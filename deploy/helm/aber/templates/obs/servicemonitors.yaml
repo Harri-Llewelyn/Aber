@@ -41,6 +41,10 @@ So each entry was verified against the pinned image before it was written:
                   background thread beside the watchdog, heartbeat and stats reporter. Not a
                   re-instrumentation: the counters already existed (issues #22, #24).
 
+  playback        the playback worker's one series, `aber_playback_jobs_total`: the jobs it ended,
+                  by outcome. Served by the same ingestion/metrics.py, through `playback-metrics`,
+                  a headless Service shaped like `ingestion-metrics`.
+
   supabase-db /   postgres_exporter AS A SIDECAR IN EACH DATABASE POD (`databaseMetrics`), which
   timescaledb     is why the credentials question the absence note used to raise went away: the
                   sidecar shares the pod's network namespace, both pg_hba files trust loopback,
@@ -112,6 +116,15 @@ Without it the targets are simply DOWN, which reads as the pods being unreachabl
       "port" "metrics"
       "path" "/metrics"
       "why" "the daemon's own counter registry, rendered by ingestion/metrics.py") -}}
+{{- end -}}
+{{- if and .Values.playback.enabled .Values.playback.metrics.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "playback"
+      "component" "playback"
+      "service" "playback-metrics"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the playback worker's jobs by outcome, rendered by ingestion/metrics.py") -}}
 {{- end -}}
 {{- if and .Values.mosquitto.enabled .Values.mosquitto.metrics.enabled -}}
 {{- $targets = append $targets (dict

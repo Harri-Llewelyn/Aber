@@ -7,7 +7,8 @@ import { Tooltip } from './Tooltip'
  * A sortable column's header: the label is a button, and a click sorts the table by the column,
  * a second reverses it, and a third returns the table to its default order. The sorted column's
  * header carries `aria-sort` and an arrow, as the WAI-ARIA "Sortable Table" pattern has it; the
- * other columns show a faint double arrow while the pointer or focus is on them.
+ * other sortable columns always show a faint double arrow, so a header that sorts can be told from
+ * one that does not without pointing at it.
  *
  * `sort` is the table's useTableSort (or useLocalTableSort) result. `title` is what the column
  * holds, said once for every row: the shared tooltip on the label's button, never the browser's.

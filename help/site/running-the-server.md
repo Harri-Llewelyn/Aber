@@ -205,11 +205,12 @@ given, and stops pulling if the port changes. So:
   is the node's own address. The render refuses broker TLS without it (*MQTTS on 8883* below).
 - `supabaseFunctions.aas.baseIri`, below.
 
-**Set the AAS base IRI before the first export: it is permanent from then on.** Put it under a
-domain your organisation controls, as `values-prod.yaml.example` shows. The default,
+**Set the AAS base IRI before the first export or AAS API read: it is permanent from then on.** Put
+it under a domain your organisation controls, as `values-prod.yaml.example` shows. The default,
 `https://aber.local/ids/asset/`, belongs to nobody. Every `globalAssetId` and submodel id in an
-exported Asset Administration Shell is `supabaseFunctions.aas.baseIri` plus the asset's
-`sparkplug_id`. Once a shell has left the site, whoever imported it holds those identifiers.
+Asset Administration Shell, exported or read from the AAS API, is `supabaseFunctions.aas.baseIri`
+plus the asset's `sparkplug_id`. Once a shell has left the site, whoever imported it holds those
+identifiers.
 Changing the IRI would then give every asset a new identity.
 
 The twelve built images resolve automatically to the chart's `appVersion`, which the release sets
@@ -408,19 +409,34 @@ is meant only for the operations team:
 helm upgrade ... --set ingress.routes.docs=false
 ```
 
-**`studio` goes the other way: it is off by default and turning it on is the deliberate act.** To
-turn it on:
+**`studio` goes the other way: Studio is off by default, and turning it on is the deliberate act.**
+Supabase Studio is the database administrator's console: tables, SQL, storage and accounts, as the
+database owner. Aber's dashboard does the site's own work, so a default install runs no Studio. Nor
+does it run postgres-meta, which serves Studio's database pages and nothing else.
+
+To run Studio and publish it at `studio.<domain>`:
 
 ```bash
 helm upgrade ... \
+  --set supabaseStudio.enabled=true \
+  --set supabaseMeta.enabled=true \
   --set ingress.routes.studio=true \
   --set secrets.studioOAuthClientSecret=$(openssl rand -hex 32) \
   --set secrets.studioProxyHmacSecret=$(openssl rand -hex 32)
 ```
 
+Studio and postgres-meta are on or off together, and the render fails if only one is on. The route
+needs Studio on.
+
 Both secrets are required, and if either is missing the **render fails naming them**. Without that
 check, the route would be published with no registered client for its sign-in. It would then look
 like a broken proxy rather than two empty values.
+
+Without the route, Studio runs inside the cluster only. Reach it with a port-forward:
+
+```bash
+kubectl -n aber port-forward svc/supabase-studio 54323:3000
+```
 
 With `secrets.existingSecret`, put the two keys in that Secret instead (`STUDIO_OAUTH_CLIENT_SECRET`
 and `STUDIO_PROXY_HMAC_SECRET`) and leave out the two `--set secrets.studio...` lines. The chart
@@ -433,8 +449,9 @@ cannot see that Secret, so it does not check them.
 The route publishes `supabase-envoy:8001`, the gateway's studio listener, which runs an OAuth
 sign-in against Aber's own GoTrue and admits `Administrator` alone. It never publishes
 `supabase-studio:3000`, which is a database console with no login of its own, running as the
-database owner. The NetworkPolicy follows the same shape. The ingress controller may reach the
-gateway on `8001`, the gateway may reach Studio on `3000`, and nothing else may reach Studio at all.
+database owner. A NetworkPolicy holds the same shape whether or not `networkPolicy.enabled` is on.
+Only the gateway may reach Studio on `3000`. Only Studio may reach postgres-meta on `8080`, because
+postgres-meta runs any SQL as `supabase_admin` with no login. A port-forward to Studio still works.
 
 This does **not** give Studio MFA, or a per-user audit trail of what was run in the SQL
 editor. It controls *who may open the console*, and everything inside it still runs as the
@@ -443,15 +460,16 @@ database owner.
 ### What a browser may load: the Content-Security-Policy
 
 **The dashboard tells browsers what its pages may load, and browsers refuse the rest.** It sends a
-`Content-Security-Policy` header naming its own origin, the API and the two sign-in doors. A script
-injected into a page can then load nothing from elsewhere, and send what it reads nowhere.
+`Content-Security-Policy` header naming its own origin, the API and the sign-in doors: the forge's,
+and Studio's where the site runs Studio. A script injected into a page can then load nothing from
+elsewhere, and send what it reads nowhere.
 
 The chart builds the policy from the addresses it hands the dashboard in `/config.js`
 (`publicUrls.supabase`, `publicUrls.studio` and `publicUrls.gitea`, or their defaults):
 
 | Directive | Allows | Because |
 | :--- | :--- | :--- |
-| `connect-src` | the API over HTTP and WebSocket, the Studio and forge doors, `blob:`, `data:` | Data, sign-in, files and live updates; the sign-out request to each door; a 3D model's own textures |
+| `connect-src` | the API over HTTP and WebSocket, the forge's door and Studio's (only with Studio on), `blob:`, `data:` | Data, sign-in, files and live updates; the sign-out request to each door; a 3D model's own textures |
 | `script-src` | the dashboard, `'wasm-unsafe-eval'` | The 3D viewer's decoders are WebAssembly |
 | `worker-src` | the dashboard, `blob:` | The decoders run in a worker made from a `blob:` address |
 | `img-src` | the dashboard, `data:`, `blob:` | Icons in the stylesheet, and area plans |
@@ -701,10 +719,9 @@ the Supabase database's certificate Secret. Each kind of client is set up differ
 
 **Realtime is the one named exception.** Its own pool takes the CA as a file (`DB_SSL_CA_CERT`), and
 verifies under OTP 27's client default. Its per-tenant connections follow the tenant row's
-`ssl_enforced`, which the image's seed hardcodes to false. When it is true, Postgrex gets
-`verify: :verify_none` with no CA option (measured against v2.102.3). The chart mounts a copy of
-that seed with `ssl_enforced` taken from `DB_SSL`, so the tenant link is encrypted but not verified
-by the client. When you bump Realtime's tag, copy the seed again.
+`ssl_enforced`, which the image's seed takes from `DB_SSL`. When it is true, Postgrex gets
+`verify: :verify_none` with no CA option (measured against v2.102.3). So the tenant link is
+encrypted but not verified by the client.
 
 **Two things this exposed.** Keep both fixes:
 

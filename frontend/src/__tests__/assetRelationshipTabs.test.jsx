@@ -5,6 +5,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
+import { deviceSummaries } from '../test/deviceSummary'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -91,7 +92,7 @@ describe('CellsTab shows the gateways and devices attached to a cell', () => {
     expect(within(row).getByText('Host_Gateway_NodeRED')).toBeTruthy()
     expect(within(row).getByText('Simulated_CNC_01')).toBeTruthy()
     // The same summary the Gateways page puts on a gateway's device column.
-    expect(within(row).getByText('1 Online / 0 Offline')).toBeTruthy()
+    expect(deviceSummaries(row)).toContain('1 Online / 0 Offline')
 
     // The heartbeat is not here: per-gateway status and heartbeat age are on the Gateways page, one
     // click away through the drawer's chip.
@@ -139,7 +140,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 
     await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
 
-    expect(screen.getByText('1 Online / 0 Offline')).toBeInTheDocument()
+    expect(deviceSummaries()).toContain('1 Online / 0 Offline')
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
     expect(screen.getByText('20s ago')).toBeInTheDocument()
     expect(screen.getByText('ONLINE', { selector: '.badge' })).toBeInTheDocument()
@@ -223,8 +224,8 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
   })
 })
 
-// Paging a fleet-wide stream has no equivalent in the per-device telemetry modal, which shows the
-// latest value per metric and defers history to the CSV export. See telemetryModal.test.jsx.
+// A device's readings over time, their latest values and their CSV export are History's; see
+// historyPage.test.jsx and telemetryExportModal.test.jsx.
 
 // Site Map -> Cells hand-over: a pin on the Site Map opens the cell's panel, whose action emits
 // the cell id, and Cells consumes it the way Gateways and Devices consume theirs.

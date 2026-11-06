@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from 'react'
 import { ActionButton } from '../common/ActionButton'
 import { HoldToReveal } from '../common/HoldToReveal'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { IconLock } from '../common/Icons'
 import { MIN_PASSWORD_LENGTH, changeOwnPassword, newPasswordProblem } from '../../utils/passwords'
 
@@ -20,8 +21,9 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
   const currentRef = useRef(null)
 
   const problem = newPasswordProblem(current, next, again)
-  // Said under the form once a new password is being typed, so the disabled button is explained.
-  const shownProblem = (next || again) ? problem : null
+  // Said above the buttons once a new password is being typed, not after the current one alone,
+  // where the length rule would be the next field's problem before it was reached.
+  const newPasswordTyped = next !== '' || again !== ''
 
   const change = useCallback(async (e) => {
     e?.preventDefault()
@@ -47,6 +49,8 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
       onClose={busy ? () => {} : onClose}
       lead="This browser stays signed in. Other browsers signed in as you are signed out within the hour."
       initialFocus={currentRef}
+      problem={problem}
+      touched={newPasswordTyped}
       error={error}
       footer={(
         <>
@@ -70,7 +74,7 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
         <input type="email" autoComplete="username" value={email || ''} readOnly hidden />
 
         <div className="form-group">
-          <label className="form-label" htmlFor="change-password-current">Current password</label>
+          <label className="form-label" htmlFor="change-password-current">Current password <RequiredMark /></label>
           <input
             id="change-password-current"
             className="form-control"
@@ -80,11 +84,12 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
             autoComplete="current-password"
             disabled={busy}
             ref={currentRef}
+            aria-required="true"
           />
         </div>
 
         <div className="form-group">
-          <label className="form-label" htmlFor="change-password-new">New password</label>
+          <label className="form-label" htmlFor="change-password-new">New password <RequiredMark /></label>
           <div className="password-field">
             <input
               id="change-password-new"
@@ -95,6 +100,7 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
               autoComplete="new-password"
               minLength={MIN_PASSWORD_LENGTH}
               disabled={busy}
+              aria-required="true"
             />
             <HoldToReveal revealed={revealed} onChange={setRevealed} />
           </div>
@@ -104,7 +110,7 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
         </div>
 
         <div className="form-group">
-          <label className="form-label" htmlFor="change-password-again">New password again</label>
+          <label className="form-label" htmlFor="change-password-again">New password again <RequiredMark /></label>
           <input
             id="change-password-again"
             className="form-control"
@@ -113,8 +119,8 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
             onChange={e => setAgain(e.target.value)}
             autoComplete="new-password"
             disabled={busy}
+            aria-required="true"
           />
-          {shownProblem && <div className="form-hint" role="status">{shownProblem}</div>}
         </div>
       </form>
     </Modal>

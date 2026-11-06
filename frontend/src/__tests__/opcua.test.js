@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   suggestedGroup, sparkplugDatatypeFor, categoryFor,
-  dataPoints, dataPointByName, opcuaSections, opcuaPrefill, dataPointTooltip
+  dataPoints, dataPointByName, opcuaSections, opcuaPrefill, dataPointTooltip, dataPointId
 } from '../utils/opcua'
 import { OPCUA_GROUPS } from '../utils/opcuaGroups.generated'
 import { STANDARDS } from '../utils/standards'
@@ -188,9 +188,12 @@ describe('opcuaPrefill', () => {
   })
 })
 
-describe('dataPointTooltip', () => {
-  it('names the node, which is what disambiguates two identical names', () => {
-    expect(dataPointTooltip(vocabulary[2])).toContain('NodeId: nsu=http://opcfoundation.org/UA/Machinery/;i=6002')
+describe('dataPointTooltip and dataPointId', () => {
+  it('says what the point is, and gives the node it names apart, for a line of its own', () => {
+    // The node is what tells two points of one name apart; the panel draws it under the text, in mono.
+    expect(dataPointTooltip(vocabulary[2])).toBe('Manufacturer — Name of the machine manufacturer.')
+    expect(dataPointId(vocabulary[2])).toBe('nsu=http://opcfoundation.org/UA/Machinery/;i=6002')
+    expect(dataPointId({ name: 'Bare' })).toBe('')
   })
 
   it('degrades to the bare name when there is nothing else to say', () => {

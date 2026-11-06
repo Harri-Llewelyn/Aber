@@ -1,18 +1,19 @@
 /**
  * Audit Trail: the action filter, and the two vocabularies this page speaks.
  * `audit_trail.action` is what the database did (INSERT / UPDATE / DELETE plus the
- * trigger-written kinds), shown on the drawer's badge; `MARKERS` is what it meant, derived
- * client-side and colouring the timeline. The filter must use the first vocabulary. The allow-list
+ * trigger-written kinds), shown on the drawer's badge; `MARKERS` is what it meant, the class the
+ * server names and the legend's toggles choose, colouring the timeline. The filter must use the first vocabulary. The allow-list
  * in api.js must refuse an unknown action rather than apply no predicate, because "returns
  * everything" is a failure a caller cannot see.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab, MARKERS } from '../components/tabs/AuditTrailTab'
-import { AUDIT_TRAIL_ACTIONS } from '../constants'
+import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ACTION_GROUPS } from '../constants'
 import { api } from '../api'
-import { getAllByTooltip } from '../test/tooltips'
+import { tooltipOf } from '../test/tooltips'
+import { filterList, offered, toggleInList } from '../test/listFilters'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -43,51 +44,70 @@ const show = async () => {
   await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 }
 
-/** The kind and action filters live in the Filters popover, which is opened first. */
-const openFilters = () => {
-  if (!document.querySelector('.filters-popover')) {
-    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-  }
-}
-const filter = () => { openFilters(); return screen.getByRole('combobox', { name: 'Action' }) }
+/** The action filter: a list in the Filters popover, which is opened first. */
+const filter = () => filterList('Action')
+/** The actions it offers, by their labels, in order. */
+const labels = () => offered(filter())
+const LABEL_TO_ACTION = Object.fromEntries(Object.entries(AUDIT_TRAIL_ACTIONS).map(([k, v]) => [v, k]))
 const trailUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes('/audit-trail'))
 
 
 describe('the action filter offers every action the database can record', () => {
   /* Several of these are not written by the generic audit trigger. Spelled out rather than derived,
      so adding one is a deliberate edit; the test below proves the list cannot drift from the enum. */
-  it('lists every action, including the forty-one the generic trigger does not write', async () => {
+  it('lists every action, including the fifty the generic trigger does not write, in groups', async () => {
     await show()
-    const values = [...filter().querySelectorAll('option')].map(o => o.value)
+    const values = labels().map(l => LABEL_TO_ACTION[l])
 
-    // Pinned in order as well as by membership, because this select is what a reader scans.
+    // Pinned in order as well as by membership, because this list is what a reader scans: by
+    // group, then each group's order.
     expect(values).toEqual([
-      '', 'INSERT', 'UPDATE', 'DELETE', 'SCHEMA_REJECTION', 'CREDENTIAL_ISSUED', 'CREDENTIAL_SHOWN', 'TOKEN_MINTED',
-      'TOKEN_REVOKED', 'PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED',
-      'PROPOSAL_APPLIED', 'EXPORTED', 'PROPOSAL_EXPIRED', 'ROLE_GRANTED', 'ROLE_REVOKED',
-      'PERSON_ADDED', 'ACCESS_REMOVED', 'ACCESS_RESTORED', 'PASSWORD_SET', 'DISPLAY_NAME_CHANGED', 'EMAIL_CHANGED', 'SESSIONS_ENDED', 'MFA_RESET',
-      'APP_REGISTERED', 'APP_REMOVED', 'APP_RESTORED', 'APP_APPROVED', 'APP_APPROVAL_REVOKED', 'FLOW_DEPLOYED', 'BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN',
-      'BACKUP_FAILED', 'BACKUP_PRUNED', 'CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED',
-      'CAPTURE_UPLOADED', 'CAPTURE_DOWNLOAD_ISSUED', 'CAPTURE_DELETED', 'PLAYBACK_STARTED',
-      'PLAYBACK_STOPPED'
+      'INSERT', 'UPDATE', 'DELETE',
+      'SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED',
+      'ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN', 'SUPPRESSION_WINDOW_SCHEDULED',
+      'SUPPRESSION_WINDOW_CHANGED', 'SUPPRESSION_WINDOW_ENDED', 'SUPPRESSION_WINDOW_CANCELLED',
+      'CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
+      'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED',
+      'PERSON_ADDED', 'ROLE_GRANTED', 'ROLE_REVOKED', 'ACCESS_REMOVED', 'ACCESS_RESTORED',
+      'PASSWORD_SET', 'DISPLAY_NAME_CHANGED', 'EMAIL_CHANGED', 'SESSIONS_ENDED', 'MFA_RESET',
+      'APP_REGISTERED', 'APP_REMOVED', 'APP_RESTORED', 'APP_APPROVED', 'APP_APPROVAL_REVOKED',
+      'PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED', 'TOKEN_MINTED',
+      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED', 'SIGNING_KEY_ISSUED',
+      'BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
+      'BACKUP_PRUNED',
+      // The reads, the legend's Read class, together.
+      'SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED'
     ])
+    const headings = within(filter()).getAllByRole('group')
+      .map(g => document.getElementById(g.getAttribute('aria-labelledby')).textContent)
+    expect(headings).toEqual(AUDIT_TRAIL_ACTION_GROUPS.map(g => g.label))
   })
 
   it('is generated from the shared enum, so it cannot drift from the API allow-list', async () => {
     /* The point of the shared constant: the options and `api.js`'s allow-list must not be two
-       hand-written lists. */
+       hand-written lists. Every action is in exactly one group. */
     await show()
-    const values = [...filter().querySelectorAll('option')].map(o => o.value).filter(Boolean)
+    const values = labels().map(l => LABEL_TO_ACTION[l])
 
-    expect(values).toEqual(Object.keys(AUDIT_TRAIL_ACTIONS))
+    expect([...values].sort()).toEqual(Object.keys(AUDIT_TRAIL_ACTIONS).sort())
+    expect(new Set(values).size).toBe(values.length)
   })
 
-  it('pushes the selected action down as a query parameter', async () => {
+  it('pushes the chosen actions down as one query parameter', async () => {
     await show()
-    fireEvent.change(filter(), { target: { value: 'SCHEMA_REJECTION' } })
-
+    toggleInList('Action', 'Schema rejection')
     await waitFor(() =>
       expect(trailUrls().some(u => u.includes('action=SCHEMA_REJECTION'))).toBe(true))
+    toggleInList('Action', 'Exported')
+    await waitFor(() =>
+      expect(trailUrls().some(u => u.includes(`action=${encodeURIComponent('SCHEMA_REJECTION,EXPORTED')}`))).toBe(true))
+  })
+
+  it('chooses a whole group from its heading', async () => {
+    await show()
+    fireEvent.click(within(filter()).getByRole('checkbox', { name: 'Backups' }))
+    await waitFor(() => expect(new URL(trailUrls().at(-1), 'http://x').searchParams.get('action'))
+      .toBe('BACKUP_REQUESTED,BACKUP_CANCELLED,BACKUP_RELEASED,BACKUP_TAKEN,BACKUP_FAILED,BACKUP_PRUNED'))
   })
 })
 
@@ -96,24 +116,26 @@ describe('the two vocabularies are kept apart', () => {
   it('the filter labels name the database action, not the marker classes', async () => {
     /* The filter matches the raw badge shown in the event drawer, not the legend's derived words. */
     await show()
-    const labels = [...filter().querySelectorAll('option')].map(o => o.textContent)
     const markerLabels = Object.values(MARKERS).map(m => m.label)
 
-    for (const label of labels.filter(l => l !== 'Any action')) {
+    for (const label of labels()) {
       expect(markerLabels).not.toContain(label)
     }
   })
 
-  it('the placeholder says "action", not "event"', async () => {
+  it('the filter is called "Action", not "Event"', async () => {
     await show()
-    expect(filter().querySelector('option[value=""]').textContent).toBe('Any action')
+    expect(filter()).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: /event/i })).toBeNull()
   })
 
-  it('the legend still describes the derived classification', async () => {
-    // Both vocabularies remain on screen; the fix is that they no longer share words.
+  it('the legend still describes the classes', async () => {
+    // Both vocabularies remain on screen; the fix is that they no longer share words. A toggle's
+    // tooltip opens with its class's hint and goes on to say what selecting it does.
     await show()
+    const tips = within(screen.getByRole('group', { name: 'Classes' })).getAllByRole('button').map(tooltipOf)
     for (const marker of Object.values(MARKERS)) {
-      expect(getAllByTooltip(marker.hint).length).toBeGreaterThan(0)
+      expect(tips.some(t => t?.startsWith(`${marker.hint}. `)), marker.label).toBe(true)
     }
   })
 })
@@ -158,7 +180,7 @@ describe('an unrecognised action must not widen the query', () => {
       await realApi.get(`/api/v1/audit-trail?action=${action}`)
       expect(built.length, `${action} should have reached the RPC`).toBe(1)
       expect(built[0][0]).toBe('audit_trail_page')
-      expect(built[0][1].p_action, `${action} should have become an argument`).toBe(action)
+      expect(built[0][1].p_action, `${action} should have become an argument`).toEqual([action])
     }
 
     built.length = 0

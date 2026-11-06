@@ -1253,6 +1253,56 @@ Each carries the subject's `name` and `sparkplug_id`, which the Audit Trail name
 
 `test_capture_audit.py` holds every act, the deletion guard, the purge and the session's end.
 
+### A failed or stuck capture or playback reaches someone (0226)
+
+A failed job showed on the Capture page as a banner for fifteen minutes, and in the job history.
+A job stuck in flight, or a playback queued for a worker that was not running, showed only in its
+own strip. Nobody away from the page was told. `platform_health_rows()` now has three more arms,
+and a Grafana rule in the Platform Conditions group reads each one. The alert reaches the
+dashboard's counter through the existing webhook. The rules' thresholds and their reasons are in
+[`grafana/README.md`](../grafana/README.md).
+
+| Condition | One row for | Value |
+| --- | --- | --- |
+| `job_failed` | each capture or playback job that ended `FAILED` in the last hour | seconds since it failed |
+| `job_stuck` | each job still queued, recording or running five minutes past what its own limits allow | seconds since its limits ran out |
+| `playback_worker_stale` | the playback worker, while its heartbeat is over two minutes old **and** a playback is queued or running | seconds since it last reported |
+
+- **A failure is an event, not a state.** Its row leaves the view an hour after `finished_at`,
+  so the alert resolves by itself. Every writer of `FAILED` stamps `finished_at`: the two failure
+  gates, `playback_finish()` and both startup sweeps.
+- **A job's limits are the ones Stop already uses.** A queued capture should be claimed within
+  seconds. A recording ends at `max_seconds`, and two minutes without a progress report is what
+  `request_capture_stop()` calls stale; its last report is `started_at` plus `elapsed_seconds`. A
+  queued playback is timed from when it was queued, or from when the last playback ended if that is
+  later, and only while no playback runs, since the worker runs one at a time. A running playback
+  that has not reported for a minute is what `request_playback_stop()` calls stalled. The margin
+  is five minutes past whichever comes first, so Stop ends any job the rule reports.
+- **The stale worker is gated on a waiting playback, never on the age alone.** The heartbeat row is
+  seeded at the epoch (`0002`), and the database cannot tell whether the worker is deployed: only
+  the dashboard is told `playback.enabled`. An age-only condition would fire for ever on a site that
+  runs no worker. Two minutes is the playback dialog's `WORKER_STALE_MS`, and mirror check 41 holds
+  them equal.
+- **One cause, one alert.** `job_stuck` leaves out a playback while the worker's heartbeat is stale,
+  because `playback_worker_stale` names that cause.
+- **No row names an asset.** These are the platform's own jobs, so `sparkplug_id` is NULL and the
+  rules are `entity_type: platform`. A row is named by the job's kind and id, such as
+  `capture job 6c1e…`, so each job is its own alert. `detail` names the subject and, for a failure,
+  the error.
+- **A failure writes no Audit Trail row.** The trail keeps the acts of named people. A failed job
+  is the system's outcome, and the job history on the Capture page is its record.
+
+The function keeps `0001`'s signature and grants, and `0185`'s arms. The file revokes it from
+`PUBLIC`, `anon` and `authenticated` by name. Its self-check asserts the three arms, the gate on the
+stale arm, the shadow-gateway exclusions, and that `grafana_reader` still reads the view; it reads
+the definition and the catalogue, never the rows. `test_a_failed_or_stuck_job_is_a_platform_condition.py`
+runs each rule's own query against every case. Check 191 in `scripts/check-docs-drift.mjs` holds
+the arms, the gate and the rules together.
+
+The workers count their outcomes too, on their metrics endpoints
+([`ingestion/README.md`](../ingestion/README.md#metrics)). The rules read the database instead,
+because a restart resets a counter, and a restart is one of the commonest causes of a failure.
+
 ### Single-key shortcuts can be turned off (0194)
 
 The dashboard has four shortcuts that are one character with no modifier: `?` opens the shortcuts
@@ -1353,9 +1403,9 @@ GoTrue runs an OAuth 2.1 server for the stack's own clients: Grafana, Node-RED, 
 forge doors. `0002` seeds all four, with `registration_type` `manual`. Up to 1.5.0 the chart also
 left GoTrue's dynamic client registration on, so anyone holding the publishable key could register a
 client of their own at `/auth/v1/oauth/clients/register`. That key is public by design: every browser
-is served it. A token issued to any client carries its person's whole role, because `has_role()`
-reads `auth.uid()` and not the client the token was issued to. So a registered client was one
-approval on the consent page away from a token as capable as the person who approved it.
+is served it. Until `0235`, a token issued to any client carried its person's whole role, because
+`has_role()` read `auth.uid()` and not the client the token was issued to. So a registered client was
+one approval on the consent page away from a token as capable as the person who approved it.
 
 The chart now sets `GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION` to `"false"`. It is not a chart
 value: nothing the stack uses registers itself.
@@ -2269,7 +2319,9 @@ or by SQL.
   key and no edge function, and the Audit Trail rows carry the Administrator. It returns `{name,
   approvals_ended, sessions_ended}`.
 - **Aber's own four cannot be removed** (`42501`). `0002` upserts each with `deleted_at = NULL` on
-  every boot, so a removal would undo itself at the next one; the four are part of the stack.
+  every boot, so a removal would undo itself at the next one; the four are part of the stack. The
+  one exception is `0002`'s own: with Studio off it removes Studio's client itself
+  ([Studio's login](#the-second-listener-which-is-studios-login-archived-migration-0081)).
 - **Each act is an Audit Trail row, written by a trigger**, because registration and approval happen
   inside GoTrue. On `auth.oauth_clients`, in the app's lane (`entity_type = 'oauth_clients'`, filed
   under `security` by `audit_domain_for()`'s default): `APP_REGISTERED` for an insert,
@@ -2290,7 +2342,8 @@ or by SQL.
 - **A boot writes nothing.** `0002`'s upsert of an existing row is an UPDATE that leaves `deleted_at`
   NULL, and the update trigger fires only when `deleted_at` changes between NULL and a time. The
   first seed of a stack app on a stack that already has `0217` writes one `APP_REGISTERED`, by
-  `migration`; on a fresh install `0002` runs before `0217` and writes none.
+  `migration`; on a fresh install `0002` runs before `0217` and writes none. The first boot with
+  Studio off after it was on writes its removal, once.
 - **The triggers are on GoTrue's tables, which `postgres` does not own.** It creates them with the
   TRIGGER privilege the image's default privileges give it on every table `supabase_auth_admin`
   creates; the file checks it first and names it if absent. Disabling a trigger needs the owner.
@@ -2515,7 +2568,9 @@ one person or machine identity had changed.
   shows the account's current address for them where the viewer may read it (an Administrator,
   through `list_user_accounts()`), and the id where not, as before.
 - **`audit_trail_page()` takes `p_changed_by uuid`**, its eleventh and last argument, and keeps the
-  rows whose `changed_by` is that id. It is `SECURITY INVOKER`, so `audit_trail`'s policies still
+  rows whose `changed_by` is that id. (`0227` makes it a list, with the kind and the action:
+  [An Audit Trail filter takes several values](#an-audit-trail-filter-takes-several-values-0227).)
+  It is `SECURITY INVOKER`, so `audit_trail`'s policies still
   decide the rows: a Shopfloor Manager filtering by an Administrator sees that person's asset-lane
   rows and none of their security-lane ones. Whoever can read the Audit Trail can filter it; no
   policy changed. The predicate is one equality in the scan `matching` already makes, so it costs
@@ -2676,6 +2731,1382 @@ answer shape, the next request, liveness's two changes, who reads and writes, an
 with a local table standing in for the foreign one. Mirror check 39 holds the seeded keys to the
 dashboard's and the API reference's, and check 176 (`scripts/check-docs-drift.mjs`) holds each
 tile's Grafana panel to the dashboard JSON.
+
+### Reading a service's logs is recorded (0225)
+
+The System page's Logs tab shows an Administrator a service's newest log lines, so a failed sign-in
+or a rejected gateway can be read without Grafana Explore. Every container logs to Loki through
+Alloy. Loki has no access control of its own and is reachable only inside the cluster, so the
+browser never reaches it: the `service-logs` function reads it for an Administrator and nobody else.
+
+**The function** ([`functions/service-logs`](functions/service-logs)) follows `broker-inventory`:
+
+- **A GET, and the role is the whole decision.** GoTrue's `getUser()` checks the caller, so a machine
+  identity's token is refused, as it should be: the lines are for a person. Any role but
+  Administrator is `403` before the store is asked anything. No service-role key.
+- **Parameters, never a query.** `service`, `level`, `filter`, `range` (or `from` and `to`, since
+  `0230`) and `limit`. Any other parameter is refused. `store.ts` builds the one shape, `{service="…"} |= "…"`, then
+  `| json aber_level="level" | aber_level=~"(?i)(?:…)"` for a level, with every caller value a
+  quoted string, escaped as LogQL reads one (Go's `strconv.Unquote`). `service` must be a value
+  Loki lists for the label over the window: between `from` and `to`, or the last 7 days for any
+  `range`, so the list does not shrink at 15 minutes. The refusal names the window it checked.
+- **A level is a JSON line's.** Alloy keeps two stream labels, `service` and `container`, and no
+  level. Ingestion and playback write JSON (`logging_config.py`), so their lines carry `level`. A
+  line in any other format has none and shows only under *Any level*; the tab says so. The level is
+  read into `aber_level`, so a `level` label on another collector's store is not renamed under it.
+- **Ceilings, clamped or refused, and said.** A range of at most 7 days, 500 lines (200 by
+  default), 8 KiB a line, and 10 seconds for the store. A `limit` over 500 is clamped and `clamped`
+  says why; any other value outside the rules is `400`. A longer line is cut at a character and
+  ends ` … [cut at 8 KiB]`. A store that does not answer in time is `504`, one that fails `503`, each
+  a fixed sentence with the store's answer in the log.
+- **One module knows the store.** `store.ts` holds the query, the service list
+  (`/loki/api/v1/label/service/values`) and the parsing of `query_range`. The store that replaces
+  Loki changes that file alone.
+- **The address is the Loki Grafana reads.** The chart sets `LOKI_URL` from `aber.lokiUrlOrNone`:
+  `grafana.lokiUrl`, else the chart's own `http://loki:3100` while `observability.enabled`, else
+  nothing, which the function answers as `observability: false`. Under `networkPolicy.enabled` the
+  edge `supabase-functions` → `loki:3100` admits it; an external Loki needs a rule in
+  `networkPolicy.extraEgress`.
+
+**`0225` records each new read.** `record_service_logs_read(p_service, p_level, p_filter, p_range)`
+writes one `SERVICE_LOGS_READ` row. (`0230` adds `p_from` and `p_to`, for a fixed window:
+[A read of a service's logs names a range or a fixed window](#a-read-of-a-services-logs-names-a-range-or-a-fixed-window-0230).) The function calls it as the caller after Loki answered, and
+returns the lines only once it has: a read that cannot be recorded is `503` with no lines.
+
+- **The database decides when a row is due**, never the caller. It writes one when the four
+  parameters, as sent, differ from the caller's last recorded read, and otherwise writes nothing
+  and returns NULL. So the tab's first load writes a row, each change of filter writes one, and a
+  refresh, a poll or a repeated direct call writes none. A flag from the page would let a direct
+  API caller read without a trace. `limit` is not part of a read, and neither are the resolved
+  times, so "the last hour" a minute later is the same read.
+- **The last read is looked for among the caller's rows of the last 24 hours**, in the `security`
+  lane. Partitions older than that are pruned when the query starts, and the rest are read through
+  `idx_audit_trail_domain`, as `0204` reads `TOKEN_MINTED` rows. No index was added. A read
+  repeated a day after its row writes another, which says the person is still reading.
+- **Two requests at once write one row.** `record_service_logs_read()` takes a transaction-scoped
+  advisory lock on the caller before it looks, so identical reads arriving together cannot both
+  find no last row.
+- **One lane per service.** `entity_type` is `service_logs`, which `audit_domain_for()` files in the
+  security lane, as it files every type it does not name: an Administrator and an Auditor read the
+  rows. `entity_id` is the md5 of `service_logs:` and the service, and `new_data` names the service
+  as `name`, so the Audit Trail page draws one lane per service, named by it.
+- **The rule is the function's.** The levels, the ranges, 1-128 characters for a service and 200 for
+  a filter are refused with `22023` as `service-logs` refuses them. Mirror check 40
+  (`scripts/check-mirror-drift.mjs`) holds the three lists in `0225`, `logs.ts` and
+  `frontend/src/utils/serviceLogs.js` together.
+- **Administrator only.** `SECURITY DEFINER` with `search_path` pinned, and it checks `has_role()`
+  itself; every other role is `42501`, and `anon` and `service_role` hold no `EXECUTE`.
+
+The file's self-check asserts the function's `SECURITY DEFINER` and pin, who may execute it, the lane,
+and that a request with no identity is refused. `test_reading_a_service_s_logs_is_recorded.py`
+holds the rows, when one is due, the refusals and who reads them. `logs_test.ts` and `store_test.ts`
+hold the role check, the parameters, the query and its escaping, the ceilings and the order: the
+store, then the row, then the lines. `test-harness/test_log_pipeline.py` reads a dropped device's line
+back through the function on a running stack.
+
+### A read of a service's logs names a range or a fixed window (0230)
+
+System › Logs uses the shared time control (`TimeWindowControl`), as the Audit Trail does. A day, a
+week, a step back or a custom range is a fixed window: it has two ends, and moves only when the
+person moves it. Until `0230`, `service-logs` took a rolling `range` alone, and the record compared
+the range key.
+
+- **`service-logs` takes `from` and `to` beside `range`.** Each is an ISO 8601 instant with an
+  offset, and `to` is the first moment outside the window. A read names a range or the two ends,
+  never both. The ends are in order and at most 169 hours apart: the 7 days a read covers, and the
+  hour a calendar week gains when the clocks go back, so the control's Week is never refused.
+  Anything else is `400` with the reason, before the store is asked. A rolling window is still
+  measured back from the function's own now. The services listed, and the check on a read's
+  `service`, follow the window: a fixed one's own, and for every range the last 7 days. The tab
+  reads the list again when the window moves, and keeps a chosen service the new list lacks.
+- **The row records what was asked for.** `record_service_logs_read()` takes `p_from` and `p_to`
+  after `p_range`, each `DEFAULT NULL`. A rolling read's `new_data` is `name`, `level`, `filter`
+  and `range`, as before, so a poll of the last hour writes nothing, and the first poll after an
+  upgrade matches the row written before it. A fixed read's is `name`, `level`, `filter`, `from`
+  and `to`, the ends in UTC to the millisecond whatever the session's time zone. So stepping to
+  yesterday writes one row, and refreshing yesterday writes none. The same instants written with
+  another offset are the same read.
+- **The tab sends what it shows.** A rolling window goes as `range`, and any other as `from` and
+  `to`, worked out from the browser's local calendar at fetch time (`logWindowParams` in
+  `frontend/src/utils/serviceLogs.js`). Refresh and the interval repeat a fixed window exactly.
+- **A rolling call is still four arguments.** The function sends `p_from` and `p_to` only for a
+  fixed read, and the defaults fill them otherwise. So a function from before `0230` still records
+  on the new form while the edge functions roll out.
+
+**Two more arguments are a new signature**, so the rule `0227` followed applies. `0225`, the
+function's own file, declares the six-argument form in place, as `0001` and `0168` declared
+`0227`'s, and its self-check calls it by six arguments. On the first boot of an upgrade, `0225`
+creates the new form beside the four-argument one, and `0230` drops that one, guarded, and states
+the grants by name. Between the two, a four-argument call is ambiguous, so a read of the logs fails
+for the seconds those files take on that one boot. No later boot holds two. A body in `0230`
+instead would leave `0225` recreating the four-argument form on every boot.
+
+The file's self-check asserts one `record_service_logs_read`, `p_range`, `p_from` and `p_to` by
+name and type, their two defaults, `SECURITY DEFINER` and its pin, who may execute it, and that a
+fixed window with no identity behind it is refused. Mirror check 40 (`scripts/check-mirror-drift.mjs`)
+now also holds the widest window in `logs.ts` and `0225`, the arguments the function sends against
+those `0225` declares, and the tab's spans against the widest window.
+`test_a_logs_read_names_a_range_or_a_fixed_window.py` holds the rows, the repeats, the refusals and
+the one form after `0225` and `0230` replay over the four-argument one. `logs_test.ts` holds the
+parameters, the refusals and what the function sends.
+
+### An Audit Trail filter takes several values (0227)
+
+The Audit Trail's filters took one kind, one action and one person each, so "gateways and devices"
+or "what these two people changed" could not be asked. Every list filter in the dashboard now takes
+several values, and the trail's three are filtered on the server, before the row limit, as one
+value was: filtering a page after the fact would show whatever fraction of it matched.
+
+- **`audit_trail_page()` takes `p_entity_type text[]`, `p_action text[]` and `p_changed_by uuid[]`**,
+  in the places the single `text`, `text` and `uuid` were, under the same names. Each list keeps the
+  rows that match any of its values, and the three are combined with AND, as before.
+- **NULL or an empty list is no constraint, and a one-element list is the single value.** So a page
+  filtered on one kind, one action or one person returns what it did. A value no row holds matches
+  nothing; beside a value that does match, it takes nothing away. `p_entity_ids` keeps its own
+  rule, where an empty list matches nothing, since "these ids, of which there are none" is a
+  question about no entity.
+- **Nothing else changes.** The keyset paging, `total_matching`, `purged_assets`, the purged rule,
+  the search, `transaction_rows`, `SECURITY INVOKER` and the pinned `search_path` are as they were,
+  and `audit_trail`'s policies still decide the rows. The dashboard sends each list as an array, or
+  null when nothing is chosen (`frontend/src/api.js`).
+- **The old call is refused, not widened.** A client still sending one string for one of the three
+  gets PostgREST's error for a value that is not an array, rather than every row.
+
+**A changed argument type is a new signature**, so the rule `0222` followed applies. `0001` and
+`0168` declare the list form in place, and `0001`'s sweep of stale overloads names it. On the first
+boot of an upgrade, `0001` creates the list form beside the single-value one, and the sweep drops the
+single-value form at the end of the same file; `0227` drops it too if it is still there. Between the
+two, PostgREST cannot choose between the forms, so the Audit Trail fails for the seconds `0001` takes
+on that one boot. No later boot holds two. `0227` holds no third copy of the body: a third copy
+would only be something to keep in step, and `0001` and `0168` replay before it on every boot
+anyway. It states the grants by name, `authenticated` and `service_role` and not `anon`, since
+`0001`'s ACL section revokes from `PUBLIC` only. `0222`'s self-check now asserts only that
+`p_changed_by` is last, whatever its type.
+
+The file's self-check asserts one `audit_trail_page`, each of the three list arguments by name and
+type (not their places, so a later argument passes), `SECURITY INVOKER`, the pinned `search_path`
+and who may execute it. Check 195 (`scripts/check-docs-drift.mjs`) holds the three as arrays in
+`0001`, `0168`, the sweep, `0227`'s drop, the API reference and `api.js`.
+`test_an_audit_trail_filter_takes_several_values.py` holds two values of each list, the AND across
+them, the one-element list against the single value, NULL and the empty list, a value nothing
+holds, the cursor, the totals, the purged rule, the search and the caller's policies under lists,
+and one list form after `0001`, `0168`, `0222` and `0227` replay over the single-value form.
+
+### The Audit Trail sorts events into classes in the database (0228)
+
+The Audit Trail's legend names the class of each event: Created, Operational, Configuration,
+Lifecycle and, new here, Read. The dashboard used to work the class out in the browser, from rules
+of its own (`classifyEvent()`), while the server paged the trail. A filter on the class could then
+only hide rows from the page already loaded, and "200 of 242" would have been wrong. So the rules
+are the database's now.
+
+**`audit_event_class(action, entity_type, audit_domain, old_data, new_data)`** answers one of
+`created`, `operational`, `configuration`, `lifecycle` and `read`. The first rule that matches
+decides:
+
+1. **Read**: `SERVICE_LOGS_READ`, `CREDENTIAL_SHOWN`, `CAPTURE_DOWNLOAD_ISSUED` and `EXPORTED`. Each
+   records that someone looked at or took a copy of something, and changes nothing. Reads are
+   decided before the security lane's rule, which would otherwise call a log read a configuration
+   change.
+2. **Configuration**, for every row in the security lane, and for a schema rejection, a token minted
+   or revoked and a role granted or revoked.
+3. The capture lane: a recording, capture, upload or playback started is **created**; a capture
+   deleted is **lifecycle**; a recording or playback stopped is **operational**.
+4. **Configuration** for a schema attached to or detached from a device (`device_submodels`).
+5. **Lifecycle** for a `DELETE`, **created** for an `INSERT`.
+6. Otherwise the snapshots decide. **Lifecycle** when `is_archived`, `is_quarantined` or
+   `deprecated` is `true` now and was not before. **Configuration** when `schema_id`,
+   `asset_config`, `connection_method`, `grafana_url` or `access_url` changed. **Operational**
+   otherwise. A missing field and a JSON `null` are the same value. With one snapshot, a field it
+   holds that is neither `null` nor `''` counts as changed.
+
+These are the browser's rules, moved, with Read added. `test-harness/fixtures/audit-event-classes.json`
+holds an answer for each kind of row. The database suite asserts every case. While the browser's copy
+existed, a dashboard suite asserted the same cases against it, and the two differed only on the four
+reads, which the browser drew as a change.
+
+**Computed, not stored.** `audit_trail` is append-only, so a class column could not be filled in for
+the rows already recorded. `audit_event_class()` is `IMMUTABLE` and has no `SET` clause, so the
+planner inlines it into the query that calls it. It reads no table and calls only built-in
+operators, so an unpinned `search_path` changes nothing it resolves; the lint allowlist says so, as
+it does for `may_decide_proposal()`. `authenticated` and `service_role` may run it, and `anon` may
+not.
+
+#### What the page takes and answers
+
+- **`audit_trail_page()` takes `p_class text[]`**, after `p_changed_by`, a list like the other three:
+  any of its classes, combined with them by AND, and NULL or an empty list is no constraint. A class
+  no row has matches nothing. **Each event carries its `class`**, which the dashboard draws.
+- **`p_counts boolean`** (default false) adds `counts`: `{ class, entity_type, action }`, each a map
+  from a value to its events. **Each filter's own choice is left out of its own counts**, so choosing
+  an action does not empty the action counts, and a class's toggle can say how many events it would
+  add. Everything else applies to all three: the search, the window, the people, the ids and the
+  deleted toggle. A value with no events is absent. The dashboard asks for them with the first page
+  and the poll, not with Show more.
+- **A backup request's id finds the backup it took.** When the search is a whole UUID, it also
+  matches the rows of any backup whose Backup taken row records that id as its `job_id`, and with
+  them every row keyed by that backup's id: taken, released and pruned. It reads the trail, not
+  `backups`: a pruned backup's row is deleted, and on the dev stack 11 of 33 taken remain. So the
+  Backups page's View Audit Trail shows the request's lane and the backup's lane together. A
+  cancelled or failed request took no backup, and shows its own lane. Any other id finds what it
+  found before.
+- Nothing else changes: the keyset paging, `total_matching`, `purged_assets`, the purged rule, the
+  search, `transaction_rows`, `SECURITY INVOKER` and the pinned `search_path`. `audit_trail`'s
+  policies still decide the rows.
+
+#### Under a second on a million rows
+
+The target: one page, its `total_matching` and its counts in under a second on a trail of a million
+rows, with a class chosen. The function as it was took 2 to 2.6 seconds on such a trail with
+nothing chosen, before any class was computed. Three changes meet it.
+
+- **One partial index per class.** `idx_audit_trail_class_<class>` is on `(recorded_at DESC, id
+  DESC)` where `audit_event_class(...)` is that class, and includes `audit_domain`, `entity_type`,
+  `action`, `entity_id` and `changed_by`: what the filters, the policies, the purged rule and the
+  counts read. A query that names a class reads its rows from its index, with the class proven by
+  the index's predicate, never computed, and without touching the table. Postgres cannot read an
+  indexed expression back out of an index (an index-only scan needs the columns the expression
+  reads), so the five partial indexes are how a class is read without its row's snapshots.
+  The index keeps the class it was built with, which is why `audit_event_class()` is `IMMUTABLE` and
+  a change to its rules rebuilds them (`REINDEX INDEX`, each a statement of its own, since a
+  partitioned index cannot be rebuilt inside a transaction) in the same file. Check 199
+  (`scripts/check-docs-drift.mjs`) refuses a later file that redeclares it without rebuilding all
+  five.
+- **`audit_trail_matching(p_class, ...)`** returns one class's rows under every filter, each with
+  whether its entity is deleted. It is a SQL function with no `SET` clause, so it inlines into each
+  of the page's calls with its class a constant. The page calls it once per class for the counts and
+  once per class for the page, and the filter text is written once.
+- **The page is planned with its values.** `audit_trail_page()` is PL/pgSQL with
+  `plan_cache_mode = force_custom_plan`, so each call's arguments are constants to the planner: a
+  filter nobody chose folds away, a window prunes the months outside it, and a class not asked for
+  drops its branch. The counts come from one index-only scan per class, grouped into a few hundred
+  rows. The page is the newest few of each class after the cursor, merged, and a class with nothing
+  to show is not read. The purged rule reads the live ids of the five probed tables once, into an
+  array, rather than probing five tables per row.
+
+`test_a_million_row_trail_answers_in_under_a_second.py` holds the target. It attaches ten months of
+2001 to `audit_trail`, a hundred thousand rows each in a plant's mix, each month filled as a table
+of its own and then attached, so no row trigger runs a million times and the trail's indexes are
+built as a running stack has them. It inserts the devices, gateways and cells the rows name inside
+each test's transaction, leaving one device in ten out for the purged rule, and drops the ten months
+afterwards, as an owner retires whole months. Measured on a laptop, as an Administrator with the
+policies on, the median of three warm calls:
+
+| Call | Time |
+| --- | --- |
+| Seeding the million rows, their indexes and `VACUUM ANALYZE` | 25 to 50 s |
+| All time, Lifecycle, the page with its total and its counts | 0.55 s |
+| All time, Read and Lifecycle, the same | 0.6 s |
+| All time, Lifecycle, the next page, without the counts | 0.1 s |
+| All time, nothing chosen, the page with every count (printed, not asserted) | 0.7 to 0.85 s |
+
+The suite asserts the first three under a second, and the totals, the deleted count and the counts
+exact over the ten months. A search is still a scan of every row's snapshots, as before: about five
+seconds on a million rows.
+
+#### One redeclaration
+
+A new argument is a new signature, so the rule `0222` and `0227` followed applies. `0001` and
+`0168` declare the new form in place, with the same body, and `0001`'s sweep of stale overloads
+names it. On the first boot of an upgrade, `0001` creates the new form beside the list form and
+the sweep drops the list form at the end of the same file; `0228` drops it too if it is still
+there. **The new form calls `audit_trail_matching()` and `audit_event_class()`, which this file
+declares**, so on that one boot the Audit Trail answers with an error from the end of `0001` until
+`0228` has run. PL/pgSQL is checked when it runs, not when it is declared, so `0001` and `0168` can
+declare it first. No later boot has the window: the functions exist from the first. `0227` now
+grants its own form only while it is declared, and `0222`'s self-check asks only that `p_changed_by`
+follows `p_search`.
+
+The file's self-check asserts the classifier's and the helper's shapes (SQL, no `SET`; the classifier
+`IMMUTABLE`), one `audit_trail_page` with `p_class` and `p_counts` by name and type, `SECURITY
+INVOKER`, the pinned `search_path` and `force_custom_plan`, who may run all three, each class's index
+valid and on its class, and one answer per kind of rule.
+`test_the_audit_trail_sorts_events_into_classes_in_the_database.py` holds the fixture, the class
+filter and the class on each event, the counts, the backup search, the grants and the indexes, and
+one form after `0001`, `0168`, `0222`, `0227` and `0228` replay over the list form.
+
+### The Audit Trail knows which kinds each action is written for (0229)
+
+The Audit Trail's Entity and Action filters offered every kind and every action, whatever else was
+chosen, so Cells with Backup taken could be chosen and always showed nothing. Nothing said which
+actions go with which kind: each action is written by its own function, across some thirty
+migrations, and `audit_domain_for()` says which lane a pair is in, not whether it can occur.
+
+**`audit_trail_action_kinds()`** is the declared map: one row per action and kind a writer can
+produce, with the classes `audit_event_class()` can put such a row in. It is an `IMMUTABLE` SQL
+function over a `VALUES` list rather than a table, so a replay states the whole map again and no
+row can be left behind. `frontend/src/constants.js` mirrors it row for row as
+`AUDIT_TRAIL_ACTION_KINDS`, and mirror check 43 (`scripts/check-mirror-drift.mjs`) holds the two to
+the same (action, kind, class) triples. Nothing in the database reads it: the dashboard narrows by
+the mirror.
+
+- **The classes come from the rules.** A pair whose action or lane decides its class has that one
+  class. A pair the snapshots decide (an `UPDATE`, or a named act on an asset row) has
+  `operational`, `configuration` and `lifecycle`, whether or not its table has a column that would
+  make it the second or the third: the map says what the rules allow, so it can show an action that
+  never happens in a class, and never hides one that can.
+- **A writer that records a new action, or an action on a new kind, adds its rows** here and to the
+  mirror. The database suite reads the writers out of the catalog and fails until it does.
+
+`test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py` reads every writer: the audit
+trigger on each table it is attached to, for the operations it fires on, and each function whose
+body inserts into `audit_trail`, with its kind and action read from the `INSERT`. A kind written as
+`NEW.entity_type` or a record's field is read from that table's `CHECK`; an action written as a
+variable, from the literals it is assigned. Any other shape fails the suite. It asserts the map names
+every pair those writers produce and no other, and that each pair's classes are the ones
+`audit_event_class()` answers over snapshots that reach each of its rules. The file's self-check
+asserts who may run it and that no pair is listed twice or with a class the classifier does not
+answer.
+
+### A person acknowledges an alert (0231)
+
+An alert nobody could mark as seen stayed red for everyone: two people investigated the same one,
+and an alert everyone knew about trained people to ignore red. An acknowledgement says who has seen
+it, when, and why it fired. It is a role-gated act by a named person against one row, as every other
+write here is, so it goes through a function and the Audit Trail records it.
+
+- **Five nullable columns, not a status.** `acknowledged_at`, `acknowledged_by`,
+  `acknowledged_by_email`, `acknowledgement_reason` and `acknowledgement_note`. `status` stays
+  `firing` or `resolved`, Grafana's two states, so no reader of `status` changes meaning, and an
+  acknowledgement never resolves a row: only its writer does. `0001` states the columns and selects
+  them in `platform_alerts_active`, as it did for `0220`'s, and its guard drops the view once when
+  the column list differs ([An alert keeps its rule's uid, labels and values](#an-alert-keeps-its-rules-uid-labels-and-values-0220)).
+- **A closed set of reasons.** `investigating`, `known_cause`, `planned_work`,
+  `sensor_or_model_fault`, `threshold_wrong` and `other`, held by
+  `platform_alerts_acknowledgement_reason_valid`. A closed set is what makes the reasons countable
+  later; the note is what makes people use it. The note is trimmed and 1 to 200 characters, as a
+  backup's note is in the dashboard, and `other` needs one (`platform_alerts_acknowledgement_note_valid`).
+  `platform_alerts_acknowledgement_is_whole` keeps the time, the person and the reason together.
+- **The email is stamped from the token**, as `0222` stamps a decider's. Every reader of the alert
+  sees who acknowledged it, and `display_names_for()` names nobody for this.
+- **An Operator's second write.** Filing a proposal was the first ([The approvals queue](#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-archived-migration-0086)),
+  and this is not a write to an asset table either: it marks an alert, through one function, and
+  every asset table's write policies are unchanged.
+- **`acknowledge_alert(p_alert_id, p_reason, p_note)`** is `SECURITY DEFINER`. An Operator, a
+  Shopfloor Manager or an Administrator may call it; every other caller is `42501`, a machine
+  identity included, since `user_roles` gives one no role. It checks the select policy's own
+  predicate: a `service_identity` alert is the Administrator's alone (`0204`), and a row the caller
+  cannot read is a 404, the same as one that does not exist. It locks the row, so two people
+  acknowledging at once are taken in turn. A resolved occurrence, or one a newer occurrence has
+  replaced, is `23514`. One already acknowledged is `23505`, naming who and when: two people never
+  overwrite each other silently. A reason outside the set, a long note, and `other` without a note
+  are `22023`.
+- **`withdraw_alert_acknowledgement(p_alert_id)`**: the acknowledger, or a Shopfloor Manager or an
+  Administrator, on a firing occurrence they may read. A resolved occurrence keeps its
+  acknowledgement as its record, so it is refused.
+- **An acknowledgement holds for the fingerprint until it resolves.** The table is keyed on
+  occurrences, `(fingerprint, starts_at)`, so `trg_platform_alerts_inherit_acknowledgement`, a
+  `BEFORE INSERT` trigger, copies the acknowledgement onto a new firing occurrence from the newest
+  earlier occurrence of its fingerprint, while that one is still firing and acknowledged. The
+  newest earlier one, not the newest firing one: a later resolved occurrence supersedes a firing
+  one, as in `platform_alerts_active`, so a resolve that never arrived cannot carry an
+  acknowledgement past a resolve that did. Any writer gets it without changing, and
+  `grafana-alert-webhook` does not change. On the webhook's upsert the trigger fires for a row that
+  then conflicts too, but the update sets only the columns the webhook sends, so an occurrence's own
+  acknowledgement is never overwritten and a withdrawn one never comes back. Inheriting writes no
+  audit row: nobody acted.
+- **Each act writes one audit row**, `ALERT_ACKNOWLEDGED` or `ALERT_ACKNOWLEDGEMENT_WITHDRAWN`,
+  through `alert_audit_identity()`: the alert's name, its severity, when it started, the occurrence,
+  the fingerprint and the subject (kind, id, name and Sparkplug id). `old_data` is the alert and
+  `new_data` the alert with the reason and the note, so the drawer shows those as what changed; a
+  withdrawal holds the acknowledgement it took back, and whose it was, in `old_data`. The row is in
+  the alert's lane, `platform_alerts` with the md5 of the fingerprint as its id, one lane per alert
+  across its occurrences. `name` is the alert and the device or gateway it is about, so two
+  machines' alerts of one rule are two lanes that read apart. A machine identity's alert is
+  recorded in that identity's lane, `service_principals`. `0232` files both.
+
+**Realtime carries it.** `platform_alerts` is in the `supabase_realtime` publication with
+`REPLICA IDENTITY FULL`, publishing updates, and the dashboard's counter subscribes to every event
+on it. An acknowledgement is an `UPDATE`, so it reaches every open dashboard whose reader may see the
+row, and the publication needs no change.
+
+The file's self-check asserts the five columns, that the view returns them under
+`security_invoker`, that `authenticated` reads them and writes none, the three CHECKs, the trigger,
+both functions' `SECURITY DEFINER`, pin and grants, and that a request with no identity is refused
+by both. `test_a_person_acknowledges_an_alert.py` holds each role's acknowledgement and withdrawal,
+the refusals, the inheritance, the audit rows and who reads them.
+
+### The Audit Trail files an alert's acknowledgement (0232)
+
+`0231`'s two actions need a lane, a class and a place in the map of kinds.
+
+- **The lane.** `audit_domain_for()` files `platform_alerts` in the asset lane: the people who
+  acknowledge are an Operator, a Shopfloor Manager and an Administrator, and the asset lane's
+  readers are the roles that read the Audit Trail. A machine identity's alert is acknowledged in
+  that identity's lane, `service_principals`, which stays in the security lane: only an
+  Administrator may read the alert, so only an Administrator and an Auditor read the act. Filing it
+  under `platform_alerts` would have shown a Shopfloor Manager an alert `0204` keeps from them.
+- **The class.** `audit_event_class()` answers `operational` for both actions, after the reads and
+  before the security lane's rule. Without the rule, an acknowledgement in the security lane would
+  be Configuration, and one in the asset lane would be decided by its snapshots, so the map would
+  have to offer it under Configuration and Lifecycle too.
+- **The map.** `audit_trail_action_kinds()` lists both actions on both kinds, `operational` only,
+  and `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43).
+
+Each function is redeclared whole, unchanged but for those lines: `0001`, `0168`, `0193`, `0228`
+and `0229` replay first on every boot, and the last declaration stands. For `audit_domain_for()` the
+moment between them files nothing wrongly that matters: a row stamped then lands in the security
+lane, the fail-closed side.
+
+**The class indexes are rebuilt only when they could be wrong.** Each class's partial index keeps
+the class a row had when it was indexed, and check 199 (`scripts/check-docs-drift.mjs`) refuses a
+redeclaration of the classifier without a `REINDEX` of all five. The new rule changes the class of
+one kind of row only: an acknowledgement in the security lane. Such a row can be indexed under the
+old rules only if it was written on a boot, between `0228`'s declaration and this file's. So the
+file asks whether any such row exists, with `\gset`, and rebuilds the five indexes under `\if` only
+then. A site with none, every fresh install included, rebuilds nothing; one with some rebuilds on
+each boot, which is correct and costs a few seconds on a large trail.
+
+The file's self-check asserts both lanes, the class of both actions on both kinds, the map's rows,
+that the classifier is still an inlinable `IMMUTABLE` SQL function, each class index valid, and that
+three of `0228`'s rules answer as before. `test-harness/fixtures/audit-event-classes.json` holds the
+two lanes' answers, and `test_a_person_acknowledges_an_alert.py` reads both kinds back through the
+Operational class.
+
+### History reads each series carried forward (0233)
+
+The History page charts a device's readings over a window, and a rollup read directly shows steady
+running as a hole: under report-by-exception a machine that changes nothing sends nothing, so a
+bucket with no rows means *unchanged*, not *unknown*. The historian's `telemetry_gapfill()` carries
+values forward, but the dashboard reaches the historian only through `postgres_fdw`, which cannot
+call a historian function. **`telemetry_carried(from_ts, to_ts, bucket, asset_ids, metric_names)`**
+is the platform side's carried read. Derived metrics
+([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) are to call it for their inputs
+rather than carry values a second time, so its contract stays plain:
+
+- **A series is one asset and one metric**, every pair of the two lists. `asset_ids` are telemetry
+  keys (`devices.sparkplug_id`), as the views take them. Both lists are required: a series silent
+  all window is found by its name, never by a scan.
+- **One row per series per bucket**, ordered by asset, metric and bucket: `bucket_ts`, `asset_id`,
+  `metric_name`, `avg_double`, `min_double`, `max_double`, `last_double`, `last_string`, `last_bool`,
+  `n_rows` and `is_carried`. A bucket with readings has their weighted average, minimum, maximum and
+  last values, and `n_rows` counts them. A quiet bucket has `n_rows` 0, `is_carried` true, and the
+  last value before it as its average, minimum, maximum and last. `telemetry_gapfill()` returns the
+  last value alone; a chart of a bucket with readings needs its range.
+- **Buckets lie on the epoch grid**, as the rollups' do, so a window opening inside a bucket starts
+  at that bucket's start. A bucket is a whole number of minutes, at least one, and has no months.
+  It is stepped in seconds, so a day is 24 hours in any session time zone, as `date_bin()` counts it.
+- **The source is the widest rollup whose width divides the bucket**: `telemetry_1h` for whole
+  hours, `telemetry_5m` for whole five minutes, else `telemetry_1m`. A wider bucket, such as a day,
+  is combined from it on the historian: the sums, counts, minima and maxima compose exactly, so the
+  answer is the one a 1-minute read would give, from up to sixty times fewer rows, and as far back as
+  that rollup is kept (`telemetry_1h` five years, `telemetry_1m` 180 days).
+- **Each series is seeded from the rollups, never from raw**, which the historian drops after 14
+  days by default (`timescaledb.retention.retainFor`): a series silent for longer would otherwise
+  seed empty. One query takes the newest values of every series in the 288 source buckets before
+  the window (a day of 5-minute buckets). Each series it misses is then read on its own, with
+  `ORDER BY bucket DESC LIMIT 1`, and from `telemetry_1h` when its own rollup has nothing.
+- **Nothing is carried past now**, and a series with no value at or before a bucket has no row
+  for it, so an unknown is never drawn as a value. A window may still end after now: a Day ends at
+  midnight.
+- **At most 50,000 rows** (buckets times series), refused with the count before anything is read,
+  as are bounds out of order and a bad bucket (`22023`, which PostgREST answers 400). The
+  dashboard's own cap is `TELEMETRY_MAX_ROWS`, 5,000 a read (`frontend/src/api.js`).
+
+**It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, and is granted by name
+to `authenticated` and `service_role` and to nobody else: the same as the telemetry views, which
+the same roles read through the `timescale` foreign tables and the `FOR PUBLIC` user mapping
+(`fdw_reader`). It returns nothing a signed-in person cannot already read.
+
+**How it keeps the historian's work on the historian.** `postgres_fdw` ships a `WHERE`, a
+`GROUP BY` and its aggregates (`date_bin()`, `array_agg(... ORDER BY ...) FILTER`, `sum`, `min`,
+`max`) when their inputs are constants or parameters, so the bounds and lists are plpgsql
+parameters and each window read is one remote aggregate. Three things it does not ship, each found
+while measuring: `now()` (evaluated here, so a bound written with it would pull every row across),
+a lateral join (planned once per outer row: a seed written as one ran 2,535 remote queries for one
+chart, 10 s), and a `LIMIT` on a parameterised scan (the per-series seed is therefore its
+own statement, not a join). The 6,338-row `LIMIT` threshold in `api.js` governs a `LIMIT` on a
+view; none of these reads carries one, and a `LIMIT` a client puts on the RPC trims the result
+after the work is done, which is why the function bounds itself.
+
+**Measured** for #324's spike, on a private historian (TimescaleDB 2.31, the chart's retention and
+compression, 20 devices of 15 metrics over 10 days, 3.06 million `telemetry_1m` rows), warm, median
+of five, as `authenticated`: one device over 7 days at 1-hour buckets (2,535 rows), 74 ms; 20
+devices of one metric over 24 hours at 1-hour buckets (500 rows), 45 ms; one device over 24 hours
+at 5-minute buckets (4,335 rows), 115 to 280 ms. The same 7-day read from `telemetry_1m` took
+525 ms.
+
+`test_history_reads_each_series_carried_forward.py` holds every rule above with local tables
+standing in for the rollups and raw telemetry. The file's self-check asserts one form, `STABLE`,
+`SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
+read, so it holds on a stack with no historian.
+
+### An app's token reaches only its own routes (0235)
+
+GoTrue's OAuth server signs a person in to an app: Grafana, Node-RED, and the Studio and forge
+doors today. The access token it issues names the person, and `has_role()` and `has_authority()`
+looked the caller up by `auth.uid()`. So the token reached PostgREST, Storage, Realtime and the edge
+functions with everything the person may do, whichever app held it. GoTrue writes the app's
+`client_id` into that token (and its `scope`), and nothing read it. An outside app, which #1036 lets
+an Administrator register, could then change anything the person who allowed it can.
+
+**A token with a `client_id` is refused in three places.** Together they touch no policy.
+
+- **`auth_pre_request()` refuses it**, before every other arm, with `insufficient_privilege`, which
+  PostgREST answers 403: the message `this token was issued to an app, and reaches only that app's
+  own routes`, the client in the detail, and a hint naming what to call the API with instead. The
+  hook sees every PostgREST request, whoever relays it: i3X, `aas-api` and the Directory send the
+  caller's token through the gateway, and the gateway cannot tell a relayed request from a direct
+  one. No other state lifts this refusal, so it answers first and needs no lookup.
+- **`has_role()` and `has_authority()` answer false** for it:
+  `coalesce(auth.jwt() ->> 'client_id', '') = ''` comes before the lookup. Storage and Realtime
+  verify the token themselves and never run the hook, so this is what closes the rows a role gates
+  there. `has_authority()`'s machine arm is behind the same test, though GoTrue never issues a
+  machine identity's token.
+- **The gateway admits it only on `/auth/v1/` and its own app's functions**, and answers 403
+  everywhere else ([`docs/gateway.md`](../docs/gateway.md#an-apps-token)). The functions each app
+  calls are recorded in [`docs/security-model.md`](../docs/security-model.md#an-apps-token-reaches-only-its-own-routes).
+
+**What still passes.** A token with no `client_id`, or an empty or null one: the dashboard's
+sessions, scripts, machine identities, the i3X and MCP clients' tokens, and the publishable and
+secret keys. Each is served and answered as before. Realtime still delivers to an app's token the
+changes to rows any signed-in account reads, because the token is inside the join message, where
+the gateway cannot see it. That gap is accepted, in
+[`docs/security-model.md`](../docs/security-model.md#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account).
+
+**Each body is declared where it is stated, as `0227` declared its form.** `0001` declares
+`has_role()` and `has_authority()` in place, and `0205`, whose body is the one the API runs,
+declares `auth_pre_request()`'s arm. db-init replays every file on every boot, so a copy in `0235`
+would leave the older body from `0001` or `0205` serving until `0235` ran, on every boot. `0235`
+holds no body. `CREATE OR REPLACE` keeps each function's grants, volatility, `SECURITY DEFINER` and
+pinned `search_path`.
+
+**What it costs.** `test_role_checks_are_timed.py` was run on a freshly migrated test database with
+the old and the new bodies in turn, six rounds interleaved, on a laptop shared with four other
+sessions. The figures are µs per call, the median of six rounds, each the median of 5 × 10,000
+calls; the least round is in brackets. An app's token was timed on the new bodies alone, the median
+of three runs. The baseline is on issue #1194.
+
+| µs per call | before | after |
+| :--- | ---: | ---: |
+| the loop alone | 0.07 (0.06) | 0.07 (0.07) |
+| `has_role()` admitting | 18.13 (13.39) | 21.68 (20.48) |
+| `has_role()` refusing | 21.88 (15.09) | 19.37 (16.98) |
+| `has_authority()` admitting | 144.67 (122.15) | 142.66 (122.30) |
+| `has_role()`, an app's token | | 16.97 |
+| `has_authority()`, an app's token | | 30.52 |
+
+`has_role()` pays a few µs for the second read of the claims, which `auth.uid()` reads too. A
+policy calls it once per statement (`0177`), so a request pays it once. `has_authority()` shows no
+change: its machine-principal lookup costs more than the claim. The guarded read's plan is the
+same, and its median execution is 0.23-0.42 ms after against 0.19-0.43 ms before.
+
+The file's self-check asserts that each of the three reads the claim and keeps its language,
+volatility, `SECURITY DEFINER` and pin, and that the roles that run each may still execute it. It
+asserts that the hook refuses an app's token with that message and serves an empty `client_id`.
+Where a person is on record, it asserts that their role and a permission are theirs with their own
+claims and nobody's with an app's. `test_an_app_s_token_reaches_only_its_own_routes.py` holds the
+refusal for every app and every API role, its order, the role checks for a person and a machine,
+a row a role gates, the read the Realtime gap keeps, and an empty or null `client_id`.
+`test_each_app_s_token_reaches_only_its_own_routes.py`, in the stack lane, holds the same through
+the gateway with a real token for each of the four apps.
+
+### An alert stays quiet during planned work (0240)
+
+A machine down for a planned belt change fired for the whole shift, and its red buried everything
+else. A suppression window is a scheduled period on one device, gateway or cell: an alert that fires
+in it is recorded and marked suppressed, is not counted, colours nothing and is not sent. A window
+ends by itself. It is not a maintenance switch on the asset, because a forgotten switch would
+silence a machine for good. Grafana's mute timings are not used: the windows live beside the assets,
+and Aber's own evaluator ([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)) never reaches
+Grafana.
+
+- **`alert_suppression_windows`**, one row per window. Exactly one of `device_id`, `gateway_id`
+  and `cell_id` (`alert_suppression_windows_one_subject`, `num_nonnulls() = 1`). None is a foreign
+  key: a window outlives its subject, as an alert and its audit rows do, so purging a device, gateway
+  or cell never waits on one, and no child of `cells` cascades (`test_archive_purge_cascade.py`).
+  The writers refuse a subject that is not there.
+  `starts_at` and `ends_at` are required, `ends_at` after `starts_at`. `reason` is required, trimmed
+  and 1 to 200 characters, as an acknowledgement's note is. `created_by`, its email from the token
+  and `created_at` say who scheduled it, and `ended_by` and its email who ended it early.
+- **What a window covers.** A device window covers the alerts whose `entity_type` is `device` and
+  whose `entity_id` is that device. A gateway window covers the gateway's own alerts, not its
+  devices'. A cell window covers every device whose cell is that cell when the alert is read, by
+  `device_locations.effective_cell_id`: move a device out and its alert counts again, with nothing
+  written. A replay lane or a simulated device is in no cell, so no cell window covers it. A
+  `platform` or `service_identity` alert is never covered, nor one whose `entity_id` matched no row.
+- **"Suppressed now" is decided when a row is read**, so a window's start and its end take effect
+  with no write to `platform_alerts`. `platform_alert_suppressing_window(p_entity_type, p_entity_id,
+  p_at)` is the one place it is decided: it returns the window covering that subject's alert at
+  `p_at` (from `starts_at`, up to but not including `ends_at`), or NULL. Of several, the one that
+  ends last answers, so the alert reads as suppressed until then. The cell is read when the function
+  runs, whatever `p_at`. It is a `STABLE` SQL function run as its caller, granted to
+  `authenticated` and `service_role`; every signed-in role reads every window, device, gateway and
+  cell, so the answer does not depend on who asks. **Its signature stays as it is**: the sender
+  calls it too.
+- **`platform_alerts_active` returns it.** `suppressed`, and the covering window's id
+  (`suppressing_window_id`), `suppression_reason` and `suppressed_until`, after every column it
+  returned before. The function is in the view's `FROM`, so it runs once per firing alert, and the
+  window's reason and end are joined by its answer. `0001` states the view, the table, its read
+  policy and grants, and the function, so the view can join them on every boot; `0001`'s guard drops
+  the view once when its column list differs, as for `0231`'s columns.
+- **Each occurrence records the window that first covered it**, for history, in
+  `platform_alerts.suppression_window_id`, which `0001` states. `trg_platform_alerts_stamp_suppression`,
+  a `BEFORE INSERT` trigger, stamps an occurrence that starts in a window, or one that arrives
+  firing while a window covers it now. `stamp_platform_alerts_suppression()` stamps the newest
+  occurrence of each fingerprint that is still firing, unstamped and covered now. The writers call it
+  as they write, so a window that starts now covers what is already firing, and pg_cron runs it every
+  minute as `stamp_platform_alerts_suppression`, for a window whose start arrives later. It is a job
+  of its own rather than a line in another every-minute job, so its failure stops nothing else and
+  `cron.job_run_details` names it. The stamp is history only, so its minute of lag never changes
+  what is counted. `trg_platform_alerts_keep_suppression` keeps a stamp once it is there: an
+  `UPDATE` that names the column can neither clear it nor move it, not even when the window changes
+  or ends. The webhook's upsert does not name it.
+
+**Three functions write a window, and nothing else does.** The table has row security, one read
+policy and no write grant. `schedule_alert_suppression_window(p_subject_kind, p_subject_id,
+p_starts_at, p_ends_at, p_reason)`, `change_alert_suppression_window(p_window_id, p_starts_at,
+p_ends_at, p_reason)` and `end_alert_suppression_window(p_window_id)` are `SECURITY DEFINER`. An
+Administrator or a Shopfloor Manager calls them; every other caller is `42501`, an Operator
+included, whose one direct write stays the acknowledgement. Each asks `require_mfa()` after its role
+check, so with MFA required a window needs a session that gave its code (`0251`). Functions rather than write policies,
+because ending a window early needs the server's clock and the name of who ended it, and because
+the audit row belongs in the subject's lane, which the generic audit trigger cannot reach.
+
+- **A start in the past is now**, at scheduling and when an upcoming window's start moves. A window
+  may start in the future.
+- **A change keeps history.** A NULL argument keeps what the window has. A window that has started
+  keeps its start, and one that has ended is kept as it was (`23514`). The end must stay after now:
+  ending is `end_alert_suppression_window()`'s.
+- **A window lasts at most `alerts.suppression_max_days`**, so a forgotten one still ends soon.
+  `0002` declares it in the Retention category: 7 days, from 1 to 90, which only an Administrator
+  changes (`system_settings_update_admin`), each change an Audit Trail row. A setting rather than a
+  constant, because a site's planned shutdown may run past a week.
+  - `check_alert_suppression_window_length(p_starts_at, p_ends_at)` refuses an end more than the
+    limit after the start, `22023`, with *A window can last at most 7 days, set on Settings ›
+    Retention.* and the live value. A window of exactly the limit is accepted. A missing row, or a
+    value outside 1 to 90, is 7 days, so the limit never refuses every window. A part day is taken
+    as it is, as the other day settings take one. Both writers call it; nothing outside the
+    database may.
+  - **Scheduling** measures from the start the window gets: now, for a start in the past.
+  - **A change of the start or the end** measures from the window's own start: the new one when the
+    change moves it, else the stored one. So an end cannot creep out a day at a time. A change of
+    the reason alone is not measured.
+  - **A window already longer keeps its end** when the limit is lowered, and at the upgrade. It
+    ends by itself, so nothing rewrites it. Its next change of the times is held to the limit.
+  - **Declared in `0240`**, the one file that declares the two writers, as `0251` added their
+    guard in place. `0240` is unreleased, so no installed site runs the unbounded body. A copy in a
+    later file would leave it standing in `0240` for every boot to replay first.
+  - The dialog sets its end field's `max` from the same setting and names the limit beneath it.
+    The database stays the authority: a stale page is refused with the sentence above.
+- **Ending early** sets `ends_at` to now and records who ended it. A window that has not started
+  covered nothing, so ending it cancels it: the row is deleted, and its audit row keeps it.
+- **Each act writes one audit row** in the subject's own lane: `devices`, `gateways` or `cells`, with
+  the subject's id. `SUPPRESSION_WINDOW_SCHEDULED`, `SUPPRESSION_WINDOW_CHANGED` (the window before
+  and after; nothing when nothing changed), `SUPPRESSION_WINDOW_ENDED` and
+  `SUPPRESSION_WINDOW_CANCELLED`. The snapshot is `alert_suppression_window_audit_identity()`: the
+  subject's `name`, which the Audit Trail labels the lane by after the subject is gone, its kind, id
+  and name, the times, the reason and who scheduled and ended it. `0241` files them.
+
+**Sending holds, it does not drop.** The dispatcher
+([#325](https://github.com/Harri-Llewelyn/Aber/issues/325)) decides each send in one SQL function,
+`platform_alert_send_decision()`. Its suppression arm, in place since `0250`, calls
+`platform_alert_suppressing_window(a.entity_type, a.entity_id, now())` for the occurrence `a` it
+would send, and **holds** the send while that answers a window: nothing is sent, and the occurrence
+is not marked sent. When the window ends, or is ended early, and the alert is
+still firing, the next pass finds the function answering NULL and sends it, as if it had just fired.
+Otherwise a machine that comes back from maintenance broken never alerts. An occurrence that
+resolves inside the window is never sent: there is nothing left to say. The dispatcher reads the
+function, not the stamp: the stamp says what covered an occurrence, not whether one covers it now.
+
+**What the dashboard does with it.** It counts, colours and toasts only the rows that are neither
+acknowledged nor suppressed, and lists a suppressed one after the others, with the window's reason
+and end. Nothing is written when a window ends, so the dashboard re-reads at the nearest start or end
+it knows of. The table is not in the realtime publication: a window that starts now stamps the
+alerts it covers, an `UPDATE` that Realtime carries, and an early end reaches other dashboards at
+their next re-read, within a minute.
+
+The file's self-check asserts the table's row security, its one read policy and that no browser or
+service role writes it; each constraint; the stamp column, its two triggers and the minute job; the
+view's four columns under `security_invoker`; the function's one form, volatility, pin and grants,
+and that it covers no platform alert and no alert without a subject; the writers' `SECURITY DEFINER`,
+pin and grants; that a request with no identity is refused by each; and the longest window's
+setting and bounds, and that its check admits a day and refuses past 90 days.
+`test_an_alert_stays_quiet_during_planned_work.py` holds each role's writes, the CHECKs, what each
+kind of window covers before, during and after, a device moved out of its cell, the stamp, the
+audit rows, and the longest window: at the limit and a minute past it, a change measured from the
+window's own start, the setting's bounds, a lowered limit and a missing setting.
+
+### The Audit Trail files a suppression window's acts (0241)
+
+`0240`'s four actions are written in the lane of the window's subject: a device, a gateway or a
+cell. Those are the asset lane's already, and the classifier's rules for a named act on an asset row
+class them, so `audit_domain_for()` and `audit_event_class()` are unchanged. A window's snapshot
+carries no configuration field and no flag, so each act is Operational.
+
+**`audit_trail_action_kinds()`** lists the four on `devices`, `gateways` and `cells`, with
+`operational`, `configuration` and `lifecycle`: the classes the rules allow a named act on an asset
+row, which the map states whether or not a window's acts reach them. `AUDIT_TRAIL_ACTION_KINDS`
+mirrors it (mirror check 43). It is redeclared whole, unchanged but for those rows: `0229` and
+`0232` replay first on every boot, and the last declaration stands.
+
+The file's self-check asserts the lane, the Operational class of each act on each kind, the map's
+rows, that `0232`'s rows are still there, and who may run it.
+`test-harness/fixtures/audit-event-classes.json` holds two of the acts' classes.
+
+### History lists the alerts that fired (0243)
+
+The alert counter shows what is firing now, and until this the record of what fired and cleared was
+Grafana's Alerting > History. Grafana won't see the alerts Aber's own evaluator is to raise
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)), and is to leave the default install by 2.0.
+So History has an Alerts tab, and its charts shade the periods an alert was firing. Both read
+**`alert_occurrences(p_from, p_to, p_sparkplug_ids, p_limit)`**, over `platform_alerts` from every
+writer.
+
+- **An occurrence is listed when it overlaps the window** `[p_from, p_to)`, not only when it
+  started in it: one that started before and ended inside, one still firing, and one that spans the
+  window. One that ended exactly at `p_from`, or started exactly at `p_to`, is outside.
+- **Each row is the whole occurrence**, the `platform_alerts` row type, in a column named
+  `occurrence`, which PostgREST returns as an object. A column a later migration adds to the table
+  reaches the dashboard with no change here. Beside it are two columns:
+  - **`ended_at`**: `ends_at`, or, for a firing occurrence that a later occurrence of the same
+    fingerprint replaced, that one's start. NULL while it is still firing.
+  - **`replaced`**: true for such an occurrence.
+- **Why an occurrence can be replaced.** Grafana, and Aber's own evaluator, open a new occurrence when
+  an alert fires again with no resolve in between, after a restart or a missed notification. Each
+  row is resolved only by its own writer, so nothing ever resolves the older one.
+  `platform_alerts_active` already reads it as superseded. Read alone, it would be listed as firing
+  in every window after it, for as long as retention keeps it. PostgREST cannot ask for the next
+  occurrence of a fingerprint, which is why this is a function and not a read of the table. The
+  lookup runs only for a firing row with no end, on `uq_platform_alerts_event`.
+- **Newest first**, by `starts_at`. `p_sparkplug_ids` keeps the occurrences about those devices and
+  gateways, by the immutable id every device and gateway alert carries (`platform_alerts_asset_has_wire_id`);
+  NULL keeps every one, and an empty list none. `p_limit` is 1 to 5,000. The dashboard asks for
+  1,001 and shows 1,000, so it can say when more fired.
+- **Refused with `22023`**, which PostgREST answers 400: a missing bound, bounds out of order, and a
+  limit outside 1 to 5,000.
+
+**It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`. So `platform_alerts_select_authenticated` decides the rows, and
+an alert about a machine identity's token reaches an Administrator alone (`0204`). A replaced row's
+end is found among the rows the caller may read, and every occurrence of a fingerprint has the same
+`entity_type`, so no role learns of a row it may not read.
+
+**Suppression is not read here.** A suppressed occurrence (#326 part 2) is in the table like any
+other, and its stamp reaches the dashboard in `occurrence` once that column exists.
+
+**Measured** on the test database, with 50,000 occurrences over 90 days (500 fingerprints of 100
+each, 500 of them replaced firing rows), as the owner: Last 24 hours 33-44 ms, a week 43 ms and 90
+days 53-55 ms, each the dashboard's 1,001 rows; one device over 90 days, 1.4 ms.
+
+The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the pinned `search_path`, the
+return type, the grants and the refusals. `test_history_lists_the_alerts_that_fired.py` holds the
+overlap rule at the window's edges, a replaced occurrence's end, the order, the filter, the limit,
+the whole row, and the rows each role reads.
+
+### Alert history is kept for 90 days (0244)
+
+`alerts.retention_days` kept a resolved alert for 7 days, when nothing read an old one. History's
+Alerts tab lists them, so the default is now **90 days**: a quarter of alerts to look back over.
+The table grows by alert occurrences, not by readings, so the cost is small.
+
+- **A fresh install is seeded with 90.** `0002` declares it through `seed_setting()`, which inserts
+  on a first boot and afterwards refreshes only the metadata, so a new default alone reaches new
+  installs only.
+- **A site still at 7 moves to 90 at the upgrade to 1.8.0, once.** Any other value is kept.
+  - db-init replays every file on every boot, so the move needs a guard that matches on the first
+    boot of 1.8 and on no later one. Otherwise a 7 that a person chooses after the upgrade would
+    be moved back to 90 on the next boot.
+  - `updated_by IS NULL` is no such guard. `system_settings_stamp()` sets it to `auth.uid()` on
+    every write, which is NULL during a migration, a metadata refresh included.
+  - The guard is the description. Just before its `seed_setting()` call, `0002` sets 90 where the
+    value is 7 and the description is still the text every release from 1.0.0 to 1.7.x wrote.
+    The call then writes 1.8's description, which names the 90-day default. From then on no boot
+    matches.
+  - The move is recorded in the Audit Trail, as any change to a setting is, with no person named.
+- **`prune_platform_alerts()` falls back to 90 days**, not 7, where the setting cannot be read.
+
+**Each is declared where it is stated, as `0227` and `0235` declared theirs.** `0001` declares the
+prune's fallback in place, and `0002` the setting. `0244` holds no copy.
+
+The file's self-check asserts that the setting no longer carries 1.7's description and names 90
+days, and that the prune falls back to 90 days. It does not check the value, which a person may
+have chosen. Neither assertion counts rows, and both hold on every later boot.
+`test_alert_history_is_kept_for_90_days.py` runs `0002`'s block twice for each case: a fresh
+install, 1.7's row at 7, a site at 30, and a 7 an Administrator chooses after the upgrade. It also
+runs the prune with the setting gone.
+
+### History counts where readings arrived (0245)
+
+History's Overview draws one lane per device, a strip of blocks across the window, darker where more
+readings arrived. **`telemetry_coverage(from_ts, to_ts, block, asset_ids)`** is its read. The series
+rollups could not serve it at the documented fleet: 1,000 devices of 10 metrics are 2.87 million
+rows of `telemetry_5m` for one day, and the historian took 5 to 16 s to group them (the #319
+measurement). So the historian keeps a rollup per device, and the function reads that.
+
+- **The device rollups** (`timescaledb/aggregates.sql`): `telemetry_device_5m`, `sum(n_rows)` by
+  device and 5-minute bucket from `telemetry_1m`, which reaches back 180 days by default, and
+  `telemetry_device_1h`, the same by the hour from `telemetry_1h`, which reaches back 5 years. Ten
+  times fewer rows than a series rollup at ten metrics. Materialised only: a real-time read walks the raw tail's
+  `(asset_id, metric_name, time)` index for every device it names, since it names no metric.
+  `timescaledb/README.md` has their policies and the backfill.
+- **One row per device asked for**, in `asset_id` order: `counts integer[]`, oldest block first,
+  `0` for a block with none; `first_block` and `block_width`, so block i starts at
+  `first_block + i * block_width`; and `computed_from`, `computed_to` and `complete`, what the
+  read covers. A block outside that stretch is not counted yet, which is not a block with no
+  readings. A device with no readings has a row of zeros.
+- **The source follows each block's age, with no setting.** The historian's
+  `telemetry_device_coverage` reports each rollup's reach and watermark, from its catalogue.
+  - **A block under an hour** comes from `telemetry_device_5m`. A window older than that rollup
+    reaches is read in hours instead, and `block_width` says so, so an old day draws 24 blocks.
+  - **An hour and longer** comes from `telemetry_device_1h` up to its watermark, then from
+    `telemetry_device_5m` summed to the block on the historian, from where the hourly one stops. A
+    block the watermark falls inside takes each part once; no bucket is read from both. The
+    stitched stretch is the hourly rollup's refresh lag, about an hour, so the right-hand edge lags
+    only by the 5-minute rollup's. It is 6 hours at most: an hourly rollup further behind leaves
+    the gap not counted, and `computed_from` starts after it. At 1,000 devices the stretch costs
+    the historian 7 ms for two hours and 41 ms for six.
+- **Blocks lie on the epoch grid**, as the rollups' buckets do, from the one holding `from_ts`, and
+  are stepped in seconds.
+- **More than 40 devices read only the device rollups' own widths**, 5 minutes and 1 hour, and
+  nothing is summed on the historian. The historian sends each device's buckets and counts as two
+  arrays (`array_agg ... ORDER BY bucket`, which postgres_fdw ships), so a row a device crosses, and
+  a device with every block filled takes its counts as they came. **Forty or fewer may take any
+  whole number of 5 minutes**, summed from the widest rollup that divides it. Nothing is finer: only
+  `telemetry_1m` could answer under 5 minutes, and its real-time tail walks raw telemetry's index for
+  every device named. Forty is where a year of 1-day blocks still answers in
+  about half a second.
+- **At most 1,000 devices and 360,000 device-buckets read**, refused before anything is read, as are
+  bounds out of order and a bad block (`22023`). 360,000 is 1,000 devices over 26 hours of 5-minute
+  buckets, or 40 over a year of hourly ones, each with the stitched stretch. It is counted at the
+  block asked for, before anything is read; reading an old window hourly takes fewer. The dashboard reads 1,000 devices a call, and shows a
+  larger selection 7 days at most (`COVERAGE_*` in `frontend/src/api.js`).
+- **The foreign tables fetch 10,000 rows at a time** (`fetch_size`, declared in `0001`). At the
+  default 100, the round trips were half the read's time once the historian's share was small.
+
+**It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`, as `telemetry_carried()` (0233) is. The device rollups' foreign
+tables are granted SELECT to the same two roles.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression, 1,000
+devices of 10 metrics at the storage basis's density), warm, as `authenticated`:
+
+| Read | Blocks | Warm median |
+| :--- | ---: | ---: |
+| 1,000 devices, Last 24 hours | 289 × 5 minutes | 650 ms |
+| 1,000 devices, a week, stitched at the hourly watermark | 169 × 1 hour | 400 ms |
+| 20 devices, Last 24 hours | 289 × 5 minutes | 18 ms |
+| 20 devices, a week, stitched | 169 × 1 hour | 14 ms |
+| 20 devices, a year, summed (synthetic year) | 367 × 1 day | 100 ms |
+| 20 devices, a day 200 days back (synthetic), read in hours | 25 × 1 hour | 3 ms |
+| 40 devices, a year, summed (synthetic) | 367 × 1 day | 370 ms |
+| 1,000 devices, 30 days (synthetic) | 721 × 1 hour | 1.5 to 3.9 s, so the page stops at 7 days |
+
+`test_history_counts_where_readings_arrived.py` holds every rule above with local tables standing in
+for the foreign ones, the stitch at the watermark among them. The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the
+pinned `search_path`, the grants, the foreign tables' `fetch_size`, and that the refusals come before
+any read, so it holds on a stack with no historian.
+
+### An alert is queued for each channel that carries it (0247)
+
+An alert reached the dashboard and nowhere else: nobody who was not looking at the dashboard or
+Grafana learned that anything had happened. The platform database is the system of record for alerts
+and their acknowledgements, so it decides what is sent, and Grafana sends nothing itself
+([`grafana/README.md`](../grafana/README.md), *One route*). From 1.8 `platform_alerts` has two
+writers: `grafana-alert-webhook` for the platform's rules, and Aber's own evaluator for machine
+conditions (#322). So the dispatcher starts from the table's rows, not from the webhook, and a writer
+added later is sent without changing.
+
+**`notification_deliveries` is the queue and the delivery log.** One row is one message to one
+channel: the occurrence (`alert_id`, NULL for a test), the `event` (`firing`, `resolved`, `reminder`
+or `test`), the `channel` (`webhook` today), `attempts`, `next_attempt_at`, the `state` and the
+`last_error`. A row is `pending` until it leaves the queue: `sent` (the receiver answered 2xx),
+`dropped` (the send decision said it no longer applies) or `dead` (every attempt failed). The
+partial unique index `notification_deliveries_once_per_occurrence` allows one firing and one resolve
+per occurrence and channel. A row goes with its occurrence when `prune_platform_alerts()` removes it
+(`ON DELETE CASCADE`), and the newest 20 finished tests are kept.
+
+**`trg_platform_alerts_queue_notifications` queues on a status change and nothing else.** It runs
+`AFTER INSERT OR UPDATE OF status`. The webhook upserts the same row on every Grafana repeat, naming
+`status` each time, so the trigger compares `OLD.status` with `NEW.status` and queues only when an
+occurrence starts firing or resolves. The `last_confirmed_at` stamp is not a status change, so it
+queues nothing either.
+
+- **A firing message** is queued for each channel that carries the alert: one that is configured
+  (`notification_channel_is_configured()`: the webhook needs its address and its signing key),
+  whose route admits its severity (`notification_severity_carried()`), and that may carry it. The
+  webhook carries only what every signed-in role may read, so it is never queued a
+  `service_identity` alert.
+- **A resolve** is queued for each channel that was queued the firing message, whatever its route
+  says now. A route raised in between must not leave a receiver holding an alert that never ends.
+- **An occurrence that arrives resolved** was never announced, and queues nothing.
+
+A queued row asks for a pass: `trg_notification_deliveries_request_dispatch` calls
+`request_notification_dispatch_once()`, which asks once a transaction however many rows it queued.
+
+**`platform_alert_send_decision(alert_id, event, channel)` decides each message just before it is
+sent**, so whatever changed since the row was queued counts. It answers `send`, `hold` or `drop`:
+
+| Event | When | Answer |
+| :--- | :--- | :--- |
+| Any | The occurrence is gone (pruned) | drop |
+| Any | The channel is the webhook and the alert is about a machine identity | drop |
+| `resolved` | Its channel's firing message was sent | send |
+| `resolved` | That message is still pending | hold |
+| `resolved` | That message was dropped or died, or there is none | drop |
+| `firing`, `reminder` | The occurrence resolved, or a newer occurrence of its fingerprint replaced it | drop |
+| `firing`, `reminder` | It is acknowledged | drop |
+| `reminder` | Its writer has not confirmed it within its window | drop |
+| `firing`, `reminder` | A suppression window covers the alert now (`0250`) | hold |
+| `firing`, `reminder` | Otherwise | send |
+
+So a firing message whose alert resolved before it went out is dropped, and its resolve with it. An
+acknowledgement drops the firing message and every reminder, and a resolve still goes if its firing
+message went. **A held row stays `pending`** with its next attempt pushed a minute out, and is not an
+attempt. It is decided again when it comes due, and sent once the hold lifts. Suppression windows
+(#326) are the second reason to hold. `0247` leaves the arm a marked place (`SUPPRESSION ARM`, after
+acknowledgement and before `send`), and `0250` fills it: a firing message or a reminder held while a
+window covers its alert is sent when the window ends, as if the alert had just fired.
+
+**A reminder every `notifications.reminder_hours`** (default 12, the repeat interval Grafana uses)
+while an alert fires unacknowledged. `queue_platform_alert_reminders()` queues one when the newest
+of the channel's sent firing message and its last reminder, whatever became of that reminder, is that
+many hours old. So a reminder that died is not queued again every minute. It queues only for the
+newest occurrence, still firing, unacknowledged, carried by the channel's route, with no reminder
+already waiting, and confirmed by its writer.
+
+**Confirmed means stamped recently by the row's writer.** `platform_alerts.last_confirmed_at` is new
+(stated in `0001`, and not in `platform_alerts_active`). `grafana-alert-webhook` stamps it on every
+row of every post, a repeat of a firing alert included. `platform_alert_confirmation_window()` says
+how long a stamp holds, by the writer the fingerprint names: Grafana's `repeat_interval`, 12 hours
+(`grafana/provisioning/alerting/policies.yaml`; mirror check 57), plus a margin of one hour. The
+margin covers a repeat that waits for its group's next flush or for the webhook to answer again.
+A row whose resolve never arrived is therefore reminded for at most 13 hours after Grafana stopped
+repeating it, where before it would have been reminded for ever: `prune_platform_alerts()` keeps the
+newest occurrence of a fingerprint however old it is. A fingerprint starting `condition:` is the
+evaluator's (#322), which will stamp on every run. Its arm answers no window, so no reminder, until
+the evaluator states its run interval there. A row never stamped is not reminded.
+
+**The dispatcher is `notification-dispatch`, asked for as `sweep_forge()` asks for `forge-sweep`.**
+`request_notification_dispatch()` reads the functions' address, the publishable key and the dispatch
+secret from the vault, and posts through `pg_net`, which sends on commit. It returns false, and asks
+nothing, while any of the three is missing. `pg_cron` runs `sweep_notifications()` every minute as
+the backstop: it queues the reminders that are due, and asks for a pass only while a row is due, so
+a quiet queue costs one query a minute. A request `pg_net` lost, a backoff that has come due and a
+hold to look at again are all picked up by the next minute's sweep.
+
+**One pass at a time**, under `notification_dispatch_lease`, a copy of the forge sweep's
+([One pass at a time](#one-pass-at-a-time-0156)). A pass claims the
+lease for 60 seconds and renews it before each post, so a pass that outlived it sends nothing more;
+`notification_deliveries_due()` and `record_notification_delivery()` refuse a caller that does not
+hold a live lease (`55P03`). A claim refused while a pass runs marks the lease `requested`, and the
+release asks for one more pass. So does a pass that stops at its 40-second budget with rows still
+due, through `release_notification_dispatch(holder, p_again)`.
+
+**The retry policy is the dispatcher's.** A failed post is retried after 30 seconds, doubling each
+time to at most an hour: 30 s, 1, 2, 4, 8, 16 and 32 minutes, then an hour twice. A message is dead
+after its tenth failed attempt, about three hours after the first. A test is tried once, because the
+Administrator who sent it is waiting for the answer. `record_notification_delivery()` stores what the
+pass decided, and only a pending row changes, so a row finished another way stays as it is.
+
+**The dispatch secret is generated by the database.** It is the one thing that tells the database's
+call apart from any other caller: the gateway's key check proves only that a caller holds a key every
+browser has. `0247` generates it on the first boot, 32 random bytes, and keeps it in the vault as
+`notification_dispatch_secret`. A value the vault can no longer decrypt is replaced. The chart passes
+no value, unlike `forge_sweep_secret`: nothing outside the database needs to know it, and the function
+checks it through `notification_dispatch_secret_matches()`, as the service role, comparing digests.
+Nothing a caller sends chooses what is sent, since every message comes from the queue.
+
+**Visibility.** The dispatcher runs as the service role, past RLS, so the database applies each
+row's visibility itself. No `service_identity` alert is ever sent to the webhook: the trigger does not
+queue one, `notification_deliveries_due()` does not select one, and the decision drops one. Every
+signed-in role reads the delivery log, as the Settings page shows it to every role. Its select policy
+calls `notification_delivery_is_readable(alert_id)`, a `SECURITY INVOKER` lookup of the alert under
+the reader's own policy on `platform_alerts`, so a row about an alert a role may not read is not
+listed either. No API role writes the queue or reads the lease.
+
+The file's self-check asserts the column and that the view does not return it, RLS and the grants on
+both tables, both triggers' shapes, the service role's grants and every function's pin, the vault's
+secret and that the comparison admits nothing else, the sweep's schedule, both windows, and that a
+decision about an occurrence that is gone is `drop`. `test_aber_sends_each_alert_to_a_webhook.py`
+holds the trigger, every arm of the decision, the reminders, the lease, the secret and each outcome.
+`notification-dispatch/dispatch_test.ts` holds the envelope, the signature against a known vector,
+the allow-list, a redirect not followed, the backoff to a dead letter and a hold that sends later.
+
+### The webhook is signed and kept to its allowed hosts (0248)
+
+The one channel `0247` sends to today is a generic outbound webhook: any URL whose host an
+Administrator has allowed. No product is named. A site that wants a chat channel points the webhook
+at it, or at a receiver on its own network. Email is the second channel (#325 part 2); it adds its own
+keys and changes none of these.
+
+**The address is a foreign credential.** A webhook URL is a bearer secret its receiver issued, so
+`set_notification_webhook_url()` writes it through `set_foreign_credential()` and
+`notification_webhook_url_is_set()` probes it through `foreign_credential_is_set()`
+([Secrets live in Supabase Vault](#runtime-configuration-system_settings)). It is an http or https URL
+of at most 2,048 characters with no user name in it (`22023`); a credential belongs in the path or
+the query, where the receiver issued it. The Settings page enters it with `CredentialField`.
+`clear_notification_webhook_url()` removes it, which stops the webhook, and drops what was waiting
+for it. Each is the Administrator's alone (`42501`). Each asks `require_mfa()` after its role check,
+as `issue_notification_signing_key()` and `queue_test_notification()` do, so with MFA required the
+webhook is changed only from a session that gave its code (`0251`).
+
+**Three closed settings, in the Notifications category**, each checked by
+`notification_setting_guard()` beside the table's own type and bound CHECKs (`23514`):
+
+| Key | Holds | Who reads it |
+| :--- | :--- | :--- |
+| `notifications.webhook_min_severity` | `info`, `warning` (seeded) or `critical`: the lowest severity the webhook carries | Every role |
+| `notifications.webhook_allowed_hosts` | Up to 20 distinct lower-case host names, IPv4 addresses or bracketed IPv6 addresses. A host, not a URL | An Administrator alone (`sensitive`), as a destination is |
+| `notifications.reminder_hours` | A whole number of hours, 1 to 168 (seeded 12) | Every role |
+
+Only an Administrator writes them, by `system_settings_update_admin`, and the audit trigger records
+each change as for any setting. A channel's route is its own keys, named
+`notifications.<channel>_*`, so email adds `notifications.email_min_severity` and the roles it tells
+beside these without a migration of the webhook's.
+
+**The signing key is Aber's.** `issue_notification_signing_key()` generates 32 random bytes and
+returns them as Standard Webhooks writes a key, `whsec_` and base64, so a receiver's verifier takes
+it as it is. It keeps the key in the vault as `notification_webhook_signing_key`, replaced rather
+than updated, so the row's `created_at` is when it was issued, and returns it: the one time it is
+shown. Issuing again rotates it, and the old key stops signing at once, so a receiver must be given
+the new one straight after. Each issue writes one `SIGNING_KEY_ISSUED` row in the webhook's lane,
+`notification_channels`, naming who issued it and when the key it replaced was issued; the key is
+never in it. `0249` files it. The codebase classes the first showing of a credential with its issue,
+as `TOKEN_MINTED` does for a machine identity's token, and keeps `CREDENTIAL_SHOWN` for showing a
+kept copy again, so there is no second row. `notification_webhook_status()` tells an Administrator
+whether the address is set and when the key was issued; anybody else is told `visible: false`.
+
+**The message is a CloudEvents 1.0 event in structured JSON mode**, the envelope #306 settled and will
+extend. It is posted as `application/cloudevents+json`:
+
+- `specversion` `1.0`; `id` the queue row's, the same on every retry, so a receiver can drop a
+  repeat; `source` the dashboard's address (`FRONTEND_PUBLIC_URL`), or `urn:aber` without one;
+  `datacontenttype` `application/json`.
+- `type` is `aber.alert.firing`, `aber.alert.resolved`, `aber.alert.reminder` or `aber.test`.
+- `time` is when it happened: the occurrence's start for a firing message, its end for a resolve, and
+  when the row was queued for a reminder or a test.
+- `data` holds the occurrence's id (`alert_id`), its `name`, `severity`, `subject` (`type`, `id`,
+  `sparkplug_id` and `name`), `starts_at`, `ends_at`, `summary`, `labels` and `values`, and a `link`
+  to the subject in the dashboard: the device's or gateway's page, or the dashboard itself for a
+  platform alert. A test's `data` holds a sentence and a link to Settings › Notifications.
+
+**It is signed with the Standard Webhooks headers**, so a receiver can check it with an off-the-shelf
+verifier: `webhook-id` (the event's `id`), `webhook-timestamp` (seconds since the epoch) and
+`webhook-signature`, `v1,` and the base64 HMAC-SHA256 of `id.timestamp.body` under the key's bytes.
+A receiver should refuse a timestamp more than a few minutes old.
+
+**What the dispatcher refuses.** It reads the address, the key and the hosts through
+`notification_webhook_destination()`, the service role's alone, before each pass:
+
+- **An address whose host is not on the allowed hosts** is refused before anything is posted, as a
+  failed attempt, and the delivery log says so. The match is exact: no wildcard and no suffix.
+- **A redirect is not followed.** The post uses `redirect: "manual"`, so a 3xx comes back as itself,
+  and it is a failure: its target is not on the allow-list.
+- **A receiver has 10 seconds to answer.** Any answer outside 2xx is a failure.
+- **No error names the address**, since it is a credential: the log's sentences are the
+  dispatcher's own, and the function's log line names the address's origin alone.
+
+**A test goes through the queue.** `queue_test_notification()` queues an `aber.test` row and returns
+its id, and the page reads that row until it has left `pending`. So the function is never reachable
+from a browser, and a test meets the same allow-list, signature and redirect rule as any message. It
+needs the address and a key first (`55000`).
+
+**The functions pod opens the connection.** A site with `networkPolicy.enabled` must admit the
+functions pod to each webhook host in its own `networkPolicy.extraEgress`
+([`help/site/upgrading.md`](../help/site/upgrading.md#from-180-alerts-can-be-sent-to-a-webhook)).
+
+The file's self-check asserts each function's pin and grants, the guard's trigger, what the hosts'
+rule admits and refuses, and that a request with no person behind it is refused a key and a test and
+is shown nothing. `test_aber_sends_each_alert_to_a_webhook.py` holds the settings by role, the
+address, the key and its audit rows, the destination and the test.
+
+### The Audit Trail files a webhook's signing key (0249)
+
+`0248`'s `SIGNING_KEY_ISSUED` row is in the webhook's lane, `notification_channels`, which no table
+backs. It needs one line in the map of kinds and nothing else:
+
+- **The lane** is the security lane, by `audit_domain_for()`'s fail-closed default, as for
+  `service_logs`: an Administrator issues the key, and an Administrator and an Auditor read the act.
+- **The class** is `configuration`, by `audit_event_class()`'s rule for the security lane. The class
+  indexes are unchanged, so nothing is rebuilt.
+- **`audit_trail_action_kinds()`** lists the action on its kind. It is redeclared whole from `0232`,
+  unchanged but for that line and `0241`'s four suppression window rows, and
+  `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43). `0241` declares the map too, and replays
+  first on every boot: the last declaration stands, so this one carries `0241`'s rows.
+
+The file's self-check asserts the lane, the class and the map's row, and that `0232`'s and `0241`'s
+rows are still there.
+
+### A suppressed alert is held until its window ends (0250)
+
+`0240`'s suppression windows keep an alert quiet on the dashboard, and `0247`'s dispatcher sends each
+alert to the webhook. Each was built to stand alone, so `0247`'s send decision left suppression a
+marked place (`SUPPRESSION ARM`). This file fills it, and nothing else changes.
+
+- **A firing message or a reminder is held** while `platform_alert_suppressing_window()` answers a
+  window for the alert, asked with `now()` as the dashboard asks it. The row stays `pending`, is not
+  an attempt, and is decided again a minute later.
+- **When the window ends, or is ended early**, the predicate answers NULL, and the next decision
+  sends an alert that is still firing, as if it had just fired.
+- **The drops come first.** An alert that resolved, was replaced or was acknowledged inside its
+  window is dropped, not held, so it is never sent.
+- **A resolve is decided as before**: sent only if its firing message went. So an occurrence that
+  resolved inside its window sends neither message. One whose firing message went before the
+  window opened still sends its resolve, so the receiver is not left holding an alert that never
+  ends.
+- **The occurrence's stamp is not read.** `suppression_window_id` says which window first covered
+  an occurrence, for history; the predicate says whether one covers it now.
+
+`platform_alert_send_decision()` is redeclared whole from `0247`, unchanged but for the arm and its
+comment. The file's self-check asserts that the function asks the predicate after the
+acknowledgement's drop, keeps its volatility, `SECURITY DEFINER`, pin and grants, and drops a message
+about an occurrence that is gone. `test_aber_sends_each_alert_to_a_webhook.py` holds a firing
+message held inside a window and sent once it is ended early, a reminder held, and an occurrence that
+resolved inside its window sending nothing.
+
+### With MFA required, a change to the platform needs a session that gave its code (0251)
+
+From 1.7.0 a person may enrol a TOTP factor (`0216`), and nothing read `aal`. A Settings row now
+asks for one: **Require MFA to change the platform**, `security.require_mfa_for_managers`, in the
+Security category. `0002` declares it a boolean, off, readable by every role. Only an Administrator
+may change it (`system_settings_update_admin`), and each change is an Audit Trail row. While it is
+on, an Administrator or a Shopfloor Manager changes the platform only from a session that gave its
+code (`aal2`), or one another identity provider signed in (`amr` names `oauth` or `sso/saml`).
+Every other role, and every machine identity, is never asked, and no read is ever refused. A
+database setting, not a Helm value, because a policy reads it at query time and it applies to the
+next request.
+
+- **One predicate, `mfa_satisfied()`** (`0001`, `STABLE`, as the caller, `search_path` pinned):
+  true while the switch is off, for a caller who holds neither role, for an `aal2` session and for
+  a federated one. The switch is read first, so a site that never turns it on pays one index
+  lookup. `require_mfa()` is its guard: true, or `42501` (PostgREST's 403) with the sentence *MFA
+  is required for this. Add an authenticator on Profile › MFA, then try again.*, the detail
+  `mfa_required` and a hint. A guard, not a boolean, because a `USING` clause that answered false
+  would turn an UPDATE or DELETE into a silent zero rows, which the dashboard reads as success.
+- **Beside `has_role()` only.** Every write policy that admits either role is `has_role(…) AND (SELECT
+  require_mfa())`, and every function that changes the platform for them calls `PERFORM
+  public.require_mfa()` after its role check. A machine identity never satisfies `has_role()`, and
+  the predicate admits any caller without a covered role, so no machine's write can meet the guard.
+  Three schema functions, guarded by `schema:manage`, which a machine may hold, call it too: a
+  person publishes a schema through them, and a machine passes the guard as it passes everywhere.
+  `has_role()` and `has_authority()` themselves are unchanged.
+- **Cached per statement.** A policy calls the guard as `(SELECT public.require_mfa())`, an initplan
+  evaluated once per statement however many rows it reads (the plan below), as `0177` made the
+  role checks of the policies it restated.
+- **Where each is declared.** db-init replays every file on every boot, so each policy and body is
+  changed where it is stated, as `0235` changed `has_role()`'s: `0001` for the two functions, its
+  write policies and the functions whose final form it holds; each later function in its own file
+  (`0164`, `0165`, `0166`, `0168`, `0178`, `0196`, `0203`, `0213`, `0217`, `0218`, `0240`, `0248`); and the same line
+  in `0001`'s and `0164`'s and `0203`'s earlier copies, so no boot serves an ungated body between two
+  replays. The policies `0177` and `0204` restate (`STATED_LATER`) are all reads, so neither
+  changes. `supabase/storage-policies.sql` puts the guard in each storage write arm. `0251` holds no
+  copy of any of them.
+- **Not covered**, each with its reason in [`mfa-exemptions.json`](mfa-exemptions.json): every read;
+  a person's own sessions, picture, name and factors; an alert's acknowledgement, an Operator's
+  write too. Mirror check 59 fails on a write policy or a function that names a covered role in
+  `has_role()` and neither asks nor is listed, and on a stale entry. Check 60 holds the setting, the
+  roles, the federated methods, the sentence and Grafana's id to one value in `0001`, `0251`,
+  `_shared/secondFactor.ts`, `consent-gate` and `utils/secondFactor.js`.
+- **The edge functions** that check a role and then act with a key the policies never see ask
+  `_shared/secondFactor.ts`, the same predicate, before they act: `aas-export`, `approve-quarantine`,
+  `broker-inventory`, `broker-subscriber`, `gateway-bundle`, `gateway-credential`, `manage-people` and
+  `mint-service-token`. A function with no service-role key reads the switch as the caller, which
+  every role may read. Each answers 403 with `code: mfa_required` and the sentence in `details`.
+- **The consent step.** Every app's token is `aal1` (GoTrue's code exchange issues it with no
+  factor), so no door can read the assurance. The gateway asks `consent-gate` on
+  `/auth/v1/oauth/authorizations/` alone, where both of the consent page's calls carry the person's
+  own session, and fails closed. `oauth_authorization_client(p_authorization_id)`, `service_role`
+  only, reads the app a pending sign-in is for, so Grafana's passes at `aal1`.
+  [`docs/security-model.md`](../docs/security-model.md#mfa-required-to-change-the-platform) has the
+  whole surface.
+- **App sessions end.** `end_covered_door_sessions()` deletes the `auth.sessions` rows with an
+  `oauth_client_id` (their refresh tokens cascade) of every person holding a covered role,
+  Grafana's excepted, as `0217` and `0208` end a session. A trigger on `system_settings` runs it for
+  everyone when the switch turns on; one on `user_roles` runs it for one person given a covered role
+  from another or none while it is on. A promotion within the covered roles ends nothing: those
+  sessions were won under the switch. One `SESSIONS_ENDED` row per person, in their lane, names the
+  apps and the reason, with the Administrator who acted in `changed_by`. No new action, so no
+  Audit Trail arm. The triggers are two functions, one per table:
+  `mfa_switch_ends_door_sessions()` and `mfa_grant_ends_door_sessions()`.
+
+**Every `has_role()` policy**, final forms: 56 in the migrations (as on `45b87e43`) and 13 in
+`storage-policies.sql`. A, M, Au and O are Administrator, Shopfloor_Manager, Auditor and Operator.
+
+| Table | Policy | For | Roles | MFA term | Why |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `areas` | `areas_delete_privileged` | DELETE | A, M | yes | Removes an area |
+| `areas` | `areas_insert_privileged` | INSERT | A, M | yes | Adds an area |
+| `areas` | `areas_update_privileged` | UPDATE | A, M | yes | Changes an area |
+| `asset_config` | `asset_config_delete_privileged` | DELETE | A, M | yes | Removes a device's asset configuration |
+| `asset_config` | `asset_config_insert_privileged` | INSERT | A, M | yes | Adds a device's asset configuration |
+| `asset_config` | `asset_config_update_privileged` | UPDATE | A, M | yes | Changes a device's asset configuration |
+| `asset_exports` | `asset_exports_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `audit_trail` | `audit_trail_select_asset` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `audit_trail` | `audit_trail_select_security` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `backup_jobs` | `backup_jobs_select_administrator` | SELECT | A | no | A read, which the switch never refuses |
+| `backups` | `backups_select_administrator` | SELECT | A | no | A read, which the switch never refuses |
+| `capture_jobs` | `capture_jobs_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `captures` | `captures_delete_privileged` | DELETE | A, M | yes | Removes a stored capture |
+| `captures` | `captures_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `cells` | `cells_delete_privileged` | DELETE | A, M | yes | Removes a cell |
+| `cells` | `cells_insert_privileged` | INSERT | A, M | yes | Adds a cell |
+| `cells` | `cells_update_privileged` | UPDATE | A, M | yes | Changes a cell |
+| `change_proposals` | `change_proposals_select_own_or_approver` | SELECT | A, M | no | A read, which the switch never refuses |
+| `device_nameplate` | `device_nameplate_delete_privileged` | DELETE | A, M | yes | Removes a device's nameplate |
+| `device_nameplate` | `device_nameplate_insert_privileged` | INSERT | A, M | yes | Adds a device's nameplate |
+| `device_nameplate` | `device_nameplate_update_privileged` | UPDATE | A, M | yes | Changes a device's nameplate |
+| `device_submodels` | `device_submodels_delete_privileged` | DELETE | A, M | yes | Removes a device's schemas |
+| `device_submodels` | `device_submodels_insert_privileged` | INSERT | A, M | yes | Adds a device's schemas |
+| `device_submodels` | `device_submodels_update_privileged` | UPDATE | A, M | yes | Changes a device's schemas |
+| `devices` | `devices_delete_privileged` | DELETE | A, M | yes | Removes a device |
+| `devices` | `devices_insert_privileged` | INSERT | A, M | yes | Adds a device |
+| `devices` | `devices_update_privileged` | UPDATE | A, M | yes | Changes a device |
+| `directory_services` | `directory_services_delete_privileged` | DELETE | A, M | yes | Removes a Directory service |
+| `directory_services` | `directory_services_insert_privileged` | INSERT | A, M | yes | Adds a Directory service |
+| `directory_services` | `directory_services_update_privileged` | UPDATE | A, M | yes | Changes a Directory service |
+| `gateways` | `gateways_delete_privileged` | DELETE | A, M | yes | Removes a gateway |
+| `gateways` | `gateways_insert_privileged` | INSERT | A, M | yes | Adds a gateway |
+| `gateways` | `gateways_update_privileged` | UPDATE | A, M | yes | Changes a gateway |
+| `links` | `links_delete_privileged` | DELETE | A, M | yes | Removes an asset's link |
+| `links` | `links_insert_privileged` | INSERT | A, M | yes | Adds an asset's link |
+| `links` | `links_update_privileged` | UPDATE | A, M | yes | Changes an asset's link |
+| `machine_principals` | `machine_principals_select_admin_or_auditor` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `metric_catalog` | `metric_catalog_insert_privileged` | INSERT | A | yes | Adds a catalogued metric |
+| `metric_catalog` | `metric_catalog_update_privileged` | UPDATE | A | yes | Changes a catalogued metric |
+| `metric_groups` | `metric_groups_insert_privileged` | INSERT | A | yes | Adds a metric group |
+| `metric_groups` | `metric_groups_update_privileged` | UPDATE | A | yes | Changes a metric group |
+| `platform_alerts` | `platform_alerts_select_authenticated` | SELECT | A | no | A read, which the switch never refuses |
+| `playback_jobs` | `playback_jobs_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `playback_worker_status` | `playback_worker_status_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `principal_permissions` | `principal_permissions_select_own_or_admin` | SELECT | A | no | A read, which the switch never refuses |
+| `rebirth_requests` | `rebirth_requests_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `revoked_service_principals` | `revoked_service_principals_select_privileged` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `revoked_service_tokens` | `revoked_service_tokens_select_privileged` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `schemas` | `schemas_delete_privileged` | DELETE | A | yes | Removes a schema |
+| `schemas` | `schemas_insert_privileged` | INSERT | A | yes | Adds a schema |
+| `schemas` | `schemas_update_privileged` | UPDATE | A | yes | Changes a schema |
+| `service_token_last_use` | `service_token_last_use_select_privileged` | SELECT | A, Au | no | A read, which the switch never refuses |
+| `storage.objects` | `area_plans_delete_privileged` | DELETE | A, M | yes | Removes an area plan |
+| `storage.objects` | `area_plans_insert_privileged` | INSERT | A, M | yes | Adds an area plan |
+| `storage.objects` | `area_plans_update_privileged` | UPDATE | A, M | yes | Changes an area plan |
+| `storage.objects` | `asset_3d_models_delete_privileged` | DELETE | A, M | yes | Removes a 3D model |
+| `storage.objects` | `asset_3d_models_insert_privileged` | INSERT | A, M | yes | Adds a 3D model |
+| `storage.objects` | `asset_3d_models_select_privileged` | SELECT | A, M | no | A read, which the switch never refuses |
+| `storage.objects` | `asset_3d_models_update_privileged` | UPDATE | A, M | yes | Changes a 3D model |
+| `storage.objects` | `asset_exports_delete_admin` | DELETE | A | yes | Removes an export |
+| `storage.objects` | `asset_exports_read_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `storage.objects` | `broker_captures_delete_privileged` | DELETE | A, M | yes | Removes a capture's file |
+| `storage.objects` | `broker_captures_insert_privileged` | INSERT | A, M | yes | Adds a capture's file |
+| `storage.objects` | `broker_captures_read_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
+| `storage.objects` | `broker_captures_update_privileged` | UPDATE | A, M | yes | Changes a capture's file |
+| `system_settings` | `system_settings_select_authenticated` | SELECT | A | no | A read, which the switch never refuses |
+| `system_settings` | `system_settings_update_admin` | UPDATE | A | yes | Changes a setting, this switch among them |
+| `user_roles` | `user_roles_select_own_or_privileged` | SELECT | A, M | no | A read, which the switch never refuses |
+| `webhook_endpoints` | `webhook_endpoints_select_privileged` | SELECT | A | no | A read, which the switch never refuses |
+
+**Every function that names a covered role in `has_role()`**, final forms, and the three schema
+functions guarded by `schema:manage`. A function that asks calls `require_mfa()` after its role
+check; one that does not is in `mfa-exemptions.json` with the reason given here. Capture and
+playback acts ask through `may_manage_captures()`, and every People act through
+`check_person_act()`, so their callers need no line of their own.
+
+| Function | Final form | Asks | Why |
+| :--- | :--- | :--- | :--- |
+| `acknowledge_alert()` | `0231` | no | An Operator's write as much as a manager's: acknowledging an alert changes no platform state. |
+| `app_approvals()` | `0217` | no | A read: who allows an app. |
+| `approve_proposal()` | `0165` | yes | Applies a proposed change |
+| `audit_trail_backup_job_ids_matching()` | `0001` | no | A read: the Audit Trail's search. |
+| `audit_trail_user_ids_matching()` | `0203` | no | A read: the Audit Trail's search. |
+| `authorize_host_gateway_credential()` | `0196` | yes | Authorises a gateway's broker credential |
+| `backup_summary()` | `0179` | no | A read: the Backups page's figures. |
+| `cancel_backup_job()` | `0001` | yes | Cancels a backup |
+| `change_alert_suppression_window()` | `0240` | yes | Changes a suppression window |
+| `check_person_act()` | `0166` | yes | Every People act: role, access, password, email, sessions, MFA reset, approvals |
+| `clear_backup_offsite_destination()` | `0001` | yes | Removes it |
+| `clear_notification_webhook_url()` | `0248` | yes | Removes the webhook's address |
+| `cold_archive_backlog()` | `0001` | no | A read: the Cold Storage page. |
+| `cold_storage_rows()` | `0001` | no | A read: the Cold Storage page. |
+| `create_machine_principal()` | `0001` | yes | Creates a machine identity |
+| `describe_machine_principal()` | `0001` | yes | Renames a machine identity |
+| `discard_schema_draft()` | `0165` | yes | Discards a schema draft (schema:manage) |
+| `display_names_for()` | `0213` | no | A read: the names the dashboard shows. |
+| `end_alert_suppression_window()` | `0240` | yes | Ends or cancels a suppression window |
+| `end_my_other_sessions()` | `0211` | no | A person's own sessions, in any role. |
+| `end_my_session()` | `0211` | no | A person's own session, in any role. |
+| `foreign_credential_is_set()` | `0178` | no | A read: whether a credential is set, never what it is. |
+| `fork_schema()` | `0165` | yes | Versions a schema (schema:manage) |
+| `gateway_is_playback_delivery_target()` | `0183` | no | A read the playback dialog makes. |
+| `historian_backup_state()` | `0001` | no | A read: the Backups page. |
+| `is_active_capture_object()` | `0184` | no | A storage predicate; the write policies call require_mfa() in the arm beside it. |
+| `is_active_playback_capture()` | `0184` | no | A storage predicate the read policy calls. |
+| `is_own_avatar_object()` | `0213` | no | A person's own picture, in any role. |
+| `is_unclaimed_capture_object()` | `0190` | no | A storage predicate; the write policies call require_mfa() in the arm beside it. |
+| `issue_capture_download()` | `0195` | no | A read: downloading a stored capture, which an Auditor may do too. |
+| `issue_gateway_enrollment_token()` | `0196` | yes | Mints a gateway enrolment token |
+| `issue_notification_signing_key()` | `0248` | yes | Issues or rotates the webhook's signing key |
+| `keep_gateway_credential()` | `0196` | yes | Keeps a gateway's password |
+| `list_apps()` | `0217` | no | A read: the Apps tab. |
+| `list_machine_principals()` | `0001` | no | A read: Machine identities. |
+| `list_my_app_approvals()` | `0217` | no | A read: a person's own approvals. |
+| `list_my_sessions()` | `0206` | no | A read: a person's own sessions. |
+| `list_people()` | `0166` | no | A read: People. |
+| `list_user_accounts()` | `0001` | no | A read: the accounts list. |
+| `may_decide_proposal()` | `0001` | no | A predicate: approve_proposal() and reject_proposal() call require_mfa() themselves, and list_proposer_names() reads by it. |
+| `may_manage_captures()` | `0001` | yes | Every capture and playback act, and a gateway rebirth request |
+| `notification_webhook_status()` | `0248` | no | A read: whether the webhook has an address and a signing key, never what they are. |
+| `person_session_summary()` | `0207` | no | A read: a person's drawer. |
+| `person_sessions()` | `0212` | no | A read: a person's drawer. |
+| `platform_backup_state()` | `0173` | no | A read: the Backups page. |
+| `playback_delivery_targets()` | `0183` | no | A read the playback dialog makes. |
+| `playback_stale_credentials()` | `0184` | no | A read the playback dialog makes. |
+| `publish_schema_version()` | `0165` | yes | Publishes a schema (schema:manage) |
+| `queue_test_notification()` | `0248` | yes | Sends a test to the webhook |
+| `raw_telemetry_window()` | `0001` | no | A read: the Cold Storage page. |
+| `record_broker_account_created()` | `0218` | yes | Records a read-only broker account |
+| `record_broker_account_deleted()` | `0218` | yes | Records its deletion |
+| `record_gateway_credential_issued()` | `0001` | yes | Records an issued gateway credential |
+| `record_service_logs_read()` | `0225` | no | Records a read of a service's logs: reading is never refused. |
+| `reinstate_service_principal()` | `0001` | yes | Reinstates a machine identity |
+| `reject_proposal()` | `0165` | yes | Decides a proposal |
+| `release_backup()` | `0001` | yes | Releases a kept backup |
+| `relocate_devices()` | `0165` | yes | Moves devices between cells |
+| `remove_app()` | `0217` | yes | Removes an app |
+| `request_backup()` | `0001` | yes | Takes a backup |
+| `revoke_service_principal()` | `0001` | yes | Revokes a machine identity |
+| `revoke_service_token()` | `0001` | yes | Revokes a service token |
+| `schedule_alert_suppression_window()` | `0240` | yes | Schedules a suppression window, which keeps a machine's alerts quiet |
+| `set_backup_offsite_destination()` | `0001` | yes | Sets the off-site backup destination |
+| `set_device_schemas()` | `0168` | yes | Changes a device's schemas |
+| `set_display_name()` | `0213` | yes | Names another person (your own name is yours at any assurance) |
+| `set_foreign_credential()` | `0178` | yes | Writes a credential to Vault: the archive, the backups, and each later one |
+| `set_notification_webhook_url()` | `0248` | yes | Sets where the platform's alerts are sent |
+| `set_own_picture()` | `0213` | no | A person's own picture, in any role. |
+| `show_gateway_credential()` | `0164` | no | Shows a stored gateway credential again: a read, which the switch never refuses. |
+| `withdraw_alert_acknowledgement()` | `0231` | no | The other half of acknowledging an alert, which an Operator may do too. |
+
+**What it costs.** `test_role_checks_are_timed.py` times `has_role()` alone and `has_role() AND
+mfa_satisfied()`, a write policy's two calls, in the same run, so both see one load. It was run three
+times on a freshly migrated test database, as #1194's baseline was, on a laptop shared with seven
+other sessions. `has_role()` admitting measured 20.08 / 21.07 / 49.24, against #1194's 13.83-16.95
+and #1186's 21.68, so read the difference within each run. µs per call, the median of 5 × 10,000
+calls, runs 1 / 2 / 3:
+
+| µs per call | has_role() alone | has_role() + mfa_satisfied() |
+| :--- | :--- | :--- |
+| the switch off | 21.94 / 30.64 / 55.93 | 41.57 / 53.01 / 106.31 |
+| the switch on, an `aal2` Administrator | 19.43 / 18.96 / 48.34 | 51.91 / 49.94 / 150.06 |
+
+With the switch off the predicate costs about one `has_role()`: the setting's lookup and the call.
+With it on, a covered `aal2` caller also pays the role and the claims, two to three `has_role()`s
+in all. A policy pays it once per statement, as an initplan. `EXPLAIN ANALYZE` of an UPDATE over
+10,000 areas, as an `aal2` Administrator with the switch on, shows the guard's initplan run once
+(`loops=1`) while `has_role()`, as before, is in the per-row filter. The median of 5 runs was
+707 / 665 / 1763 ms, most of it the audit trigger's 10,000 rows.
+
+The file's self-check asserts the two functions' language, volatility, that both run as their
+caller, and their pin; that `authenticated` and `service_role` may run them and `anon` may not;
+that this file's four functions are `SECURITY DEFINER` and pinned, the gate's reader
+`service_role`'s alone; that both triggers are in place; that a caller with no role is admitted
+whatever the switch says; that the owner may read GoTrue's authorizations and end its sessions;
+and that `0002` declared the row.
+`test_with_mfa_required_a_write_needs_a_session_that_gave_its_code.py` holds every gated policy and
+function at `aal1` and `aal2`, the switch on and off, a federated `amr`, an Operator and a machine
+identity, the exemption list against the live catalog with a planted policy and function caught,
+and the sessions that end with their refresh tokens. In the stack lane,
+`test_a_second_factor_guards_what_changes_the_platform.py` drives the consent step, a gated function
+and the ending of a Node-RED session with a throwaway person and a computed TOTP code, and
+`check-gateway-surface.mjs --runtime --consent` holds the gate's decisions at the live gateway.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
@@ -3055,7 +4486,8 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `user_settings` | own row only, `Administrator` included (`0188`) | own row: `INSERT`, `UPDATE`; no `DELETE` — the row goes with the account |
 | `person_profiles` | own row only; others' names through `list_people()`, `list_user_accounts()` and `display_names_for()` (`0203`) | none — `set_display_name()`: your own, or anyone's as `Administrator` |
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
-| `platform_alerts` | `authenticated`; a `service_identity` row `Administrator` only (`0204`) | none — `grafana-alert-webhook` writes as `service_role` |
+| `platform_alerts` | `authenticated`; a `service_identity` row `Administrator` only (`0204`) | none — `grafana-alert-webhook` writes the alert as `service_role`; `acknowledge_alert()` and `withdraw_alert_acknowledgement()` the acknowledgement (`0231`); the database the suppression stamp (`0240`) |
+| `alert_suppression_windows` | `authenticated` (`0240`) | none — `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and `end_alert_suppression_window()`, as `Administrator` / `Shopfloor_Manager` |
 | `service_token_last_use` | `Administrator`, `Auditor` (`0209`) | none — `record_service_token_use()`, which the i3X server calls as the token's own caller |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
@@ -5100,13 +6532,14 @@ over-trust, and this inventory is the compensating control
 
 Revocation exists since `0074` (see
 [Tokens became revocable in `0074`](#tokens-became-revocable-in-archived-migration-0074-and-the-mint-followed-in-archived-migration-0075))
-and reaches PostgREST only: Storage, Realtime and the edge runtime verify the signature for
-themselves. Expiry therefore still bounds every token, and the line falls between **keys that name a
+and reaches PostgREST and what checks a token through it (the i3X server, `aas-api` and
+`fplus-directory`): Storage and Realtime verify the signature for themselves. Expiry therefore
+still bounds every token, and the line falls between **keys that name a
 principal** and **keys that name nobody**:
 
 | Key | Expiry | Why |
 | :--- | :--- | :--- |
-| `mint-api-token.mjs` tokens | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine; revocation reaches PostgREST only, so the expiry bounds the rest |
+| `mint-api-token.mjs` tokens | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine; revocation does not reach Storage or Realtime, so the expiry bounds them |
 | `SUPABASE_INGESTION_KEY`, `SUPABASE_PLAYBACK_KEY` | **90 days**, rotatable | They carry a `sub`, so they are the same kind of credential as the row above and are bounded by the same ceiling. `npm run keys:rotate` re-signs them |
 | `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | 10 years | Not anybody: `role` and no `sub`, so RLS never asks who is calling. No client holds them: the gateway admits only the publishable and secret keys as an `apikey`, refuses these if presented, and substitutes them upstream — so shortening them means re-signing them for the gateway and every service that verifies them at once |
 
@@ -5352,12 +6785,15 @@ policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
 **The key it needs had been recorded since `0043`.** Both host scripts stamp a `jti` and hand it to
 `record_service_token_issued()`, for an inventory that could not act on it.
 
-**Revocation reaches PostgREST and nothing else, and the page says so.** `supabase-storage`,
-`supabase-realtime` and the edge runtime (which boots `VERIFY_JWT="false"`) each verify the signature
-for themselves (the JWKS, [ES256](#signing-with-es256)) and consult no
-denylist. That is complete coverage for what
-this is about — the Read-only API client and `Service_Ingestor` reach PostgREST and nothing else — but the
-expiry is still the only bound that reaches every service, which is why the 90-day ceiling stays.
+**Revocation reaches PostgREST and what checks a token through it, and the page says so.** The i3X
+server, `aas-api` and `fplus-directory` check every token with a PostgREST call made as the caller
+([0224](#aas-api-and-the-directory-accept-a-machine-identitys-token-0224)), so the hook refuses a
+revoked one there too. `supabase-storage` and `supabase-realtime` each verify the signature for
+themselves (the JWKS, [ES256](#signing-with-es256)) and consult no denylist. The other edge
+functions check a caller with GoTrue's `getUser()`, which refuses every machine identity's token,
+revoked or not. That is complete coverage for what this is about — the Read-only API client and
+`Service_Ingestor` reach PostgREST and what checks through it — but the expiry is still the only
+bound that reaches every service, which is why the 90-day ceiling stays.
 
 **`0075` is the mint, and it is deliberately not an RPC.** The retired revocable-tokens roadmap item sketched a
 `SECURITY DEFINER` function signing with `pgjwt`, on the reasoning that it needed "no secret leaving
@@ -5417,6 +6853,40 @@ does not fold, granted to `authenticated` and `service_role` only. The call stay
 its EXECUTE check runs on every execution. `service_token_max_days()` keeps its own job, the token
 ceiling, where folding is harmless. Check 32 of `scripts/check-docs-drift.mjs` holds the probe to
 plpgsql and not `IMMUTABLE`, and `test_service_token_revocation.py` replays the attack.
+
+#### aas-api and the Directory accept a machine identity's token (0224)
+
+`aas-api` and `fplus-directory` read as their caller, and they used to check the caller with
+GoTrue's `getUser()`. GoTrue refuses a token with no `aud` claim there, and a machine identity's
+token carries none: `mint-service-token` and `mint-api-token.mjs` sign `sub`, `role`, `iat`, `exp`
+and `jti`. So the Read-only API client could read neither, while PostgREST and the i3X server
+accepted the same token.
+
+Both now check the caller as the i3X server does, with one PostgREST call made as the caller.
+`checkCaller()` in [`_shared/callerCheck.ts`](functions/_shared/callerCheck.ts) calls
+`auth_probe()`, which `0224` declares in the shape of i3X's probe: it returns true, it is plpgsql
+and `STABLE` so no plan folds the call away, and `authenticated` alone may run it.
+
+- **A person's session and a machine identity's token are accepted**, and each reads under RLS as
+  itself.
+- **A revoked token, a withdrawn identity, a removed person and an ended session are refused**,
+  because `auth_pre_request()` runs before the probe. `getUser()` consulted neither denylist.
+- **The publishable and the secret key are refused.** `anon` and `service_role` may not run the
+  probe, so a caller presenting the secret key as its bearer gets no service-role reach from a
+  function that holds no service-role key.
+- **A refusal is still the function's own `401`**, `Invalid user token`. A probe that could not
+  answer is a `500` with a request id, never an acceptance.
+
+**What a machine identity sees.** Every relation a shell or a Directory entry is read from is
+`SELECT TO authenticated USING (true)`, and a minted token's role is `authenticated`. So the
+Read-only API client reads every shell and every Directory route as a signed-in person does. Its
+`telemetry:read` grant is not consulted there.
+
+**No `aud` was added to the minted tokens.** Fourteen functions called `getUser()`, and an audience
+would have admitted machine identities to all of them at once, none of them audited for it. The
+other twelve still refuse a machine identity. i3X keeps its own `i3x_auth_probe()`. Check 184 of
+`scripts/check-docs-drift.mjs` holds `auth_probe()` to its grants and shape, and check 185 holds
+both functions to it.
 
 #### A missing hook is a total outage that every health check calls healthy
 
@@ -5494,15 +6964,16 @@ refuses a missing or wrong token or secret.
 | [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read. `format=bundle` also needs `audit_trail:read`, because it carries the trail |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`, which makes it the only gate on deploying a flow from the platform's Node-RED |
-| [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
+| [`fplus-directory`](functions/fplus-directory) | a signed-in person or a machine identity | Factory+ Directory adapter — see below |
 | [`forge-membership`](functions/forge-membership) | `Administrator`, `Shopfloor_Manager` | The forge listener's `ext_authz` step: places the caller in the team their role warrants, refuses a role removed since the token was signed (`0094`) |
 | [`studio-admission`](functions/studio-admission) | `Administrator` | The studio listener's `ext_authz` step: refuses a role removed or changed since the token was signed, and sends a session GoTrue ended to the door's sign-out |
 | [`forge-signout`](functions/forge-signout) | the caller | Gitea's own sign-out link: ends the door's GoTrue session, then sends the browser to the dashboard's `/sign-out` (`FRONTEND_PUBLIC_URL`) |
 | [`forge-events`](functions/forge-events) | **no Supabase role at all** | Gitea's push webhook, authorised on its HMAC; records the head of `main` on the gateway row (`0095`) |
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
-| [`aas-api`](functions/aas-api) | any authenticated user | The IDTA 02001/02002 read API over the mapping `aas-export` uses; queries as the caller, so RLS decides |
+| [`aas-api`](functions/aas-api) | a signed-in person or a machine identity | The IDTA-01002 (AAS Part 2) read API over the mapping `aas-export` uses; queries as the caller, and every caller reads the same shells — see [Connecting an AAS client](#connecting-an-aas-client) |
 | [`broker-inventory`](functions/broker-inventory) | `Administrator` | The broker's accounts and roles, for the Access Control page |
 | [`broker-subscriber`](functions/broker-subscriber) | `Administrator` | Creates a read-only broker account (the `subscriber` role alone) and shows its password once, or deletes one; refuses any username outside the subscriber scheme (`0218`) |
+| [`service-logs`](functions/service-logs) | `Administrator` | A service's newest log lines from Loki, for System › Logs, built from parameters and never a query; each new read is recorded (`0225`) — see [Reading a service's logs is recorded](#reading-a-services-logs-is-recorded-0225) |
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
 | [`gateway-bundle`](functions/gateway-bundle) | `Administrator`, `Shopfloor_Manager`; `GET`: any signed-in user | The remote-gateway ZIP bundle or the one-liner, minting an enrolment token; `GET` is the readiness probe |
 | [`mint-service-token`](functions/mint-service-token) | `Administrator` | Signs a machine principal's token and shows it once |
@@ -5570,8 +7041,11 @@ a title or `rulename` label the webhook would read as an error.
 
 ### Alert retention (archived migration 0030)
 
-**Alert occurrences are kept for 7 days and then deleted.** Not archived — nothing reads a historical
-alert. The dashboard reads `platform_alerts_active`, which is `DISTINCT ON (fingerprint)` filtered to
+**Alert occurrences are kept for 90 days and then deleted** (7 until 1.8.0:
+[Alert history is kept for 90 days](#alert-history-is-kept-for-90-days-0244)). Not archived: History's
+Alerts tab reads them over that window and no longer
+([History lists the alerts that fired](#history-lists-the-alerts-that-fired-0243)). The alert
+counter reads `platform_alerts_active`, which is `DISTINCT ON (fingerprint)` filtered to
 `status = 'firing'`; no Grafana dashboard queries the table; and the Realtime subscription wants
 change *events*, not persistence. The telemetry that breached the threshold is retained
 independently in the historian, so the alert row is derived data whose evidence outlives it.
@@ -5586,7 +7060,7 @@ updates status and summary but not age. An alert firing continuously for longer 
 therefore has one row, older than the cutoff — and
 
 ```sql
-DELETE FROM public.platform_alerts WHERE recorded_at < now() - interval '7 days';  -- WRONG
+DELETE FROM public.platform_alerts WHERE recorded_at < now() - interval '90 days';  -- WRONG
 ```
 
 deletes the current state of a live alert. The pill disappears, the device stops being painted red,
@@ -5619,7 +7093,9 @@ rather than an adopted format.
 no Supabase `apikey` and no way to acquire one. Those gateway routes are therefore exempt from the
 `apikey` check — which makes the function itself the **only** thing in front of the fleet's address
 space. Every `/v1/` path refuses a request with no bearer token *before it routes*, and
-`validate.py` check 11b asserts that 401 rather than trusting it.
+`validate.py` check 11b asserts that 401 rather than trusting it. It checks a token with one
+PostgREST call made as the caller, so a machine identity's token is accepted and a revoked one is
+not ([0224](#aas-api-and-the-directory-accept-a-machine-identitys-token-0224)).
 
 It **queries as the caller**, not as the service role: a Directory is a live read over the whole
 address space, so running it privileged would hand every authenticated user a view their RLS
@@ -5654,6 +7130,47 @@ read-as-the-caller property above does not survive the move. RLS decides what ea
 a retained topic has one copy for every subscriber, so on MQTT the broker ACL is the whole of the
 access control. Everything else about it follows from that.
 
+### Connecting an AAS client
+
+`aas-api` is the live AAS repository. A client written against IDTA-01002 (AAS Part 2, the API)
+reads shells and submodels from it, with nothing exported first.
+
+**The base URL** is `https://api.<domain>/functions/v1/aas-api` on a site, and
+`http://api.localhost/functions/v1/aas-api` on the development stack. A client adds `/shells`,
+`/submodels` and `/description` after it.
+
+**What a request sends** is a bearer token in `Authorization`, and nothing else:
+
+- **a person's token**, from **Profile → Copy Token**. It acts as them and lasts at most an hour.
+- **a machine identity's token**, issued on **Access Control**. For a client you keep, issue one
+  for the Read-only API client. It lasts up to 90 days, and revoking it refuses it from the next
+  request ([0224](#aas-api-and-the-directory-accept-a-machine-identitys-token-0224)).
+
+No `apikey`: the gateway exempts `/functions/v1/aas-api/` from its key check
+([API Gateway](#api-gateway-envoyyaml)). `/description` needs no token at all. A browser client
+also needs its origin in `global.corsExtraOrigins`, as any browser client of the API does.
+
+**Every caller reads the same shells.** Every relation a shell is read from is
+`SELECT TO authenticated USING (true)`, so the token decides whether a caller is let in, not what
+it sees.
+
+**What is not served:**
+
+- the Registry and Discovery interfaces;
+- concept descriptions, although the JSON export carries them;
+- writes: every route is a `GET`, and the advertised profiles are the read-only SSP-002 pair;
+- the `$metadata`, `$reference` and `$path` modifiers, which answer `404`. Only `/$value`
+  is handled;
+- a search. `GET /shells` reads only `limit` and `cursor`, so a client that asks by
+  `assetIds` or `idShort` gets every shell;
+- a page of submodels by count. On `/submodels`, `limit` counts devices, and a page holds every
+  submodel of each.
+
+**A shell's history link has requirements of its own.** The Time Series submodel carries a
+`LinkedSegment` whose endpoint is PostgREST's `/rest/v1/telemetry` (`AAS_HISTORIAN_ENDPOINT`),
+queried by `asset_id`. That is the REST API, not `aas-api`, so a client following it sends the
+`apikey` as well as a person's or a machine identity's token.
+
 ### Getting a shell into a third-party AAS server
 
 Two routes to the same destination, and it is worth having both before you need either.
@@ -5662,8 +7179,18 @@ Two routes to the same destination, and it is worth having both before you need 
 in as a supplementary part. This is the handover artefact — it needs nothing from this stack once
 it has been produced.
 
-**The REST push.** `npm run aas:push-basyx -- --device=Sim_CNC_Mill_01` exports the JSON
-environment and POSTs it into a running server's `/submodels` and `/shells`.
+**The REST push.** `npm run aas:push-basyx -- --device=<device name>` exports the JSON
+environment and POSTs it into a running server's `/submodels` and `/shells`. Before you run it:
+
+1. Run `npm run dev:forward`. The script reads the gateway at `SUPABASE_URL`, which is
+   `http://127.0.0.1:54321` unless set, and on Windows Node cannot resolve `api.localhost`.
+2. Set `AAS_TEST_EMAIL` and `AAS_TEST_PASSWORD` to an account whose role may export. Unset, the
+   script signs in as the seeded `admin@aber.local`.
+3. Point `--basyx` at BaSyx's AAS Environment, not its Web UI. They are different ports, and the
+   Web UI serves no `/shells`.
+
+To view the result, set the BaSyx Web UI's repository addresses to the AAS Environment, and allow
+the Web UI's origin in BaSyx's own CORS setting.
 
 The second exists because the AASX carries its Environment as JSON at `aasx/aasenv-root.json` —
 valid AAS Part 5, but some BaSyx builds' upload path expects an XML environment part and will
@@ -5713,7 +7240,7 @@ import map, and code imports the bare names (`@supabase/supabase-js`, `fflate`, 
 modules djwt imports by content hash.
 
 - **The image resolves them.** The Dockerfile's `modules` stage runs `deno cache --frozen` with
-  Deno 2.1.4, the Deno that edge-runtime v1.77.0 embeds (`edge-runtime --version`), and copies the
+  Deno 2.1.4, the Deno that edge-runtime v1.77.4 embeds (`edge-runtime --version`), and copies the
   module cache into the image as `DENO_DIR=/home/deno/deno-dir`. `--frozen` fails the build when the
   lock does not cover the module graph; bytes that differ from the lock fail its integrity check.
 - **The build proves it.** The `offline-check` stage boots every function directory under
@@ -6184,7 +7711,7 @@ begin `realtime-dev`.
 
 The `apikey` check gates `/rest/v1/`, `/realtime/v1/`, `/storage/v1/` and `/functions/v1/`, and
 accepts the `sb_publishable_*` / `sb_secret_*` keys
-([`docs/gateway.md`](../docs/gateway.md)). **Six routes are open, across four
+([`docs/gateway.md`](../docs/gateway.md)). **Seven routes are open, across five
 exemptions:**
 
 | Route(s) | Exemption | Why |
@@ -6193,6 +7720,7 @@ exemptions:**
 | `/storage/v1/object/public/` | public objects | An AAS `File` URL must resolve for a viewer holding no session. Routed before `/storage/v1/`, with `/object/public/` preserved in the upstream path |
 | `/functions/v1/grafana-userinfo`, `/functions/v1/nodered-userinfo` | OAuth userinfo | An OAuth client presents client credentials, never a Supabase apikey. Exact paths, before `/functions/v1/`, so a function added later is gated by default |
 | `/ping`, `/v1/` | Factory+ Directory | A Factory+ client has no apikey. `/ping` is open by specification; `/v1/` is authenticated by the **function**, which refuses a request with no bearer and queries as the caller, so RLS applies |
+| `/functions/v1/aas-api/` | AAS API | A standard AAS client sends a bearer token and no apikey. `/description` is open by specification; every other route is authenticated by the **function**, as the Directory's are. Before `/functions/v1/`, rewritten to `/aas-api/` so the runtime picks the worker |
 
 **The table is asserted, not maintained by hand.** `check-gateway-surface.mjs` compares the whole
 routing and authentication surface against a reviewed inventory, because `validate.py` asserts the
@@ -6208,7 +7736,8 @@ The template's own comments state each route and filter; the semantics they depe
 because each one produces a stack that looks fine and is not when it is forgotten.
 
 - **Route order is first-match.** `/storage/v1/object/public/` precedes `/storage/v1/`, and the
-  userinfo paths precede `/functions/v1/`, so an exemption is a route placed before the gate.
+  userinfo paths and `/functions/v1/aas-api/` precede `/functions/v1/`, so an exemption is a route
+  placed before the gate. `check-gateway-surface.mjs` fails one placed after it.
 - **Realtime keeps its key and rewrites its Host.** The Realtime client puts the key in the
   WebSocket URL's query string, so a header-only check leaves Realtime permanently 401; it also
   parses the key, so the gateway replaces it with the JWT it stands for rather than stripping it.
@@ -6337,9 +7866,31 @@ states it rather than absorbing it.
 
 **Two operational consequences.** The listener is `supabase-envoy:8001`, which the Ingress serves
 as `studio.<domain>`; `supabase-studio` itself has no route. And both halves fail closed: without
-`STUDIO_OAUTH_CLIENT_SECRET`, `0002` skips the registration with a `WARNING` and the
-substituter renders credentials that cannot authenticate — a stack that runs normally with a console
-nobody can open, which is the same posture as the loopback binding it replaces.
+`STUDIO_OAUTH_CLIENT_SECRET`, `0002` skips the registration with a `WARNING` naming the Studio login
+and the secret to set, and the substituter renders credentials that cannot authenticate — a stack
+that runs normally with a console nobody can open, which is the same posture as the loopback binding
+it replaces.
+
+**With Studio off, `0002` removes the client rather than leaving it.** db-init passes
+`studio_enabled` from `supabaseStudio.enabled`, which is false by default. Only `true` is a fault
+without the secret, so only `true` warns:
+
+| `studio_enabled` | What `0002` does |
+| :--- | :--- |
+| `false` | A `NOTICE` that Studio is off, so its client is not registered. A client an earlier boot registered is removed as `remove_app()` removes one: every approval revoked, every session ended, then `deleted_at` set. The trigger records one `APP_REMOVED` and an `APP_APPROVAL_REVOKED` per approval, by `migration`. The `NOTICE` gives the counts. |
+| `true` | As before: registered with the secret, or a `WARNING` and nothing without it. A client removed while Studio was off is restored by the upsert (`APP_RESTORED`), and each person approves it again. |
+| unset | An older chart or a hand-run `psql`: as `true`, so nothing that worked before changes. |
+
+Any other value fails the boot, naming it. So a site that had Studio on and turns it off ends with
+the clients in force that a default install has. `list_apps()`, the Apps tab and GoTrue's own reads
+(`deleted_at IS NULL`) no longer find Studio's. A later boot finds nothing to remove and records
+nothing.
+
+Nothing else needs the row. `stack_app_ids()` still names the id, so the id stays Part of Aber and
+`remove_app()` still refuses it. `end_my_door_sessions()` (`0208`) deletes by id and finds none.
+The gateway's rules for the door cannot match: the chart drops the studio listener, and the API
+listener names the id in no rule. GoTrue issues no new token for a removed client, and the API
+refuses one issued before, since its session has ended (`0205`).
 
 ---
 

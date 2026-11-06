@@ -461,6 +461,25 @@ describe('a firing platform alert', () => {
     expect(hook.history).toEqual([])
   })
 
+  it('links a capture or playback alert to the Capture page, firing and resolved', async () => {
+    const failed = {
+      ...row, fingerprint: 'f4', alert_name: 'Capture or Playback Failed', entity_type: 'platform',
+      sparkplug_id: null, rule_uid: 'aber-job-failed',
+      labels: { job: 'playback job 7d2c0000-0000-4000-8000-000000000002' }
+    }
+    const firing = await mountAlerts([failed])
+    const link = screen.getByRole('link', { name: /Capture or Playback Failed/ })
+    expect(link).toHaveAttribute('href', '/capture/playbacks')
+    expect(link).not.toHaveAttribute('target')
+
+    await firing([])
+    expect(hook.toasts.find(t => t.msg === 'Resolved — Capture or Playback Failed').to).toBe('/capture/playbacks')
+    expect(alertToastUrl({ ...failed, labels: { job: 'capture job 7d2c' } })).toBe('/capture/captures')
+    expect(alertToastUrl({ ...failed, rule_uid: 'aber-playback-worker-stale', labels: {} })).toBe('/capture/playbacks')
+    // A row written before 0220 has no labels, and its link stays the rule's.
+    expect(alertToastUrl({ ...failed, labels: null })).toBe(grafanaAlertUrl(failed))
+  })
+
   it('links any other alert to its rule, whatever entity_id it carries', () => {
     expect(alertToastUrl({ ...row, entity_type: 'gateway', entity_id: 'g-1' })).toBe(grafanaAlertUrl(row))
     expect(alertToastUrl({ ...row, entity_type: 'service_identity', entity_id: null })).toBe(grafanaAlertUrl(row))

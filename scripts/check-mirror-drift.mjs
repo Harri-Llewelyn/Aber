@@ -6,7 +6,7 @@
  *
  * Usage: node scripts/check-mirror-drift.mjs
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -159,6 +159,28 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   if (jsChars && gateChars) {
     compare('sparkplugGroup', `characters the dialog and ${gate.file}'s gate refuse`, sorted(jsChars[1]), sorted(gateChars[1]));
   }
+}
+
+// 64. An area's and a cell's name. Their dialogs hold Save, and say why, with placeNameProblem();
+// areas_name_topic_safe and cells_name_topic_safe refuse the name in the database. A character only
+// one side refuses is a dialog that blocks a legal name, or one that lets the save fail with a
+// constraint error.
+{
+  const js = read('frontend/src/utils/unsPath.js');
+  const jsChars = need(js, /^const UNSAFE = \/\[([^\]]+)\]\//m, 'UNSAFE in unsPath.js');
+  const jsEmpty = /export const placeNameProblem = [^\n]*!\(name \|\| ''\)\.trim\(\)/.test(js);
+  const sorted = (chars) => [...chars].sort().join('');
+  for (const table of ['areas', 'cells']) {
+    const check = need(
+      SCHEMA,
+      new RegExp(`CONSTRAINT ${table}_name_topic_safe CHECK \\(\\(\\(name <> ''::text\\) AND \\(name !~ '\\[([^\\]]+)\\]'::text\\)\\)\\)`),
+      `${table}_name_topic_safe in the applied chain`
+    );
+    if (jsChars && check) {
+      compare('placeName', `characters the dialog and ${table}_name_topic_safe refuse`, sorted(jsChars[1]), sorted(check[1]));
+    }
+  }
+  if (!jsEmpty) problems.push('placeName: placeNameProblem() no longer refuses the empty name the CHECKs refuse');
 }
 
 // 15. A person's display name. The dashboard's forms and manage-people's `add` refuse a name before
@@ -326,6 +348,168 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 48. What an app's token reaches at the gateway. The API listener's app check (supabase/envoy.yaml)
+// admits a token GoTrue issued to an app on the functions that app calls, by client id, and each
+// door listener signs in as a client of its own. An id stack_app_ids() does not list is an app the
+// stack does not register, given a route; a function with no directory, or one the edge runtime's
+// allow-list (functions/main/index.ts) does not name, is a route to nothing.
+{
+  const before = problems.length;
+  const envoy = read('supabase/envoy.yaml').replace(/\r\n/g, '\n');
+  const ids = lastDefinition('CREATE OR REPLACE FUNCTION public.stack_app_ids()', '$$;', 'stack_app_ids() in the applied chain');
+  const listed = ids ? [...ids.body.matchAll(/'([0-9a-f-]{36})'/g)].map((m) => m[1]) : [];
+  const start = envoy.indexOf('\n    - name: gateway\n');
+  const next = envoy.indexOf('\n    - name: ', start + 1);
+  const gateway = start < 0 ? '' : envoy.slice(start, next < 0 ? undefined : next);
+  const rbacAt = gateway.indexOf('- name: envoy.filters.http.rbac');
+  const rbac = rbacAt < 0 ? '' : gateway.slice(rbacAt, gateway.indexOf('- name: envoy.filters.http.router', rbacAt));
+  const lines = rbac.split('\n');
+  const at = lines.findIndex((l) => /^\s*policies:\s*$/.test(l));
+  const indent = at < 0 ? -1 : lines[at].search(/\S/) + 2;
+  const routes = {};
+  let current = null;
+  for (const line of lines.slice(at + 1)) {
+    if (line.length - line.trimStart().length === indent && /^\s*[a-z0-9-]+:\s*$/.test(line)) current = { ids: [], fns: [] };
+    if (!current) continue;
+    for (const m of line.matchAll(/string_match: \{ exact: ([0-9a-f-]{36}) \}/g)) current.ids.push(m[1]);
+    for (const m of line.matchAll(/url_path: \{ path: \{ exact: "\/functions\/v1\/([a-z0-9-]+)" \} \}/g)) current.fns.push(m[1]);
+    for (const id of current.ids) routes[id] = [...new Set([...(routes[id] || []), ...current.fns])];
+  }
+  const doors = [...envoy.matchAll(/^\s+client_id: ([0-9a-f-]{36})\s*$/gm)].map((m) => m[1]);
+  const registry = read('supabase/functions/main/index.ts');
+  const block = registry.slice(registry.indexOf('const FUNCTION_REGISTRY'), registry.indexOf('\n};', registry.indexOf('const FUNCTION_REGISTRY')));
+  const registered = new Set([...block.matchAll(/^\s+"([a-z0-9-]+)": \[/gm)].map((m) => m[1]));
+
+  if (!rbac || at < 0) {
+    problems.push('appRoutes: found no app check (rbac policies) on the gateway listener in supabase/envoy.yaml -- the shape changed, so this check is no longer checking anything');
+  } else if (Object.keys(routes).length === 0 || doors.length === 0 || registered.size === 0) {
+    problems.push('appRoutes: found no app route, door client or registered function -- the shape changed, so this check is no longer checking anything');
+  } else {
+    for (const id of [...Object.keys(routes), ...doors].filter((x) => !listed.includes(x))) {
+      problems.push(`appRoutes: supabase/envoy.yaml names the client ${id}, which stack_app_ids() (${ids?.file}) does not list: an app the stack does not register is given a route`);
+    }
+    for (const fn of Object.values(routes).flat()) {
+      if (!existsSync(join(ROOT, 'supabase/functions', fn, 'index.ts'))) {
+        problems.push(`appRoutes: the gateway admits an app's token to /functions/v1/${fn}, and supabase/functions/${fn}/index.ts does not exist`);
+      } else if (!registered.has(fn)) {
+        problems.push(`appRoutes: the gateway admits an app's token to /functions/v1/${fn}, which FUNCTION_REGISTRY in functions/main/index.ts does not name, so the edge runtime answers 404`);
+      }
+    }
+    if (problems.length === before) {
+      ok.push(`appRoutes: ${Object.entries(routes).map(([id, fns]) => `${id} -> ${fns.join(', ')}`).join('; ')}; the doors sign in as ${doors.join(', ')}; every id is in stack_app_ids() and every function exists and is registered`);
+    }
+  }
+}
+
+// 59. Every site that changes the platform for a covered role asks the MFA switch (0251). A write
+// policy calls require_mfa() beside each has_role() arm naming Administrator or Shopfloor_Manager,
+// in its final form and in storage-policies.sql; a function whose final body names either role in
+// has_role() calls it too. Anything else is in supabase/mfa-exemptions.json with its reason, and an
+// entry there that names no such site is stale. A new write policy or function with neither fails.
+{
+  const before = problems.length;
+  const exemptions = JSON.parse(read('supabase/mfa-exemptions.json'));
+  const COVERED = /has_role\(ARRAY\[[^\]]*'(?:Administrator|Shopfloor_Manager)'/g;
+  const count = (text, re) => (text.match(re) || []).length;
+  // A machine-capable permission guards these, and require_mfa() admits every caller without a
+  // covered role, so they call it though has_role() is not theirs.
+  const GATED_BY_AUTHORITY = ['fork_schema', 'publish_schema_version', 'discard_schema_draft'];
+
+  // Final policy forms: the last CREATE POLICY of each name on each table, in replay order.
+  const policies = new Map();
+  for (const m of SCHEMA.matchAll(/^CREATE POLICY (\S+) ON (\S+) FOR (\w+) [^\n]*$/gm)) policies.set(`${m[2]} ${m[1]}`, { cmd: m[3], text: m[0] });
+  for (const m of read('supabase/storage-policies.sql').matchAll(/^CREATE POLICY "([^"]+)" ON storage\.objects\s+FOR (\w+)([\s\S]*?\);)$/gm)) {
+    policies.set(`storage.objects ${m[1]}`, { cmd: m[2], text: m[3] });
+  }
+  const writes = [...policies].filter(([, p]) => p.cmd !== 'SELECT' && count(p.text, COVERED) > 0);
+  for (const [name, p] of writes) {
+    if (name in exemptions.policies) continue;
+    if (count(p.text, /require_mfa\(\)/g) < count(p.text, COVERED)) {
+      problems.push(`mfaSites: the ${p.cmd} policy ${name} admits Administrator or Shopfloor_Manager without require_mfa() beside each has_role(): add it, or exempt it in supabase/mfa-exemptions.json with its reason`);
+    }
+  }
+  for (const name of Object.keys(exemptions.policies)) {
+    if (!writes.some(([n]) => n === name)) problems.push(`mfaSites: supabase/mfa-exemptions.json exempts the policy ${name}, which is no write policy naming a covered role`);
+  }
+
+  // Final function bodies, by name.
+  const bodies = new Map();
+  for (const m of SCHEMA.matchAll(/CREATE OR REPLACE FUNCTION\s+public\.([a-z0-9_]+)\s*\([\s\S]*?\bAS (\$[a-z_]*\$)([\s\S]*?)\2/g)) bodies.set(m[1], m[3]);
+  const sites = [...bodies].filter(([, body]) => count(body, COVERED) > 0).map(([name]) => name);
+  const ungated = sites.filter((name) => !bodies.get(name).includes('require_mfa()') && !(name in exemptions.functions));
+  for (const name of ungated) {
+    problems.push(`mfaSites: ${name}() names Administrator or Shopfloor_Manager in has_role() and calls no require_mfa(): call it after the role check if it changes the platform, or exempt it in supabase/mfa-exemptions.json with its reason`);
+  }
+  for (const name of Object.keys(exemptions.functions)) {
+    if (!sites.includes(name)) problems.push(`mfaSites: supabase/mfa-exemptions.json exempts ${name}(), whose final body names no covered role in has_role()`);
+    else if (bodies.get(name).includes('require_mfa()')) problems.push(`mfaSites: supabase/mfa-exemptions.json exempts ${name}(), which calls require_mfa(): drop the entry`);
+    if (!String(exemptions.functions[name]).trim()) problems.push(`mfaSites: the exemption of ${name}() gives no reason`);
+  }
+  for (const name of GATED_BY_AUTHORITY.filter((n) => !bodies.get(n)?.includes('require_mfa()'))) {
+    problems.push(`mfaSites: ${name}() no longer calls require_mfa(); a person changes the platform through it`);
+  }
+  if (!writes.length || !sites.length) {
+    problems.push('mfaSites: found no write policy or function naming a covered role -- the shape changed, so this check is no longer checking anything');
+  } else if (problems.length === before) {
+    const gated = sites.filter((n) => bodies.get(n).includes('require_mfa()')).length;
+    ok.push(`mfaSites: ${writes.length} write policies and ${gated + GATED_BY_AUTHORITY.length} functions ask require_mfa(); ${Object.keys(exemptions.functions).length} functions are exempt, each with its reason`);
+  }
+}
+
+// 60. The MFA switch's predicate, in its four places (0251): mfa_satisfied() and require_mfa() in
+// 0001, the session ending in 0251, the edge functions' _shared/secondFactor.ts with the consent
+// gate, and the dashboard's utils/secondFactor.js. Each names the same setting, roles, federated
+// methods, refusal sentence and code, and the gate's Grafana is stack_app_ids()'s first app.
+{
+  const before = problems.length;
+  const satisfied = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_satisfied()', '$$;', 'mfa_satisfied() in the applied chain');
+  const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.require_mfa()', '$$;', 'require_mfa() in the applied chain');
+  const ending = lastDefinition('CREATE OR REPLACE FUNCTION public.end_covered_door_sessions(', '$$;', 'end_covered_door_sessions() in the applied chain');
+  const trigger = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_grant_ends_door_sessions()', '$$;', 'mfa_grant_ends_door_sessions() in the applied chain');
+  const switched = lastDefinition('CREATE OR REPLACE FUNCTION public.mfa_switch_ends_door_sessions()', '$$;', 'mfa_switch_ends_door_sessions() in the applied chain');
+  const ids = lastDefinition('CREATE OR REPLACE FUNCTION public.stack_app_ids()', '$$;', 'stack_app_ids() in the applied chain');
+  const ts = read('supabase/functions/_shared/secondFactor.ts');
+  const gate = read('supabase/functions/consent-gate/gate.ts');
+  const web = read('frontend/src/utils/secondFactor.js');
+  const seed = read(`${MIGRATION_DIR}/0002_seed_data.sql`);
+  const list = (src) => (src ? [...src.matchAll(/["']([A-Za-z_/]+)["']/g)].map((m) => m[1]).sort().join(', ') : null);
+  // A literal search, not a regex built from the name.
+  const tsConst = (name) => {
+    const head = `export const ${name} = `;
+    const at = ts.indexOf(head);
+    if (at < 0) {
+      problems.push(`could not find ${name} in _shared/secondFactor.ts — the file's shape changed, so this check is no longer checking anything`);
+      return null;
+    }
+    return ts.slice(at + head.length, ts.indexOf(';', at));
+  };
+  if (satisfied && guard && ending && trigger && switched && ids) {
+    const setting = tsConst('MFA_SETTING')?.replace(/"/g, '');
+    for (const [where, body] of [['mfa_satisfied()', satisfied.body], ['mfa_switch_ends_door_sessions()', switched.body], ['mfa_grant_ends_door_sessions()', trigger.body]]) {
+      if (!body.includes(`'${setting}'`)) problems.push(`mfaPredicate: ${where} does not read ${setting}, the setting _shared/secondFactor.ts reads`);
+    }
+    if (!seed.includes(`'${setting}',\n    to_jsonb(false),\n    'boolean'`)) problems.push(`mfaPredicate: 0002 does not declare ${setting} as a boolean, off`);
+    const roles = list(tsConst('COVERED_ROLES'));
+    for (const [where, body] of [['mfa_satisfied()', satisfied.body], ['end_covered_door_sessions()', ending.body], ['mfa_grant_ends_door_sessions()', trigger.body]]) {
+      compare('mfaPredicate', `the covered roles in ${where} and _shared/secondFactor.ts`, roles, list((body.match(/ARRAY\[([^\]]*)\]/) || [])[1]));
+    }
+    const federated = list(tsConst('FEDERATED_METHODS'));
+    compare('mfaPredicate', 'the federated methods in mfa_satisfied() and _shared/secondFactor.ts', federated,
+      [...satisfied.body.matchAll(/"method": "([^"]+)"/g)].map((m) => m[1]).sort().join(', '));
+    compare('mfaPredicate', 'the federated methods in utils/secondFactor.js and _shared/secondFactor.ts', federated,
+      list((web.match(/export const FEDERATED_METHODS = \[([^\]]*)\]/) || [])[1]));
+    const sentence = tsConst('MFA_REFUSAL')?.replace(/^"|"$/g, '');
+    compare('mfaPredicate', 'the refusal in require_mfa() and _shared/secondFactor.ts', sentence, (guard.body.match(/RAISE EXCEPTION '([^']+)'/) || [])[1]);
+    compare('mfaPredicate', 'the refusal in utils/secondFactor.js and _shared/secondFactor.ts', sentence, (web.match(/export const MFA_REQUIRED_MESSAGE = '([^']+)'/) || [])[1]);
+    compare('mfaPredicate', 'the refusal code in require_mfa() and _shared/secondFactor.ts', tsConst('MFA_REFUSAL_CODE')?.replace(/"/g, ''),
+      (guard.body.match(/DETAIL = '([^']+)'/) || [])[1]);
+    const grafana = (ids.body.match(/'([0-9a-f-]{36})'/) || [])[1];
+    compare('mfaPredicate', "Grafana's app in consent-gate and stack_app_ids()", (gate.match(/GRAFANA_CLIENT_ID = "([0-9a-f-]{36})"/) || [])[1], grafana);
+    compare('mfaPredicate', "the app end_covered_door_sessions() keeps and stack_app_ids()'s Grafana", (ending.body.match(/<> '([0-9a-f-]{36})'::uuid/) || [])[1], grafana);
+    if (problems.length === before) ok.push('mfaPredicate: the setting, roles, federated methods, refusal and Grafana agree across 0001, 0251, the functions and the dashboard');
+  }
+}
+
 // 2. Gateway staleness, derived at read time on both sides, so the two thresholds must agree. The
 // view is built inside `ensure_gateway_status_view()`, which later migrations call after adding a
 // gateways column; the latest redeclaration is the one that runs.
@@ -386,6 +570,26 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     if (view.redeclarations > 1) {
       ok.push(`gatewayStatus: read the LAST of ${view.redeclarations} declarations of ensure_gateway_status_view() (${view.file})`);
     }
+  }
+}
+
+// 41. The playback worker's staleness. The playback dialog reads a heartbeat older than
+// WORKER_STALE_MS as a worker that is not running, and platform_health_rows() raises
+// playback_worker_stale past the same age, and leaves a playback out of job_stuck before it. Two
+// thresholds would let the dialog call the worker running while the alert says it is not.
+{
+  const js = read('frontend/src/components/modals/StartPlaybackModal.jsx');
+  const jsMs = need(js, /WORKER_STALE_MS\s*=\s*([\d_ *]+)\n/, 'WORKER_STALE_MS in StartPlaybackModal.jsx');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.platform_health_rows()', '$$;',
+    'public.platform_health_rows()');
+  if (jsMs && fn) {
+    const ms = jsMs[1].split('*').map((n) => Number(n.trim().replace(/_/g, ''))).reduce((a, b) => a * b, 1);
+    const stale = need(fn.body.slice(fn.body.indexOf("'playback_worker_stale'::text")),
+      /reported_at < now\(\) - interval '(\d+) minutes'/, `the playback_worker_stale arm's age (${fn.file})`);
+    const fresh = need(fn.body.slice(fn.body.indexOf("'job_stuck'::text")),
+      /reported_at >= now\(\) - interval '(\d+) minutes'/, `the job_stuck arm's heartbeat test (${fn.file})`);
+    if (stale) compare('playbackWorkerStale', `the stale-worker alert's age (ms), from ${fn.file}`, ms, Number(stale[1]) * 60000);
+    if (fresh) compare('playbackWorkerStale', `the age job_stuck leaves to it (ms), from ${fn.file}`, ms, Number(fresh[1]) * 60000);
   }
 }
 
@@ -774,6 +978,416 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     const sql = keys(seeded[1], /\('([a-z_]+)'\)/g);
     compare('systemFigureKeys', 'the figures the System page reads', keys(js[1], /'([a-z_]+)'/g), sql);
     compare('systemFigureKeys', 'the figures the API reference names', keys(spec[1], /([a-z_]+)/g), sql);
+  }
+}
+
+// 47. History's read, one rule in two places. telemetry_carried() (0233) reads the rollup whose
+// width divides the bucket, and api.js names the same rollups and widths (TELEMETRY_RESOLUTIONS),
+// from which History's resolutions are built. A width only one side has is a resolution the page
+// offers and the function reads from a coarser rollup, or the other way. Each of History's widths
+// must be a bucket the function takes, and the page's row cap must fit under the function's bound.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_carried(', '$fn$;', 'telemetry_carried()');
+  const api = read('frontend/src/api.js');
+  const rollups = need(api, /const TELEMETRY_RESOLUTIONS = \{([\s\S]*?)\n\};/, 'TELEMETRY_RESOLUTIONS in frontend/src/api.js');
+  const history = need(api, /export const HISTORY_RESOLUTIONS = Object\.freeze\(\[([\s\S]*?)\]\);/, 'HISTORY_RESOLUTIONS in frontend/src/api.js');
+  const cap = need(api, /^const TELEMETRY_MAX_ROWS = (\d+);$/m, 'TELEMETRY_MAX_ROWS in frontend/src/api.js');
+  if (def && rollups && history && cap) {
+    const UNIT_MINUTES = { minute: 1, minutes: 1, hour: 60, hours: 60 };
+    const sql = [...def.body.matchAll(/v_source := '(telemetry_\w+)'; v_width := interval '(\d+) (minutes?|hours?)'/g)]
+      .map((m) => `${m[1]}=${Number(m[2]) * UNIT_MINUTES[m[3]]}`).sort().join(', ');
+    const js = [...rollups[1].matchAll(/relation: '(telemetry_\w+)', bucketMinutes: (\d+)/g)]
+      .map((m) => `${m[1]}=${m[2]}`).sort().join(', ');
+    compare('historyRead', 'the rollups and their widths in minutes, in api.js and telemetry_carried()', js, sql);
+
+    const bound = need(def.body, /c_max_rows CONSTANT bigint := (\d+);/, `the row bound in ${def.file}`);
+    const least = need(def.body, /v_secs < (\d+) OR v_secs % (\d+) <> 0/, `the smallest bucket in ${def.file}`);
+    if (bound && least) {
+      if (Number(cap[1]) > Number(bound[1])) {
+        problems.push(`historyRead: the page's row cap (${cap[1]}) is over telemetry_carried()'s bound (${bound[1]}), so a read the page makes is refused`);
+      } else {
+        ok.push(`historyRead: the page's row cap (${cap[1]}) fits under telemetry_carried()'s bound (${bound[1]})`);
+      }
+      // History's widths, each as minutes: a literal, or a rollup's bucketMinutes by its key.
+      const byKey = Object.fromEntries([...rollups[1].matchAll(/'(\w+)': \{ relation: '\w+', bucketMinutes: (\d+)/g)].map((m) => [m[1], Number(m[2])]));
+      const widths = [...history[1].matchAll(/minutes: (?:TELEMETRY_RESOLUTIONS\['(\w+)'\]\.bucketMinutes|(\d+))/g)]
+        .map((m) => (m[1] ? byKey[m[1]] : Number(m[2])));
+      const refused = widths.filter((w) => !(Number.isInteger(w) && w * 60 >= Number(least[1]) && (w * 60) % Number(least[2]) === 0));
+      if (!widths.length) {
+        problems.push('historyRead: found no width in HISTORY_RESOLUTIONS -- its shape changed, so this check is no longer checking anything');
+      } else if (refused.length) {
+        problems.push(`historyRead: History offers ${refused.join(', ')}-minute buckets, which telemetry_carried() refuses`);
+      } else {
+        ok.push(`historyRead: telemetry_carried() takes each of History's ${widths.length} widths (${widths.join(', ')} minutes)`);
+      }
+    }
+  }
+}
+
+// 56. History's Overview read, one rule in two places. telemetry_coverage() (0245) caps a read's
+// devices, lets only a small selection sum a block, reads a larger one at the device rollups' own
+// widths, and bounds the buckets it reads; api.js states the same for the page, which reads in parts
+// of that many devices and caps a large selection's window. A value only one side has is a read the
+// page makes and the function refuses.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_coverage(', '$fn$;', 'telemetry_coverage()');
+  const api = read('frontend/src/api.js');
+  const history = read('frontend/src/utils/history.js');
+  const devices = need(api, /^export const COVERAGE_MAX_DEVICES = (\d+);$/m, 'COVERAGE_MAX_DEVICES in frontend/src/api.js');
+  const small = need(api, /^export const COVERAGE_SMALL_SELECTION = (\d+);$/m, 'COVERAGE_SMALL_SELECTION in frontend/src/api.js');
+  const hours = need(api, /^export const COVERAGE_LARGE_MAX_HOURS = (\d+);$/m, 'COVERAGE_LARGE_MAX_HOURS in frontend/src/api.js');
+  const widths = need(api, /^export const COVERAGE_ROLLUP_MINUTES = Object\.freeze\(\[(\d+), (\d+)\]\);$/m, 'COVERAGE_ROLLUP_MINUTES in frontend/src/api.js');
+  const fiveHours = need(history, /^export const LARGE_FIVE_MINUTE_HOURS = (\d+)$/m, 'LARGE_FIVE_MINUTE_HOURS in frontend/src/utils/history.js');
+  if (def && devices && small && hours && widths && fiveHours) {
+    const sqlDevices = need(def.body, /c_max_devices\s+CONSTANT integer := (\d+);/, `the device cap in ${def.file}`);
+    const sqlSmall = need(def.body, /c_small\s+CONSTANT integer := (\d+);/, `the small selection in ${def.file}`);
+    const sqlBuckets = need(def.body, /c_max_buckets\s+CONSTANT bigint := (\d+);/, `the bucket bound in ${def.file}`);
+    const sqlWidths = need(def.body, /v_secs NOT IN \((\d+), (\d+)\)/, `the widths a large selection reads in ${def.file}`);
+    if (sqlDevices && sqlSmall && sqlBuckets && sqlWidths) {
+      compare('coverageRead', 'the devices one read may carry, in api.js and telemetry_coverage()', devices[1], sqlDevices[1]);
+      compare('coverageRead', 'the selection that may sum a block, in api.js and telemetry_coverage()', small[1], sqlSmall[1]);
+      compare('coverageRead', "a large selection's block widths in seconds, in api.js and telemetry_coverage()",
+        `${widths[1] * 60}, ${widths[2] * 60}`, `${sqlWidths[1]}, ${sqlWidths[2]}`);
+      // The longest windows the page gives a full read: 5-minute buckets, then hourly ones, plus the
+      // block holding the window's start.
+      const widest = Math.max(Number(fiveHours[1]) * 12 + 1, Number(hours[1]) + 1) * Number(devices[1]);
+      if (widest > Number(sqlBuckets[1])) {
+        problems.push(`coverageRead: ${devices[1]} devices over the page's longest windows read ${widest} buckets, over telemetry_coverage()'s ${sqlBuckets[1]}`);
+      } else {
+        ok.push(`coverageRead: ${devices[1]} devices over the page's longest windows read ${widest} buckets, under telemetry_coverage()'s ${sqlBuckets[1]}`);
+      }
+    }
+  }
+}
+
+// 40. A read of a service's logs, one rule in three places. service-logs (logs.ts) refuses a level,
+// a range, a filter or a fixed window outside its rule, 0225's record_service_logs_read() refuses
+// the same, and System › Logs (utils/serviceLogs.js) offers them. A value the page offers and the
+// function refuses is a picker that fails; one the function reads and 0225 refuses is a read never
+// shown, since no line is released unrecorded. The tab's spans must fit the widest window, and the
+// arguments the function names in its call must be the ones 0225 declares, or every read is a 503.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.record_service_logs_read(', '$$;',
+    'record_service_logs_read()');
+  const ts = read('supabase/functions/service-logs/logs.ts');
+  const js = read('frontend/src/utils/serviceLogs.js');
+  const quoted = (text) => [...(text || '').matchAll(/'([^']*)'/g)].map((m) => m[1]).join(', ');
+  const tsLevels = need(ts, /export const LEVELS = \[([^\]]*)\]/, 'LEVELS in service-logs/logs.ts');
+  const tsRanges = need(ts, /export const RANGES[^=]*= \{([^}]*)\}/, 'RANGES in service-logs/logs.ts');
+  const tsFilter = need(ts, /export const FILTER_MAX = (\d+)/, 'FILTER_MAX in service-logs/logs.ts');
+  const tsService = need(ts, /export const SERVICE_MAX = (\d+)/, 'SERVICE_MAX in service-logs/logs.ts');
+  const tsLines = need(ts, /export const MAX_LINES = (\d+)/, 'MAX_LINES in service-logs/logs.ts');
+  const tsWindow = need(ts, /export const LONGEST_WINDOW_HOURS = (\d+)/, 'LONGEST_WINDOW_HOURS in service-logs/logs.ts');
+  const tsCall = need(ts, /caller\.rpc\("record_service_logs_read", \{([\s\S]*?)\n {4}\}\);/,
+    "service-logs/logs.ts's call to record_service_logs_read()");
+  const jsLevels = need(js, /export const LOG_LEVELS = \[([\s\S]*?)\n\]/, 'LOG_LEVELS in frontend/src/utils/serviceLogs.js');
+  const jsRanges = need(js, /export const LOG_RANGES = \[([\s\S]*?)\n\]/, 'LOG_RANGES in frontend/src/utils/serviceLogs.js');
+  const jsFilter = need(js, /export const LOG_FILTER_MAX = (\d+)/, 'LOG_FILTER_MAX in frontend/src/utils/serviceLogs.js');
+  const jsLines = need(js, /export const LOG_LINES_MAX = (\d+)/, 'LOG_LINES_MAX in frontend/src/utils/serviceLogs.js');
+  const jsSpans = need(js, /export const LOG_SPANS = \[([^\]]*)\]/, 'LOG_SPANS in frontend/src/utils/serviceLogs.js');
+  if (def && tsWindow && tsCall && jsSpans) {
+    const sqlWindow = need(def.body, /p_to - p_from > interval '(\d+) hours'/, `the widest window in ${def.file}`);
+    const sqlArgs = need(def.body, /record_service_logs_read\(([\s\S]*?)\)\s+RETURNS/, `the arguments ${def.file} declares`);
+    if (sqlWindow) compare('serviceLogsRead', 'the widest fixed window, in hours, in the function and 0225', tsWindow[1], sqlWindow[1]);
+    if (sqlArgs) {
+      const declared = [...sqlArgs[1].matchAll(/\b(p_[a-z]+) /g)].map((m) => m[1]).join(', ');
+      const sent = [...new Set([...tsCall[1].matchAll(/\b(p_[a-z]+):/g)].map((m) => m[1]))].join(', ');
+      compare('serviceLogsRead', 'the arguments the function sends and 0225 declares', sent, declared);
+    }
+    // A span's longest length in hours: a day and a week an hour longer when the clocks go back.
+    const LONGEST_SPAN_HOURS = { day: 25, week: 7 * 24 + 1, month: 31 * 24 + 1, year: 366 * 24 + 1 };
+    const spans = [...jsSpans[1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
+    const over = spans.filter((sp) => !(LONGEST_SPAN_HOURS[sp] <= Number(tsWindow[1])));
+    if (spans.length === 0) {
+      problems.push('serviceLogsRead: found no span in LOG_SPANS -- its shape changed, so this check is no longer checking anything');
+    } else if (over.length) {
+      problems.push(`serviceLogsRead: System › Logs offers ${over.join(', ')}, which can be longer than the ${tsWindow[1]} hours service-logs reads`);
+    } else {
+      ok.push(`serviceLogsRead: the spans System › Logs offers (${spans.join(', ')}) fit ${tsWindow[1]} hours`);
+    }
+  }
+  if (def && tsLevels && tsRanges && tsFilter && tsService && tsLines && jsLevels && jsRanges && jsFilter && jsLines) {
+    const sqlLevels = need(def.body, /p_level = ANY \(ARRAY\[([^\]]*)\]\)/, `the levels record_service_logs_read() takes (${def.file})`);
+    const sqlRanges = need(def.body, /p_range = ANY \(ARRAY\[([^\]]*)\]\)/, `the ranges record_service_logs_read() takes (${def.file})`);
+    const sqlFilter = need(def.body, /char_length\(coalesce\(p_filter, ''\)\) > (\d+)/, `the filter's limit in ${def.file}`);
+    const sqlService = need(def.body, /char_length\(p_service\) NOT BETWEEN 1 AND (\d+)/, `the service's limit in ${def.file}`);
+    const values = (text) => [...text.matchAll(/value: '([^']*)'/g)].map((m) => m[1]).join(', ');
+    const tsRangeKeys = [...tsRanges[1].matchAll(/"([^"]+)":/g)].map((m) => m[1]).join(', ');
+    const tsLevelList = [...tsLevels[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).join(', ');
+    if (sqlLevels && sqlRanges && sqlFilter && sqlService) {
+      compare('serviceLogsRead', 'the levels the function takes and 0225 records', tsLevelList, quoted(sqlLevels[1]));
+      compare('serviceLogsRead', 'the levels System › Logs offers and 0225 records', values(jsLevels[1]), quoted(sqlLevels[1]));
+      compare('serviceLogsRead', 'the ranges the function takes and 0225 records', tsRangeKeys, quoted(sqlRanges[1]));
+      compare('serviceLogsRead', 'the ranges System › Logs offers and 0225 records', values(jsRanges[1]), quoted(sqlRanges[1]));
+      compare('serviceLogsRead', "the filter's limit in the function and 0225", tsFilter[1], sqlFilter[1]);
+      compare('serviceLogsRead', "the filter's limit in System › Logs and 0225", jsFilter[1], sqlFilter[1]);
+      compare('serviceLogsRead', "a service name's limit in the function and 0225", tsService[1], sqlService[1]);
+    }
+    compare('serviceLogsRead', 'the most lines a read returns, which System › Logs asks for', jsLines[1], tsLines[1]);
+  }
+}
+
+// 42. Each Audit Trail kind's domain is the one audit_domain_for() files its rows under. The
+// Entity filter's Security group is AUDIT_TRAIL_ENTITY_TYPES' security domain, offered only to the
+// roles audit_trail_select_security admits. A kind filed asset in the database and security here is
+// hidden from a Shopfloor Manager who can read its rows; one filed security there and asset here is
+// offered to a role that only ever reads "no events". audit_domain_for() names the asset tables and
+// files everything else under security, its fail-closed default.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.audit_domain_for(', '$$;', 'audit_domain_for()');
+  const js = need(read('frontend/src/constants.js'), /export const AUDIT_TRAIL_ENTITY_TYPES = \[([\s\S]*?)\n\];/,
+    'AUDIT_TRAIL_ENTITY_TYPES in frontend/src/constants.js');
+  if (def && js) {
+    const asset = need(def.body, /WHEN p_entity_type IN \(([^)]*)\)\s*THEN 'asset'/,
+      `the asset tables audit_domain_for() names (${def.file})`);
+    const kinds = [...js[1].matchAll(/table: '([a-z_]+)',[^}]*domain: '(asset|security)'/g)].map((m) => [m[1], m[2]]);
+    if (asset && kinds.length === 0) {
+      problems.push('auditTrailDomains: found no kind in AUDIT_TRAIL_ENTITY_TYPES -- its shape changed, so this check is no longer checking anything');
+    } else if (asset) {
+      const assetTables = new Set([...asset[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
+      const sqlDomain = (table) => (assetTables.has(table) ? 'asset' : 'security');
+      compare('auditTrailDomains', `the domain of each of the ${kinds.length} kinds the Audit Trail filters by`,
+        kinds.map(([table, domain]) => `${table}:${domain}`).join(', '),
+        kinds.map(([table]) => `${table}:${sqlDomain(table)}`).join(', '));
+    }
+  }
+}
+
+// 43. Which kinds each Audit Trail action is written for, and the classes such a row can be in.
+// audit_trail_action_kinds() (0229) declares it and AUDIT_TRAIL_ACTION_KINDS mirrors it; the
+// Entity, Action and class filters narrow each other by the mirror. A pair the database has and
+// the dashboard lacks hides a value that can occur; one the dashboard has and the database lacks
+// offers one that cannot. Compared as (action, kind, class) triples, so the grouping may differ.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.audit_trail_action_kinds(', '$$;',
+    'audit_trail_action_kinds()');
+  const js = need(read('frontend/src/constants.js'), /export const AUDIT_TRAIL_ACTION_KINDS = \[([\s\S]*?)\n\];/,
+    'AUDIT_TRAIL_ACTION_KINDS in frontend/src/constants.js');
+  const words = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  const triples = (rows) => rows
+    .flatMap(([action, kinds, classes]) => kinds.flatMap((k) => classes.map((c) => `${action} ${k} ${c}`)))
+    .sort();
+  if (def && js) {
+    const sqlRows = [...def.body.matchAll(/\('([A-Z_]+)',\s*ARRAY\[([^\]]*)\],\s*ARRAY\[([^\]]*)\]\)/g)]
+      .map((m) => [m[1], words(m[2]), words(m[3])]);
+    const jsRows = [...js[1].matchAll(/\['([A-Z_]+)',\s*\[([^\]]*)\],\s*\[([^\]]*)\]\]/g)]
+      .map((m) => [m[1], words(m[2]), words(m[3])]);
+    if (sqlRows.length === 0 || jsRows.length === 0) {
+      problems.push(`auditTrailActionKinds: found no row in ${sqlRows.length ? 'AUDIT_TRAIL_ACTION_KINDS' : `audit_trail_action_kinds() (${def.file})`} -- its shape changed, so this check is no longer checking anything`);
+    } else {
+      compare('auditTrailActionKinds', `the ${triples(sqlRows).length} (action, kind, class) triples (${def.file})`,
+        triples(jsRows).join('; '), triples(sqlRows).join('; '));
+    }
+  }
+}
+
+// 44. The Audit Trail's classes, by name. audit_event_class() (0228) answers one of them, each has
+// its partial index, the dashboard lists them in AUDIT_TRAIL_CLASSES (the address's `?class=` words
+// and the legend's order) and draws one marker per class (MARKERS). A class the function answers
+// and the dashboard lacks draws no marker of its own; one with no index is read row by row.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.audit_event_class(', '$$;', 'audit_event_class()');
+  const constants = need(read('frontend/src/constants.js'), /export const AUDIT_TRAIL_CLASSES = \[([^\]]*)\]/,
+    'AUDIT_TRAIL_CLASSES in frontend/src/constants.js');
+  const tab = need(read('frontend/src/components/tabs/AuditTrailTab.jsx'), /export const MARKERS = \{([\s\S]*?)\n\}/,
+    'MARKERS in frontend/src/components/tabs/AuditTrailTab.jsx');
+  if (def && constants && tab) {
+    const answered = [...new Set([...def.body.matchAll(/THEN '([a-z]+)'|ELSE '([a-z]+)'/g)].map((m) => m[1] || m[2]))].sort();
+    const indexed = [...SCHEMA.matchAll(/CREATE INDEX IF NOT EXISTS idx_audit_trail_class_([a-z]+) ON public\.audit_trail[^;]*= '([a-z]+)';/g)]
+      .filter((m) => m[1] === m[2]).map((m) => m[1]).sort();
+    const listed = [...constants[1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
+    compare('auditTrailClasses', `the classes audit_event_class() answers (${def.file}) and AUDIT_TRAIL_CLASSES`,
+      [...listed].sort().join(', '), answered.join(', '));
+    compare('auditTrailClasses', 'the classes with an index of their own and AUDIT_TRAIL_CLASSES',
+      [...listed].sort().join(', '), indexed.join(', '));
+    const drawn = [...tab[1].matchAll(/^ {2}([a-z]+):/gm)].map((m) => m[1]);
+    compare('auditTrailClasses', "MARKERS' classes, in order, and AUDIT_TRAIL_CLASSES",
+      drawn.join(', '), listed.join(', '));
+  }
+}
+
+// 45. An alert's acknowledgement reasons, one closed set in three places (0231): the CHECK on
+// platform_alerts, acknowledge_alert()'s own refusal, and the dialog's list. A reason the dialog
+// offers and the database lacks is refused on every save; one the database admits and the dialog
+// lacks can never be chosen. Compared in order, so the dialog lists them as the CHECK does.
+{
+  const check = need(SCHEMA, /ADD CONSTRAINT platform_alerts_acknowledgement_reason_valid CHECK \(\(acknowledgement_reason = ANY \(ARRAY\[([^\]]*)\]\)\)\)/,
+    'platform_alerts_acknowledgement_reason_valid in the migrations');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.acknowledge_alert(', '$$;', 'acknowledge_alert()');
+  const js = need(read('frontend/src/utils/alertAcknowledgement.js'),
+    /export const ALERT_ACKNOWLEDGEMENT_REASONS = \[([\s\S]*?)\n\]/, 'ALERT_ACKNOWLEDGEMENT_REASONS in utils/alertAcknowledgement.js');
+  const refused = fn && need(fn.body, /NOT p_reason = ANY \(ARRAY\[([^\]]*)\]\)/, `acknowledge_alert()'s list of reasons (${fn.file})`);
+  if (check && refused && js) {
+    const words = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).join(', ');
+    const offered = [...js[1].matchAll(/value: '([a-z_]+)'/g)].map((m) => m[1]).join(', ');
+    compare('alertAcknowledgementReasons', 'the reasons the CHECK admits and the dialog offers', offered, words(check[1]));
+    compare('alertAcknowledgementReasons', `the reasons acknowledge_alert() admits (${fn.file}) and the dialog offers`,
+      offered, words(refused[1]));
+  }
+}
+
+// 46. Who may acknowledge an alert, and who may withdraw anyone's acknowledgement (0231). The alert
+// counter offers Acknowledge and Withdraw by ALERT_ACKNOWLEDGE_ROLES and ALERT_WITHDRAW_ANY_ROLES; the
+// functions decide by has_role(). A role the counter offers and the database refuses meets an
+// error on every click; one it leaves out never sees the button.
+{
+  const ack = lastDefinition('CREATE OR REPLACE FUNCTION public.acknowledge_alert(', '$$;', 'acknowledge_alert()');
+  const withdraw = lastDefinition('CREATE OR REPLACE FUNCTION public.withdraw_alert_acknowledgement(', '$$;',
+    'withdraw_alert_acknowledgement()');
+  const js = read('frontend/src/utils/alertAcknowledgement.js');
+  const jsAck = need(js, /export const ALERT_ACKNOWLEDGE_ROLES = \[([^\]]*)\]/, 'ALERT_ACKNOWLEDGE_ROLES');
+  const jsAny = need(js, /export const ALERT_WITHDRAW_ANY_ROLES = \[([^\]]*)\]/, 'ALERT_WITHDRAW_ANY_ROLES');
+  const roles = (list) => [...list.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]).sort().join(', ');
+  if (ack && withdraw && jsAck && jsAny) {
+    const ackSql = need(ack.body, /NOT public\.has_role\(ARRAY\[([^\]]*)\]\) THEN/, `acknowledge_alert()'s roles (${ack.file})`);
+    const gateSql = need(withdraw.body, /NOT public\.has_role\(ARRAY\[([^\]]*)\]\) THEN/,
+      `withdraw_alert_acknowledgement()'s callers (${withdraw.file})`);
+    const anySql = need(withdraw.body, /IS DISTINCT FROM v_uid\s+AND NOT public\.has_role\(ARRAY\[([^\]]*)\]\)/,
+      `withdraw_alert_acknowledgement()'s roles that withdraw anyone's (${withdraw.file})`);
+    if (ackSql) compare('alertAcknowledgementRoles', 'the roles that may acknowledge', roles(jsAck[1]), roles(ackSql[1]));
+    if (gateSql) compare('alertAcknowledgementRoles', 'the roles that may withdraw their own', roles(jsAck[1]), roles(gateSql[1]));
+    if (anySql) compare('alertAcknowledgementRoles', "the roles that may withdraw anyone's", roles(jsAny[1]), roles(anySql[1]));
+  }
+}
+
+// 53. Who may schedule, change and end a suppression window (0240). A drawer offers its acts by
+// SUPPRESSION_WINDOW_ROLES; each of the three writers decides by has_role(). A role the drawer
+// offers and a writer refuses meets an error on every click; one it leaves out never sees them.
+{
+  const jsRoles = need(read('frontend/src/utils/alertSuppression.js'),
+    /export const SUPPRESSION_WINDOW_ROLES = \[([^\]]*)\]/, 'SUPPRESSION_WINDOW_ROLES in utils/alertSuppression.js');
+  const roles = (list) => [...list.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]).sort().join(', ');
+  for (const name of ['schedule_alert_suppression_window', 'change_alert_suppression_window', 'end_alert_suppression_window']) {
+    const fn = lastDefinition(`CREATE OR REPLACE FUNCTION public.${name}(`, '$$;', `${name}()`);
+    const sql = fn && need(fn.body, /NOT public\.has_role\(ARRAY\[([^\]]*)\]\) THEN/, `${name}()'s roles (${fn.file})`);
+    if (jsRoles && sql) compare('suppressionWindowRoles', `the roles ${name}() admits and the drawers offer`, roles(jsRoles[1]), roles(sql[1]));
+  }
+}
+
+// 54. A suppression window's reason, one limit in three places (0240): the CHECK, the writers'
+// refusal and the dialog's field. A dialog that takes more is refused on save; one that takes less
+// cuts a reason the database would keep.
+{
+  const check = need(SCHEMA, /ADD CONSTRAINT alert_suppression_windows_reason_valid CHECK \(\(\(char_length\(reason\) >= 1\) AND \(char_length\(reason\) <= (\d+)\)/,
+    'alert_suppression_windows_reason_valid in the migrations');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.schedule_alert_suppression_window(', '$$;',
+    'schedule_alert_suppression_window()');
+  const refused = fn && need(fn.body, /char_length\(v_reason\) > (\d+) THEN/, `schedule_alert_suppression_window()'s limit (${fn.file})`);
+  const js = need(read('frontend/src/utils/alertSuppression.js'), /export const SUPPRESSION_REASON_MAX = (\d+)/,
+    'SUPPRESSION_REASON_MAX in utils/alertSuppression.js');
+  if (check && js) compare('suppressionReasonMax', "the reason's limit in the CHECK and the dialog", js[1], check[1]);
+  if (refused && js) compare('suppressionReasonMax', `the reason's limit schedule_alert_suppression_window() refuses past (${fn.file}) and the dialog`, js[1], refused[1]);
+}
+
+// 62. The longest suppression window, one default and one range in three places: 0002's seed and
+// bounds, the writers' check, which falls back to the default outside the range, and the dialog,
+// which does the same where the setting cannot be read. A dialog with another default offers an
+// end the writers refuse, or refuses one they would keep.
+{
+  const seed = need(SCHEMA, /seed_setting\(\s*'alerts\.suppression_max_days',\s*to_jsonb\((\d+)\)/,
+    "alerts.suppression_max_days' seed in 0002");
+  const bounds = need(SCHEMA, /SET min_value = (\d+), max_value = (\d+)\s+WHERE key = 'alerts\.suppression_max_days'/,
+    "alerts.suppression_max_days' bounds in 0002");
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.check_alert_suppression_window_length(', '$$;',
+    'check_alert_suppression_window_length()');
+  const fallback = fn && need(fn.body, /IF v_days IS NULL OR v_days < (\d+) OR v_days > (\d+) THEN\s+v_days := (\d+);/,
+    `check_alert_suppression_window_length()'s fallback (${fn.file})`);
+  const js = read('frontend/src/utils/alertSuppression.js');
+  const jsDays = need(js, /export const SUPPRESSION_MAX_DAYS = (\d+)$/m, 'SUPPRESSION_MAX_DAYS in utils/alertSuppression.js');
+  const jsMin = need(js, /export const SUPPRESSION_MAX_DAYS_MIN = (\d+)$/m, 'SUPPRESSION_MAX_DAYS_MIN in utils/alertSuppression.js');
+  const jsMax = need(js, /export const SUPPRESSION_MAX_DAYS_MAX = (\d+)$/m, 'SUPPRESSION_MAX_DAYS_MAX in utils/alertSuppression.js');
+  if (seed && jsDays) compare('suppressionMaxDays', 'the longest window the dialog falls back to and 0002 seeds', jsDays[1], seed[1]);
+  if (fallback && jsDays) compare('suppressionMaxDays', `the longest window the dialog and the writers' check (${fn.file}) fall back to`, jsDays[1], fallback[3]);
+  if (bounds && jsMin && jsMax) compare('suppressionMaxDays', "the setting's range in the dialog and 0002's bounds", `${jsMin[1]} to ${jsMax[1]}`, `${bounds[1]} to ${bounds[2]}`);
+  if (fallback && jsMin && jsMax) compare('suppressionMaxDays', `the setting's range in the dialog and the writers' check (${fn.file})`, `${jsMin[1]} to ${jsMax[1]}`, `${fallback[1]} to ${fallback[2]}`);
+}
+
+// 63. Where the longest suppression window is set, named in two places as 0002 files it: the
+// writers' refusal and the hint under the dialog's end field. A key moved to another category
+// leaves both pointing at a tab that no longer holds it.
+{
+  const seeded = need(SCHEMA, /seed_setting\(\s*'alerts\.suppression_max_days',\s*to_jsonb\(\d+\),\s*'number',\s*'([^']+)'/,
+    "alerts.suppression_max_days' category in 0002");
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.check_alert_suppression_window_length(', '$$;',
+    'check_alert_suppression_window_length()');
+  const refused = fn && need(fn.body, /set on Settings › ([^.']+)\./, `the tab check_alert_suppression_window_length()'s sentence names (${fn.file})`);
+  const js = need(read('frontend/src/utils/alertSuppression.js'), /export const SUPPRESSION_MAX_DAYS_PLACE = 'Settings › ([^']+)'/,
+    'SUPPRESSION_MAX_DAYS_PLACE in utils/alertSuppression.js');
+  if (seeded && js) compare('suppressionMaxDaysPlace', "the Settings tab the dialog names and 0002's category", js[1], seeded[1]);
+  if (seeded && refused) compare('suppressionMaxDaysPlace', `the Settings tab the writers' refusal names (${fn.file}) and 0002's category`, refused[1], seeded[1]);
+}
+
+// 55. History's alerts, two numbers in two places. The Alerts tab asks alert_occurrences() (0243)
+// for ALERT_HISTORY_LIMIT and one more, which must fit under the function's bound, or every read is
+// refused. Where alerts.retention_days cannot be read, the tab says alerts are kept for
+// ALERT_RETENTION_DAYS, which must be the value 0002 seeds.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.alert_occurrences(', '$fn$;', 'alert_occurrences()');
+  const limit = need(read('frontend/src/api.js'), /^export const ALERT_HISTORY_LIMIT = (\d+);$/m, 'ALERT_HISTORY_LIMIT in frontend/src/api.js');
+  const days = need(read('frontend/src/utils/alertHistory.js'), /^export const ALERT_RETENTION_DAYS = (\d+)$/m,
+    'ALERT_RETENTION_DAYS in frontend/src/utils/alertHistory.js');
+  const seeded = need(SCHEMA, /seed_setting\(\s*'alerts\.retention_days',\s*to_jsonb\((\d+)\)/, "alerts.retention_days' seed in 0002");
+  const bound = def && need(def.body, /c_max_rows CONSTANT integer := (\d+);/, `the row bound in ${def.file}`);
+  if (limit && bound) {
+    if (Number(limit[1]) + 1 > Number(bound[1])) {
+      problems.push(`alertHistory: the Alerts tab asks for ${Number(limit[1]) + 1} rows, over alert_occurrences()'s bound (${bound[1]}), so every read is refused`);
+    } else {
+      ok.push(`alertHistory: the Alerts tab's ${Number(limit[1]) + 1} rows fit under alert_occurrences()'s bound (${bound[1]})`);
+    }
+  }
+  if (days && seeded) compare('alertHistory', 'the days alerts are kept, as the tab falls back to and 0002 seeds', days[1], seeded[1]);
+}
+
+// 57. How long a Grafana alert's confirmation holds (0247). grafana-alert-webhook stamps
+// last_confirmed_at on every post, and Grafana posts a firing alert again every repeat_interval
+// (policies.yaml). platform_alert_confirmation_window() allows that interval plus a margin before an
+// alert is reminded no more. A shorter window than the interval stops the reminders of every alert
+// still firing; a longer one keeps reminding about a resolve that never arrived.
+{
+  const policies = read('grafana/provisioning/alerting/policies.yaml');
+  const repeat = need(policies, /^\s*repeat_interval:\s*(\d+)h\s*$/m, 'repeat_interval in grafana/provisioning/alerting/policies.yaml');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.platform_alert_confirmation_window(', '$$;',
+    'platform_alert_confirmation_window()');
+  const arm = fn && need(fn.body, /ELSE interval '(\d+) hours' \+ interval '(\d+) hours?'/,
+    `platform_alert_confirmation_window()'s Grafana arm (${fn.file})`);
+  if (repeat && arm) {
+    compare('alertConfirmationWindow', `Grafana's repeat_interval (hours) and the window's interval (${fn.file})`, repeat[1], arm[1]);
+  }
+}
+
+// 58. The Notifications vocabulary, one closed set in each place it is written (0247, 0248): the
+// severities a route may name, as notification_setting_guard() admits them, notification_severity_carried()
+// ranks them and the Settings page offers them; and the events a message may be, as the queue's CHECK
+// admits them, the delivery log labels them and the dispatcher types them. A severity offered and
+// refused fails every save; an event the log cannot name shows as its raw word.
+{
+  const notifications = read('frontend/src/utils/notifications.js');
+  const dispatch = read('supabase/functions/notification-dispatch/dispatch.ts');
+  const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_setting_guard(', '$$;', 'notification_setting_guard()');
+  const rank = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_severity_carried(', '$$;',
+    'notification_severity_carried()');
+  const offered = need(notifications, /export const SEVERITIES = \[([\s\S]*?)\n\]/, 'SEVERITIES in utils/notifications.js');
+  const admitted = guard && need(guard.body, /NOT \(NEW\.value #>> '\{\}'\) = ANY \(ARRAY\[([^\]]*)\]\)/,
+    `notification_setting_guard()'s severities (${guard.file})`);
+  const ranked = rank && need(rank.body, /array_position\(ARRAY\[([^\]]*)\], p_severity\)/,
+    `notification_severity_carried()'s ranking (${rank.file})`);
+  const words = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).join(', ');
+  if (offered && admitted && ranked) {
+    const js = [...offered[1].matchAll(/value: '([a-z]+)'/g)].map((m) => m[1]).join(', ');
+    compare('notificationSeverities', `the severities the page offers and the guard admits (${guard.file})`, js, words(admitted[1]));
+    compare('notificationSeverities', `the severities the page offers and the route ranks, lowest first (${rank.file})`, js, words(ranked[1]));
+  }
+
+  const check = need(SCHEMA, /CONSTRAINT notification_deliveries_event_valid\s+CHECK \(\(event = ANY \(ARRAY\[([^\]]*)\]\)\)\)/,
+    'notification_deliveries_event_valid in the migrations');
+  const labels = need(notifications, /export const EVENT_LABELS = \{([^}]*)\}/, 'EVENT_LABELS in utils/notifications.js');
+  const typed = need(dispatch, /export type Event = ([^;]*);/, 'the Event type in notification-dispatch/dispatch.ts');
+  if (check && labels && typed) {
+    const sql = words(check[1].replace(/::text/g, ''));
+    compare('notificationEvents', 'the events the delivery log labels and the queue admits',
+      [...labels[1].matchAll(/([a-z]+):/g)].map((m) => m[1]).join(', '), sql);
+    compare('notificationEvents', 'the events the dispatcher types and the queue admits',
+      [...typed[1].matchAll(/"([a-z]+)"/g)].map((m) => m[1]).join(', '), sql);
   }
 }
 

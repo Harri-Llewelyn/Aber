@@ -20,7 +20,8 @@ import {
   IconSettings,
   IconInbox,
   IconTag,
-  IconUser
+  IconUser,
+  IconChartLine
 } from './components/common/Icons'
 
 /*
@@ -78,6 +79,18 @@ export const SYSTEM_TABS = [
   { id: 'infrastructure', label: 'Data & Backend Infrastructure', description: 'What the services on the other tabs are built on: the databases, APIs and sign-in behind them.' },
 ]
 
+/**
+ * After the groups, and Administrator only: the lines carry sign-ins and addresses, and the
+ * service-logs function refuses anyone else. A tab of its own, never a group, so it shows while no
+ * service row would put it there.
+ */
+export const SYSTEM_LOGS_TAB = {
+  id: 'logs',
+  label: 'Logs',
+  description: "Each service's recent log lines, newest first. Every new read is recorded in the Audit Trail.",
+  role: 'Administrator',
+}
+
 /** People leads, and is offered to an Administrator only, as the page itself is. */
 export const ACCESS_CONTROL_PEOPLE_TAB = {
   id: 'people',
@@ -109,17 +122,26 @@ export const SETTINGS_TABS = [
   { id: 'approvals', label: 'Approvals', description: 'How many proposals one person may hold open, when an open one expires, and how long decided ones are kept.' },
   { id: 'audit-trail', label: 'Audit Trail', description: 'How often the Audit Trail page reads the audit log again while it is open.' },
   { id: 'cold-storage', label: 'Cold Storage', description: "When readings move out to the cold archive, and the key that names this site's archive." },
+  { id: 'notifications', label: 'Notifications', description: 'Where Aber sends each alert: the webhook, the lowest severity it carries, how often it reminds, and what was sent.' },
   { id: 'retention', label: 'Retention', description: 'How long Aber keeps records, such as resolved alerts, before the nightly prune removes them.' },
+  { id: 'security', label: 'Security', description: 'Whether managers and Administrators need MFA to change the platform and to sign in to its apps.' },
   { id: 'site', label: 'Site', description: "The site's name, the Sparkplug group its gateways publish under, and how close cells may sit on a plan." },
+]
+
+/** History's views. Overview is the first and the default, so it is the bare page as well as /history/overview. */
+export const HISTORY_TABS = [
+  { id: 'overview', label: 'Overview', description: 'Where readings arrived over the window: a lane for each device, darker where more arrived, grouped by area and cell.' },
+  { id: 'device', label: 'Device', description: "One device's metrics over the window you choose, a chart each, on one time axis." },
+  { id: 'alerts', label: 'Alerts', description: 'Every alert that fired over the window you choose, with who acknowledged it and why.' },
 ]
 
 /** The ids are the page's anchors: the search bar opens one by id. */
 export const PROFILE_TABS = [
   { id: 'account', label: 'Account', description: 'Your picture, the address you sign in with, your role, and your password.' },
   { id: 'appearance', label: 'Appearance', description: 'How the dashboard looks and behaves for you: theme, sidebar layout and single-key shortcuts.' },
-  { id: 'sessions', label: 'Sessions', description: 'Every browser and service you are signed in to, and ending them.' },
-  { id: 'mfa', label: 'MFA', description: 'Multi-factor authentication: the authenticator apps that give a code after your password.' },
-  { id: 'allowed-apps', label: 'Allowed Apps', description: 'The apps you have let sign you in, and what each may read about you.' },
+  { id: 'sessions', label: 'Sessions', description: 'Every browser and service you are signed in to, and ending them. Ending one stops its access at once.' },
+  { id: 'mfa', label: 'MFA', description: 'Multi-factor authentication: apps that give a code after your password. Settings can require one of managers and Administrators.' },
+  { id: 'allowed-apps', label: 'Allowed Apps', description: 'The apps you have let sign you in, and what each may read about you. Revoking one signs it out.' },
 ]
 
 /*
@@ -134,8 +156,9 @@ export const PROFILE_TABS = [
  *                     timer over something and offers a way to restore from it.
  *   Administration -- who may do what, what runs, how is it configured?
  *
- * The Site Map is the landing page, alone in `home`. Audit Trail leads History rather than
- * sitting beside Devices because it is the audit trace of every entity.
+ * The Site Map is the landing page, and leads `home`. The History page sits under it: the plant over
+ * time, beside the plant now. Audit Trail leads the History group rather than sitting beside
+ * Devices because it is the audit trace of every entity.
  *
  * The groups are not captioned in the rail: the separator is the whole of the grouping, and a
  * caption had to hold its box in the collapsed state to stop items jumping on hover.
@@ -160,6 +183,8 @@ export const NAV_GROUPS = [
  */
 export const TABS = [
   { id: 'site-map',       label: 'Site Map',       group: 'home',    icon: <IconMap size={16} /> },
+  // Ungated, as the Site Map is: what it charts is what the telemetry views let the viewer read.
+  { id: 'history',        label: 'History',        group: 'home',    icon: <IconChartLine size={16} />, pageTabs: HISTORY_TABS },
   // Gated on `proposal:create`: an Auditor holds neither it nor a decision gate, and RLS would
   // return them their own proposals, of which they can have none.
   { id: 'approvals',      label: 'Approvals',      group: 'work',    icon: <IconInbox size={16} />, permission: PERMISSION_UUIDS.PROPOSAL_CREATE, pageTabs: APPROVALS_TABS, signalTab: 'open' },
@@ -203,8 +228,8 @@ export const TABS = [
 
   // What runs, who may touch it, and how it is tuned. System and Settings are ungated and Access
   // Control is Administrator-only, so for anyone else this group is the two. IconServer, not
-  // IconActivity, which means live telemetry.
-  { id: 'system',         label: 'System',         group: 'admin',   icon: <IconServer size={16} />, pageTabs: SYSTEM_TABS },
+  // IconActivity, which means live telemetry. System's Logs tab is gated on its own.
+  { id: 'system',         label: 'System',         group: 'admin',   icon: <IconServer size={16} />, pageTabs: [...SYSTEM_TABS, SYSTEM_LOGS_TAB] },
   // Access Control is narrower than the API behind it: seeing who holds what is an access-control
   // question, and a Shopfloor_Manager who needs to issue a credential still can, from Gateways.
   { id: 'access-control', label: 'Access Control', group: 'admin',   icon: <IconLock size={16} />, role: 'Administrator', pageTabs: [ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ...ACCESS_CONTROL_TABS] },
@@ -217,8 +242,9 @@ export const TABS = [
 ]
 
 /**
- * Whether a page appears in the navigation. Only a courtesy: hiding a page removes a signpost,
- * not an ability, and what refuses a request is the RLS policy.
+ * Whether a page, or one of a page's tabs, appears in the navigation. Only a courtesy: hiding one
+ * removes a signpost, not an ability, and what refuses a request is the RLS policy or the function
+ * behind the tab.
  */
 export function tabIsVisible(tabDef, hasPermission, userRole) {
   // `role` takes a list as well as a string: the Capture page is admitted to three roles, and a
@@ -229,6 +255,19 @@ export function tabIsVisible(tabDef, hasPermission, userRole) {
   }
   if (!tabDef.permission) return true
   return hasPermission(tabDef.permission)
+}
+
+/**
+ * The pages this viewer may see, each with the tabs they may see: a tab with a `role` (System's
+ * Logs) is left out for anyone else. Computed once in App.jsx, so the rail, the search and the
+ * router's redirect all read the same answer.
+ */
+export function visiblePages(hasPermission, userRole) {
+  return TABS
+    .filter(page => tabIsVisible(page, hasPermission, userRole))
+    .map(page => (page.pageTabs?.some(t => !tabIsVisible(t, hasPermission, userRole))
+      ? { ...page, pageTabs: page.pageTabs.filter(t => tabIsVisible(t, hasPermission, userRole)) }
+      : page))
 }
 
 /**
@@ -259,6 +298,18 @@ export function currentTabOf(pageId, url) {
   if (tabs.length === 0) return null
   const [page, segment] = pathSegments(url)
   return (page === pageId && tabs.find(t => t.id === segment)) || tabs[0]
+}
+
+/**
+ * Whether `url` names a tab of `pageId` that the viewer may not see, given `pages` from
+ * visiblePages(). The router then opens the page's first tab instead, so the address of a gated
+ * tab shows nothing of it.
+ */
+export function urlNamesWithheldTab(pages, pageId, url) {
+  const [page, segment] = pathSegments(url)
+  if (page !== pageId || !segment || !pageTabsOf(pageId).some(t => t.id === segment)) return false
+  const shown = pages.find(p => p.id === pageId)
+  return Boolean(shown) && !shown.pageTabs?.some(t => t.id === segment)
 }
 
 /** The page's name with its tab's, "Devices › Quarantine", for the browser tab's title. */

@@ -3,7 +3,6 @@ import { api } from '../../api'
 import { AppApprovalsTable } from '../common/AppApprovalsTable'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
-import { HelpTip } from '../common/HelpTip'
 import { IconShieldAlert } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -39,19 +38,18 @@ export function AllowedAppsSection({ isPerson = true, showToast }) {
 
   useEffect(() => { if (isPerson) load() }, [isPerson, load])
 
+  // Run from the Revoke dialog, which shows a refusal and stays open. Read again either way.
   const revoke = async () => {
     const app = appLabel(confirming.client_name)
     try {
       await api.revokeMyAppApproval(confirming.client_id)
+      setConfirming(null)
       showToast?.(
         `${app} is revoked. Its sessions for you have ended, and it asks you to allow it again next time.`,
         'success',
         { to: APPS_URL },
       )
-    } catch (err) {
-      showToast?.(err.message, 'error')
     } finally {
-      setConfirming(null)
       await load()
     }
   }
@@ -73,19 +71,6 @@ export function AllowedAppsSection({ isPerson = true, showToast }) {
   // A fragment, not a wrapper: the table must stay a direct child of the card, which scrolls it.
   return (
     <>
-      <div className="card-body profile-section-head">
-        <div className="profile-section-heading">
-          <h4 className="profile-section-title">Apps you have allowed</h4>
-          <HelpTip
-            label="About apps you have allowed"
-            text="The first time an app such as Grafana signs you in with your Aber account, it asks you to allow it. Revoke signs that app out and makes it ask again. It does not change your role."
-          />
-        </div>
-        <p className="profile-section-note">
-          Each app you let sign you in, when you allowed it, and what it can read about you.
-        </p>
-      </div>
-
       {!isPerson ? (
         <EmptyState message="A machine identity allows no apps. It holds a token of its own." />
       ) : error ? (

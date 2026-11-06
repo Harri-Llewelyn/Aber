@@ -29,7 +29,6 @@ const TABLES = {
     sortable: 0,
     fixed: ['A form: each device in the capture, in the capture\'s order, mapped onto a target device.']
   },
-  'components/modals/TelemetryModal.jsx': { sortable: 1 },
   'components/tabs/AccessControlTab.jsx': { sortable: 4 },
   'components/tabs/AppsSection.jsx': { sortable: 1 },
   'components/tabs/ApprovalsTab.jsx': {
@@ -55,7 +54,13 @@ const TABLES = {
   'components/tabs/ColdStorageTab.jsx': { sortable: 1 },
   'components/tabs/DevicesTab.jsx': { sortable: 2 },
   'components/tabs/GatewaysTab.jsx': { sortable: 1 },
+  'components/tabs/HistoryAlerts.jsx': { sortable: 1 },
+  'components/tabs/HistoryTab.jsx': { sortable: 1 },
   'components/tabs/MetricsTab.jsx': { sortable: 3 },
+  'components/tabs/NotificationsPanel.jsx': {
+    sortable: 0,
+    fixed: ['The delivery log: the newest 50 messages, newest first, as the server returns them up to a limit: a sort in the browser would sort only the rows on screen.']
+  },
   'components/tabs/PeopleSection.jsx': { sortable: 1 },
   'components/tabs/ProfileTab.jsx': {
     sortable: 0,
@@ -69,6 +74,10 @@ const TABLES = {
   'components/tabs/SettingsTab.jsx': {
     sortable: 0,
     fixed: ['A form: each setting in its category\'s order, with its own Save and Discard.']
+  },
+  'components/tabs/SystemLogs.jsx': {
+    sortable: 0,
+    fixed: ["A service's newest log lines, newest first, as the log store returns them up to a limit: a sort in the browser would sort only the lines on screen."]
   },
   'components/tabs/SystemTab.jsx': { sortable: 1 }
 }
@@ -96,6 +105,17 @@ describe('every table can be sorted, or says why it keeps one order', () => {
 
   it('lists every file that draws a table', () => {
     expect(withTables.map(f => f.file).sort()).toEqual(Object.keys(TABLES).sort())
+  })
+
+  it('draws every sortable header\'s arrow at rest, so a header that sorts says so without a pointer', () => {
+    const css = fs.readFileSync(path.join(SRC, 'App.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    const arrowRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /\.sort-arrow/.test(selector))
+    expect(arrowRules.length).toBeGreaterThan(0)
+    for (const [, selector, body] of arrowRules) {
+      expect(body, `${selector.trim()} hides the sort arrow`).not.toMatch(/visibility\s*:\s*hidden|display\s*:\s*none|opacity\s*:\s*0(?![.\d])/)
+    }
+    const header = code(path.join(SRC, 'components/common/SortHeader.jsx'))
+    expect(header).toMatch(/!active \? IconChevronsUpDown/)
   })
 
   it.each(Object.entries(TABLES))('%s: its tables are the sortable ones and the listed exceptions', (file, spec) => {

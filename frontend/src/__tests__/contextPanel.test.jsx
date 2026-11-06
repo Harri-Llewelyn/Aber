@@ -11,6 +11,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
 import { getByTooltip, helpTipText, tooltipOf } from '../test/tooltips'
 import { declaration } from '../test/themeColours'
+import { deviceSummaries } from '../test/deviceSummary'
 
 /**
  * The right-hand context drawer. Three properties distinguish it from a modal: it pushes rather
@@ -61,9 +62,8 @@ const device = {
 const cell = { cell_id: 'cell-1', cell_name: 'Assembly Line 1', is_archived: false, gateways: [gateway], gateway_count: 1 }
 
 const routeGet = (overrides = {}) => (path) => {
-  // The sub-routes go first: `/api/v1/devices/dev-1/telemetry/latest` starts with
-  // `/api/v1/devices`, so the collection route would answer it with a device object as though it
-  // were a telemetry row.
+  // The sub-routes go first: `/api/v1/devices/dev-1/config` starts with `/api/v1/devices`, so the
+  // collection route would answer it with a device object as though it were its config.
   if (path.includes('/telemetry')) return Promise.resolve(overrides.telemetry ?? [])
   if (path.includes('/config')) return Promise.resolve(overrides.config ?? [])
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(overrides.cells ?? [cell])
@@ -208,6 +208,26 @@ describe('ContextPanel component', () => {
   it('keeps an action order with no primary as given', () => {
     render(<ContextPanel {...baseProps} open onClose={vi.fn()} actions={[{ label: 'B' }, { label: 'A' }]} />)
     expect([...document.querySelectorAll('.context-action')].map(b => b.textContent.trim())).toEqual(['B', 'A'])
+  })
+
+  it('draws `nav` at its full width under the header, above the fields, outside the scrolling body', () => {
+    render(<ContextPanel {...baseProps} open onClose={vi.fn()} nav={<button type="button">Next</button>} />)
+    const slot = document.querySelector('.context-panel-nav')
+    const header = document.querySelector('.context-panel-header')
+    // A sibling of the header, not inside it beside the close button, and before the body.
+    expect(slot.parentElement).toBe(document.querySelector('.context-panel-inner'))
+    expect(slot.previousElementSibling).toBe(header)
+    expect(slot.nextElementSibling).toHaveClass('context-panel-body')
+    expect(within(slot).getByRole('button', { name: 'Next' })).toBeInTheDocument()
+    // The header gives its rule to the slot, so the two read as one band.
+    expect(header).toHaveClass('context-panel-header-nav')
+    expect(APP_CSS.match(/\n\.context-panel-nav \{([\s\S]*?)\n\}/)?.[1]).toMatch(/flex-shrink:\s*0/)
+  })
+
+  it('draws no slot and keeps the header as it was without `nav`', () => {
+    render(<ContextPanel {...baseProps} open onClose={vi.fn()} />)
+    expect(document.querySelector('.context-panel-nav')).toBeNull()
+    expect(document.querySelector('.context-panel-header')).not.toHaveClass('context-panel-header-nav')
   })
 })
 
@@ -629,7 +649,7 @@ describe('Tables shed what the panel now carries', () => {
     expect(onSelectGateway).toHaveBeenCalledWith('gw-1')
   })
 
-  it('opens the telemetry inspector as a modal, not inside the narrow panel', async () => {
+  it('keeps readings out of the narrow panel: View History opens the device on the History page', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
@@ -641,14 +661,12 @@ describe('Tables shed what the panel now carries', () => {
     fireEvent.click(list().getByText('Simulated_CNC_01'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    // Neither the documents list nor the telemetry table renders inside a 360px column any more:
-    // documents open in their editor from Attached Links, telemetry in a modal from here.
+    // Neither the documents list nor a telemetry table renders inside a 360px column: documents
+    // open in their editor from Attached Links, and readings on the History page.
     expect(within(panel()).queryByText('Attached Document Links')).toBeNull()
     expect(within(panel()).queryByRole('table')).toBeNull()
-
-    fireEvent.click(within(panel()).getByText('View Telemetry'))
-    await waitFor(() => expect(document.querySelector('.modal-wide')).toBeTruthy())
-    expect(within(document.querySelector('.modal-wide')).getByText(/Telemetry — Simulated_CNC_01/)).toBeTruthy()
+    expect(within(panel()).queryByText('View Telemetry')).toBeNull()
+    expect(within(panel()).getByRole('link', { name: /View History/ }).getAttribute('href')).toMatch(/^\/history\/device\//)
   })
 
   it('answers WHICH devices a gateway carries, which the row can only count', async () => {
@@ -886,7 +904,7 @@ describe('The cells table hands its neighbours over, and stays one row tall', ()
     renderCells()
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    expect(within(cellsTable()).getByText('1 Online / 0 Offline')).toBeTruthy()
+    expect(deviceSummaries(cellsTable())).toContain('1 Online / 0 Offline')
     expect(within(cellsTable()).getByText('Host_Gateway_NodeRED')).toBeTruthy()
   })
 
@@ -1067,11 +1085,13 @@ describe('Context panel layout invariants', () => {
     expect(within(section).getByText('3D Model')).toBeInTheDocument()
     expect(within(section).getByTestId('model-3d-input')).toBeInTheDocument()
 
-    // After the fields, before the actions, and nothing after the actions.
+    // After the fields, before the actions. After the actions is one tool, the Suppression windows,
+    // whose height is not known.
     const actions = panel().querySelector('.context-panel-actions')
     expect(fields[0].compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(section.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(panel().querySelector('.context-panel-extras')).toBeNull()
+    const tools = panel().querySelector('.context-panel-extras')
+    expect([...tools.children].map(c => c.className)).toEqual(['suppression-windows'])
   })
 
   it('rules the 3D model off as the actions are, as far below the fields', () => {

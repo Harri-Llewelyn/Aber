@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { copyText } from '../common/CopyableId'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { IconShieldAlert } from '../common/Icons'
 import { Setting, useDirectoryBroker } from './EdgeNodeSettings'
 import { ROOT_CERTIFICATE_PATH } from '../../utils/edgeNodeSettings'
@@ -45,6 +46,10 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
   const descriptionLength = characters(description)
   const canCreate = !busy && nameLength > 0 && nameLength <= SUBSCRIBER_NAME_MAX
     && descriptionLength > 0 && descriptionLength <= SUBSCRIBER_DESCRIPTION_MAX
+  // The fields' maxLength holds the upper bounds; what is left to say is what is missing.
+  const problem = nameLength === 0 ? 'Give the account a name'
+    : descriptionLength === 0 ? 'Say what the account is for'
+      : null
 
   const create = useCallback(async () => {
     setBusy(true)
@@ -90,6 +95,7 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
         whole site, and <strong>publishes nothing</strong>.
       </>)}
       initialFocus={account ? undefined : nameRef}
+      problem={account ? undefined : problem}
       error={!account
         ? error
         : copyFailed
@@ -108,7 +114,7 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
             className="btn btn-primary"
             disabled={!canCreate}
             onClick={create}
-            title={canCreate ? 'Create the account and show its password once' : 'Give the account a name and say what it is for'}
+            title={problem ?? 'Create the account and show its password once'}
           >
             Create Read-Only Account
           </ActionButton>
@@ -117,7 +123,7 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
     >
       {!account && (<>
         <div className="form-group">
-          <label className="form-label" htmlFor="subscriber-name">Name</label>
+          <label className="form-label" htmlFor="subscriber-name">Name <RequiredMark /></label>
           <input
             id="subscriber-name"
             className="form-control"
@@ -127,12 +133,13 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
             placeholder="e.g. Line 4 OEE board"
             value={name}
             onChange={(e) => setName(oneLine(e.target.value))}
+            aria-required="true"
           />
           <div className="form-hint">What Broker accounts lists it as.</div>
         </div>
 
         <div className="form-group">
-          <label className="form-label" htmlFor="subscriber-description">What it is for</label>
+          <label className="form-label" htmlFor="subscriber-description">What it is for <RequiredMark /></label>
           <textarea
             id="subscriber-description"
             className="form-control"
@@ -142,6 +149,7 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
             value={description}
             onChange={(e) => setDescription(oneLine(e.target.value))}
             style={{ resize: 'vertical' }}
+            aria-required="true"
           />
           <div className="form-hint">
             Shown beside the name. It is what tells the next Administrator whether the account is

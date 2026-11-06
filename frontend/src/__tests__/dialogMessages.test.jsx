@@ -78,21 +78,27 @@ describe('attached links', () => {
     await waitFor(() => expect(screen.queryByText(/Loading links/)).toBeNull())
   }
 
-  it('says in the dialog that a link needs a name', async () => {
+  it('holds Save Link until the link has a name and an address, and says why in the dialog', async () => {
     await show()
     fireEvent.click(screen.getByRole('button', { name: /Add Link/i }))
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^(Attach|Save)/ })) })
-    expect(inDialog(/Attached Links/).getByRole('alert')).toHaveTextContent('Link name is required')
+    const save = screen.getByRole('button', { name: 'Save Link' })
+    expect(save).toBeDisabled()
+    expect(save).toHaveClass('btn-disabled')
+    fireEvent.change(screen.getByLabelText(/^Link URL/), { target: { value: 'https://example.com/drawing.pdf' } })
+    expect(inDialog(/Attached Links/).getByText('Give the link a name')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Display Name'), { target: { value: 'Drawing' } })
+    fireEvent.change(screen.getByLabelText(/^Link URL/), { target: { value: 'example.com' } })
+    expect(inDialog(/Attached Links/).getByText('The address must start with http:// or https://')).toBeInTheDocument()
+    expect(api.post).not.toHaveBeenCalled()
   })
 
-  it('says in the dialog that a removal failed, once the confirmation has closed', async () => {
+  it('says in the confirmation that a removal failed, and keeps it open', async () => {
     await show()
     api.delete.mockRejectedValue(new Error('The link could not be removed.'))
     fireEvent.click(screen.getByRole('button', { name: /Remove/i }))
     const confirm = screen.getByRole('dialog', { name: 'Remove link' })
-    await act(async () => { fireEvent.click(within(confirm).getByRole('button', { name: 'Confirm' })) })
+    await act(async () => { fireEvent.click(within(confirm).getByRole('button', { name: 'Remove link' })) })
 
-    expect(screen.queryByRole('dialog', { name: 'Remove link' })).toBeNull()
-    expect(inDialog(/Attached Links/).getByRole('alert')).toHaveTextContent('The link could not be removed.')
+    expect(within(confirm).getByRole('alert')).toHaveTextContent('The link could not be removed.')
   })
 })

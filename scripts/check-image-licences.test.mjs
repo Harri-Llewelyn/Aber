@@ -62,7 +62,7 @@ test('a Dockerfile names its FROM images, not the stages it built, with ARG defa
   const text = [
     'ARG BASE=ghcr.io/harri-llewelyn/aber/ingestion:1.7.0',
     'FROM denoland/deno:2.1.4 AS modules',
-    'FROM supabase/edge-runtime:v1.77.0 AS runtime',
+    'FROM supabase/edge-runtime:v1.77.4 AS runtime',
     'FROM --platform=linux/amd64 runtime AS offline-check',
     'FROM ${BASE}',
     'FROM python:3.12-slim@sha256:' + 'a'.repeat(64),
@@ -70,7 +70,7 @@ test('a Dockerfile names its FROM images, not the stages it built, with ARG defa
   ].join('\n');
   assert.deepEqual(dockerfileBases(text), [
     'denoland/deno:2.1.4',
-    'supabase/edge-runtime:v1.77.0',
+    'supabase/edge-runtime:v1.77.4',
     'ghcr.io/harri-llewelyn/aber/ingestion:1.7.0',
     `python:3.12-slim@sha256:${'a'.repeat(64)}`,
   ]);

@@ -20,6 +20,9 @@ A RESTART STORES THE RECORDING. ingestion.py's shutdown calls begin_shutdown() f
 finish_on_shutdown() last, once the historian's queue has drained. The recording takes what arrives
 in between, then has one upload attempt in what the pod's grace period leaves.
 
+EACH JOB IT ENDS IS COUNTED, as `aber_ingestion_capture_jobs_total{outcome}` on the daemon's
+metrics endpoint: completed, failed or discarded, counted once the database has the outcome.
+
 Related: supabase/migrations/archive/0055_capture_orchestration.sql (the tables and every gate
          called here), 0190 (a path per recording, and deleting what nothing claims), capture.py
          (the file format, and the encoding preservation this reuses), README.md -> "Recording
@@ -35,6 +38,7 @@ import time
 from datetime import datetime, timezone
 
 import capture
+import registry
 from logging_config import get_logger
 
 # `get_logger`, NOT `logging.getLogger(__name__)`. This daemon configures NAMED loggers with
@@ -587,6 +591,7 @@ def _finish(state, reason, stop=None, deadline=None):
             logger.warning(
                 "Capture %s was ended outside the recorder before it could be stored (%s). Its file "
                 "is discarded; any earlier capture of the subject is unchanged.", state.id, err)
+            registry.count("capture_jobs_discarded")
             _tidy(state.subject, deadline)
         else:
             logger.error("Capture %s: could not record the finished capture: %s", state.id, err)
@@ -598,6 +603,7 @@ def _finish(state, reason, stop=None, deadline=None):
             _settle_failure(state, message, uploaded=True, deadline=deadline)
         return
 
+    registry.count("capture_jobs_completed")
     # The row now names this capture's file; the one it replaced is unclaimed and goes now.
     _tidy(state.subject, deadline)
     logger.info(
@@ -875,6 +881,7 @@ def _settle_failure(state, message, uploaded=False, deadline=None):
         _unsettled = (state, message, uploaded)
         return False
     _unsettled = None
+    registry.count("capture_jobs_failed")
     logger.warning("Capture %s failed: %s", state.id, message)
     if uploaded:
         # Its file is unclaimed now the job is not RECORDING.
@@ -978,6 +985,7 @@ def _discard(state, answer):
     global _active
     _active = None
     state.drain()
+    registry.count("capture_jobs_discarded")
     if answer == "gone":
         logger.warning("Capture %s: its job no longer exists, because its subject was deleted while "
                        "it recorded. The recording is discarded.", state.id)
@@ -1122,6 +1130,8 @@ def reconcile(supabase):
         res = supabase.rpc("ingest_reconcile_capture_jobs", {}).execute()
         swept = res.data or 0
         if swept:
+            # Failed by this sweep, and counted here: the daemon that left them cannot.
+            registry.count("capture_jobs_failed", swept)
             logger.warning(
                 "Capture: %d job(s) were left in flight by a previous run and have been failed. "
                 "Their recordings did not survive the restart.", swept,

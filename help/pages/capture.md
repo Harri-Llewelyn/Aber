@@ -6,7 +6,7 @@ Use this page to record what the broker actually carried, and play it back later
 
 - **The page has four tabs.** **Gateways** and **Devices** list what you can record. **Captures** and **Playbacks** list the recordings and playbacks that have finished. Each tab has its own address, and the sidebar lists all four.
 - **On the Gateways and Devices tabs**, you record one subject at a time. A gateway's capture holds everything it publishes, including every device beneath it. A device's capture holds that one device, plus its gateway's birth certificate. It records the device under its Sparkplug ID, its Published ID if it has one, and its UUID. There is no capture of the whole broker.
-- **The search box** finds a name or a Sparkplug ID, on the Gateways and Devices tabs. **The Stored filter** beside it narrows the list to subjects with or without a capture. Both stay set when you move between Gateways and Devices. On the Devices tab, **the gateway filter** narrows the list to one gateway's devices.
+- **The search box** finds a name or a Sparkplug ID, on the Gateways and Devices tabs. **The Capture filter** beside it narrows the list to subjects with or without a capture. Both stay set when you move between Gateways and Devices. On the Devices tab, **the gateway filter** narrows the list to the devices of the gateways you tick. Each value shows how many subjects have it.
 - **The columns** are the subject, its Sparkplug ID and its Type (Remote, Third-party, Host or Simulated). The last column is the one stored capture, with its messages, size and date. **UPLOADED** marks a file that was not recorded here. **NO BIRTH** marks a capture with no birth certificate in it.
 - **A column's heading sorts the table** by that column, on the Gateways and Devices tabs. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - **Selecting a row**, by clicking it or pressing Enter on it, opens the details panel. It shows how long the recording ran and why it stopped, the recorded rate, the devices and metrics the capture holds, and the actions.
@@ -44,6 +44,8 @@ If a playback completes but loses readings whose timestamps were too old or too 
 **Captures** lists every recording that has finished, newest first. **Playbacks** lists every playback that has finished, newest first. A row says when it was started, what it was about, how it ended and how long it ran. It also says who started it. A failed row says why it failed. The strips above the list show a failure for fifteen minutes; these tabs keep it.
 
 Each tab shows the newest 20. **Show more**, at the foot of the table, loads the next 20. These two tables have no search, and their columns do not sort.
+
+A failure also raises the Grafana alert **Capture or Playback Failed**, for an hour. A recording or playback that is still queued or running long past its limits raises **Capture or Playback Stuck**. Press **Stop** to end it. A playback waiting for a playback worker that has stopped reporting raises **Playback Worker Not Reporting**. Each reaches the alert counter in the top bar, so nobody has to be watching this page. Select one there, or its pop-up message, and this page opens on the **Captures** or **Playbacks** tab, whichever the job was.
 
 ## Who can use it
 

@@ -14,6 +14,7 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab, causationSiblings } from '../components/tabs/AuditTrailTab'
+import { closePanel, filterList, openFiltersPanel, ticked, toggleInList } from '../test/listFilters'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -166,18 +167,29 @@ describe('the Same transaction control', () => {
     expect(chip()).toHaveTextContent('2')
   })
 
-  it('says a single-row act wrote nothing else, and offers no control', async () => {
-    /* The case a user asked to go away: the button put the id in the search box and loaded the
-       same single row again. Only the count can tell this act from one whose siblings a filter
-       hides, which is why the button could not simply be hidden when the list was empty. */
+  it('draws no section for an act that wrote nothing else', async () => {
+    /* A heading and a line about nothing, for every single-row act. Only the count can tell this
+       act from one whose siblings a filter hides, so it is the count that takes the section away. */
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
+    await waitFor(() => expect(group()).toBeTruthy())
     stepToSingleRowAct()
 
-    await waitFor(() =>
-      expect(within(group()).getByText('Nothing else was written by this act.')).toBeInTheDocument())
-    expect(control()).toBeNull()
-    expect(chip()).toHaveTextContent('0')
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('event')).toBe('3'))
+    expect(group()).toBeNull()
+    expect(screen.queryByText('Nothing else was written by this act.')).toBeNull()
+    // The id stays in the fields, for a reader who wants to search it anyway.
+    expect(screen.getByRole('button', { name: 'Copy transaction id 4472' })).toBeInTheDocument()
+  })
+
+  it('draws none when the search is the transaction and nothing else came back, count or no count', async () => {
+    // The loaded set IS the act, and it is this row alone.
+    api.get.mockImplementation(serve(UNCOUNTED.filter(e => e.event_id === 3)))
+    window.history.replaceState({}, '', '/audit-trail?search=4472&event=3')
+    render(<AuditTrailTab />)
+    await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
+    expect(group()).toBeNull()
+    window.history.replaceState({}, '', '/audit-trail')
   })
 
   it('steps the drawer across to the sibling, which is a DIFFERENT entity', async () => {
@@ -222,9 +234,8 @@ describe('the Same transaction control', () => {
        part of the act under a count that reads as the whole of it. */
     await show()
     // The kind filter lives in the Filters popover.
-    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    fireEvent.change(screen.getByRole('combobox', { name: 'Entity' }),
-      { target: { value: 'DEVICE' } })
+    toggleInList('Entity', 'Devices')
+    closePanel()
     // The filter is a query parameter, so the page refetches; selecting before that lands picks
     // an event out of the list that is about to be replaced.
     await waitFor(() =>
@@ -234,8 +245,8 @@ describe('the Same transaction control', () => {
 
     fireEvent.click(control())
 
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Entity' }).value).toBe(''))
+    await waitFor(() => expect(window.location.search).not.toContain('type='))
+    expect(ticked(filterList('Entity'))).toEqual([])
   })
 
   it('shows deleted entities, whose rows the count includes', async () => {
@@ -245,12 +256,15 @@ describe('the Same transaction control', () => {
     await show()
     await selectEvent(/UPDATE on Simulated_CNC_01/)
     await waitFor(() => expect(group()).toBeTruthy())
-    const toggle = () => screen.getByRole('button', { name: /Show deleted entities \(1\)/ })
-    expect(toggle()).not.toHaveClass('btn-primary')
+    const toggle = () => within(openFiltersPanel()).getByRole('checkbox', { name: 'Show deleted entities 1' })
+    expect(toggle().checked).toBe(false)
+    // Shut by its button: Escape would close the drawer too.
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
 
     fireEvent.click(control())
 
-    await waitFor(() => expect(toggle()).toHaveClass('btn-primary'))
+    await waitFor(() => expect(window.location.search).toContain('deleted=1'))
+    expect(toggle().checked).toBe(true)
   })
 
   it('says the list is complete once every row the act wrote is loaded', async () => {

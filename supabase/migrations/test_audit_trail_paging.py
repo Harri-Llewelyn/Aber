@@ -123,12 +123,13 @@ class AuditTrailPaging(unittest.TestCase):
                 p_limit              => %s,
                 p_include_purged     => true,
                 p_entity_ids         => %s::uuid[],
-                p_action             => %s,
+                p_action             => %s::text[],
                 p_before_recorded_at => %s,
                 p_before_id          => %s
             )
             """,
-            (limit, self.entities, kwargs.get("action"),
+            # A one-element list: the single action, as the filter sends one (0227).
+            (limit, self.entities, [kwargs["action"]] if kwargs.get("action") else None,
              (cursor or {}).get("recorded_at"), (cursor or {}).get("id")),
         )
         payload = self.cur.fetchone()[0]
@@ -539,20 +540,25 @@ class AuditTrailTotalAndSearch(unittest.TestCase):
         here with no probe below it would read as deleted always; a probe with no type named would
         never be consulted.
         """
-        self.cur.execute(
-            "SELECT pg_get_functiondef(p.oid) FROM pg_proc p"
-            "  JOIN pg_namespace n ON n.oid = p.pronamespace"
-            " WHERE n.nspname = 'public' AND p.proname = 'audit_trail_page'"
-        )
-        body = self.cur.fetchone()[0]
+        def body(name):
+            self.cur.execute(
+                "SELECT pg_get_functiondef(p.oid) FROM pg_proc p"
+                "  JOIN pg_namespace n ON n.oid = p.pronamespace"
+                " WHERE n.nspname = 'public' AND p.proname = %s", (name,)
+            )
+            return self.cur.fetchone()[0]
+
+        # 0228: the kinds are audit_trail_matching()'s, the tables audit_trail_page() reads the live
+        # ids from.
         listed = set(re.findall(
             r"'([a-z_]+)'",
-            re.search(r"entity_type IN \(([^)]*)\)", body).group(1)))
+            re.search(r"entity_type IN \(([^)]*)\)", body("audit_trail_matching")).group(1)))
         self.assertEqual(listed, self.PURGEABLE)
 
         # Every named type is answered by a probe: its own table, or `devices` for the two keyed
         # by a device.
-        probed = set(re.findall(r"FROM public\.([a-z_]+)\s+\w+ WHERE \w+\.id = t\.entity_id", body))
+        live = re.search(r"v_live := ARRAY\((.*?)\);", body("audit_trail_page"), re.S).group(1)
+        probed = set(re.findall(r"FROM public\.([a-z_]+) \w+", live))
         self.assertEqual(probed, self.PURGEABLE - self.DEVICE_KEYED)
 
     # ---------------------------------------------------------------------------------------
@@ -984,11 +990,11 @@ class HowManyRowsATransactionWrote(unittest.TestCase):
         self.cur.execute(
             """
             SELECT public.audit_trail_page(
-                p_limit => 1000, p_include_purged => %s, p_entity_type => %s,
+                p_limit => 1000, p_include_purged => %s, p_entity_type => %s::text[],
                 p_entity_ids => %s::uuid[]
             ) -> 'events'
             """,
-            (include_purged, entity_type, ids),
+            (include_purged, [entity_type] if entity_type else None, ids),
         )
         return self.cur.fetchone()[0]
 

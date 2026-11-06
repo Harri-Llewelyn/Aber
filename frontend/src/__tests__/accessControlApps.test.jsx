@@ -2,7 +2,7 @@
  * Access Control > Apps: every app that signs people in with Aber, for an Administrator. A row is
  * the app, how and when it was registered, where it sends people back to, its type and how many
  * people allow it. Its drawer lists the people who allowed it, each with Revoke, and offers Remove
- * App, which Aber's own four refuse. Each act asks first, says what ended in a toast that links to
+ * App, which Aber's own refuse. Each act asks first, says what ended in a toast that links to
  * the app, and reads the lists again.
  */
 import React from 'react'
@@ -15,7 +15,8 @@ import { appUrl } from '../routes'
 import { removeQuestion, revokeQuestion } from '../utils/apps'
 import { tabLink, tabLinks } from '../test/tabBar'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: {
     listApps: vi.fn(),
     appApprovals: vi.fn(),
@@ -80,8 +81,8 @@ beforeEach(() => {
   api.listRevokedServicePrincipals.mockResolvedValue(new Map())
 })
 
-function renderApps(showToast = vi.fn()) {
-  render(<AccessControlTab showToast={showToast} userRole="Administrator" currentUserId={ME} />)
+function renderApps(showToast = vi.fn(), hasPermission = undefined) {
+  render(<AccessControlTab showToast={showToast} userRole="Administrator" currentUserId={ME} hasPermission={hasPermission} />)
   return showToast
 }
 
@@ -166,6 +167,19 @@ describe("an app's drawer", () => {
     expect(drawer.getByText('PART OF ABER')).toBeInTheDocument()
   })
 
+  it('opens the Audit Trail filtered to the app, for a reader who may open it (#1349)', async () => {
+    renderApps(vi.fn(), () => true)
+    const drawer = await openDrawer('Grafana')
+    expect(drawer.getByRole('link', { name: /View Audit Trail/ }))
+      .toHaveAttribute('href', `/audit-trail?search=${GRAFANA}&type=APP`)
+  })
+
+  it('offers no View Audit Trail without the permission', async () => {
+    renderApps(vi.fn(), () => false)
+    const drawer = await openDrawer('Grafana')
+    expect(drawer.queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
+  })
+
   it("refuses to remove Aber's own, and says why", async () => {
     renderApps()
     const drawer = await openDrawer('Grafana')
@@ -203,12 +217,13 @@ describe("an app's drawer", () => {
     await waitFor(() => expect(window.location.search).not.toContain('app='))
   })
 
-  it('shows a refusal in a toast', async () => {
+  it('shows a refusal in the dialog, which stays open', async () => {
     api.removeApp.mockRejectedValue(new Error('this app is part of Aber'))
     const showToast = renderApps()
     const drawer = await openDrawer('Shift Reports')
     fireEvent.click(drawer.getByRole('button', { name: /Remove App/ }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove App' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('this app is part of Aber', 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('this app is part of Aber')
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
   })
 })

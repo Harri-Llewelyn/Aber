@@ -1,4 +1,4 @@
-import { readFlag, readSetting } from './config';
+import { readFlag, readSetting, studioDoorUrl } from './config';
 
 export const SPARKPLUG_TYPES = {
   1: 'Int8', 2: 'Int16', 3: 'Int32', 4: 'Int64',
@@ -115,6 +115,23 @@ export const AUDIT_TRAIL_ACTIONS = {
   CAPTURE_DELETED:         'Capture deleted',
   PLAYBACK_STARTED:        'Playback started',
   PLAYBACK_STOPPED:        'Playback stopped',
+  // An Administrator reading a service's log lines on the System page (0225). The database writes
+  // one when the read's service, level, filter or range differs from their last, so a refresh
+  // writes none.
+  SERVICE_LOGS_READ:       'Logs read',
+  // A person acknowledging a firing alert from the alert counter, or withdrawing it (0231): in the
+  // alert's lane, or a machine identity's alert in the identity's.
+  ALERT_ACKNOWLEDGED:              'Alert acknowledged',
+  ALERT_ACKNOWLEDGEMENT_WITHDRAWN: 'Acknowledgement withdrawn',
+  // A suppression window scheduled, changed, ended early or cancelled before it started, from the
+  // drawer of the device, gateway or cell it covers (0240): in that subject's lane.
+  SUPPRESSION_WINDOW_SCHEDULED: 'Suppression window scheduled',
+  SUPPRESSION_WINDOW_CHANGED:   'Suppression window changed',
+  SUPPRESSION_WINDOW_ENDED:     'Suppression window ended',
+  SUPPRESSION_WINDOW_CANCELLED: 'Suppression window cancelled',
+  // An Administrator issuing or rotating the webhook's signing key on Settings › Notifications
+  // (0248), in the webhook's lane. The key itself is never in the row.
+  SIGNING_KEY_ISSUED:              'Signing key issued',
 };
 
 /**
@@ -128,40 +145,190 @@ export const AUDIT_TRAIL_ACTIONS = {
  * drawable, filterable and resolvable at once, and `auditTrailEntityTypes.test.js` fails if
  * any consumer is left behind.
  */
-// `domain: 'asset'` is the database's audit-domain value; the UI calls these rows entities.
+// `domain: 'asset'` is the database's audit-domain value; the UI calls these rows entities. `group`
+// is the heading the filter draws the kind under (AUDIT_TRAIL_ENTITY_GROUPS), security for the
+// security domain.
 export const AUDIT_TRAIL_ENTITY_TYPES = [
-  { kind: 'AREA',             table: 'areas',              label: 'Areas',              domain: 'asset' },
-  { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset' },
-  { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset' },
-  { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset' },
+  { kind: 'AREA',             table: 'areas',              label: 'Areas',              domain: 'asset', group: 'plant' },
+  { kind: 'CELL',             table: 'cells',              label: 'Cells',              domain: 'asset', group: 'plant' },
+  { kind: 'GATEWAY',          table: 'gateways',           label: 'Gateways',           domain: 'asset', group: 'plant' },
+  { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset', group: 'plant' },
+  // An alert's acknowledgements (0231), one lane per alert across its occurrences (0232).
+  { kind: 'ALERT',            table: 'platform_alerts',    label: 'Alerts',             domain: 'asset', group: 'plant' },
   // The security lane (archive/0070_audit_domain_and_the_acts_nothing_recorded.sql), in the order a
   // reader meets it: who holds what, what the machines are, then the contracts and settings that
   // shape both.
-  { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security' },
-  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security' },
+  { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security', group: 'security' },
+  { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security', group: 'security' },
   // A read-only broker account made or deleted on Access Control (0218): an INSERT and a DELETE,
   // filed under security by audit_domain_for()'s fail-closed default. No table holds the account.
-  { kind: 'BROKER ACCOUNT',   table: 'broker_accounts',    label: 'Broker accounts',    domain: 'security' },
+  { kind: 'BROKER ACCOUNT',   table: 'broker_accounts',    label: 'Broker accounts',    domain: 'security', group: 'security' },
   // The apps that sign people in (0217): the sign-in service's OAuth clients.
-  { kind: 'APP',              table: 'oauth_clients',      label: 'Apps',               domain: 'security' },
-  { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
+  { kind: 'APP',              table: 'oauth_clients',      label: 'Apps',               domain: 'security', group: 'security' },
+  // Reads of a service's log lines (0225), one lane per service, filed under security by
+  // audit_domain_for()'s fail-closed default: the lines carry sign-ins and addresses.
+  { kind: 'SERVICE LOGS',     table: 'service_logs',       label: 'Service logs',       domain: 'security', group: 'security' },
+  // The webhook's signing key, issued or rotated (0248), one lane per channel, filed under security
+  // by audit_domain_for()'s fail-closed default: only an Administrator issues it.
+  { kind: 'NOTIFICATION CHANNEL', table: 'notification_channels', label: 'Notification channels', domain: 'security', group: 'security' },
+  { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset', group: 'model' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
-  { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },
-  { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security' },
+  { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset', group: 'model' },
+  { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security', group: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
-  { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
-  { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
+  { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset', group: 'model' },
+  { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset', group: 'model' },
   // A schema attached to or detached from a device; the entity id is the device's (0168).
-  { kind: 'DEVICE SCHEMA',    table: 'device_submodels',   label: 'Device schemas',     domain: 'asset' },
+  { kind: 'DEVICE SCHEMA',    table: 'device_submodels',   label: 'Device schemas',     domain: 'asset', group: 'model' },
   // The capture lane (0193): the act of recording, the capture it stores, and its replays. Asset,
   // because the roles that read the asset lane are the roles that read captures.
-  { kind: 'RECORDING',        table: 'capture_jobs',       label: 'Recordings',         domain: 'asset' },
-  { kind: 'CAPTURE',          table: 'captures',           label: 'Captures',           domain: 'asset' },
-  { kind: 'PLAYBACK',         table: 'playback_jobs',      label: 'Playbacks',          domain: 'asset' },
+  { kind: 'RECORDING',        table: 'capture_jobs',       label: 'Recordings',         domain: 'asset', group: 'capture' },
+  { kind: 'CAPTURE',          table: 'captures',           label: 'Captures',           domain: 'asset', group: 'capture' },
+  { kind: 'PLAYBACK',         table: 'playback_jobs',      label: 'Playbacks',          domain: 'asset', group: 'capture' },
   // The backup lane: the act and the artefact, both filed under security by audit_domain_for()'s
   // fail-closed default, which is where an act on the whole database belongs.
-  { kind: 'BACKUP JOB',       table: 'backup_jobs',        label: 'Backup jobs',        domain: 'security' },
-  { kind: 'BACKUP',           table: 'backups',            label: 'Backups',            domain: 'security' },
+  { kind: 'BACKUP JOB',       table: 'backup_jobs',        label: 'Backup jobs',        domain: 'security', group: 'security' },
+  { kind: 'BACKUP',           table: 'backups',            label: 'Backups',            domain: 'security', group: 'security' },
+];
+
+/**
+ * The groups the Audit Trail's entity filter draws its kinds under, in this order: each kind's
+ * `group` above. The security group is the security domain, which only some roles may read.
+ */
+export const AUDIT_TRAIL_ENTITY_GROUPS = [
+  { id: 'plant', label: 'The plant' },
+  { id: 'model', label: 'The model' },
+  { id: 'capture', label: 'Capture' },
+  { id: 'security', label: 'Security' },
+];
+
+/**
+ * The groups the Audit Trail's action filter draws AUDIT_TRAIL_ACTIONS under, by what each act is
+ * about, and the reads together: the acts that record access and change nothing, the legend's Read
+ * class (0228). Every action is in exactly one (`auditTrailFilterGroups.test.js`). Otherwise not the
+ * legend's classes, which classify an event rather than name its action.
+ */
+export const AUDIT_TRAIL_ACTION_GROUPS = [
+  { label: 'Row changes', actions: ['INSERT', 'UPDATE', 'DELETE'] },
+  {
+    label: 'The plant and the model',
+    actions: ['SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED'],
+  },
+  {
+    label: 'Alerts',
+    actions: ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN', 'SUPPRESSION_WINDOW_SCHEDULED',
+      'SUPPRESSION_WINDOW_CHANGED', 'SUPPRESSION_WINDOW_ENDED', 'SUPPRESSION_WINDOW_CANCELLED'],
+  },
+  {
+    label: 'Capture and playback',
+    actions: ['CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
+      'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED'],
+  },
+  {
+    label: 'People and access',
+    actions: ['PERSON_ADDED', 'ROLE_GRANTED', 'ROLE_REVOKED', 'ACCESS_REMOVED', 'ACCESS_RESTORED',
+      'PASSWORD_SET', 'DISPLAY_NAME_CHANGED', 'EMAIL_CHANGED', 'SESSIONS_ENDED', 'MFA_RESET'],
+  },
+  {
+    label: 'Apps',
+    actions: ['APP_REGISTERED', 'APP_REMOVED', 'APP_RESTORED', 'APP_APPROVED', 'APP_APPROVAL_REVOKED'],
+  },
+  {
+    label: 'Machine identities and credentials',
+    actions: ['PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED', 'TOKEN_MINTED',
+      'TOKEN_REVOKED', 'CREDENTIAL_ISSUED', 'SIGNING_KEY_ISSUED'],
+  },
+  {
+    label: 'Backups',
+    actions: ['BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
+      'BACKUP_PRUNED'],
+  },
+  { label: 'Reads', actions: ['SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED'] },
+];
+
+/**
+ * The classes `audit_event_class()` (0228) sorts Audit Trail events into, in the legend's order.
+ * The words are the server's, and the address's (`?class=lifecycle,read`). Mirror check 44 holds
+ * them to the function and its indexes.
+ */
+export const AUDIT_TRAIL_CLASSES = ['created', 'operational', 'configuration', 'lifecycle', 'read'];
+
+/**
+ * Which kinds each action is written for, and the classes such a row can be in: the database's
+ * `audit_trail_action_kinds()` (0229), row for row, as `[action, tables, classes]`. Mirror check 43
+ * holds the two together. The Audit Trail's filters narrow by it: chosen kinds hide the actions
+ * none of them can have, chosen actions the kinds none of them apply to, and chosen classes the
+ * actions none of them can hold.
+ */
+export const AUDIT_TRAIL_ACTION_KINDS = [
+  // The audit trigger, on every table it is attached to.
+  ['INSERT', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'], ['created']],
+  ['INSERT', ['device_submodels', 'system_settings', 'service_principals', 'broker_accounts'], ['configuration']],
+  ['UPDATE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'],
+    ['operational', 'configuration', 'lifecycle']],
+  ['UPDATE', ['device_submodels', 'system_settings'], ['configuration']],
+  ['DELETE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'], ['lifecycle']],
+  ['DELETE', ['device_submodels', 'system_settings', 'broker_accounts'], ['configuration']],
+  // The plant and the model.
+  ['SCHEMA_REJECTION', ['devices'], ['configuration']],
+  ['PROPOSAL_APPLIED', ['areas', 'cells', 'devices', 'device_nameplate', 'gateways', 'schemas'],
+    ['operational', 'configuration', 'lifecycle']],
+  ['PROPOSAL_EXPIRED', ['change_proposals'], ['operational', 'configuration', 'lifecycle']],
+  ['EXPORTED', ['devices'], ['read']],
+  ['FLOW_DEPLOYED', ['gateways'], ['operational', 'configuration', 'lifecycle']],
+  ['CREDENTIAL_ISSUED', ['gateways'], ['operational', 'configuration', 'lifecycle']],
+  ['CREDENTIAL_SHOWN', ['gateways'], ['read']],
+  // Capture and playback.
+  ['CAPTURE_STARTED', ['capture_jobs'], ['created']],
+  ['CAPTURE_STOPPED', ['capture_jobs'], ['operational']],
+  ['CAPTURE_RECORDED', ['captures'], ['created']],
+  ['CAPTURE_UPLOADED', ['captures'], ['created']],
+  ['CAPTURE_DOWNLOAD_ISSUED', ['captures'], ['read']],
+  ['CAPTURE_DELETED', ['captures'], ['lifecycle']],
+  ['PLAYBACK_STARTED', ['playback_jobs'], ['created']],
+  ['PLAYBACK_STOPPED', ['playback_jobs'], ['operational']],
+  // People and access, in the person's lane.
+  ['PERSON_ADDED', ['user_roles'], ['configuration']],
+  ['ROLE_GRANTED', ['user_roles'], ['configuration']],
+  ['ROLE_REVOKED', ['user_roles'], ['configuration']],
+  ['ACCESS_REMOVED', ['user_roles'], ['configuration']],
+  ['ACCESS_RESTORED', ['user_roles'], ['configuration']],
+  ['PASSWORD_SET', ['user_roles'], ['configuration']],
+  ['DISPLAY_NAME_CHANGED', ['user_roles'], ['configuration']],
+  ['EMAIL_CHANGED', ['user_roles'], ['configuration']],
+  ['SESSIONS_ENDED', ['user_roles'], ['configuration']],
+  ['MFA_RESET', ['user_roles'], ['configuration']],
+  ['APP_APPROVED', ['user_roles'], ['configuration']],
+  ['APP_APPROVAL_REVOKED', ['user_roles'], ['configuration']],
+  // Apps, in the app's lane.
+  ['APP_REGISTERED', ['oauth_clients'], ['configuration']],
+  ['APP_REMOVED', ['oauth_clients'], ['configuration']],
+  ['APP_RESTORED', ['oauth_clients'], ['configuration']],
+  // Machine identities and credentials.
+  ['PRINCIPAL_REVOKED', ['service_principals'], ['configuration']],
+  ['PRINCIPAL_REINSTATED', ['service_principals'], ['configuration']],
+  ['PRINCIPAL_DESCRIBED', ['service_principals'], ['configuration']],
+  ['TOKEN_MINTED', ['service_principals'], ['configuration']],
+  ['TOKEN_REVOKED', ['service_principals'], ['configuration']],
+  // Backups: the request, then the backup it took.
+  ['BACKUP_REQUESTED', ['backup_jobs'], ['configuration']],
+  ['BACKUP_CANCELLED', ['backup_jobs'], ['configuration']],
+  ['BACKUP_FAILED', ['backup_jobs'], ['configuration']],
+  ['BACKUP_TAKEN', ['backups'], ['configuration']],
+  ['BACKUP_RELEASED', ['backups'], ['configuration']],
+  ['BACKUP_PRUNED', ['backups'], ['configuration']],
+  // The System page.
+  ['SERVICE_LOGS_READ', ['service_logs'], ['read']],
+  // Alerts, in the alert's lane, or a machine identity's alert in the identity's.
+  ['ALERT_ACKNOWLEDGED', ['platform_alerts', 'service_principals'], ['operational']],
+  ['ALERT_ACKNOWLEDGEMENT_WITHDRAWN', ['platform_alerts', 'service_principals'], ['operational']],
+  // A suppression window's acts, in its subject's lane.
+  ['SUPPRESSION_WINDOW_SCHEDULED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  ['SUPPRESSION_WINDOW_CHANGED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  ['SUPPRESSION_WINDOW_ENDED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  ['SUPPRESSION_WINDOW_CANCELLED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  // The webhook's signing key, issued or rotated, in the webhook's lane.
+  ['SIGNING_KEY_ISSUED', ['notification_channels'], ['configuration']],
 ];
 
 /**
@@ -196,7 +363,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  * here renders and does nothing when clicked. `appRouting.test.jsx` asserts the two match.
  */
 export const VALID_TABS = [
-  'site-map', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'vocabulary', 'system',
+  'site-map', 'history', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'vocabulary', 'system',
   'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings',
   'profile'
 ];
@@ -229,13 +396,12 @@ export const GRAFANA_URL = readSetting('VITE_GRAFANA_URL', 'http://localhost:300
   .replace(/\/+$/, '');
 
 /**
- * Supabase Studio's door, as the browser reaches it. Not a link (Studio is reached from the
- * System page); this exists for sign-out alone (`utils/studioSignOut.js`). The fallback matches
- * STUDIO_PUBLIC_URL's, `127.0.0.1` and not `localhost`: cookies key on host, so a session opened
- * on one cannot be ended on the other.
+ * Supabase Studio's door, as the browser reaches it, or null where the chart runs no Studio. Not a
+ * link (Studio is reached from the System page); this exists for sign-out alone
+ * (`utils/studioSignOut.js`). The fallback matches STUDIO_PUBLIC_URL's, `127.0.0.1` and not
+ * `localhost`: cookies key on host, so a session opened on one cannot be ended on the other.
  */
-export const STUDIO_URL = readSetting('VITE_STUDIO_URL', 'http://127.0.0.1:54323')
-  .replace(/\/+$/, '');
+export const STUDIO_URL = studioDoorUrl('http://127.0.0.1:54323')?.replace(/\/+$/, '') ?? null;
 
 /**
  * The forge's door, as the browser reaches it (GITEA_ROOT_URL on the server side). A link as
@@ -280,13 +446,6 @@ export const grafanaAlertUrl = (alert) => {
  */
 export const grafanaPanelUrl = ({ uid, panel }) =>
   `${GRAFANA_URL}/d/${encodeURIComponent(uid)}?viewPanel=${encodeURIComponent(panel)}`;
-
-/**
- * Grafana's alert history (Alerting > History): every rule's state changes, the record of alerts
- * that fired and cleared. Opens on the last 24 hours; the page's own default is one. The page
- * needs grafana.ini to keep that history in Loki (grafana/README.md).
- */
-export const GRAFANA_ALERT_HISTORY_URL = `${GRAFANA_URL}/alerting/history?from=now-24h&to=now`;
 
 // How often tabs that render wall-clock-derived state re-render (hooks/useClockTick.js). A
 // gateway going quiet writes nothing, so it emits no Realtime event; 15s keeps STALE detection

@@ -4,8 +4,8 @@
 -- creates storage.objects by its own migrations and the PG17 image ships the storage schema empty,
 -- and before storage-init, which creates the buckets as service_role and needs the grants below.
 -- Between the two, RLS is on with no policies: a brief loss of function, never of control. Depends
--- on public.has_role(). The reasoning per bucket is in ./README.md, "Storage buckets and why they
--- differ".
+-- on public.has_role(), and on public.require_mfa() beside it in every person's write arm (0251).
+-- The reasoning per bucket is in ./README.md, "Storage buckets and why they differ".
 \set ON_ERROR_STOP on
 
 -- Fail with the reason rather than a bare "relation does not exist": reaching this before
@@ -43,7 +43,7 @@ CREATE POLICY "asset_3d_models_insert_privileged" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'asset-3d-models'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
   );
 
 DROP POLICY IF EXISTS "asset_3d_models_update_privileged" ON storage.objects;
@@ -51,11 +51,11 @@ CREATE POLICY "asset_3d_models_update_privileged" ON storage.objects
   FOR UPDATE TO authenticated
   USING (
     bucket_id = 'asset-3d-models'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
   )
   WITH CHECK (
     bucket_id = 'asset-3d-models'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
   );
 
 DROP POLICY IF EXISTS "asset_3d_models_delete_privileged" ON storage.objects;
@@ -63,7 +63,7 @@ CREATE POLICY "asset_3d_models_delete_privileged" ON storage.objects
   FOR DELETE TO authenticated
   USING (
     bucket_id = 'asset-3d-models'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
   );
 
 -- On the PG17 image storage-api creates its tables with no grants to these roles, so each is
@@ -142,7 +142,7 @@ CREATE POLICY "broker_captures_insert_privileged" ON storage.objects
   WITH CHECK (
     bucket_id = 'broker-captures'
     AND (
-      (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+      ((public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
        AND public.is_capture_subject_prefix((storage.foldername(storage.objects.name))[1])
        AND public.is_open_capture_upload(storage.objects.name))
       OR (public.is_ingestion_caller()
@@ -158,7 +158,7 @@ CREATE POLICY "broker_captures_update_privileged" ON storage.objects
   USING (
     bucket_id = 'broker-captures'
     AND (
-      (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+      ((public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
        AND public.is_open_capture_upload(storage.objects.name))
       OR (public.is_ingestion_caller()
           AND public.is_active_capture_object(storage.objects.name))
@@ -167,7 +167,7 @@ CREATE POLICY "broker_captures_update_privileged" ON storage.objects
   WITH CHECK (
     bucket_id = 'broker-captures'
     AND (
-      (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+      ((public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
        AND public.is_capture_subject_prefix((storage.foldername(storage.objects.name))[1])
        AND public.is_open_capture_upload(storage.objects.name))
       OR (public.is_ingestion_caller()
@@ -180,7 +180,7 @@ CREATE POLICY "broker_captures_delete_privileged" ON storage.objects
   FOR DELETE TO authenticated
   USING (
     bucket_id = 'broker-captures'
-    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND ((public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
          OR public.is_ingestion_caller())
     AND public.is_unclaimed_capture_object(storage.objects.name)
   );
@@ -348,7 +348,7 @@ CREATE POLICY "asset_exports_delete_admin" ON storage.objects
   FOR DELETE TO authenticated
   USING (
     bucket_id = 'asset-exports'
-    AND public.has_role(ARRAY['Administrator'])
+    AND (public.has_role(ARRAY['Administrator']) AND (SELECT public.require_mfa()))
   );
 
 DO $$
@@ -398,7 +398,7 @@ CREATE POLICY "area_plans_insert_privileged" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'area-plans'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
     AND public.is_area_plan_path(storage.objects.name)
   );
 
@@ -407,11 +407,11 @@ CREATE POLICY "area_plans_update_privileged" ON storage.objects
   FOR UPDATE TO authenticated
   USING (
     bucket_id = 'area-plans'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
   )
   WITH CHECK (
     bucket_id = 'area-plans'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
     AND public.is_area_plan_path(storage.objects.name)
   );
 
@@ -420,7 +420,7 @@ CREATE POLICY "area_plans_delete_privileged" ON storage.objects
   FOR DELETE TO authenticated
   USING (
     bucket_id = 'area-plans'
-    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND ((public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
          OR (public.is_ingestion_caller()
              AND public.is_unclaimed_area_plan_object(storage.objects.name)))
   );

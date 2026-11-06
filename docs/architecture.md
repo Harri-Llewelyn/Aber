@@ -8,7 +8,7 @@ document: [`kubernetes-architecture.md`](kubernetes-architecture.md).
 > Where ACS ships bespoke microservices, Aber uses Supabase, TimescaleDB, Grafana and
 > Node-RED. The custom surface is one Python ingestion service — a daemon and the modules beside it:
 > the constraint engine, the metrics registry, capture and playback, the Directory and UNS publishers,
-> cold archival — 21 edge functions, an i3X server and a React dashboard.
+> cold archival — 24 edge functions, an i3X server and a React dashboard.
 
 ---
 
@@ -53,7 +53,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - forge-membership - forge-signout - forge-events - forge-sweep - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle - gateway-install<br/>revoke-gateway-credential - gateway-credential - broker-inventory - broker-subscriber<br/>mint-service-token - manage-people - studio-admission"]
+        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - forge-membership - forge-signout - forge-events - forge-sweep - fplus-directory<br/>grafana-alert-webhook - notification-dispatch - enroll-gateway - gateway-bundle - gateway-install<br/>revoke-gateway-credential - gateway-credential - broker-inventory - broker-subscriber<br/>mint-service-token - manage-people - studio-admission - consent-gate - service-logs"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -127,20 +127,20 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `loki` | `grafana/loki:3.7.9` | `loki:3100`, read by Grafana |
 | `mosquitto` | `eclipse-mosquitto:2.1.2-alpine`, the `gateway-credential` sidecar, `jryberg/mosquitto-exporter:v0.7.9` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
 | `node-red` | `ghcr.io/harri-llewelyn/aber/node-red` | `nodered.<domain>` |
-| `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`) |
+| `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`); no route; `playback-metrics:9109` is scraped |
 | `prometheus` | `prom/prometheus:v3.15.1` | `prometheus:9090`, read by Grafana |
-| `realtime` | `supabase/realtime:v2.134.10` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
+| `realtime` | `supabase/realtime:v2.143.3` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
 | `release-check` | `node:24.22.2-alpine3.24` | CronJob (`releaseCheck.enabled`, off by default): asks api.github.com once a day for the latest Aber release |
 | `storage-init` | `node:24.22.2-alpine3.24` | hook Job: the storage buckets |
 | `storage-policies` | `supabase/postgres:17.6.1.175` | hook Job: the storage RLS policies |
 | `supabase-auth` | `supabase/gotrue:v2.197.0` | behind `api.<domain>/auth/v1` |
 | `supabase-db` | `ghcr.io/harri-llewelyn/aber/supabase-db` (`supabase/postgres:17.6.1.175` with pgBackRest and tini), `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar, and the `pgbackrest` backup sidecar when `supabaseDb.physicalBackup` is on | `supabase-db:5432`; `:9187` is scraped |
-| `supabase-envoy` | `envoyproxy/envoy:v1.40.2` | the gateway: `api.<domain>` (in-cluster `supabase-envoy:8000`), Studio on 8001, the forge on 8002, the forge's API for the edge functions on 8003 |
+| `supabase-envoy` | `envoyproxy/envoy:v1.40.2` | the gateway: `api.<domain>` (in-cluster `supabase-envoy:8000`), Studio on 8001 when Studio is on, the forge on 8002, the forge's API for the edge functions on 8003 |
 | `supabase-functions` | `ghcr.io/harri-llewelyn/aber/edge-runtime` | behind `api.<domain>/functions/v1` |
-| `supabase-meta` | `supabase/postgres-meta:v0.99.0` | in-cluster only, for Studio |
-| `supabase-rest` | `postgrest/postgrest:v14.17` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
-| `supabase-storage` | `supabase/storage-api:v1.74.0` | behind `api.<domain>/storage/v1` |
-| `supabase-studio` | `supabase/studio:2026.09.28-sha-5e59b60` | `studio.<domain>`, off by default, behind the gateway's login |
+| `supabase-meta` | `supabase/postgres-meta:v0.100.0` | off by default, on with Studio; in-cluster only, for Studio |
+| `supabase-rest` | `postgrest/postgrest:v14.18` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
+| `supabase-storage` | `supabase/storage-api:v1.81.0` | behind `api.<domain>/storage/v1` |
+| `supabase-studio` | `supabase/studio:2026.10.12-sha-3699278` | off by default (`supabaseStudio.enabled`); `studio.<domain>` when its route is on too, behind the gateway's login |
 | `swagger-ui` | `ghcr.io/harri-llewelyn/aber/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
 | `test-api` | `curlimages/curl:8.23.0` | `helm test` Pod: GoTrue's health and PostgREST with the publishable key answer 200 through the gateway |
 | `test-broker` | `eclipse-mosquitto:2.1.2-alpine` | `helm test` Pod: a wrong password gets CONNACK "not authorised", over TLS verified under the chart CA when broker TLS is on |
@@ -212,7 +212,7 @@ made. The demo user accounts are seeded separately, by `supabase/seed.sql`.
 | **OPC UA** (40001, 40001-4, 40010, 30050, 40501, 40540) | Companion-specification data points: machinery, energy, robotics, PackML, machine tools, additive. Generated from OPC Foundation NodeSets by [`scripts/generate-opcua-vocabulary.mjs`](../scripts/generate-opcua-vocabulary.mjs) |
 | **ISO 22400** | Computed KPIs, which MTConnect and OPC UA deliberately exclude |
 | **ASHRAE 223P** | Building-system semantics — 640 concepts from the open223 ontology. ⚠ Still in public review |
-| **AAS / IEC 63278** | V3 export as JSON or AASX, validated against the official IDTA schema |
+| **AAS / IEC 63278** | V3 export as JSON or AASX, and a live read-only repository API (`aas-api`, IDTA-01002), validated against the official IDTA schema |
 
 These are **four vocabularies, not four alternatives** — a mixed fleet needs all of them, which is
 why the schema builder offers a choice rather than a migration path. All are built, as is the IDTA

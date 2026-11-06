@@ -7,7 +7,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
-import { IconGlobe, IconShieldAlert, IconTrash } from '../common/Icons'
+import { IconGlobe, IconHistory, IconShieldAlert, IconTrash } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
 import { SearchInput } from '../common/SearchInput'
@@ -16,7 +16,7 @@ import { Tooltip } from '../common/Tooltip'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { useUrlState } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
-import { appUrl, tabUrl } from '../../routes'
+import { appUrl, tabUrl, trailUrl } from '../../routes'
 import { formatDateTime, plural } from '../../utils/format'
 import { appLabel, appRegistration, clientTypeLabel, removeQuestion, revokeQuestion } from '../../utils/apps'
 
@@ -39,12 +39,13 @@ const personOf = (r) => r.display_name || r.email || r.user_id
  * (`list_apps()`, 0217). Each row is the app, how and when it was registered, where it sends people
  * back to, its client type and how many people allow it. A click or Enter opens its drawer
  * (`?app=<id>`), which lists the people who allowed it (`app_approvals()`) with Revoke for each
- * (`revoke_app_approval()`), and offers Remove App (`remove_app()`). Aber's own four apps are
- * marked and cannot be removed: they are registered again each time Aber starts.
+ * (`revoke_app_approval()`), and offers Remove App (`remove_app()`). Aber's own apps are marked
+ * and cannot be removed: they are registered again each time Aber starts.
  *
- * `drawerHost` is the element the drawer is drawn into, beside the page's card.
+ * `drawerHost` is the element the drawer is drawn into, beside the page's card. `canReadTrail` offers
+ * View Audit Trail, the app's own lane.
  */
-export function AppsSection({ showToast, drawerHost = null }) {
+export function AppsSection({ showToast, drawerHost = null, canReadTrail = false }) {
   const [apps, setApps] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -86,6 +87,7 @@ export function AppsSection({ showToast, drawerHost = null }) {
       .some(v => String(v || '').toLowerCase().includes(query))), [apps, query])
   const [shown, sort] = useSortableRows(matching, APP_SORT)
 
+  // Run from the act's dialog, which shows a refusal and stays open. Read again either way.
   const confirmAct = useCallback(async () => {
     const { act, app, person } = confirming
     const name = appLabel(app.client_name)
@@ -106,10 +108,8 @@ export function AppsSection({ showToast, drawerHost = null }) {
           { to: tabUrl('access-control', 'apps') },
         )
       }
-    } catch (err) {
-      showToast?.(err.message, 'error')
-    } finally {
       setConfirming(null)
+    } finally {
       if (act === 'revoke') readPeople(app.id)
       load()
     }
@@ -194,7 +194,13 @@ export function AppsSection({ showToast, drawerHost = null }) {
               ? 'Aber registers this app each time it starts, so it cannot be removed.'
               : 'Stop it signing anyone in. Every approval of it, and every session it holds, ends.',
           },
-        ] : []}
+          // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+          canReadTrail && {
+            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            to: trailUrl(a.id, 'APP'),
+            title: 'Open the Audit Trail filtered to this app: its registration and removal. A person allowing it is in their own history.',
+          },
+        ].filter(Boolean) : []}
       />
     )
   })()
@@ -213,7 +219,7 @@ export function AppsSection({ showToast, drawerHost = null }) {
             <ClearFilters count={query ? 1 : 0} onClear={() => setSearch('')} />
             <HelpTip
               label="About apps"
-              text="An app signs people in with their Aber account, and each person allows it once. Aber's own four are Grafana, Node-RED, Studio and the forge. Revoke one person's approval in an app's drawer, or remove an app that is not Aber's own."
+              text="An app signs people in with their Aber account, and each person allows it once. Aber's own are Grafana, Node-RED and the forge, and Studio where the site runs it. Revoke one person's approval in an app's drawer, or remove an app that is not Aber's own."
             />
           </div>
         </div>

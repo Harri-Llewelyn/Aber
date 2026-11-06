@@ -4,9 +4,11 @@ import { playbackWorkerDeployed } from '../../config'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { IconPlay, IconShieldAlert } from '../common/Icons'
 import { plural } from '../../utils/format'
 import { deviceIdKey } from '../../utils/sparkplugId'
+import { replayLanesUrl } from '../../routes'
 
 /**
  * Speeds offered, rather than a free number. Speed divides both the send schedule and the timestamp
@@ -49,8 +51,9 @@ function describeWorkerPassword(sources) {
  * re-checks the credential and the device map, and refuses any gateway that is not a shadow. The
  * captured ids come from the manifest alone, as ensure_shadow_devices() reads them. The dialog never
  * reads the file: only a download the person asks for may, and issue_capture_download() records it.
+ * `subjectName` names what was recorded, in the toast Prepare replay lanes ends with.
  */
-export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, onCancel }) {
+export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null, onConfirm, onCancel, showToast }) {
   const [targets, setTargets] = useState(null)
   const [worker, setWorker] = useState(undefined)   // undefined = not loaded, null = never reported
   // sparkplug_ids whose credential was re-issued after the worker last picked one up (#217).
@@ -134,12 +137,14 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
   /**
    * Mint the replay lanes and fill the map from what came back. The target list is refreshed
    * afterwards, because `target.devices` is what the dropdowns render and was read before these
-   * lanes existed.
+   * lanes existed. The toast counts lanes, not captured ids: two ids of one device share a lane.
    */
   const prepareLanes = () => runPrepare(async () => {
     setError(null)
     try {
       const map = await api.ensureShadowLanes(capture.id)
+      showToast?.(`${plural(new Set(Object.values(map)).size, 'replay lane')} ready for ${subjectName || capture.subject_sparkplug_id}.`,
+        'success', { to: replayLanesUrl(target.id) })
       setTargets(await api.playbackTargets())
       setDeviceMap(m => ({ ...m, ...map }))
     } catch (err) {
@@ -154,6 +159,14 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
     && target.gateway_has_broker_credential
     && (worker === undefined || !workerLive || workerHoldsCurrent(target))
     && unmapped.length === 0
+
+  // Why Play back is off, where no callout above says so already: those name a missing worker, a
+  // capture with no device list, a gateway with no credential and a worker without it.
+  const problem = ready || !deployed || capturedDevices === null ? null
+    : !target ? 'Choose the Playback gateway'
+      : !target.gateway_has_broker_credential || (workerLive && !workerHoldsCurrent(target)) ? null
+        : unmapped.length > 0 ? `${plural(unmapped.length, 'device')} still to map`
+          : null
 
   const submit = () => run(async () => {
     setError(null)
@@ -176,6 +189,7 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
         the account that publishes it, so a capture can never be played back under the identity it
         was recorded from.
       </>}
+      problem={problem}
       error={error}
       footer={
         <>
@@ -243,7 +257,7 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
       )}
 
       <div className="form-group">
-        <label className="form-label" htmlFor="playback-target">Playback gateway</label>
+        <label className="form-label" htmlFor="playback-target">Playback gateway <RequiredMark /></label>
         {targets === null && <p className="form-hint">Loading the Playback gateway…</p>}
         {targets !== null && targets.length === 0 && (
           <div className="callout callout-warning">
@@ -263,6 +277,7 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
               value={targetId}
               onChange={e => setTargetId(e.target.value)}
               disabled={pending}
+              aria-required="true"
             >
               <option value="">Choose the Playback gateway…</option>
               {targets.map(t => (
@@ -426,6 +441,7 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
                           value={deviceMap[captured] || ''}
                           onChange={e => setDeviceMap(m => ({ ...m, [captured]: e.target.value }))}
                           disabled={pending}
+                          aria-required="true"
                         >
                           <option value="">Choose a device…</option>
                           {target.devices.map(d => (

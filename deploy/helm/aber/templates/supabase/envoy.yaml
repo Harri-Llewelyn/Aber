@@ -5,6 +5,13 @@
 {{- if not $envoy }}
 {{- fail "\n\naber: files/envoy/envoy.yaml is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nEnvoy refuses to start on a config it cannot parse, so an absent one is a CrashLoopBackOff rather\nthan a silent 404 -- but the message points at a path, not at the sync step, which is why this fails here.\n" }}
 {{- end }}
+{{- /* Without Studio, the gateway has no studio listener or cluster: the template marks both. */ -}}
+{{- if not .Values.supabaseStudio.enabled }}
+{{- $envoy = regexReplaceAll "(?s)\\n *# studio:begin[^\\n]*\\n.*?\\n *# studio:end[^\\n]*" $envoy "" }}
+{{- if contains "__STUDIO_" $envoy }}
+{{- fail "\n\naber: files/envoy/envoy.yaml still names a __STUDIO_ placeholder with Studio off.\n\nThe studio listener and cluster must each sit between a `# studio:begin` and a `# studio:end` line,\nwhich the chart removes when supabaseStudio.enabled is false.\n" }}
+{{- end }}
+{{- end }}
 {{/*
 THE GATEWAY (docs/gateway.md). CI runs `check-gateway-surface.mjs --runtime --authenticated`
 against the k3d stack; to re-run it by hand:
@@ -55,6 +62,7 @@ spec:
       port: 8000
       targetPort: http
       protocol: TCP
+    {{- if .Values.supabaseStudio.enabled }}
     # STUDIO'S DOOR, and the only backend the studio ingress route may name. Pointing that route at
     # the `supabase-studio` Service instead reaches the console with no login in front of it, which
     # is what this port exists to prevent -- so the route is built from the gateway Service in
@@ -63,6 +71,7 @@ spec:
       port: 8001
       targetPort: studio
       protocol: TCP
+    {{- end }}
     # THE FORGE'S DOOR, and the only backend the gitea ingress route may name, for the reason the
     # studio port gives -- with reverse-proxy authentication on, `gitea:3000` signs in whoever a
     # request header names, so a route pointing there would let the internet pick its own identity.
@@ -108,7 +117,7 @@ spec:
         # It does NOT cover the API keys, which live in the Secret the chart may not own. Rotating
         # one needs `kubectl rollout restart deployment/supabase-envoy`.
         checksum/envoy-template: {{ $envoy | sha256sum }}
-        # And with a change to the signing set the studio and forge listeners verify with.
+        # And with a change to the signing set the API, studio and forge listeners verify with.
         checksum/signing-keys: {{ include "aber.signingChecksum" . }}
         {{- if .Values.supabaseEnvoy.metrics.enabled }}
         # The admin listener serves the scrape at /stats/prometheus, not /metrics.
@@ -188,7 +197,7 @@ spec:
               # bootstrap. Measured: Envoy refused to start.
               CORS_MATCHERS=$(printf '%s' "$ENVOY_CORS_ORIGINS" | sed 's/"\([^"]*\)"/{exact: "\1"}/g')
 
-              # The JWKS the studio and forge listeners verify session tokens against: ES256 by kid.
+              # The JWKS the API, studio and forge listeners verify tokens against: ES256 by kid.
               # sed substitutes it into a single-quoted YAML string, so it is made one line and may
               # hold no quote, backslash, ampersand or bar; a JWK never needs them. An `oct` key is
               # refused: every service behind this gateway would take a token signed with its
@@ -211,6 +220,7 @@ spec:
                   ;;
               esac
 
+              {{- if .Values.supabaseStudio.enabled }}
               # FAIL CLOSED, NOT SHUT. The chart does not publish the studio
               # listener at all by default (routes.studio is false), so an unset pair here is the
               # ordinary case rather than a misconfiguration -- and refusing to boot over it would
@@ -238,6 +248,7 @@ spec:
                 '    generic_secret:' \
                 "      secret: { inline_string: \"$STUDIO_PROXY_HMAC_SECRET\" }" \
                 > /config/studio-hmac-secret.yaml
+              {{- end }}
 
               # The forge's door, the same way. Unlike Studio's route, the gitea route is ON by
               # default, so an unset pair here is a forge nobody can sign into -- reported, and
@@ -323,10 +334,15 @@ spec:
             - name: STRICT_TRANSPORT_SECURITY
               value: {{ include "aber.strictTransportSecurity" . | quote }}
             # ------------------------------------------------------------------------------
-            # The studio listener's inputs. See the listener in files/envoy/envoy.yaml.
+            # The studio and forge listeners' inputs. See the listeners in files/envoy/envoy.yaml.
             # ------------------------------------------------------------------------------
             # What jwt_authn verifies the session token against: the JWKS of the key GoTrue signs with.
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_JWT_JWKS" "secretName" (include "aber.secretName" .) "key" "SUPABASE_JWT_JWKS") | nindent 12 }}
+            # An address the BROWSER uses -- the ingress hostname, never the in-cluster Service
+            # name, which is what the token endpoint in the config uses instead.
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ include "aber.supabaseUrl" . | quote }}
+            {{- if .Values.supabaseStudio.enabled }}
             # OPTIONAL, unlike every secret above. `routes.studio` is false by default, so most
             # installs never publish this listener and have no reason to hold its credential; a
             # required ref would fail those pods on a key nothing reads. The init container's
@@ -343,15 +359,13 @@ spec:
                   name: {{ include "aber.secretName" . }}
                   key: STUDIO_PROXY_HMAC_SECRET
                   optional: true
-            # Both are addresses the BROWSER uses -- the ingress hostnames, never the in-cluster
-            # Service names, which is what the token endpoint in the config uses instead.
-            - name: SUPABASE_PUBLIC_URL
-              value: {{ include "aber.supabaseUrl" . | quote }}
+            # The browser's address for Studio, as SUPABASE_PUBLIC_URL is for the API.
             - name: STUDIO_PUBLIC_URL
               value: {{ include "aber.studioUrl" . | quote }}
             # The name Envoy DIALS: the Service in templates/supabase/studio.yaml.
             - name: STUDIO_UPSTREAM_ADDRESS
               value: supabase-studio
+            {{- end }}
             # ------------------------------------------------------------------------------
             # The forge listener's inputs (0094). It shares the JWKS key and SUPABASE_PUBLIC_URL
             # with Studio's. OPTIONAL refs for the reason Studio's are -- an operator's existing
@@ -399,13 +413,15 @@ spec:
           ports:
             - name: http
               containerPort: 8000
-            # Studio's listener. Declared unconditionally because the bootstrap declares it
-            # unconditionally -- the port is open in the pod whether or not `ingress.routes.studio`
-            # publishes it, and a containerPort that disagreed with the config would make the pod
-            # describe itself wrongly without changing what it serves.
+            {{- if .Values.supabaseStudio.enabled }}
+            # Studio's listener, which the config has exactly when Studio is on -- whether or not
+            # `ingress.routes.studio` publishes it. A containerPort that disagreed with the config
+            # would make the pod describe itself wrongly without changing what it serves.
             - name: studio
               containerPort: 8001
-            # The forge's listener and its API listener, declared unconditionally for the same reason.
+            {{- end }}
+            # The forge's listener and its API listener, declared unconditionally: the config always
+            # has them.
             - name: forge
               containerPort: 8002
             - name: forge-api

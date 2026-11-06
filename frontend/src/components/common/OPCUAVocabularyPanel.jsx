@@ -1,4 +1,4 @@
-import { opcuaSections, dataPointTooltip } from '../../utils/opcua'
+import { opcuaSections, dataPointTooltip, dataPointId } from '../../utils/opcua'
 import { STANDARDS } from '../../utils/standards'
 
 /**
@@ -36,6 +36,7 @@ export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
     isUsed: item =>
       (item.point.semantic_id && semanticIds.has(item.point.semantic_id)) || nameSegments.has(item.name),
     tooltipFor: item => dataPointTooltip(item.point),
+    idFor: item => { const id = dataPointId(item.point); return id ? { label: 'NodeId', value: id } : null },
     metaFor: item => item.point.datatype || '',
     // Every point is a metric in its own right, unlike MTConnect where components and units are
     // name fragments rather than observations.

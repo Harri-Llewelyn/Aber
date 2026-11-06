@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useUrlState } from '../../hooks/useUrlState'
+import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { isUuid } from '../../utils/isUuid'
@@ -11,19 +11,37 @@ import { shortcutAllowed } from '../../shortcuts'
 import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag, IconChevronRight,
-  IconRecord, IconFileText, IconRefreshCw, IconGlobe, IconX
+  IconRecord, IconFileText, IconRefreshCw, IconGlobe, IconX, IconServer
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { FiltersPopover } from '../common/FiltersPopover'
+import { FilterCheck, FilterList } from '../common/FilterChecklist'
+import { TimeWindowControl } from '../common/TimeWindowControl'
 import { ListFoot } from '../common/ListFoot'
+import { ExpandAllToggle } from '../common/ExpandAllToggle'
+import { GroupHeading } from '../common/GroupHeading'
+import { OverflowText } from '../common/OverflowText'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import {
-  AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ENTITY_TYPES, ENTITY_KIND_BY_TABLE, auditTrailEntityTypesFor
+  AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_ACTION_GROUPS, AUDIT_TRAIL_ACTION_KINDS, AUDIT_TRAIL_CLASSES,
+  AUDIT_TRAIL_ENTITY_GROUPS, AUDIT_TRAIL_ENTITY_TYPES, ENTITY_KIND_BY_TABLE, ENTITY_TABLE_BY_KIND,
+  auditTrailEntityTypesFor
 } from '../../constants'
 import { useSetting } from '../../hooks/useSettings'
+import { useTimeWindow } from '../../hooks/useTimeWindow'
+import { useClockTick } from '../../hooks/useClockTick'
+import { useBandDrag } from '../../hooks/useBandDrag'
+import {
+  ALL_TIME, TIME_PRESETS, bandWindow, bandWords, calendarTicks, clockWords, timeWindow, windowBounds,
+  windowEndsWords
+} from '../../utils/timeWindow'
+import CopyableId from '../common/CopyableId'
+import { RouteLink } from '../common/RouteLink'
+import { entityUrl, identityUrl, personUrl } from '../../routes'
+import { TABS, tabIsVisible } from '../../navigation'
 
 /**
  * `actor_source` names the kind of actor; `changed_by` only says which principal it was, and is set
@@ -85,6 +103,31 @@ const DELETABLE_KINDS = new Set(
 /** Before any lookup lands, nothing is answerable. Hoisted so it is not a new Set every render. */
 const EMPTY_KINDS = new Set()
 
+/** No list filter chosen. Hoisted: useUrlList's default is compared, not copied. */
+const NONE = Object.freeze([])
+
+/** The Action filter's values, under the groups AUDIT_TRAIL_ACTION_GROUPS names. */
+const ACTION_OPTIONS = AUDIT_TRAIL_ACTION_GROUPS.flatMap(g => g.actions.map(a => ({
+  value: a, label: AUDIT_TRAIL_ACTIONS[a] || a, group: g.label,
+})))
+const ACTION_VALUES = Object.keys(AUDIT_TRAIL_ACTIONS)
+
+/**
+ * The database's map of which kinds each action is written for (0229), a row per action and kind
+ * with the classes such a row can be in. Each list offers what can occur with the other two's
+ * choices, read from these rows.
+ */
+const ACTION_ROWS = AUDIT_TRAIL_ACTION_KINDS
+  .flatMap(([action, tables, classes]) => tables.map(table => ({ action, table, classes })))
+
+/** Whether a row can occur with these choices: a table of `tables`, any of `actions` and `classes`, none being any. */
+const rowFits = (row, { tables, actions, classes }) => tables.has(row.table)
+  && (actions.length === 0 || actions.includes(row.action))
+  && (classes.length === 0 || row.classes.some(c => classes.includes(c)))
+
+/** "Cells", or "these kinds" for several: what a chosen value's note says it cannot occur with. */
+const oneOrThese = (values, name, plural) => (values.length === 1 ? name(values[0]) : `these ${plural}`)
+
 const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
 
@@ -97,49 +140,34 @@ const entityKind = (t) =>
 const NOISE_FIELDS = new Set(['updated_at', 'last_heartbeat', 'last_seen'])
 
 /**
- * Fields whose change is a governance act (what the entity is declared to be) rather than an
- * operational one. `asset_config` names the concept even though it is its own, unaudited, table.
- * `schema_id` stays for the devices rows recorded while a device carried one; the trail keeps them.
- */
-const GOVERNANCE_FIELDS = new Set([
-  'schema_id', 'asset_config', 'connection_method', 'grafana_url', 'access_url'
-])
-/* `identity_source` is deliberately absent: a device's first DBIRTH updates it alongside `status`,
-   and it is provenance written by ingestion rather than operator configuration. `name` and `icon`
-   are cosmetic, not governance. */
-
-/** The capture lane's named acts, by the marker each gets. CAPTURE_DELETED is Lifecycle. */
-const CAPTURE_CREATIONS = new Set(['CAPTURE_STARTED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED', 'PLAYBACK_STARTED'])
-const CAPTURE_OPERATIONS = new Set(['CAPTURE_STOPPED', 'CAPTURE_DOWNLOAD_ISSUED', 'PLAYBACK_STOPPED'])
-
-/**
- * The tables whose rows are acts or the files they made rather than named things: each recording,
- * capture and playback is its own lane, and two of one machine would otherwise draw the same label.
- * Their lanes carry the short id as the qualifier, as a backup job's does.
- */
-const ACT_TABLES = new Set(['capture_jobs', 'captures', 'playback_jobs'])
-
-/**
- * The four marker classes. `kind` is a CSS suffix as well as a key -- see `.trail-node-*`. Each has
- * a shape as well as a colour, so the classes stay apart without colour vision.
+ * The classes `audit_event_class()` sorts events into (0228), in the legend's order. The server
+ * names each event's class and the page draws the marker it is given. The key is a CSS suffix as
+ * well (`.trail-node-*`); each class has a shape as well as a colour, so the classes stay apart
+ * without colour vision. Mirror check 44 holds the keys to AUDIT_TRAIL_CLASSES.
  */
 export const MARKERS = {
-  creation:    { label: 'Created',       shape: 'square',   hint: 'Row created — provisioning, a first DBIRTH admitting the device, or a capture or playback begun' },
-  operational: { label: 'Operational',   shape: 'circle',   hint: 'State change — status, cell, another running-time property, or a capture stopped or downloaded' },
-  governance:  { label: 'Configuration', shape: 'diamond',  hint: 'Governance change — schema binding or declared configuration' },
-  critical:    { label: 'Lifecycle',     shape: 'triangle', hint: 'Lifecycle event — deleted, archived, deprecated, or quarantined' }
+  created:       { label: 'Created',       shape: 'square',   hint: 'Row created: provisioning, a first DBIRTH admitting the device, or a capture or playback begun' },
+  operational:   { label: 'Operational',   shape: 'circle',   hint: 'State change: status, cell, another running-time property, or a capture or playback stopped' },
+  configuration: { label: 'Configuration', shape: 'diamond',  hint: 'What an entity is declared to be: a schema bound or a configuration field, and every change to people, access or settings' },
+  lifecycle:     { label: 'Lifecycle',     shape: 'triangle', hint: 'Lifecycle event: deleted, archived, deprecated, or quarantined' },
+  read:          { label: 'Read',          shape: 'eye',      hint: 'Something read and nothing changed: a service\'s logs read, a credential shown again, a download link issued, or a device exported' }
 }
+
+/** A class the page has no marker for draws as Operational, the commonest, rather than nothing. */
+const markerOf = (e) => (MARKERS[e?.class] ? e.class : 'operational')
 
 /**
  * Each shape's outline in the 13px box `CLUSTER_GAP_PX` is measured against, sized to carry about
  * the weight of the 9px circle: the square smaller, the diamond and the triangle larger, the
- * triangle raised a little so it does not sit low on the track.
+ * triangle raised a little so it does not sit low on the track. The eye is an almond with a ring cut
+ * out round its pupil, filled even-odd.
  */
 const MARKER_PATHS = {
   circle:   'M2 6.5a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0Z',
   square:   'M2.75 2.75h7.5v7.5h-7.5Z',
   diamond:  'M6.5 1L12 6.5L6.5 12L1 6.5Z',
-  triangle: 'M6.5 0.5L12.5 11.5H0.5Z'
+  triangle: 'M6.5 0.5L12.5 11.5H0.5Z',
+  eye:      'M0.5 6.5C3 2 10 2 12.5 6.5C10 11 3 11 0.5 6.5Z M4.3 6.5a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0 -4.4 0Z M5.4 6.5a1.1 1.1 0 1 0 2.2 0a1.1 1.1 0 1 0 -2.2 0Z'
 }
 
 /**
@@ -160,8 +188,8 @@ export function TrailMarker({ kind, selected = false }) {
       aria-hidden="true"
       focusable="false"
     >
-      {selected && <path className="trail-node-ring" d={d} />}
-      <path className="trail-node-shape" d={d} />
+      {selected && <path className="trail-node-ring" d={d} fillRule="evenodd" />}
+      <path className="trail-node-shape" d={d} fillRule="evenodd" />
     </svg>
   )
 }
@@ -205,92 +233,6 @@ export function diffFields(oldData, newData) {
 }
 
 /**
- * Which marker an event gets. `audit_trail.action` holds only INSERT / UPDATE / DELETE from the
- * trigger, so archiving, quarantining and a schema rebinding are derived from the diff.
- * SCHEMA_REJECTION is written by `record_ingestion_rejection()` with no diff, so the action itself
- * decides: governance, not critical. An INSERT is always creation, even of an already-quarantined
- * device, except a `device_submodels` row, which is a schema binding and governance whatever its
- * verb.
- */
-export function classifyEvent(event, diff) {
-  const action = String(event.event_type || event.action || '').toUpperCase()
-
-  // `audit_domain` is stamped at insert time; a security row is governance whatever its verb.
-  // Optional, because fixtures and older page states supply rows without it, which fall through to
-  // the derivation.
-  if (event.audit_domain === 'security') return 'governance'
-
-  if (action === 'SCHEMA_REJECTION') return 'governance'
-  // TOKEN_MINTED and TOKEN_REVOKED record who may reach the stack: governance, not creation and not
-  // critical. Named explicitly because rows without `audit_domain` still arrive.
-  if (action === 'TOKEN_MINTED' || action === 'TOKEN_REVOKED') return 'governance'
-  // The same argument, arriving from `user_roles`. A revocation is not `critical`: that
-  // marker is for an entity's lifecycle, and nothing on the shopfloor ended here.
-  if (action === 'ROLE_GRANTED' || action === 'ROLE_REVOKED') return 'governance'
-  // The capture lane's acts (0193). Each start makes the row its lane is about, so it is a
-  // creation; a deletion is the capture's lifecycle; a stop or a download link is operational.
-  if (CAPTURE_CREATIONS.has(action)) return 'creation'
-  if (action === 'CAPTURE_DELETED') return 'critical'
-  if (CAPTURE_OPERATIONS.has(action)) return 'operational'
-  // A device_submodels row is a schema binding: attaching or detaching one is a governance act,
-  // not a creation or a deletion of the device.
-  if (String(event.entity_type || '').toLowerCase() === 'device_submodels') return 'governance'
-  if (action === 'DELETE') return 'critical'
-  if (action === 'INSERT') return 'creation'
-
-  const changed = new Set(diff.map(d => d.field))
-  const roseTo = (field) => changed.has(field) && event.new_data?.[field] === true
-  // `deprecated` is a metric's retirement, as `is_archived` is an entity's.
-  if (roseTo('is_archived') || roseTo('is_quarantined') || roseTo('deprecated')) return 'critical'
-
-  for (const field of changed) if (GOVERNANCE_FIELDS.has(field)) return 'governance'
-  return 'operational'
-}
-
-/**
- * The range presets; `ms` of null is unbounded. The short presets exist because an act happens
- * inside a second, and a date-only picker could not frame one.
- */
-const TIME_PRESETS = [
-  { value: 'all', label: 'All time',       ms: null },
-  { value: '15m', label: 'Last 15 minutes', ms: 15 * 60 * 1000 },
-  { value: '1h',  label: 'Last 1 hour',     ms: 60 * 60 * 1000 },
-  { value: '24h', label: 'Last 24 hours',   ms: 24 * 60 * 60 * 1000 },
-  { value: '7d',  label: 'Last 7 days',     ms: 7 * 24 * 60 * 60 * 1000 },
-  { value: '30d', label: 'Last 30 days',    ms: 30 * 24 * 60 * 60 * 1000 }
-]
-
-/**
- * The preset or custom dates as the `since` / `until` the API takes. All time is the default: most
- * arrivals are a handover for one entity whose last edit may be years old. Called at fetch time
- * rather than memoised, so a rolling window does not drift while the poll runs.
- */
-export function timeWindow(preset, customStart, customEnd) {
-  /**
-   * A custom bound as an ISO instant. Accepts `YYYY-MM-DDTHH:mm` from `datetime-local` and
-   * `YYYY-MM-DD` from the older date input, which names a day and is widened to one end of it.
-   * Parsed as local time: appending `Z` or using toISOString() would shift the window by the
-   * timezone offset.
-   */
-  const iso = (value, endOfRange) => {
-    if (!value) return ''
-    const hasTime = String(value).includes('T')
-    const d = hasTime
-      ? new Date(value)
-      : new Date(`${value}T${endOfRange ? '23:59:59.999' : '00:00:00.000'}`)
-    if (Number.isNaN(d.getTime())) return ''
-    // Minute granularity: an end bound of 16:11 must include 16:11:59.
-    if (hasTime && endOfRange) d.setSeconds(59, 999)
-    return d.toISOString()
-  }
-
-  if (preset === 'custom') return { since: iso(customStart, false), until: iso(customEnd, true) }
-
-  const ms = TIME_PRESETS.find(p => p.value === preset)?.ms
-  return { since: ms ? new Date(Date.now() - ms).toISOString() : '', until: '' }
-}
-
-/**
  * The fallback for the `ui.audit_trail_poll_seconds` setting, whose `fallback_source` names this
  * constant.
  */
@@ -301,6 +243,40 @@ const DEFAULT_POLL_SECONDS = 60
  * the page size, so a larger page only costs; paging is the answer, not a bigger page.
  */
 const PAGE_SIZE = 200
+
+/**
+ * The most events a bounded window loads by itself, page after page. Each page is a request that
+ * scans the whole match, and every event is a marker the timeline lays out and clusters, so a busy
+ * month stops here rather than at its start; Show more goes on from there.
+ */
+export const WINDOW_EVENT_CAP = 2000
+
+/** The narrowest hatched part that says what it is in words; a narrower one is hatched alone. */
+const SHADE_WORDS_PX = 150
+/** The narrowest that also says the cap stopped the loading. */
+const SHADE_CAP_WORDS_PX = 330
+
+/** Which sections this browser's viewer closed, by kind. Not in the address: a link opens them all. */
+export const CLOSED_SECTIONS_KEY = 'aber_audit_trail_closed_sections'
+
+/** The closed sections, or none where storage is refused or holds something else. */
+function readClosedSections() {
+  try {
+    const kinds = JSON.parse(window.localStorage.getItem(CLOSED_SECTIONS_KEY) || '[]')
+    return new Set(Array.isArray(kinds) ? kinds.filter(k => typeof k === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeClosedSections(kinds) {
+  try {
+    if (kinds.size) window.localStorage.setItem(CLOSED_SECTIONS_KEY, JSON.stringify([...kinds]))
+    else window.localStorage.removeItem(CLOSED_SECTIONS_KEY)
+  } catch {
+    // Refused storage: the sections open again on the next visit, which is the default anyway.
+  }
+}
 
 /**
  * Fold a freshly polled first page into the pages already loaded. The trail is append-only and
@@ -319,7 +295,7 @@ export function mergeFirstPage (prev, fresh) {
 }
 
 /* Markers too close to draw separately become one badge carrying the count. Grouping is by pixel
-   distance, so the range control acts as a zoom, and positions are never nudged along the time
+   distance, so the time window acts as a zoom, and positions are never nudged along the time
    axis: identical timestamps are the visual signature of one transaction. See the Audit Trail
    notes in frontend/README.md. */
 
@@ -375,6 +351,12 @@ export function clusterEvents(events, xOf, trackWidth) {
 }
 
 /**
+ * The timeline's band drag (hooks/useBandDrag.js): a press on the axis or an empty part of a track,
+ * never on a marker or a badge, so the marker still opens. Measured inside each track's 14px ends.
+ */
+const TRAIL_BAND = { track: '.trail-track', skip: '.trail-node, .trail-cluster', inset: 14 }
+
+/**
  * The hover text on a cluster badge: a breakdown by classification in legend order, then whether
  * the members share a `causation_id` (one act) or merely a timestamp.
  */
@@ -405,7 +387,7 @@ export function clusterSummary(events, kindOf) {
         : `${first} → ${last}`
 
   return `${events.length} events: ${breakdown}\n${when}\n`
-       + 'Click to open the first — narrow the time range to separate them'
+       + 'Click to open the first — narrow the time window to separate them'
 }
 
 /** A lane's key: the stored kind and the entity, so a device, its nameplate and its schemas are three lanes. */
@@ -470,6 +452,15 @@ function StepButton({ label, glyph, glyphAfter = false, keyName, tip, atEnd, onS
   )
 }
 
+/** The kinds with a page of their own, as `entityUrl` names them, and that page's name. */
+const ENTITY_PAGES = {
+  AREA:    { type: 'area',    page: 'Areas' },
+  CELL:    { type: 'cell',    page: 'Cells' },
+  GATEWAY: { type: 'gateway', page: 'Gateways' },
+  DEVICE:  { type: 'device',  page: 'Devices' },
+  SCHEMA:  { type: 'schema',  page: 'Schemas' },
+}
+
 /** The icon for a kind with no section of its own — the raw kind, which `ENTITY_KIND` made legible. */
 const FALLBACK_SECTION_ICON = IconHistory
 
@@ -489,7 +480,8 @@ const SECTION_ICONS = {
   SETTING:            IconSettings,
   RECORDING:          IconRecord,
   CAPTURE:            IconFileText,
-  PLAYBACK:           IconRefreshCw
+  PLAYBACK:           IconRefreshCw,
+  'SERVICE LOGS':     IconServer
 }
 
 /**
@@ -594,6 +586,39 @@ const CATEGORY_IDENTITY_FIELDS = new Set(['origin'])
 const ORIGIN_LABELS = { requested: 'On request', scheduled: 'Scheduled' }
 
 /**
+ * The kinds whose entity is one act, named by its subject: a machine is recorded and played back
+ * many times, so each lane's qualifier says when that one began.
+ */
+const ACT_TABLES = new Set(['capture_jobs', 'captures', 'playback_jobs'])
+
+/**
+ * When an act began: a stored capture's `recorded_at`, else its lane's first event. A recording or
+ * a playback starts with its own event (Recording started, Playback started), so that is its start
+ * unless the window began after it.
+ */
+export function actStartedAt(laneEvents) {
+  for (const e of laneEvents) {
+    const recorded = Date.parse(e?.new_data?.recorded_at ?? e?.old_data?.recorded_at ?? '')
+    if (Number.isFinite(recorded)) return recorded
+  }
+  const stamps = laneEvents.map(e => Date.parse(e.timestamp)).filter(Number.isFinite)
+  return stamps.length ? Math.min(...stamps) : null
+}
+
+/**
+ * An act's start as its lane shows it: the clock alone within a window of a day or less, else the
+ * date and the clock, with the year when it is not this one's. `seconds` for two acts of one
+ * subject that began in the same minute.
+ */
+export function startedWords(ms, { withinDay = false, seconds = false } = {}) {
+  const d = new Date(ms)
+  const clock = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) })
+  if (withinDay) return clock
+  const thisYear = d.getFullYear() === new Date().getFullYear()
+  return `${d.toLocaleDateString([], { day: 'numeric', month: 'short', ...(thisYear ? {} : { year: 'numeric' }) })} ${clock}`
+}
+
+/**
  * The identity an audit row carries in its payload, for an entity the lookups cannot name -- one
  * deleted, or of a kind nothing looks up. Both snapshots are checked because an INSERT has only
  * `new_data` and a DELETE only `old_data`.
@@ -625,11 +650,8 @@ export function snapshotIdentity(event) {
       return { label: ORIGIN_LABELS[value] || String(value), field: 'origin' }
     }
 
-    // A recording, capture or playback is named by its subject, and one machine has many.
-    if (ACT_TABLES.has(String(event?.entity_type || '').toLowerCase())) {
-      return { label: String(value), qualifier: shortId(event.entity_id), field }
-    }
-
+    // A recording, capture or playback is named by its subject, as a machine has many. Their
+    // lanes then share a name, and the label's tooltip holds the id that tells them apart.
     return { label: String(value), field }
   }
 
@@ -724,6 +746,20 @@ const shownAfter = (action, d) =>
       ? d.after.name
       : formatValue(d.after)
 
+/**
+ * The rows the drawer's table draws. A Logs read over a fixed window stores its two ends in UTC;
+ * they are one `window` row here, in local time, as the Logs tab chose them. The payload below and
+ * the CSV export keep the stored values.
+ */
+const shownRows = (action, diff) => {
+  if (action !== 'SERVICE_LOGS_READ') return diff
+  const ends = Object.fromEntries(diff.filter(d => d.field === 'from' || d.field === 'to').map(d => [d.field, d.after]))
+  const words = windowEndsWords(ends.from, ends.to)
+  if (!words) return diff
+  return [...diff.filter(d => d.field !== 'from' && d.field !== 'to'), { field: 'window', before: undefined, after: words }]
+    .sort((a, b) => (a.field < b.field ? -1 : a.field > b.field ? 1 : 0))
+}
+
 const EmptyValue = ({ label }) => <span className="trail-diff-empty">{label}</span>
 
 /**
@@ -745,46 +781,44 @@ export function causationSiblings(event, events) {
 }
 
 /**
- * Rendered whenever the row carries a transaction, siblings or not. Two numbers decide what it
+ * Rendered when the act wrote something besides this row, or may have. Two numbers decide what it
  * says: `event.transaction_rows`, how many rows the transaction wrote, counted by
  * audit_trail_page() over the whole table; and `siblings`, drawn from the loaded,
- * filtered set. One row, and there is nothing to offer; every row loaded, and the list is
- * complete; rows missing, how many, and the control that loads them. Without the count (a row
- * from a response that lacks it) the section hedges instead, because a group whose other members
- * are outside the filter then looks identical to a single-row act.
+ * filtered set. A count of one is an act that wrote this row alone, and draws nothing; every row
+ * loaded, and the list is complete; rows missing, how many, and the control that loads them.
+ * Without the count (a row from a response that lacks it) the section hedges instead, because a
+ * group whose other members are outside the filter then looks identical to a single-row act.
  *
  * `isolated` means the search already IS this transaction, so the control would do what has been
- * done; rows still missing then are on pages not yet fetched.
+ * done; rows still missing then are on pages not yet fetched, and with none loaded and no count
+ * the act wrote this row alone.
  */
 function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransaction, isolated }) {
   if (!event?.causation_id) return null
 
   const known = Number.isFinite(event.transaction_rows)
   const loaded = siblings.length
+  if (known ? event.transaction_rows <= 1 : (isolated && loaded === 0)) return null
   // The other rows the act wrote, and how many of them are not on this page.
-  const others = known ? Math.max(0, event.transaction_rows - 1) : null
+  const others = known ? event.transaction_rows - 1 : null
   const missing = known ? Math.max(0, others - loaded) : null
 
   const some = (n) => (n === 1 ? 'One other change' : `${n} other changes`)
   const hint = !known
     ? (isolated
-        ? (loaded === 0
-            ? 'Nothing else was written by this act.'
-            : `${some(loaded)} written by this act, and this is all of them.`)
+        ? `${some(loaded)} written by this act, and this is all of them.`
         : (loaded === 0
             ? 'Nothing else written by this act is loaded — which is not the same as there '
               + 'being nothing else.'
             : `${some(loaded)} ${loaded === 1 ? 'was' : 'were'} written by the same act. `
               + 'Limited to the events currently loaded and filtered.'))
-    : (others === 0
-        ? 'Nothing else was written by this act.'
-        : missing === 0
-          ? `${some(others)} written by this act, and this is all of them.`
-          : `${some(others)} ${others === 1 ? 'was' : 'were'} written by this act. `
-            + `${missing === 1 ? 'One' : missing} of them ${missing === 1 ? 'is' : 'are'} not loaded: `
-            + (isolated
-                ? 'on a page not yet fetched.'
-                : 'outside the current filters, or on a page not yet fetched.'))
+    : (missing === 0
+        ? `${some(others)} written by this act, and this is all of them.`
+        : `${some(others)} ${others === 1 ? 'was' : 'were'} written by this act. `
+          + `${missing === 1 ? 'One' : missing} of them ${missing === 1 ? 'is' : 'are'} not loaded: `
+          + (isolated
+              ? 'on a page not yet fetched.'
+              : 'outside the current filters, or on a page not yet fetched.'))
 
   // Offered when there is something to load. Not once the search is this transaction: a control
   // that would do what has been done reads as though it might do something more.
@@ -878,12 +912,13 @@ function EventDiff({ event, diff }) {
   const action = String(event.event_type || event.action || '').toUpperCase()
   const captureAct = CAPTURE_ACT_LABELS[action] || APP_ACT_LABELS[action]
   // These acts are one-sided (INSERT, DELETE, SCHEMA_REJECTION, TOKEN_MINTED, BACKUP_REQUESTED,
-  // BACKUP_TAKEN, PERSON_ADDED, PASSWORD_SET, SESSIONS_ENDED, MFA_RESET, the capture and app acts): `old_data`
+  // BACKUP_TAKEN, PERSON_ADDED, PASSWORD_SET, SESSIONS_ENDED, MFA_RESET, SERVICE_LOGS_READ, the capture and app acts): `old_data`
   // is NULL by construction, and a Previous column would invite a search for a prior state that does not exist.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
     || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'
     || action === 'PERSON_ADDED' || action === 'PASSWORD_SET' || action === 'SESSIONS_ENDED'
-    || action === 'MFA_RESET' || Boolean(captureAct)
+    || action === 'MFA_RESET' || action === 'SERVICE_LOGS_READ' || Boolean(captureAct)
+  const rows = shownRows(action, diff)
 
   return (
     <div className="trail-diff">
@@ -901,13 +936,14 @@ function EventDiff({ event, diff }) {
               : action === 'PASSWORD_SET' ? 'Password set'
               : action === 'SESSIONS_ENDED' ? 'Sessions ended'
               : action === 'MFA_RESET' ? 'MFA reset'
+              : action === 'SERVICE_LOGS_READ' ? 'Logs read'
                 // Two-sided, unlike TOKEN_MINTED: a revocation carries the original mint in
                 // `old_data` so the row stays readable after the denylist entry is pruned.
                 : action === 'TOKEN_REVOKED' ? 'Token withdrawn'
                   : 'Changed properties'}
       </div>
 
-      {diff.length === 0 ? (
+      {rows.length === 0 ? (
         /* Either an UPDATE whose only changed column was on the noise denylist, or a row without
            snapshots. Neither is an error. */
         <div className="trail-diff-none">
@@ -937,7 +973,7 @@ function EventDiff({ event, diff }) {
             </tr>
           </thead>
           <tbody>
-            {diff.map(d => {
+            {rows.map(d => {
               const before = formatValue(d.before)
               const after  = shownAfter(action, d)
               return (
@@ -1006,15 +1042,19 @@ export function AuditTrailTab({ userRole, showToast }) {
   // deleted and hidden. Narrower than the constant whenever a tolerated lookup failed.
   const [loadedKinds, setLoadedKinds] = useState(EMPTY_KINDS)
   const [loading, setLoading]         = useState(true)
-  const [entityTypeFilter, setEntityTypeFilter] = useUrlState('type', '', { allowed: entityTypes.map(e => e.kind) })
+  // The three list filters, each any of its values (`?type=GATEWAY,DEVICE`); one value from an
+  // older link is a list of one. The kinds offered are the role's.
+  const [entityTypeFilter, setEntityTypeFilter] = useUrlList('type', NONE, { allowed: entityTypes.map(e => e.kind) })
   const [nameFilter, setNameFilter]   = useUrlState('search')
-  const [actionFilter, setActionFilter] = useUrlState('action', '', { allowed: Object.keys(AUDIT_TRAIL_ACTIONS) })
-  // Whose changes: the user id the trail stamps in `changed_by`, a person's or a machine identity's.
+  const [actionFilter, setActionFilter] = useUrlList('action', NONE, { allowed: ACTION_VALUES })
+  // Whose changes: the user ids the trail stamps in `changed_by`, people's or machine identities'.
   // Any id is kept, listed or not: the database's policies decide which of their rows come back.
-  const [changedBy, setChangedBy] = useUrlState('changed_by', '', { allowed: isUuid })
-  const [rangePreset, setRangePreset] = useUrlState('range', 'all', { allowed: [...TIME_PRESETS.map(p => p.value), 'custom'] })
-  const [customStart, setCustomStart] = useUrlState('since')
-  const [customEnd, setCustomEnd]     = useUrlState('until')
+  const [changedBy, setChangedBy] = useUrlList('changed_by', NONE, { allowed: isUuid })
+  // The classes the legend's toggles choose (`?class=lifecycle,read`), any of them; none is all.
+  const [classFilter, setClassFilter] = useUrlList('class', NONE, { allowed: AUDIT_TRAIL_CLASSES })
+  // All time is the default: most arrivals are a handover for one entity whose last edit may be
+  // years old, and any window would answer that with an empty timeline.
+  const [timeWin, setTimeWin] = useTimeWindow({ ranges: TIME_PRESETS, allTime: true, fallback: ALL_TIME })
   const [devices, setDevices]         = useState([])
   const [gateways, setGateways]       = useState([])
   const [cells, setCells]             = useState([])
@@ -1149,12 +1189,26 @@ export function AuditTrailTab({ userRole, showToast }) {
     return { people, machines: [...machines].map(([id, label]) => ({ id, label })).sort(byLabel) }
   }, [userAccounts, machinePrincipals])
 
-  /** The chosen actor as the chip and the list say them, or the id where nothing here names them. */
-  const changedByName = changedBy
-    ? ([...actorOptions.people, ...actorOptions.machines].find(o => o.id === changedBy)?.label || changedBy)
-    : ''
-  const changedByListed = !changedBy
-    || [...actorOptions.people, ...actorOptions.machines].some(o => o.id === changedBy)
+  /** A chosen actor as the chip and the list say them, or the id where nothing here names them. */
+  const actorName = (id) =>
+    [...actorOptions.people, ...actorOptions.machines].find(o => o.id === id)?.label || id
+  /** What the chip says: the one actor, or the first and how many more. */
+  const changedByWords = changedBy.length === 0 ? ''
+    : changedBy.length === 1 ? actorName(changedBy[0])
+      : `${actorName(changedBy[0])} and ${changedBy.length - 1} more`
+
+  /**
+   * Changed by's values: People, then Machine identities, then any id from a link that neither list
+   * holds, so the list still shows it.
+   */
+  const changedByOptions = useMemo(() => {
+    const listed = new Set([...actorOptions.people, ...actorOptions.machines].map(o => o.id))
+    return [
+      ...actorOptions.people.map(o => ({ value: o.id, label: o.label, group: 'People' })),
+      ...actorOptions.machines.map(o => ({ value: o.id, label: o.label, group: 'Machine identities' })),
+      ...changedBy.filter(id => !listed.has(id)).map(id => ({ value: id, label: id, group: 'Not listed' })),
+    ]
+  }, [actorOptions, changedBy])
 
   // Deleted entities: in the log, absent from every live table. The list endpoints do not filter
   // `is_archived`, so absent means gone rather than retired. The server counts them over everything
@@ -1165,6 +1219,61 @@ export function AuditTrailTab({ userRole, showToast }) {
   const [totalMatching, setTotalMatching] = useState(null)
   // Whether the row limit bit, which the page cannot tell otherwise.
   const [truncated, setTruncated] = useState(false)
+  // Each class's, kind's and action's events under every filter but its own, from the first page and
+  // the poll: `{ class, entity_type, action }`, or null where the response carried none.
+  const [counts, setCounts] = useState(null)
+
+  /** Entity's counts by kind (the server keys them by table) and Action's, or undefined before any. */
+  const kindCounts = useMemo(() => (counts?.entity_type
+    ? Object.fromEntries(Object.entries(counts.entity_type).map(([t, n]) => [ENTITY_KIND_BY_TABLE[t] || t, n]))
+    : undefined), [counts])
+  const actionCounts = counts?.action || undefined
+
+  /**
+   * What each list offers: a value that can occur with the other lists' choices, by the map; one
+   * that did occur, which the counts show; and one that is chosen. A chosen value that can do
+   * neither stays, with a note saying what it cannot occur with, so the empty timeline explains
+   * itself. With nothing chosen in Entity, an action is one this role's kinds can have.
+   */
+  const allowedTables = useMemo(() => new Set(entityTypes.map(e => e.table)), [entityTypes])
+  const chosenTables = useMemo(
+    () => new Set(entityTypeFilter.map(k => ENTITY_TABLE_BY_KIND[k]).filter(Boolean)), [entityTypeFilter])
+
+  /** Entity's values: the kinds this role may ask for, under the groups the timeline's sections fall in. */
+  const kindOptions = useMemo(() => {
+    const fits = new Set(ACTION_ROWS
+      .filter(r => rowFits(r, { tables: allowedTables, actions: actionFilter, classes: classFilter }))
+      .map(r => r.table))
+    const note = (table) => (
+      actionFilter.length && !ACTION_ROWS.some(r => r.table === table && actionFilter.includes(r.action))
+        ? `not with ${oneOrThese(actionFilter, a => AUDIT_TRAIL_ACTIONS[a] || a, 'actions')}`
+        : `never ${oneOrThese(classFilter, c => MARKERS[c].label, 'classes')}`)
+    return AUDIT_TRAIL_ENTITY_GROUPS.flatMap(g => entityTypes
+      .filter(e => e.group === g.id)
+      .filter(e => fits.has(e.table) || (kindCounts?.[e.kind] ?? 0) > 0 || entityTypeFilter.includes(e.kind))
+      .map(e => ({
+        value: e.kind, label: e.label, group: g.label,
+        ...(fits.has(e.table) || (kindCounts?.[e.kind] ?? 0) > 0 ? {} : { note: note(e.table) }),
+      })))
+  }, [entityTypes, allowedTables, actionFilter, classFilter, kindCounts, entityTypeFilter])
+
+  /** Action's values, under their groups, narrowed by the kinds and the classes chosen. */
+  const actionOptions = useMemo(() => {
+    const tables = chosenTables.size ? chosenTables : allowedTables
+    const fits = new Set(ACTION_ROWS
+      .filter(r => rowFits(r, { tables, actions: NONE, classes: classFilter }))
+      .map(r => r.action))
+    const kindLabel = (table) => AUDIT_TRAIL_ENTITY_TYPES.find(e => e.table === table)?.label || table
+    const note = (action) => (
+      chosenTables.size && !ACTION_ROWS.some(r => r.action === action && chosenTables.has(r.table))
+        ? `not with ${oneOrThese([...chosenTables], kindLabel, 'kinds')}`
+        : !ACTION_ROWS.some(r => r.action === action && allowedTables.has(r.table))
+          ? 'not in a lane you can read'
+          : `never ${oneOrThese(classFilter, c => MARKERS[c].label, 'classes')}`)
+    return ACTION_OPTIONS
+      .filter(o => fits.has(o.value) || (actionCounts?.[o.value] ?? 0) > 0 || actionFilter.includes(o.value))
+      .map(o => (fits.has(o.value) || (actionCounts?.[o.value] ?? 0) > 0 ? o : { ...o, note: note(o.value) }))
+  }, [chosenTables, allowedTables, classFilter, actionCounts, actionFilter])
 
   /**
    * How many deleted entities the current filters cover. The server's count wins; a response without
@@ -1232,13 +1341,16 @@ export function AuditTrailTab({ userRole, showToast }) {
 
   const buildUrl = useCallback((cursor) => {
     let url = `/api/v1/audit-trail?limit=${PAGE_SIZE}`
-    if (entityTypeFilter) url += `&entity_type=${encodeURIComponent(entityTypeFilter)}`
-    if (actionFilter)     url += `&action=${encodeURIComponent(actionFilter)}`
-    if (changedBy)        url += `&changed_by=${encodeURIComponent(changedBy)}`
+    // Each list as one comma-separated parameter, which api.js sends as an array.
+    if (entityTypeFilter.length) url += `&entity_type=${encodeURIComponent(entityTypeFilter.join(','))}`
+    if (actionFilter.length)     url += `&action=${encodeURIComponent(actionFilter.join(','))}`
+    if (changedBy.length)        url += `&changed_by=${encodeURIComponent(changedBy.join(','))}`
+    if (classFilter.length)      url += `&class=${encodeURIComponent(classFilter.join(','))}`
+    // The counts come with the first page; a later one cannot change them.
+    if (!cursor)                 url += '&counts=true'
     if (search)           url += `&search=${encodeURIComponent(search)}`
-    // Evaluated here, not held in state: see timeWindow's note on a rolling window going stale
-    // under auto-refresh.
-    const { since, until } = timeWindow(rangePreset, customStart, customEnd)
+    // Measured at fetch time, so a rolling window or today does not go stale under the poll.
+    const { since, until } = timeWindow(timeWin)
     if (since) url += `&since=${encodeURIComponent(since)}`
     if (until) url += `&until=${encodeURIComponent(until)}`
     if (showPurged) url += '&include_purged=true'
@@ -1249,14 +1361,34 @@ export function AuditTrailTab({ userRole, showToast }) {
       url += `&before_id=${encodeURIComponent(cursor.id)}`
     }
     return url
-  }, [entityTypeFilter, actionFilter, changedBy, search, rangePreset, customStart, customEnd, showPurged])
+  }, [entityTypeFilter, actionFilter, changedBy, classFilter, search, timeWin, showPurged])
+
+  /** When the loaded events were asked for: where a rolling window, or today, is measured from. */
+  const [askedAt, setAskedAt] = useState(() => Date.now())
+
+  /**
+   * Bumped whenever the loaded list is replaced, by a new filter or by a poll that starts it again.
+   * A page asked for before that belongs to the old list, and is dropped when it lands.
+   */
+  const listGen = useRef(0)
+  /** Set when a page the trail asked for by itself failed or added nothing, so it stops asking. */
+  const [pagingHalted, setPagingHalted] = useState(false)
 
   const load = useCallback((isInitial = false) => {
-    if (isInitial) setLoading(true)
+    if (isInitial) {
+      listGen.current += 1
+      setLoading(true)
+      setLoadingMore(false)
+      setPagingHalted(false)
+    }
+    const gen = listGen.current
+    const asked = Date.now()
     api.get(buildUrl(null))
       // `d` is the event array carrying the page-level counts as properties. A fixture that
       // resolves a bare array reports no deleted entities and no truncation.
       .then(d => {
+        if (gen !== listGen.current) return
+        setAskedAt(asked)
         const fresh = Array.isArray(d) ? d : []
         // The poll merges into the loaded pages rather than replacing them: a reader six pages back
         // must not lose five of them every minute.
@@ -1269,15 +1401,21 @@ export function AuditTrailTab({ userRole, showToast }) {
         // facts about everything the filters select, so a poll's answer is the current one whether
         // or not it replaced the list.
         setTotalMatching(typeof d?.totalMatching === 'number' ? d.totalMatching : null)
+        setCounts(d?.counts && typeof d.counts === 'object' ? d.counts : null)
         // Only when the list was replaced. After a merge the cursor still points past the oldest
         // row held.
         if (reset) {
+          if (!isInitial) {
+            listGen.current += 1
+            setLoadingMore(false)
+            setPagingHalted(false)
+          }
           setNextCursor(d?.nextCursor || null)
           setTruncated(Boolean(d?.truncated))
         }
         setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch(() => { if (gen === listGen.current) setLoading(false) })
   }, [buildUrl])
 
   /**
@@ -1286,57 +1424,76 @@ export function AuditTrailTab({ userRole, showToast }) {
    */
   const loadMore = useCallback(() => {
     if (!nextCursor || loadingMore) return
+    const gen = listGen.current
     setLoadingMore(true)
     api.get(buildUrl(nextCursor))
       .then(d => {
+        if (gen !== listGen.current) return
         const page = Array.isArray(d) ? d : []
+        const held = new Set(allEventsRef.current.map(e => e.event_id))
+        const added = page.filter(e => !held.has(e.event_id))
         setAllEvents(prev => {
           const seen = new Set(prev.map(e => e.event_id))
           return [...prev, ...page.filter(e => !seen.has(e.event_id))]
         })
         setNextCursor(d?.nextCursor || null)
         setTruncated(Boolean(d?.truncated))
+        // A page that adds nothing yet names another would have the window's loop ask forever.
+        if (added.length === 0 && d?.nextCursor) setPagingHalted(true)
         // `purgedAssets` and `totalMatching` are counted over the whole match, so page one's
         // answer already stands and the poll keeps it current.
         setLoadingMore(false)
       })
-      .catch(() => setLoadingMore(false))
+      .catch(() => {
+        if (gen !== listGen.current) return
+        setLoadingMore(false)
+        setPagingHalted(true)
+      })
   }, [nextCursor, loadingMore, buildUrl])
 
-  const rangeIsFiltering =
-    rangePreset === 'custom' ? !!(customStart || customEnd) : rangePreset !== 'all'
+  const rangeIsFiltering = timeWin.kind !== 'all'
 
-  /** The controls in the Filters popover that are off their default; its own Clear resets them. */
-  const popoverFilterCount = (entityTypeFilter ? 1 : 0) + (actionFilter ? 1 : 0) + (changedBy ? 1 : 0)
+  /**
+   * The controls in the Filters popover that are off their default; its own Clear resets them.
+   * Showing deleted entities is the deviation, so Clear returns them to hidden.
+   */
+  const popoverFilterCount = (entityTypeFilter.length ? 1 : 0) + (actionFilter.length ? 1 : 0) +
+    (changedBy.length ? 1 : 0) + (showPurged ? 1 : 0)
 
-  const activeFilterCount = popoverFilterCount + (nameFilter ? 1 : 0) +
-    // Showing deleted entities is the deviation, so Clear filters returns them to hidden.
-    (rangeIsFiltering ? 1 : 0) + (showPurged ? 1 : 0)
+  const activeFilterCount = popoverFilterCount + (nameFilter ? 1 : 0) + (rangeIsFiltering ? 1 : 0)
+    + (classFilter.length ? 1 : 0)
 
-  const clearPopoverFilters = () => { setEntityTypeFilter(''); setActionFilter(''); setChangedBy('') }
+  const clearPopoverFilters = () => {
+    setEntityTypeFilter([]); setActionFilter([]); setChangedBy([]); setShowPurged(false)
+  }
 
   /**
    * Load every row one transaction wrote, by searching its id.
    *
-   * The entity and action filters are cleared because one act crosses both: an approval writes an
-   * UPDATE on the entity it changed and a PROPOSAL_APPLIED row, and either filter would hide half
-   * of it. Changed by is cleared too, so a row another actor wrote in the transaction is not
+   * The entity, action and class filters are cleared because one act crosses all three: an approval
+   * writes an UPDATE on the entity it changed and a PROPOSAL_APPLIED row, and any of them would hide
+   * half of it. Changed by is cleared too, so a row another actor wrote in the transaction is not
    * hidden. Deleted entities are shown for the same reason: a delete's own row is about an entity
-   * no live table holds, and `transaction_rows` counts it. The time range is kept: the rows share
-   * one `recorded_at`, so a range holding this event holds its siblings.
+   * no live table holds, and `transaction_rows` counts it. The time window is kept: the rows share
+   * one `recorded_at`, so a window holding this event holds its siblings.
    */
   const showWholeTransaction = (causationId) => {
     setNameFilter(String(causationId))
-    setEntityTypeFilter('')
-    setActionFilter('')
-    setChangedBy('')
+    setEntityTypeFilter([])
+    setActionFilter([])
+    setClassFilter([])
+    setChangedBy([])
     setShowPurged(true)
   }
 
   const resetFilters = () => {
-    setEntityTypeFilter(''); setNameFilter(''); setActionFilter(''); setChangedBy('')
-    setRangePreset('all'); setCustomStart(''); setCustomEnd(''); setShowPurged(false)
+    setEntityTypeFilter([]); setNameFilter(''); setActionFilter([]); setChangedBy([]); setClassFilter([])
+    setTimeWin(ALL_TIME); setShowPurged(false)
   }
+
+  /** A legend toggle: its class added to the chosen ones, or taken away. None chosen is every class. */
+  const toggleClass = (kind) => setClassFilter(
+    AUDIT_TRAIL_CLASSES.filter(c => (c === kind ? !classFilter.includes(c) : classFilter.includes(c))))
 
   useEffect(() => {
     load(true)
@@ -1355,12 +1512,24 @@ export function AuditTrailTab({ userRole, showToast }) {
     return () => clearInterval(timer)
   }, [load, pollSeconds])
 
-  /** event_id -> { diff, kind }. Computed once per fetch; both the markers and the CSV read it. */
+  /**
+   * A bounded window loads every event in it, a page at a time, until no page is left or the cap
+   * is reached; All time loads a page and offers Show more. Each page runs this again, as it moves
+   * the cursor and `loadingMore`.
+   */
+  const boundedWindow = timeWin.kind !== 'all'
+  const capReached = allEvents.length >= WINDOW_EVENT_CAP
+  const windowPaging = boundedWindow && !!nextCursor && !pagingHalted && !capReached
+  useEffect(() => {
+    if (windowPaging && !loading && !loadingMore) loadMore()
+  }, [windowPaging, loading, loadingMore, loadMore])
+
+  /** event_id -> { diff, kind }: the diff the drawer and the CSV read, and the class the server named. */
   const analysis = useMemo(() => {
     const m = new Map()
     for (const e of events) {
       const diff = diffFields(e.old_data, e.new_data)
-      m.set(e.event_id, { diff, kind: classifyEvent(e, diff) })
+      m.set(e.event_id, { diff, kind: markerOf(e) })
     }
     return m
   }, [events])
@@ -1378,7 +1547,7 @@ export function AuditTrailTab({ userRole, showToast }) {
       }
       byEntity.get(key).events.push(e)
     }
-    return [...byEntity.values()]
+    const named = [...byEntity.values()]
       .map(lane => ({
         ...lane,
         ...resolveLaneName(lane.entityId, lane.events, entityIdentities, {
@@ -1387,16 +1556,41 @@ export function AuditTrailTab({ userRole, showToast }) {
           canTellDeleted: loadedKinds.has(lane.kind),
         }),
       }))
-      .sort((a, b) =>
-        b.events.length - a.events.length ||
-        String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)))
-  }, [events, entityIdentities, loadedKinds])
+
+    // An act's lane shares its subject's name with every other act on that subject, so it says
+    // when it began. To the second only where two acts of one subject began in the same minute.
+    // A window's length does not move with the clock, so now is as good as when it was asked for.
+    // 25 hours, so a day that ends summer time still counts as one.
+    const { start, end } = windowBounds(timeWin, Date.now())
+    const withinDay = Boolean(start && end && end - start <= 25 * 60 * 60 * 1000)
+    const acts = named.filter(lane => lane.name && !lane.qualifier &&
+      ACT_TABLES.has(String(lane.events[0]?.entity_type || '').toLowerCase()))
+    const minuteOf = new Map(acts.map(lane => [lane, actStartedAt(lane.events)]).filter(([, ms]) => ms !== null))
+    const sameMinute = new Map()
+    for (const [lane, ms] of minuteOf) {
+      const key = `${lane.events[0].entity_type}|${lane.name}|${startedWords(ms, { withinDay })}`
+      sameMinute.set(key, (sameMinute.get(key) || 0) + 1)
+    }
+    for (const [lane, ms] of minuteOf) {
+      const key = `${lane.events[0].entity_type}|${lane.name}|${startedWords(ms, { withinDay })}`
+      lane.qualifier = startedWords(ms, { withinDay, seconds: sameMinute.get(key) > 1 })
+      lane.startedAt = ms
+    }
+
+    return named.sort((a, b) =>
+      b.events.length - a.events.length ||
+      String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)) ||
+      (a.startedAt ?? 0) - (b.startedAt ?? 0))
+  }, [events, entityIdentities, loadedKinds, timeWin])
+
+  /** The kinds whose sections this viewer closed, remembered in this browser. */
+  const [closedSections, setClosedSections] = useState(readClosedSections)
 
   /**
    * Every lane, grouped into sections. A known kind keeps its order and icon when this role may ask
    * for it; a lane of a known kind outside `allowedKinds` is dropped, because the role could not
    * have read its rows. Every other kind gets a section of its own with the fallback icon. Empty
-   * sections are omitted.
+   * sections are omitted. `open` is false for a section the viewer closed.
    */
   const sections = useMemo(() => {
     const known = SECTIONS
@@ -1415,17 +1609,41 @@ export function AuditTrailTab({ userRole, showToast }) {
         lanes: lanes.filter(l => l.kind === kind)
       }))
 
-    return [...known, ...leftovers]
-  }, [lanes, allowedKinds])
+    return [...known, ...leftovers].map(s => ({ ...s, open: !closedSections.has(s.kind) }))
+  }, [lanes, allowedKinds, closedSections])
 
-  /** Every lane in the order it is drawn, across the sections: what ↑ and ↓ move through. */
-  const drawnLanes = useMemo(() => sections.flatMap(s => s.lanes), [sections])
+  /** Every lane in section order, and the ones an open section draws: what ↑ and ↓ move through. */
+  const allLanes = useMemo(() => sections.flatMap(s => s.lanes), [sections])
+  const drawnLanes = useMemo(() => sections.flatMap(s => (s.open ? s.lanes : [])), [sections])
+  const laneByKey = useMemo(() => new Map(allLanes.map(l => [l.key, l])), [allLanes])
+
+  /** Opens or closes sections by kind; a press on a heading, Expand all and Collapse all. */
+  const setSectionsOpen = useCallback((kinds, open) => setClosedSections(prev => {
+    const next = new Set(prev)
+    for (const kind of kinds) { if (open) next.delete(kind); else next.add(kind) }
+    return next
+  }), [])
+  useEffect(() => { writeClosedSections(closedSections) }, [closedSections])
+
+  /** The id of the box holding a section's lanes, which its heading controls. */
+  const sectionIdBase = useId()
+  const sectionLanesId = (kind) => `${sectionIdBase}-lanes-${kind.replace(/[^A-Za-z0-9]+/g, '-')}`
 
   /**
-   * The x-axis extent, from the events rather than the range control: the default range is
-   * unbounded, and a requested window would push a dense day into one corner of the track.
+   * The x-axis extent: the time window's, so the axis reads as the control does and today runs on
+   * past now. All time has no bounds, so its extent is the events'. `calendar` is the span whose
+   * ticks it takes.
    */
   const domain = useMemo(() => {
+    const { start, end } = windowBounds(timeWin, askedAt)
+    if (start && end && end > start) {
+      return {
+        min: start.getTime(),
+        max: end.getTime(),
+        span: end.getTime() - start.getTime(),
+        calendar: timeWin.kind === 'calendar' ? timeWin.span : null,
+      }
+    }
     const stamps = events
       .map(e => new Date(e.timestamp).getTime())
       .filter(Number.isFinite)
@@ -1434,8 +1652,8 @@ export function AuditTrailTab({ userRole, showToast }) {
     let max = Math.max(...stamps)
     // A single instant has no extent; pad it by an hour so the marker lands mid-track.
     if (max === min) { min -= 30 * 60 * 1000; max += 30 * 60 * 1000 }
-    return { min, max, span: max - min }
-  }, [events])
+    return { min, max, span: max - min, calendar: null }
+  }, [events, timeWin, askedAt])
 
   /** Fraction of the track, 0..1, for a timestamp. */
   const fractionFor = useCallback((timestamp) => {
@@ -1472,36 +1690,98 @@ export function AuditTrailTab({ userRole, showToast }) {
   }, [])
 
   /**
-   * lane.key to the items its track draws. Computed here because the legend also needs the badge
-   * count. Per lane, because a collision is only within one row.
+   * lane.key to the items its track draws, for the lanes of open sections. Computed here because
+   * the legend also needs the badge count. Per lane, because a collision is only within one row.
    */
   const laneClusters = useMemo(() => {
     const m = new Map()
-    for (const lane of lanes) {
+    for (const lane of drawnLanes) {
       m.set(lane.key, clusterEvents(lane.events, (e) => fractionFor(e.timestamp), trackWidth))
     }
     return m
-  }, [lanes, fractionFor, trackWidth])
+  }, [drawnLanes, fractionFor, trackWidth])
 
   /**
-   * How many badges are drawn, which the legend's Grouped entry counts. Badges rather than the
-   * events inside them; that number is on each badge.
+   * A closed section's kind to the items its heading's track draws: every event of its lanes on one
+   * track, clustered as a lane's are, so a burst across twelve devices is one badge.
+   */
+  const summaryClusters = useMemo(() => {
+    const m = new Map()
+    for (const section of sections) {
+      if (section.open) continue
+      const all = section.lanes.flatMap(l => l.events)
+      m.set(section.kind, clusterEvents(all, (e) => fractionFor(e.timestamp), trackWidth))
+    }
+    return m
+  }, [sections, fractionFor, trackWidth])
+
+  /**
+   * How many badges are drawn, on lanes and summary tracks, which the legend's Grouped entry counts.
+   * Badges rather than the events inside them; that number is on each badge.
    */
   const clusterCount = useMemo(
-    () => [...laneClusters.values()]
+    () => [...laneClusters.values(), ...summaryClusters.values()]
       .reduce((n, items) => n + items.filter(i => i.isCluster).length, 0),
-    [laneClusters]
+    [laneClusters, summaryClusters]
   )
 
   const ticks = useMemo(() => {
     if (!domain) return []
+    // The full timestamp is always one hover away, whatever the axis had room to print.
+    if (domain.calendar) {
+      return calendarTicks(domain.calendar, new Date(domain.min), new Date(domain.max))
+        .map(({ at, label }) => ({ f: (at.getTime() - domain.min) / domain.span, label, title: at.toLocaleString() }))
+    }
     const format = tickFormatter(domain.span)
     return [0, 0.25, 0.5, 0.75, 1].map(f => {
       const at = new Date(domain.min + domain.span * f)
-      // The full timestamp is always one hover away, whatever the axis had room to print.
       return { f, label: format(at), title: at.toLocaleString() }
     })
   }, [domain])
+
+  // Each minute while the axis runs on past now, so the now marker keeps up with the clock.
+  const nowMs = Date.now()
+  useClockTick(domain && domain.max > nowMs ? 60 * 1000 : 0)
+  /** Where now falls inside the axis, or null; a window running on past it is hatched after it. */
+  const nowF = domain && nowMs > domain.min && nowMs < domain.max ? (nowMs - domain.min) / domain.span : null
+  /**
+   * Where the oldest loaded event falls, once loading has stopped short of the window's start, or
+   * null. The axis is the window's, so the part before it would otherwise look empty. Not while a
+   * bounded window is still loading its pages.
+   */
+  const oldestLoaded = allEvents.reduce((t, e) => Math.min(t, new Date(e.timestamp).getTime() || Infinity), Infinity)
+  const unloadedF = domain && (nextCursor || truncated) && !windowPaging
+    && Number.isFinite(oldestLoaded) && oldestLoaded > domain.min
+    ? Math.min(1, (oldestLoaded - domain.min) / domain.span)
+    : null
+  /** Whether a hatched part is wide enough for its words; jsdom measures nothing, so says yes. */
+  const fitsWords = (fraction, px = SHADE_WORDS_PX) => !trackWidth || fraction * trackWidth >= px
+  /** The hatch's words, which say when the cap stopped the loading, shorter where room is short. */
+  const capWords = WINDOW_EVENT_CAP.toLocaleString('en-GB')
+  const unloadedWords = unloadedF === null || !fitsWords(unloadedF) ? null
+    : !(boundedWindow && capReached && nextCursor) ? 'Older events not loaded'
+      : fitsWords(unloadedF, SHADE_CAP_WORDS_PX)
+        ? `Older events not loaded: more than ${capWords} in this window`
+        : `Not loaded: over ${capWords}`
+
+  /**
+   * A drag across the tracks zooms to the stretch it covers: a custom window, and a new history
+   * entry, so Back undoes it as it does the control's Zoom in and Zoom out.
+   */
+  const atFraction = (f) => domain.min + domain.span * f
+  const { band, onPointerDown: startBand } = useBandDrag((a, b) => {
+    if (domain) setTimeWin(bandWindow(atFraction(a), atFraction(b), domain.span), { replace: false })
+  }, TRAIL_BAND)
+  /** The band as drawn: its ends as fractions, and the window a release sets, in words. */
+  const shownBand = band && domain ? (() => {
+    const lo = Math.min(band.a, band.b)
+    const hi = Math.max(band.a, band.b)
+    const { start, end } = windowBounds(bandWindow(atFraction(lo), atFraction(hi), domain.span))
+    return { lo, hi, mid: (lo + hi) / 2, words: bandWords(start, end, nowMs) }
+  })() : null
+  const bandStyle = shownBand
+    ? { left: offsetForFraction(shownBand.lo), width: `calc((100% - 28px) * ${shownBand.hi - shownBand.lo})` }
+    : null
 
   // Resolved fresh every render: a refresh replaces every event object. If the selected event drops
   // out of the filter, the drawer closes.
@@ -1514,6 +1794,57 @@ export function AuditTrailTab({ userRole, showToast }) {
   const SelectedIcon = selected
     ? (SECTION_ICONS[entityKind(selected.entity_type)] || FALLBACK_SECTION_ICON)
     : null
+
+  /** Whether this viewer may open Access Control, as the rail decides: where a principal links to. */
+  const canOpenAccessControl = useMemo(() => {
+    const page = TABS.find(t => t.id === 'access-control')
+    return Boolean(page) && tabIsVisible(page, () => true, userRole)
+  }, [userRole])
+
+  /**
+   * The drawer's User ID or Machine identity field: who it is, by name, and the id, which copies.
+   * For a viewer who may open Access Control the name links to their row there, a removed person's
+   * included; for anyone else it is text. A link and a copy cannot share one click, so the id is a
+   * chip of its own beside the name.
+   */
+  const actorField = (event) => {
+    const id = String(event.changed_by)
+    const machine = isMachineRow(event, machinePrincipals)
+    const label = machine ? 'Machine identity' : 'User ID'
+    const name = entityNames.get(id)
+    const to = canOpenAccessControl && name ? (machine ? identityUrl(id) : personUrl(id)) : null
+    return {
+      label,
+      value: (
+        <div className="trail-actor-field">
+          {name && (to
+            ? (
+              <RouteLink
+                className="count-link"
+                to={to}
+                title={`Open ${name} on Access Control › ${machine ? 'Machine identities' : 'People'}`}
+              >
+                {name}
+              </RouteLink>
+            )
+            : <span>{name}</span>)}
+          <CopyableId value={id} label={label.toLowerCase()} onNotify={showToast} className="copyable-id-wrap" />
+        </div>
+      ),
+    }
+  }
+
+  /**
+   * The drawer's one action: the entity on its own page, named for the page ("View in Devices").
+   * Only while the live lookup holds it, so a deleted entity, which has no page, gets none.
+   */
+  const entityPage = selected ? ENTITY_PAGES[entityKind(selected.entity_type)] : null
+  const drawerActions = entityPage && entityNames.has(selected.entity_id) ? [{
+    label: `View in ${entityPage.page}`,
+    icon: SelectedIcon && <SelectedIcon size={13} />,
+    to: entityUrl(entityPage.type, selected.entity_id),
+    title: `Open ${drawerName} on the ${entityPage.page} page`,
+  }] : []
 
   /**
    * The open lane's events, oldest first and in write order inside a transaction (byTimeThenId):
@@ -1528,10 +1859,16 @@ export function AuditTrailTab({ userRole, showToast }) {
   )
   const selectedIndex = selectedLaneEvents
     .findIndex(e => String(e.event_id) === String(selectedEventId))
-  // Where the open lane is drawn, in the order on screen now; -1 for a lane no section draws.
+  // Where the open lane is drawn, in the order on screen now; -1 for a lane no section draws, as
+  // in a closed section.
   const selectedLaneIndex = drawnLanes.findIndex(l => l.key === selectedLaneKey)
-  const laneAbove = selectedLaneIndex > 0 ? drawnLanes[selectedLaneIndex - 1] : null
-  const laneBelow = selectedLaneIndex >= 0 ? (drawnLanes[selectedLaneIndex + 1] ?? null) : null
+  const selectedLane = laneByKey.get(selectedLaneKey) || null
+  /* The drawn lanes either side of the open one, skipping closed sections. Found from its place
+     among every lane, so an event open in a closed section still steps to the lanes around it. */
+  const lanePlace = allLanes.findIndex(l => l.key === selectedLaneKey)
+  const isDrawn = (lane) => !closedSections.has(lane.kind)
+  const laneAbove = lanePlace > 0 ? (allLanes.slice(0, lanePlace).reverse().find(isDrawn) ?? null) : null
+  const laneBelow = lanePlace >= 0 ? (allLanes.slice(lanePlace + 1).find(isDrawn) ?? null) : null
 
   /* What the drawer's status line says after a step, by key or button, and the event it was said
      for. Any other change of selection (a click, a transaction row, the address) leaves it silent,
@@ -1551,8 +1888,7 @@ export function AuditTrailTab({ userRole, showToast }) {
   const stepTo = (i) => {
     const next = selectedLaneEvents[i]
     if (!next) return
-    const lane = drawnLanes[selectedLaneIndex]
-    goTo(next, `${eventNews(i, selectedLaneEvents.length, next)}, ${lane ? laneLabel(lane) : drawerName}`)
+    goTo(next, `${eventNews(i, selectedLaneEvents.length, next)}, ${selectedLane ? laneLabel(selectedLane) : drawerName}`)
   }
 
   /**
@@ -1565,8 +1901,21 @@ export function AuditTrailTab({ userRole, showToast }) {
     const laneEvents = [...lane.events].sort(byTimeThenId)
     const next = nearestInTime(laneEvents, selected.timestamp)
     if (!next) return
-    goTo(next, `Entity ${selectedLaneIndex + by + 1} of ${drawnLanes.length}, ${laneLabel(lane)}. `
+    goTo(next, `Entity ${drawnLanes.indexOf(lane) + 1} of ${drawnLanes.length}, ${laneLabel(lane)}. `
       + eventNews(laneEvents.indexOf(next), laneEvents.length, next))
+  }
+
+  /** A lane's name opens its newest loaded event: what changed last. ← then steps back from it. */
+  const openNewest = (lane) => {
+    const newest = lane.events.reduce((a, b) => (byTimeThenId(a, b) >= 0 ? a : b))
+    setSelectedEventId(newest.event_id)
+  }
+
+  /** An event picked on a closed section's track: opened, with its section, so its lane shows. */
+  const openFromSummary = (kind, event) => {
+    scrollToSelected.current = true
+    setSectionsOpen([kind], true)
+    setSelectedEventId(event.event_id)
   }
 
   useEffect(() => {
@@ -1574,7 +1923,7 @@ export function AuditTrailTab({ userRole, showToast }) {
     scrollToSelected.current = false
     trailBodyRef.current?.querySelector('[aria-pressed="true"]')
       ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
-  }, [selectedEventId])
+  }, [selectedEventId, closedSections])
 
   /**
    * ← and → step along the open lane and ↑ and ↓ to the lane above or below, while the drawer is
@@ -1649,6 +1998,72 @@ export function AuditTrailTab({ userRole, showToast }) {
     }
   })
 
+  /** A lane's entity as a marker's name says it: its name, or its whole id. */
+  const laneName = (lane) => (lane ? lane.name || lane.entityId : '')
+
+  /** The lane label's tooltip: the whole name and id, and where a deleted entity's name came from. */
+  const laneTip = (lane) => [
+    lane.name ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}` : null,
+    lane.email || null,
+    lane.entityId,
+  ].filter(Boolean).join(' — ') + (!lane.gone ? ''
+    : lane.fromSnapshot
+      ? '\nDeleted: the name is the one recorded in its final audit snapshot.'
+      : '\nDeleted: its audit rows carry no name to recover.')
+
+  const kindOf = (e) => analysis.get(e.event_id)?.kind || 'operational'
+
+  /**
+   * One thing a track draws: an event's marker, or a badge for events too close to draw apart. The
+   * same on a lane and on a closed section's track; `where` places a badge ("on Press 4", "in
+   * Devices"), `nameOf` names an event's entity and `onOpen` opens an event in the drawer.
+   */
+  const trackItem = (item, { where, nameOf, onOpen }) => {
+    /* The ring follows the drawer: a badge is lit while the drawer shows any of its events, so the
+       highlight stays put while Previous / Next steps through the burst. */
+    const isSelected = item.events.some(e => String(e.event_id) === String(selectedEventId))
+
+    if (item.isCluster) {
+      return (
+        <Tooltip key={`cluster-${item.event.event_id}`} text={clusterSummary(item.events, kindOf)}>
+          <button
+            type="button"
+            className={`trail-cluster${isSelected ? ' trail-node-selected' : ''}`}
+            style={{ left: offsetForFraction(item.xOffset) }}
+            /* The oldest member (see clusterEvents on the tiebreak), so Next means and then what. */
+            onClick={() => onOpen(item.event)}
+            aria-label={`${item.events.length} events ${where} from `
+              + `${new Date(item.event.timestamp).toLocaleString()} — open the first`}
+            aria-pressed={isSelected}
+          >
+            {item.events.length}
+          </button>
+        </Tooltip>
+      )
+    }
+
+    const e = item.event
+    const kind = kindOf(e)
+    return (
+      /* What, who, when, a line each; the rest is in the drawer. */
+      <Tooltip
+        key={e.event_id}
+        text={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e, machinePrincipals)}\n${new Date(e.timestamp).toLocaleString()}`}
+      >
+        <button
+          type="button"
+          className={`trail-node trail-node-${kind}${isSelected ? ' trail-node-selected' : ''}`}
+          style={{ left: offsetForFraction(item.xOffset) }}
+          onClick={() => onOpen(e)}
+          aria-label={`${e.event_type} on ${nameOf(e)} at ${new Date(e.timestamp).toLocaleString()}`}
+          aria-pressed={isSelected}
+        >
+          <TrailMarker kind={kind} selected={isSelected} />
+        </button>
+      </Tooltip>
+    )
+  }
+
   return (
     /* `page-fill` and `card-fill`: the page fills the viewport and the timeline scrolls inside the
        card, so the axis row has a scroller to pin to. See .page-fill in App.css. */
@@ -1670,126 +2085,72 @@ export function AuditTrailTab({ userRole, showToast }) {
             ariaLabel="Search by name, entity ID, mutation ID or transaction ID"
           />
 
-          {/* All time is the default (see timeWindow). The window is a query parameter, so a
-              narrower range does not spend the row budget outside it. */}
-          <select
-            className="form-control control-sm"
-            value={rangePreset}
-            onChange={e => setRangePreset(e.target.value)}
-            aria-label="Time range"
-          >
-            {TIME_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-            <option value="custom">Custom range…</option>
-          </select>
+          {/* The window is a query parameter, so a narrower one does not spend the row budget
+              outside it. Zoom in halves the axis drawn, which under All time is the events'. */}
+          <TimeWindowControl
+            value={timeWin}
+            onChange={setTimeWin}
+            ranges={TIME_PRESETS}
+            allTime
+            zoom
+            extent={domain ? { start: domain.min, end: domain.max } : null}
+          />
 
-          {/* Shown only in custom mode. */}
-          {rangePreset === 'custom' && (
-            <>
-              {/* `datetime-local`, not `date`: a date pair cannot express a window narrower than a
-                  day. `timeWindow()` widens the end bound to :59.999. */}
-              <Tooltip text="In local time.">
-                <input
-                  type="datetime-local"
-                  className="form-control"
-                  style={{ width: '210px' }}
-                  value={customStart}
-                  onChange={e => setCustomStart(e.target.value)}
-                  aria-label="Range start"
-                />
-              </Tooltip>
-              <Tooltip text="In local time, and including that minute.">
-                <input
-                  type="datetime-local"
-                  className="form-control"
-                  style={{ width: '210px' }}
-                  value={customEnd}
-                  onChange={e => setCustomEnd(e.target.value)}
-                  aria-label="Range end"
-                />
-              </Tooltip>
-            </>
-          )}
-
-          {/* The secondary filters: the kind of entity and the action. Search, the range and the
-              deleted-entities toggle stay in the bar. */}
+          {/* The secondary filters: the kinds of entity, the actions, who made the change, and
+              whether deleted entities are shown. Search and the time window stay in the bar. */}
           <FiltersPopover activeCount={popoverFilterCount} onClear={clearPopoverFilters}>
-            <select
-              className="form-control"
+            {/* Every kind this role may ask for, from the same table the sections are built from,
+                so a kind cannot be drawable and unfilterable. */}
+            <FilterList
+              label="Entity"
+              plural="kinds"
+              options={kindOptions}
               value={entityTypeFilter}
-              onChange={e => setEntityTypeFilter(e.target.value)}
-              aria-label="Entity"
-            >
-              <option value="">All entities</option>
-              {/* Every kind this role may ask for, from the same table the sections are built from,
-                  so a kind cannot be drawable and unfilterable. */}
-              {entityTypes.map(({ kind, label }) => (
-                <option key={kind} value={kind}>{label}</option>
-              ))}
-            </select>
-
-            <Tooltip text="The database action on the audit row, as the drawer's badge shows it. The key's markers are a separate classification.">
-              <select
-                className="form-control"
-                value={actionFilter}
-                onChange={e => setActionFilter(e.target.value)}
-                aria-label="Action"
-              >
-                <option value="">Any action</option>
-                {Object.entries(AUDIT_TRAIL_ACTIONS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </Tooltip>
-
-            <Tooltip text="Only the changes one person or machine identity made, under any email address they had.">
-              <select
-                className="form-control"
-                value={changedBy}
-                onChange={e => setChangedBy(e.target.value)}
-                aria-label="Changed by"
-              >
-                <option value="">Changed by anyone</option>
-                {actorOptions.people.length > 0 && (
-                  <optgroup label="People">
-                    {actorOptions.people.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-                  </optgroup>
-                )}
-                {actorOptions.machines.length > 0 && (
-                  <optgroup label="Machine identities">
-                    {actorOptions.machines.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-                  </optgroup>
-                )}
-                {/* An id from a link that neither list holds, so the control still shows it. */}
-                {!changedByListed && <option value={changedBy}>{changedBy}</option>}
-              </select>
-            </Tooltip>
+              onChange={setEntityTypeFilter}
+              counts={kindCounts}
+              tip="The kinds of entity the trail can hold with the other choices, each with its events in the current match."
+            />
+            <FilterList
+              label="Action"
+              plural="actions"
+              options={actionOptions}
+              value={actionFilter}
+              onChange={setActionFilter}
+              counts={actionCounts}
+              tip="The database action on the audit row, as the drawer's badge shows it, offered where the chosen kinds and classes can have it."
+            />
+            <FilterList
+              label="Changed by"
+              plural="names"
+              options={changedByOptions}
+              value={changedBy}
+              onChange={setChangedBy}
+              tip="Only the changes these people or machine identities made, under any email address they had."
+            />
+            {/* Offered while something is deleted, or while they are shown. The tip says no longer
+                in the database, because absence from the lookups is all the test sees. */}
+            {(purgedEntityCount > 0 || showPurged) && (
+              <FilterCheck
+                label="Show deleted entities"
+                checked={showPurged}
+                onChange={setShowPurged}
+                count={purgedEntityCount}
+                tip="Include events for entities no longer in the database. The records are kept either way; this changes only the list."
+              />
+            )}
           </FiltersPopover>
 
-          {/* The chosen actor stays in view while the popover is shut; selecting it clears it. */}
-          {changedBy && (
+          {/* The chosen actors stay in view while the popover is shut; selecting the chip clears them. */}
+          {changedBy.length > 0 && (
             <Tooltip text="Only their changes are shown. Select to show everyone's.">
               <button
                 type="button"
                 className="chip chip-link trail-actor-chip"
-                onClick={() => setChangedBy('')}
-                aria-label={`Changed by ${changedByName}. Show everyone's changes`}
+                onClick={() => setChangedBy([])}
+                aria-label={`Changed by ${changedByWords}. Show everyone's changes`}
               >
-                <span className="chip-name">Changed by {changedByName}</span>
+                <span className="chip-name">Changed by {changedByWords}</span>
                 <IconX size={11} aria-hidden="true" />
-              </button>
-            </Tooltip>
-          )}
-
-          {/* Shown only when something is deleted. The tooltip says no longer in the database,
-              because absence from the lookups is all the test sees. */}
-          {purgedEntityCount > 0 && (
-            <Tooltip text="Include events for entities no longer in the database. The records are kept either way; this changes only the list.">
-              <button
-                className={`btn btn-sm ${showPurged ? 'btn-primary' : 'btn-ghost'}`}
-                aria-pressed={showPurged}
-                onClick={() => setShowPurged(v => !v)}
-              >
-                <IconTrash size={13} /> Show deleted entities ({purgedEntityCount})
               </button>
             </Tooltip>
           )}
@@ -1812,28 +2173,52 @@ export function AuditTrailTab({ userRole, showToast }) {
         </div>
 
         {/* The toolbar's own rule divides it from the trace. `trail-timeline` is the one part of the
-            card that gives way when the viewport is short; its own scroller is `trail-scroll`. */}
-        <div className="card-body card-fill-scroll trail-timeline">
-          {/* One row above the timeline, always drawn so the card keeps its shape: the key. How
-              much of the trail is loaded is stated at the foot, beside Show more. */}
+            card that gives way when the viewport is short; its own scroller is `trail-scroll`. No
+            padding: the timeline runs to the card's edges, as a table does. */}
+        <div className="card-fill-scroll trail-timeline">
+          {/* One row above the timeline, always drawn so the card keeps its shape: the control that
+              opens or closes every section, over the section headings it acts on, and the key at
+              the row's right-hand end, over the tracks it explains. How much of the trail is loaded
+              is stated at the foot, beside Show more. */}
           <div className="trail-header">
-            {/* The legend for a derived classification: nothing else on the page says what a
-                triangle means. The same marker the track draws. Each entry takes focus, so its
-                tooltip is the keyboard's as well. */}
-            <div className="trail-legend">
-              {Object.entries(MARKERS).map(([kind, m]) => (
-                <Tooltip key={kind} text={m.hint}>
-                  <span className="trail-legend-item" tabIndex={0}>
-                    <TrailMarker kind={kind} />
-                    {m.label}
-                  </span>
-                </Tooltip>
-              ))}
+            <ExpandAllToggle
+              anyOpen={sections.some(s => s.open)}
+              onExpandAll={() => setSectionsOpen(sections.map(s => s.kind), true)}
+              onCollapseAll={() => setSectionsOpen(sections.map(s => s.kind), false)}
+              disabled={sections.length === 0}
+            />
 
-              {/* Shown only while a badge is on screen. The sample is a real `.trail-cluster`,
-                  reading `n` as a placeholder for each badge's count. */}
+            {/* The key is the class filter: each class's entry is a toggle drawing the marker the
+                track draws, with its events under every other filter. Several may be on; none on is
+                every class. Nothing else on the page says what a triangle means. */}
+            <div className="trail-legend" role="group" aria-label="Classes">
+              {Object.entries(MARKERS).map(([kind, m]) => {
+                const on = classFilter.includes(kind)
+                const n = counts?.class ? (counts.class[kind] ?? 0) : null
+                return (
+                  <Tooltip
+                    key={kind}
+                    text={`${m.hint}. ${on ? 'Shown. Select to leave it out.' : `Select to show it${classFilter.length ? ' as well' : ' alone'}.`}`}
+                  >
+                    <button
+                      type="button"
+                      className={`btn btn-sm trail-legend-toggle ${on ? 'btn-primary' : 'btn-ghost'}`}
+                      aria-pressed={on}
+                      onClick={() => toggleClass(kind)}
+                    >
+                      {/* On a disc in the card's colour, as the track has it behind the marker,
+                          so a pressed toggle's fill never meets the marker. */}
+                      <span className="trail-legend-disc"><TrailMarker kind={kind} /></span>
+                      {n === null ? m.label : `${m.label} (${n})`}
+                    </button>
+                  </Tooltip>
+                )
+              })}
+
+              {/* A key entry, not a filter: shown only while a badge is on screen. The sample is a
+                  real `.trail-cluster`, reading `n` as a placeholder for each badge's count. */}
               {clusterCount > 0 && (
-                <Tooltip text="Events too close to draw apart are one badge with their count. Point at one for its breakdown, or narrow the range.">
+                <Tooltip text="Events too close to draw apart are one badge with their count. Point at one for its breakdown, or narrow the time window.">
                   <span className="trail-legend-item" tabIndex={0}>
                     <span className="trail-cluster trail-legend-cluster" aria-hidden="true">n</span>
                     Grouped ({clusterCount})
@@ -1856,7 +2241,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                       ? 'one deleted entity does'
                       : `${purgedEntityCount} deleted entities do`}. Their records are kept; this view just hides them.`
                   : rangeIsFiltering
-                    ? 'No audit trail events in this time range. Widen it, or switch back to All time.'
+                    ? 'No audit trail events in this time window. Step back, widen it, or switch back to All time.'
                     : 'No audit trail events match the filter criteria.'
               }
             >
@@ -1872,12 +2257,24 @@ export function AuditTrailTab({ userRole, showToast }) {
           ) : (
             <>
               <div className="trail-scroll">
-                <div className="trail-swimlanes">
+                {/* A press on the axis or an empty part of a track and a drag zooms (useBandDrag). */}
+                <div className="trail-swimlanes" onPointerDown={startBand}>
                   <div className="trail-lane trail-axis">
                     {/* The corner is a spacer now: it holds the lane labels' width so the ticks
                         line up with the tracks beside them, and nothing else. */}
                     <div className="trail-lane-label trail-axis-corner" aria-hidden="true" />
                     <div className="trail-track trail-axis-track" ref={axisTrackRef}>
+                      {/* Divs, as the now marker is, so the ticks stay the spans of their type. */}
+                      {shownBand && <div className="trail-band" aria-hidden="true" style={bandStyle} />}
+                      {shownBand && (
+                        <div
+                          className={`trail-band-words${shownBand.mid > 0.85 ? ' trail-band-words-end' : shownBand.mid < 0.15 ? ' trail-band-words-start' : ''}`}
+                          aria-hidden="true"
+                          style={{ left: offsetForFraction(shownBand.mid > 0.85 ? shownBand.hi : shownBand.mid < 0.15 ? shownBand.lo : shownBand.mid) }}
+                        >
+                          {shownBand.words}
+                        </div>
+                      )}
                       {ticks.map(t => (
                         <Tooltip key={t.f} text={t.title}>
                           <span className="trail-tick" style={{ left: offsetForFraction(t.f) }}>
@@ -1885,131 +2282,131 @@ export function AuditTrailTab({ userRole, showToast }) {
                           </span>
                         </Tooltip>
                       ))}
+                      {/* A div among the ticks' spans, so `.trail-tick:first-of-type` still finds
+                          the end ticks. Kept inside the track near either end, as they are. */}
+                      {nowF !== null && (
+                        <div
+                          className={`trail-now${nowF > 0.85 ? ' trail-now-end' : nowF < 0.15 ? ' trail-now-start' : ''}`}
+                          style={{ left: offsetForFraction(nowF) }}
+                        >
+                          Now {clockWords(new Date(nowMs))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {/* Everything under the axis. Its own box, so the gridlines can span exactly the
                       rows and nothing above them. */}
                   <div className="trail-body" ref={trailBodyRef}>
-                    {sections.map(section => (
-                      <React.Fragment key={section.kind}>
-                        <div className="trail-section" role="separator" aria-label={`${section.label} lanes`}>
-                          {/* A row of the grid: the heading in the label column and an empty track
-                              beside it, so it takes the row's rule and the row's rhythm. */}
-                          <div className="trail-lane-label">
-                            <section.Icon size={12} className="trail-section-icon" />
-                            <span className="trail-section-name">{section.label}</span>
-                          </div>
-                          <div className="trail-track" aria-hidden="true" />
-                        </div>
-
-                        {section.lanes.map(lane => (
-                          <div className="trail-lane" key={lane.key}>
-                            {/* No type badge and no icon: the section heading carries the kind and
-                                is pinned in view, so the width goes to the name. The UUID is
-                                copyable in the drawer's Entity ID field. */}
-                            {/* The full name and id, which the label may truncate, and for a deleted
-                                entity where its name came from: one tooltip, so the "deleted" mark
-                                inside it does not open a second. */}
-                            <Tooltip text={[
-                              lane.name
-                                ? `${lane.name}${lane.qualifier ? ` ${lane.qualifier}` : ''}`
-                                : null,
-                              lane.email || null,
-                              lane.entityId,
-                            ].filter(Boolean).join(' — ') + (!lane.gone ? ''
-                              : lane.fromSnapshot
-                                ? '\nDeleted: the name is the one recorded in its final audit snapshot.'
-                                : '\nDeleted: its audit rows carry no name to recover.')}>
-                              <div className="trail-lane-label">
-                                {lane.name
-                                  ? <strong className="trail-lane-name">{lane.name}</strong>
-                                  /* Neither the join nor a snapshot could name it: the shortened id,
-                                     monospaced. */
-                                  : <span className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</span>}
-                                {/* Must survive truncation: a schema lineage shares its name and differs only
-                                    here. */}
-                                {lane.qualifier && (
-                                  <span className="trail-lane-qualifier">{lane.qualifier}</span>
-                                )}
-                                {/* A person's email beside their display name: the name alone is
-                                    not enough to tell who it was. */}
-                                {lane.email && <span className="trail-lane-email">{lane.email}</span>}
-                                {/* `gone`, not `fromSnapshot`: a name from a snapshot says where the
-                                    label came from, and a settings or backup lane is named that way
-                                    while existing perfectly well. */}
-                                {lane.gone && <span className="trail-lane-gone">deleted</span>}
-                              </div>
-                            </Tooltip>
-
+                    {sections.map(section => {
+                      const lanesId = sectionLanesId(section.kind)
+                      const laneCount = section.lanes.length
+                      return (
+                        <React.Fragment key={section.kind}>
+                          {/* A row of the grid: the heading in the label column and a track beside
+                              it, so it takes the row's rule and the row's rhythm. Closed, the track
+                              carries every event of the section's lanes. */}
+                          <div className={`trail-section${section.open ? '' : ' trail-section-closed'}`}>
+                            <div className="trail-lane-label">
+                              <GroupHeading
+                                open={section.open}
+                                onToggle={() => setSectionsOpen([section.kind], !section.open)}
+                                label={section.label}
+                                count={laneCount}
+                                countLabel={`${laneCount} ${laneCount === 1 ? 'lane' : 'lanes'}`}
+                                icon={<section.Icon size={12} className="trail-section-icon" />}
+                                controls={lanesId}
+                              />
+                            </div>
+                            {/* The hatched parts carry their words here, as the headings are pinned
+                                in view and opaque over the layer behind the rows. */}
                             <div className="trail-track">
-                              {(laneClusters.get(lane.key) || []).map(item => {
-                                /* The ring follows the drawer: a badge is lit while the drawer shows
-                                   any of its events, so the highlight stays put while Previous / Next
-                                   steps through the burst. */
-                                const isSelected = item.events
-                                  .some(e => String(e.event_id) === String(selectedEventId))
-
-                                if (item.isCluster) {
-                                  return (
-                                    <Tooltip
-                                      key={`cluster-${item.event.event_id}`}
-                                      text={clusterSummary(item.events, (e) => analysis.get(e.event_id)?.kind || 'operational')}
-                                    >
-                                      <button
-                                        type="button"
-                                        className={`trail-cluster${isSelected ? ' trail-node-selected' : ''}`}
-                                        style={{ left: offsetForFraction(item.xOffset) }}
-                                        /* The oldest member (see clusterEvents on the tiebreak), so
-                                           Next means and then what. */
-                                        onClick={() => setSelectedEventId(item.event.event_id)}
-                                        aria-label={`${item.events.length} events on `
-                                          + `${lane.name || lane.entityId} from `
-                                          + `${new Date(item.event.timestamp).toLocaleString()} — open the first`}
-                                        aria-pressed={isSelected}
-                                      >
-                                        {item.events.length}
-                                      </button>
-                                    </Tooltip>
-                                  )
-                                }
-
-                                const e = item.event
-                                const kind = analysis.get(e.event_id)?.kind || 'operational'
-                                return (
-                                  /* What, who, when, a line each; the rest is in the drawer. */
-                                  <Tooltip
-                                    key={e.event_id}
-                                    text={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e, machinePrincipals)}\n${new Date(e.timestamp).toLocaleString()}`}
-                                  >
-                                    <button
-                                      type="button"
-                                      className={`trail-node trail-node-${kind}${isSelected ? ' trail-node-selected' : ''}`}
-                                      style={{ left: offsetForFraction(item.xOffset) }}
-                                      onClick={() => setSelectedEventId(e.event_id)}
-                                      aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
-                                      aria-pressed={isSelected}
-                                    >
-                                      <TrailMarker kind={kind} selected={isSelected} />
-                                    </button>
-                                  </Tooltip>
-                                )
-                              })}
+                              {shownBand && <div className="trail-band" aria-hidden="true" style={bandStyle} />}
+                              {unloadedF !== null && (
+                                <span className="trail-shade trail-shade-unloaded" aria-hidden="true" style={{ width: offsetForFraction(unloadedF) }}>
+                                  {unloadedWords}
+                                </span>
+                              )}
+                              {nowF !== null && (
+                                <span className="trail-shade trail-shade-future" aria-hidden="true" style={{ left: offsetForFraction(nowF) }}>
+                                  {fitsWords(1 - nowF) && 'Nothing recorded yet'}
+                                </span>
+                              )}
+                              {!section.open && (summaryClusters.get(section.kind) || []).map(item => trackItem(item, {
+                                where: `in ${section.label}`,
+                                nameOf: (e) => laneName(laneByKey.get(laneKeyOf(e))) || e.entity_id,
+                                onOpen: (e) => openFromSummary(section.kind, e),
+                              }))}
                             </div>
                           </div>
-                        ))}
-                      </React.Fragment>
-                    ))}
+
+                          {/* The lanes, drawn only while the section is open. */}
+                          <div id={lanesId} role="group" aria-label={`${section.label} lanes`} hidden={!section.open}>
+                            {section.open && section.lanes.map(lane => (
+                              <div className="trail-lane" key={lane.key}>
+                                {/* The name is the button that opens the lane's newest event. No
+                                    type badge and no icon: the section heading carries the kind and
+                                    is pinned in view, so the width goes to the name. The full name
+                                    and id, which the label may cut, are in one tooltip, with where a
+                                    deleted entity's name came from. */}
+                                <Tooltip text={laneTip(lane)}>
+                                  <button
+                                    type="button"
+                                    className="trail-lane-label trail-lane-open"
+                                    onClick={() => openNewest(lane)}
+                                    aria-label={`Open the latest change to ${laneLabel(lane)}${lane.gone ? ', deleted' : ''}`}
+                                  >
+                                    {lane.name
+                                      ? <OverflowText className="trail-lane-name">{lane.name}</OverflowText>
+                                      /* Neither the join nor a snapshot could name it: the shortened
+                                         id, monospaced. */
+                                      : <span className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</span>}
+                                    {/* Must survive truncation: a schema lineage shares its name and
+                                        differs only here. */}
+                                    {lane.qualifier && (
+                                      <span className="trail-lane-qualifier">{lane.qualifier}</span>
+                                    )}
+                                    {/* A person's email beside their display name: the name alone is
+                                        not enough to tell who it was. */}
+                                    {lane.email && <span className="trail-lane-email">{lane.email}</span>}
+                                    {/* `gone`, not `fromSnapshot`: a name from a snapshot says where
+                                        the label came from, and a settings or backup lane is named
+                                        that way while existing perfectly well. */}
+                                    {lane.gone && <span className="trail-lane-gone">deleted</span>}
+                                  </button>
+                                </Tooltip>
+
+                                <div className="trail-track">
+                                  {(laneClusters.get(lane.key) || []).map(item => trackItem(item, {
+                                    where: `on ${laneName(lane)}`,
+                                    nameOf: () => laneName(lane),
+                                    onOpen: (e) => setSelectedEventId(e.event_id),
+                                  }))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </React.Fragment>
+                      )
+                    })}
 
                     {/* Faint dotted verticals from each tick down the whole grid, so an event on
                         one lane can be read against the same instant on another. Drawn once,
                         behind the rows, rather than once per lane; placed last so the first
                         section stays the body's first child. Positioned by the same helper as
-                        the ticks and the markers. Nothing here is content. */}
+                        the ticks and the markers. Nothing here is content. The hatched parts of
+                        the window, and a band being dragged, are in the same layer. */}
                     <div className="trail-gridlines" aria-hidden="true">
                       {ticks.map(t => (
                         <span key={t.f} className="trail-gridline" style={{ left: offsetForFraction(t.f) }} />
                       ))}
+                      {unloadedF !== null && (
+                        <span className="trail-shade trail-shade-unloaded" style={{ width: offsetForFraction(unloadedF) }} />
+                      )}
+                      {nowF !== null && (
+                        <span className="trail-shade trail-shade-future" style={{ left: offsetForFraction(nowF) }} />
+                      )}
+                      {shownBand && <div className="trail-band" style={bandStyle} />}
                     </div>
                   </div>
                 </div>
@@ -2033,7 +2430,7 @@ export function AuditTrailTab({ userRole, showToast }) {
                   total={footTotal}
                   step={PAGE_SIZE}
                   onMore={loadMore}
-                  pending={loadingMore}
+                  pending={loadingMore || windowPaging}
                   /* "200 of 242" beside Show more, only against the server's own total: without
                      one, `footTotal` is an estimate. */
                   counted={typeof totalMatching === 'number'}
@@ -2041,7 +2438,7 @@ export function AuditTrailTab({ userRole, showToast }) {
               )}
             </>
           )}
-        </div>{/* .card-body — the timeline */}
+        </div>{/* .trail-timeline */}
       </div>{/* .card */}
       </div>
 
@@ -2053,11 +2450,21 @@ export function AuditTrailTab({ userRole, showToast }) {
         onCopy={showToast}
         title={drawerName}
         subtitle={selected && (
-          /* One flex item laid out internally as rows; `.context-panel-subtitle` is a wrapping row
-             shared with other pages. */
+          <div className="trail-drawer-nav-badges">
+            <Tooltip text="The audit event type">
+              <span className="badge badge-warning">{selected.event_type}</span>
+            </Tooltip>
+            <Tooltip text={MARKERS[selectedAnalysis?.kind]?.hint}>
+              <span className={`badge trail-badge-${selectedAnalysis?.kind}`}>
+                {MARKERS[selectedAnalysis?.kind]?.label}
+              </span>
+            </Tooltip>
+          </div>
+        )}
+        nav={selected && (
+          /* At the drawer's full width under its header, above the fields it changes: the place,
+             the step buttons in their two rows, and the line that says what a step opened. */
           <div className="trail-drawer-nav">
-            {/* Above the thing it changes. The subtitle slot is the only one ContextPanel offers
-                above the metadata. */}
             <Tooltip text="Its place in this entity's history, oldest first, and among the entities on the trail">
               <div className="trail-drawer-nav-pos">
                 Event {selectedIndex + 1} of {selectedLaneEvents.length}
@@ -2097,8 +2504,9 @@ export function AuditTrailTab({ userRole, showToast }) {
                 keyName="ArrowUp"
                 atEnd={!laneAbove}
                 tip={laneAbove ? `Move to ${laneLabel(laneAbove)}, the entity above, at the same point in time (↑)`
-                  : selectedLaneIndex < 0 ? 'This entity has no lane on the trail'
-                    : 'This is the first entity on the trail'}
+                  : lanePlace < 0 ? 'This entity has no lane on the trail'
+                    : lanePlace > 0 ? 'Every entity above this one is in a closed section'
+                      : 'This is the first entity on the trail'}
                 onStep={() => stepLane(-1)}
               />
               <StepButton
@@ -2108,8 +2516,9 @@ export function AuditTrailTab({ userRole, showToast }) {
                 keyName="ArrowDown"
                 atEnd={!laneBelow}
                 tip={laneBelow ? `Move to ${laneLabel(laneBelow)}, the entity below, at the same point in time (↓)`
-                  : selectedLaneIndex < 0 ? 'This entity has no lane on the trail'
-                    : 'This is the last entity on the trail'}
+                  : lanePlace < 0 ? 'This entity has no lane on the trail'
+                    : lanePlace < allLanes.length - 1 ? 'Every entity below this one is in a closed section'
+                      : 'This is the last entity on the trail'}
                 onStep={() => stepLane(1)}
               />
             </div>
@@ -2120,17 +2529,6 @@ export function AuditTrailTab({ userRole, showToast }) {
             <div className="sr-only" role="status" aria-live="polite">
               {stepNews.eventId != null && String(stepNews.eventId) === String(selectedEventId) ? stepNews.text : ''}
             </div>
-
-            <div className="trail-drawer-nav-badges">
-              <Tooltip text="The audit event type">
-                <span className="badge badge-warning">{selected.event_type}</span>
-              </Tooltip>
-              <Tooltip text={MARKERS[selectedAnalysis?.kind]?.hint}>
-                <span className={`badge trail-badge-${selectedAnalysis?.kind}`}>
-                  {MARKERS[selectedAnalysis?.kind]?.label}
-                </span>
-              </Tooltip>
-            </div>
           </div>
         )}
         fields={selected ? [
@@ -2140,26 +2538,8 @@ export function AuditTrailTab({ userRole, showToast }) {
             value: actorLabel(selected, machinePrincipals),
             help: actorTitle(selected, machinePrincipals)
           },
-          // Only when the row names a principal: a user's id, or the machine identity's name
-          // (its id where nothing here names it).
-          ...(selected.changed_by
-            ? [isMachineRow(selected, machinePrincipals)
-              ? {
-                label: 'Machine identity',
-                value: selected.changed_by,
-                display: entityNames.get(selected.changed_by),
-                copyable: true,
-                mono: true
-              }
-              : {
-                label: 'User ID',
-                value: selected.changed_by,
-                // The person, by name and email, where this viewer may read them; the id is copied.
-                display: entityNames.get(selected.changed_by),
-                copyable: true,
-                mono: true
-              }]
-            : []),
+          // Only when the row names a principal: a person, or a machine identity.
+          ...(selected.changed_by ? [actorField(selected)] : []),
           {
             label: 'Entity ID',
             value: selected.entity_id,
@@ -2191,10 +2571,11 @@ export function AuditTrailTab({ userRole, showToast }) {
             : []),
           { label: 'Description', value: selected.description, full: true }
         ] : []}
+        actions={drawerActions}
         beforeActions={selected && selectedAnalysis && (
           <>
-            {/* Above the diff, for the reason the subtitle nav is: a control that changes what the
-                drawer shows belongs above it. */}
+            {/* Above the diff, for the reason the step buttons are above the fields: a control
+                that changes what the drawer shows belongs above it. */}
             <CausationGroup
               event={selected}
               siblings={selectedSiblings}

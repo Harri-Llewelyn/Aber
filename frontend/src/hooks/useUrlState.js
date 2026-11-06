@@ -63,28 +63,54 @@ export const pathSlug = (label) =>
 export const queryOf = (url = currentUrl()) => new URLSearchParams(split(url).search)
 
 /**
+ * A query string with its commas written as commas, so a list reads `?status=online,offline`. A
+ * comma inside one value of a list is escaped by `encodeList` first, so it never reads as a
+ * separator.
+ */
+const queryText = (query) => query.toString().replace(/%2C/gi, ',')
+
+/**
+ * A list as one query value: the values joined by commas, each value's own `%` and `,` escaped.
+ * `decodeList` reverses it, and reads `''` as the empty list.
+ */
+export const encodeList = (values) =>
+  values.map(v => String(v).replace(/%/g, '%25').replace(/,/g, '%2C')).join(',')
+export const decodeList = (raw) => (raw === '' || raw === null || raw === undefined ? [] : raw
+  .split(',')
+  .map(v => v.replace(/%25|%2C/gi, m => (m === '%25' ? '%' : ',')))
+  .filter(v => v !== ''))
+
+/**
  * A URL for `page` with `params`, leaving out empty values: `pageUrl('devices', { search: id })`.
- * `tab` is the page's tab as a path segment.
+ * An array is a list (`encodeList`), left out when empty. `tab` is the page's tab as a path segment.
  */
 export function pageUrl(page, params = {}, tab = '') {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value === null || value === undefined || value === '' || value === false) continue
+    if (Array.isArray(value)) {
+      if (value.length) query.set(key, encodeList(value))
+      continue
+    }
     query.set(key, value === true ? '1' : String(value))
   }
-  const q = query.toString()
+  const q = queryText(query)
   return `/${page}${tab ? `/${tab}` : ''}${q ? `?${q}` : ''}`
 }
 
-/** The current address with `changes` applied to its query; null or '' removes a key. */
-function withQuery(changes) {
+/**
+ * The current address with `changes` applied to its query; null or '' removes a key. `keep` names
+ * the keys whose '' is written as `key=` rather than removed: a list whose empty choice is not its
+ * default (useUrlList).
+ */
+export function withQuery(changes, { keep = [] } = {}) {
   const { pathname, search } = split(currentUrl())
   const query = new URLSearchParams(search)
   for (const [key, value] of Object.entries(changes)) {
-    if (value === null || value === undefined || value === '') query.delete(key)
+    if (value === null || value === undefined || (value === '' && !keep.includes(key))) query.delete(key)
     else query.set(key, value)
   }
-  const q = query.toString()
+  const q = queryText(query)
   return pathname + (q ? `?${q}` : '')
 }
 
@@ -156,6 +182,80 @@ export function useUrlState(key, defaultValue = '', { allowed } = {}) {
   return [value, setValue]
 }
 
+const NO_VALUES = Object.freeze([])
+
+const sameSet = (a, b) => a.length === b.length && a.every(v => b.includes(v))
+
+/**
+ * The values `raw` names, and how the address should be tidied: `tidy` is the text to write, null
+ * to remove the key, or undefined to leave it. Aliases expand an old single value (`all`) into the
+ * values it meant; a value the page does not offer is dropped, and a list of nothing but those reads
+ * as the default. `''` is an explicit empty list, kept only where the default is not empty.
+ */
+function readList(raw, defaultValue, allowed, aliases) {
+  if (raw === null) return { value: defaultValue, tidy: undefined }
+  const expanded = []
+  for (const item of decodeList(raw)) {
+    for (const v of (aliases && Object.prototype.hasOwnProperty.call(aliases, item) ? aliases[item] : [item])) {
+      if (!expanded.includes(v)) expanded.push(v)
+    }
+  }
+  const kept = expanded.filter(v => isAllowed(allowed, v))
+  // Nothing the page offers, from a list that named something: a stray link, read as the default.
+  const stray = raw !== '' && kept.length === 0 && expanded.length > 0
+  const value = stray ? defaultValue : kept
+  if (stray || sameSet(value, defaultValue)) return { value, tidy: null }
+  const text = encodeList(value)
+  return { value, tidy: text === raw ? undefined : text }
+}
+
+/**
+ * One list filter held in a query parameter, its values joined by commas: `?status=online,offline`.
+ * Returns `[values, setValues]`, as `useUrlState` does, and `setValues` takes a list or an updater.
+ * A change replaces the current history entry. A link carrying one value is a list of one.
+ *
+ * The default never appears in the address. Choosing nothing, where the default is not nothing (a
+ * lifecycle that opens on Active), is written `key=`. A value the page does not offer is dropped,
+ * and the address is tidied to match; so is an alias, written out as the values it names.
+ *
+ * @param {string} key The query parameter.
+ *
+ * @param {Array<string>} [defaultValue] What the page shows with the parameter absent. Hoist it, or
+ * pass the same array each render.
+ *
+ * @param {Object} [options]
+ * @param {Array|Function|null} [options.allowed] The values the page offers, as a list or a
+ * predicate; null while a data-driven list is still loading, so a good value is not tidied away.
+ * @param {Object<string, Array<string>>} [options.aliases] Old single values and what each means:
+ * `{ all: ['active', 'archived'] }`.
+ */
+export function useUrlList(key, defaultValue = NO_VALUES, { allowed, aliases } = {}) {
+  const url = useUrl()
+  const raw = queryOf(url).get(key)
+  const { value, tidy } = readList(raw, defaultValue, allowed, aliases)
+
+  // The same array while the values are the same, so a consumer can depend on it.
+  const held = useRef(value)
+  if (!(held.current.length === value.length && held.current.every((v, i) => v === value[i]))) held.current = value
+
+  useEffect(() => {
+    if (tidy !== undefined) navigate(withQuery({ [key]: tidy }, { keep: [key] }), { replace: true })
+  }, [tidy, key])
+
+  const latest = useRef({ defaultValue, allowed, aliases })
+  latest.current = { defaultValue, allowed, aliases }
+  const setValues = useCallback((next) => {
+    const { defaultValue: fallback, allowed: offered, aliases: named } = latest.current
+    const current = readList(queryOf().get(key), fallback, offered, named).value
+    const chosen = typeof next === 'function' ? next(current) : next
+    const values = [...new Set((chosen || []).map(String))]
+    const text = sameSet(values, fallback) ? null : encodeList(values)
+    navigate(withQuery({ [key]: text }, { keep: [key] }), { replace: true })
+  }, [key])
+
+  return [held.current, setValues]
+}
+
 /**
  * The address of tab `next` on `page`: the bare page for `home`, with the `kept` keys of `url`.
  * `kept` is a list, or a function of `next` returning one.
@@ -164,7 +264,7 @@ function tabAddress(page, next, home, kept, url) {
   const keys = typeof kept === 'function' ? kept(next) : kept
   const carried = new URLSearchParams()
   for (const [key, value] of queryOf(url)) if (keys.includes(key)) carried.append(key, value)
-  const q = carried.toString()
+  const q = queryText(carried)
   return `/${page}${next && next !== home ? `/${next}` : ''}${q ? `?${q}` : ''}`
 }
 

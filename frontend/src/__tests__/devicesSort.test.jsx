@@ -161,7 +161,7 @@ describe('Devices: sorting the Registered roster by a column (#801)', () => {
     expect(listed()).toEqual(['Press_Alarm', 'Lathe_Overdue', 'Mill_Offline', 'Drill_Online', 'Old_Saw'])
     expect(header('Status')).toHaveAttribute('aria-sort', 'ascending')
     expect(sortInAddress()).toBe('status')
-    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('all')
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('active,archived')
   })
 
   it('reverses Status on a second click, the archived device still last, since it has no lifecycle state', async () => {
@@ -209,6 +209,26 @@ describe('Devices: sorting the Registered roster by a column (#801)', () => {
     expect(listed()).toEqual(['Drill_Online', 'Mill_Offline', 'Lathe_Overdue', 'Press_Alarm'])
     expect(header('Status')).toHaveAttribute('aria-sort', 'descending')
     expect(sortInAddress()).toBe('-status')
+  })
+})
+
+describe('Devices: Status ranks a firing alert, then an acknowledged one, then the rest', () => {
+  const firing = (d, severity) => ({ alert_name: 'Firing', severity, entity_type: 'device', sparkplug_id: d.sparkplug_id })
+
+  it('puts a warning nobody has picked up before an acknowledged critical, and a suppressed alert with no alert', async () => {
+    api.get.mockImplementation(routeGet(ROSTER, QUEUE))
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} activeAlerts={[
+      firing(mill, 'warning'),
+      { ...firing(drill, 'critical'), acknowledged_at: '2026-11-05T09:00:00Z', acknowledged_by_email: 'op@aber.local', acknowledgement_reason: 'investigating' },
+      { ...firing(press, 'critical'), suppressed: true, suppressed_until: '2026-11-05T12:00:00Z', suppression_reason: 'Belt change' },
+    ]} />)
+    await waitFor(() => expect(document.querySelector('.loading-wrap')).toBeNull())
+
+    sortBy('Status')
+    // The overdue lathe's amber badge is the rest's most severe; the suppressed press is ONLINE.
+    expect(listed()).toEqual(['Mill_Offline', 'Drill_Online', 'Lathe_Overdue', 'Press_Alarm'])
+    sortBy('Status')
+    expect(listed()).toEqual(['Press_Alarm', 'Lathe_Overdue', 'Drill_Online', 'Mill_Offline'])
   })
 })
 

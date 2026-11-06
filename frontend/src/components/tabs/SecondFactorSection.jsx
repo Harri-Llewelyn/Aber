@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
 import { EmptyState } from '../common/EmptyState'
-import { HelpTip } from '../common/HelpTip'
 import { IconPlus, IconShieldAlert } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { ColumnHeader } from '../common/SortHeader'
@@ -18,7 +17,8 @@ const MFA_URL = tabUrl('profile', 'mfa')
  * Profile's MFA tab: the authenticator apps the signed-in person has added (GoTrue's verified TOTP
  * factors, read through auth-js), with Add Authenticator and a Remove on
  * each row. Every role may add one. Once one is added, signing in asks for its code after the
- * password (components/auth/SecondFactorChallenge.jsx). Nothing on the site requires one.
+ * password (components/auth/SecondFactorChallenge.jsx). While Settings requires MFA (0251), an
+ * Administrator or Shopfloor Manager needs one to change the platform; every other role never does.
  *
  * `isPerson` is false for a machine identity, which signs in with a token and has none.
  */
@@ -59,31 +59,21 @@ export function SecondFactorSection({ isPerson = true, showToast }) {
   // A fragment, not a wrapper: the table must stay a direct child of the card.
   return (
     <>
-      <div className="card-body profile-section-head second-factor-head">
-        <div className="profile-section-heading">
-          <h4 className="profile-section-title">Multi-factor authentication (MFA)</h4>
-          <HelpTip
-            label="About MFA"
-            text="A code from an authenticator app on your phone, asked for after your password each time you sign in. Someone who learns your password cannot sign in without it. Any app that shows 6-digit codes works."
-          />
-          {isPerson && (
-            <div className="profile-section-actions">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                disabled={factors === undefined && !error}
-                onClick={() => setAdding(true)}
-              >
-                <IconPlus size={13} /> Add Authenticator
-              </button>
-            </div>
-          )}
+      {/* The tab explains itself in its tooltip; the row under the bar holds only its button. */}
+      {isPerson && (
+        <div className="filter-bar">
+          <div className="filter-bar-actions">
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={factors === undefined && !error}
+              onClick={() => setAdding(true)}
+            >
+              <IconPlus size={13} /> Add Authenticator
+            </button>
+          </div>
         </div>
-        <p className="profile-section-note">
-          Optional for every role. With an authenticator added, signing in asks for its code after
-          your password, for the dashboard and for the services that sign in through it.
-        </p>
-      </div>
+      )}
 
       {!isPerson ? (
         <EmptyState message="A machine identity signs in with a token, so it has no MFA." />

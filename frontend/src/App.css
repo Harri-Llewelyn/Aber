@@ -62,6 +62,10 @@
   --success-tint: color-mix(in srgb, var(--success) 15%, transparent);
   --warning-tint: color-mix(in srgb, var(--warning) 15%, transparent);
   --danger-tint:  color-mix(in srgb, var(--danger) 15%, transparent);
+  /* An acknowledged alert: the danger colour paled. The edge at 70% over the card still clears 3:1
+     against it in both themes; the fill is half the firing tint's. */
+  --danger-soft-border: color-mix(in srgb, var(--danger) 70%, var(--bg-card));
+  --danger-soft-tint:   color-mix(in srgb, var(--danger) 7%, transparent);
   --text-primary: #e8eaf0;
   /* Three distinguishable secondary tiers, every one clearing WCAG AA against --bg-card. */
   --text-muted:   #858ea3;  /* 5.14:1 on --bg-card */
@@ -91,6 +95,20 @@
   --cluster:      #a855f7;
   --cluster-bg:   rgba(168, 85, 247, 0.18);
   --cluster-text: #d8b4fe;
+  /* A state chart's box: an OKLCH lightness and chroma, the hue the value's own (stateHue()). Every
+     hue stays inside sRGB at these, the label clears 7.4:1 on the box and the edge 5.9:1 on the card. */
+  --chart-state-l:      0.40;
+  --chart-state-c:      0.065;
+  --chart-state-edge-l: 0.70;
+  --chart-state-edge-c: 0.115;
+  /* History's Overview: a block's shade, fewer readings to more, a sequential blue ramp checked with
+     the dataviz validator against this card. Sparse blocks recede toward the card and dense ones are
+     a calm light blue. The step nearest the card clears 2:1 (2.08:1), the floor for an ordered ramp;
+     a block's count is also in its readout, never in its colour alone. */
+  --coverage-1: #184f95;
+  --coverage-2: #256abf;
+  --coverage-3: #3987e5;
+  --coverage-4: #86b6ef;
   /* The offline and archived device chip's fill: a white lift on the dark card. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
   /* Its label: --text-muted's grey, a step lighter because the lift costs it AA (4.49:1 on the lift,
@@ -164,6 +182,10 @@
   --success-tint: color-mix(in srgb, var(--success) 15%, transparent);
   --warning-tint: color-mix(in srgb, var(--warning) 15%, transparent);
   --danger-tint:  color-mix(in srgb, var(--danger) 15%, transparent);
+  /* An acknowledged alert: the danger colour paled. The edge at 70% over the card still clears 3:1
+     against it in both themes; the fill is half the firing tint's. */
+  --danger-soft-border: color-mix(in srgb, var(--danger) 70%, var(--bg-card));
+  --danger-soft-tint:   color-mix(in srgb, var(--danger) 7%, transparent);
   --text-primary: #0f172a;
   --text-muted:   #475569;  /* 7.58:1 on --bg-card */
   /* Clears AA on both a white card (5.25:1) and --bg-base (4.80:1), and stays dimmer than
@@ -189,6 +211,17 @@
   --cluster:      #7e22ce;
   --cluster-bg:   rgba(147, 51, 234, 0.12);
   --cluster-text: #6b21a8;
+  /* The light card's box: the label clears 13:1 on it at every hue, and the edge 3.7:1 on the card. */
+  --chart-state-l:      0.90;
+  --chart-state-c:      0.045;
+  --chart-state-edge-l: 0.60;
+  --chart-state-edge-c: 0.10;
+  /* Overview's shades on the white card, the same ramp darkening with the count; the step nearest
+     the card clears 2:1 (2.11:1). */
+  --coverage-1: #86b6ef;
+  --coverage-2: #5598e7;
+  --coverage-3: #2a78d6;
+  --coverage-4: #1c5cab;
   /* The dark theme's white lift, unchanged: on a white card it paints nothing, so the chip is an
      outline. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
@@ -1294,12 +1327,16 @@ a.tab-strip-tab { text-decoration: none; }
 
 /* The toolbar's right-hand group: Clear filters first, then secondary buttons such as Export, then
    the page's main button last. The margin is on the group rather than its first child, so the end
-   stays stable when a control is conditional. */
+   stays stable when a control is conditional. On a narrow screen the group wraps, from the right,
+   rather than pushing the page sideways. */
 .filter-bar-actions {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 /* The three widths of a filter control, selects and search alike. The doubled selector beats
@@ -1313,6 +1350,10 @@ a.tab-strip-tab { text-decoration: none; }
 .filter-bar-clear { margin-left: auto; }
 
 /* The Filters popover: fixed under its button (see FiltersPopover), on the popover rung. */
+/* A popover's trigger ends in a chevron, turned while its panel is open (ToolbarPopover). */
+.popover-chevron { flex-shrink: 0; transition: transform 0.15s ease; }
+[aria-expanded="true"] > .popover-chevron { transform: rotate(180deg); }
+
 .filters-popover {
   position: fixed;
   z-index: 200;
@@ -1340,6 +1381,83 @@ a.tab-strip-tab { text-decoration: none; }
   padding: 8px var(--inset-tight);
   border-top: 1px solid var(--border);
 }
+
+/* A list filter (FilterChecklist): the values as checkboxes under their group headings, a search
+   box above a long list, and each value's count at the right. In a toolbar dropdown, its one list,
+   the values scroll under the search box. In a Filters panel a list is at full height and only the
+   panel scrolls (check 203). */
+.filter-checklist { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.filter-checklist .search-input,
+.filter-checklist .search-input.control-lg { width: 100%; }
+.filter-checklist .search-input-field { height: 34px; padding-top: 0; padding-bottom: 0; font-size: 13px; }
+.filter-checklist-options {
+  display: flex;
+  flex-direction: column;
+}
+.filter-dropdown-panel .filter-checklist-options { max-height: min(50vh, 360px); overflow-y: auto; }
+.filter-checklist-section + .filter-checklist-section { margin-top: 6px; }
+.filter-checklist-option,
+.filter-checklist-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.filter-checklist-group { font-weight: 600; }
+.filter-checklist-section .filter-checklist-option { padding-left: 24px; }
+.filter-checklist-option input,
+.filter-checklist-group input { margin: 0; flex-shrink: 0; accent-color: var(--accent); }
+.filter-checklist-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.filter-checklist-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* A chosen value that cannot occur with what else is chosen: the name dimmed and the reason beside
+   it in the count's voice, so the row reads as kept for undoing, not as on offer. */
+.filter-checklist-note { flex-shrink: 0; font-size: 12px; font-style: italic; color: var(--text-muted); }
+.filter-checklist-option-noted .filter-checklist-label { color: var(--text-muted); }
+.filter-checklist-empty { padding: 4px 2px; font-size: 12px; color: var(--text-muted); }
+/* In a Filters panel: the list's label, as the time control's popover labels its groups. */
+.filter-list { display: flex; flex-direction: column; gap: 6px; }
+.filter-list-head { display: flex; align-items: center; gap: 6px; }
+.filter-list-head .form-label { margin-bottom: 0; }
+.filter-check { flex: 1; }
+/* Two or more lists in a Filters panel are sections, one open at a time (FiltersPopover): each
+   heading a GroupHeading on a strip of the base surface, ruled off as the timeline's sections are,
+   edge to edge across the panel. The strip tints while its button is hovered; a HelpTip beside the
+   button is not part of it. */
+.filter-sections {
+  display: flex;
+  flex-direction: column;
+  margin: 0 calc(-1 * var(--inset-tight));
+  border-bottom: 1px solid var(--border);
+}
+.filter-section { display: flex; flex-direction: column; }
+.filter-section-head {
+  display: flex;
+  align-items: center;
+  background: var(--bg-base);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.filter-section-head:has(> .group-heading:hover) { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
+.filter-section-head > .group-heading {
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  padding: 8px var(--inset-tight);
+}
+.filter-section-head > .help-tip { margin-right: var(--inset-tight); }
+.filter-section-body { padding: 8px var(--inset-tight) 12px; }
+/* A list filter in the toolbar keeps the width of the select it replaced, so the row keeps its shape:
+   the words are cut at the edge, the chevron sits at the right. */
+.filter-dropdown { justify-content: space-between; min-width: 0; }
+.filter-dropdown-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* SearchInput: a form control with a leading icon and a clear button inside its right edge. The
    native search cancel is hidden, since the clear button replaces it. */
@@ -1580,7 +1698,12 @@ th[aria-sort] > .sort-header { color: var(--text-primary); }
   transform: translateY(-50%);
 }
 
-.sort-header:not(:hover):not(:focus-visible) > .sort-arrow-idle { visibility: hidden; }
+/* An unsorted column's double arrow is drawn at rest, so the header says it sorts before anyone
+   points at it, on a touch screen too. Quieter than the label; it steps up with the label on hover
+   or focus. */
+.sort-arrow-idle { color: var(--text-dim); }
+.sort-header:hover > .sort-arrow-idle,
+.sort-header:focus-visible > .sort-arrow-idle { color: var(--text-primary); }
 
 /* A sortable header's "?" (SortHeader's `help`), clear of the arrow the label's margin overhangs. */
 .sort-header + .help-tip { margin-left: 20px; }
@@ -1726,6 +1849,27 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .table-group-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
+/* GroupHeading: a table group button with a count after the name ("Devices · 12"), muted beside
+   the accent name, and its chevron and icon kept whole. A page sizes it to the row it sits in. */
+.group-heading-chevron,
+.group-heading-icon { display: inline-flex; flex-shrink: 0; }
+.group-heading-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-heading-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+/* Words in place of the count (`detail`): cut, and slid by OverflowText, before the name gives way. */
+.group-heading-detail,
+.group-heading-detail-shown { display: flex; min-width: 0; }
+.group-heading-detail { flex-shrink: 100; }
+
 
 /* Monospace is a typeface, not a cue: it takes the text colour. Accent marks a real link. */
 .mono {
@@ -1823,6 +1967,29 @@ tbody tr:hover { background: var(--bg-glass); }
   white-space: nowrap;
 }
 
+/* OverflowText: one line cut with an ellipsis that slides to show its end on hover or keyboard
+   focus. The script sets --overflow-shift (how far, negative) and --overflow-ms (how long), and
+   keeps the line clipped rather than ellipsised until the text is back at its start. */
+.overflow-text {
+  --overflow-shift: 0px;
+  --overflow-ms: 250ms;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overflow-text-inner {
+  position: relative;
+  left: 0;
+}
+/* Doubled, to beat a page class on the same element that sets the ellipsis. */
+.overflow-text.overflow-text-sliding { text-overflow: clip; }
+.overflow-text-sliding > .overflow-text-inner {
+  left: var(--overflow-shift);
+  transition: left var(--overflow-ms) linear;
+}
+
 /* The dotted underline that says "hover for the meaning". */
 .hint-underline {
   text-decoration: underline dotted;
@@ -1896,6 +2063,111 @@ td.row-actions, th.row-actions {
 }
 .system-lost > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
+/* Refresh and its interval as one control (common/RefreshButton.jsx): one filled shape, as a
+   .btn-primary .btn-sm is, holding two plain halves with a hairline between them. Hover lights the
+   half under the pointer and focus rings it inside the shape. While Off the right half is only its
+   chevron (the select's text is transparent and the select as narrow as the chevron). */
+.refresh-split {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow: hidden;
+  transition: var(--transition);
+}
+.refresh-split:hover { box-shadow: 0 0 16px var(--accent-glow); }
+.refresh-split-now {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.refresh-split-now:disabled { opacity: 0.6; cursor: default; }
+.refresh-split-every {
+  position: relative;
+  display: inline-flex;
+  border-left: 1px solid color-mix(in srgb, var(--accent-contrast) 30%, transparent);
+}
+.refresh-split-now:hover:not(:disabled),
+.refresh-split-every:hover:not(:has(select:disabled)) { background: color-mix(in srgb, var(--accent-contrast) 12%, transparent); }
+/* Off with a reason: dimmed, and the pointer passes to the half, whose tooltip says why. */
+.refresh-split-every:has(select:disabled) { opacity: 0.6; }
+.refresh-split-every select:disabled { cursor: default; pointer-events: none; }
+.refresh-split-every select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 6px 28px 6px 10px;
+  cursor: pointer;
+}
+.refresh-split-off select { width: 32px; padding: 6px 0; color: transparent; }
+.refresh-split-every option { color: var(--text-primary); background: var(--bg-card); }
+.refresh-split-every svg { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.refresh-split-now:focus-visible,
+.refresh-split-every:has(select:focus-visible) { outline: 2px solid var(--accent-contrast); outline-offset: -3px; }
+.refresh-split-every select:focus-visible { outline: none; }
+
+/* System › Logs: time, level, message and a copy button. The message takes what the other three
+   leave and wraps anywhere, since a line is one long token as often as a sentence. */
+.table-logs {
+  table-layout: fixed;
+  min-width: 760px;
+}
+.table-logs th:nth-child(1) { width: 210px; }  /* Time */
+.table-logs th:nth-child(2) { width: 100px; }  /* Level */
+.table-logs th:nth-child(4) { width: 60px; }   /* Copy */
+.table-logs th { padding: 9px 16px; }
+.table-logs td {
+  padding: 8px 16px;
+  font-size: 13px;
+  vertical-align: top;
+}
+.table-logs .cell-log-time { font-size: 12px; white-space: nowrap; }
+
+/* As written, line breaks kept: a traceback is one entry, and scrolls inside its cell. */
+.log-message {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16em;
+  overflow: auto;
+}
+
+/* A JSON line's named fields (reason, device, edge_node), under its message. */
+.log-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* A device id or a reason is one long token: it breaks anywhere rather than widen the column. */
+.log-field { overflow-wrap: anywhere; }
+.log-field-key { color: var(--text-dim); }
+
+/* What a read left out, and what the level filter cannot see, under the toolbar. */
+.log-note {
+  margin: 8px 16px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* An endpoint that opens is a link chip: accent text. */
 .endpoint-action {
   text-decoration: none;
@@ -1967,12 +2239,9 @@ td.row-actions, th.row-actions {
   overflow-wrap: anywhere;
 }
 
-/* A cut chip's full value, in its tooltip: in the chip's face, and broken anywhere, since an id
-   longer than the bubble has no space to break at. */
-.copyable-id-full {
-  font-family: var(--font-mono);
-  overflow-wrap: anywhere;
-}
+/* An id in a tooltip, in the face it has where it is written: a cut chip's full value, or a
+   vocabulary entry's NodeId or semantic id. The bubble breaks it where it has to. */
+.copyable-id-full { font-family: var(--font-mono); }
 
 .copyable-id-icon { flex-shrink: 0; }
 
@@ -1983,11 +2252,14 @@ td.row-actions, th.row-actions {
 }
 
 /* ===== Badges ===== */
+/* A badge is one line: its pill radius would round a wrapped badge into an oval. A long label in a
+   narrow cell widens the column instead, so a long summary is split into one badge per figure. */
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 3px 10px;
+  white-space: nowrap;
   border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 600;
@@ -2033,6 +2305,14 @@ td.row-actions, th.row-actions {
 /* Out of commission: the warning badge with a border, and an icon in front. See ArchivedBadge. */
 .badge-archived {
   border: 1px solid var(--warning);
+  gap: 4px;
+}
+
+/* An alert somebody has acknowledged: the danger badge paled, with a softer edge and a tick in
+   front, so it reads as still an issue but in hand, apart from a firing ALARM by shape and words. */
+.badge-acknowledged {
+  background: var(--danger-soft-tint);
+  border: 1px solid var(--danger-soft-border);
   gap: 4px;
 }
 
@@ -2147,6 +2427,8 @@ td.row-actions, th.row-actions {
 
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 
+/* A button that cannot go ahead: not permitted, or held until a form is complete. ActionButton adds
+   it whenever it is disabled and not pending; the `disabled` attribute alone changes nothing here. */
 .btn-disabled {
   opacity: 0.45 !important;
   cursor: not-allowed !important;
@@ -2160,8 +2442,8 @@ td.row-actions, th.row-actions {
   transform: none !important;
 }
 
-/* Button pending state: a button whose action is in flight. Not `.btn-disabled`, which means not
-   permitted and greys the control; this one has to stay legible. ActionButton sets the `disabled`
+/* Button pending state: a button whose action is in flight. Not `.btn-disabled`, which means it
+   cannot go ahead and greys the control; this one has to stay legible. ActionButton sets the `disabled`
    attribute alongside this class as the double-submit guard. `cursor: wait` still applies on a
    disabled button. */
 .btn-loading {
@@ -2193,6 +2475,14 @@ td.row-actions, th.row-actions {
 .badge-drive      { --badge-brand-color: var(--brand-drive); }
 
 /* ===== Collapsed tag list ===== */
+/* An entry drawn as several badges (a devices column's summary): one item of the list, wrapping
+   between its badges, never inside one. */
+.tag-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .tag-overflow {
   font-size: 11px;
   color: var(--text-muted);
@@ -2372,6 +2662,13 @@ main:focus { outline: none; }
   line-height: 1.5;
 }
 
+/* Why the confirm is off (Modal's `problem`), between the body and the error slot. It stays in the
+   box while empty, as a live region, and takes no height then. */
+.modal-problem {
+  flex: none;
+  margin: 0;
+}
+
 /* One paragraph under the header saying what the dialog will do. */
 .modal-lead {
   margin: 0 0 16px;
@@ -2394,6 +2691,11 @@ main:focus { outline: none; }
   color: var(--text-muted);
   margin-bottom: 7px;
 }
+
+/* The asterisk of a required field (RequiredMark): a shape as well as a colour. Drawn here, so it
+   is not in the label's text, which names the control. */
+.required-mark { color: var(--danger-text); margin-left: 3px; }
+.required-mark::before { content: '*'; }
 
 .form-control {
   width: 100%;
@@ -3290,6 +3592,7 @@ span.area-plan-pin { cursor: inherit; }
 .area-plan-pin-attention { --pin-colour: var(--warning); }
 .area-plan-pin-idle      { --pin-colour: var(--text-dim); }
 .area-plan-pin-alert     { --pin-colour: var(--danger); }
+.area-plan-pin-acknowledged { --pin-colour: var(--danger-soft-border); }
 .area-plan-pin-muted     { --pin-colour: var(--text-dim); opacity: 0.55; }
 
 /* The Site Map's grid sets --pin-size by its column count; 40px elsewhere, and the largest drawn. */
@@ -3360,6 +3663,46 @@ span.area-plan-pin { cursor: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   .area-plan-pin-alert .area-plan-pin-disc::after { animation: none; opacity: 0.6; }
+}
+
+/* An acknowledged alert: the red ring without the pulse, and a tick on the disc's corner, so it
+   differs from Alert firing by shape and motion as well as by the tooltip's words. The badge is
+   ::after and the tick, two borders turned, is ::before above it. */
+.area-plan-pin-acknowledged .area-plan-pin-disc::after,
+.area-plan-pin-acknowledged .area-plan-pin-disc::before {
+  content: '';
+  position: absolute;
+}
+.area-plan-pin-acknowledged .area-plan-pin-disc::after {
+  right: -5px;
+  bottom: -5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+.area-plan-pin-acknowledged .area-plan-pin-disc::before {
+  z-index: 1;
+  right: 0;
+  bottom: -1px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--bg-card);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.area-plan-pin-small.area-plan-pin-acknowledged .area-plan-pin-disc::after {
+  right: -4px;
+  bottom: -4px;
+  width: 9px;
+  height: 9px;
+}
+.area-plan-pin-small.area-plan-pin-acknowledged .area-plan-pin-disc::before {
+  right: -1px;
+  bottom: -2px;
+  width: 2px;
+  height: 4px;
+  border-width: 0 1.5px 1.5px 0;
 }
 
 /* Under the grid of areas: the cells filed in no area, which no plan can draw. */
@@ -3493,9 +3836,11 @@ span.area-plan-pin { cursor: inherit; }
 .tile-dot-attention { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
 /* No glow: "nothing live in here" should not draw the eye the way something actionable does. */
 .tile-dot-idle      { background: var(--text-dim); }
-/* An area whose device Grafana has raised an alert against: the one red dot, and only on an area
-   card, where a pin inside is red for the same reason. The legend keeps the chip swatch. */
+/* An area with an alert firing against a device in it: the one red dot, and only on an area card,
+   where a pin inside is red for the same reason. The legend keeps the chip swatch. */
 .tile-dot-alert     { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+/* Every alert there acknowledged: a paled red ring, with no glow. */
+.tile-dot-acknowledged { background: var(--danger-soft-tint); box-shadow: inset 0 0 0 2px var(--danger-soft-border); }
 
 /* Legend chip swatch: the alert entry describes a chip, not a dot, since an alert fires against one
    device while the dots roll up a whole lane or area. Sized to sit on the same 8px optical line as
@@ -3510,6 +3855,15 @@ span.area-plan-pin { cursor: inherit; }
 /* The same border and fill as `.chip-danger`, quoted rather than shared: a swatch that drifts from
    the chip it describes is a legend that lies. */
 .legend-chip-danger { border-color: var(--danger); background: var(--danger-tint); }
+/* An acknowledged alert's chip, paled, with the tick its flag carries. */
+.legend-chip-acknowledged {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: var(--danger-soft-border);
+  background: var(--danger-soft-tint);
+  color: var(--danger-text);
+}
 
 /* A chip that navigates, used in the context drawers for Serving Gateway, Cell and Schema. An <a>
    when it opens another page (Ctrl-click opens a new tab), a <button> when it acts on this one.
@@ -3580,9 +3934,9 @@ a.chip { text-decoration: none; }
   margin-top: 5px;
 }
 
-/* Provenance on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is narrow
-   and "Raised by Grafana · since 14:22:07" plus the link is close enough to that to wrap on a narrow
-   band, and a clipped link is worse than a two-line footer. */
+/* The state on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is narrow
+   and "Alert acknowledged · since 5 Nov 2026, 14:22" plus the link is close enough to that to wrap on
+   a narrow band, and a clipped link is worse than a two-line footer. */
 .context-alert-foot {
   display: flex;
   align-items: center;
@@ -3601,15 +3955,49 @@ a.chip { text-decoration: none; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--accent);
+  /* A link reads as blue text with no resting underline, as every link does. */
+  color: var(--accent-text);
   font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration: none;
   flex-shrink: 0;
 }
 
-.context-alert-link:hover { color: var(--text-primary); }
+/* The banner's two links, kept together at the foot's right. */
+.context-alert-links { display: inline-flex; align-items: center; gap: 12px; }
+
+.context-alert-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 .context-alert-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Acknowledged, the banner pales: its severity's colour, softer at the edge and in the fill, as
+   the badges and pins pale. Suppressed, it colours nothing: a dashed neutral outline, and the
+   crossed bell. */
+.context-alert.context-alert-acknowledged {
+  border-color: color-mix(in srgb, var(--warning) 70%, var(--bg-card));
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
+}
+.context-alert-critical.context-alert-acknowledged {
+  border-color: var(--danger-soft-border);
+  background: var(--danger-soft-tint);
+}
+.context-alert.context-alert-suppressed {
+  border-color: var(--border);
+  border-style: dashed;
+  background: transparent;
+}
+.context-alert-suppressed .context-alert-head { color: var(--text-primary); }
+
+/* Who acknowledged it, or until when a window keeps it quiet, with the reason under it. */
+.context-alert-state {
+  display: flex;
+  gap: 5px;
+  align-items: flex-start;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+.context-alert-state svg { flex-shrink: 0; margin-top: 1px; }
+.context-alert-note { font-size: 11px; line-height: 1.35; color: var(--text-primary); margin-top: 3px; overflow-wrap: anywhere; }
 
 /* The top bar's alert counter and the list behind it. Permanent in all three states; see
    AlertPill.jsx. `position: relative` on the wrapper anchors the panel to the pill rather than the
@@ -3741,7 +4129,7 @@ a.chip { text-decoration: none; }
 
 .alert-pill-item {
   display: flex;
-  gap: 9px;
+  flex-direction: column;
   padding: 0;
   border-bottom: 1px solid var(--border);
 }
@@ -3775,8 +4163,11 @@ a.chip { text-decoration: none; }
 
 /* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
    alert's sparkplug_id happens not to resolve to a device. */
-.alert-pill-item > .alert-pill-dot { margin-left: 12px; margin-top: 15px; }
-.alert-pill-item > .alert-pill-item-body { padding: 10px 12px 10px 0; }
+.alert-pill-item-static {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+}
 
 .alert-pill-dot {
   width: 7px;
@@ -3789,6 +4180,38 @@ a.chip { text-decoration: none; }
 .alert-pill-dot-critical { background: var(--danger); }
 .alert-pill-dot-warning  { background: var(--warning); }
 .alert-pill-dot-info     { background: var(--accent); }
+/* Acknowledged: the same hue as a ring, so the row reads apart from an unacknowledged one by shape. */
+.alert-pill-dot.alert-pill-dot-acknowledged {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+.alert-pill-dot-warning.alert-pill-dot-acknowledged { box-shadow: inset 0 0 0 1.5px var(--warning); }
+.alert-pill-dot-info.alert-pill-dot-acknowledged    { box-shadow: inset 0 0 0 1.5px var(--accent); }
+/* Suppressed: a muted ring with a stroke through it, whatever its severity, since it colours
+   nothing. After the acknowledged rules, so it wins on a row that is both. */
+.alert-pill-dot.alert-pill-dot-suppressed {
+  background: linear-gradient(135deg, transparent 43%, var(--text-muted) 43% 57%, transparent 57%);
+  box-shadow: inset 0 0 0 1.5px var(--text-muted);
+}
+
+/* Under an alert's name: Acknowledge, or who acknowledged it, when and why, with Withdraw. Indented
+   to the name, past the dot: 12px of row padding, the 7px dot and its 9px gap. */
+.alert-pill-ack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0 12px 10px 28px;
+  margin-top: -4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.alert-pill-ack-words { display: flex; gap: 5px; align-items: flex-start; line-height: 1.35; }
+.alert-pill-ack-tick { flex-shrink: 0; margin-top: 1px; color: var(--success-text); }
+.alert-pill-suppression-mark { flex-shrink: 0; margin-top: 1px; }
+.alert-pill-ack-note { color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; }
+.alert-pill-ack .btn-sm { padding: 2px 8px; font-size: 11px; }
 
 .alert-pill-item-body { min-width: 0; }
 .alert-pill-item-name { font-size: 12px; font-weight: 600; }
@@ -3816,7 +4239,7 @@ a.chip { text-decoration: none; }
   color: var(--text-muted);
 }
 
-/* Grafana's alert history, on a line of its own under the feed's note: a link, so the accent. */
+/* History's Alerts tab, on a line of its own under the feed's note: a link, so the accent. */
 .alert-pill-history {
   display: flex;
   align-items: center;
@@ -4011,16 +4434,18 @@ a.chip { text-decoration: none; }
 }
 
 /* ===== Popover arrows =====
-   The four panels that open from a button point at it: a square turned 45 degrees, centred on the
-   panel's border on the side facing the button. It is a pseudo-element of the panel's wrapper, not
-   of the panel, because the alert, notification and account panels clip or scroll their overflow;
-   the Filters panel clips nothing and carries its own. --bg-card is opaque in both themes, so the
+   The four panels that open from a button point at it, and History Overview's selection popover at
+   its box: a square turned 45 degrees, centred on the panel's border on the side facing what it
+   points at. It is a pseudo-element of the panel's wrapper, not of the panel, because the alert,
+   notification and account panels clip or scroll their overflow; the Filters panel and the
+   selection popover clip nothing and carry their own. --bg-card is opaque in both themes, so the
    half inside the panel hides the panel's border there and the two bordered sides carry the
    outline on into the point. The rules below say where the centre goes and which way it turns. */
 .alert-pill-wrap:has(> .alert-pill-panel)::after,
 .notif-wrap:has(> .notif-panel)::after,
 .user-menu:has(> .user-popover)::after,
-.filters-popover::before {
+.filters-popover::before,
+.overview-popover::before {
   --arrow-size: 10px;
   content: '';
   position: absolute;
@@ -4065,6 +4490,20 @@ a.chip { text-decoration: none; }
   top: -0.5px;
   left: calc(var(--arrow-x, 50%) - 1px);
 }
+
+/* Up from History Overview's selection popover to its box, or down where it opens above the box;
+   none where a box taller than the window has it over its foot. --arrow-x is set as the Filters
+   panel's is. */
+.overview-popover::before {
+  top: -0.5px;
+  left: calc(var(--arrow-x, 50%) - 1px);
+}
+.overview-popover-above::before {
+  --arrow-turn: 225deg;
+  top: auto;
+  bottom: -0.5px;
+}
+.overview-popover-over::before { display: none; }
 
 /* The 3D model preview in the device drawer's model section: the drawer's width, and 16:9 so it
    grows with the drawer (about 290px tall at 1080p). One class on all three states (the
@@ -4341,6 +4780,8 @@ a.chip { text-decoration: none; }
 /* --danger-text and --chip-offline-text, not --danger and --text-muted: both measure under AA on the
    fill their chip paints. */
 .chip-danger  { border-color: var(--danger);  background: var(--danger-tint); color: var(--danger-text); font-weight: 600; }
+/* An acknowledged alert: the danger chip paled, its ACKNOWLEDGED flag carrying the tick. */
+.chip-acknowledged { border-color: var(--danger-soft-border); background: var(--danger-soft-tint); color: var(--text-primary); font-weight: 600; }
 .chip-offline { border-color: color-mix(in srgb, var(--text-dim) 40%, transparent); background: var(--chip-offline-bg); color: var(--chip-offline-text); font-weight: 500; }
 
 /* Context panel: the right-hand drawer, and the flex row that lets it push rather than cover.
@@ -4417,6 +4858,16 @@ a.chip { text-decoration: none; }
   border-bottom: 1px solid var(--border);
   background: var(--bg-glass);
   flex-shrink: 0;
+}
+
+/* The full-width slot under the header (`nav`), for controls that change what the drawer shows. It
+   continues the header's band and takes its rule, and stays in view while the body scrolls. */
+.context-panel-header-nav { border-bottom: none; padding-bottom: 6px; }
+.context-panel-nav {
+  flex-shrink: 0;
+  padding: 0 var(--inset-tight) 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-glass);
 }
 
 .context-panel-heading { min-width: 0; }
@@ -4509,7 +4960,8 @@ a.chip { text-decoration: none; }
 
 /* Tighter than the 6px a form label gives it: these labels are 11px and uppercase, and the
    standard gap reads as a gap rather than as part of the label. */
-.context-field-label .help-tip {
+.context-field-label .help-tip,
+.context-panel-section-label .help-tip {
   margin-left: 3px;
   width: 15px;
   height: 15px;
@@ -4620,6 +5072,31 @@ a.chip { text-decoration: none; }
   flex-direction: column;
   gap: 10px;
 }
+
+/* A drawer's Suppression windows section (common/SuppressionWindows.jsx): each window a ruled row,
+   its state as a word beside the reason, the times and who under it, the acts at its foot. The
+   reason wraps rather than cuts: it is what the reader came for, and it is at most 200 characters. */
+.suppression-windows { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+/* Flex so its HelpTip sits on the label's line, as a field label's does. */
+.suppression-windows > .context-panel-section-label { margin-bottom: 0; display: flex; align-items: center; }
+.suppression-windows .context-field-empty { font-size: 11px; }
+.suppression-window-list { list-style: none; margin: 0; padding: 0; width: 100%; }
+.suppression-window {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+.suppression-window:first-child { border-top: none; padding-top: 2px; }
+.suppression-window-head { display: flex; align-items: flex-start; gap: 6px; }
+.suppression-window-head .badge { flex-shrink: 0; }
+.suppression-window-reason { font-size: 12px; color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; min-width: 0; }
+.suppression-window-meta { color: var(--text-muted); line-height: 1.35; }
+.suppression-window-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+/* The dialog's start and end side by side, one above the other in a narrow dialog. */
+.suppression-window-times { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 14px; }
 
 /* A copyable identifier inside the panel is a block, not an inline chip. It wraps to as many
    lines as the value needs (see `.copyable-id-wrap`), so the negative margin `.copyable-id`
@@ -4999,12 +5476,85 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   border: 0;
 }
 
+/* ===== Time window control ===== */
+/* ‹ the window in words ›, the span switch, and Zoom in and Zoom out where a page asks for them
+   (common/TimeWindowControl.jsx), in a toolbar after the search box. One flex item, so a toolbar
+   that wraps moves it to a line of its own whole; only on a line narrower than itself do the switch
+   and the zoom go under the arrows, which never part from the words. The words keep a minimum
+   width, so › stays put under the pointer while a week or a day is stepped. */
+.time-window {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.time-window-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.time-window-step { padding-left: 7px; padding-right: 7px; }
+
+/* Zoom in and Zoom out, after the switch, a pair that wraps together. */
+.time-window-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.time-window-pick {
+  min-width: 12.5rem;
+  justify-content: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.time-window-words { white-space: nowrap; }
+
+/* Inside the popover: the three groups, their buttons wrapping, and the labelled fields. */
+.time-window-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.time-window-group .form-label { margin-bottom: 0; }
+/* Show range ends its group at the right, as Clear ends the Filters panel, rather than spanning it. */
+.time-window-group > .btn { align-self: flex-end; }
+.time-window-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.time-window-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.time-window-field {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* A toolbar control's height, as in .filter-bar, so the three groups fit the panel at 800px. */
+.time-window-field .form-control {
+  height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 13px;
+}
+
 /* Audit Trail swimlanes: one lane per entity, with time on the x-axis so two changes a fortnight
    apart and two a second apart look different. */
 
-/* The card body holding the timeline: the one link in the card that gives way (.card-fill-scroll),
-   and inside it .trail-scroll is the one thing that scrolls. It keeps overflow visible so the two
-   are not nested scrollers; the parts beside the scroller do not shrink. */
+/* The box holding the timeline: the one link in the card that gives way (.card-fill-scroll), and
+   inside it .trail-scroll is the one thing that scrolls. It keeps overflow visible so the two are
+   not nested scrollers; the parts beside the scroller do not shrink. No padding, so the rows run to
+   the card's edges as a table's do; the key row and the foot carry their own inset. */
 .card-fill > .trail-timeline {
   display: flex;
   flex-direction: column;
@@ -5022,25 +5572,48 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   flex: 0 1 auto;
 }
 
-/* The row above the timeline, holding the key. */
+/* The row above the timeline, holding the key and Expand all, inset as a card body is. */
 .trail-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 6px 16px;
-  margin-bottom: 10px;
+  padding: 10px var(--inset);
 }
 
-/* The key. Each entry draws the track's own marker (TrailMarker), so the legend cannot drift away
-   from what it describes. */
+/* The key, at the row's right-hand end, and the class filter. Each entry draws the track's own
+   marker (TrailMarker), so the legend cannot drift away from what it describes. Kept to the right
+   when the row wraps on a narrow card. */
 .trail-legend {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 6px 14px;
+  margin-left: auto;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* A class's toggle: the toolbar's counted toggle (btn-ghost, btn-primary while on) holding the
+   marker, so the key reads as it did and the filter as filters do elsewhere. */
+.trail-legend-toggle { gap: 6px; }
+
+/* The marker's ground in a toggle: a disc in the card's colour, which the marker has behind it on
+   the track, so it reads the same pressed (the accent fill) or not. 19px holds each shape whole,
+   centred on whole pixels; the margins keep the toggle as tall as the buttons beside it.
+   themeContrast.test.js holds each marker at 3:1 on it. */
+.trail-legend-disc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 19px;
+  height: 19px;
+  margin: -2px 0;
+  border-radius: 50%;
+  background: var(--bg-card);
 }
 
 .trail-legend-item {
@@ -5049,25 +5622,28 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   gap: 6px;
 }
 
-/* Both scrolls live here rather than on the page: the drawer is a flex sibling of the list and takes
-   width off this box, and the axis row pins to its nearest scroll container, so that must be this
-   one. The .page-fill chain gives it a height to overflow. */
+/* The scroll lives here rather than on the page: the axis row pins to its nearest scroll container,
+   so that must be this one. The .page-fill chain gives it a height to overflow. Never sideways: a
+   window always fits the width, however much the drawer takes, so the track narrows instead and
+   the clustering draws closer markers as one. */
 .trail-scroll {
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
-/* The three widths every rule below is laid out from, declared once: a gridline is placed against
-   the track's box, and the track's box is what is left of a lane after the label and the gap. The
-   minimum width is their sum, so the track can never be forced past the box it is drawn in. */
+/* The widths every rule below is laid out from, declared once: a gridline is placed against the
+   track's box, and the track's box is what is left of a lane after the label and the gap. The label
+   column is a share of the width, between a floor that still holds a short name and 260px, the
+   width a schema's name and version need. */
 .trail-swimlanes {
-  --trail-label-width: 260px;
+  --trail-label-width: clamp(140px, 30%, 260px);
   --trail-lane-gap: 10px;
-  --trail-track-min: 380px;
   /* The axis track's height, which is also where a pinned section heading sits. */
   --trail-axis-height: 24px;
-  min-width: calc(var(--trail-label-width) + var(--trail-lane-gap) + var(--trail-track-min));
+  /* Where a lane's name starts: past the heading's inset, chevron and icon, so it lines up with the
+     heading's text. */
+  --trail-name-indent: calc(var(--inset) + 36px);
 }
 
 /* The rows, in a box of their own under the axis. `isolation` makes it a stacking context, which
@@ -5157,48 +5733,68 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   background: var(--bg-base);
 }
 
-/* A heading's label: the icon at 9px, where the lanes' names indent to meet its text. The row's
-   own colour, opaque, so markers cannot show through it either. */
+/* A heading's label holds its button (GroupHeading), which fills it. The row's own colour, opaque,
+   so markers cannot show through it either. */
 .trail-section .trail-lane-label {
-  padding-left: 9px;
+  padding: 0;
   background: var(--bg-base);
   color: var(--text-muted);
 }
 
+/* The heading button fills the label column, row-high rather than table-cell-high, with its
+   chevron at the card's inset. The tint is on the button, not the row: a closed section's track
+   beside it holds markers of its own. */
+.trail-section .group-heading {
+  height: 100%;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 8px 0 var(--inset);
+}
+.trail-section .group-heading:hover { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
+
 .trail-section-icon { flex-shrink: 0; }
 
-.trail-section-name {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.7px;
-}
-
-/* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
-   them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
-   here would let a dozen dots slide through the text. */
-/* 260px: a schema lane is `<name> v<version>` and a lineage shares the name, so a narrower label
-   ellipsises every version to the same string. The track is `flex: 1` and every marker is a
-   fraction of it, so the width comes off the track. The full name is on the label's `title`. */
+/* Opaque in the card's own colour and above the track beside it (2), so a wide badge near the
+   window's start passes under the name rather than over it. */
+/* Up to 260px: a schema lane is `<name> v<version>` and a lineage shares the name, so a narrower
+   label ellipsises every version to the same string. The track is `flex: 1` and every marker is a
+   fraction of it, so the width comes off the track. The full name is in the label's tooltip. */
 .trail-lane-label {
-  position: sticky;
-  left: 0;
+  position: relative;
   z-index: 2;
   flex: 0 0 var(--trail-label-width);
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  /* 27px on the left: a section heading's icon sits at 9px and its text 18px after that, so a
-     lane's name lines up with the heading's text rather than its icon. */
-  padding: 0 8px 0 27px;
+  /* A lane's name lines up with its section heading's text rather than its chevron. */
+  padding: 0 8px 0 var(--trail-name-indent);
   background: var(--bg-card);
   /* The column's edge, on every row including the axis and the headings: what makes the label
-     column read as a column, and marks the line markers pass under when the timeline is scrolled
-     sideways. Inside the 260px, so the track and the gridlines start where they did. */
+     column read as a column. Inside the label's width, so the track and the gridlines start where
+     they did. */
   border-right: 1px solid var(--border);
   font-size: 12px;
 }
+
+/* A lane's label is the button that opens its newest event: the label's look, with the button's
+   own border, font and alignment taken away. The name takes the accent while it can be pressed. */
+.trail-lane-open {
+  margin: 0;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.trail-lane-open:hover .trail-lane-name:not(.trail-lane-unnamed),
+.trail-lane-open:focus-visible .trail-lane-name:not(.trail-lane-unnamed) { color: var(--accent-text); }
+.trail-lane-open:hover .trail-lane-unnamed,
+.trail-lane-open:focus-visible .trail-lane-unnamed { color: var(--text-primary); }
+.trail-lane-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* The one element allowed to lose characters. Everything else in the label -- the icon, the
    deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
@@ -5259,7 +5855,7 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .trail-track {
   position: relative;
   flex: 1;
-  min-width: var(--trail-track-min);
+  min-width: 0;
   height: 28px;
   /* A stacking context of its own, so a marker's z-index -- a badge is 3, the active ring 4, a
      hovered badge 5 -- orders markers within their track and never lifts one above a sticky
@@ -5280,9 +5876,483 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 
 /* The end ticks are aligned by their inner edge rather than centred, or each would hang half its
-   width past the track and widen the scroll area by a label. */
-.trail-tick:first-child { transform: none; }
-.trail-tick:last-child  { transform: translateX(-100%); }
+   width past the track and widen the scroll area by a label. Of their type, as the now marker
+   beside them in the track is a div. */
+.trail-tick:first-of-type { transform: none; }
+.trail-tick:last-of-type  { transform: translateX(-100%); }
+
+/* "Now 15:20" on the axis, where a window that runs on past now meets its hatched part. Opaque and
+   above the ticks, so it reads where it lands on one. Near either end it is held inside the track,
+   as the end ticks are. */
+.trail-now {
+  position: absolute;
+  top: 3px;
+  z-index: 1;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.trail-now-start { transform: none; }
+.trail-now-end   { transform: translateX(-100%); }
+
+/* The parts of a window where nothing is drawn: after now, and before the oldest loaded event while
+   older ones are not loaded. Hatched in the layer behind the rows, and on each section heading,
+   which says what the part is in words. The future part's left edge is the now line. */
+.trail-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  background: repeating-linear-gradient(135deg,
+    color-mix(in srgb, var(--text-dim) 30%, transparent) 0 1px, transparent 1px 7px);
+}
+.trail-shade-future {
+  right: 0;
+  border-left: 1px solid var(--accent);
+}
+.trail-shade-unloaded {
+  left: 0;
+  justify-content: flex-end;
+  border-right: 1px dashed var(--text-dim);
+}
+
+/* A drag across a track zooms to the band it shades. Nothing in a track is text to select, so a
+   drag never selects the ticks it crosses; a marker keeps its own pointer. */
+.trail-swimlanes .trail-track {
+  cursor: crosshair;
+  user-select: none;
+}
+
+/* The band, drawn where the hatched parts are: on the axis, on each section heading and in the
+   layer behind the rows. A translucent accent with an edge each side, so it reads on both themes
+   and over a hatch. */
+.trail-band,
+.chart-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-left: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+  pointer-events: none;
+}
+
+/* What a release sets, "10:05 – 10:40, 35 min", on the axis, which stays in view. Opaque over the
+   ticks, centred on the band and held inside the track near either end, as the now marker is; an
+   outline rather than the now marker's fill, so the two are not read as one. */
+.trail-band-words,
+.chart-band-words {
+  position: absolute;
+  top: 3px;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.trail-band-words-start,
+.chart-band-words-start { transform: none; }
+.trail-band-words-end,
+.chart-band-words-end   { transform: translateX(-100%); }
+
+/* ===== History: the charts ===== */
+/* A chart's now marker and hatched future, as the Audit Trail's axis draws them (.trail-now,
+   .trail-shade-future): placed over uPlot's plot area (.u-over), which is the window's width, and
+   leaving the pointer to the chart beneath. */
+.chart-now {
+  position: absolute;
+  top: 2px;
+  z-index: 1;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.chart-now-start { transform: none; }
+.chart-now-end   { transform: translateX(-100%); }
+.chart-future {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 8px;
+  border-left: 1px solid var(--accent);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+  background: repeating-linear-gradient(135deg,
+    color-mix(in srgb, var(--text-dim) 30%, transparent) 0 1px, transparent 1px 7px);
+}
+
+/* The row above the charts and Overview's lanes: Expand all or Collapse all at its start, as
+   .trail-header has it, then the line saying what is shown. The same room above and below as
+   .trail-header, so the three pages' rows read alike; what follows it adds none of its own. */
+.history-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 10px var(--inset);
+}
+.history-meta {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* The key to the alert shading, after the status line: the band's swatch, as alertBands.js paints
+   it from --danger, then its words and a link to the alerts on the Alerts tab. */
+.history-alert-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.history-alert-swatch {
+  flex-shrink: 0;
+  width: 12px;
+  height: 10px;
+  border-left: 2px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+/* The charts stack down the card, which scrolls; each fits the card's width, never wider. */
+.history-charts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack);
+  padding: 12px var(--inset) var(--inset);
+  min-width: 0;
+}
+/* A closed group's charts take no space: display: flex above would otherwise outrank [hidden]. */
+.history-charts[hidden] { display: none; }
+/* Positioned so the chart's absolute screen-reader summary (.sr-only) is placed, clipped and scrolled
+   inside the Device tab's scroller; placed against the page instead, it lengthens the page. */
+.history-chart { position: relative; margin: 0; min-width: 0; }
+.history-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.history-chart-title { font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
+.history-chart-range { font-size: 12px; color: var(--warning-text); }
+.history-chart-hover { min-width: 0; margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
+.chart-frame { position: relative; min-width: 0; }
+.chart-box { position: relative; width: 100%; min-width: 0; overflow: hidden; }
+.chart-box .uplot { width: 100%; font-family: var(--font-mono); }
+.chart-box-empty {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* A state metric: each run of one value is a box across its stretch of the window, named in text,
+   filled with its value's colour: the hue the element carries (`--state-hue`, its text's hash) at
+   the theme's lightness and chroma, the edge a lighter or darker step, the text in the text colour.
+   A carried stretch inside it is hatched instead of filled, as a number chart dashes one. */
+.chart-state,
+.chart-state-key-value {
+  --tone: oklch(var(--chart-state-edge-l) var(--chart-state-edge-c) var(--state-hue));
+  --tone-fill: oklch(var(--chart-state-l) var(--chart-state-c) var(--state-hue));
+}
+.chart-state-key-plain { --tone: var(--text-dim); }
+.chart-box-states { height: 34px; }
+.chart-states { position: absolute; inset: 4px 0; }
+.chart-state {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 6px;
+  border: 1px solid var(--tone);
+  border-radius: var(--radius-xs);
+  background: var(--tone-fill);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.chart-state > .overflow-text { position: relative; }
+.chart-state-carried {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(45deg,
+    color-mix(in srgb, var(--tone) 55%, transparent) 0 1px, transparent 1px 6px), var(--bg-card);
+}
+/* The key under a state chart: a swatch, the value and its share, wrapping, never wider than the card. */
+.chart-state-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  min-width: 0;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.chart-state-key li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.chart-state-key-name { max-width: 16rem; font-family: var(--font-mono); color: var(--text-primary); }
+.chart-state-share { font-variant-numeric: tabular-nums; }
+.chart-state-swatch {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--tone);
+  border-radius: 2px;
+  background: var(--tone);
+}
+.chart-state-swatch-carried {
+  background: repeating-linear-gradient(45deg, var(--tone) 0 1px, transparent 1px 4px), var(--bg-card);
+}
+.chart-overlay { position: absolute; inset: 0; pointer-events: none; }
+/* Which alerts were firing at the pointer, at the plot's foot (alertBands.js): opaque over the
+   shading, one line an alert, held inside the plot near either end as the now marker is. */
+.chart-alert-readout {
+  position: absolute;
+  bottom: 18px;
+  z-index: 2;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 2px 6px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  pointer-events: none;
+}
+.chart-alert-readout[data-edge="start"] { transform: none; }
+.chart-alert-readout[data-edge="end"]   { transform: translateX(-100%); }
+.chart-alert-readout[hidden] { display: none; }
+/* A drag across a chart or a strip zooms to the band it shades (.chart-band, with the trail's look),
+   so a drag selects no text. */
+.history-charts .u-over,
+.chart-box-states { cursor: crosshair; user-select: none; }
+
+/* History's toolbar device and its list, in the time window's popover frame. */
+.history-device-pick { justify-content: flex-start; min-width: 0; }
+.history-device-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.history-device-option {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--accent-text);
+  text-decoration: none;
+}
+.history-device-option:hover,
+.history-device-option:focus-visible { background: var(--bg-glass); text-decoration: underline; }
+.history-device-option.is-current { color: var(--text-primary); font-weight: 600; }
+.history-device-place { font-size: 11px; color: var(--text-muted); }
+.history-device-none { padding: 6px 8px; font-size: 12px; color: var(--text-muted); }
+.history-picker-badge { margin-left: 8px; }
+/* The Alerts tab's table. A name, a summary, a subject or a note is one line, cut and sliding on
+   hover (OverflowText), so a cell never pushes the row wider than the card. */
+.alert-history-table td { vertical-align: top; }
+.alert-history-name,
+.alert-history-ack { display: flex; flex-direction: column; gap: 2px; min-width: 0; max-width: 22rem; }
+.alert-history-title { font-weight: 500; color: var(--text-primary); }
+.alert-history-subject { display: inline-flex; min-width: 0; max-width: 14rem; }
+.alert-history-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.alert-history-ack-who { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--text-primary); }
+.alert-history-ack-who svg { flex-shrink: 0; color: var(--success-text); }
+/* What the device page shows under its toolbar; its width sets the text charts' buckets. It is the
+   card's .card-fill-scroll.trail-timeline, so .history-header stays and .trail-scroll holds the
+   groups; a chart takes that scroller's width, less its scrollbar. */
+.history-body { min-width: 0; }
+/* The charts in groups by datatype, each under a heading strip that opens and closes it, as the
+   Vocabulary page's sections are drawn. A heading pins to the top of the scroller while its charts
+   are in view, over their band words and readouts (z-index 2), as .trail-section pins. */
+.history-groups { display: flex; flex-direction: column; min-width: 0; }
+.history-group { min-width: 0; }
+.history-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-base);
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
+}
+.history-group-head:hover { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
+.history-group-head > .group-heading { padding: 8px var(--inset); }
+/* The export dialog's first line: the device, the metrics and the window it exports. */
+.telemetry-export-what { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
+/* Buckets: its size in the toolbar, shaped as the Metrics dropdown beside it, and its choices a
+   column in the popover. */
+.history-bucket-pick { justify-content: space-between; min-width: 0; }
+.history-bucket-choices { display: flex; flex-direction: column; gap: 6px; }
+.history-bucket-choices .btn { justify-content: flex-start; }
+
+/* ===== History: Overview ===== */
+/* Overview is the Audit Trail's lane grid (.trail-swimlanes, .trail-lane, .trail-section,
+   .trail-axis): a label column, then a track a row, under the same axis, at the same widths and
+   row height. What follows is only what Overview adds to it. */
+.overview-swimlanes {
+  position: relative;
+  min-width: 0;
+  /* Overview's headings carry no icon, so a lane's label starts past the chevron alone: under its
+     heading's text, as the Audit Trail's does. */
+  --trail-name-indent: calc(var(--inset) + 18px);
+}
+/* A cell's heading under its area's, a step in, and pinned one row below it. */
+.overview-subsection { top: calc(var(--trail-axis-height) + 1px + 29px); }
+.overview-subsection .group-heading { padding-left: calc(var(--inset) + 18px); }
+.overview-lane-deep .trail-lane-label { padding-left: calc(var(--trail-name-indent) + 18px); }
+/* A lane's label: tick box, status dot, name, then the metric count as the qualifier. */
+.overview-pick { flex-shrink: 0; margin: 0; }
+.overview-status { display: inline-flex; flex-shrink: 0; }
+.overview-lane-name { min-width: 0; text-decoration: none; }
+.overview-lane-name .trail-lane-name { display: block; color: var(--accent-text); }
+.overview-lane-name:hover .trail-lane-name,
+.overview-lane-name:focus-visible .trail-lane-name { text-decoration: underline; }
+.overview-lane-offline { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+/* A track's blocks: a run of one shade a box, between the row's rules, on the track's own colour. */
+.overview-track { cursor: crosshair; user-select: none; }
+.overview-run { position: absolute; top: 7px; bottom: 7px; }
+.overview-step-1 { background: var(--coverage-1); }
+.overview-step-2 { background: var(--coverage-2); }
+.overview-step-3 { background: var(--coverage-3); }
+.overview-step-4 { background: var(--coverage-4); }
+/* Where a lane's readings stop, at the track's right-hand end, on the card so it reads over a block. */
+.overview-stop {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 1;
+  transform: translateY(-50%);
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* The block under the pointer in words: the tooltip's bubble and arrow (.tooltip-bubble), on one
+   line, below the block or above it on the last lane. */
+.overview-readout { white-space: nowrap; }
+/* The selection box, over the tracks and under the labels, with the band's look on every edge. */
+.overview-box-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--trail-label-width) + var(--trail-lane-gap));
+  right: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.overview-box {
+  position: absolute;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+}
+/* The selection's words and actions, in a popover beside the box: the Filters panel's frame,
+   portalled and fixed so the card cannot clip it, with its arrow (Popover arrows). */
+/* Focused as it opens, after a drag, so a press is not lost; no ring, as only a pointer opens it. */
+.overview-popover:focus { outline: none; }
+.overview-popover {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 10px var(--inset-tight);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-popover);
+}
+.overview-popover-words { margin: 0; font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.overview-popover-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The key, at the end of the row above the lanes, as the Audit Trail's legend is. */
+.overview-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.overview-key-item { display: inline-flex; align-items: center; gap: 6px; }
+.overview-key-shades { display: inline-flex; gap: 2px; }
+/* A swatch takes its shade from .overview-step-N; the one for no readings is the track's own
+   colour, the card, with an edge. */
+.overview-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+}
+.overview-swatch-none {
+  background: var(--bg-card);
+  box-shadow: inset 0 0 0 1px var(--border-hover);
+}
+/* A stretch the device rollups have not counted yet: dotted crosswise, so it is told from the
+   future's single hatch (.trail-shade-future) and from a block with no readings. */
+.overview-uncounted {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(45deg, color-mix(in srgb, var(--text-dim) 35%, transparent) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(-45deg, color-mix(in srgb, var(--text-dim) 35%, transparent) 0 1px, transparent 1px 5px);
+}
+.overview-swatch-uncounted {
+  background:
+    repeating-linear-gradient(45deg, var(--text-dim) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(-45deg, var(--text-dim) 0 1px, transparent 1px 4px), var(--bg-card);
+}
 
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --
@@ -5343,22 +6413,23 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .trail-node-selected { z-index: 4; }
 
 /* Where a step in the drawer scrolls the marker it opens (scrollIntoView, nearest): its whole lane
-   clear of the pinned axis row and section heading above (25px and 29px), and the marker clear of
-   the sticky label column and the track's 14px end padding beside it. */
+   clear of the pinned axis row and section heading above (25px and 29px). The timeline never
+   scrolls sideways, so nothing is needed across. */
 .trail-track > .trail-node,
 .trail-track > .trail-cluster {
-  scroll-margin: calc(var(--trail-axis-height) + 38px) 14px 14px
-    calc(var(--trail-label-width) + var(--trail-lane-gap) + 14px);
+  scroll-margin-block: calc(var(--trail-axis-height) + 38px) 14px;
 }
 .trail-cluster.trail-node-selected {
   box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
 }
 
-/* The class colours, carried by the marker's `color` into its fill. */
-.trail-node-creation    { color: var(--success); }
-.trail-node-operational { color: var(--accent); }
-.trail-node-governance  { color: var(--warning); }
-.trail-node-critical    { color: var(--danger); }
+/* The class colours, carried by the marker's `color` into its fill. Read is grey: it changed nothing,
+   and --text-muted holds 3:1 on the card in both themes (themeContrast.test.js). */
+.trail-node-created       { color: var(--success); }
+.trail-node-operational   { color: var(--accent); }
+.trail-node-configuration { color: var(--warning); }
+.trail-node-lifecycle     { color: var(--danger); }
+.trail-node-read          { color: var(--text-muted); }
 
 /* The cluster badge: several events too close together to draw separately, replaced by their count.
    Violet, because a badge is not a kind of event; see --cluster. Positioning is separate from the
@@ -5419,19 +6490,18 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* The classification badge in the drawer's subtitle. Same tinted-fill convention as `.badge-*`
    above, and the same reason for the `-text` tokens: the bare signal colours are tuned for
    borders and fills, not for text. */
-.trail-badge-creation    { background: var(--success-tint);     color: var(--success-text); }
-.trail-badge-operational { background: var(--accent-dim);       color: var(--accent-text); }
-.trail-badge-governance  { background: var(--warning-tint);     color: var(--warning-text); }
-.trail-badge-critical    { background: var(--danger-tint);      color: var(--danger-text); }
+.trail-badge-created       { background: var(--success-tint);     color: var(--success-text); }
+.trail-badge-operational   { background: var(--accent-dim);       color: var(--accent-text); }
+.trail-badge-configuration { background: var(--warning-tint);     color: var(--warning-text); }
+.trail-badge-lifecycle     { background: var(--danger-tint);      color: var(--danger-text); }
+.trail-badge-read          { background: var(--bg-glass);         color: var(--text-muted); }
 
-/* Stepping through one asset's history: full width of the subtitle row, stacked, because the
-   position line and the two buttons are three things at three sizes. */
+/* Stepping through one asset's history, in the drawer's nav slot at its full width: stacked,
+   because the position line and the two rows of buttons are three things at three sizes. */
 .trail-drawer-nav {
-  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 2px;
 }
 
 .trail-drawer-nav-pos {
@@ -5462,6 +6532,16 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 2px;
+}
+
+/* User ID and Machine identity: the name, a link for a viewer who may open Access Control, then
+   the id's copy chip, beside it where the drawer is wide enough and under it where not. */
+.trail-actor-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
 }
 
 /* The other changes one transaction made. Above the diff in the drawer, with the same top border
@@ -5838,6 +6918,40 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   }
 }
 
+/* Settings › Notifications: under the category's table, the delivery log, a table of its own with
+   its own header row. Time, Event, Outcome and Attempts are fixed, so the rows line up; the alert
+   and the error take the rest, cut with an ellipsis and slid on hover (OverflowText). */
+.notification-admin-note { min-height: 0; }
+
+.notification-log {
+  padding: 16px var(--inset) 20px;
+  border-top: 1px solid var(--border);
+}
+
+.notification-log-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.notification-log-lead,
+.notification-log-empty {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.notification-log-table { table-layout: fixed; width: 100%; }
+.notification-col-time { width: 170px; }
+.notification-col-event { width: 96px; }
+.notification-col-outcome { width: 104px; }
+.notification-col-attempts { width: 80px; }
+
+.notification-log-cut { display: block; min-width: 0; max-width: 100%; }
+.notification-log-none { color: var(--text-dim); }
+
 /* ===== Profile ============================================================================== */
 
 /* The Profile page reuses the Settings table above. A value that is a fact, not a field: the email
@@ -5867,36 +6981,11 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* The note that the row could not be reached, above the table it explains. */
 .profile-source { flex-shrink: 0; padding-bottom: 0; }
 
-/* A section of the Security tab: its heading, About tip and button on one row, a line under it,
-   then its table. The button wraps under the heading on a narrow window. */
-.profile-section-head { flex-shrink: 0; }
-.profile-section-heading {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.profile-section-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.profile-section-actions { margin-left: auto; }
-.profile-section-note {
-  margin: 6px 0 0;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-muted);
-}
-
 /* A session's place, then its badges on the same line. */
 .session-where { color: var(--text-primary); }
 .session-badge { margin-left: 8px; }
 
-/* The Security tab's Second factor section, under Sessions: a rule above its heading, and its
-   table keeps its height, so the sessions list is what scrolls. */
-.second-factor-head { border-top: 1px solid var(--border); }
+/* The MFA tab's table keeps its height. */
 .card-fill > .table-wrap.second-factor-table { flex-shrink: 0; overflow-y: visible; }
 
 /* Adding one: the QR code on its light ground, then the secret for typing in, in groups. */
@@ -6136,10 +7225,15 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   letter-spacing: normal;
   text-transform: none;
   /* `pre-line` so a tip can carry a second paragraph (Cold telemetry's only-copy warning); spaces
-     and wrapping still collapse. */
+     and wrapping still collapse. A word wider than the bubble, such as an id, breaks anywhere rather
+     than running past its edge; a word that fits is never broken. */
   white-space: pre-line;
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
+
+/* A line of its own inside a bubble: an id under its description, or the hint that ends a tip. */
+.tooltip-line { display: block; margin-top: 4px; }
 
 /* The point at the trigger, drawn as the popovers' are (Popover arrows): a square turned 45 degrees
    on the border facing the trigger, the half inside hiding the border. --arrow-x is the trigger's
@@ -6314,14 +7408,13 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .cell-tag { margin-left: 8px; }
 
 /* Two badges side by side in a cell, the second dropping under the first when the column is
-   narrow. Each stays on one line: a pill broken over two lines reads as two badges. */
+   narrow. Each stays on one line, as every badge does. */
 .badge-pair {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
 }
-.badge-pair > .badge { white-space: nowrap; }
 
 /* Badges stacked in a cell: the status badge over the alert badge. */
 .badge-col {

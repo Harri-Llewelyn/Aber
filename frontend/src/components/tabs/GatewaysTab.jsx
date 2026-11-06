@@ -17,9 +17,9 @@ import {
   GATEWAY_TYPES, SELECTABLE_TYPES, LISTED_TYPES, gatewayType, gatewayTypeFields,
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone, credentialIssuedHere,
 } from '../../utils/gatewayType'
-import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor, deviceColumnTags } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags } from '../../utils/deviceStatus'
 import { inServiceDevices } from '../../utils/inService'
-import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { isShadowGateway } from '../../utils/fleetCounts'
 import { flowDriftState, flowDriftLabel, isFlowDrift, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
@@ -36,9 +36,11 @@ import { EmptyState } from '../common/EmptyState'
 import { HelpLink } from '../common/HelpLink'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { SuppressionWindows } from '../common/SuppressionWindows'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { RestoreEntityModal } from '../modals/RestoreEntityModal'
@@ -65,9 +67,24 @@ import {
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
-import { useUrlState } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import {
+  LIFECYCLE_ALIASES, LIFECYCLE_DEFAULT, LIFECYCLE_OPTIONS, LIFECYCLE_VALUES, applyFacets, lifecycleChanged, lifecycleOf
+} from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
+
+/** No list filter chosen. */
+const NONE = Object.freeze([])
+
+/** The Status filter's values: the live status, from the heartbeat's age as well as the stored one. */
+const STATUS_OPTIONS = [
+  { value: 'ONLINE', label: 'Online' },
+  { value: 'STALE', label: 'Stale' },
+  { value: 'OFFLINE', label: 'Offline' },
+]
+const STATUS_VALUES = STATUS_OPTIONS.map(o => o.value)
 
 /**
  * The devices a gateway's counts count: all it serves but the archived ones. Replay lanes stay in,
@@ -83,6 +100,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [cells, setCells]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
+  // A refusal of the form's save, shown in the dialog as the database worded it.
+  const [formError, setFormError] = useState(null)
   const [editing, setEditing]   = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
   // The archived gateway whose Restore dialog is open.
@@ -109,18 +128,19 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // or when the probe failed: an unknown never blocks.
   const [enrolment, setEnrolment] = useState(null)
   // The filters are query parameters; a drill-down from another page arrives as `?search=<id>`.
-  const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['active', 'archived', 'all'] })
+  // Each list filter holds several values, any of which a gateway may match.
+  const [lifecycle, setLifecycle] = useUrlList('lifecycle', LIFECYCLE_DEFAULT, { allowed: LIFECYCLE_VALUES, aliases: LIFECYCLE_ALIASES })
   const [searchQuery, setSearchQuery] = useUrlState('search')
-  const [liveStatusFilter, setLiveStatusFilter] = useUrlState('status', '', { allowed: ['ONLINE', 'STALE', 'OFFLINE'] })
-  const [kindFilter, setKindFilter] = useUrlState('type', '', { allowed: LISTED_TYPES })
+  const [liveStatusFilter, setLiveStatusFilter] = useUrlList('status', NONE, { allowed: STATUS_VALUES })
+  const [kindFilter, setKindFilter] = useUrlList('type', NONE, { allowed: LISTED_TYPES })
   const [quarantineOnly, setQuarantineOnly] = useUrlState('quarantined', false)
 
   const resetFilters = () => {
     setSearchQuery('')
-    setLiveStatusFilter('')
-    setKindFilter('')
+    setLiveStatusFilter([])
+    setKindFilter([])
     setQuarantineOnly(false)
-    setFilterMode('active')
+    setLifecycle(LIFECYCLE_DEFAULT)
   }
 
   const load = useCallback(async (signal) => {
@@ -164,6 +184,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [rebirthingId, runRebirth] = usePendingKey()
 
   const save = async () => {
+    setFormError(null)
     try {
       // Proposing changes an existing gateway only: registering one issues setup, which cannot be queued.
       if (proposeMode) {
@@ -220,25 +241,24 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       } else {
         showToast(`Gateway '${createdName}' created`, 'success', { to: createdTo })
       }
-    } catch (e) { showToast(e.message, 'error') }
+    } catch (e) { setFormError(e.message) }
   }
+
+  const closeForm = () => { setShowForm(false); setEditingProposal(null); setFormError(null) }
 
   const archiveGateway = async (days) => {
-    try {
-      await api.post(`/api/v1/gateways/${archiveTarget.gateway_id}/archive`, { auto_delete_days: days })
-      // Closes after the request, so ArchiveModal holds its pending state for the whole round trip.
-      setArchiveTarget(null); load()
-      showToast(`Gateway '${archiveTarget.gateway_name}' archived`, 'success', { to: gatewayUrl(archiveTarget.gateway_id) })
-    } catch (e) { showToast(e.message, 'error') }
+    await api.post(`/api/v1/gateways/${archiveTarget.gateway_id}/archive`, { auto_delete_days: days })
+    // Closes after the request, so ArchiveModal holds its pending state for the whole round trip,
+    // and only once it succeeded: a refusal is shown in the dialog.
+    setArchiveTarget(null); load()
+    showToast(`Gateway '${archiveTarget.gateway_name}' archived`, 'success', { to: gatewayUrl(archiveTarget.gateway_id) })
   }
 
-  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
+  // Run from the Restore dialog, which shows a refusal and stays open.
   const restoreGateway = async (gatewayId, name) => {
-    try {
-      await api.post(`/api/v1/gateways/${gatewayId}/restore`, {})
-      load(); showToast(`Gateway '${name}' restored to active service`, 'success', { to: gatewayUrl(gatewayId) })
-    } catch (e) { showToast(e.message, 'error') }
-    finally { setRestoreTarget(null) }
+    await api.post(`/api/v1/gateways/${gatewayId}/restore`, {})
+    setRestoreTarget(null); load()
+    showToast(`Gateway '${name}' restored to active service`, 'success', { to: gatewayUrl(gatewayId) })
   }
 
   const canManage = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)
@@ -281,6 +301,12 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const offeredGroup = editingMismatch && !proposeMode && form.sparkplug_group !== editingMismatch.observed
     ? editingMismatch.observed : null
   const groupChanged = groupEdited && !groupProblem
+  // Why Save is off and nothing beside a field says so: the type's hint says why a Remote gateway
+  // is withheld, and the group's field says what is wrong with it. The database refuses Area-Wide
+  // with no area; it would take an empty name.
+  const formProblem = !(form.gateway_name || '').trim() ? 'Give the gateway a name'
+    : locationIncomplete(form) ? 'Choose which area the gateway serves'
+      : null
   const groupFollowsTheNode = groupChanged && form.sparkplug_group === editing.observed_sparkplug_group
 
   /** The note under a field a proposal may not name: disabled with the reason rather than hidden. */
@@ -302,9 +328,14 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     assets.filter(a => a.is_quarantined && a.active_gateway_id).map(a => a.active_gateway_id)
   )
 
-  const matchingGateways = gateways.filter(g => {
-    if (filterMode === 'active'   && g.is_archived) return false
-    if (filterMode === 'archived' && !g.is_archived) return false
+  // Each list filter is any of its values, and the filters combine with AND; each value's count is
+  // over what the other filters let through.
+  const { rows: matchingGateways, counts: facetCounts } = applyFacets(gateways, [
+    { key: 'lifecycle', chosen: lifecycle, values: lifecycleOf },
+    { key: 'status', chosen: liveStatusFilter, values: g => [gatewayDisplayStatus(g)] },
+    // The derived type, not `deployment`: Simulated and Host share a deployment.
+    { key: 'type', chosen: kindFilter, values: g => [gatewayType(g)] },
+  ], (g) => {
     if (searchQuery) {
       // Matches the friendly name, the internal UUID and the Sparkplug edge node id.
       const q = searchQuery.toLowerCase()
@@ -312,9 +343,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         .filter(Boolean).join(' ').toLowerCase()
       if (!haystack.includes(q)) return false
     }
-    if (liveStatusFilter && gatewayDisplayStatus(g) !== liveStatusFilter) return false
-    // The derived type, not `deployment`: Simulated and Host share a deployment.
-    if (kindFilter && gatewayType(g) !== kindFilter) return false
     if (quarantineOnly && !gatewaysWithQuarantine.has(g.gateway_id)) return false
     return true
   })
@@ -342,8 +370,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [filteredGateways, sort] = useSortableRows(matchingGateways, sortColumns)
 
   const activeFilterCount =
-    [searchQuery, liveStatusFilter, kindFilter].filter(Boolean).length +
-    (quarantineOnly ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
+    (searchQuery ? 1 : 0) + (liveStatusFilter.length ? 1 : 0) + (kindFilter.length ? 1 : 0) +
+    (quarantineOnly ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
 
   // Arriving from a cell's gateway chip or a device's Serving Gateway chip names ONE gateway: open it.
   useArrivalSelection(
@@ -352,7 +380,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     (g, term) => g.gateway_id === term || (g.sparkplug_id || gatewaySparkplugId(g.gateway_id)) === term,
     (g) => {
       // An archived gateway is off the default list, so the list shows it as well as the drawer.
-      if (g.is_archived && filterMode === 'active') setFilterMode('all')
+      if (g.is_archived && lifecycle.length > 0 && !lifecycle.includes('archived')) setLifecycle(v => [...v, 'archived'])
       setSelectedId(g.gateway_id)
     }
   )
@@ -445,37 +473,45 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           ariaLabel="Search gateways by name, UUID or Sparkplug ID"
         />
 
-        {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
-        <select
-          className="form-control control-sm"
-          value={filterMode}
-          onChange={e => setFilterMode(e.target.value)}
-          aria-label="Lifecycle"
-        >
-          <option value="active">Active ({gateways.filter(g => !g.is_archived).length})</option>
-          <option value="archived">Archived ({gateways.filter(g => g.is_archived).length})</option>
-          <option value="all">All ({gateways.length})</option>
-        </select>
+        {/* Lifecycle is a filter like the rest, opening on Active; the counts are beside each value. */}
+        <FilterDropdown
+          label="Lifecycle"
+          noun="lifecycle"
+          plural="lifecycles"
+          options={LIFECYCLE_OPTIONS}
+          value={lifecycle}
+          onChange={setLifecycle}
+          counts={facetCounts.lifecycle}
+          defaultValue={LIFECYCLE_DEFAULT}
+          everyIsAny
+          width="sm"
+        />
 
         {/* Derived from heartbeat age as well as the stored status: STALE is never stored. */}
-        <Tooltip text="Stale is a gateway whose last heartbeat is older than 90 seconds.">
-          <select className="form-control control-sm" value={liveStatusFilter} onChange={e => setLiveStatusFilter(e.target.value)} aria-label="Status">
-            <option value="">Any status</option>
-            <option value="ONLINE">Online</option>
-            <option value="STALE">Stale</option>
-            <option value="OFFLINE">Offline</option>
-          </select>
-        </Tooltip>
+        <FilterDropdown
+          label="Status"
+          noun="status"
+          plural="statuses"
+          options={STATUS_OPTIONS}
+          value={liveStatusFilter}
+          onChange={setLiveStatusFilter}
+          counts={facetCounts.status}
+          width="sm"
+          tip="Stale is a gateway whose last heartbeat is older than 90 seconds."
+        />
 
         {/* The same value the Type column prints, through the same helper. */}
-        <Tooltip text={kindFilter ? gatewayTypeDescription(kindFilter) : null}>
-          <select className="form-control control-sm" value={kindFilter} onChange={e => setKindFilter(e.target.value)} aria-label="Type">
-            <option value="">Any type</option>
-            {LISTED_TYPES.map(t => (
-              <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
-            ))}
-          </select>
-        </Tooltip>
+        <FilterDropdown
+          label="Type"
+          noun="type"
+          plural="types"
+          options={LISTED_TYPES.map(t => ({ value: t, label: gatewayTypeLabel(t) }))}
+          value={kindFilter}
+          onChange={setKindFilter}
+          counts={facetCounts.type}
+          width="sm"
+          tip={kindFilter.length === 1 ? gatewayTypeDescription(kindFilter[0]) : null}
+        />
 
         <Tooltip text="Gateways reporting devices held in quarantine. Several failing at once points at a misconfigured edge node.">
           <button
@@ -619,22 +655,23 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         <Modal
           title={editing ? 'Edit Gateway' : 'Register Gateway'}
           size="md"
-          onClose={() => { setShowForm(false); setEditingProposal(null) }}
+          onClose={closeForm}
+          problem={formProblem}
+          error={formError}
           footer={
             <>
-              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving}>Cancel</button>
+              <button className="btn btn-ghost" onClick={closeForm} disabled={saving}>Cancel</button>
               <ActionButton
                 pending={saving}
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                // Area-Wide with no area named would be refused by the database; held here.
-                disabled={locationIncomplete(form) || remoteWithheld || !!groupProblem}
+                disabled={formProblem !== null || remoteWithheld || !!groupProblem}
                 title={remoteWithheld
                   ? 'Remote gateways cannot be enrolled on this deployment yet'
                   : groupProblem
                   ? groupProblem
-                  : locationIncomplete(form)
-                  ? 'Choose which area the gateway serves'
+                  : formProblem
+                  ? formProblem
                   : proposeMode
                     ? 'Ask for these changes — an approver applies them, or says why not'
                     : undefined}
@@ -645,8 +682,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           }
         >
         <div className="form-group">
-          <label className="form-label" htmlFor="gateway-name">Gateway Name</label>
-          <input id="gateway-name" className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} placeholder="e.g. Sim_Gateway_Cell1_Machining" />
+          <label className="form-label" htmlFor="gateway-name">Gateway Name <RequiredMark /></label>
+          <input id="gateway-name" className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} placeholder="e.g. Sim_Gateway_Cell1_Machining" aria-required="true" />
           <div className="form-hint">
             A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID, which is generated from the database key and never moves.
           </div>
@@ -1214,15 +1251,17 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 <div className="context-device-list">
                   {selectedDevices.map(d => {
                     const status = deviceLifecycleStatus(d)
+                    const alert = alertForDevice(alerts, d)
                     return (
                       <RouteLink
                         key={d.asset_id}
                         className="chip chip-link"
                         to={deviceUrl(d.asset_id)}
                         onNavigate={() => onSelectDevice?.(d.asset_id)}
-                        title={`Open ${d.asset_name} on the Devices page — ${alertForDevice(alerts, d) ? `ALERT: ${alertForDevice(alerts, d).alert_name}` : deviceStatusTitle(status)}`}
+                        title={`Open ${d.asset_name} on the Devices page — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}` : deviceStatusTitle(status)}`}
                       >
-                        <span className="badge-dot" style={{ background: deviceDotColor(d, alertForDevice(alerts, d)) }} />
+                        {/* A ring once the alert is acknowledged, filled while it is nobody's. */}
+                        <span className="badge-dot" style={deviceDotStyle(d, alert)} />
                         <span className="chip-name">{d.asset_name}</span>
                         {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
                       </RouteLink>
@@ -1243,7 +1282,19 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
 
           </div>
         )}
-      />
+      >
+        {/* A tool of unknown height, so after the actions: the gateway's own alerts, not its devices'. */}
+        {selected && (
+          <SuppressionWindows
+            kind="gateway"
+            subjectId={selected.gateway_id}
+            subjectName={selected.gateway_name}
+            userRole={userRole}
+            showToast={showToast}
+            open={!!selected}
+          />
+        )}
+      </ContextPanel>
 
       {shownCredentialForGw && (
         <ShowGatewayCredentialModal

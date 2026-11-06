@@ -7,6 +7,8 @@ import { Tooltip } from './Tooltip'
  * last, and that is the tag that requires action. Each entry is `{ key, content, className?,
  * style?, title?, priority?, label? }`; `title` is the entry's tooltip, for a pointer, and `label`
  * is what the overflow tooltip reads, which differs from `key` where the identity is a UUID.
+ * An entry with `parts: [{ key, content, className? }]` instead of `content` is drawn as that many
+ * badges in one group, which wraps between them and counts as one entry toward `limit`.
  */
 export function TagList({ tags, limit = 2 }) {
   const [expanded, setExpanded] = useState(false)
@@ -26,7 +28,9 @@ export function TagList({ tags, limit = 2 }) {
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
       {shown.map(tag => (
         <Tooltip key={tag.key} text={tag.title}>
-          <span className={tag.className} style={tag.style}>{tag.content}</span>
+          {tag.parts
+            ? <span className="tag-group">{tag.parts.map(p => <span key={p.key} className={p.className}>{p.content}</span>)}</span>
+            : <span className={tag.className} style={tag.style}>{tag.content}</span>}
         </Tooltip>
       ))}
 

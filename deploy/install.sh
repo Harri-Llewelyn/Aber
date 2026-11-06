@@ -127,7 +127,7 @@ Answers, asked on the terminal when a flag does not give them:
   --admin-email=EMAIL    the first administrator's email
   --site-name=NAME       a short name for the site, such as plant1; it can never change
   --address=IPV4         this machine's address on the site network, which gateways connect to
-  --base-iri=URL         the start of every asset id; permanent once an asset shell is exported
+  --base-iri=URL         the start of every asset id; permanent once an asset shell is exported or read
 
 Other flags:
   --yes, -y              accept the suggested address and base IRI, and do not ask to continue
@@ -301,7 +301,7 @@ check_domain() {
 check_email() {
   CHECKED=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   case $CHECKED in
-    *[[:space:]\"\\]* | *@*@* | @* | *@) ;;
+    *[[:space:]]* | *\"* | *\\* | *@*@* | @* | *@) ;;
     *@*) return 0 ;;
   esac
   REASON="'$1' is not an email address."
@@ -322,7 +322,9 @@ check_site_name() {
 check_address() {
   CHECKED=$1
   REASON="'$1' is not an IPv4 address, such as 10.20.0.50."
-  case $1 in '' | *[!0-9.]* | .* | *. | *..*) return 1 ;; esac
+  case $1 in
+    '' | *[!0-9.]* | .* | *. | *..*) return 1 ;;
+  esac
   ca_rest=$1
   ca_count=0
   while [ -n "$ca_rest" ]; do
@@ -346,7 +348,7 @@ check_address() {
 check_base_iri() {
   CHECKED=$1
   case $1 in
-    *[[:space:]\"\\]*)
+    *[[:space:]]* | *\"* | *\\*)
       REASON="'$1' has a space, a quote or a backslash in it."
       return 1
       ;;
@@ -362,7 +364,10 @@ check_base_iri() {
     REASON="'$1' has no host name after the '//'."
     return 1
   fi
-  case $1 in */) ;; *) CHECKED=$1/ ;; esac
+  case $1 in
+    */) ;;
+    *) CHECKED=$1/ ;;
+  esac
 }
 
 # The source address of the route to the internet: the address other machines see this one at.
@@ -490,7 +495,8 @@ certificate names it."
   Q_FLAG=--base-iri Q_GIVEN=$F_IRI Q_SAVED=$S_IRI Q_SAVED_IN=$SITE_SAVED Q_DEFAULT=$dq_iri Q_CHECK=check_base_iri
   Q_PROMPT="Base IRI for asset ids"
   Q_TEXT="Every asset's id starts with this web address, so it should be under a domain your
-organisation controls. It is permanent once an asset shell has been exported."
+organisation controls. It is permanent once an asset shell has been exported or read through
+the AAS API."
   resolve
   BASE_IRI=$VALUE
 
@@ -987,9 +993,11 @@ not_ready_reason() {
       else if (init != "") print "init " init
       else if (creating != "") print "creating " creating
     }') || nr_found=
-  read -r nr_kind nr_pod nr_what <<EOF
-$nr_found
-EOF
+  # Its kind, pod and what, at the single spaces awk put between them.
+  nr_kind=${nr_found%% *}
+  nr_rest=${nr_found#* }
+  nr_pod=${nr_rest%% *}
+  nr_what=${nr_rest#* }
   case $nr_kind in
     failed) printf '%s' "Its pod $nr_pod could not download $nr_what.
 Kubernetes keeps trying. Check that this machine can reach $(image_registry "$nr_what"), then run the
@@ -1052,11 +1060,12 @@ finish() {
     return 0
   fi
   fi_password=$(yaml_value "$VALUES" firstAdministratorPassword)
+  [ -n "$fi_password" ] || fi_password="(not in $VALUES)"
   say ""
   say "Aber $ABER_VERSION is installed, and its checks passed: the link between the databases,"
   say "the API through the gateway, the broker over TLS, ingestion and the dashboard."
   say ""
-  printf '  %-12s %s\n' "Sign in at" "https://app.$DOMAIN" "Email" "$EMAIL" "Password" "${fi_password:-(not in $VALUES)}"
+  printf '  %-12s %s\n' "Sign in at" "https://app.$DOMAIN" "Email" "$EMAIL" "Password" "$fi_password"
   if [ "$RERUN" = 1 ]; then
     say "               The password the account was created with. If it has been changed since,"
     say "               the new one stands."
@@ -1068,8 +1077,10 @@ finish() {
     say ""
     say "$fi_dns"
   fi
+  fi_copy=
+  [ -z "$CA_COPY" ] || fi_copy=" (copied to $CA_COPY)"
   say ""
-  say "Install the root certificate, $CA_FILE${CA_COPY:+ (copied to $CA_COPY)}, on every"
+  say "Install the root certificate, $CA_FILE$fi_copy, on every"
   say "browser and gateway that will use Aber. Until then every page shows a certificate warning:"
   say "$REPO_URL/blob/v$ABER_VERSION/help/site/install.md#8-install-the-root-certificate"
 }

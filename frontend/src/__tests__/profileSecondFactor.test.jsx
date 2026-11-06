@@ -72,14 +72,17 @@ const renderMfa = (props = {}) => {
 const factorRows = () => [...document.querySelectorAll('tr[data-factor]')]
 
 describe('the MFA tab', () => {
-  it('is a tab of its own, after Sessions, with an About tip, and offers Add Authenticator to every role', async () => {
+  it('is a tab of its own, after Sessions, and offers Add Authenticator to every role, filled in its toolbar', async () => {
     renderMfa({ userRole: 'Auditor' })
-    const headings = screen.getAllByRole('heading', { level: 4 }).map(h => h.textContent)
     expect(tabLink('MFA')).toHaveAttribute('aria-current', 'page')
-    expect(headings).toEqual(['Multi-factor authentication (MFA)'])
-    expect(screen.getByRole('button', { name: 'About MFA' })).toBeInTheDocument()
     expect(await screen.findByText('You have not set up MFA. Your password alone signs you in.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Add Authenticator/ })).toBeEnabled()
+    const add = screen.getByRole('button', { name: /Add Authenticator/ })
+    expect(add).toBeEnabled()
+    // The tab explains itself in its tooltip: no heading, About tip or line under the bar.
+    expect(screen.queryAllByRole('heading', { level: 4 })).toEqual([])
+    expect(screen.queryByRole('button', { name: /^About / })).toBeNull()
+    expect(add.closest('.filter-bar-actions')).toBeTruthy()
+    expect(add).toHaveClass('btn-primary')
   })
 
   it('lists verified factors by name, and leaves a half-made one out', async () => {
@@ -171,12 +174,18 @@ describe('adding one', () => {
     expect(code).toHaveValue('')
   })
 
-  it('refuses something that is not six digits before asking GoTrue', async () => {
+  it('refuses something that is not six digits before asking GoTrue, and says so', async () => {
     const dialog = await openAdd()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
-    fireEvent.change(await within(dialog).findByLabelText('Code'), { target: { value: '12345' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Authenticator' }))
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Enter the 6-digit code your app shows.')
+    const code = await within(dialog).findByLabelText('Code')
+    const confirm = within(dialog).getByRole('button', { name: 'Add Authenticator' })
+    // The name typed at the first step does not make the code step scold before its own edit.
+    expect(dialog.querySelector('.modal-problem')).toHaveTextContent(/^$/)
+    expect(confirm).toHaveClass('btn-disabled')
+    fireEvent.change(code, { target: { value: '12345' } })
+    expect(dialog.querySelector('.modal-problem')).toHaveTextContent('Enter the 6-digit code your app shows')
+    expect(confirm).toBeDisabled()
+    fireEvent.keyDown(code, { key: 'Enter' })
     expect(api.verifyFactorCode).not.toHaveBeenCalled()
   })
 

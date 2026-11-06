@@ -283,6 +283,13 @@ run that started early would not be enough, because what it did stays done. For 
 request starts the node's throttle, which a second run then meets. A first install has no older
 pods, so it creates its Jobs running.
 
+The historian is not restarted after the upgrade. `up` sets its `checksum/image` pod annotation
+(`timescaledb.podAnnotations`) to the id of the historian image it imported. When that image
+changed, the historian restarts during `helm upgrade`, as a new image tag makes it restart on a real
+upgrade. It has to: the maintenance hook waits for the historian to offer the chart's TimescaleDB
+([`timescaledb/README.md`](../../timescaledb/README.md#why-on-every-boot-and-in-this-order)), so a
+historian restarted only afterwards would hold the hook until its timeout.
+
 The port-forwards use the ports that every host-side script and suite defaults to, so every
 host-side tool keeps its defaults. They include `5433` for the historian, `54322` and `54321` for
 Supabase, and `1880`, `3002`, `9090`, `3100` and the rest. `test` takes every credential from
@@ -378,7 +385,8 @@ Run `npm run dev:test`. The port-forwards give `DB_HOST`, `SUPABASE_DB_HOST`, `M
 | `supabase-envoy`, `supabase-auth`, `supabase-rest` | deployed |
 | `realtime-dev` Service + `supabase-realtime` Deployment | deployed |
 | `supabase-storage`, `supabase-functions` | deployed |
-| `supabase-meta`, `supabase-studio`, `swagger-ui` | deployed |
+| `swagger-ui` | deployed |
+| `supabase-studio`, `supabase-meta` | off by default; `supabaseStudio.enabled` and `supabaseMeta.enabled` turn both on |
 | `db-roles-init`, `db-init`, `storage-policies`, `storage-init`, `timescaledb-maintenance` hooks | deployed |
 | `mosquitto` + `mosquitto-external`, `ingestion`, `playback` | deployed |
 | `node-red`, `frontend` | deployed |
@@ -722,8 +730,15 @@ through the gateway's `forge-api` listener (8003), which removes the identity he
 is the container's: a policy matches the port after the Service has translated it, so it is 22
 whatever `gitea.ssh.external.port` publishes.
 
-Everything else in this section stays opt-in. Turning the layer on replaces this policy with the
-generated pair.
+**Studio and postgres-meta get one each too, where a site runs them** (#1360). postgres-meta runs
+any SQL as `supabase_admin` and asks for no login, so its policy admits Studio's pods on 8080 and
+nothing else. Studio's own port skips the gateway's sign-in, so its policy admits the gateway on
+3000 and nothing else. Both cover ingress only, and both stay with the layer on: the generated pairs
+admit the same peers, so nothing is widened. A `kubectl port-forward` to Studio still works, because
+it connects inside the pod.
+
+Everything else in this section stays opt-in. Turning the layer on replaces the forge's policy with
+the generated pair.
 
 The reason is that Gitea runs with reverse-proxy authentication. It signs in whoever the
 `X-WEBAUTH-USER` header names, from any peer. (`REVERSE_PROXY_TRUSTED_PROXIES` governs
@@ -825,7 +840,6 @@ container gets back only the capabilities its process was shown to need, each na
 
 | Container (pod) | Added back | Why |
 |---|---|---|
-| `realtime` (supabase-realtime) | `SETGID`, `SETUID` | `/app/run.sh` runs the migrations as `nobody` through `sudo`. Its start logs `sudo: unable to send audit message: Operation not permitted`, which is harmless. |
 | `supabase-db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 100). tini, as root, forwards the stop signal to it. Why it starts as root is under *Users*, below. |
 | `gitea-init` (gitea) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | The image's setup rewrites `app.ini` and the git user's `.ssh`, and runs `gitea` as git (uid 1000). |
 | `gitea` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `NET_BIND_SERVICE`, `SETGID`, `SETUID`, `SYS_CHROOT` | The same setup. sshd binds port 22 and chroots its pre-authentication child, and s6 delivers SIGTERM to Gitea. |
@@ -940,9 +954,10 @@ Two images the chart does not run follow the same rule. The Remote gateway appli
 chowns the broker's key.
 
 The chart also states the user of each third-party image that already runs as one: Grafana (472),
-Loki (10001), Prometheus and postgres_exporter (65534), GoTrue and PostgREST (1000). The broker
-(`eclipse-mosquitto`) starts as its own user, 1883, with every other container in its pod. The Jobs
-that run `supabase/postgres` or `node` tools run as those images' own users (100:101, 1000:1000).
+Loki (10001), Prometheus, postgres_exporter and Realtime (65534), GoTrue and PostgREST (1000). The
+broker (`eclipse-mosquitto`) starts as its own user, 1883, with every other container in its pod.
+The Jobs that run `supabase/postgres` or `node` tools run as those images' own users (100:101,
+1000:1000).
 
 Four third-party images name no `USER`. The chart runs each as the user the image carries, with its
 init containers:
@@ -957,14 +972,12 @@ init containers:
 - **Studio** (`supabase-studio`) as `node`, 1000:1000. It writes snippets, and Next.js its cache,
   to `emptyDir` volumes. Its Edge Functions folder is read, never written.
 
-`wait-for-realtime-schema` runs as `supabase/postgres`'s user, 100:101, though Realtime starts as
-root.
+`wait-for-realtime-schema` runs as `supabase/postgres`'s user, 100:101, beside Realtime's 65534.
 
 These pods still start a container as root, each for the reason given:
 
 - **`alloy`** reads the node's `/`, `/proc` and `/sys`, which root owns.
 - **`gitea`**: the image's s6 supervisor and sshd start as root and drop to git (1000).
-- **`supabase-realtime`**: `/app/run.sh` runs the migrations through `sudo`.
 - **`supabase-db`**: its data directory is the volume's own root, because the image's
   `postgresql.conf` names `/var/lib/postgresql/data`. A provisioner creates that directory owned by
   root, and initdb as postgres (100) cannot take a directory it does not own. Started as root, the
@@ -1676,6 +1689,7 @@ Both stores keep thirty days.
 | Pod | Port | Path | Needs |
 | :--- | :--- | :--- | :--- |
 | `ingestion` | 9108 | `/metrics` | `ingestion.metrics.enabled` (default on) |
+| `playback` | 9109 | `/metrics` | `playback.metrics.enabled` (default on, with `playback.enabled`) |
 | `supabase-envoy` | 9901 | `/stats/prometheus` | `supabaseEnvoy.metrics.enabled` (default on) |
 | `supabase-rest` | 3001 | `/metrics` | nothing — the admin listener is always bound |
 | `grafana` | 3000 | `/metrics` | nothing |
@@ -1772,6 +1786,11 @@ Under `networkPolicy.enabled`, the external Prometheus also needs `networkPolicy
 reach the ports above; `values-prod.yaml.example` carries the rule. The cluster's Loki must label
 streams `service` with the workload name. Otherwise every shipped log query returns nothing, against a
 datasource that reports healthy.
+
+The System page's Logs tab reads the same Loki, through the edge functions (`service-logs`). Under
+`networkPolicy.enabled` the functions reach the chart's own Loki on their own edge, but your Loki
+needs a `networkPolicy.extraEgress` rule from `supabase-functions` to it. Without one the tab says
+the log store could not be read.
 
 ### Still outstanding
 

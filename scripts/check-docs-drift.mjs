@@ -1168,11 +1168,14 @@ function edgeFunctionNames() {
     'public.playback_reconcile_jobs': '0191 words each swept job by what happened (never started, nothing published, or the count reached); the baseline said "publishing stopped partway" of all three',
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
-    'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live. Both declare the eleven-argument form, with p_changed_by last, and 0222 drops the ten-argument one',
-    'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
+    'public.audit_trail_page': '0168 probed device_submodels rows for deletion beside device_nameplate, both keyed by their device; since 0228 both declare the same body, the purged kinds being audit_trail_matching()\'s. Both declare p_changed_by after p_search, and 0222 drops the ten-argument form; p_entity_type, p_action and p_changed_by as lists, and 0227 drops the single-value form (check 195); p_class and p_counts after them, and 0228 drops the form without them',
+    'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables. 0232 files platform_alerts there, the lane of an alert\'s acknowledgement, which an Operator, a Shopfloor Manager or an Administrator makes',
+    'public.audit_event_class': '0232 answers operational for ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN before the security lane\'s rule, so a machine identity\'s alert acknowledged in that identity\'s lane is the same class as any other; it rebuilds the class indexes while a row they could hold wrongly exists (check 199)',
+    'public.audit_trail_action_kinds': '0232 lists ALERT_ACKNOWLEDGED and ALERT_ACKNOWLEDGEMENT_WITHDRAWN on platform_alerts and service_principals, the two lanes acknowledge_alert() and withdraw_alert_acknowledgement() (0231) write. 0241 lists the four SUPPRESSION_WINDOW_ actions on devices, gateways and cells, the subjects\' lanes 0240\'s window writers write. 0249 lists SIGNING_KEY_ISSUED on notification_channels, the webhook\'s lane, and carries 0241\'s rows, since the last declaration stands',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
-    'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71)',
+    'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71). 0226 adds a capture or playback job that failed in the last hour, one stuck past its own limits, and a playback worker silent while a playback waits, which the Grafana rules read (check 191)',
+    'public.platform_alert_send_decision': '0250 holds a firing message or a reminder while a suppression window (0240) covers its alert, in the place 0247 marked for it, so 0247 stands alone where 0240 is not applied',
     'public.refresh_directory_liveness': '0223 takes Prometheus\'s address from directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares first, so the baseline\'s copy never names it during a replay. It also counts content that is not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the baseline raised on such content without firing the next probe, and left every scraped service at its last ACTIVE when a probe failed',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
@@ -1878,6 +1881,55 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 191. A failed or stuck capture or playback, and a silent playback worker, reach someone. The last
+// declaration of platform_health_rows() has the three arms 0226 added, and each has a Platform
+// Conditions rule that reads it from platform_health as a platform alert. The stale-worker arm is
+// gated on a queued or running playback: its row is seeded at the epoch, and a site that runs no
+// worker would alert for ever on the age alone. Comments are stripped, so only the SQL counts.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const declaration = /CREATE OR REPLACE FUNCTION\s+public\.platform_health_rows\s*\(\)[\s\S]*?\bAS\s+(\$[a-z_]*\$)([\s\S]*?)\1/gi;
+  let last = null;
+  for (const name of files) {
+    for (const m of read(`${dir}/${name}`).matchAll(declaration)) last = { name, body: m[2] };
+  }
+  const sql = last ? last.body.replace(/--[^\n]*/g, '') : '';
+  const rules = Object.fromEntries(read('grafana/provisioning/alerting/alert-rules.yaml')
+    .split(/^ {6}- uid: /m).slice(1).map((block) => [block.split('\n')[0].trim(), block]));
+  const ARMS = { job_failed: 'aber-job-failed', job_stuck: 'aber-job-stuck', playback_worker_stale: 'aber-playback-worker-stale' };
+
+  const wrong = [];
+  for (const [condition, uid] of Object.entries(ARMS)) {
+    if (!sql.includes(`'${condition}'::text`)) {
+      wrong.push(`platform_health_rows() has no ${condition} arm${last ? ` (last declared in ${last.name})` : ''}`);
+    }
+    const rule = rules[uid];
+    if (!rule) {
+      wrong.push(`no rule ${uid} reads ${condition}`);
+    } else if (!/FROM public\.platform_health\b/.test(rule) || !rule.includes(`WHERE condition = '${condition}'`)) {
+      wrong.push(`${uid} does not read platform_health's ${condition} rows`);
+    } else if (!/^ {10}entity_type: platform$/m.test(rule)) {
+      wrong.push(`${uid} is not entity_type: platform, so the webhook would look for an asset it names`);
+    }
+  }
+  const staleArm = sql.slice(sql.indexOf("'playback_worker_stale'::text"));
+  if (sql.includes("'playback_worker_stale'::text")
+      && !/EXISTS\s*\(\s*SELECT 1 FROM public\.playback_jobs p WHERE p\.status IN \('PENDING', 'RUNNING'\)\s*\)/.test(staleArm)) {
+    wrong.push(`${last.name}'s playback_worker_stale arm is not gated on a queued or running playback. Its heartbeat row is `
+      + 'seeded at the epoch, so a site with playback.enabled: false would raise Playback Worker Not Reporting for ever');
+  }
+
+  if (wrong.length) {
+    fail(`a failed or stuck job, or a silent playback worker, would reach no one:\n      ${wrong.join('\n      ')}`);
+  } else {
+    pass(`platform_health_rows()'s last declaration (${last.name}) reports failed and stuck jobs and a silent playback `
+      + 'worker, only while a playback waits, and a Platform Conditions rule reads each');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 55. Every grant to grafana_reader is made in 0001's last block, after its sweep and in the same
 // transaction, so Grafana keeps reading through a replay. A grant made only elsewhere is swept on
 // every boot and refused until its own statement runs again.
@@ -2226,6 +2278,89 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 184. The edge functions' authentication probe is a function `authenticated` alone may call.
+//
+// _shared/callerCheck.ts calls AUTH_PROBE as the caller for aas-api and fplus-directory. Revoked
+// from `authenticated`, dropped or given an argument, it refuses every token; callable by `anon`, it
+// accepts the publishable key; by `service_role`, the secret key, in functions that hold no
+// service-role key. It must be plpgsql and not IMMUTABLE, as i3X's probe must (check 32).
+// -------------------------------------------------------------------------------------------------
+{
+  const probe = read('supabase/functions/_shared/callerCheck.ts').match(/^export const AUTH_PROBE = "([a-z0-9_]+)";$/m);
+  if (!probe) {
+    fail('supabase/functions/_shared/callerCheck.ts: AUTH_PROBE is not a string literal, so check 184 cannot read it');
+  } else {
+    const fn = probe[1];
+    const sig = `public\\.${fn}\\(\\)`;
+    const dir = 'supabase/migrations';
+    const sql = readdirSync(join(REPO, dir))
+      .filter((n) => /^\d+_.*\.sql$/.test(n))
+      .sort()
+      .map((n) => read(`${dir}/${n}`))
+      .join('\n');
+    const faults = [];
+    if (!new RegExp(`CREATE OR REPLACE FUNCTION ${sig}`).test(sql)) {
+      faults.push(`no migration declares public.${fn}() with no arguments`);
+    }
+    const headers = [...sql.matchAll(new RegExp(`CREATE OR REPLACE FUNCTION ${sig}[^$]*?AS\\s*\\$`, 'g'))];
+    const header = headers.length ? headers[headers.length - 1][0] : '';
+    if (header && !/\bLANGUAGE\s+plpgsql\b/i.test(header)) {
+      faults.push(`public.${fn}() is not plpgsql, so the planner may inline it and skip its EXECUTE check`);
+    }
+    if (/\bIMMUTABLE\b/i.test(header)) {
+      faults.push(`public.${fn}() is IMMUTABLE, so the planner folds the call and skips its EXECUTE check`);
+    }
+    if (!new RegExp(`GRANT (ALL|EXECUTE) ON FUNCTION ${sig} TO [^;]*\\bauthenticated\\b`).test(sql)) {
+      faults.push(`public.${fn}() is not granted to authenticated`);
+    }
+    if (!new RegExp(`REVOKE ALL ON FUNCTION ${sig} FROM PUBLIC, anon, service_role`).test(sql)) {
+      faults.push(`public.${fn}() keeps PUBLIC's, anon's or service_role's default EXECUTE`);
+    }
+    if (new RegExp(`GRANT [^;]* ON FUNCTION ${sig} TO [^;]*\\b(anon|PUBLIC|service_role)\\b`, 'i').test(sql)) {
+      faults.push(`public.${fn}() is granted to anon, PUBLIC or service_role`);
+    }
+    if (new RegExp(`(REVOKE [^;]* ON FUNCTION ${sig} FROM [^;]*\\bauthenticated\\b|DROP FUNCTION[^;]*\\b${fn}\\b)`, 'i').test(sql)) {
+      faults.push(`a migration revokes public.${fn}() from authenticated, or drops it`);
+    }
+    if (!read('supabase/README.md').includes(`\`${fn}()\``)) {
+      faults.push(`supabase/README.md does not name the probe, \`${fn}()\``);
+    }
+    if (faults.length) {
+      fail(`The edge functions' authentication probe ${fn}() would refuse every token or admit a key:\n` +
+        faults.map((f) => `        ${f}`).join('\n'));
+    } else {
+      pass(`aas-api and fplus-directory authenticate through ${fn}(), which authenticated alone may call`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 185. aas-api and fplus-directory check their caller through the probe, never through getUser().
+//
+// GoTrue's getUser() refuses a token with no `aud`, which is every machine identity's, and consults
+// no revocation. Each function must call checkCaller() before it routes, after its own refusal of a
+// request with no Authorization header.
+// -------------------------------------------------------------------------------------------------
+{
+  const offences = [];
+  for (const fn of ['aas-api', 'fplus-directory']) {
+    const file = `supabase/functions/${fn}/index.ts`;
+    const source = read(file);
+    if (/\bauth\.getUser\(/.test(source)) offences.push(`${file} calls auth.getUser(), which refuses every machine identity`);
+    if (!source.includes('from "../_shared/callerCheck.ts"')) offences.push(`${file} does not import checkCaller from _shared/callerCheck.ts`);
+    const missing = source.indexOf('"Missing Authorization header"');
+    const check = source.indexOf('await checkCaller(');
+    if (check < 0) offences.push(`${file} never calls checkCaller()`);
+    else if (missing < 0 || missing > check) offences.push(`${file} calls checkCaller() before refusing a request with no Authorization header`);
+  }
+  if (offences.length) {
+    fail(`A function that reads as its caller authenticates it some other way:\n  ${offences.join('\n  ')}`);
+  } else {
+    pass('aas-api and fplus-directory refuse a request with no token, then check the token through the probe');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 64. The i3X server answers browsers from the gateway's origin list, and its README states the
 // methods and headers it allows.
 //
@@ -2346,6 +2481,10 @@ const OPERATOR_PAIRS = [
       'one row saying which forge-sweep pass may run (0156). RLS on with no policy, nothing granted ' +
       'to anon/authenticated, and service_role may only read it: it moves through three service_role ' +
       'RPCs that forge-sweep calls, and a browser has no reason to see which pass is running',
+    notification_dispatch_lease:
+      'one row saying which notification-dispatch pass may run (0247), as forge_sweep_lease does for ' +
+      'the forge. RLS on with no policy and nothing granted to an API role: it moves through three ' +
+      'RPCs that notification-dispatch calls as service_role',
     schema_bootstrap:
       'one row recording whether db-init reached the end of the migration chain on this boot ' +
       '(0072). RLS on with no policy and the anon/authenticated grants revoked -- it is bootstrap ' +
@@ -2602,19 +2741,24 @@ const OPERATOR_PAIRS = [
 // or the Audit Trail and drops it. db-init replays every file on every boot, so another migration
 // that declares the column or names it in a function body would bring it back or fail the replay;
 // 0202 reads it only after returning when it is gone. The API spec documents it on neither Cell nor
-// CellWrite, and no code reads it but the Audit Trail's list of governance fields, which past rows
-// carry.
+// CellWrite, and no code reads it. The Audit Trail's configuration fields, which past rows carry,
+// are audit_event_class()'s (0228, and a later file that redeclares it), which reads it out of a
+// snapshot as `-> 'grafana_url'` alone.
 // -------------------------------------------------------------------------------------------------
 {
   const DROPPER = '0219_a_cell_has_no_grafana_url_column.sql';
   const MOVER = '0202_a_cell_s_dashboard_address_is_one_of_its_links.sql';
+  const CLASSIFIER = '0228_the_audit_trail_sorts_events_into_classes_in_the_database.sql';
   const dir = 'supabase/migrations';
   const files = readdirSync(join(REPO, dir)).filter((f) => /^\d+_.*\.sql$/.test(f)).sort();
   const offences = [];
   for (const f of [MOVER, DROPPER]) if (!files.includes(f)) offences.push(`${dir}/${f} is missing`);
 
   for (const f of files.filter((name) => name !== DROPPER && name !== MOVER)) {
-    if (/\bgrafana_url\b/.test(read(`${dir}/${f}`))) offences.push(`${f} names grafana_url`);
+    const sql = read(`${dir}/${f}`);
+    const classifier = f === CLASSIFIER || /CREATE OR REPLACE FUNCTION public\.audit_event_class\(/.test(sql);
+    const named = classifier ? sql.replace(/-> 'grafana_url'/g, '') : sql;
+    if (/\bgrafana_url\b/.test(named)) offences.push(`${f} names grafana_url`);
   }
   if (files.includes(MOVER)) {
     const mover = read(`${dir}/${MOVER}`);
@@ -2639,8 +2783,7 @@ const OPERATOR_PAIRS = [
 
   const READERS = /^(?:frontend\/src|supabase\/functions|i3x|ingestion)\/.*\.(?:js|jsx|ts|mjs|py)$/;
   const TESTS = /(?:^|\/)(?:__tests__\/|test_[^/]*\.py$|[^/]*\.test\.[jt]sx?$|[^/]*_test\.ts$)/;
-  const GOVERNANCE = 'frontend/src/components/tabs/AuditTrailTab.jsx';
-  for (const f of allFiles.filter((p) => READERS.test(p) && !TESTS.test(p) && p !== GOVERNANCE)) {
+  for (const f of allFiles.filter((p) => READERS.test(p) && !TESTS.test(p))) {
     if (/\bgrafana_url\b/.test(read(f))) offences.push(`${f} names grafana_url`);
   }
 
@@ -3465,6 +3608,65 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 189. The Logs tab's ceilings are stated as service-logs holds them. logs.ts decides: a range of
+// at most 7 days, a fixed window of at most LONGEST_WINDOW_HOURS, 500 lines a read (200 by
+// default), 8 KiB a line, 10 seconds for the store, and the level and range keys. The help page, the
+// API reference and supabase/README.md each state them, and a ceiling stated wrong reads as the tab
+// hiding lines. Mirror check 40 holds the code's three copies; this holds the prose.
+// -------------------------------------------------------------------------------------------------
+{
+  const ts = read('supabase/functions/service-logs/logs.ts');
+  const num = (re) => Number(ts.match(re)?.[1]);
+  const maxLines = num(/export const MAX_LINES = (\d+)/);
+  const defaultLines = num(/export const DEFAULT_LINES = (\d+)/);
+  const lineKiB = num(/export const LINE_BYTES = (\d+) \* 1024/);
+  const timeoutS = num(/export const UPSTREAM_TIMEOUT_MS = (\d+)_000/);
+  const windowHours = num(/export const LONGEST_WINDOW_HOURS = (\d+)/);
+  const ranges = [...(ts.match(/export const RANGES[^=]*= \{([^}]*)\}/)?.[1] ?? '').matchAll(/"([^"]+)":/g)].map((m) => m[1]);
+  const levels = [...(ts.match(/export const LEVELS = \[([^\]]*)\]/)?.[1] ?? '').matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const longest = ranges.at(-1);
+  const problems189 = [];
+  if (![maxLines, defaultLines, lineKiB, timeoutS, windowHours].every(Number.isFinite) || !ranges.length || !levels.length) {
+    problems189.push('could not read the ceilings out of service-logs/logs.ts; its shape changed');
+  } else {
+    if (longest !== '7d') problems189.push(`logs.ts's longest range is ${longest}, and every page below says 7 days`);
+    const help = read('help/pages/system.md');
+    const section = help.slice(help.indexOf('## The Logs tab'), help.indexOf('\n## ', help.indexOf('## The Logs tab') + 1));
+    for (const phrase of [`At most ${maxLines} lines`, `${lineKiB} KiB`, 'last 7 days', 'A window covers at most 7 days']) {
+      if (!section.includes(phrase)) problems189.push(`help/pages/system.md's Logs tab section does not say "${phrase}"`);
+    }
+    const spec = read('docs/openapi.yaml');
+    const at = spec.indexOf('\n  /functions/v1/service-logs:');
+    const entry = at < 0 ? '' : spec.slice(at, spec.indexOf('\n  /', at + 1));
+    if (!entry) problems189.push('docs/openapi.yaml has no /functions/v1/service-logs');
+    for (const phrase of [`at most ${maxLines} lines`, `${defaultLines} by default`, `${lineKiB} KiB`, `${timeoutS} seconds`,
+      `enum: [${levels.join(', ')}]`, `enum: [${ranges.join(', ')}]`, 'at most 7 days', `at most ${windowHours} hours`,
+      '{ name: from, in: query', '{ name: to, in: query']) {
+      if (entry && !entry.includes(phrase)) problems189.push(`docs/openapi.yaml's service-logs entry does not say "${phrase}"`);
+    }
+    const readme = read('supabase/README.md');
+    const from = readme.indexOf("### Reading a service's logs is recorded (0225)");
+    const prose = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 1)).replace(/\s+/g, ' ');
+    if (!prose) problems189.push("supabase/README.md has no section \"Reading a service's logs is recorded (0225)\"");
+    const fixedAt = readme.indexOf("### A read of a service's logs names a range or a fixed window (0230)");
+    const fixed = fixedAt < 0 ? '' : readme.slice(fixedAt, readme.indexOf('\n### ', fixedAt + 1)).replace(/\s+/g, ' ');
+    if (!fixed) problems189.push("supabase/README.md has no section \"A read of a service's logs names a range or a fixed window (0230)\"");
+    else if (!fixed.includes(`at most ${windowHours} hours apart`)) {
+      problems189.push(`supabase/README.md's 0230 section does not say "at most ${windowHours} hours apart"`);
+    }
+    for (const phrase of ['at most 7 days', `${maxLines} lines (${defaultLines} by default)`, `${lineKiB} KiB a line`, `${timeoutS} seconds for the store`]) {
+      if (prose && !prose.includes(phrase)) problems189.push(`supabase/README.md's 0225 section does not say "${phrase}"`);
+    }
+  }
+  if (problems189.length) {
+    fail(`the Logs tab's ceilings are stated otherwise than service-logs holds them:\n` +
+      problems189.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help, the API reference and supabase/README.md state service-logs' ceilings: 7 days (${windowHours} hours for a fixed window), ${maxLines} lines (${defaultLines} by default), ${lineKiB} KiB, ${timeoutS} seconds`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists.
 //
 // Measured against postgrest/postgrest:v14.12: a hook naming a missing function boots, answers
@@ -3610,6 +3812,261 @@ const OPERATOR_PAIRS = [
       `all ${declared.size} variable(s) the function registry declares are set on ` +
         `supabase-functions (${Object.keys(elsewhere).length} by something other than its env list)`
     );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 190. service-logs reads the Loki Grafana reads, and nothing else may. aber.lokiUrl (Grafana's
+// datasource) is aber.lokiUrlOrNone with a refusal, so the two cannot name different stores; the
+// functions Deployment sets LOKI_URL from aber.lokiUrlOrNone; main/index.ts forwards LOKI_URL to
+// service-logs alone, since the store has no access control of its own; and the NetworkPolicy
+// admits supabase-functions to loki on the port loki.yaml's Service serves. Each link missing reads
+// as a store that cannot be reached, or as observability off, on a stack where it is on.
+// -------------------------------------------------------------------------------------------------
+{
+  const helpers = read('deploy/helm/aber/templates/_helpers.tpl');
+  const fnChart = read('deploy/helm/aber/templates/supabase/functions.yaml');
+  const policy = read('deploy/helm/aber/templates/networkpolicy.yaml');
+  const lokiChart = read('deploy/helm/aber/templates/obs/loki.yaml');
+  const registry = read('supabase/functions/main/index.ts');
+  const problems190 = [];
+
+  const lokiUrl = helpers.match(/\{\{- define "aber\.lokiUrl" -\}\}([\s\S]*?)\{\{- end -\}\}\n\{\{- end -\}\}/)?.[1] ?? '';
+  // The refusal's sentence names grafana.lokiUrl too, so only a value read or an address counts.
+  if (!/include "aber\.lokiUrlOrNone" \./.test(lokiUrl) || /\.Values\.grafana\.lokiUrl|http:\/\/loki:/.test(lokiUrl)) {
+    problems190.push('aber.lokiUrl does not take its address from aber.lokiUrlOrNone alone, so Grafana and the functions can name different stores');
+  }
+  if (!/include "aber\.lokiUrlOrNone" \.[\s\S]{0,40}\n\s*- name: LOKI_URL\n/.test(fnChart)) {
+    problems190.push('templates/supabase/functions.yaml does not set LOKI_URL from aber.lokiUrlOrNone');
+  }
+  const block = registry.match(/const FUNCTION_REGISTRY[^{]*\{([\s\S]*?)\n\};/)?.[1] ?? '';
+  const holders = [...block.matchAll(/^\s*"([a-z0-9-]+)"\s*:\s*\[([^\]]*)\]/gm)]
+    .filter((m) => m[2].includes('"LOKI_URL"')).map((m) => m[1]);
+  if (holders.join() !== 'service-logs') {
+    problems190.push(`main/index.ts forwards LOKI_URL to ${holders.join(', ') || 'no function'}; service-logs alone may hold it`);
+  }
+  const lokiPort = lokiChart.match(/\n {2}ports:\n\s*- name: \S+\n\s*port: (\d+)/)?.[1];
+  const edge = policy.match(/\(dict "from" "supabase-functions" "to" "loki"\s+"port" (\d+) "why" "([^"]+)"\)/);
+  if (!edge) {
+    problems190.push('networkpolicy.yaml has no supabase-functions -> loki edge');
+  } else if (!lokiPort || edge[1] !== lokiPort) {
+    problems190.push(`networkpolicy.yaml admits supabase-functions to loki on ${edge[1]}, and loki.yaml's Service serves ${lokiPort ?? '(not found)'}`);
+  } else if (!edge[2].includes('service-logs')) {
+    problems190.push("networkpolicy.yaml's supabase-functions -> loki edge does not say service-logs needs it");
+  }
+  if (problems190.length) {
+    fail(`service-logs does not read the Loki Grafana reads:\n` + problems190.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`service-logs alone holds LOKI_URL, set from the helper Grafana's datasource derives from, and reaches loki:${lokiPort} through its own edge`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 193. Every list filter is the shared one, as frontend/README.md says. A `<select>` in a page's
+// toolbar (`.filter-bar`, the Filters panel inside it included) takes one value, which is what the
+// shared FilterChecklist replaced; System › Logs' Service and Level are the two left, each a value
+// service-logs takes one of and records. The README's search threshold is the component's.
+// -------------------------------------------------------------------------------------------------
+{
+  /** file -> the aria-label of each select its toolbar may keep, and why. */
+  const KEPT_SELECTS = {
+    'frontend/src/components/tabs/SystemLogs.jsx': {
+      Service: 'the one service whose lines are read, a source rather than a filter over a list',
+      Level: 'one level, which service-logs takes and 0225 records with each read',
+    },
+  };
+  /** The end of the JSX tag that opens at `from`, past attribute braces and quotes. */
+  const tagEnd = (src, from) => {
+    let depth = 0;
+    let quote = null;
+    for (let i = from; i < src.length; i++) {
+      const c = src[i];
+      if (quote) { if (c === quote) quote = null; continue; }
+      if (c === '"' || c === "'" || c === '`') quote = c;
+      else if (c === '{') depth++;
+      else if (c === '}') depth--;
+      else if (c === '>' && depth === 0) return i;
+    }
+    return -1;
+  };
+  /** The source of the element `<div` opening at `from` up to its matching `</div>`. */
+  const divBlock = (src, from) => {
+    let depth = 0;
+    let i = from;
+    while (i < src.length) {
+      const open = src.indexOf('<div', i);
+      const close = src.indexOf('</div>', i);
+      if (close < 0) return src.slice(from);
+      if (open >= 0 && open < close && /[\s>]/.test(src[open + 4])) {
+        const end = tagEnd(src, open);
+        if (end < 0) return src.slice(from);
+        if (src[end - 1] !== '/') depth++;
+        i = end + 1;
+      } else {
+        depth--;
+        i = close + 6;
+        if (depth === 0) return src.slice(from, i);
+      }
+    }
+    return src.slice(from);
+  };
+
+  const problems193 = [];
+  const files = allFiles.filter((f) => /^frontend\/src\/components\/(tabs|common)\/[^/]+\.jsx$/.test(f));
+  let bars = 0;
+  for (const file of files) {
+    const src = read(file);
+    for (const m of src.matchAll(/<div className="filter-bar"/g)) {
+      bars += 1;
+      const block = divBlock(src, m.index);
+      for (const sel of block.matchAll(/<select\b/g)) {
+        const end = tagEnd(block, sel.index);
+        const label = block.slice(sel.index, end).match(/aria-label="([^"]+)"/)?.[1] ?? '(no aria-label)';
+        if (!KEPT_SELECTS[file]?.[label]) {
+          const line = src.slice(0, m.index + sel.index).split('\n').length;
+          problems193.push(`${file}:${line} has a select "${label}" in its toolbar; use FilterDropdown or FilterList (common/FilterChecklist.jsx)`);
+        }
+      }
+    }
+  }
+  const checklist = read('frontend/src/components/common/FilterChecklist.jsx');
+  const searchAt = Number(checklist.match(/export const SEARCH_AT = (\d+)/)?.[1]);
+  const WORDS = { 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine', 10: 'ten', 12: 'twelve' };
+  const readme = read('frontend/README.md').replace(/\s+/g, ' ');
+  if (!Number.isFinite(searchAt)) {
+    problems193.push('could not read SEARCH_AT out of frontend/src/components/common/FilterChecklist.jsx');
+  } else if (!readme.includes(`Over ${WORDS[searchAt] ?? searchAt} values it has a search box`)) {
+    problems193.push(`frontend/README.md does not say "Over ${WORDS[searchAt] ?? searchAt} values it has a search box", the threshold SEARCH_AT holds`);
+  }
+  for (const phrase of ['common/FilterChecklist.jsx', 'never a `<select>`', '`useUrlList`']) {
+    if (!readme.includes(phrase)) problems193.push(`frontend/README.md's toolbar rules do not name ${phrase}`);
+  }
+  if (bars === 0) problems193.push('found no `.filter-bar` in the components; the shape this check reads has changed');
+  if (problems193.length) {
+    fail('a list filter is not the shared one, or the README states it otherwise:\n'
+      + problems193.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`no toolbar among ${bars} holds a select but System › Logs' Service and Level, and the README states the shared filter's search at ${searchAt} values`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 194. The Audit Trail's help names its filters' groups as constants.js holds them. The kind
+// filter's groups are AUDIT_TRAIL_ENTITY_GROUPS, each named on the page; the action groups the
+// page gives as examples are AUDIT_TRAIL_ACTION_GROUPS labels. A group renamed in the code and not
+// in the help sends a reader looking for a heading that is not there.
+// -------------------------------------------------------------------------------------------------
+{
+  const constants = read('frontend/src/constants.js');
+  const block = (name) => {
+    const at = constants.indexOf(`export const ${name} = [`);
+    return at < 0 ? '' : constants.slice(at, constants.indexOf('];', at));
+  };
+  const entityGroups = [...block('AUDIT_TRAIL_ENTITY_GROUPS').matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const actionGroups = [...block('AUDIT_TRAIL_ACTION_GROUPS').matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const help = read('help/pages/audit-trail.md');
+  const kindLine = help.split('\n').find((l) => l.startsWith('- **The kind filter**')) || '';
+  const actionLine = help.split('\n').find((l) => l.startsWith('- **The action filter**')) || '';
+  const problems194 = [];
+  if (!entityGroups.length || !actionGroups.length) {
+    problems194.push('could not read AUDIT_TRAIL_ENTITY_GROUPS or AUDIT_TRAIL_ACTION_GROUPS out of frontend/src/constants.js');
+  }
+  if (!kindLine || !actionLine) {
+    problems194.push('help/pages/audit-trail.md has no "The kind filter" or "The action filter" bullet');
+  }
+  for (const g of entityGroups) {
+    if (kindLine && !kindLine.toLowerCase().includes(g.toLowerCase())) {
+      problems194.push(`help/pages/audit-trail.md's kind filter bullet does not name the group "${g}"`);
+    }
+  }
+  // The examples after "such as", lower-cased as the prose writes them.
+  const examples = (actionLine.match(/grouped by what the act is about, such as ([^.]+)\./)?.[1] ?? '')
+    .split(/, (?:or |and )?| or /).map((e) => e.trim()).filter(Boolean);
+  if (actionLine && examples.length === 0) problems194.push('help/pages/audit-trail.md\'s action filter bullet gives no group "such as" an example');
+  for (const e of examples) {
+    if (!actionGroups.some((g) => g.toLowerCase() === e.toLowerCase())) {
+      problems194.push(`help/pages/audit-trail.md names an action group "${e}" that AUDIT_TRAIL_ACTION_GROUPS does not hold`);
+    }
+  }
+  if (problems194.length) {
+    fail('the Audit Trail help names its filter groups otherwise than constants.js:\n'
+      + problems194.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Audit Trail help names the ${entityGroups.length} kind groups and gives ${examples.length} real action groups as examples`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 195. The Audit Trail's three list filters are arrays in every place that states them (0227).
+// 0001 and 0168 declare audit_trail_page() with p_entity_type text[], p_action text[] and
+// p_changed_by uuid[], and audit_trail_matching() (0228) matches each with = ANY; 0001's sweep of
+// stale overloads names that form, or it would drop it on every boot; 0227 drops the single-value
+// form; the API reference documents the three as arrays; and api.js sends each as an array from
+// listParam() or null. A copy left on one value either brings a second form back or sends a string
+// the function refuses.
+// -------------------------------------------------------------------------------------------------
+{
+  const LISTS = { p_entity_type: 'text[]', p_action: 'text[]', p_changed_by: 'uuid[]' };
+  const COLUMN = { p_entity_type: 't.entity_type', p_action: 't.action', p_changed_by: 't.changed_by' };
+  const LIST_IDENT = 'audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone, '
+    + 'timestamp with time zone, timestamp with time zone, bigint, text, uuid[], text[], boolean)';
+  // The rows the lists select are audit_trail_matching()'s, which the page calls once per class.
+  const m0228 = 'supabase/migrations/0228_the_audit_trail_sorts_events_into_classes_in_the_database.sql';
+  const helperSql = allFiles.includes(m0228) ? read(m0228) : '';
+  const helperAt = helperSql.indexOf('CREATE OR REPLACE FUNCTION public.audit_trail_matching(');
+  const helper = helperAt < 0 ? '' : helperSql.slice(helperAt, helperSql.indexOf('$$;', helperSql.indexOf('AS $$', helperAt)));
+  const problems195 = [];
+
+  const declaring = ['0001_baseline_schema.sql', '0168_every_schema_attached_to_a_device_counts.sql'];
+  for (const name of declaring) {
+    const sql = read(`supabase/migrations/${name}`);
+    const at = sql.indexOf('CREATE OR REPLACE FUNCTION public.audit_trail_page(');
+    const body = at < 0 ? '' : sql.slice(at, sql.indexOf('$_$;', at));
+    if (!body) { problems195.push(`${name} no longer declares audit_trail_page`); continue; }
+    const args = body.slice(0, body.indexOf(') RETURNS'));
+    for (const [arg, type] of Object.entries(LISTS)) {
+      if (!args.includes(`${arg} ${type} DEFAULT NULL::${type}`)) {
+        problems195.push(`${name} declares audit_trail_page without ${arg} ${type}`);
+      }
+      if (!new RegExp(`${COLUMN[arg].replace('.', '\\.')}\\s+= ANY \\(${arg}\\)`).test(helper)) {
+        problems195.push(`audit_trail_matching() does not match ${COLUMN[arg]} against any value of ${arg}`);
+      }
+    }
+  }
+  if (!read('supabase/migrations/0001_baseline_schema.sql').includes(`'${LIST_IDENT}'`)) {
+    problems195.push("0001's sweep of stale overloads does not name the list form, so it drops it on every boot");
+  }
+  const m0227 = 'supabase/migrations/0227_an_audit_trail_filter_takes_several_values.sql';
+  const migration = allFiles.includes(m0227) ? read(m0227) : '';
+  if (!/DROP FUNCTION public\.audit_trail_page\(integer, boolean, text, text, uuid\[\],[^)]*bigint, text, uuid\)/.test(migration)) {
+    problems195.push(`${m0227} does not drop the single-value form`);
+  }
+
+  const spec = read('docs/openapi.yaml');
+  const specAt = spec.indexOf('\n  /rest/v1/rpc/audit_trail_page:');
+  const entry = specAt < 0 ? '' : spec.slice(specAt, spec.indexOf('\n  /', specAt + 1));
+  for (const arg of Object.keys(LISTS)) {
+    if (!new RegExp(`\\n\\s+${arg}: \\{ type: array, nullable: true, items: \\{ type: string`).test(entry)) {
+      problems195.push(`docs/openapi.yaml's audit_trail_page entry does not document ${arg} as an array`);
+    }
+  }
+
+  const api = read('frontend/src/api.js');
+  const apiAt = api.indexOf("supabase.rpc('audit_trail_page'");
+  const branch = apiAt < 0 ? '' : api.slice(api.lastIndexOf("path.includes('/audit-trail')", apiAt), apiAt + 2000);
+  for (const arg of Object.keys(LISTS)) {
+    const sent = branch.match(new RegExp(`\\n\\s+${arg}: (\\w+)\\.length\\s*\\?[\\s\\S]*?: null,`));
+    if (!sent) {
+      problems195.push(`frontend/src/api.js does not send ${arg} as an array or null`);
+    } else if (!new RegExp(`const ${sent[1]} = listParam\\('`).test(branch)) {
+      problems195.push(`frontend/src/api.js sends ${arg} from ${sent[1]}, which listParam() does not make`);
+    }
+  }
+
+  if (problems195.length) {
+    fail(`the Audit Trail's list filters are not arrays everywhere:\n` + problems195.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass("audit_trail_page()'s kinds, actions and people are arrays in 0001, 0168, the sweep, 0227, the API reference and api.js");
   }
 }
 
@@ -4300,8 +4757,8 @@ const OPERATOR_PAIRS = [
 
 // -------------------------------------------------------------------------------------------------
 // 15. The alert retention window is declared once and cited consistently. The number lives in
-// the seeded `alerts.retention_days` setting; the READMEs and the archived migration's header
-// quote it, including the header's counter-example predicate.
+// the seeded `alerts.retention_days` setting; supabase/README.md quotes it, including its
+// counter-example predicate.
 // -------------------------------------------------------------------------------------------------
 {
   // The seeded value is DML, so it folded into 0002 and is still executed on every boot. The
@@ -4328,12 +4785,9 @@ const OPERATOR_PAIRS = [
 
     // Where the number is quoted, and what it would mean for each to be stale. Substring matches,
     // not regexes: the strings are full of reserved characters, and an escaping slip fails open.
+    // Archived 0030's counter-example keeps 1.0's 7 days: the archive is the record of what each
+    // file did, so it is held to mention 0032 below and not to the number now seeded.
     const CITATIONS = [
-      {
-        file: MIGRATION,
-        needle: `interval '${days} days';  -- NO`,
-        what: 'the header counter-example showing the predicate that must NOT be used',
-      },
       {
         file: 'supabase/README.md',
         needle: `kept for ${days} days`,
@@ -4371,6 +4825,32 @@ const OPERATOR_PAIRS = [
           `cited consistently in ${new Set(CITATIONS.map((c) => c.file)).size} files`
       );
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 240. History's Alerts tab is described as the code holds it. Its help names the most alerts it
+// lists (ALERT_HISTORY_LIMIT) and how long alerts are kept (0002's seed), and the upgrade guide's
+// 1.8.0 subsection names the same days, which the tab falls back to (ALERT_RETENTION_DAYS).
+// -------------------------------------------------------------------------------------------------
+{
+  const HELP = 'help/pages/history.md';
+  const GUIDE = 'help/site/upgrading.md';
+  const limit = read('frontend/src/api.js').match(/^export const ALERT_HISTORY_LIMIT = (\d+);$/m)?.[1];
+  const days = read('supabase/migrations/0002_seed_data.sql').match(/seed_setting\(\s*'alerts\.retention_days',\s*to_jsonb\((\d+)\)/)?.[1];
+  const help = read(HELP);
+  const alerts = help.slice(help.indexOf('\n## Alerts\n'), help.indexOf('\n## ', help.indexOf('\n## Alerts\n') + 1));
+  const guide = read(GUIDE);
+  const problems240 = [];
+  if (!limit || !days) problems240.push('could not read ALERT_HISTORY_LIMIT in frontend/src/api.js or the seeded alerts.retention_days');
+  if (!help.includes('\n## Alerts\n')) problems240.push(`${HELP}: no "Alerts" section`);
+  if (limit && !alerts.includes(`at most ${Number(limit).toLocaleString('en-GB')} alerts`)) problems240.push(`${HELP}: the Alerts section does not say it lists at most ${Number(limit).toLocaleString('en-GB')} alerts`);
+  if (days && !alerts.includes(`**Alerts are kept for ${days} days.**`)) problems240.push(`${HELP}: the Alerts section does not say alerts are kept for ${days} days`);
+  if (days && !guide.includes(`\n### From 1.8.0, alert history is kept for ${days} days\n`)) problems240.push(`${GUIDE}: no "From 1.8.0, alert history is kept for ${days} days" subsection`);
+  if (problems240.length) {
+    fail("History's Alerts tab and its help disagree:\n" + problems240.map((p) => `      - ${p}`).join('\n'));
+  } else {
+    pass(`History's help says the Alerts tab lists at most ${Number(limit).toLocaleString('en-GB')} alerts, kept for ${days} days, as the upgrade guide does`);
   }
 }
 
@@ -4492,18 +4972,17 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
-// 104. The alert counter's history link has a history to show.
+// 104. Grafana's Alerting > History has a history to show.
 //
-// The dashboard records no Grafana alert (frontend/README.md, Toasts and the notification history),
-// so the record of what fired and cleared is Grafana's Alerting > History, which the alert
-// counter's footer links to. That page answers only from Loki: on Grafana's default annotations
-// backend it shows an error. So grafana.ini sends state history to Loki, the chart gives Grafana
-// the Loki URL the logs datasource uses, and grafana/README.md says why.
+// The dashboard's record of what fired is History's Alerts tab, which the alert counter's footer
+// links to. Grafana keeps its own for its own pages, and Alerting > History answers only from Loki:
+// on Grafana's default annotations backend it shows an error. So grafana.ini sends state history
+// to Loki, the chart gives Grafana the Loki URL the logs datasource uses, and grafana/README.md
+// says why.
 // -------------------------------------------------------------------------------------------------
 {
   const INI = 'grafana/grafana.ini';
   const TEMPLATE = 'deploy/helm/aber/templates/obs/grafana.yaml';
-  const CONSTANTS = 'frontend/src/constants.js';
   const README = 'grafana/README.md';
   const ENV = 'GF_UNIFIED_ALERTING_STATE_HISTORY_LOKI_REMOTE_URL';
 
@@ -4521,16 +5000,337 @@ const OPERATOR_PAIRS = [
   const env = read(TEMPLATE).split('\n').findIndex(l => l.trim() === `- name: ${ENV}`);
   const value = env < 0 ? '' : read(TEMPLATE).split('\n')[env + 1].trim();
   if (value !== 'value: {{ include "aber.lokiUrl" . | quote }}') problems104.push(`${TEMPLATE}: ${ENV} is not set from aber.lokiUrl, the logs datasource's URL`);
-  if (!read(CONSTANTS).includes('export const GRAFANA_ALERT_HISTORY_URL = `${GRAFANA_URL}/alerting/history')) problems104.push(`${CONSTANTS}: GRAFANA_ALERT_HISTORY_URL no longer opens /alerting/history`);
   if (!read(README).includes('\n## Alert state history\n')) problems104.push(`${README}: no "Alert state history" section`);
 
   if (problems104.length) {
     fail(
-      'alert state history: the alert counter links to Grafana\'s Alerting > History, which needs:\n' +
+      'alert state history: Grafana\'s Alerting > History needs:\n' +
         problems104.map(p => `      - ${p}`).join('\n')
     );
   } else {
-    pass('Grafana keeps alert state history in the logs datasource\'s Loki, so the alert counter\'s history link has a page to open');
+    pass('Grafana keeps alert state history in the logs datasource\'s Loki, so its Alerting > History has a page to show');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 214. The Site Map's help names each state its legend draws, and neither alert state names what
+// raised the alert. STATUS_WORD in SiteMapTab.jsx is the legend's words; the help's "What the states
+// mean" gives each a bullet in bold and says how many the legend names. More than one thing writes
+// platform_alerts, so STATUS_LABEL's two alert entries, the help's two bullets and the counter's
+// footer name no evaluator.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/SiteMapTab.jsx';
+  const PILL = 'frontend/src/components/common/AlertPill.jsx';
+  const HELP = 'help/pages/site-map.md';
+  const NUMBER = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+  const tab = read(TAB);
+  const help = read(HELP);
+  const problems214 = [];
+  // One literal pattern per object: a RegExp built from a name is a Semgrep finding (detect-non-literal-regexp).
+  const pairs = (body) => Object.fromEntries([...(body ?? '').matchAll(/(\w+): '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const words = pairs(tab.match(/const STATUS_WORD = \{([\s\S]*?)\n\s*\}/)?.[1]);
+  const labels = pairs(tab.match(/const STATUS_LABEL = \{([\s\S]*?)\n\s*\}/)?.[1]);
+  if (!words.alert || !words.acknowledged) problems214.push(`${TAB}: STATUS_WORD has no alert or acknowledged entry`);
+  const states = help.slice(help.indexOf('## What the states mean'), help.indexOf('\n## ', help.indexOf('## What the states mean') + 1));
+  for (const word of Object.values(words)) {
+    if (!states.includes(`- **${word}**`)) problems214.push(`${HELP}: "What the states mean" has no bullet for **${word}**`);
+  }
+  const count = Object.keys(words).length;
+  if (!help.includes(`names the ${NUMBER[count] ?? count} states below`)) {
+    problems214.push(`${HELP}: the legend's bullet does not say it names the ${NUMBER[count] ?? count} states`);
+  }
+  const named = (text) => /Grafana|evaluat/i.test(text);
+  for (const key of ['alert', 'acknowledged']) {
+    if (named(labels[key] ?? '')) problems214.push(`${TAB}: STATUS_LABEL.${key} names what raised the alert`);
+    const bullet = states.split('\n').find((l) => l.startsWith(`- **${words[key]}**`)) ?? '';
+    if (named(bullet)) problems214.push(`${HELP}: the **${words[key]}** bullet names what raised the alert`);
+  }
+  const pill = read(PILL);
+  const foot = pill.slice(pill.indexOf('<div className="alert-pill-foot">'), pill.indexOf('className="alert-pill-history"'));
+  if (!foot || /Evaluated by|silences/i.test(foot.replace(/\{\/\*[\s\S]*?\*\/\}/g, ''))) {
+    problems214.push(`${PILL}: the counter's footer names an evaluator or says where silences live`);
+  }
+  if (problems214.length) {
+    fail('the Site Map help and the alert states disagree:\n' + problems214.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Site Map help names the ${count} states its legend draws, and no alert state or the counter's footer names an evaluator`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 215. The reasons for acknowledging an alert are named alike in the help and the API reference.
+// ALERT_ACKNOWLEDGEMENT_REASONS (utils/alertAcknowledgement.js) is the dialog's list, which mirror
+// check 45 holds to the database. The Site Map help's steps name each label in bold, and
+// docs/openapi.yaml gives acknowledge_alert's p_reason and DeviceAlert's acknowledgement_reason
+// the values. The note's limit is stated alike in the util, the CHECK and the reference.
+// -------------------------------------------------------------------------------------------------
+{
+  const UTIL = 'frontend/src/utils/alertAcknowledgement.js';
+  const HELP = 'help/pages/site-map.md';
+  const SPEC = 'docs/openapi.yaml';
+  const util = read(UTIL);
+  const spec = read(SPEC);
+  const problems215 = [];
+  const reasons = [...(util.match(/export const ALERT_ACKNOWLEDGEMENT_REASONS = \[([\s\S]*?)\n\]/)?.[1] ?? '')
+    .matchAll(/value: '([a-z_]+)', label: '([^']+)'/g)].map((m) => ({ value: m[1], label: m[2] }));
+  if (!reasons.length) problems215.push(`${UTIL}: could not read ALERT_ACKNOWLEDGEMENT_REASONS`);
+  const help = read(HELP);
+  const step = help.split('\n').find((l) => /^\d+\. Choose a reason: /.test(l)) ?? '';
+  if (!step) problems215.push(`${HELP}: no "Choose a reason" step`);
+  for (const r of reasons) {
+    if (step && !step.includes(`**${r.label}**`)) problems215.push(`${HELP}: the reasons step does not name **${r.label}**`);
+  }
+  const values = reasons.map((r) => r.value).join(', ');
+  const entry = spec.slice(spec.indexOf('\n  /rest/v1/rpc/acknowledge_alert:'), spec.indexOf('\n  /rest/v1/rpc/withdraw_alert_acknowledgement:'));
+  if (!entry.includes(`p_reason: { type: string, enum: [${values}] }`)) {
+    problems215.push(`${SPEC}: acknowledge_alert's p_reason does not list ${values}`);
+  }
+  const schema = spec.match(/^ {4}DeviceAlert:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  if (!schema.includes(`enum: [${values}]`)) problems215.push(`${SPEC}: DeviceAlert's acknowledgement_reason does not list ${values}`);
+  const max = util.match(/export const ALERT_ACKNOWLEDGEMENT_NOTE_MAX = (\d+)/)?.[1];
+  const sql = read('supabase/migrations/0231_a_person_acknowledges_an_alert.sql');
+  if (!max || !sql.includes(`(char_length(acknowledgement_note) <= ${max})`) || !entry.includes(`maxLength: ${max}`)) {
+    problems215.push(`the note's limit (${max ?? 'unread'} in ${UTIL}) is not the CHECK's and the API reference's`);
+  }
+  if (problems215.length) {
+    fail('the reasons for acknowledging an alert are named otherwise than the dialog lists them:\n' +
+      problems215.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help and the API reference name the ${reasons.length} reasons for acknowledging an alert, and the note's limit of ${max}, as the dialog does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 216. The API reference documents the acknowledgement as the migration declares it: both
+// functions under their own paths, each column on DeviceAlert, and both actions on
+// AuditTrailEntry. A function missing from the reference is one an API client never learns of.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const MIGRATION = 'supabase/migrations/0231_a_person_acknowledges_an_alert.sql';
+  const spec = read(SPEC);
+  const sql = read(MIGRATION);
+  const problems216 = [];
+  const granted = new Set([...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)\([^)]*\) TO authenticated/g)].map((m) => m[1]));
+  const functions = [...sql.matchAll(/CREATE OR REPLACE FUNCTION public\.(\w+)\(/g)].map((m) => m[1])
+    .filter((fn) => granted.has(fn));
+  if (functions.length !== 2) problems216.push(`${MIGRATION}: expected two functions granted to authenticated, found ${functions.join(', ') || 'none'}`);
+  for (const fn of functions) {
+    if (!spec.includes(`\n  /rest/v1/rpc/${fn}:\n`)) problems216.push(`${SPEC} has no /rest/v1/rpc/${fn}`);
+  }
+  const columns = [...(sql.match(/-- 1\. The columns[\s\S]*?-- 2\./)?.[0] ?? '')
+    .matchAll(/COMMENT ON COLUMN public\.platform_alerts\.(\w+) IS/g)].map((m) => m[1]);
+  if (columns.length !== 5) problems216.push(`${MIGRATION}: expected five column comments, found ${columns.length}`);
+  const schema = spec.match(/^ {4}DeviceAlert:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  for (const c of columns) {
+    if (!new RegExp(`^ {8}${c}:`, 'm').test(schema)) problems216.push(`${SPEC}: DeviceAlert does not document ${c}`);
+  }
+  const actions = spec.match(/^ {4}AuditTrailEntry:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  for (const action of ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN']) {
+    if (!actions.includes(action)) problems216.push(`${SPEC}: AuditTrailEntry does not list ${action}`);
+  }
+  if (problems216.length) {
+    fail('the API reference does not document the acknowledgement as 0231 declares it:\n' +
+      problems216.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`docs/openapi.yaml documents ${functions.join(' and ')}, the ${columns.length} acknowledgement columns and both audit actions`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 235. The API reference documents the suppression windows as 0240 declares them: each writer
+// granted to authenticated under its own path, the table's path, the view's four columns and the
+// stamp on DeviceAlert, and the four actions on AuditTrailEntry.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const MIGRATION = 'supabase/migrations/0240_an_alert_stays_quiet_during_planned_work.sql';
+  const spec = read(SPEC);
+  const sql = read(MIGRATION);
+  const problems235 = [];
+  const writers = [...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)\([^)]*\) TO authenticated/g)].map((m) => m[1]);
+  if (writers.length !== 3) problems235.push(`${MIGRATION}: expected three writers granted to authenticated, found ${writers.join(', ') || 'none'}`);
+  for (const fn of writers) {
+    if (!spec.includes(`\n  /rest/v1/rpc/${fn}:\n`)) problems235.push(`${SPEC} has no /rest/v1/rpc/${fn}`);
+  }
+  if (!spec.includes('\n  /rest/v1/alert_suppression_windows:\n')) problems235.push(`${SPEC} has no /rest/v1/alert_suppression_windows`);
+  const schema = spec.match(/^ {4}DeviceAlert:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  const documented = new Set(schema.split('\n').filter((l) => /^ {8}\w+:/.test(l)).map((l) => l.trim().split(':')[0]));
+  for (const column of ['suppression_window_id', 'suppressed', 'suppressing_window_id', 'suppression_reason', 'suppressed_until']) {
+    if (!documented.has(column)) problems235.push(`${SPEC}: DeviceAlert does not document ${column}`);
+  }
+  const actions = spec.match(/^ {4}AuditTrailEntry:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  const written = [...new Set([...sql.matchAll(/'(SUPPRESSION_WINDOW_[A-Z]+)'/g)].map((m) => m[1]))];
+  if (written.length !== 4) problems235.push(`${MIGRATION}: expected four SUPPRESSION_WINDOW_ actions, found ${written.join(', ') || 'none'}`);
+  for (const action of written) {
+    if (!actions.includes(action)) problems235.push(`${SPEC}: AuditTrailEntry does not list ${action}`);
+  }
+  if (problems235.length) {
+    fail('the API reference does not document the suppression windows as 0240 declares them:\n' +
+      problems235.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`docs/openapi.yaml documents ${writers.join(', ')}, the windows table, the five suppression columns and the four window actions`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 275. DeviceAlert documents platform_alerts as the migrations declare it: each column of the table
+// is a property, and a property that is no column says it is on platform_alerts_active only. The
+// columns are 0001's CREATE TABLE and any later ADD COLUMN. A column left out is one an API client
+// never learns of; one documented after it is dropped is one it asks for and is refused.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const VIEW_ONLY = 'On `platform_alerts_active` only';
+  const spec = read(SPEC);
+  const problems275 = [];
+  const columns = new Set();
+  for (const file of readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort()) {
+    const sql = read(`supabase/migrations/${file}`);
+    const table = sql.match(/^CREATE TABLE IF NOT EXISTS public\.platform_alerts \(\n([\s\S]*?)\n\);/m)?.[1] ?? '';
+    for (const line of table.split('\n')) {
+      // Four spaces, then a column's name (`values` is quoted, a reserved word); a CONSTRAINT is upper case.
+      const name = /^ {4}"?([a-z][a-z0-9_]*)"? [a-z]/.exec(line)?.[1];
+      if (name) columns.add(name);
+    }
+    for (const m of sql.matchAll(/ALTER TABLE (?:ONLY )?public\.platform_alerts\s+ADD COLUMN (?:IF NOT EXISTS )?"?([a-z][a-z0-9_]*)/gi)) {
+      columns.add(m[1]);
+    }
+  }
+  if (columns.size < 10) problems275.push(`supabase/migrations: found ${columns.size} platform_alerts columns, so the table was not parsed`);
+  const schema = spec.match(/^ {4}DeviceAlert:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  // Each property with its own lines, up to the next property.
+  const properties = new Map();
+  let current = null;
+  for (const line of schema.split('\n')) {
+    const name = /^ {8}(\w+):/.exec(line)?.[1];
+    if (name) properties.set((current = name), line);
+    else if (current && /^ {9,}\S/.test(line)) properties.set(current, `${properties.get(current)}\n${line}`);
+  }
+  for (const c of columns) {
+    if (!properties.has(c)) problems275.push(`${SPEC}: DeviceAlert does not document platform_alerts.${c}`);
+  }
+  for (const [name, text] of properties) {
+    if (!columns.has(name) && !text.includes(VIEW_ONLY)) {
+      problems275.push(`${SPEC}: DeviceAlert documents ${name}, which platform_alerts has no column for, and does not say "${VIEW_ONLY}"`);
+    }
+  }
+  if (problems275.length) {
+    fail('DeviceAlert does not document platform_alerts as the migrations declare it:\n' +
+      problems275.map((p) => `        ${p}`).join('\n'));
+  } else {
+    const viewOnly = [...properties.keys()].filter((p) => !columns.has(p)).length;
+    pass(`docs/openapi.yaml's DeviceAlert documents all ${columns.size} platform_alerts columns, and says its other ${viewOnly} properties are platform_alerts_active's`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 236. The suppression predicate keeps one signature, in one place. platform_alerts_active and the
+// sender call platform_alert_suppressing_window(p_entity_type, p_entity_id, p_at), and the sender's
+// call is written against it, so 0001 declares it in place and no other file holds a copy (a copy
+// replayed later would stand as the body the view and the sender run). supabase/README.md names it
+// with those arguments and says the sender holds a send while it answers.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const SIGNATURE = 'CREATE OR REPLACE FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone DEFAULT now()) RETURNS uuid';
+  const problems236 = [];
+  const baseline = read(`${dir}/0001_baseline_schema.sql`);
+  if (!baseline.includes(SIGNATURE)) problems236.push(`${dir}/0001_baseline_schema.sql does not declare ${SIGNATURE}`);
+  const others = readdirSync(join(REPO, dir))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && f !== '0001_baseline_schema.sql')
+    .filter((f) => read(`${dir}/${f}`).includes('CREATE OR REPLACE FUNCTION public.platform_alert_suppressing_window('));
+  if (others.length) problems236.push(`a later file declares it again: ${others.join(', ')}`);
+  const view = baseline.slice(baseline.indexOf('CREATE OR REPLACE VIEW public.platform_alerts_active'), baseline.indexOf('ALTER VIEW public.platform_alerts_active'));
+  if (!view.includes('public.platform_alert_suppressing_window(newest.entity_type, newest.entity_id, now())')) {
+    problems236.push('platform_alerts_active does not call platform_alert_suppressing_window(entity_type, entity_id, now())');
+  }
+  const readme = read('supabase/README.md');
+  const section = readme.slice(readme.indexOf('### An alert stays quiet during planned work (0240)'), readme.indexOf('### The Audit Trail files a suppression window'));
+  if (!section.includes('platform_alert_suppressing_window(a.entity_type, a.entity_id, now())') || !section.includes('**holds**')) {
+    problems236.push("supabase/README.md's 0240 section does not give the sender's call, or does not say the send is held");
+  }
+  if (problems236.length) {
+    fail('the suppression predicate is not one function with one signature:\n' + problems236.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('platform_alert_suppressing_window(p_entity_type, p_entity_id, p_at) is declared once, in 0001, called by the view, and documented for the sender');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 237. The help names the Suppression windows section's controls as the drawer draws them. The
+// labels are SuppressionWindows.jsx's and the dialog's; devices.md holds the section, and the
+// gateway and cell pages and the Site Map's counter link to it. The counter's help says a
+// suppressed alert is not counted, and the Site Map's states that one colours nothing.
+// -------------------------------------------------------------------------------------------------
+{
+  const SECTION = 'frontend/src/components/common/SuppressionWindows.jsx';
+  const DIALOG = 'frontend/src/components/modals/SuppressionWindowModal.jsx';
+  const code = read(SECTION) + read(DIALOG);
+  const devices = read('help/pages/devices.md');
+  const problems237 = [];
+  const help = devices.slice(devices.indexOf('## Suppression windows'));
+  if (!devices.includes('## Suppression windows')) problems237.push('help/pages/devices.md has no "## Suppression windows" section');
+  for (const label of ['Schedule window…', 'Change…', 'End now', 'Cancel window', 'From cell', 'NOW']) {
+    if (!code.includes(label)) problems237.push(`${SECTION}: no longer draws "${label}"`);
+    if (!help.includes(`**${label}**`)) problems237.push(`help/pages/devices.md: the section does not name **${label}**`);
+  }
+  if (!code.includes("'Schedule window'") || !help.includes('Select **Schedule window**.')) {
+    problems237.push("the dialog's confirm and the help's last step do not both say Schedule window");
+  }
+  for (const page of ['help/pages/gateways.md', 'help/pages/cells.md', 'help/pages/site-map.md']) {
+    if (!read(page).includes('(devices.md#suppression-windows)')) problems237.push(`${page} does not link to devices.md#suppression-windows`);
+  }
+  const siteMap = read('help/pages/site-map.md');
+  const states = siteMap.slice(siteMap.indexOf('## What the states mean'), siteMap.indexOf('## The alert counter'));
+  const counter = siteMap.slice(siteMap.indexOf('## The alert counter'));
+  if (!states.includes('A suppressed alert colours nothing.')) problems237.push('help/pages/site-map.md: the states do not say a suppressed alert colours nothing');
+  if (!counter.includes('A suppressed alert is not counted')) problems237.push("help/pages/site-map.md: the counter's help does not say a suppressed alert is not counted");
+  if (problems237.length) {
+    fail('the help and the Suppression windows section disagree:\n' + problems237.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the help names the Suppression windows controls as the drawer draws them, and says a suppressed alert is not counted and colours nothing');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 267. The longest suppression window is named as 0002 declares it: its label, its tab, its default
+// and its range, in devices.md's Suppression windows section and the Settings page's help, and its
+// default and range in supabase/README.md's 0240 section.
+// -------------------------------------------------------------------------------------------------
+{
+  const SEED = 'supabase/migrations/0002_seed_data.sql';
+  const seed = read(SEED);
+  const declared = seed.match(/seed_setting\(\s*'alerts\.suppression_max_days',\s*to_jsonb\((\d+)\),\s*'number',\s*'([^']+)',\s*'([^']+)'/);
+  const bounds = seed.match(/SET min_value = (\d+), max_value = (\d+)\s+WHERE key = 'alerts\.suppression_max_days'/);
+  const problems267 = [];
+  if (!declared || !bounds) {
+    problems267.push(`${SEED}: could not read alerts.suppression_max_days' seed_setting() call or its bounds`);
+  } else {
+    const [, days, category, label] = declared;
+    const [, min, max] = bounds;
+    const devices = read('help/pages/devices.md');
+    const section = devices.slice(devices.indexOf('## Suppression windows'));
+    for (const needle of [`at most ${days} days after the start`, `**A window lasts at most ${days} days**`, `**${category}** tab`,
+      `**${label}**, from ${min} to ${max}`]) {
+      if (!section.includes(needle)) problems267.push(`help/pages/devices.md: the Suppression windows section does not say "${needle}"`);
+    }
+    const settings = read('help/pages/settings.md');
+    for (const needle of [`**${category}** holds`, `**${label}**`, `${days} unless you change it, from ${min} to ${max}`]) {
+      if (!settings.includes(needle)) problems267.push(`help/pages/settings.md does not say "${needle}"`);
+    }
+    const readme = read('supabase/README.md');
+    const zone = readme.slice(readme.indexOf('### An alert stays quiet during planned work (0240)'), readme.indexOf('### The Audit Trail files a suppression window'));
+    if (!zone.includes(`in the ${category} category: ${days} days, from ${min} to ${max}`)) {
+      problems267.push(`supabase/README.md's 0240 section does not say "in the ${category} category: ${days} days, from ${min} to ${max}"`);
+    }
+  }
+  if (problems267.length) {
+    fail('the help and the README name the longest suppression window otherwise than 0002 declares it:\n' +
+      problems267.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help and supabase/README.md name ${declared[3]} as 0002 declares it: ${declared[1]} days, ${bounds[1]} to ${bounds[2]}, on ${declared[2]}`);
   }
 }
 
@@ -4548,7 +5348,8 @@ const OPERATOR_PAIRS = [
   const VITE = 'frontend/vite.config.js';
   const fallback = /location \/ \{[^}]*try_files \$uri \$uri\/ \/index\.html;/.test(read(NGINX));
   // Comments are blanked, as check 49 does, not removed: what is left cannot close up into a new one.
-  const uncommented = read(INDEX).replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  // <!-{2} and -{2}>, not the markers: Semgrep's parser, not Node, reads a regex opening with one as a comment.
+  const uncommented = read(INDEX).replace(/<!-{2}[\s\S]*?-{2}>/g, (c) => c.replace(/[^\n]/g, ' '));
   const relative = [...uncommented.matchAll(/\s(?:src|href)="([^"]*)"/g)]
     .map((m) => m[1])
     .filter((url) => !url.startsWith('/') && !/^[a-z]+:/i.test(url));
@@ -4755,8 +5556,9 @@ const OPERATOR_PAIRS = [
     }
     return '';
   };
-  const using = at < 0 ? '' : inside(policies, policies.indexOf('USING (', at) + 'USING '.length);
-  const roles = using.indexOf('AND (') < 0 ? '' : inside(using, using.indexOf('AND (') + 'AND '.length);
+  // Not named `using`: Semgrep's parser, not Node, refuses that name where an expression reads it.
+  const usingClause = at < 0 ? '' : inside(policies, policies.indexOf('USING (', at) + 'USING '.length);
+  const roles = usingClause.indexOf('AND (') < 0 ? '' : inside(usingClause, usingClause.indexOf('AND (') + 'AND '.length);
   const arms = [];
   let depth = 0;
   let from = 0;
@@ -5046,6 +5848,7 @@ const OPERATOR_PAIRS = [
   const ALLOWED = {
     'public.set_foreign_credential': 'the one writer every foreign credential shares',
     'public.keep_gateway_credential': 'keeps a copy of a broker password the platform issued, which is not a foreign credential',
+    'public.issue_notification_signing_key': 'generates the webhook\'s signing key, which Aber issues and shows once, so it is not a foreign credential (0248)',
   };
   const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
   const last = new Map();
@@ -5989,6 +6792,30 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 186. The TimescaleDB the maintenance hook waits for is the one timescaledb/Dockerfile is built
+// FROM. The hook holds extension.sql back until the historian offers that version, so a chart that
+// names an older one updates on the old pod again, and a newer one fails every upgrade at its bound.
+// -------------------------------------------------------------------------------------------------
+{
+  const HOOK = 'deploy/helm/aber/templates/jobs/timescaledb-maintenance.yaml';
+  const from = read('timescaledb/Dockerfile').match(/^FROM\s+timescale\/timescaledb:(\d+\.\d+\.\d+)-pg\d+\s*$/m);
+  const hook = read(HOOK);
+  const constant = [...hook.matchAll(/^\{\{-\s*\$timescaledbVersion\s*:=\s*"([^"]*)"\s*-?\}\}\s*$/gm)];
+  const offences = [];
+  if (!from) offences.push('timescaledb/Dockerfile names no timescale/timescaledb:<x.y.z>-pg<n> base');
+  if (constant.length !== 1) offences.push(`${HOOK} sets $timescaledbVersion ${constant.length} times, not once`);
+  else if (from && constant[0][1] !== from[1]) offences.push(`${HOOK} waits for TimescaleDB ${constant[0][1]}, and timescaledb/Dockerfile is built FROM ${from[1]}`);
+  if (!/expected=\{\{ \$timescaledbVersion \| quote \}\}/.test(hook)) offences.push(`${HOOK}'s wait no longer reads $timescaledbVersion`);
+  else if (hook.indexOf('expected={{ $timescaledbVersion') > hook.indexOf('-f /sql/extension.sql')) offences.push(`${HOOK} waits for the version after it runs extension.sql`);
+
+  if (offences.length) {
+    fail(`The maintenance hook waits for the TimescaleDB the historian image is built FROM:\n  ${offences.join('\n  ')}`);
+  } else {
+    pass(`The maintenance hook waits for TimescaleDB ${from[1]}, the version timescaledb/Dockerfile is built FROM, before extension.sql`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 27. The Directory's exposure map names the same ingress routes in the seed and the chart.
 //
 // `0002` reads each row's exposure from `directory_exposure` by route name, and the chart's
@@ -6473,6 +7300,42 @@ const OPERATOR_PAIRS = [
   }
   if (!missing.length && workerReads) {
     pass('the playback worker and the ingestion daemon take the same primary host id from aber.primaryHostId');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 192. The playback worker's metrics endpoint is scraped. The worker serves PLAYBACK_METRICS_PORT,
+// whose default is values.yaml's playback.metrics.port; playback.yaml passes the port, or 0 when
+// playback.metrics.enabled is false, and annotates the pod for Alloy's scrape on it; and the network
+// policy admits alloy to playback on it. Any one missing and the outcome count is never collected,
+// with the endpoint answering and nothing failing.
+// -------------------------------------------------------------------------------------------------
+{
+  const worker = read('ingestion/playback_worker.py');
+  const template = read('deploy/helm/aber/templates/apps/playback.yaml');
+  const policy = read('deploy/helm/aber/templates/networkpolicy.yaml');
+  const values = read('deploy/helm/aber/values.yaml');
+  const defaultPort = worker.match(/^PLAYBACK_METRICS_PORT = int\(os\.getenv\("PLAYBACK_METRICS_PORT", "(\d+)"\)\)/m)?.[1];
+  const valuesPort = values.slice(values.indexOf('\nplayback:\n')).match(/\n {2}metrics:\n {4}enabled: \w+\n {4}port: (\d+)\n/)?.[1];
+  const wrong = [];
+  if (!defaultPort) wrong.push('ingestion/playback_worker.py does not read PLAYBACK_METRICS_PORT');
+  if (!valuesPort) wrong.push('values.yaml declares no playback.metrics.enabled and playback.metrics.port');
+  if (defaultPort && valuesPort && defaultPort !== valuesPort) {
+    wrong.push(`the worker's default port is ${defaultPort} and the chart's is ${valuesPort}`);
+  }
+  if (!/- name: PLAYBACK_METRICS_PORT\n\s+value: \{\{ ternary \(\.Values\.playback\.metrics\.port \| toString\) "0" \.Values\.playback\.metrics\.enabled \| quote \}\}/.test(template)) {
+    wrong.push('playback.yaml does not pass PLAYBACK_METRICS_PORT from playback.metrics, 0 when it is disabled');
+  }
+  if (!/\{\{- if \.Values\.playback\.metrics\.enabled \}\}\n\s+\{\{- include "aber\.scrapeAnnotations" \(dict "port" \.Values\.playback\.metrics\.port "path" "\/metrics"\)/.test(template)) {
+    wrong.push("playback.yaml does not annotate the pod for Alloy's scrape on playback.metrics.port");
+  }
+  if (!/\(dict "from" "alloy"\s+"to" "playback"\s+"port" \(int \.Values\.playback\.metrics\.port\)/.test(policy)) {
+    wrong.push('networkpolicy.yaml has no alloy -> playback edge on playback.metrics.port, so under default-deny the scrape is dropped');
+  }
+  if (wrong.length) {
+    fail(`the playback worker's outcome count would not be collected:\n      ${wrong.join('\n      ')}`);
+  } else {
+    pass(`the playback worker serves :${defaultPort}/metrics, and the chart passes the port, annotates the pod and admits alloy to it`);
   }
 }
 
@@ -6976,6 +7839,101 @@ const OPERATOR_PAIRS = [
     for (const p of problems145) fail(`check 145: ${p}. docs/security-model.md says Sign Out ends every door session the person holds.`);
   } else {
     pass(`Sign Out ends the sessions of the ${Object.keys(doors).length} door clients the gateway signs in as`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 254. supabase/README.md's 0251 section lists every has_role() site as the code has it. Its policy
+// table names each final-form policy that calls has_role(), in the migrations and in
+// storage-policies.sql, with whether it calls require_mfa(); its function table names each function
+// whose final body names a covered role in has_role(), with the same. A row the code contradicts,
+// or a site with no row, is a classification nobody reviewed.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems254 = [];
+  const files = readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const policies = new Map();
+  const bodies = new Map();
+  for (const f of files) {
+    const sql = read(`supabase/migrations/${f}`);
+    for (const m of sql.matchAll(/^CREATE POLICY (\S+) ON (\S+) FOR \w+ [^\n]*$/gm)) policies.set(`${m[2].replace(/^public\./, '')} ${m[1]}`, m[0]);
+    for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION\s+public\.([a-z0-9_]+)\s*\([\s\S]*?\bAS (\$[a-z_]*\$)([\s\S]*?)\2/g)) bodies.set(m[1], m[3]);
+  }
+  for (const m of read('supabase/storage-policies.sql').matchAll(/^CREATE POLICY "([^"]+)" ON storage\.objects\s+FOR \w+([\s\S]*?\);)$/gm)) {
+    policies.set(`storage.objects ${m[1]}`, m[2]);
+  }
+  const readme = read('supabase/README.md');
+  const at = readme.indexOf('### With MFA required, a change to the platform needs a session that gave its code (0251)');
+  const section = at < 0 ? '' : readme.slice(at, readme.indexOf('\n### ', at + 10));
+  // The policy table's first two cells are the table and the policy; the function table's first
+  // is the function.
+  const policyRows = new Map([...section.matchAll(/^\| `([^`]+)` \| `([^`]+)` \| \w+ \| [^|]* \| (yes|no) \|/gm)]
+    .map((m) => [`${m[1]} ${m[2]}`, m[3] === 'yes']));
+  const functionRows = new Map([...section.matchAll(/^\| `([a-z0-9_]+)\(\)` \| `[^`]+` \| (yes|no) \|/gm)]
+    .map((m) => [m[1], m[2] === 'yes']));
+  if (!section || !policyRows.size || !functionRows.size) {
+    problems254.push("supabase/README.md has no 0251 section with its two tables, so the classification is not checked");
+  } else {
+    const COVERED = /has_role\(ARRAY\[[^\]]*'(?:Administrator|Shopfloor_Manager)'/;
+    for (const [name, text] of policies) {
+      if (!text.includes('has_role(')) continue;
+      const asks = text.includes('require_mfa()');
+      if (!policyRows.has(name)) problems254.push(`the policy ${name} calls has_role() and has no row`);
+      else if (policyRows.get(name) !== asks) problems254.push(`the policy ${name} is listed as ${policyRows.get(name) ? '' : 'not '}asking require_mfa(), and ${asks ? 'does' : 'does not'}`);
+    }
+    for (const name of policyRows.keys()) {
+      if (!policies.get(name)?.includes('has_role(')) problems254.push(`a row names the policy ${name}, which calls no has_role()`);
+    }
+    for (const [name, body] of bodies) {
+      const asks = body.includes('require_mfa()');
+      if (!COVERED.test(body) && !(asks && functionRows.has(name))) continue;
+      if (!functionRows.has(name)) problems254.push(`${name}() names a covered role in has_role() and has no row`);
+      else if (functionRows.get(name) !== asks) problems254.push(`${name}() is listed as ${functionRows.get(name) ? '' : 'not '}asking require_mfa(), and ${asks ? 'does' : 'does not'}`);
+    }
+    for (const name of functionRows.keys()) {
+      if (!bodies.has(name)) problems254.push(`a row names ${name}(), which no applied migration declares`);
+    }
+  }
+  if (problems254.length) {
+    for (const p of problems254) fail(`check 254: ${p}. supabase/README.md's 0251 section classifies every has_role() site.`);
+  } else {
+    pass(`supabase/README.md's 0251 tables classify all ${policyRows.size} has_role() policies and ${functionRows.size} functions as the code has them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 255. The MFA switch is named as 0002 declares it, and its refusal's way on is the tab that exists.
+// The Settings, Profile and Access Control help pages and docs/security-model.md give the row's
+// label, and every one names Profile › MFA, which navigation.jsx's Profile tabs must hold. A page
+// that names another label, or a tab that was renamed, sends a refused person nowhere.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems255 = [];
+  const seed = read('supabase/migrations/0002_seed_data.sql');
+  const label = seed.match(/'security\.require_mfa_for_managers',\s*to_jsonb\(false\),\s*'boolean',\s*'([^']+)',\s*'([^']+)'/);
+  const nav = read('frontend/src/navigation.jsx');
+  const profileTabs = nav.slice(nav.indexOf('export const PROFILE_TABS'), nav.indexOf(']', nav.indexOf('export const PROFILE_TABS')));
+  const settingsTabs = nav.slice(nav.indexOf('export const SETTINGS_TABS'), nav.indexOf(']', nav.indexOf('export const SETTINGS_TABS')));
+  if (!label) problems255.push('0002 declares no boolean security.require_mfa_for_managers');
+  else if (!settingsTabs.includes(`label: '${label[1]}'`)) problems255.push(`navigation.jsx's SETTINGS_TABS has no ${label[1]} category for it`);
+  if (!/\{ id: 'mfa', label: 'MFA'/.test(profileTabs)) problems255.push("navigation.jsx's PROFILE_TABS has no MFA tab, which every refusal names");
+  const pages = {
+    'help/pages/settings.md': [label?.[2], 'Profile › MFA'],
+    'help/pages/profile.md': ['Settings', 'Security'],
+    'help/pages/access-control.md': ['Settings requires MFA'],
+    'docs/security-model.md': [label?.[2], 'security.require_mfa_for_managers', 'Profile › MFA'],
+  };
+  for (const [page, phrases] of Object.entries(pages)) {
+    const text = read(page);
+    for (const phrase of phrases.filter(Boolean)) {
+      if (!text.includes(phrase)) problems255.push(`${page} does not say "${phrase}"`);
+    }
+    if (/Profile › Security/.test(text)) problems255.push(`${page} names Profile › Security; the tab is Profile › MFA`);
+  }
+  if (problems255.length) {
+    for (const p of problems255) fail(`check 255: ${p}.`);
+  } else {
+    pass(`the MFA switch, "${label[2]}", is named as 0002 declares it on ${Object.keys(pages).length} pages, each pointing to Profile › MFA`);
   }
 }
 
@@ -7646,8 +8604,9 @@ const OPERATOR_PAIRS = [
     ['@import', /@import\s+(?:url\(\s*)?["']?\s*(?:https?:)?\/\//gi],
     ['url()', /(?<!@import\s+)\burl\(\s*["']?\s*(?:https?:)?\/\//gi],
   ];
-  // A comment keeps its newlines, so a line number still points at the source.
-  const blank = (text) => text.replace(/<!--[\s\S]*?-->|\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
+  // A comment keeps its newlines, so a line number still points at the source. <!-{2} and -{2}>, not
+  // the markers: Semgrep's parser, not Node, reads a regex opening with one as a comment.
+  const blank = (text) => text.replace(/<!-{2}[\s\S]*?-{2}>|\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
 
   const offences = [];
   for (const file of PAGES) {
@@ -8196,6 +9155,41 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 198. The Audit Trail drawer's "View in" action is offered for the kinds the help page names. The
+// tab's ENTITY_PAGES decides which kinds have a page and what it is called, and each must be a kind
+// routes.js's entityUrl() opens; the help lists the button's wordings. A page added on one side
+// only is a button the help does not mention, or one it promises that never appears.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/AuditTrailTab.jsx';
+  const block = read(TAB).match(/^const ENTITY_PAGES = \{\n([\s\S]*?)\n\}/m)?.[1] ?? '';
+  const pages = [...block.matchAll(/type: '(\w+)',\s*page: '([^']+)'/g)].map((m) => ({ type: m[1], page: m[2] }));
+  const routed = (read('frontend/src/routes.js').match(/export const entityUrl = [\s\S]*?\{ ([^}]*) \}\[type\]/)?.[1] ?? '')
+    .split(',').map((p) => p.split(':')[0].trim()).filter(Boolean);
+  const help = read('help/pages/audit-trail.md');
+  const said = [...(help.match(/^- \*\*View in Devices\*\*.*$/m)?.[0] ?? '').matchAll(/\*\*View in (\w+)\*\*/g)].map((m) => m[1]);
+  const problems198 = [];
+  if (!pages.length) problems198.push(`could not read ENTITY_PAGES out of ${TAB}`);
+  if (!routed.length) problems198.push('could not read the kinds entityUrl() opens out of routes.js');
+  for (const { type } of pages.filter((p) => !routed.includes(p.type))) {
+    problems198.push(`ENTITY_PAGES offers ${type}, which entityUrl() does not open`);
+  }
+  if (!said.length) problems198.push('help/pages/audit-trail.md has no "View in Devices" bullet');
+  for (const { page } of pages.filter((p) => !said.includes(p.page))) {
+    problems198.push(`help/pages/audit-trail.md does not name "View in ${page}"`);
+  }
+  for (const page of said.filter((s) => !pages.some((p) => p.page === s))) {
+    problems198.push(`help/pages/audit-trail.md names "View in ${page}", which the drawer never offers`);
+  }
+  if (problems198.length) {
+    fail('the Audit Trail drawer\'s View in action is described otherwise than the code offers it:\n' +
+      problems198.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help names the Audit Trail drawer's ${pages.length} View in pages, each one entityUrl() opens`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 43. Every workflow job runs on one pinned runner image. GitHub moves `ubuntu-latest` to a new
 // release on its own schedule and gradually, so for weeks any job, a release among them, can land on
 // either image (#764). Pinned, a move is one change, tried on every workflow before it merges.
@@ -8223,6 +9217,559 @@ const OPERATOR_PAIRS = [
     );
   } else {
     pass(`all ${runners.length} workflow jobs run on ${images[0]}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 196. How much a time window loads by itself is stated as AuditTrailTab.jsx holds it. A bounded
+// window pages on, PAGE_SIZE at a time, until WINDOW_EVENT_CAP events are loaded, and the hatch
+// then quotes the cap. The help page and frontend/README.md give the numbers and the hatch's words;
+// a cap stated wrong reads as the page hiding events.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/AuditTrailTab.jsx';
+  const tab = read(TAB);
+  const pageSize = Number(tab.match(/^const PAGE_SIZE = (\d+)$/m)?.[1]);
+  const cap = Number(tab.match(/^export const WINDOW_EVENT_CAP = (\d+)$/m)?.[1]);
+  const problems196 = [];
+  if (!Number.isFinite(pageSize) || !Number.isFinite(cap)) {
+    problems196.push(`could not read PAGE_SIZE and WINDOW_EVENT_CAP out of ${TAB}; its shape changed`);
+  } else {
+    const words = cap.toLocaleString('en-GB');
+    for (const hatch of ["const capWords = WINDOW_EVENT_CAP.toLocaleString('en-GB')",
+      'Older events not loaded: more than ${capWords} in this window', 'Not loaded: over ${capWords}']) {
+      if (!tab.includes(hatch)) problems196.push(`${TAB} no longer words the hatch with "${hatch}"`);
+    }
+    const help = read('help/pages/audit-trail.md');
+    for (const phrase of [`loads the next ${pageSize} events`, `${pageSize} at a time, up to ${words} events`,
+      `loads the newest ${words}`, `Older events not loaded: more than ${words} in this window`,
+      `Not loaded: over ${words}`]) {
+      if (!help.includes(phrase)) problems196.push(`help/pages/audit-trail.md does not say "${phrase}"`);
+    }
+    const readme = read('frontend/README.md').replace(/\s+/g, ' ');
+    if (!readme.includes(`\`WINDOW_EVENT_CAP\` (${words})`)) {
+      problems196.push(`frontend/README.md does not give WINDOW_EVENT_CAP as (${words})`);
+    }
+  }
+  if (problems196.length) {
+    fail('the Audit Trail\'s window loading is stated otherwise than AuditTrailTab.jsx holds it:\n' +
+      problems196.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help and frontend/README.md state the Audit Trail's window loading: ${pageSize} a page, up to ${cap} events`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 211. How narrow a zoom goes, and how far a press moves to be a drag, are stated as the code holds
+// them. Zoom in stops at ZOOM_FLOOR_MS (utils/timeWindow.js), and a press is a drag from
+// BAND_DRAG_PX (hooks/useBandDrag.js, which the Audit Trail and History share). Both pages' help,
+// frontend/README.md and Zoom in's own tooltip give them; a floor stated wrong reads as a broken
+// button.
+// -------------------------------------------------------------------------------------------------
+{
+  const UTIL = 'frontend/src/utils/timeWindow.js';
+  const TAB = 'frontend/src/hooks/useBandDrag.js';
+  const CONTROL = 'frontend/src/components/common/TimeWindowControl.jsx';
+  const UNITS = { SECOND: ['second', 1], MINUTE: ['minute', 60], HOUR: ['hour', 3600] };
+  const floor = read(UTIL).match(/^export const ZOOM_FLOOR_MS = (?:(\d+) \* )?(SECOND|MINUTE|HOUR)$/m);
+  const px = Number(read(TAB).match(/^export const BAND_DRAG_PX = (\d+)$/m)?.[1]);
+  const problems211 = [];
+  if (!floor || !Number.isFinite(px)) {
+    problems211.push(`could not read ZOOM_FLOOR_MS out of ${UTIL} or BAND_DRAG_PX out of ${TAB}; their shape changed`);
+  } else {
+    const n = Number(floor[1] ?? 1);
+    const words = n === 1 ? `one ${UNITS[floor[2]][0]}` : `${n} ${UNITS[floor[2]][0]}s`;
+    for (const page of ['help/pages/audit-trail.md', 'help/pages/history.md']) {
+      const help = read(page);
+      for (const phrase of [`stops at a window of ${words}`, `shorter than ${words} opens as ${words}`,
+        `A drag must move at least ${px} pixels`]) {
+        if (!help.includes(phrase)) problems211.push(`${page} does not say "${phrase}"`);
+      }
+    }
+    const readme = read('frontend/README.md').replace(/\s+/g, ' ');
+    for (const phrase of [`\`ZOOM_FLOOR_MS\` (${words})`, `\`BAND_DRAG_PX\` (${px}px)`]) {
+      if (!readme.includes(phrase)) problems211.push(`frontend/README.md does not give ${phrase}`);
+    }
+    if (!read(CONTROL).includes(`is ${words} long, the narrowest a zoom goes`)) {
+      problems211.push(`${CONTROL}'s Zoom in tooltip does not name the floor as ${words}`);
+    }
+  }
+  if (problems211.length) {
+    fail('how far the Audit Trail and History zoom is stated otherwise than the code holds it:\n' +
+      problems211.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`both pages' help, frontend/README.md and Zoom in's tooltip state the zoom floor and the ${px}px drag as the code holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 197. frontend/README.md shows GroupHeading as the component takes it, and names the key the Audit
+// Trail keeps its closed sections under. A prop the example passes and the component ignores, or a
+// key the page no longer writes, sends the next page that copies them wrong.
+// -------------------------------------------------------------------------------------------------
+{
+  const COMPONENT = 'frontend/src/components/common/GroupHeading.jsx';
+  const props = (read(COMPONENT).match(/export function GroupHeading\(\{([^}]*)\}\)/)?.[1] ?? '')
+    .split(',').map((p) => p.trim().split(/\s*=/)[0]).filter(Boolean);
+  const readme = read('frontend/README.md');
+  const from = readme.indexOf('### A group of rows opens and closes under one heading');
+  const section = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 1));
+  const fence = '`'.repeat(3);
+  const opened = section.indexOf(`${fence}jsx\n`);
+  const closed = opened < 0 ? -1 : section.indexOf(fence, opened + fence.length + 4);
+  const example = closed < 0 ? '' : section.slice(opened + fence.length + 4, closed);
+  // The props on GroupHeading itself, not those of an element passed as one of them (an icon).
+  const passed = [...example.replace(/<(?!GroupHeading)[A-Z]\w*[^>]*\/>/g, '').matchAll(/(\w+)=\{/g)].map((m) => m[1]);
+  const key = read('frontend/src/components/tabs/AuditTrailTab.jsx')
+    .match(/^export const CLOSED_SECTIONS_KEY = '([^']+)'$/m)?.[1];
+  const problems197 = [];
+  if (!props.length) problems197.push(`could not read GroupHeading's props out of ${COMPONENT}`);
+  if (!section) problems197.push('frontend/README.md has no section "A group of rows opens and closes under one heading"');
+  else if (!passed.length) problems197.push('that section has no GroupHeading example to check');
+  for (const p of passed.filter((p) => !props.includes(p))) {
+    problems197.push(`the README's example passes ${p}, which GroupHeading does not take`);
+  }
+  if (!key) problems197.push('could not read CLOSED_SECTIONS_KEY out of AuditTrailTab.jsx');
+  else if (section && !section.includes(`\`${key}\``)) problems197.push(`the section does not name the key ${key}`);
+  if (problems197.length) {
+    fail('frontend/README.md describes GroupHeading otherwise than the code has it:\n' +
+      problems197.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`frontend/README.md's GroupHeading example passes ${passed.length} of its props and names ${key}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 218. History's help names its bucket sizes and its row cap as api.js holds them. The page says
+// which resolution it shows in HISTORY_RESOLUTIONS' words, and the row cap (TELEMETRY_MAX_ROWS)
+// decides which; a help page naming another size, or another cap, explains a page nobody sees.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const help = read('help/pages/history.md');
+  const block = api.match(/export const HISTORY_RESOLUTIONS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1] ?? '';
+  const words = [...block.matchAll(/words: '([^']+)'/g)].map((m) => m[1]);
+  const cap = Number(api.match(/^const TELEMETRY_MAX_ROWS = (\d+);$/m)?.[1]);
+  const problems218 = [];
+  if (!words.length) problems218.push('could not read the words of HISTORY_RESOLUTIONS out of frontend/src/api.js');
+  if (!/export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;/.test(api)) {
+    problems218.push('frontend/src/api.js no longer sets HISTORY_MAX_ROWS to TELEMETRY_MAX_ROWS');
+  }
+  if (!Number.isFinite(cap)) problems218.push('could not read TELEMETRY_MAX_ROWS out of frontend/src/api.js');
+  const listed = [...help.matchAll(/^- \*\*(\d+-(?:minute|hour|day) buckets)\*\*$/gm)].map((m) => m[1]);
+  if (words.length && listed.join(', ') !== words.join(', ')) {
+    problems218.push(`help/pages/history.md lists ${listed.join(', ') || 'no bucket sizes'}; api.js has ${words.join(', ')}`);
+  }
+  if (Number.isFinite(cap) && !help.includes(`at most ${cap.toLocaleString('en-GB')} points`)) {
+    problems218.push(`help/pages/history.md does not say "at most ${cap.toLocaleString('en-GB')} points"`);
+  }
+  if (problems218.length) {
+    fail('History\'s help states its bucket sizes or row cap otherwise than api.js holds them:\n' +
+      problems218.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help names its ${words.length} bucket sizes and its ${cap.toLocaleString('en-GB')}-point cap as api.js holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 219. frontend/README.md's table of TimeSeriesChart's props is the props the component takes, every
+// one and no other. The chart is the one every History tab reuses, so the table is its contract.
+// -------------------------------------------------------------------------------------------------
+{
+  const COMPONENT = 'frontend/src/components/common/TimeSeriesChart.jsx';
+  const props = (read(COMPONENT).match(/export function TimeSeriesChart\(\{([^}]*)\}\)/)?.[1] ?? '')
+    .split(',').map((p) => p.trim().split(/\s*=/)[0]).filter(Boolean).sort();
+  const readme = read('frontend/README.md');
+  const from = readme.indexOf('**`common/TimeSeriesChart.jsx` is the one time-series chart**');
+  const table = from < 0 ? '' : readme.slice(from, readme.indexOf('\n\n', readme.indexOf('| Prop |', from)));
+  const named = [...table.matchAll(/^\| ((?:`\w+`(?:, )?)+) \|/gm)]
+    .flatMap((m) => [...m[1].matchAll(/`(\w+)`/g)].map((n) => n[1])).sort();
+  const problems219 = [];
+  if (!props.length) problems219.push(`could not read TimeSeriesChart's props out of ${COMPONENT}`);
+  if (!named.length) problems219.push('frontend/README.md has no table of TimeSeriesChart\'s props under "History and its chart"');
+  for (const p of props.filter((p) => !named.includes(p))) problems219.push(`the README's table leaves out ${p}`);
+  for (const p of named.filter((p) => !props.includes(p))) problems219.push(`the README's table names ${p}, which TimeSeriesChart does not take`);
+  if (problems219.length) {
+    fail('frontend/README.md describes TimeSeriesChart otherwise than the code has it:\n' +
+      problems219.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`frontend/README.md's table names TimeSeriesChart's ${props.length} props, every one`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 220. The uPlot the dashboard pins is the one whose notice it carries. The build drops uPlot's own
+// header, so TimeSeriesChart.jsx's legal comment carries its MIT notice and names its version, and
+// NOTICE.md names the same. A version bump that leaves either behind says the bundle carries a
+// release it does not.
+// -------------------------------------------------------------------------------------------------
+{
+  const pinned = JSON.parse(read('frontend/package.json')).dependencies?.uplot;
+  const notice = read('frontend/src/components/common/TimeSeriesChart.jsx').match(/^\/\*![\s\S]*?\*\//)?.[0] ?? '';
+  const named = notice.match(/uPlot (\d+\.\d+\.\d+)/)?.[1];
+  const listed = read('NOTICE.md').match(/\[uPlot\]\([^)]*\) (\d+\.\d+\.\d+)/)?.[1];
+  const problems220 = [];
+  if (!/^\d+\.\d+\.\d+$/.test(pinned ?? '')) problems220.push(`frontend/package.json pins uplot as ${pinned ?? 'nothing'}, not an exact version`);
+  if (!notice.includes('Permission is hereby granted, free of charge')) {
+    problems220.push('TimeSeriesChart.jsx no longer opens with uPlot\'s MIT notice as a /*! comment');
+  }
+  if (named !== pinned) problems220.push(`TimeSeriesChart.jsx's notice names uPlot ${named ?? 'no version'}; package.json pins ${pinned}`);
+  if (listed !== pinned) problems220.push(`NOTICE.md names uPlot ${listed ?? 'no version'}; package.json pins ${pinned}`);
+  if (problems220.length) {
+    fail('uPlot\'s notice and the version the dashboard pins disagree:\n' + problems220.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the bundle carries the notice of uPlot ${pinned}, the version package.json pins, and NOTICE.md names it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 221. History's help says the window it opens on, and which spans it offers, as utils/history.js
+// has them. The page opens on DEFAULT_HISTORY_WINDOW and offers every span and no All time.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const presets = read('frontend/src/utils/timeWindow.js');
+  const help = read('help/pages/history.md');
+  const range = util.match(/export const DEFAULT_HISTORY_WINDOW = rollingWindow\('(\w+)', HISTORY_RANGES\)/)?.[1];
+  const labels = Object.fromEntries([...presets.matchAll(/value: '(\w+)', +label: '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const label = range && labels[range];
+  const problems221 = [];
+  if (!label) problems221.push('could not read DEFAULT_HISTORY_WINDOW\'s range and its label');
+  else if (!help.includes(`It opens on **${label}**.`)) problems221.push(`help/pages/history.md does not say "It opens on **${label}**."`);
+  if (!/export const HISTORY_SPANS = SPAN_IDS$/m.test(util)) {
+    problems221.push('utils/history.js no longer offers every span (HISTORY_SPANS = SPAN_IDS); the help names all four');
+  } else if (!help.includes('Choose **Day**, **Week**, **Month** or **Year**')) {
+    problems221.push('help/pages/history.md does not name the four spans');
+  }
+  if (!help.includes('There is no **All time**')) problems221.push('help/pages/history.md does not say there is no All time');
+  if (problems221.length) {
+    fail('History\'s help states its window otherwise than utils/history.js has it:\n' +
+      problems221.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help says it opens on ${label}, with every span and no All time`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 244. History's help says what Overview's lanes are and what a selection may see, as the code has
+// it: the key's words (COVERAGE_KEY), the lanes past which every group starts closed
+// (OVERVIEW_OPEN_LANES_MAX), and the selection that may take any block width and the longest window
+// a larger one sees (COVERAGE_SMALL_SELECTION, COVERAGE_LARGE_MAX_HOURS in api.js).
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const api = read('frontend/src/api.js');
+  const help = read('help/pages/history.md');
+  const key = util.match(/fewer: '([^']+)', more: '([^']+)', none: '([^']+)'/);
+  const lanes = util.match(/^export const OVERVIEW_OPEN_LANES_MAX = (\d+)$/m)?.[1];
+  const small = api.match(/^export const COVERAGE_SMALL_SELECTION = (\d+);$/m)?.[1];
+  const hours = api.match(/^export const COVERAGE_LARGE_MAX_HOURS = (\d+);$/m)?.[1];
+  const problems244 = [];
+  if (!key || !lanes || !small || !hours) {
+    problems244.push('could not read COVERAGE_KEY, OVERVIEW_OPEN_LANES_MAX, COVERAGE_SMALL_SELECTION or COVERAGE_LARGE_MAX_HOURS');
+  } else {
+    if (!help.includes(`**${key[3]}**, then **${key[1]} → ${key[2]}**`)) problems244.push(`the key is not "**${key[3]}**, then **${key[1]} → ${key[2]}**"`);
+    if (!help.includes(`unless there are more than ${lanes} devices`)) problems244.push(`it does not say every group starts closed past ${lanes} devices`);
+    if (!help.includes(`**${small} devices or fewer**`) || !help.includes(`**More than ${small}**`)) problems244.push(`it does not name ${small} devices as the small selection`);
+    // A large selection's longest window is a week and an hour, a week across a clock change.
+    const days = Math.floor(Number(hours) / 24);
+    if (!help.includes(`1-hour blocks up to ${days} days`)) problems244.push(`it does not say a large selection sees ${days} days at most`);
+  }
+  if (problems244.length) {
+    fail("History's help describes Overview otherwise than the code:\n" + problems244.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help names Overview's key, its ${lanes}-lane first visit, and the ${small}-device selection that sees past ${Math.floor(Number(hours) / 24)} days`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 222. History's help names the refresh timer's choices as utils/history.js holds them
+// (HISTORY_REFRESH_EVERY), in order, and says it starts at the first. A help page offering another
+// interval sends a reader looking for a choice the list does not have.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const help = read('help/pages/history.md');
+  const block = util.match(/export const HISTORY_REFRESH_EVERY = \[([\s\S]*?)\]/)?.[1] ?? '';
+  const labels = [...block.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const problems222 = [];
+  if (labels.length < 2) problems222.push('could not read the labels of HISTORY_REFRESH_EVERY out of frontend/src/utils/history.js');
+  else {
+    const said = `${labels.slice(0, -1).map((l) => `**${l}**`).join(', ')} or **${labels[labels.length - 1]}**`;
+    if (!help.includes(said)) problems222.push(`help/pages/history.md does not offer ${said}`);
+    if (!help.includes(`It starts at **${labels[0]}**.`)) problems222.push(`help/pages/history.md does not say "It starts at **${labels[0]}**."`);
+  }
+  if (problems222.length) {
+    fail('History\'s help states its refresh choices otherwise than utils/history.js holds them:\n' +
+      problems222.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help offers the refresh timer's ${labels.length} choices, ${labels.join(', ')}, as utils/history.js holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 223. History's help says how many states a state chart's key names, and the README the same, as
+// utils/history.js caps it (STATE_KEY_MAX). A free-text metric has many values, and the cap is what
+// keeps its key readable; a page promising another number misleads whoever counts.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const help = read('help/pages/history.md');
+  const readme = read('frontend/README.md');
+  const cap = Number(util.match(/^export const STATE_KEY_MAX = (\d+)$/m)?.[1]);
+  const WORDS = ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const problems223 = [];
+  if (!Number.isInteger(cap)) problems223.push('could not read STATE_KEY_MAX out of frontend/src/utils/history.js');
+  else {
+    const said = `The key names the ${WORDS[cap] ?? cap} states with the most time`;
+    if (!help.includes(said)) problems223.push(`help/pages/history.md does not say "${said}"`);
+    if (!readme.includes(`\`STATE_KEY_MAX\` (${cap})`)) problems223.push(`frontend/README.md does not name \`STATE_KEY_MAX\` (${cap})`);
+  }
+  if (problems223.length) {
+    fail('History\'s docs state a state key\'s cap otherwise than utils/history.js holds it:\n' +
+      problems223.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and the README say a state chart's key names ${cap} values, as STATE_KEY_MAX holds`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 224. History's help names the readings export's resolutions and its row cap as the code holds
+// them: EXPORT_RESOLUTIONS' labels (utils/telemetryExport.js), raw first, and TELEMETRY_EXPORT_MAX_ROWS
+// (api.js). The dialog shows those labels and stops at that cap; help naming another sends a reader
+// looking for a choice that is not there, or trusting a file to hold rows it cannot.
+// -------------------------------------------------------------------------------------------------
+{
+  const help = read('help/pages/history.md');
+  const block = read('frontend/src/utils/telemetryExport.js').match(/export const EXPORT_RESOLUTIONS = \[([\s\S]*?)\n\]/)?.[1] ?? '';
+  const labels = [...block.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const cap = Number(read('frontend/src/api.js').match(/^export const TELEMETRY_EXPORT_MAX_ROWS = (\d+);$/m)?.[1]);
+  const problems224 = [];
+  if (labels.length < 2) problems224.push('could not read the labels of EXPORT_RESOLUTIONS out of frontend/src/utils/telemetryExport.js');
+  else {
+    const [raw, ...summaries] = labels;
+    const first = `- **${raw}**, the one the dialog starts on,`;
+    const rest = `${summaries.slice(0, -1).map((l) => `**${l}**`).join(', ')} and **${summaries[summaries.length - 1]}** are summaries`;
+    if (!help.includes(first)) problems224.push(`help/pages/history.md does not say "${first}"`);
+    if (!help.includes(rest)) problems224.push(`help/pages/history.md does not say "${rest}"`);
+  }
+  if (!Number.isFinite(cap)) problems224.push('could not read TELEMETRY_EXPORT_MAX_ROWS out of frontend/src/api.js');
+  else if (!help.includes(`at most ${cap.toLocaleString('en-GB')} rows`)) {
+    problems224.push(`help/pages/history.md does not say "at most ${cap.toLocaleString('en-GB')} rows"`);
+  }
+  if (problems224.length) {
+    fail('History\'s help states the readings export otherwise than the code holds it:\n' +
+      problems224.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help names the export's ${labels.length} resolutions, ${labels[0]} first, and its ${cap.toLocaleString('en-GB')}-row cap as the code holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 225. History's help and frontend/README.md say how wide a text chart's bucket is held under Auto,
+// as utils/history.js holds it (TEXT_BUCKET_MIN_PX). The width is why a text chart can read in
+// larger buckets than the numbers beside it; a page naming another explains a size nobody sees.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const px = Number(util.match(/^export const TEXT_BUCKET_MIN_PX = (\d+)$/m)?.[1]);
+  const problems225 = [];
+  if (!Number.isInteger(px)) problems225.push('could not read TEXT_BUCKET_MIN_PX out of frontend/src/utils/history.js');
+  else {
+    if (!read('help/pages/history.md').includes(`whose buckets are each at least ${px} pixels wide`)) {
+      problems225.push(`help/pages/history.md does not say "whose buckets are each at least ${px} pixels wide"`);
+    }
+    if (!read('frontend/README.md').includes(`\`TEXT_BUCKET_MIN_PX\` (${px}px)`)) {
+      problems225.push(`frontend/README.md does not give \`TEXT_BUCKET_MIN_PX\` (${px}px)`);
+    }
+  }
+  if (problems225.length) {
+    fail('History\'s docs state a text chart\'s bucket width otherwise than utils/history.js holds it:\n' +
+      problems225.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and the README hold a text chart's bucket to ${px}px under Auto, as TEXT_BUCKET_MIN_PX does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 226. History's help names its chart groups' order as utils/history.js holds it (GROUP_ORDER),
+// each type by the name the Metrics page gives it (SPARKPLUG_TYPES, constants.js). A help page in
+// another order sends a reader looking for a group where it is not.
+// -------------------------------------------------------------------------------------------------
+{
+  const order = (read('frontend/src/utils/history.js').match(/^const GROUP_ORDER = \[([\d, ]+)\]$/m)?.[1] ?? '')
+    .split(',').map((c) => Number(c.trim())).filter(Number.isFinite);
+  const block = read('frontend/src/constants.js').match(/export const SPARKPLUG_TYPES = \{([\s\S]*?)\};/)?.[1] ?? '';
+  const types = Object.fromEntries([...block.matchAll(/(\d+): '(\w+)'/g)].map((m) => [Number(m[1]), m[2]]));
+  const SHAPE = [10, 9, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14];
+  const problems226 = [];
+  if (order.join(',') !== SHAPE.join(',')) {
+    problems226.push(`utils/history.js's GROUP_ORDER is [${order.join(', ')}]; the help states [${SHAPE.join(', ')}], so change both`);
+  } else {
+    const n = (code) => types[code];
+    const said = `**${n(10)}**, **${n(9)}**, the whole numbers (**${n(1)}** to **${n(8)}**), **${n(11)}**, **${n(12)}** and **${n(14)}**, then any other type`;
+    if (!read('help/pages/history.md').includes(said)) problems226.push(`help/pages/history.md does not say "${said}"`);
+  }
+  if (problems226.length) {
+    fail('History\'s help orders its chart groups otherwise than utils/history.js does:\n' +
+      problems226.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help orders its chart groups as GROUP_ORDER does, ${order.map((c) => types[c]).join(', ')}, then Other`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 199. A change to the Audit Trail's classes rebuilds the indexes built on them (0228). Each class's
+// partial index keeps the class audit_event_class() gave a row when the index was built, and CREATE
+// OR REPLACE FUNCTION does not rebuild it. So a file after 0228 that redeclares the function also
+// rebuilds every class index (REINDEX, a statement of its own), or each query naming a class reads
+// the old answer. No file before 0228 declares it.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const CLASSES_FILE = '0228_the_audit_trail_sorts_events_into_classes_in_the_database.sql';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const problems199 = [];
+  const created = files.includes(CLASSES_FILE) ? read(`${dir}/${CLASSES_FILE}`) : '';
+  const classes = [...created.matchAll(/CREATE INDEX IF NOT EXISTS idx_audit_trail_class_([a-z]+) ON public\.audit_trail/g)]
+    .map((m) => m[1]);
+  if (!classes.length) problems199.push(`${CLASSES_FILE} creates no class index, so this check is checking nothing`);
+  for (const f of files.filter((name) => name !== CLASSES_FILE)) {
+    const sql = read(`${dir}/${f}`);
+    if (!/CREATE OR REPLACE FUNCTION public\.audit_event_class\(/.test(sql)) continue;
+    if (f < CLASSES_FILE) {
+      problems199.push(`${f} declares audit_event_class(), which 0228 declares first with its indexes`);
+      continue;
+    }
+    for (const c of classes) {
+      if (!sql.includes(`REINDEX INDEX public.idx_audit_trail_class_${c};`)) {
+        problems199.push(`${f} redeclares audit_event_class() without REINDEX INDEX public.idx_audit_trail_class_${c};`);
+      }
+    }
+  }
+  if (problems199.length) {
+    fail('a change to the Audit Trail\'s classes leaves an index built on the old ones:\n' +
+      problems199.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`audit_event_class() comes with its ${classes.length} class indexes in 0228, and no later file changes it without rebuilding them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 203. A Filters panel has one scroller, its own. Its lists are sections at full height, so App.css
+// may cap or scroll a list's parts (a `max-height`, or an `overflow` of auto or scroll) only under
+// `.filter-dropdown-panel`, the one-list toolbar dropdown, which FilterDropdown alone draws. The
+// panel finds its lists among its own children, so every list in a FiltersPopover is a FilterList
+// written straight into it: not a FilterChecklist or a FilterDropdown, and not inside a `<div>`.
+// -------------------------------------------------------------------------------------------------
+{
+  const CSS_FILE = 'frontend/src/App.css';
+  const CHECKLIST = 'frontend/src/components/common/FilterChecklist.jsx';
+  const PARTS = ['filter-sections', 'filter-section', 'filter-section-head', 'filter-section-body', 'filter-list',
+    'filter-checklist', 'filter-checklist-options', 'filter-checklist-section'];
+  const css = read(CSS_FILE).replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
+  /** Every style rule as [selectors, declarations], walking into @media, @supports and the like. */
+  const rules = [];
+  const walkCss = (src) => {
+    let i = 0;
+    while (i < src.length) {
+      const open = src.indexOf('{', i);
+      if (open < 0) return;
+      const head = src.slice(i, open);
+      const selector = head.slice(head.lastIndexOf(';') + 1).trim();
+      let depth = 1;
+      let j = open + 1;
+      for (; j < src.length && depth > 0; j++) {
+        if (src[j] === '{') depth++;
+        else if (src[j] === '}') depth--;
+      }
+      const body = src.slice(open + 1, j - 1);
+      if (!selector.startsWith('@')) rules.push([selector, body]);
+      else if (/^@(media|supports|layer|container)\b/.test(selector)) walkCss(body);
+      i = j;
+    }
+  };
+  walkCss(css);
+  const splitSelectors = (s) => {
+    const out = [];
+    let depth = 0;
+    let from = 0;
+    for (let k = 0; k < s.length; k++) {
+      if (s[k] === '(') depth++;
+      else if (s[k] === ')') depth--;
+      else if (s[k] === ',' && depth === 0) { out.push(s.slice(from, k).trim()); from = k + 1; }
+    }
+    out.push(s.slice(from).trim());
+    return out;
+  };
+  /** Whether `selector` names the class `name` itself, not one it begins (`.filter-list-head`). */
+  const hasClass = (selector, name) => {
+    for (let at = selector.indexOf(`.${name}`); at >= 0; at = selector.indexOf(`.${name}`, at + 1)) {
+      if (!/[\w-]/.test(selector[at + name.length + 1] ?? '')) return true;
+    }
+    return false;
+  };
+  const scrolls = (body) => /(?:^|[;\s])max-height\s*:/.test(body) || /(?:^|[;\s])overflow(?:-y)?\s*:[^;]*\b(?:auto|scroll)\b/.test(body);
+
+  const problems203 = [];
+  let partRules = 0;
+  for (const [selectorList, body] of rules) {
+    for (const selector of splitSelectors(selectorList)) {
+      if (!PARTS.some((p) => hasClass(selector, p))) continue;
+      partRules += 1;
+      if (scrolls(body) && !hasClass(selector, 'filter-dropdown-panel')) {
+        problems203.push(`${CSS_FILE}: "${selector}" caps or scrolls a list's parts outside a toolbar dropdown, a scroller inside the Filters panel's`);
+      }
+    }
+  }
+  if (!rules.some(([s, body]) => splitSelectors(s).includes('.filters-popover-controls') && /overflow-y\s*:\s*auto/.test(body))) {
+    problems203.push(`${CSS_FILE}: .filters-popover-controls no longer scrolls (overflow-y: auto), so a long panel cannot be read to its end`);
+  }
+  if (!rules.some(([s, body]) => splitSelectors(s).includes('.filter-dropdown-panel .filter-checklist-options') && scrolls(body))) {
+    problems203.push(`${CSS_FILE}: a toolbar dropdown's list (.filter-dropdown-panel .filter-checklist-options) no longer scrolls under its search box`);
+  }
+
+  // The dropdown's class is drawn by FilterDropdown and nothing else.
+  const jsx = allFiles.filter((f) => /^frontend\/src\/components\/.+\.jsx$/.test(f));
+  for (const file of jsx) {
+    const src = read(file);
+    let at = src.indexOf('filter-dropdown-panel');
+    while (at >= 0) {
+      const owner = [...src.slice(0, at).matchAll(/export function (\w+)\(/g)].pop()?.[1];
+      if (file !== CHECKLIST || owner !== 'FilterDropdown') {
+        problems203.push(`${file}: ${owner ?? 'its top level'} draws .filter-dropdown-panel, which App.css lets scroll inside a Filters panel`);
+      }
+      at = src.indexOf('filter-dropdown-panel', at + 1);
+    }
+  }
+
+  // Each Filters panel's lists, as the panel finds them.
+  let panels = 0;
+  let lists = 0;
+  for (const file of jsx) {
+    const src = read(file);
+    for (const m of src.matchAll(/<FiltersPopover\b/g)) {
+      const end = src.indexOf('</FiltersPopover>', m.index);
+      // A usage example in a doc comment is not a panel.
+      if (end < 0 || /^\s*(\*|\/\/)/.test(src.slice(src.lastIndexOf('\n', m.index) + 1, m.index))) continue;
+      panels += 1;
+      const block = src.slice(m.index, end);
+      const line = src.slice(0, m.index).split('\n').length;
+      lists += (block.match(/<FilterList\b/g) || []).length;
+      for (const [pattern, what] of [[/<FilterChecklist\b/, 'a bare FilterChecklist'], [/<FilterDropdown\b/, 'a FilterDropdown'], [/<div\b/, 'a <div>']]) {
+        if (pattern.test(block)) {
+          problems203.push(`${file}:${line}'s Filters panel holds ${what}; write each list as a FilterList straight into the panel, which makes it a section`);
+        }
+      }
+    }
+  }
+  if (panels === 0) problems203.push('found no <FiltersPopover> in the components; the shape this check reads has changed');
+  if (partRules === 0) problems203.push(`found no rule on a list's parts in ${CSS_FILE}; the shape this check reads has changed`);
+  if (problems203.length) {
+    fail('a list in a Filters panel scrolls on its own, or the panel cannot make it a section:\n' +
+      problems203.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`a Filters panel is its lists' one scroller: ${partRules} App.css rules on their parts cap none, and ${panels} panels hold ${lists} FilterList sections`);
   }
 }
 

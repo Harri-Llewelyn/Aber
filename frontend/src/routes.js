@@ -14,11 +14,17 @@ export const cellUrl = (id) => pageUrl('cells', { search: id })
 export const areaUrl = (id) => pageUrl('areas', { search: id })
 export const schemaUrl = (uuid) => pageUrl('schemas', { search: uuid })
 
+/** One device's readings over time on the History page, at the window it opens on. */
+export const deviceHistoryUrl = (id) => `/history/device/${encodeURIComponent(id)}`
+
 /** Every device provisioned with one schema. */
 export const devicesForSchemaUrl = (uuid) => pageUrl('devices', { schema: uuid })
 
 /** Every device in one cell, archived ones included: the Devices page hides those by default. */
-export const devicesInCellUrl = (id) => pageUrl('devices', { cell: id, lifecycle: 'all' })
+export const devicesInCellUrl = (id) => pageUrl('devices', { cell: id, lifecycle: ['active', 'archived'] })
+
+/** The replay lanes on one gateway, the Playback gateway: the Devices page hides lanes by default. */
+export const replayLanesUrl = (gatewayId) => pageUrl('devices', { gateway: gatewayId, replay: true })
 
 /** The Site Map, scrolled to one area. */
 export const siteMapAreaUrl = (id) => pageUrl('site-map', { area: id })
@@ -95,8 +101,37 @@ export const appUrl = (id) => pageUrl('access-control', { app: id }, 'apps')
 /** One setting, by its key, on the category that holds it. */
 export const settingUrl = (key) => pageUrl('settings', { setting: key })
 
+/** Settings › Notifications: the webhook, its routes and the delivery log. */
+export const notificationsUrl = () => pageUrl('settings', {}, 'notifications')
+
 /** The Metric Catalog with Unmapped on. */
 export const unmappedMetricsUrl = () => pageUrl('metrics', { unmapped: true })
 
 /** One tab of a page, as the search's cards and the rail's signals open it. */
 export const tabUrl = (page, tab = '') => pageUrl(page, {}, tab)
+
+/** The capture and playback rules (0226), which name their job in the `job` label. */
+const JOB_RULES = new Set(['aber-job-failed', 'aber-job-stuck'])
+const JOB_LABEL = /^(capture|playback) job \S+$/
+
+/**
+ * The page in the dashboard for a Grafana alert whose subject has one, as `{ to, title }`, or null
+ * for any other alert, whose home is its rule in Grafana. The alert counter and the alert toasts
+ * both link by this, so they agree.
+ *
+ * - A machine identity's token: the identity on Access Control, where a new token is issued.
+ * - A capture or playback job: the Capture page on the tab of its kind, read from the `job` label.
+ *   The strip above every tab shows a job in flight, with Stop; the tab lists a failed one.
+ * - The playback worker not reporting: the Playbacks tab, whose strip shows the waiting playback.
+ */
+export const alertPage = (alert) => {
+  if (alert?.entity_type === 'service_identity' && alert.entity_id) {
+    return { to: identityUrl(alert.entity_id), title: 'Show this machine identity on Access Control' }
+  }
+  if (alert?.rule_uid === 'aber-playback-worker-stale') {
+    return { to: tabUrl('capture', 'playbacks'), title: 'Show the waiting playback on the Capture page' }
+  }
+  const kind = JOB_RULES.has(alert?.rule_uid) && JOB_LABEL.exec(alert.labels?.job ?? '')?.[1]
+  if (!kind) return null
+  return { to: tabUrl('capture', `${kind}s`), title: `Show this ${kind} on the Capture page` }
+}

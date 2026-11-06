@@ -74,12 +74,15 @@ describe('the Sessions tab', () => {
     expect(tabLink('Sessions')).toHaveAttribute('aria-current', 'page')
   })
 
-  it('heads its Sessions section, with an About tip and a line on what it cannot show', async () => {
+  it('explains itself in its tooltip, and puts Sign Out of All Other Sessions filled in its toolbar', async () => {
     renderSessions()
-    expect(screen.getByRole('heading', { name: 'Sessions' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'About sessions' })).toBeInTheDocument()
-    expect(document.querySelector('.profile-section-note')).toHaveTextContent(/shows no device\. No address is recorded\./)
     await loaded()
+    // No heading, About tip or line under the bar, as no other tab has.
+    expect(screen.queryAllByRole('heading', { level: 4 })).toEqual([])
+    expect(screen.queryByRole('button', { name: /^About / })).toBeNull()
+    const signOut = screen.getByRole('button', { name: /Sign Out of All Other Sessions/ })
+    expect(signOut.closest('.filter-bar-actions')).toBeTruthy()
+    expect(signOut).toHaveClass('btn-primary')
   })
 
   it('has a header row', async () => {
@@ -185,9 +188,9 @@ describe('End', () => {
     const { showToast } = renderSessions()
     await loaded()
     fireEvent.click(within(await askToEnd('Grafana')).getByRole('button', { name: 'End Session' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith('session s-grafana not found', 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('session s-grafana not found')
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
     await waitFor(() => expect(api.listMySessions).toHaveBeenCalledTimes(2))
-    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
 
@@ -240,6 +243,26 @@ describe('Sign Out of All Other Sessions', () => {
     expect(api.signOutOtherSessions).not.toHaveBeenCalled()
   })
 
+  // The deployment's config.js, as the chart writes it; studioEnabled() reads it per call.
+  it('names Studio\'s sign-ins with Studio on, and leaves them out with it off', async () => {
+    const dialogWith = async (studio) => {
+      globalThis.__ABER_CONFIG__ = { VITE_STUDIO_ENABLED: studio }
+      renderSessions()
+      await loaded()
+      fireEvent.click(button())
+      return screen.findByRole('dialog')
+    }
+    try {
+      expect(await dialogWith('true')).toHaveTextContent('and your Grafana, Node-RED, Studio and forge sign-ins, in this browser too.')
+      cleanup()
+      const off = await dialogWith('false')
+      expect(off).toHaveTextContent('and your Grafana, Node-RED and forge sign-ins, in this browser too.')
+      expect(off).not.toHaveTextContent('Studio')
+    } finally {
+      delete globalThis.__ABER_CONFIG__
+    }
+  })
+
   it('names its button for the act, and starts on the dialog, not on that button', async () => {
     renderSessions()
     await loaded()
@@ -277,7 +300,8 @@ describe('Sign Out of All Other Sessions', () => {
     await loaded()
     fireEvent.click(button())
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Sign Out of All Other Sessions' }))
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(refusal, 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent(refusal)
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
     await waitFor(() => expect(api.listMySessions).toHaveBeenCalledTimes(2))
   })
 

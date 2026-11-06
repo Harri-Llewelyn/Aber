@@ -130,10 +130,12 @@ spec:
             # what Grafana's did until it was parameterised.
             - name: GRAFANA_PUBLIC_URL
               value: {{ include "aber.grafanaUrl" . | quote }}
-            # Studio's client (0081), and the address its redirect_uri is built from. OPTIONAL for
+            {{- if .Values.supabaseStudio.enabled }}
+            # Studio's client (0002), and the address its redirect_uri is built from. OPTIONAL for
             # the same reason the gateway's copy is: `routes.studio` is false by default, and an
-            # install that never publishes the console has no credential for it. Absent, 0081 logs
-            # a WARNING and registers nothing.
+            # install that never publishes the console has no credential for it. Absent, 0002 logs
+            # a WARNING and registers nothing. With Studio off neither is passed, and studio_enabled
+            # below has 0002 remove the client instead.
             - name: STUDIO_OAUTH_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -142,6 +144,7 @@ spec:
                   optional: true
             - name: STUDIO_PUBLIC_URL
               value: {{ include "aber.studioUrl" . | quote }}
+            {{- end }}
             # The forge's client (0094), and the address its redirect_uri is built from -- the
             # same helper Gitea's ROOT_URL and the Ingress host come from. Optional like Studio's,
             # so an operator's existing Secret still runs the migrations; absent, 0094 warns and
@@ -318,6 +321,7 @@ spec:
                     -v ts_sslrootcert="$TS_SSLROOTCERT" \
                     -v grafana_oauth_client_secret="$GRAFANA_OAUTH_CLIENT_SECRET" \
                     -v grafana_public_url="$GRAFANA_PUBLIC_URL" \
+                    -v studio_enabled="{{ if .Values.supabaseStudio.enabled }}true{{ else }}false{{ end }}" \
                     -v studio_oauth_client_secret="$STUDIO_OAUTH_CLIENT_SECRET" \
                     -v studio_public_url="$STUDIO_PUBLIC_URL" \
                     -v gitea_oauth_client_secret="$GITEA_OAUTH_CLIENT_SECRET" \

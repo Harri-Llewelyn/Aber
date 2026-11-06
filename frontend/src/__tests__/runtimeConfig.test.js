@@ -130,6 +130,60 @@ describe('i3xUrl', () => {
   })
 })
 
+describe("Studio's door", () => {
+  const DOOR = 'https://studio.plant.example'
+
+  /** constants.js afresh, with `injected` as the deployment config. */
+  async function loadConstants(injected) {
+    await loadConfig(injected)
+    return import('../constants.js')
+  }
+
+  it('is null with Studio off, whatever address is given, and with none falls back to nothing', async () => {
+    for (const injected of [
+      { VITE_STUDIO_ENABLED: 'false', VITE_STUDIO_URL: '' },
+      { VITE_STUDIO_ENABLED: 'false', VITE_STUDIO_URL: DOOR },
+      { VITE_STUDIO_ENABLED: 'FALSE', VITE_STUDIO_URL: DOOR },
+    ]) {
+      const { studioDoorUrl } = await loadConfig(injected)
+      expect(studioDoorUrl('http://127.0.0.1:54323')).toBeNull()
+      const { STUDIO_URL } = await loadConstants(injected)
+      expect(STUDIO_URL).toBeNull()
+    }
+  })
+
+  it('is the address given with Studio on, and the localhost fallback without one', async () => {
+    const on = await loadConstants({ VITE_STUDIO_ENABLED: 'true', VITE_STUDIO_URL: `${DOOR}/` })
+    expect(on.STUDIO_URL).toBe(DOOR)
+    const blank = await loadConstants({ VITE_STUDIO_ENABLED: 'true', VITE_STUDIO_URL: '' })
+    expect(blank.STUDIO_URL).toBe('http://127.0.0.1:54323')
+  })
+
+  it('reads as on when the setting is absent, as the Vite dev server and an older config.js give it', async () => {
+    const named = await loadConstants({ VITE_STUDIO_URL: DOOR })
+    expect(named.STUDIO_URL).toBe(DOOR)
+    const blank = await loadConstants({ VITE_STUDIO_ENABLED: '', VITE_STUDIO_URL: '' })
+    expect(blank.STUDIO_URL).toBe('http://127.0.0.1:54323')
+    const { studioDoorUrl } = await loadConfig(undefined)
+    expect(studioDoorUrl('http://127.0.0.1:54323')).toBe('http://127.0.0.1:54323')
+  })
+
+  it('agrees with studioEnabled(), which reads off only for false, in any case', async () => {
+    for (const [injected, on] of [
+      [{ VITE_STUDIO_ENABLED: 'false' }, false],
+      [{ VITE_STUDIO_ENABLED: 'FALSE' }, false],
+      [{ VITE_STUDIO_ENABLED: 'true' }, true],
+      [{ VITE_STUDIO_ENABLED: '' }, true],
+      [{}, true],
+      [undefined, true],
+    ]) {
+      const { studioEnabled, studioDoorUrl } = await loadConfig(injected)
+      expect(studioEnabled()).toBe(on)
+      expect(studioDoorUrl(DOOR) !== null).toBe(on)
+    }
+  })
+})
+
 describe('public/config.js placeholder', () => {
   const source = readFileSync(PLACEHOLDER_FILE, 'utf8')
 

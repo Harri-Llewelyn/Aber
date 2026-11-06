@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  entityUrl, proposalUrl, metricUrl, captureSubjectUrl, backupUrl, personUrl, identityUrl, changesByUrl
+  entityUrl, proposalUrl, metricUrl, captureSubjectUrl, backupUrl, personUrl, identityUrl, changesByUrl, replayLanesUrl
 } from '../routes'
 
 /**
@@ -88,6 +88,7 @@ const NO_LINK = [
   { file: 'components/modals/GatewayBundleModal.jsx', piece: 'Bundle downloaded for', why: 'a file, in the downloads' },
   { file: 'components/modals/TelemetryExportModal.jsx', piece: 'Exported ${rows.length}', why: 'a file, in the downloads' },
   { file: 'components/tabs/SchemasTab.jsx', piece: 'Downloaded ${filename}', why: 'a file, in the downloads' },
+  { file: 'components/tabs/CaptureTab.jsx', piece: 'Downloading the capture of', why: 'a file, in the downloads' },
   { file: 'components/tabs/ArchivesTab.jsx', piece: 'permanently deleted', why: 'the record is gone' },
   { file: 'components/tabs/CaptureTab.jsx', piece: 'Capture deleted.', why: 'the capture is gone' },
   { file: 'components/tabs/AccessControlTab.jsx', piece: '” deleted`', why: 'the read-only broker account is gone' },
@@ -138,6 +139,8 @@ describe('where a notification links to', () => {
     expect(metricUrl('m-1', true)).toBe('/metrics/deprecated?metric=m-1')
     expect(captureSubjectUrl('gateway', 'g-1')).toBe('/capture?subject=g-1')
     expect(captureSubjectUrl('device', 'd-1')).toBe('/capture/device?subject=d-1')
+    // The lanes Prepare replay lanes made, on the Devices page, which hides lanes by default.
+    expect(replayLanesUrl('g-1')).toBe('/devices?gateway=g-1&replay=1')
   })
 
   it('finds a backup run, a person and a machine identity', () => {
@@ -161,6 +164,7 @@ describe('where a notification links to', () => {
     ['components/tabs/MetricsTab.jsx', ["useUrlState('metric'"], 'deprecated'],
     ['components/tabs/CaptureTab.jsx', ["useUrlState('subject'"], 'device'],
     ['components/tabs/BackupsTab.jsx', ["useUrlState('run'"], null],
+    ['components/tabs/DevicesTab.jsx', ["useUrlList('gateway'", "useUrlState('replay'"], null],
     ['components/tabs/PeopleSection.jsx', ["useUrlState('removed'", "useUrlState('search'", "useUrlState('person'"], null],
     ['components/tabs/AccessControlTab.jsx', ["useUrlState('withdrawn'"], 'identities'],
   ])('%s reads what its link writes', (file, needles, tab) => {

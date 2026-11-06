@@ -139,8 +139,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
           pending={busy}
           pendingLabel="Issuing…"
           disabled={!confirmed}
-          // `.btn-disabled` is the appearance; the attribute alone leaves a refusing button looking armed.
-          className={`btn btn-primary${confirmed ? '' : ' btn-disabled'}`}
+          className="btn btn-primary"
           onClick={generate}
           title={confirmed
             ? (mode === 'command' ? 'Mint a new token and show a fresh install command' : 'Mint a new token and download a fresh bundle')

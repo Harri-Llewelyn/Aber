@@ -1,14 +1,16 @@
 /**
  * Audit Trail: the capture lane (0193). Recordings, captures and playbacks are kinds the timeline
- * draws and the filters offer a Shopfloor_Manager, each act gets a marker class, a lane is named
- * by the machine it recorded with its own short id beside the name, and the drawer words each act.
+ * draws and the filters offer a Shopfloor_Manager, each act draws the class the server names, a lane is named
+ * by the machine it recorded with its own id in the name's tooltip, and the drawer words each act.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { AuditTrailTab, classifyEvent, diffFields, shortId } from '../components/tabs/AuditTrailTab'
+import { AuditTrailTab, shortId } from '../components/tabs/AuditTrailTab'
 import { AUDIT_TRAIL_ACTIONS } from '../constants'
+import { filterList, offered } from '../test/listFilters'
 import { api } from '../api'
+import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -21,26 +23,26 @@ const OLDER = '91c3d0e2-4b5a-4c6d-8e00-0000000000c3'
 const PLAYBACK = 'a4b5c6d7-e8f9-4a0b-9c00-0000000000d4'
 const PRESS = { name: 'Press_02', sparkplug_id: 'dev270000000000400080000', subject_kind: 'device' }
 
-const event = (id, entity_type, entity_id, event_type, new_data, timestamp) => ({
+const event = (id, entity_type, entity_id, event_type, new_data, timestamp, cls) => ({
   event_id: id, entity_type, entity_id, event_type, timestamp, causation_id: 100 + id,
   description: `Action ${event_type} on ${entity_type} [${entity_id}]`,
   changed_by: 'user-uuid-1', actor_source: 'user', audit_domain: 'asset',
-  old_data: null, new_data
+  old_data: null, new_data, class: cls
 })
 
 const EVENTS = [
   event(1, 'capture_jobs', JOB, 'CAPTURE_STARTED',
         { ...PRESS, note: 'before the retrofit', max_seconds: 60, replaces_capture_id: null },
-        '2026-10-19T09:00:00Z'),
+        '2026-10-19T09:00:00Z', 'created'),
   event(2, 'captures', CAPTURE, 'CAPTURE_DOWNLOAD_ISSUED',
         { ...PRESS, storage_path: `${PRESS.sparkplug_id}/${JOB}.json`, size_bytes: 9000, message_count: 40 },
-        '2026-10-19T10:00:00Z'),
+        '2026-10-19T10:00:00Z', 'read'),
   event(3, 'captures', OLDER, 'CAPTURE_DELETED',
         { ...PRESS, reason: 'replaced by a recording', capture_job_id: JOB },
-        '2026-10-19T09:05:00Z'),
+        '2026-10-19T09:05:00Z', 'lifecycle'),
   event(4, 'playback_jobs', PLAYBACK, 'PLAYBACK_STARTED',
         { ...PRESS, capture_id: CAPTURE, target_sparkplug_id: 'gwy160000000000400080000', speed: 1 },
-        '2026-10-19T11:00:00Z'),
+        '2026-10-19T11:00:00Z', 'created'),
 ]
 
 beforeEach(() => {
@@ -57,16 +59,17 @@ const show = async (userRole = 'Shopfloor_Manager') => {
 }
 
 describe('the capture lane', () => {
-  it('gives each act a marker class', () => {
-    const classOf = (action) => {
-      const e = { event_type: action, entity_type: 'captures', new_data: PRESS, old_data: null }
-      return classifyEvent(e, diffFields(null, PRESS))
-    }
-    expect(['CAPTURE_STARTED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED', 'PLAYBACK_STARTED'].map(classOf))
-      .toEqual(['creation', 'creation', 'creation', 'creation'])
-    expect(['CAPTURE_STOPPED', 'CAPTURE_DOWNLOAD_ISSUED', 'PLAYBACK_STOPPED'].map(classOf))
-      .toEqual(['operational', 'operational', 'operational'])
-    expect(classOf('CAPTURE_DELETED')).toBe('critical')
+  it('draws each act in the class the server names, a download link as a read', async () => {
+    /* audit_event_class() decides the class (test-harness/fixtures/audit-event-classes.json holds
+       the rules); the page draws what each event carries. */
+    await show()
+    const classOf = (action) => [...document.querySelectorAll('.trail-node')]
+      .find(n => n.getAttribute('aria-label').startsWith(action))
+      .querySelector('.trail-node-mark').getAttribute('class')
+    expect(classOf('CAPTURE_STARTED')).toContain('trail-node-created')
+    expect(classOf('CAPTURE_DOWNLOAD_ISSUED')).toContain('trail-node-read')
+    expect(classOf('CAPTURE_DELETED')).toContain('trail-node-lifecycle')
+    expect(classOf('PLAYBACK_STARTED')).toContain('trail-node-created')
   })
 
   it('offers every act in the action filter with a label', () => {
@@ -79,24 +82,31 @@ describe('the capture lane', () => {
   it('draws a section for recordings, captures and playbacks', async () => {
     await show()
     for (const label of ['Recordings', 'Captures', 'Playbacks']) {
-      expect(screen.getByRole('separator', { name: `${label} lanes` })).toBeInTheDocument()
+      expect(screen.getByRole('group', { name: `${label} lanes` })).toBeInTheDocument()
     }
   })
 
-  it('names each lane by its machine, with its own short id beside the name', async () => {
+  it('names each lane by its machine and when it began, with its own id in the label\'s tooltip', async () => {
     await show()
-    // Two captures of one press are two lanes; the id is what tells them apart.
+    // Two captures of one press are two lanes. When each began tells them apart at a glance; the
+    // id is one point away, rather than taking half the label from the name.
+    const names = screen.getAllByRole('button', { name: /^Open the latest change to Press_02 / })
+    expect(names).toHaveLength(4)
+    for (const name of names) {
+      expect(name.querySelector('.trail-lane-name')).toHaveTextContent(/^Press_02$/)
+      expect(name.querySelector('.trail-lane-qualifier')?.textContent).toMatch(/\d{2}:\d{2}/)
+    }
+    const tips = names.map(tooltipOf)
     for (const id of [JOB, CAPTURE, OLDER, PLAYBACK]) {
-      expect(screen.getByText(shortId(id))).toBeInTheDocument()
+      expect(screen.queryByText(shortId(id))).toBeNull()
+      expect(tips.filter(t => t.includes(id))).toHaveLength(1)
     }
   })
 
   it('offers the three kinds to a Shopfloor_Manager, who reads the asset lane', async () => {
     await show('Shopfloor_Manager')
-    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    const kinds = [...screen.getByRole('combobox', { name: 'Entity' }).querySelectorAll('option')]
-      .map(o => o.textContent)
-    expect(kinds).toEqual(expect.arrayContaining(['Recordings', 'Captures', 'Playbacks']))
+    const capture = within(filterList('Entity')).getByRole('group', { name: 'Capture' })
+    expect(offered(capture)).toEqual(['Recordings', 'Captures', 'Playbacks'])
   })
 
   it('words a download in the drawer as the act it records', async () => {

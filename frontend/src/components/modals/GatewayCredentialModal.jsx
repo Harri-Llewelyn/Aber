@@ -108,7 +108,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
           pending={busy}
           pendingLabel="Issuing…"
           disabled={!confirmed}
-          className={`btn btn-primary${confirmed ? '' : ' btn-disabled'}`}
+          className="btn btn-primary"
           onClick={mint}
           title={confirmed
             ? 'Mint a broker credential and show it once'

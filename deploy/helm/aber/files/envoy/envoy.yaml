@@ -3,7 +3,8 @@
 # asserts that the substituter knows every one and that they are still placeholders. Four listeners:
 # the API on 8000, which admits the opaque sb_publishable_* / sb_secret_* keys and hands each upstream
 # the JWT it requires; Studio's login on 8001; the forge's login on 8002; the forge's API for the edge
-# runtime on 8003, which no browser reaches. Route order is first-match.
+# runtime on 8003, which no browser reaches. Route order is first-match. Studio's listener and cluster sit
+# between `# studio:begin` and `# studio:end` lines, which the chart removes when Studio is off.
 # i3X, Node-RED and Grafana have no cluster here; they are published on their own ports.
 # Required by SDS (the listeners' client secrets and cookie keys); labels only.
 node:
@@ -14,6 +15,14 @@ node:
 admin:
   address:
     socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+# RE2 refuses a regex over 100 program instructions by default. The API listener's two multipart
+# refusals compile to about 460 and 410 (Envoy 1.39), since each counts 71 or 191 characters.
+layered_runtime:
+  layers:
+    - name: static
+      static_layer:
+        re2.max_program_size.error_level: 1000
 
 static_resources:
   listeners:
@@ -41,7 +50,8 @@ static_resources:
                     "@type": type.googleapis.com/envoy.extensions.request_id.uuid.v3.UuidRequestIdConfig
                     pack_trace_reason: false
                 # One line per request. The path without its query (which can carry the apikey), and no header that
-                # carries a credential; key= is the kind of key a gated route admitted.
+                # carries a credential; key= is the kind of key a gated route admitted, app= the client_id of a
+                # verified token GoTrue issued to an app.
                 access_log:
                   - name: envoy.access_loggers.stdout
                     typed_config:
@@ -52,7 +62,7 @@ static_resources:
                             typed_config:
                               "@type": type.googleapis.com/envoy.extensions.formatter.req_without_query.v3.ReqWithoutQuery
                         text_format_source:
-                          inline_string: "aber-api method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(X-ENVOY-ORIGINAL-PATH?:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% upstream=%UPSTREAM_CLUSTER% duration_ms=%DURATION% request_id=%REQ(X-REQUEST-ID)% client=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% key=%DYNAMIC_METADATA(aber:key)%\n"
+                          inline_string: "aber-api method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(X-ENVOY-ORIGINAL-PATH?:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% upstream=%UPSTREAM_CLUSTER% duration_ms=%DURATION% request_id=%REQ(X-REQUEST-ID)% client=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% key=%DYNAMIC_METADATA(aber:key)% app=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:client_id)%\n"
                 # The sign-in limit's 429 in GoTrue's shape, so a client reads it as the limit it already knows. Only
                 # the limit answers 429 from the gateway itself.
                 local_reply_config:
@@ -65,6 +75,42 @@ static_resources:
                       body_format_override:
                         text_format_source:
                           inline_string: '{"code":429,"error_code":"over_request_rate_limit","msg":"Request rate limit reached"}'
+                        content_type: application/json
+                    # An app's token off its own routes, in the key check's shape: the gateway's own 403 to a
+                    # verified token carrying a client_id, which only the rbac filter below answers. Matched on the
+                    # token, because the rbac filter's verdict is not yet in the metadata when its reply is mapped
+                    # (measured).
+                    - filter:
+                        and_filter:
+                          filters:
+                            - status_code_filter:
+                                comparison:
+                                  op: EQ
+                                  value: { default_value: 403, runtime_key: gateway.app_route_refusal_status }
+                            - metadata_filter:
+                                matcher:
+                                  filter: envoy.filters.http.jwt_authn
+                                  path: [{ key: jwt_payload }, { key: client_id }]
+                                  value: { string_match: { safe_regex: { regex: "(?s).+" } } }
+                                match_if_key_not_found: false
+                      body_format_override:
+                        text_format_source:
+                          inline_string: '{"message":"This token was issued to an app, and reaches only that app''s own routes"}'
+                        content_type: application/json
+                    # The consent step's own failure, when consent-gate gave no answer or a 5xx, in GoTrue's shape
+                    # so the consent page shows it. UAEX is the flag only the ext_authz filter sets; its refusals
+                    # are consent-gate's 403s, which keep their body.
+                    - filter:
+                        and_filter:
+                          filters:
+                            - status_code_filter:
+                                comparison:
+                                  op: EQ
+                                  value: { default_value: 503, runtime_key: gateway.consent_check_status }
+                            - response_flag_filter: { flags: [UAEX] }
+                      body_format_override:
+                        text_format_source:
+                          inline_string: '{"code":503,"error_code":"consent_check_unavailable","msg":"The sign-in could not be checked. Try again in a moment."}'
                         content_type: application/json
                 # Realtime is a WebSocket upstream.
                 upgrade_configs:
@@ -92,7 +138,7 @@ static_resources:
                           allow_headers: "*"
                           allow_credentials: true
                       routes:
-                        # Exemption 1 of 4: sign-in must work before a session exists. Not gated, but a bearer that is one
+                        # Exemption 1 of 5: sign-in must work before a session exists. Not gated, but a bearer that is one
                         # of the two keys is translated to its JWT (Studio presents the secret key as the bearer). Both
                         # routes hand GoTrue the client's address alone as X-Forwarded-For, which its own limits key on.
                         #
@@ -152,6 +198,39 @@ static_resources:
                                     fill_interval: 60s
                               max_dynamic_descriptors: 1000
 
+                        # The consent step: the consent page's GET of an app's sign-in request and its POST of the
+                        # approval, which GoTrue serves under this prefix and no other. The one route consent-gate
+                        # is asked on (the ext_authz filter below is off everywhere else); a plain prefix, so it
+                        # holds on any path the router sees. The rest is auth-v1-routes'.
+                        - name: auth-v1-consent-routes
+                          match: { prefix: "/auth/v1/oauth/authorizations/" }
+                          route:
+                            cluster: auth-v1
+                            prefix_rewrite: "/oauth/authorizations/"
+                          request_headers_to_add:
+                            - header: { key: x-forwarded-for, value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%" }
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          response_headers_to_add:
+                            - header: { key: cache-control, value: no-store }
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              name: translate_bearer
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              check_settings: {}
+
+                        # Any other spelling of that prefix: a doubled slash, another case, an encoded slash. GoTrue
+                        # routes none of them to its consent handler (its router matches the path as sent), and the
+                        # gateway answers them itself, so none reaches GoTrue past the step above.
+                        - name: auth-v1-consent-spellings
+                          match:
+                            safe_regex: { regex: "(?i)/auth/v1/+oauth(?:/|%2f)+authorizations(?:/|%2f).*" }
+                          direct_response:
+                            status: 404
+                            body: { inline_string: "The consent endpoints are /auth/v1/oauth/authorizations/{id} and /auth/v1/oauth/authorizations/{id}/consent.\n" }
+
                         - name: auth-v1-routes
                           match: { prefix: "/auth/v1/" }
                           route:
@@ -168,7 +247,32 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               name: translate_bearer
 
-                        # Exemption 2 of 4: an AAS File URL must resolve with no session. Before /storage/v1/; the
+                        # Multipart that storage-api's parser (busboy) must not see, refused above every route to it. A
+                        # boundary is 1 to 70 characters (RFC 2046 5.1.1), so no conforming client meets either rule. The
+                        # first refuses a longer one as clients write it. The second refuses a Content-Type over 200
+                        # characters or outside printable ASCII, which bounds every other spelling busboy reads (spaces,
+                        # quotes, boundary*=charset'') below the 252-byte boundary that stalls it. The key check runs first.
+                        - name: storage-v1-long-boundary
+                          match:
+                            prefix: "/storage/v1/"
+                            headers:
+                              - name: "content-type"
+                                string_match: { safe_regex: { regex: '[ \t]*(?i:multipart)/.*(?i:boundary)[^=;]*=[ \t]*(?:"[\t\x20\x21\x23-\x7e]{71}|[\x21\x23-\x3a\x3c-\x7e]{71}).*' } }
+                          direct_response:
+                            status: 400
+                            body: { inline_string: "The multipart boundary is longer than 70 characters (RFC 2046, section 5.1.1).\n" }
+
+                        - name: storage-v1-unreadable-multipart
+                          match:
+                            prefix: "/storage/v1/"
+                            headers:
+                              - name: "content-type"
+                                string_match: { safe_regex: { regex: '[ \t]*(?i:multipart)/(?:[\t\x20-\x7e]{191}|.*[^\t\x20-\x7e]).*' } }
+                          direct_response:
+                            status: 400
+                            body: { inline_string: "A multipart Content-Type must be printable ASCII and at most 200 characters.\n" }
+
+                        # Exemption 2 of 5: an AAS File URL must resolve with no session. Before /storage/v1/; the
                         # upstream path keeps /object/public/.
                         - name: storage-v1-public-routes
                           match: { prefix: "/storage/v1/object/public/" }
@@ -207,7 +311,7 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               name: keyauth_preserve
 
-                        # Exemption 3 of 4: an OAuth client sends client credentials, never a Supabase apikey. Exact
+                        # Exemption 3 of 5: an OAuth client sends client credentials, never a Supabase apikey. Exact
                         # paths, before /functions/v1/, so a function added later is gated by default.
                         - name: functions-v1-grafana-userinfo-route
                           match: { path: "/functions/v1/grafana-userinfo" }
@@ -229,16 +333,30 @@ static_resources:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
                               disabled: true
 
+                        # Exemption 5 of 5: aas-api, whose standard clients send a bearer token and never a Supabase apikey.
+                        # Before /functions/v1/, and the rewrite keeps the function's name. /description is open by
+                        # specification; the function refuses every other route without an Authorization header. The cost:
+                        # anyone who reaches the gateway can start an aas-api worker without a key. The publishable key is no
+                        # secret (every browser gets it in /config.js), so the gate kept out only clients unaware of Aber.
+                        - name: functions-v1-aas-api-routes
+                          match: { prefix: "/functions/v1/aas-api/" }
+                          route:
+                            cluster: functions-v1
+                            prefix_rewrite: "/aas-api/"
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              disabled: true
+
                         # The edge runtime boots with VERIFY_JWT=false (each function checks its own role), so this gate is
-                        # what stops an unauthenticated request starting any worker. /aas-api/description is gated too;
-                        # exempting it is a decision of its own, with a matching EXPECTED row in check-gateway-surface.mjs.
+                        # what stops an unauthenticated request starting any other worker.
                         - name: functions-v1-routes
                           match: { prefix: "/functions/v1/" }
                           route:
                             cluster: functions-v1
                             prefix_rewrite: "/"
 
-                        # Exemption 4 of 4: the Factory+ Directory adapter, whose clients hold no apikey. /ping is open by
+                        # Exemption 4 of 5: the Factory+ Directory adapter, whose clients hold no apikey. /ping is open by
                         # specification; /v1/ is authenticated by the function, which queries as the caller.
                         - name: fplus-directory-ping
                           match: { prefix: "/ping" }
@@ -486,10 +604,102 @@ static_resources:
                               end
                             end
 
+                  # AN APP'S TOKEN REACHES ONLY ITS OWN ROUTES. A token GoTrue's OAuth server issued carries the
+                  # app's client_id. This verifies the bearer and records its claims, and refuses nothing: no
+                  # token, a key, an expired or unverifiable token all go on as before, to be answered upstream.
+                  # After the key check, so its refusals keep their 401. No audience or issuer, so the client_id
+                  # alone decides. Every spelling an upstream reads a bearer in: any scheme, a tab, or none.
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      providers:
+                        gotrue:
+                          forward: true
+                          from_headers:
+                            - { name: authorization, value_prefix: " " }
+                            - { name: authorization, value_prefix: "\t" }
+                            - { name: authorization }
+                          local_jwks:
+                            inline_string: '__SUPABASE_JWT_JWKS__'
+                          payload_in_metadata: jwt_payload
+                      rules:
+                        - match: { prefix: "/" }
+                          requires: { allow_missing_or_failed: {} }
+                  # The decision, on the verified client_id: a token without one passes everywhere; one with it
+                  # passes on /auth/v1/ and on the functions its own app calls, and is 403 everywhere else. The
+                  # Studio and forge doors call theirs from their own listeners, so they have none here. Plain
+                  # paths, matched as the routes match them. Mirror check 48 holds the ids to stack_app_ids().
+                  - name: envoy.filters.http.rbac
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                      rules:
+                        action: ALLOW
+                        policies:
+                          a-token-issued-to-no-app:
+                            permissions: [{ any: true }]
+                            principals:
+                              - not_id:
+                                  sourced_metadata:
+                                    metadata_source: DYNAMIC
+                                    metadata_matcher:
+                                      filter: envoy.filters.http.jwt_authn
+                                      path: [{ key: jwt_payload }, { key: client_id }]
+                                      value: { string_match: { safe_regex: { regex: "(?s).+" } } }
+                          every-app-signs-in:
+                            permissions: [{ url_path: { path: { prefix: "/auth/v1/" } } }]
+                            principals: [{ any: true }]
+                          grafana-userinfo:
+                            permissions: [{ url_path: { path: { exact: "/functions/v1/grafana-userinfo" } } }]
+                            principals:
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path: [{ key: jwt_payload }, { key: client_id }]
+                                    value: { string_match: { exact: c0ffee00-0000-4000-8000-000000000001 } }
+                          nodered-userinfo:
+                            permissions: [{ url_path: { path: { exact: "/functions/v1/nodered-userinfo" } } }]
+                            principals:
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path: [{ key: jwt_payload }, { key: client_id }]
+                                    value: { string_match: { exact: c0ffee00-0000-4000-8000-000000000002 } }
+
+                  # THE CONSENT STEP. While Settings requires MFA, a manager or an Administrator approves an
+                  # app's sign-in only from a session that gave its code: consent-gate reads their role, the
+                  # token's aal, the switch and the sign-in's app on every call, and lets Grafana's through.
+                  # Off here, and on for auth-v1-consent-routes alone. It fails closed: a 5xx or no answer
+                  # refuses the consent, Grafana's too, as no claim here can stand in for the check (the doors
+                  # fail open because rbac has checked one). The dashboard and open app sessions go on.
+                  - name: envoy.filters.http.ext_authz
+                    disabled: true
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      transport_api_version: V3
+                      failure_mode_allow: false
+                      status_on_error: { code: ServiceUnavailable }
+                      allowed_headers:
+                        patterns:
+                          - exact: authorization
+                      http_service:
+                        server_uri:
+                          uri: http://supabase-functions:9000
+                          cluster: functions-v1
+                          timeout: 3s
+                        # The edge runtime routes on the first path segment.
+                        path_prefix: /consent-gate
+                        authorization_response:
+                          allowed_client_headers:
+                            patterns:
+                              - exact: content-type
+
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
+    # studio:begin -- the chart drops this listener when supabaseStudio.enabled is false.
     # STUDIO'S LOGIN (supabase/README.md, "The second listener"). Studio has no authentication of its
     # own and runs as the database owner, so: an OAuth 2.1 code flow against this stack's GoTrue, a
     # session cookie, and an Administrator check. Its own listener because machine principals on 8000
@@ -658,6 +868,7 @@ static_resources:
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+    # studio:end
 
     # THE FORGE'S LOGIN (supabase/README.md, "The forge's door"). Gitea cannot be an OIDC client of
     # GoTrue, so the oauth2, jwt_authn and rbac filters Studio's listener also runs do the code flow,
@@ -1046,6 +1257,7 @@ static_resources:
                   address:
                     socket_address: { address: supabase-functions, port_value: 9000 }
 
+    # studio:begin -- the chart drops this cluster when supabaseStudio.enabled is false.
     # For the studio listener only. Target-specific address, as realtime-v1's is.
     - name: studio
       type: STRICT_DNS
@@ -1057,6 +1269,7 @@ static_resources:
               - endpoint:
                   address:
                     socket_address: { address: __STUDIO_UPSTREAM_ADDRESS__, port_value: 3000 }
+    # studio:end
 
     # For the forge and forge-api listeners; HTTP only (git over SSH never passes through this gateway).
     - name: gitea

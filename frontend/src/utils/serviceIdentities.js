@@ -1,4 +1,5 @@
 import { formatDate } from './format'
+import { REVOCATION_REACHES, SIGNATURE_ONLY } from './revocationScope'
 
 /**
  * The non-human identities that can reach this stack, on both planes.
@@ -280,9 +281,9 @@ export function permissionReach(permissions) {
  * matters is how many are unexpired. A revoked token is not outstanding, and counting it would
  * overstate it, so `revokedJtis` is a third argument rather than a filter the caller applies
  * first: the rows are returned, marked, so the page can say "there were five and four are
- * revoked". Revocation reaches PostgREST only: storage, realtime, the edge runtime and Studio
- * verify the JWT secret for themselves. The label says "active"; the detail line draws that
- * distinction.
+ * revoked". Revocation reaches PostgREST and what checks a caller through it; storage and realtime
+ * verify the signature for themselves (`revocationScope.js`). The label says "active"; the detail
+ * line draws that distinction.
  */
 export const TOKEN_STATES = { ACTIVE: 'active', EXPIRED: 'expired', NONE: 'none' }
 
@@ -362,15 +363,15 @@ export function tokenStatusDetail(status, now = Date.now()) {
   }
   if (status.state === TOKEN_STATES.EXPIRED) {
     // Revoked and lapsed read the same on the badge and must not read the same here: a revoked
-    // token is still accepted by storage, realtime, the edge runtime and Studio until its own
-    // expiry, which is the fact an operator would act on.
+    // token is still accepted by storage and realtime until its own expiry, which is the fact an
+    // operator would act on.
     if (status.revoked > 0) {
       const when = formatDate(status.lastExpiry)
       return status.revoked === 1
-        ? `Revoked. It is refused by the API, and still accepted by storage, realtime, the edge `
-          + `functions and Studio until it expires on ${when}.`
-        : `All ${status.revoked} are revoked. They are refused by the API, and still accepted by `
-          + `storage, realtime, the edge functions and Studio until the last expires on ${when}.`
+        ? `Revoked. It is refused by ${REVOCATION_REACHES}, and still accepted by ${SIGNATURE_ONLY} `
+          + `until it expires on ${when}.`
+        : `All ${status.revoked} are revoked. They are refused by ${REVOCATION_REACHES}, and still `
+          + `accepted by ${SIGNATURE_ONLY} until the last expires on ${when}.`
     }
     return `The last token expired on ${formatDate(status.lastExpiry)}.`
   }
@@ -382,11 +383,11 @@ export function tokenStatusDetail(status, now = Date.now()) {
     ? ` ${status.revoked} further token${status.revoked === 1 ? ' has' : 's have'} been revoked.`
     : ''
   return (status.outstanding === 1
-    // "Revocable", not "revoked": revocation goes through `auth_pre_request()`, which only PostgREST
-    // runs, so a revoked token still reaches storage, realtime, the edge runtime and Studio.
-    ? `Expires ${when} — in ${days} day${days === 1 ? '' : 's'}. Revocable against the API before `
-      + 'then; storage, realtime, the edge functions and Studio check the signature only.'
+    // "Revocable", not "revoked": revocation goes through `auth_pre_request()`, so a revoked token
+    // still reaches storage and realtime, which check the signature alone.
+    ? `Expires ${when} — in ${days} day${days === 1 ? '' : 's'}. Revocable before then, though `
+      + `${SIGNATURE_ONLY} check the signature only.`
     : `Earliest expires ${when} — in ${days} day${days === 1 ? '' : 's'}. Minting again adds a `
-      + 'credential rather than replacing one; each is revoked separately, and only against the API.'
+      + 'credential rather than replacing one; each is revoked separately.'
   ) + alsoRevoked;
 }

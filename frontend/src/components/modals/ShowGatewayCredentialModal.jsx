@@ -7,6 +7,7 @@ import { IconCheck, IconCopy, IconEye, IconShieldAlert } from '../common/Icons'
 import { NodeRedCredentialSteps } from './GatewayCredentialModal'
 import { EdgeNodeSettings } from './EdgeNodeSettings'
 import { Tooltip } from '../common/Tooltip'
+import { gatewayUrl } from '../../routes'
 
 const COPY_FEEDBACK_MS = 1600
 /** Said in the dialog and in a toast when the browser refuses a copy. */
@@ -32,12 +33,13 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
     setError(null)
     try {
       setCredential(await api.showGatewayCredential(gateway.gateway_id))
+      showToast?.(`Broker credential shown for '${gateway.gateway_name}'`, 'success', { to: gatewayUrl(gateway.gateway_id) })
     } catch (err) {
       setError(err.message)
     } finally {
       setBusy(false)
     }
-  }, [gateway])
+  }, [gateway, showToast])
 
   const copy = useCallback(async (label, value) => {
     const ok = await copyText(value)

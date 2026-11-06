@@ -6,36 +6,29 @@ import {
   EXPORT_RESOLUTIONS, bestResolutionFor, commentRow, coversRange, provenanceRow,
   resolutionByKey, toExportRow
 } from '../../utils/telemetryExport'
+import { clockWords } from '../../utils/timeWindow'
 import { IconDownload, IconAlertTriangle } from '../common/Icons'
+import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { Tooltip } from '../common/Tooltip'
 
 /**
- * CSV export for a selection of one device's metrics over a chosen time range. It pages each metric
- * in TELEMETRY_PAGE_SIZE batches, one request at a time, and stops at TELEMETRY_EXPORT_MAX_ROWS
- * rows for the whole export, not per metric. Once the cap is reached the rest of that metric and
- * every later metric are left out, and the dialog and a comment line at the top of the file say so.
+ * CSV export of one device's metrics over a window its caller resolved: History's Export CSV, with
+ * the page's device, the metrics it charts and its window as absolute `from` and `to` (ISO), and
+ * `windowWords` naming that window. The dialog has no range of its own, and says what it will
+ * export in its first line. It pages each metric in TELEMETRY_PAGE_SIZE batches, one request at a
+ * time, and stops at TELEMETRY_EXPORT_MAX_ROWS rows for the whole export, not per metric. Once the
+ * cap is reached the rest of that metric and every later metric are left out, and the dialog and a
+ * comment line at the top of the file say so.
  *
  * Raw is the default resolution and a bucket average is never substituted silently. Each
- * resolution is labelled with how far back it reaches, and a range starting before the chosen
+ * resolution is labelled with how far back it reaches, and a window starting before the chosen
  * resolution's horizon raises a warning that names the finest resolution which covers it and
  * offers to switch.
+ *
+ *   <TelemetryExportModal device={device} metricNames={names} from={start.toISOString()}
+ *     to={end.toISOString()} windowWords="Last 24 hours" onClose={close} showToast={showToast} />
  */
-
-const PRESETS = [
-  { key: '1m',  label: '1 minute',  minutes: 1 },
-  { key: '1h',  label: '1 hour',    minutes: 60 },
-  { key: '1d',  label: '1 day',     minutes: 60 * 24 },
-  { key: '7d',  label: '7 days',    minutes: 60 * 24 * 7 },
-  { key: '30d', label: '30 days',   minutes: 60 * 24 * 30 }
-]
-
-/** `datetime-local` wants `YYYY-MM-DDTHH:mm` in LOCAL time, with no zone suffix. */
-function toLocalInputValue(date) {
-  const pad = n => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-         `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
 
 /** Sentence-case for a resolution's `short`, which is written lower-case for use mid-sentence. */
 const capitalise = s => s.charAt(0).toUpperCase() + s.slice(1)
@@ -47,11 +40,19 @@ function horizonLabel(oldest) {
   return `back to ${oldest.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
 }
 
-export function TelemetryExportModal({ device, metricNames, onClose, showToast }) {
-  const [mode, setMode]       = useState('preset')   // 'preset' | 'custom'
-  const [preset, setPreset]   = useState('1h')
-  const [customFrom, setCustomFrom] = useState(() => toLocalInputValue(new Date(Date.now() - 3600_000)))
-  const [customTo, setCustomTo]     = useState(() => toLocalInputValue(new Date()))
+/** A bound in words, to the minute: "4 Nov 12:41". */
+const boundWords = (iso) => {
+  const d = new Date(iso)
+  return `${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${clockWords(d)}`
+}
+
+/** What the dialog exports, in words: "Lathe 3 · 3 metrics · Last 24 hours (4 Nov 12:41 – 5 Nov 12:41)". */
+export function exportWords({ deviceName, metricNames, windowWords, from, to }) {
+  const metrics = `${metricNames.length} metric${metricNames.length === 1 ? '' : 's'}`
+  return `${deviceName} · ${metrics} · ${windowWords} (${boundWords(from)} – ${boundWords(to)})`
+}
+
+export function TelemetryExportModal({ device, metricNames, from, to, windowWords, onClose, showToast }) {
   const [resolution, setResolution] = useState('raw')
   const [horizons, setHorizons] = useState(null)   // null until the lookup settles
   const [busy, setBusy]       = useState(false)
@@ -72,24 +73,10 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
     return () => { live = false }
   }, [])
 
-  /** Resolve the chosen range to absolute ISO bounds. */
+  /** The caller's window, refused when it is not a span of time. */
   const resolveRange = () => {
-    if (mode === 'custom') {
-      // datetime-local yields local wall-clock; `new Date(...)` reads it as local and toISOString
-      // converts to UTC, which is what the historian stores.
-      const from = new Date(customFrom)
-      const to   = new Date(customTo)
-      if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
-        return { error: 'Enter both a start and an end time.' }
-      }
-      if (from >= to) return { error: 'The start time must be before the end time.' }
-      return { from: from.toISOString(), to: to.toISOString() }
-    }
-    const chosen = PRESETS.find(p => p.key === preset) || PRESETS[1]
-    return {
-      from: new Date(Date.now() - chosen.minutes * 60_000).toISOString(),
-      to: new Date().toISOString()
-    }
+    if (!(Date.parse(from) < Date.parse(to))) return { error: 'The window must start before it ends.' }
+    return { from, to }
   }
 
   // The warning, recomputed as the range or the resolution changes. `covers === false` is the only
@@ -103,7 +90,7 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
     if (covers !== false) return null
     return { entry, better: bestResolutionFor(horizons, range.from), from: range.from }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, preset, customFrom, customTo, resolution, horizons])
+  }, [from, to, resolution, horizons])
 
   const runExport = async () => {
     const range = resolveRange()
@@ -152,23 +139,23 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
       }
 
       if (rows.length === 0) {
-        // Not "the device published nothing" unless that is what happened: a range before this
+        // Not "the device published nothing" unless that is what happened: a window before this
         // resolution's horizon was dropped by the retention policy and another resolution may
         // still hold it.
         const better = horizons ? bestResolutionFor(horizons, range.from) : null
         if (!coverage) {
-          // The range IS covered by this resolution and still came back empty, so the plain
+          // The window IS covered by this resolution and still came back empty, so the plain
           // reading is the true one: this device published nothing then.
-          setError('No telemetry in that range for the selected metrics.')
+          setError('No telemetry in that window for these metrics.')
         } else if (better) {
           const what = entry.key === 'raw'
-            ? 'Raw telemetry for that range has been dropped by the retention policy'
-            : `${capitalise(entry.short)} for that range are no longer held`
+            ? 'Raw telemetry for that window has been dropped by the retention policy'
+            : `${capitalise(entry.short)} for that window are no longer held`
           setError(`${what}. ${capitalise(better.short)} still cover it — switch resolution above and export again.`)
         } else {
           setError(
-            'That range starts before any resolution still holds data, so there is nothing left ' +
-            'to export for it. Choose a more recent range.'
+            'That window starts before any resolution still holds data, so there is nothing left ' +
+            'to export for it. Choose a more recent window.'
           )
         }
         setBusy(false)
@@ -184,7 +171,7 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
         flat.unshift(commentRow(
           entry.key,
           `# TRUNCATED at ${TELEMETRY_EXPORT_MAX_ROWS} rows`,
-          '# the cap is shared across metrics, so later metrics are missing; narrow the range or select fewer metrics'
+          '# the cap is shared across metrics, so later metrics are missing; narrow the window or choose fewer metrics'
         ))
       }
 
@@ -212,7 +199,7 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
 
   return (
     <Modal
-      title={<>Export telemetry — <span className="mono">{deviceName}</span></>}
+      title={<>Export readings — <span className="mono">{deviceName}</span></>}
       icon={<IconDownload size={18} />}
       size="md"
       onClose={onClose}
@@ -220,69 +207,21 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
       footer={
         <>
           <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn btn-primary" onClick={runExport} disabled={busy} style={{ gap: '6px' }}>
-            <IconDownload size={13} /> {busy ? 'Exporting…' : 'Export CSV'}
-          </button>
+          <ActionButton className="btn btn-primary" pending={busy} pendingLabel="Exporting…" onClick={runExport} style={{ gap: '6px' }}>
+            <IconDownload size={13} /> Export CSV
+          </ActionButton>
         </>
       }
     >
+      <p className="telemetry-export-what">{exportWords({ deviceName, metricNames, windowWords, from, to })}</p>
+
       <div className="form-group">
-        <label className="form-label">Selected metrics ({metricNames.length})</label>
+        <label className="form-label">Metrics ({metricNames.length})</label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '96px', overflowY: 'auto', padding: '8px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '6px' }}>
           {metricNames.map(name => (
             <span key={name} className="badge badge-neutral" style={{ fontSize: '11px' }}>{name}</span>
           ))}
         </div>
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">Time range</label>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
-          {PRESETS.map(p => (
-            <button
-              key={p.key}
-              className={`btn btn-sm ${mode === 'preset' && preset === p.key ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => { setMode('preset'); setPreset(p.key); setError(null) }}
-              disabled={busy}
-            >
-              {p.label}
-            </button>
-          ))}
-          <button
-            className={`btn btn-sm ${mode === 'custom' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => { setMode('custom'); setError(null) }}
-            disabled={busy}
-          >
-            Custom range
-          </button>
-        </div>
-
-        {mode === 'custom' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label className="form-label" style={{ fontSize: '11px' }}>From</label>
-              <input
-                type="datetime-local"
-                className="form-control"
-                value={customFrom}
-                onChange={e => { setCustomFrom(e.target.value); setError(null) }}
-                disabled={busy}
-                aria-label="Range start"
-              />
-            </div>
-            <div>
-              <label className="form-label" style={{ fontSize: '11px' }}>To</label>
-              <input
-                type="datetime-local"
-                className="form-control"
-                value={customTo}
-                onChange={e => { setCustomTo(e.target.value); setError(null) }}
-                disabled={busy}
-                aria-label="Range end"
-              />
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="form-group">
@@ -310,7 +249,7 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
         </div>
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
           {resolution === 'raw'
-            ? 'Every reading as published. The raw hypertable is kept for a fraction of the time the rollups are, so an older range may need one of them.'
+            ? 'Every reading as published. The raw hypertable is kept for a fraction of the time the rollups are, so an older window may need one of them.'
             : 'Aggregated buckets, not individual readings. The file carries avg, min, max and last per bucket, and says so in its first line.'}
         </div>
       </div>
@@ -319,11 +258,11 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
         <div style={{ fontSize: '12px', color: 'var(--warning-text, var(--text-muted))', marginBottom: '12px', display: 'flex', alignItems: 'flex-start', gap: '6px', padding: '8px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '6px' }}>
           <IconAlertTriangle size={13} style={{ flexShrink: 0, marginTop: '2px' }} />
           <span>
-            That range starts before {coverage.entry.key === 'raw' ? 'raw telemetry' : coverage.entry.short} {coverage.entry.key === 'raw' ? 'begins' : 'begin'}
+            That window starts before {coverage.entry.key === 'raw' ? 'raw telemetry' : coverage.entry.short} {coverage.entry.key === 'raw' ? 'begins' : 'begin'}
             {horizons?.[coverage.entry.relation] ? ` (${horizonLabel(horizons[coverage.entry.relation])})` : ''}.
             {coverage.better
-              ? <> {capitalise(coverage.better.short)} cover the whole range. <button className="btn btn-sm btn-primary" style={{ marginLeft: '4px', padding: '2px 8px' }} onClick={() => { setResolution(coverage.better.key); setError(null) }} disabled={busy}>Switch to {coverage.better.label.toLowerCase()}</button></>
-              : ' No resolution still holds the whole of it, so part of the range will be missing whatever you choose.'}
+              ? <> {capitalise(coverage.better.short)} cover the whole window. <button className="btn btn-sm btn-primary" style={{ marginLeft: '4px', padding: '2px 8px' }} onClick={() => { setResolution(coverage.better.key); setError(null) }} disabled={busy}>Switch to {coverage.better.label.toLowerCase()}</button></>
+              : ' No resolution still holds the whole of it, so part of the window will be missing whatever you choose.'}
           </span>
         </div>
       )}

@@ -171,7 +171,8 @@ send the error under the rule's own name, read as the condition holding. `check-
 holds every rule to `Error`; `supabase/README.md` has the payload.
 
 **`for: 0s` where the window is the delay.** *Enrolment Stuck* reads a view that already carries an
-hour of age; *Gateway CA Expiring* has thirty days in its threshold; *Database Deadlocks* and
+hour of age; *Capture or Playback Stuck* and *Playback Worker Not Reporting* read rows the view
+emits only past their margins; *Gateway CA Expiring* has thirty days in its threshold; *Database Deadlocks* and
 *Historian Policy Job Failing* read `increase(...[window])`, which already requires the event to be
 recent. A `for` on top of any of these would require a one-off event to persist, and it would never
 fire.
@@ -236,10 +237,15 @@ that. Resolved notifications are the entire mechanism by which the dashboard's t
 the Topbar pill decrements; Grafana defaults them on, and the file says so because switching them
 off would leave every alert latched on in the UI forever with the rule showing Normal.
 
-**One route.** There is exactly one consumer, the dashboard, so a tree with per-severity branches
-would branch on a distinction nothing downstream acts on differently. `severity` still travels as
-a label and lands in `platform_alerts.severity`, where the UI colours on it; routing is not the
-place to encode it. The file replaces the default policy tree for org 1, which is what makes it
+**One route.** Grafana has exactly one consumer, `grafana-alert-webhook`, which records each alert
+in `platform_alerts`. Aber's dispatcher fans out from that table, to the dashboard and to the
+webhook a site configures on Settings › Notifications ([`supabase/README.md`](../supabase/README.md),
+*An alert is queued for each channel that carries it (0247)*). It routes by severity, reminds while
+an alert fires unacknowledged, and stops when someone acknowledges it: Grafana knows none of that.
+So a tree with per-severity branches here would branch on a distinction nothing downstream of
+Grafana acts on. **Grafana sends nothing itself, and has no SMTP.** `severity` still travels as a
+label and lands in `platform_alerts.severity`, where the UI colours on it and the dispatcher's
+routes read it; Grafana's routing is not the place to encode it. The file replaces the default policy tree for org 1, which is what makes it
 deterministic: Grafana ships a root route pointing at an email contact point with no SMTP
 configured, and leaving it in place means every alert also generates a delivery failure in
 Grafana's log.
@@ -253,7 +259,10 @@ a second device joining the same excursion; short, because the dashboard is a li
 view and a device entering alarm is precisely the thing not to sit on. `repeat_interval: 12h` is
 re-notification for something still firing and unchanged, long on purpose: the dashboard holds
 state, `platform_alerts` keeps the occurrence open and the pill keeps counting it, so a repeat
-delivers nothing new and only rewrites the same row. The mechanism exists to recover from a lost
+delivers nothing new and only rewrites the same row. That rewrite stamps `last_confirmed_at`, and
+Aber's dispatcher stops reminding about an alert 13 hours after its last stamp, this interval plus
+an hour, so a resolve Grafana never sent does not remind for ever. Change the interval here and
+`platform_alert_confirmation_window()` with it: mirror check 57 holds the two together. The mechanism exists to recover from a lost
 notification, and twelve hours is the interval at which that recovery is worth having without
 noise; a short repeat would rewrite every open alert's row continuously and make the realtime feed
 chatter. `group_by` is not set, so Grafana groups by every label, which is right for a
@@ -267,8 +276,8 @@ that never fired.
 `[unified_alerting.state_history]` sets `backend = loki`. The chart points `loki_remote_url` at the
 Loki the logs datasource reads (`aber.lokiUrl`: the chart's own, or `grafana.lokiUrl`), through
 `GF_UNIFIED_ALERTING_STATE_HISTORY_LOKI_REMOTE_URL`. Alerting > History (`/alerting/history`) reads
-it. The dashboard's alert counter links there from its footer, because the dashboard keeps no record
-of alerts that fired and cleared (`frontend/README.md`, *Toasts and the notification history*).
+it. It holds Grafana's rules only. The dashboard's own record, of every writer's alerts, is History's
+Alerts tab, which the alert counter's footer links to (`frontend/README.md`, *History's Alerts tab*).
 
 **Why not the default.** Grafana 13.2.3 writes the history as annotations unless told otherwise.
 The annotations backend answers a query for one rule only ("ruleUID is required to query
@@ -426,6 +435,63 @@ reports a nightly backup the same day. The window is the delay, so there is no `
 destination is incomplete the view has no row, so a stack without one, and every CI run, reads
 NoData, which is OK. Warning rather than critical: the local backup exists, and Backup Stale is the
 rule for having none.
+
+### Capture or Playback Failed (`aber-job-failed`)
+
+Warning, `for: 0s`, one instance per job, for an hour after it failed. A capture or playback that
+ended `FAILED`: a recording whose upload kept failing, one a restart left no time to store, a device
+that sent nothing, or a playback the broker cut or the worker could not run. The Capture page shows
+the failure as a banner for fifteen minutes, and keeps it on its Captures or Playbacks tab. This
+rule reaches someone who is not looking at that page, such as whoever left a two-hour capture
+running.
+
+A failure is an event, not a state. So `platform_health_rows()` (`0226`) returns the job for an
+hour after its `finished_at`, and the instance resolves by itself when the row leaves. An hour is
+long enough to be seen on the next look at the alert counter, and short enough that the counter
+does not fill with yesterday's failures. The job history is the record that lasts. The `job` label
+is the job's kind and id, so two failures are two instances. The value is the seconds since the
+failure, which the threshold reads as `> 0`. No row while nothing failed in the hour, so NoData is
+OK. No Audit Trail row is written for a failure: the trail keeps the acts of named people, and a
+failure is the system's outcome.
+
+Both workers count their outcomes too (`aber_ingestion_capture_jobs_total`,
+`aber_playback_jobs_total`). The rule reads the database instead, because a restart resets a
+counter, and a restart is one of the commonest causes of a failed capture.
+
+### Capture or Playback Stuck (`aber-job-stuck`)
+
+Warning, `for: 0s`, one instance per job. A job still queued, recording or running five minutes
+past what its own limits allow. A queued or recording capture blocks every other capture on the
+stack, and a playback blocks its target. Each job's limits run out at a time the view computes:
+
+| Job | Its limits run out |
+| :--- | :--- |
+| A queued capture | When it was queued: the daemon polls every 3 seconds |
+| A recording | At its duration cap, or two minutes after its last progress report, whichever comes first |
+| A queued playback | When it was queued, or when the last playback ended if that is later. Only while no playback runs, since the worker runs one at a time |
+| A running playback | A minute after its last progress report |
+
+The two minutes and the minute are what Stop already treats as stale (`request_capture_stop()`,
+`request_playback_stop()`), so Stop on the Capture page ends any job this rule reports. Five
+minutes is the margin. It covers a recording's finish, whose upload is tried four times with 14
+seconds of waits and whose finalise is retried for 31 seconds. It also covers an ingestion restart:
+the new daemon's sweep fails a job left in flight after 45 seconds, and *Capture or Playback Failed*
+reports it. So this rule fires only for a job nothing else will end. The view carries the margin,
+so there is no `for`. A playback is left out while the worker's heartbeat is stale, because
+*Playback Worker Not Reporting* names that cause, and one cause raises one alert.
+
+### Playback Worker Not Reporting (`aber-playback-worker-stale`)
+
+Warning, `for: 0s`, one instance. A playback is queued or running, and the playback worker has not
+reported for more than two minutes (`playback_worker_status.reported_at`). The worker reports
+every 30 seconds from its own thread, while a job runs too. The playback dialog already reads a
+report two minutes old as a worker that is not running (`WORKER_STALE_MS`), and mirror check 41
+holds the two thresholds equal.
+
+Never from the report's age alone. The row is seeded at the epoch, the database cannot tell whether
+the worker is deployed, and a site with `playback.enabled: false` would fire for ever. A queued job
+that nothing runs is the failure a person meets, so the job is the gate. NoData is OK: nothing is
+waiting.
 
 ## Ingestion Pipeline
 

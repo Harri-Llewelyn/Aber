@@ -13,10 +13,11 @@ import { TagList } from '../common/TagList'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { SuppressionWindows } from '../common/SuppressionWindows'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { AreaIcon } from '../../utils/areaIcon'
-import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
+import { placeNameProblem, unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
 import { unsFilterField, UnsRenameNote } from '../common/UnsPlace'
 import { isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
 import { useSetting } from '../../hooks/useSettings'
@@ -46,16 +47,21 @@ import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { plural } from '../../utils/format'
-import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags, devicesOnlineLabel } from '../../utils/deviceStatus'
 import { inServiceDevices, inServiceGateways } from '../../utils/inService'
-import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
+import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
-import { useUrlState } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import {
+  LIFECYCLE_ALIASES, LIFECYCLE_DEFAULT, LIFECYCLE_OPTIONS, LIFECYCLE_VALUES, applyFacets, lifecycleChanged, lifecycleOf
+} from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { Tooltip } from '../common/Tooltip'
 
-export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, onShowOnSiteMap, hasPermission, activeAlerts = [] }) {
+export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, onShowOnSiteMap, hasPermission, userRole = null, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js. */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [cells, setCells]       = useState([])
@@ -83,7 +89,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const [unsPaths, setUnsPaths] = useState(undefined)
   // The filters are query parameters. A cell handed over from another page arrives as
   // `?search=<cell_id>`; the search predicate matches cell_id or cell_name.
-  const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
+  const [lifecycle, setLifecycle] = useUrlList('lifecycle', LIFECYCLE_DEFAULT, { allowed: LIFECYCLE_VALUES, aliases: LIFECYCLE_ALIASES })
   const [searchQuery, setSearchQuery] = useUrlState('search')
   const [attentionOnly, setAttentionOnly] = useUrlState('attention', false)
   const [emptyOnly, setEmptyOnly] = useUrlState('empty', false)
@@ -161,23 +167,22 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     setEditing(cell); setFormVal(seed); setFormError(null); setShowForm(true)
   }
   const closeForm = () => { setShowForm(false); setEditingProposal(null) }
+  // Why the form's save is off; the database refuses the same names.
+  const formProblem = placeNameProblem(formVal.cell_name, 'cell')
 
   const archiveCell = async (days) => {
-    try {
-      await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
-      // Closed after the request, so ArchiveModal holds its Archiving state for the round trip.
-      setArchiveTarget(null); loadAll()
-      showToast(`Cell '${archiveTarget.cell_name}' archived`, 'success', { to: cellUrl(archiveTarget.cell_id) })
-    } catch (e) { showToast(e.message, 'error') }
+    await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
+    // Closed after the request, so ArchiveModal holds its Archiving state for the round trip, and
+    // only once it succeeded: a refusal is shown in the dialog.
+    setArchiveTarget(null); loadAll()
+    showToast(`Cell '${archiveTarget.cell_name}' archived`, 'success', { to: cellUrl(archiveTarget.cell_id) })
   }
 
-  // Run from the Restore dialog, which closes either way so a failure's toast is not left behind it.
+  // Run from the Restore dialog, which shows a refusal and stays open.
   const restoreCell = async (cellId, name) => {
-    try {
-      await api.post(`/api/v1/cells/${cellId}/restore`, {})
-      loadAll(); showToast(`Cell '${name}' restored to active service`, 'success', { to: cellUrl(cellId) })
-    } catch (e) { showToast(e.message, 'error') }
-    finally { setRestoreTarget(null) }
+    await api.post(`/api/v1/cells/${cellId}/restore`, {})
+    setRestoreTarget(null); loadAll()
+    showToast(`Cell '${name}' restored to active service`, 'success', { to: cellUrl(cellId) })
   }
 
   // An ID, not the cell object: this page polls, so the selection is resolved against `cells` on
@@ -236,9 +241,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   // serving no devices is not empty.
   const cellIsEmpty = (c) => liveGateways(c).length === 0 && liveDevices(c).length === 0
 
-  const matchingCells = cells.filter(c => {
-    if (filterMode === 'active'   && c.is_archived) return false
-    if (filterMode === 'archived' && !c.is_archived) return false
+  // Lifecycle is any of its values; its counts are over what the toggles and the search let through.
+  const { rows: matchingCells, counts: facetCounts } = applyFacets(cells, [
+    { key: 'lifecycle', chosen: lifecycle, values: lifecycleOf },
+  ], (c) => {
     if (attentionOnly && !cellNeedsAttention(c)) return false
     if (emptyOnly && !cellIsEmpty(c)) return false
     if (searchQuery) {
@@ -264,7 +270,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const attentionCount = cells.filter(c => !c.is_archived && cellNeedsAttention(c)).length
   const emptyCount = cells.filter(c => !c.is_archived && cellIsEmpty(c)).length
   const activeFilterCount =
-    (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
+    (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
 
   // Arriving from a cell chip or the Site Map with one cell named: open it, and show it whatever
   // its state. Identifier equality only, since the search predicate also matches names.
@@ -273,7 +279,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     cells,
     (c, term) => c.cell_id === term,
     (c) => {
-      if (c.is_archived) setFilterMode('all')
+      if (c.is_archived && lifecycle.length > 0 && !lifecycle.includes('archived')) setLifecycle(v => [...v, 'archived'])
       setSelectedId(c.cell_id)
     }
   )
@@ -328,17 +334,19 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               ariaLabel="Search cells"
             />
 
-            {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
-            <select
-              className="form-control control-sm"
-              value={filterMode}
-              onChange={e => setFilterMode(e.target.value)}
-              aria-label="Lifecycle"
-            >
-              <option value="all">All ({cells.length})</option>
-              <option value="active">Active ({cells.filter(c => !c.is_archived).length})</option>
-              <option value="archived">Archived ({cells.filter(c => c.is_archived).length})</option>
-            </select>
+            {/* Lifecycle is a filter like the rest, opening on Active; the counts are beside each value. */}
+            <FilterDropdown
+              label="Lifecycle"
+              noun="lifecycle"
+              plural="lifecycles"
+              options={LIFECYCLE_OPTIONS}
+              value={lifecycle}
+              onChange={setLifecycle}
+              counts={facetCounts.lifecycle}
+              defaultValue={LIFECYCLE_DEFAULT}
+              everyIsAny
+              width="sm"
+            />
 
             <Tooltip text="Cells containing an offline or stale gateway, or any quarantined device">
               <button
@@ -361,7 +369,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             <div className="filter-bar-actions">
               <ClearFilters
                 count={activeFilterCount}
-                onClear={() => { clearSearch(); setAttentionOnly(false); setEmptyOnly(false); setFilterMode('active') }}
+                onClear={() => { clearSearch(); setAttentionOnly(false); setEmptyOnly(false); setLifecycle(LIFECYCLE_DEFAULT) }}
               />
               <ActionButton
                 className="btn btn-primary btn-sm"
@@ -487,6 +495,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         <Modal
           title={editing ? 'Edit Cell' : 'New Cell'}
           onClose={closeForm}
+          problem={formProblem}
           error={formError}
           footer={
             <>
@@ -497,9 +506,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 // different waits and the operator knows which they asked for.
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
-                title={proposeMode
+                disabled={formProblem !== null}
+                title={formProblem ?? (proposeMode
                   ? 'Ask for these changes — an approver applies them, or says why not'
-                  : undefined}
+                  : undefined)}
               >
                 {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
               </ActionButton>
@@ -507,8 +517,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           }
         >
           <div className="form-group">
-            <label className="form-label" htmlFor="cell-name">Cell Name</label>
-            <input id="cell-name" className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" />
+            <label className="form-label" htmlFor="cell-name">Cell Name <RequiredMark /></label>
+            <input id="cell-name" className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" aria-required="true" />
             <UnsRenameNote
               index={unsPaths}
               renamed={!!editing && (formVal.cell_name || '').trim() !== editing.cell_name}
@@ -691,15 +701,17 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 <div className="context-device-list">
                   {selectedCellDevices.map(d => {
                     const status = deviceLifecycleStatus(d)
+                    const alert = alertForDevice(alerts, d)
                     return (
                       <RouteLink
                         key={d.asset_id}
                         className="chip chip-link"
                         to={deviceUrl(d.asset_id)}
                         onNavigate={() => onSelectDevice?.(d.asset_id)}
-                        title={`Open ${d.asset_name} on the Devices page — ${alertForDevice(alerts, d) ? `ALERT: ${alertForDevice(alerts, d).alert_name}` : deviceStatusTitle(status)}`}
+                        title={`Open ${d.asset_name} on the Devices page — ${alert ? `${alertState(alert) === 'acknowledged' ? 'ALERT ACKNOWLEDGED' : 'ALERT'}: ${alert.alert_name}` : deviceStatusTitle(status)}`}
                       >
-                        <span className="badge-dot" style={{ background: deviceDotColor(d, alertForDevice(alerts, d)) }} />
+                        {/* A ring once the alert is acknowledged, filled while it is nobody's. */}
+                        <span className="badge-dot" style={deviceDotStyle(d, alert)} />
                         <span className="chip-name">{d.asset_name}</span>
                         {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
                       </RouteLink>
@@ -799,7 +811,19 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 : 'Archive Cell'
           },
         ].filter(Boolean) : []}
-      />
+      >
+        {/* A tool of unknown height, so after the actions: every device in the cell when an alert is read. */}
+        {selectedCell && (
+          <SuppressionWindows
+            kind="cell"
+            subjectId={selectedCell.cell_id}
+            subjectName={selectedCell.cell_name}
+            userRole={userRole}
+            showToast={showToast}
+            open={!!selectedCell}
+          />
+        )}
+      </ContextPanel>
 
     </div>
   )

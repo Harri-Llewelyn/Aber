@@ -25,7 +25,9 @@ cannot answer that about an ordinary metric name. A name generated per run can o
 this replay, so the set of assets carrying it IS the set the identity rewrite produced.
 
 Needs the stack up AND `playback.enabled`, which `values-dev.yaml` sets. Without the worker the
-job sits PENDING and setUpClass says so rather than timing out against the broker.
+job sits PENDING and setUpClass says so rather than timing out against the broker. kubectl reads
+the worker's credential file beside the delivery Secret (await_playback_credential(), which the two
+capture suites share).
 """
 
 import hashlib
@@ -45,6 +47,7 @@ import psycopg2
 REPO = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(REPO / "test-harness"))
+import stack_exec  # noqa: E402  -- the worker's credential file, beside the Secret it is copied from
 import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
@@ -94,18 +97,9 @@ SOURCE_DEVICE_ID = "3b000000-0000-4000-8000-000000000001"
 # file is a projected Secret volume, and the kubelet refreshes those on its own sync period
 # (a minute by default) plus its cache TTL. Measured on k3d: the Secret held the new password
 # while the pod's copy was still empty, and the worker logged the gain about a minute after the
-# mint. Anything under two minutes here would be timing the kubelet.
+# mint. Anything under two minutes here would be timing the kubelet. A bound, not the signal:
+# await_playback_credential() waits on the worker's file and its report.
 CREDENTIAL_TIMEOUT = 240
-
-# A BOUND, NOT THE SIGNAL, since 0129. The status row now answers "has the worker picked up the
-# CURRENT password": it reports which gateways it has taken a new password for, the database stamps
-# those, and `playback_stale_credentials()` compares them with the last CREDENTIAL_ISSUED row. This
-# suite waits on that rather than on the clock.
-#
-# The margin is kept as an upper bound on how long that should take -- a minute is the kubelet's
-# default sync period for a projected Secret volume, ninety seconds is that plus slack -- so a run
-# that never clears fails with something specific rather than hanging.
-PROJECTION_MARGIN = 90
 JOB_TIMEOUT = 120
 HISTORIAN_TIMEOUT = 60
 # A read for a row that must NOT arrive. 15 s is ample: the daemon's writer has no flush interval
@@ -247,6 +241,86 @@ def historian():
         host=DB_HOST, port=DB_PORT, database=DB_NAME, user=DB_USER, password=DB_PASSWORD,
         connect_timeout=CONNECT_TIMEOUT,
     )
+
+
+# -------------------------------------------------------------------------------------------------
+# The Playback gateway's credential, shared by every suite that starts a playback
+# -------------------------------------------------------------------------------------------------
+def issue_playback_credential(session, gateway):
+    """
+    Issue `gateway`'s broker credential through gateway-credential, as the Gateways page does. For
+    a playback target that delivers it: the broker's password is replaced and written into the
+    delivery Secret, which the kubelet copies to the worker. Returns the response.
+    """
+    status, body = _request(
+        f"{SUPABASE_URL}/functions/v1/gateway-credential", method="POST",
+        body={"gateway_id": gateway["id"]},
+        headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {session.token}",
+                 "Content-Type": "application/json"},
+    )
+    if status != 200:
+        raise AssertionError(f"could not issue {gateway['sparkplug_id']}'s broker credential: {status} "
+                             f"{(body or {}).get('error')} {(body or {}).get('details')}")
+    return body
+
+
+def playback_credential_state(session, gateway):
+    """
+    (None, the worker's status row) when a playback onto `gateway` would connect with the broker's
+    password, else (what is missing, the row). The worker's file must hold what the delivery Secret
+    holds, as the worker re-reads it before each job it claims. The row must list the gateway,
+    recently, and playback_stale_credentials() must not, or start_playback_job() refuses it. The
+    row alone is not enough (ingestion/README.md, "What the stamp cannot tell").
+    """
+    sid = gateway["sparkplug_id"]
+    status, rows = session.rest("/playback_worker_status?select=held_edge_nodes,reported_at&limit=1")
+    row = rows[0] if status == 200 and rows else None
+    gap = stack_exec.playback_delivery_gap(sid, *stack_exec.playback_deliveries())
+    if gap:
+        return gap, row
+    if row is None:
+        return f"playback_worker_status answered {status}: {rows}", None
+    if sid not in (row.get("held_edge_nodes") or []):
+        return f"the worker's last report does not list {sid}: {row}", row
+    age = time.time() - _epoch_seconds(row["reported_at"])
+    if age >= WORKER_STALE_SECONDS:
+        return f"the worker last reported {age:.0f}s ago, so it is not running", row
+    status, stale = session.rest("/rpc/playback_stale_credentials", method="POST", body={})
+    if status != 200:
+        return f"playback_stale_credentials() answered {status}: {stale}", row
+    listed = next((r for r in stale or [] if r.get("sparkplug_id") == sid), None)
+    if listed:
+        return (f"playback_stale_credentials() lists {sid}: the worker's last observation, "
+                f"{listed.get('observed_at')}, is older than the issue at {listed.get('issued_at')}"), row
+    return None, row
+
+
+def await_playback_credential(session, gateway, timeout=CREDENTIAL_TIMEOUT):
+    """
+    The worker's status row, once playback_credential_state() finds nothing missing. Issues the
+    credential first only when none has been delivered; otherwise waits for the delivery already
+    made. Raises naming what was still missing at `timeout`.
+    """
+    sid = gateway["sparkplug_id"]
+    if not stack_exec.playback_deliveries()[1].get(sid):
+        body = issue_playback_credential(session, gateway)
+        if body.get("playback_delivered") is not True:
+            raise AssertionError(f"{sid}'s credential was issued but not delivered: playback_delivered="
+                                 f"{body.get('playback_delivered')}")
+    started = time.monotonic()
+    deadline, first = started + timeout, None
+    while True:
+        missing, row = playback_credential_state(session, gateway)
+        if missing is None:
+            if first:
+                print(f"waited {time.monotonic() - started:.0f}s for {sid}'s credential; at first {first}")
+            return row
+        first = first or missing
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"the playback worker did not hold {sid}'s current broker credential within "
+                f"{timeout}s: {missing}. Is `playback.enabled` set (values-dev.yaml sets it)?")
+        time.sleep(3)
 
 
 def recorded_flow_hash(metric):
@@ -471,83 +545,27 @@ class _ReplayFixture(unittest.TestCase):
         is_shadow (0183), the edge function passes it as `deliver_to_playback`, and the credential
         service writes the password where the worker reads. Nothing else exercises that chain.
         """
-        status, body = _request(
-            f"{SUPABASE_URL}/functions/v1/gateway-credential",
-            method="POST",
-            body={"gateway_id": cls.playback_gateway["id"]},
-            headers={"apikey": PUBLISHABLE_KEY,
-                     "Authorization": f"Bearer {cls.session.token}",
-                     "Content-Type": "application/json"},
-        )
-        if status != 200:
-            raise AssertionError(f"could not mint the playback credential: {status} {body}")
-        cls.minted_at = time.monotonic()
-        return body
-
-    @classmethod
-    def _credential_is_stale(cls, sparkplug_id):
-        """Has this gateway's credential been re-issued since the worker last picked one up?
-
-        `playback_stale_credentials()` (0129) is what the playback dialog and
-        `start_playback_job()` both consult. A read that fails answers True: this is a wait, and
-        proceeding on a failed read is how the suite would race the delivery it exists to wait for.
-        """
-        status, rows = cls.session.rest("/rpc/playback_stale_credentials", method="POST", body={})
-        if status != 200:
-            return True
-        return any(r.get("sparkplug_id") == sparkplug_id for r in (rows or []))
+        return issue_playback_credential(cls.session, cls.playback_gateway)
 
     @classmethod
     def _await_worker_credential(cls):
         """
-        Wait for the worker to SAY it holds the target.
+        Wait until the worker holds the target's current credential, and return its status row.
 
         The database knows the platform issued a credential; only the worker knows it received
-        one, which is what `playback_worker_status` carries. Waiting on it here also proves the
-        worker re-resolves its credentials while running -- it used to read them once in main(),
-        so a freshly delivered password reached it only after a container restart.
+        one. Waiting on it here also proves the worker re-resolves its credentials while running:
+        it used to read them once in main(), so a freshly delivered password reached it only after
+        a container restart.
         """
-        wanted = cls.playback_gateway["sparkplug_id"]
-        deadline = time.monotonic() + CREDENTIAL_TIMEOUT
-        last = None
-        while time.monotonic() < deadline:
-            status, rows = cls.session.rest(
-                "/playback_worker_status?select=held_edge_nodes,reported_at&limit=1")
-            if status == 200 and rows:
-                last = rows[0]
-                held = wanted in (last.get("held_edge_nodes") or [])
-                # HELD IS NOT ENOUGH, and that is the whole of #217: on a re-issue the id was
-                # already reported from the PREVIOUS file, so the id alone would let the replay
-                # start against a password the broker has already replaced. 0129 made the
-                # difference reportable, and this asks for it rather than timing the kubelet.
-                if held and not cls._credential_is_stale(wanted):
-                    return last
-            time.sleep(3)
-        raise AssertionError(
-            f"the playback worker never reported holding {wanted} within {CREDENTIAL_TIMEOUT}s "
-            f"(last report: {last}). Either the worker is not running -- `playback.enabled`, which "
-            f"values-dev.yaml sets -- or the credential was issued and not delivered."
-        )
+        return await_playback_credential(cls.session, cls.playback_gateway)
 
     @classmethod
     def _ensure_worker_credential(cls):
         """
-        Mint and wait only when the worker has not recently reported holding the current
-        credential, as the two capture suites do. PlaybackReachesTheHistorian always mints: it is
-        the class that tests the delivery.
+        Mint only when nothing has been delivered, then wait, as the two capture suites do.
+        PlaybackReachesTheHistorian always mints: it is the class that tests the delivery.
         """
-        wanted = cls.playback_gateway["sparkplug_id"]
-        status, rows = cls.session.rest(
-            "/playback_worker_status?select=held_edge_nodes,reported_at&limit=1")
-        holds = (
-            status == 200 and bool(rows)
-            and wanted in (rows[0].get("held_edge_nodes") or [])
-            and time.time() - _epoch_seconds(rows[0]["reported_at"]) < WORKER_STALE_SECONDS
-            and not cls._credential_is_stale(wanted)
-        )
-        if not holds:
-            cls._mint_credential()
-            cls._await_worker_credential()
+        return await_playback_credential(cls.session, cls.playback_gateway)
 
     @classmethod
     def _store_capture(cls):

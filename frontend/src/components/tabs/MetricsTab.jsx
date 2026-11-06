@@ -31,13 +31,14 @@ import {
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
-import { deviceUrl, metricUrl } from '../../routes'
+import { deviceUrl, metricUrl, trailUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -48,12 +49,14 @@ import {
 } from '../../utils/schemaProperty'
 import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
-  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck
+  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
-import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import { applyFacets } from '../../utils/listFilters'
 import { METRICS_TABS } from '../../navigation'
 import { useSortableRows, useTableSort } from '../../hooks/useTableSort'
 
@@ -69,8 +72,8 @@ const CUSTOM_TYPE = '__custom__'
 // name), because Machinery and Robotics both define names like `Manufacturer`.
 const OPCUA_KEY_SEP = '::'
 
-// The catalog's Standard filter: '' is All standards, and this sentinel is Local extension, because
-// a local extension's own value, STANDARDS.CUSTOM, is '' too.
+// The catalog's Standard filter: nothing chosen is any standard, and this sentinel is Local
+// extension, because a local extension's own value, STANDARDS.CUSTOM, is '' too.
 const LOCAL_STANDARD_FILTER = '__local__'
 
 // The standards the Standard filter offers, in the Add Metric form's order. Local extension follows.
@@ -78,6 +81,15 @@ const FILTER_STANDARDS = STANDARD_OPTIONS.filter(o => o.value !== STANDARDS.CUST
 
 /** The Standard filter option a metric falls under. */
 const standardFilterValue = (m) => m.standard || LOCAL_STANDARD_FILTER
+
+/** No standard chosen. */
+const NO_STANDARDS = Object.freeze([])
+
+/** The Standard filter's values: the standards in the Add Metric form's order, then Local extension. */
+const STANDARD_FILTER_OPTIONS = [
+  ...FILTER_STANDARDS.map(o => ({ value: o.value, label: o.label })),
+  { value: LOCAL_STANDARD_FILTER, label: LOCAL_EXTENSION_LABEL },
+]
 
 /**
  * No semantic id, as the AAS export counts it: NULL and '' alike. The dashboard stores a blank id
@@ -209,14 +221,15 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
   // found without opening each group.
   const [catalogSearch, setCatalogSearch] = useUrlState('search')
-  // The catalog's other filters: a standard (or LOCAL_STANDARD_FILTER), and metrics with no id.
-  const [standardFilter, setStandardFilter] = useUrlState('standard', '', {
+  // The catalog's other filters: standards (LOCAL_STANDARD_FILTER among them), any of which a metric
+  // may be under, and metrics with no id.
+  const [standardFilter, setStandardFilter] = useUrlList('standard', NO_STANDARDS, {
     allowed: [...FILTER_STANDARDS.map(o => o.value), LOCAL_STANDARD_FILTER]
   })
   const [unmappedOnly, setUnmappedOnly] = useUrlState('unmapped', false)
-  const catalogFilterCount = [catalogSearch, standardFilter, unmappedOnly].filter(Boolean).length
+  const catalogFilterCount = (catalogSearch ? 1 : 0) + (standardFilter.length ? 1 : 0) + (unmappedOnly ? 1 : 0)
   const clearCatalogFilters = () => {
-    setCatalogSearch(''); setStandardFilter(''); setUnmappedOnly(false)
+    setCatalogSearch(''); setStandardFilter([]); setUnmappedOnly(false)
   }
 
   /**
@@ -517,26 +530,20 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const usageCountFor = (metricName) =>
     schemas.filter(s => modelledMetrics(s)?.has(metricName)).length
 
+  // Deprecate, Restore and Edit run from their dialogs, which show a refusal as it was worded and
+  // stay open; each closes its dialog once the write has succeeded.
   const handleDeprecate = async (supersededBy) => {
-    try {
-      await api.post(`/api/v1/metric-catalog/${deprecateTarget.metric_uuid}/deprecate`, { superseded_by: supersededBy })
-      setDeprecateTarget(null)
-      load()
-      showToast(`Metric '${deprecateTarget.name}' deprecated. The Deprecated Metrics tab can restore it.`, 'success', { to: metricUrl(deprecateTarget.metric_uuid, true) })
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    await api.post(`/api/v1/metric-catalog/${deprecateTarget.metric_uuid}/deprecate`, { superseded_by: supersededBy })
+    setDeprecateTarget(null)
+    load()
+    showToast(`Metric '${deprecateTarget.name}' deprecated. The Deprecated Metrics tab can restore it.`, 'success', { to: metricUrl(deprecateTarget.metric_uuid, true) })
   }
 
   const handleRestore = async () => {
-    try {
-      await api.post(`/api/v1/metric-catalog/${restoreTarget.metric_uuid}/restore`)
-      setRestoreTarget(null)
-      load()
-      showToast(`Metric '${restoreTarget.name}' restored to the schema builder`, 'success', { to: metricUrl(restoreTarget.metric_uuid) })
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    await api.post(`/api/v1/metric-catalog/${restoreTarget.metric_uuid}/restore`)
+    setRestoreTarget(null)
+    load()
+    showToast(`Metric '${restoreTarget.name}' restored to the schema builder`, 'success', { to: metricUrl(restoreTarget.metric_uuid) })
   }
 
   /** Edit's save: `change` holds only what changed, the semantic id pair, the permitted values or both. */
@@ -544,32 +551,29 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     const name = editTarget.name
     const pairChanged = Object.hasOwn(change, 'semantic_id')
     const valuesChanged = Object.hasOwn(change, 'permitted_values')
-    try {
-      await api.put(`/api/v1/metric-catalog/${editTarget.metric_uuid}`, change)
-      setEditTarget(null)
-      load()
-      showToast(
-        pairChanged && valuesChanged
-          ? `Metric '${name}' saved`
-          : valuesChanged
-            ? (change.permitted_values
-              ? `Permitted values of '${name}' saved`
-              : `Permitted values of '${name}' cleared; it may report any value`)
-            : change.semantic_id
-              ? `Semantic id of '${name}' saved`
-              : `Semantic id of '${name}' cleared; the metric is now unmapped`,
-        'success',
-        { to: metricUrl(editTarget.metric_uuid, !!editTarget.deprecated) }
-      )
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    await api.put(`/api/v1/metric-catalog/${editTarget.metric_uuid}`, change)
+    setEditTarget(null)
+    load()
+    showToast(
+      pairChanged && valuesChanged
+        ? `Metric '${name}' saved`
+        : valuesChanged
+          ? (change.permitted_values
+            ? `Permitted values of '${name}' saved`
+            : `Permitted values of '${name}' cleared; it may report any value`)
+          : change.semantic_id
+            ? `Semantic id of '${name}' saved`
+            : `Semantic id of '${name}' cleared; the metric is now unmapped`,
+      'success',
+      { to: metricUrl(editTarget.metric_uuid, !!editTarget.deprecated) }
+    )
   }
 
   // The catalog and the schema registry share `schema:manage`. The write is refused by
   // metric_catalog's INSERT and UPDATE policies (has_role('Administrator')), so this disables the
   // control and decides nothing.
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   // Deprecate, Restore and Edit write metric_catalog too, so they share Add Metric's gate: a
   // permission a Shopfloor_Manager holds, such as archive:manage, would offer a button the database
   // refuses.
@@ -577,22 +581,21 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const canEditMetric = canManageSchema
 
   /**
-   * Narrows the catalog by metric name only: matching description or units would return rows whose
-   * reason for matching is invisible in the table.
+   * Narrows the catalog by metric name or UUID, as Areas and Cells search theirs: the UUID is what a
+   * link, a log line or the Audit Trail's drawer carries. Not by description or units, which would
+   * return rows whose reason for matching is invisible in the table.
    */
-  const matchesCatalogSearch = (m) =>
-    !catalogSearch || (m.name || '').toLowerCase().includes(catalogSearch.trim().toLowerCase())
-
-  const matchesCatalogFilters = (m) =>
-    matchesCatalogSearch(m) &&
-    (!standardFilter || standardFilterValue(m) === standardFilter) &&
-    (!unmappedOnly || isUnmapped(m))
+  const matchesCatalogSearch = (m) => {
+    const q = catalogSearch.trim().toLowerCase()
+    return !q || (m.name || '').toLowerCase().includes(q) || String(m.metric_uuid || '').toLowerCase().includes(q)
+  }
 
   const currentCatalog = catalog.filter(m => !m.deprecated)
-  const activeCatalog = currentCatalog.filter(matchesCatalogFilters)
-  // The filters' counts are over the whole active catalog, not what the search and the other filter
-  // leave, so they do not change while the operator types.
-  const standardCount = (value) => currentCatalog.filter(m => standardFilterValue(m) === value).length
+  // Standard is any of its values. Its counts are over what the search and Unmapped let through, as
+  // every list filter's are; Unmapped's own count is over the whole active catalog.
+  const { rows: activeCatalog, counts: facetCounts } = applyFacets(currentCatalog, [
+    { key: 'standard', chosen: standardFilter, values: m => [standardFilterValue(m)] },
+  ], m => matchesCatalogSearch(m) && (!unmappedOnly || isUnmapped(m)))
   const unmappedCount = currentCatalog.filter(isUnmapped).length
   // Its own tab, unfiltered: the search and the filters belong to the catalog tab.
   const deprecatedCatalog = catalog.filter(m => m.deprecated)
@@ -742,6 +745,17 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     datatypeChosen &&
     !permitted.error &&
     (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '')
+  // Why Add is off, where nothing in the form says so already: the name, the datatype and the
+  // permitted values each say their own problem where they are typed or chosen.
+  const addProblem = effectiveType === ''
+    ? (isCustomStandard ? 'Give the metric a name'
+      : usingCustomType ? 'Type the custom type'
+        : isIso ? 'Choose a KPI'
+          : isOpcua ? 'Choose a data point'
+            : isAshrae ? 'Choose a concept'
+              : 'Choose a data item type')
+    : newMetric.group === NEW_GROUP && newMetric.newGroup.trim() === '' ? 'Name the new group'
+      : null
 
   /**
    * Edit is on both tabs: a deprecated metric still carries its id into the schemas that model it.
@@ -775,8 +789,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         title: !canDeprecateMetric
           ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
           : 'Retire this metric from the schema builder'
-      }
-  ]
+      },
+    // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+    canReadTrail && {
+      label: 'View Audit Trail', icon: <IconHistory size={13} />,
+      to: trailUrl(m.metric_uuid, 'METRIC'),
+      title: 'Open the Audit Trail filtered to this metric'
+    }
+  ].filter(Boolean)
 
   /** The cells both tabs share, so a metric reads the same in each. */
   const metricCells = (m) => (
@@ -880,21 +900,19 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 <SearchInput
                   value={catalogSearch}
                   onChange={setCatalogSearch}
-                  placeholder="Search metrics…"
+                  placeholder="Search name or UUID…"
                   ariaLabel="Search the metric catalog"
                 />
-                <select
-                  className="form-control control-md"
+                <FilterDropdown
+                  label="Standard"
+                  noun="standard"
+                  plural="standards"
+                  options={STANDARD_FILTER_OPTIONS}
                   value={standardFilter}
-                  onChange={e => setStandardFilter(e.target.value)}
-                  aria-label="Filter the catalog by standard"
-                >
-                  <option value="">All standards ({currentCatalog.length})</option>
-                  {FILTER_STANDARDS.map(o => (
-                    <option key={o.value} value={o.value}>{o.label} ({standardCount(o.value)})</option>
-                  ))}
-                  <option value={LOCAL_STANDARD_FILTER}>{LOCAL_EXTENSION_LABEL} ({standardCount(LOCAL_STANDARD_FILTER)})</option>
-                </select>
+                  onChange={setStandardFilter}
+                  counts={facetCounts.standard}
+                  width="md"
+                />
                 <Tooltip text="Metrics with no semantic id. An AAS export writes them without one, so they cannot fill a Digital Nameplate field.">
                   <button
                     type="button"
@@ -1144,6 +1162,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         subtitle={selected?.deprecated && <Badge tone="warning" size="sm">Deprecated</Badge>}
         fields={selected ? [
           { label: 'Name', value: selected.name, mono: true, copyable: true },
+          { label: 'Metric UUID', value: selected.metric_uuid, mono: true, copyable: true },
           { label: 'Standard', value: selected.standard || LOCAL_EXTENSION_LABEL },
           { label: 'Category', value: selected.category || null },
           { label: 'Units', value: selected.units || null },
@@ -1177,6 +1196,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           icon={<IconPlus size={18} />}
           size="xl"
           onClose={closeAddMetric}
+          problem={addProblem}
           error={addError}
           footer={
             <>
@@ -1186,6 +1206,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 pending={adding}
                 pendingLabel="Adding…"
                 disabled={!canAddMetric}
+                title={addProblem ?? undefined}
                 onClick={() => runAdd(handleAddMetric)}
               >
                 Add
@@ -1235,10 +1256,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {newMetric.group === NEW_GROUP && (
               <div className="form-group" style={{ flex: '0 1 170px' }}>
-                <label className="form-label" htmlFor="metric-new-group">New Group Name</label>
+                <label className="form-label" htmlFor="metric-new-group">New Group Name <RequiredMark /></label>
                 <Tooltip text="One segment of the name, so it cannot contain a slash.">
                   <input
                     id="metric-new-group"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.newGroup}
                     onChange={e => setNewMetric(m => ({ ...m, newGroup: e.target.value.replace(/\//g, '') }))}
@@ -1265,10 +1287,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 label changes with it. */}
             {isMTConnect && (
               <div className="form-group" style={{ flex: '1 1 200px' }}>
-                <label className="form-label" htmlFor="metric-type">Data Item Type</label>
+                <label className="form-label" htmlFor="metric-type">Data Item Type <RequiredMark /></label>
                 <Tooltip text="SAMPLE is a continuous measurement, EVENT a discrete change of state, CONDITION a fault or warning.">
                   <select
                     id="metric-type"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
@@ -1287,11 +1310,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {isIso && (
               <div className="form-group" style={{ flex: '1 1 200px' }}>
-                <label className="form-label" htmlFor="metric-type">KPI</label>
+                <label className="form-label" htmlFor="metric-type">KPI <RequiredMark /></label>
                 <Tooltip text={isoKpis.find(k => k.name === newMetric.type)?.formula
                   || 'Choosing a KPI fills in its unit, semantic id and group, which belong to the standard.'}>
                   <select
                     id="metric-type"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
@@ -1309,11 +1333,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {isOpcua && (
               <div className="form-group" style={{ flex: '1 1 220px' }}>
-                <label className="form-label" htmlFor="metric-type">Data Point</label>
+                <label className="form-label" htmlFor="metric-type">Data Point <RequiredMark /></label>
                 <Tooltip text={chosenDataPoint?.description
                   || 'Choosing a data point fills in its group, its datatype and its semantic id.'}>
                   <select
                     id="metric-type"
+                    aria-required="true"
                     className="form-control"
                     value={chosenDataPoint
                       ? `${chosenDataPoint.companion_spec}${OPCUA_KEY_SEP}${chosenDataPoint.name}`
@@ -1347,11 +1372,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {isAshrae && (
               <div className="form-group" style={{ flex: '1 1 220px' }}>
-                <label className="form-label" htmlFor="metric-type">Concept</label>
+                <label className="form-label" htmlFor="metric-type">Concept <RequiredMark /></label>
                 <Tooltip text={ashraeSections.flatMap(s => s.entries).find(c => c.name === newMetric.type)?.description
                   || 'Choosing a concept fills in the group and the name. A concept names a thing, so the rest stays yours.'}>
                   <select
                     id="metric-type"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
@@ -1371,12 +1397,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             {(usingCustomType || isCustomStandard) && (
               <div className="form-group" style={{ flex: '1 1 170px' }}>
-                <label className="form-label" htmlFor="metric-custom">{isCustomStandard ? 'Metric Name' : 'Custom Type'}</label>
+                <label className="form-label" htmlFor="metric-custom">{isCustomStandard ? 'Metric Name' : 'Custom Type'} <RequiredMark /></label>
                 <Tooltip text={isCustomStandard
                   ? 'A local extension, with no standard behind it. It still groups and tags like every other metric.'
                   : 'A local extension. MTConnect allows these, but prefer a standard type where one fits.'}>
                   <input
                     id="metric-custom"
+                    aria-required="true"
                     className="form-control"
                     value={newMetric.customType}
                     onChange={e => setNewMetric(m => ({ ...m, customType: e.target.value.replace(/\//g, '') }))}
@@ -1424,10 +1451,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             </div>
 
             <div className="form-group" style={{ flex: '0 1 140px' }}>
-              <label className="form-label" htmlFor="metric-datatype">Sparkplug Datatype</label>
+              <label className="form-label" htmlFor="metric-datatype">Sparkplug Datatype <RequiredMark /></label>
               <Tooltip text="How the value is encoded on the wire. A vocabulary entry fills it where it can. It cannot change later.">
                 <select
                   id="metric-datatype"
+                  aria-required="true"
                   className="form-control"
                   value={datatypeChosen ? newMetric.datatype : ''}
                   onChange={e => setNewMetric(m => ({ ...m, datatype: parseInt(e.target.value, 10) }))}

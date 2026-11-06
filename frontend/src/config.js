@@ -23,6 +23,9 @@ export const RUNTIME_SETTING_NAMES = [
   'VITE_ENABLE_REALTIME',
   'VITE_GITHUB_REPO_URL',
   'VITE_GRAFANA_URL',
+  // supabaseStudio.enabled, read by studioEnabled(). 'false' means the chart runs no Studio, so
+  // studioDoorUrl() names no door and no text names Studio's sign-ins. Absent reads as on.
+  'VITE_STUDIO_ENABLED',
   // Supabase Studio's door; the only consumer is sign-out (utils/studioSignOut.js). The host half
   // is load-bearing: cookies are scoped by host and ignore the port, so `localhost` and
   // `127.0.0.1` are different cookie jars, and this and STUDIO_PUBLIC_URL must name the host the
@@ -74,6 +77,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_ENABLE_REALTIME: import.meta.env.VITE_ENABLE_REALTIME,
   VITE_GITHUB_REPO_URL: import.meta.env.VITE_GITHUB_REPO_URL,
   VITE_GRAFANA_URL: import.meta.env.VITE_GRAFANA_URL,
+  VITE_STUDIO_ENABLED: import.meta.env.VITE_STUDIO_ENABLED,
   VITE_STUDIO_URL: import.meta.env.VITE_STUDIO_URL,
   VITE_GITEA_URL: import.meta.env.VITE_GITEA_URL,
   VITE_I3X_URL: import.meta.env.VITE_I3X_URL,
@@ -133,6 +137,22 @@ export const readFlag = (name, fallback = false) => {
  * older config.js and the Vite dev server name no such key. Read per call, so a test can set it.
  */
 export const playbackWorkerDeployed = () => readFlag('VITE_PLAYBACK_ENABLED', true);
+
+/**
+ * Whether the chart runs Studio (supabaseStudio.enabled). Only 'false' reads as off: absent or any
+ * other value reads as on, as the Vite dev server and an older config.js name no such key. Read per
+ * call, so a test can set it.
+ */
+export const studioEnabled = () => readSetting('VITE_STUDIO_ENABLED')?.toLowerCase() !== 'false';
+
+/**
+ * Studio's door as the browser reaches it, or null where the chart runs no Studio, with no
+ * fallback. With Studio on, a blank address takes `fallback`.
+ */
+export function studioDoorUrl(fallback) {
+  if (!studioEnabled()) return null;
+  return readSetting('VITE_STUDIO_URL', fallback);
+}
 
 /**
  * The Supabase origin and publishable key. These throw when unresolvable rather than defaulting:

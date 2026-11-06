@@ -6,7 +6,8 @@ In ISA-95 terms a cell is a work center. It is not a "work cell", which the stan
 
 ## What the controls do
 
-- **The filters** are a search on the cell's UUID or name; the lifecycle select (Active by default, or Archived, or All), which shows how many cells each option holds; **Needs attention**; and **Empty**. **Clear filters** appears while any of them is changed.
+- **The filters** are a search on the cell's UUID or name; the lifecycle filter; **Needs attention**; and **Empty**. **Clear filters** appears while any of them is changed.
+- **The lifecycle filter** opens on **Active**. Tick **Archived** as well to see every cell, or untick Active to see only archived ones. Each value shows how many cells it holds.
 - **New Cell** and **Edit Details** open the form. **Cell Name** and **Cell Icon** are what the rest of the dashboard shows. The icon is a picture from a fixed set. It helps tell cells apart on the Site Map and in lists, and does not say what a cell does. If you may not edit a cell, you see **Propose a Change** instead, and an approver decides.
 - **Area** files the cell in an area, or leaves it unfiled. Once you choose an area, **Place on the plan** shows its plan: click to pin the cell where it stands. **Clear place** removes the pin and keeps the cell in the area. An area with no plan shows the default outline. The Site Map shows only cells that have a place.
 - **Place on plan**, in a placed cell's details panel, draws its area's plan with this cell's pin ringed and the other cells small and dimmed. **Expand**, the two arrows in the top-right corner of the plan's card, opens the plan to fill the window, this cell still ringed. Scroll to zoom and drag to move it; Esc closes it.
@@ -22,6 +23,7 @@ In ISA-95 terms a cell is a work center. It is not a "work cell", which the stan
 - **Archive Cell** is greyed out while any device or gateway is in the cell, archived and quarantined ones included. Hover it to see how many. Move each one to another cell, or delete it, then archive the cell.
 - **To move an archived device or gateway**, restore it, move it, then archive it again. Archiving it again starts its retention timer again. Or delete it with **Permanent Delete** on the Archived Entities page.
 - **A quarantined device** is in the Quarantine table on the Devices page, not in its list. Approve it into another place, or reject it, which deletes it.
+- **Suppression windows**, at the foot of the details panel, keep the alerts of every device in the cell quiet during planned work. A device is covered while it is in the cell: move it out and its alerts count again. A device's panel lists its cell's windows too, marked **From cell**. Scheduling, changing and ending a window work as on the Devices page. See [Suppression windows](devices.md#suppression-windows).
 
 ## What the states mean
 

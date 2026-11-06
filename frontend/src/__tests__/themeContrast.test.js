@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { tokenBlocks, themeTokens, resolveColour, over, declaration } from '../test/themeColours'
+import { AUDIT_TRAIL_CLASSES } from '../constants'
 
 /**
  * WCAG contrast guard for the theme tokens. A token that looks right in the theme it was authored
@@ -132,6 +133,10 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger-text on card',           '--danger-text',  card,                                         AA_TEXT],
     ['--danger-text on base',           '--danger-text',  base,                                         AA_TEXT],
     ['--danger-text on --danger-tint',  '--danger-text',  on(paint('.badge-critical'), card),           AA_TEXT],
+    // An acknowledged alert pales: its text still reads, and its edge still marks it out as a shape.
+    ['--danger-text on an acknowledged badge', '--danger-text', on(paint('.badge-acknowledged'), card), AA_TEXT],
+    ['--danger-text on an acknowledged banner', '--danger-text', on(paint('.context-alert-critical.context-alert-acknowledged'), surface), AA_TEXT],
+    ['acknowledged edge on card',       '--danger-soft-border', card,                                   AA_LARGE],
     ['danger badge on hover',           '--danger-text',  on(paint('.badge-critical'), glass(card)),    AA_TEXT],
     // --warning/--success remain the border/icon colours, where 3:1 is the bar.
     ['--warning icon on card',        '--warning',      card,                              AA_LARGE],
@@ -139,6 +144,9 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger as text on card',      '--danger',       card,                              AA_TEXT],
     ['--danger border on card',       '--danger',       card,                              AA_LARGE],
     ['--accent on card',              '--accent',       card,                              AA_LARGE],
+    // The Audit Trail's Read marker, a grey eye on the card, and its badge on the drawer's surface.
+    ['Read marker on card',           '--text-muted',   card,                              AA_LARGE],
+    ['Read badge in the drawer',      '--text-muted',   glass(surface),                    AA_TEXT],
     // A Site Map lane that holds something is filled with its hue. Its counts are --text-primary
     // on the fill, and its chevron, an icon, is --text-muted at the 3:1 an icon needs.
     ['--text-primary on site-wide lane', '--text-primary', on(paint('.site-lane-site'), card),      AA_TEXT],
@@ -213,13 +221,16 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['info bell badge',                '--accent-text',  on(paint('.notif-badge-info', 'background-image'), card),    AA_TEXT],
     ['warning bell badge',             '--warning-text', on(paint('.notif-badge-warning', 'background-image'), card), AA_TEXT],
     ['error bell badge',               '--danger-text',  on(paint('.notif-badge-error', 'background-image'), card),   AA_TEXT],
+    // An unsorted column's double arrow is all that tells a sortable header from a plain one, so
+    // it is an icon at 3:1 on the header's ground, which is --bg-base in every table.
+    ['idle sort arrow',                tokenIn(paint('.sort-arrow-idle', 'color')),             base, AA_LARGE],
     // The notification list: the timestamp is the dimmest text in it.
     ['notification time',              '--text-dim',     card,                              AA_TEXT],
     // A segment's name is text now, not only a tooltip: muted on the card, and the chosen one on
     // its sunken fill. Both the filter and the account menu sit on --bg-card.
     ['segment name',                   tokenIn(paint('.segmented-option', 'color')),            card, AA_TEXT],
     ['chosen segment name',            tokenIn(paint('.segmented-option-checked', 'color')),    on(paint('.segmented-option-checked'), card), AA_TEXT],
-    // The alert counter's link to Grafana's alert history, 11px in its footer.
+    // The alert counter's link to History's Alerts tab, 11px in its footer.
     ['alert history link',             tokenIn(paint('.alert-pill-history', 'color')),          card, AA_TEXT],
     // A message that links somewhere, in a toast and in the bell's list, both on --bg-card.
     ['message link',                   tokenIn(paint('.toast-link', 'color')),                  card, AA_TEXT],
@@ -282,6 +293,35 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     const offline = contrast(rgb(paint('.chip-offline', 'color'), t), on(paint('.chip-offline'), card))
     const online = contrast(rgb(paint('.chip-success', 'color'), t), on(paint('.chip-success'), card))
     expect(offline, `${themeName}: offline ${offline.toFixed(2)}:1, online ${online.toFixed(2)}:1`).toBeLessThan(online)
+  })
+
+  /**
+   * Each Audit Trail marker is a graphic, held at 3:1 (WCAG 1.4.11) in the colour its
+   * `.trail-node-*` rule gives it, against what is behind it. On the track: its card-coloured edge,
+   * and the lane at rest and hovered. In the key: the disc a toggle draws it on, over the toggle's
+   * fill at rest (.btn-ghost) and pressed (.btn-primary).
+   */
+  const markerGrounds = [
+    ['its edge on the track', on(paint('.trail-node-shape', 'stroke'), card)],
+    ['a lane',                card],
+    ['a hovered lane',        on(paint('.trail-lane:not(.trail-axis):hover'), card)],
+    ['a toggle at rest',      on(paint('.trail-legend-disc'), on(paint('.btn-ghost'), card))],
+    ['a pressed toggle',      on(paint('.trail-legend-disc'), on(paint('.btn-primary'), card))],
+  ]
+  it.each(AUDIT_TRAIL_CLASSES.flatMap(kind => markerGrounds.map(([where, ground]) => [kind, where, ground])))(
+    'the %s marker clears 3:1 on %s', (kind, where, ground) => {
+      const colour = paint(`.trail-node-${kind}`, 'color')
+      const ratio = contrast(rgb(colour, t), ground)
+      expect(
+        Number(ratio.toFixed(2)),
+        `the ${kind} marker on ${where} in ${themeName}: ${colour} measured ${ratio.toFixed(2)}:1, needs ${AA_LARGE}:1`
+      ).toBeGreaterThanOrEqual(AA_LARGE)
+    })
+
+  // Why the disc: on a pressed toggle's fill itself, the Operational marker is nearly the fill.
+  it('would lose the Operational marker on a pressed toggle without its disc', () => {
+    const ratio = contrast(rgb(paint('.trail-node-operational', 'color'), t), on(paint('.btn-primary'), card))
+    expect(ratio).toBeLessThan(AA_LARGE)
   })
 })
 
@@ -619,6 +659,66 @@ describe('toast opacity', () => {
       ).not.toMatch(/(^|[;{\s])background\s*:/)
     }
   )
+})
+
+/** OKLCH to sRGB, 0 to 255, or null where the colour falls outside sRGB. */
+const oklchRgb = (l, c, hue) => {
+  const h = (hue * Math.PI) / 180
+  const [a, b] = [c * Math.cos(h), c * Math.sin(h)]
+  const [l_, m_, s_] = [l + 0.3963377774 * a + 0.2158037573 * b, l - 0.1055613458 * a - 0.0638541728 * b, l - 0.0894841775 * a - 1.2914855480 * b]
+    .map(v => v ** 3)
+  const linear = [
+    4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+    -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+    -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_,
+  ]
+  if (linear.some(v => v < -1e-6 || v > 1 + 1e-6)) return null
+  return linear.map(v => Math.max(0, Math.min(1, v))).map(v => 255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055))
+}
+
+describe("a state chart's colour, at every hue its values can hash to", () => {
+  it.each(Object.entries(THEMES))('%s: the box is inside sRGB, its label clears AA on it, and its edge 3:1 on the card', (_, t) => {
+    const num = (k) => Number(t[k])
+    const card = rgb(t['--bg-card'])
+    const label = rgb(t['--text-primary'])
+    let worstLabel = Infinity
+    let worstEdge = Infinity
+    for (let hue = 0; hue < 360; hue++) {
+      const fill = oklchRgb(num('--chart-state-l'), num('--chart-state-c'), hue)
+      const edge = oklchRgb(num('--chart-state-edge-l'), num('--chart-state-edge-c'), hue)
+      expect(fill && edge, `hue ${hue} falls outside sRGB`).toBeTruthy()
+      worstLabel = Math.min(worstLabel, contrast(label, fill))
+      worstEdge = Math.min(worstEdge, contrast(edge, card))
+    }
+    expect(worstLabel).toBeGreaterThanOrEqual(AA_TEXT)
+    expect(worstEdge).toBeGreaterThanOrEqual(AA_LARGE)
+  })
+})
+
+describe("History's Overview shades, fewer readings to more", () => {
+  /*
+   * An ordered (sequential) ramp is read by its order, not by each step on its own: the rule the
+   * dataviz validator holds (`validate_palette.js --ordinal`) is that the steps move one way in
+   * lightness, and that the step nearest the surface clears 2:1 against it, not 3:1 for every step.
+   * A block's count is never in its colour alone: each has a readout in words.
+   */
+  const ORDINAL_FLOOR = 2.0
+  it.each(Object.entries(THEMES))('%s: each step stands further from the card than the last, the nearest at 2:1', (_, t) => {
+    const card = rgb(t['--bg-card'])
+    const steps = [1, 2, 3, 4].map(i => rgb(t[`--coverage-${i}`]))
+    const fromCard = steps.map(s => contrast(s, card))
+    expect(fromCard[0]).toBeGreaterThanOrEqual(ORDINAL_FLOOR)
+    for (let i = 1; i < steps.length; i++) {
+      expect(fromCard[i], `step ${i + 1} against the card`).toBeGreaterThan(fromCard[i - 1])
+    }
+    // Monotone in lightness: darker with the count on a light card, lighter on a dark one.
+    const light = luminance(card) > 0.5
+    const lums = steps.map(luminance)
+    for (let i = 1; i < lums.length; i++) {
+      if (light) expect(lums[i], `step ${i + 1}`).toBeLessThan(lums[i - 1])
+      else expect(lums[i], `step ${i + 1}`).toBeGreaterThan(lums[i - 1])
+    }
+  })
 })
 
 describe('theme token hygiene', () => {

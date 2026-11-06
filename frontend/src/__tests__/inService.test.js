@@ -97,7 +97,12 @@ describe('the devices column summary', () => {
     const old = device({ asset_id: 'd2', asset_name: 'CNC_02', is_archived: true })
     const held = device({ asset_id: 'd3', asset_name: 'Unknown_01', is_quarantined: true })
     const [summary, ...chips] = deviceColumnTags([live, old, held], [live, held])
-    expect(summary).toMatchObject({ priority: true, content: '1 Online / 0 Offline' })
+    // One badge per figure, so the summary wraps between them; one entry, so it counts once.
+    expect(summary).toMatchObject({ priority: true, label: '1 Online / 0 Offline' })
+    expect(summary.parts.map(p => [p.content, p.className])).toEqual([
+      ['1 Online', 'badge badge-sm badge-neutral'],
+      ['0 Offline', 'badge badge-sm badge-neutral'],
+    ])
     expect(chips[0]).toMatchObject({ className: 'badge badge-sm badge-online', title: 'CNC_01 — ONLINE', priority: false })
     expect(chips[1]).toMatchObject({ className: 'badge badge-sm badge-neutral', title: 'CNC_02 — ARCHIVED', content: 'CNC_02 (archived)' })
     expect(chips[2]).toMatchObject({ className: 'badge badge-sm badge-warning', content: 'Unknown_01 (quarantined)', priority: true })

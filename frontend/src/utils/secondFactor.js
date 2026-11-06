@@ -6,6 +6,15 @@
 /** Sign-in methods whose assurance another identity provider gave, as GoTrue names them in `amr`. */
 export const FEDERATED_METHODS = ['oauth', 'sso/saml']
 
+/**
+ * What every refusal by the MFA switch says: require_mfa() in the database, the edge functions'
+ * `details` and the consent step's `msg` (mirror check 60). A toast carrying it links to Profile › MFA.
+ */
+export const MFA_REQUIRED_MESSAGE = 'MFA is required for this. Add an authenticator on Profile › MFA, then try again.'
+
+/** Whether a message is, or contains, the MFA switch's refusal. */
+export const isMfaRequired = (message) => typeof message === 'string' && message.includes(MFA_REQUIRED_MESSAGE)
+
 /** A code from an authenticator app: six digits. Spaces a person types between groups are dropped. */
 export const CODE_LENGTH = 6
 export const normaliseCode = (code) => String(code ?? '').replace(/\s/g, '')

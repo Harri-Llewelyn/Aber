@@ -9,9 +9,13 @@ Sparkplug sessions: it subscribes to the node's NCMD and answers a rebirth reque
 primary host's STATE before each NBIRTH and ends the job when it goes offline, counts only what paho
 accepted, and ends every session with its NDEATH.
 
+It serves one HTTP endpoint, Prometheus `/metrics`, and one series on it: the jobs it ended, by
+outcome (start_metrics_endpoint()).
+
 README.md -> "Playback from the dashboard" and the sections after it hold the reasons.
 """
 
+import collections
 import json
 import os
 import shutil
@@ -24,10 +28,13 @@ import urllib.request
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
+import prometheus_client
+from prometheus_client import CollectorRegistry, Counter, generate_latest
 
 import capture
 import sparkplug_b_pb2
 from logging_config import get_logger
+from metrics import start_metrics_server
 
 # `get_logger`, not `logging.getLogger(__name__)`: this stack configures NAMED loggers with
 # `propagate = False`, so a module logger made the standard-library way has no handler and its INFO
@@ -49,6 +56,11 @@ PROGRESS_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_PROGRESS_INTERVAL_SECONDS"
 # The longest single sleep while a job waits for its next message. request_playback_stop() treats a
 # job silent for a minute as stalled, so this stays far below that.
 SLEEP_SLICE_SECONDS = 1.0
+# The most published messages paho may hold unwritten before the replay waits for its socket. paho
+# puts no limit on QoS 0 (max_queued_messages counts QoS 1 and 2 only), so a replay that outran the
+# broker held all it was ahead by: 21,733 messages, 57 MiB, at the size cap and 4x. About 2.7 KB
+# each, so this holds the queue near 3 MiB however fast the replay is.
+MAX_UNWRITTEN_MESSAGES = 1000
 # How long playback_finish() is retried, with backoff, before the row is left RUNNING for Stop or
 # the next startup sweep to end.
 FINISH_RETRY_SECONDS = float(os.getenv("PLAYBACK_FINISH_RETRY_SECONDS", "300"))
@@ -84,6 +96,27 @@ CREDENTIAL_REPORT_INTERVAL_SECONDS = float(
     os.getenv("PLAYBACK_CREDENTIAL_REPORT_INTERVAL_SECONDS", "30")
 )
 
+# The Prometheus endpoint; 0 disables it. No credential, so it serves the outcome count and nothing
+# else: no job, capture or gateway id.
+PLAYBACK_METRICS_PORT = int(os.getenv("PLAYBACK_METRICS_PORT", "9109"))
+
+# What playback_finish() records a job as, in its order: an error, then a stop, then the rest. The
+# outcome label takes these values only.
+OUTCOMES = ("failed", "cancelled", "completed")
+
+# No `_created` series, as the ingestion daemon's registry has none (registry.py).
+prometheus_client.disable_created_metrics()
+METRICS = CollectorRegistry()
+JOBS = Counter(
+    "aber_playback_jobs_total",
+    "Playback jobs this worker ended, by outcome: failed (an error, including the jobs its startup "
+    "sweep failed after a restart), cancelled (stopped by the operator) or completed. Counted once "
+    "the database has recorded the end. A failure is also listed on the Capture page, and raises "
+    "the Capture or Playback Failed alert for an hour.",
+    ["outcome"], registry=METRICS)
+# Every outcome is present at zero from startup, so rate() sees the first one.
+for _outcome in OUTCOMES:
+    JOBS.labels(outcome=_outcome)
 
 
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
@@ -646,6 +679,8 @@ class _Session:
         self.node_birth = None
         self.device_births = {}
         self.seq = None
+        # Published but not yet written to the socket, oldest first (keep_up()).
+        self.unwritten = collections.deque()
 
     def publish(self, topic, raw, progress):
         _, msg_type, _, device = capture.split_topic(topic)
@@ -660,6 +695,7 @@ class _Session:
         info = self.client.publish(topic, out, qos=0, retain=False)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             raise _JobFailed(_connection_lost(progress.sent))
+        self.unwritten.append(info)
         if msg_type == "NBIRTH":
             self.node_birth = (topic, raw)
             self.device_births.clear()
@@ -701,6 +737,23 @@ class _Session:
             raise _JobFailed(_host_went_offline(self.host, progress.sent))
         if aber.rebirth.is_set():
             self.answer_rebirth(job_id, progress)
+
+    def keep_up(self, job_id, progress):
+        """
+        Wait while more than MAX_UNWRITTEN_MESSAGES are in paho's queue, so the replay goes at the
+        broker's pace once it is ahead and the queue stays bounded. A QoS 0 message reads published
+        once paho has written it. Each wait is a slice, and check() runs after it as between
+        messages, so a lost connection, Stop and a rebirth request are still answered.
+        """
+        unwritten = self.unwritten
+        while unwritten and unwritten[0].is_published():
+            unwritten.popleft()
+        while len(unwritten) > MAX_UNWRITTEN_MESSAGES:
+            unwritten[0].wait_for_publish(SLEEP_SLICE_SECONDS)
+            while unwritten and unwritten[0].is_published():
+                unwritten.popleft()
+            self.check(job_id, progress)
+            progress.report()
 
 
 def _wait_until(target, progress, session, job_id=None):
@@ -883,6 +936,8 @@ def _replay(supabase, open_chunks, job, candidates, outcome):
                 session.publish(topic, payload_bytes, progress)
             progress.sent += 1
             progress.report()
+            if session is not None:
+                session.keep_up(job_id, progress)
     except _Stopped:
         logger.info("Playback %s: stopped by the operator after %d message(s).",
                     job_id, progress.sent)
@@ -1017,6 +1072,28 @@ def _start_heartbeat(holdings):
     return thread
 
 
+def count_outcome(outcome, n=1):
+    """Count `n` jobs ended with `outcome`, one of OUTCOMES."""
+    if outcome not in OUTCOMES:
+        raise ValueError("%r is not a playback outcome; the label takes %s only" % (outcome, OUTCOMES))
+    if n > 0:
+        JOBS.labels(outcome=outcome).inc(n)
+
+
+def render_metrics():
+    """The exposition, for the HTTP handler in metrics.py."""
+    return generate_latest(METRICS).decode("utf-8")
+
+
+def start_metrics_endpoint():
+    """Serve METRICS on PLAYBACK_METRICS_PORT, unless it is 0. A port that cannot be bound is logged
+    and survived (metrics.start_metrics_server())."""
+    if PLAYBACK_METRICS_PORT <= 0:
+        logger.info("Metrics endpoint disabled (PLAYBACK_METRICS_PORT=%s).", PLAYBACK_METRICS_PORT)
+        return None
+    return start_metrics_server(PLAYBACK_METRICS_PORT, render_metrics, logger)
+
+
 def _sweep(supabase):
     """
     Fail the jobs a previous run left in flight. Returns whether the sweep ran. Nothing is claimed
@@ -1030,6 +1107,8 @@ def _sweep(supabase):
                      "retrying every %.0fs.", err, POLL_INTERVAL_SECONDS)
         return False
     if swept:
+        # Failed by this sweep, and counted here: the run that left them cannot.
+        count_outcome("failed", swept)
         logger.warning("%d playback job(s) were left in flight by a previous run and have been "
                        "failed. Whatever they had published is already in the historian.", swept)
     return True
@@ -1081,6 +1160,7 @@ def main():
         )
         raise SystemExit(1)
 
+    start_metrics_endpoint()
     supabase = _supabase()
     storage = _storage()
     holdings = _Holdings()
@@ -1145,11 +1225,14 @@ def main():
             continue
 
         if error:
+            count_outcome("failed")
             logger.warning("Playback %s failed after %d message(s): %s", job["id"], sent, error)
         elif outcome.get("stopped"):
+            count_outcome("cancelled")
             logger.info("Playback %s stopped by the operator: %d message(s) published as %s.",
                         job["id"], sent, job["target_edge_node_id"])
         else:
+            count_outcome("completed")
             logger.info("Playback %s complete: %d message(s) published as %s.",
                         job["id"], sent, job["target_edge_node_id"])
 

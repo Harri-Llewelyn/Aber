@@ -17,8 +17,13 @@ THE GAP NEEDS A WATERMARK PAST THE REPLAY. The rollups are real-time: a bucket a
 watermark is read from raw. On a fresh historian nothing has been materialised, the watermark is
 -infinity, and a late reading shows at once. So each test first materialises an anchor reading two
 hours old, which moves every watermark past the replayed hour, as a running site's policies have.
+
+THE ANCHOR'S HOUR IS THE POLICIES' TOO. They refresh the last 25 hours on their own schedule, and
+TimescaleDB refuses a refresh that overlaps one in progress instead of waiting for it. So refresh()
+retries that refusal for up to a minute before it fails.
 """
 import os
+import time
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -35,6 +40,9 @@ WRITER_PASSWORD = os.getenv("INGEST_WRITER_PASSWORD", "")
 
 ROLLUPS = ("telemetry_1m", "telemetry_5m", "telemetry_1h")
 METRIC = "_late_replay_probe"
+# How long refresh() waits out a concurrent refresh of the same window, and how often it asks again.
+REFRESH_WAIT = timedelta(seconds=60)
+REFRESH_RETRY_EVERY = 1.0
 
 
 def connect(user, password):
@@ -71,6 +79,22 @@ class RollupRefreshTestCase(unittest.TestCase):
     def query(self, sql, *args):
         return self.query_cls(sql, *args)
 
+    def refresh(self, view, start):
+        """Refreshes the hour from start in view, waiting out a policy's refresh of the same window."""
+        end = start + timedelta(hours=1)
+        deadline = time.monotonic() + REFRESH_WAIT.total_seconds()
+        while True:
+            try:
+                self.query("CALL refresh_continuous_aggregate(%s, %s, %s)", view, start, end)
+                return
+            except psycopg2.errors.LockNotAvailable as refused:
+                # The connection is autocommit, so the refused CALL leaves no transaction to roll back.
+                if time.monotonic() >= deadline:
+                    raise AssertionError(
+                        f"{view} could not refresh [{start.isoformat()}, {end.isoformat()}): a concurrent "
+                        f"refresh held it for {REFRESH_WAIT.total_seconds():.0f} s. {refused}") from refused
+                time.sleep(REFRESH_RETRY_EVERY)
+
     def setUp(self):
         self.asset = "test-late-replay-" + uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc)
@@ -86,16 +110,18 @@ class RollupRefreshTestCase(unittest.TestCase):
         self.query("INSERT INTO telemetry (time, asset_id, metric_name, val_double) VALUES (%s, %s, %s, 1.0)",
                    self.anchor + timedelta(minutes=30), self.asset, METRIC)
         for view in ROLLUPS:
-            self.query("CALL refresh_continuous_aggregate(%s, %s, %s)",
-                       view, self.anchor, self.anchor + timedelta(hours=1))
+            self.refresh(view, self.anchor)
         # The watermark is read through TimescaleDB's internal functions: no public view reports it.
+        # Only these rollups': one never refreshed (a device rollup, before its backfill) reports the
+        # earliest timestamp, 4714 BC, which psycopg2 cannot turn into a datetime.
         marks = dict(self.query(
             "SELECT c.view_name::text, _timescaledb_functions.to_timestamp("
             "         _timescaledb_functions.cagg_watermark(h.id)) "
             "  FROM timescaledb_information.continuous_aggregates c "
             "  JOIN _timescaledb_catalog.hypertable h "
             "    ON h.schema_name = c.materialization_hypertable_schema "
-            "   AND h.table_name = c.materialization_hypertable_name"))
+            "   AND h.table_name = c.materialization_hypertable_name "
+            " WHERE c.view_name::text = ANY(%s)", list(ROLLUPS)))
         for view in ROLLUPS:
             self.assertGreater(marks[view], self.end,
                                f"{view}'s watermark did not pass the replayed hour")
@@ -107,8 +133,7 @@ class RollupRefreshTestCase(unittest.TestCase):
         # The deletion invalidates both hours; refreshing them removes the probe's buckets.
         for start in (self.start, self.anchor):
             for view in ROLLUPS:
-                self.query("CALL refresh_continuous_aggregate(%s, %s, %s)",
-                           view, start, start + timedelta(hours=1))
+                self.refresh(view, start)
         self.query("DELETE FROM assets WHERE asset_id = %s", self.asset)
 
     def write_replay(self, conn):

@@ -25,7 +25,9 @@ import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
 import { Badge } from '../common/Badge'
 import { TabStrip } from '../common/TabStrip'
-import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import { applyFacets } from '../../utils/listFilters'
 import { CAPTURE_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { SearchInput } from '../common/SearchInput'
@@ -64,6 +66,17 @@ const SUBJECT_FILTERS = ['stored', 'search']
  * Shopfloor_Manager and Auditor, writes for the first two.
  */
 
+/**
+ * The Capture filter's two values; both, like neither, is every subject. A link from before reads
+ * `stored=all` as neither.
+ */
+const STORED_OPTIONS = [
+  { value: 'with', label: 'With a capture' },
+  { value: 'without', label: 'Without a capture' },
+]
+const NONE = Object.freeze([])
+const STORED_ALIASES = Object.freeze({ all: NONE })
+
 /** Where a capture or a recording job is about: its subject, with its captures open. */
 const subjectUrlOf = (record) =>
   captureSubjectUrl(record.subject_kind, record.subject_kind === 'device' ? record.device_id : record.gateway_id)
@@ -96,8 +109,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const [dragging, setDragging] = useState(false)
   const [busyId, setBusyId] = useState(null)
 
-  const [storedFilter, setStoredFilter] = useUrlState('stored', 'all', { allowed: ['all', 'with', 'without'] })
-  const [gatewayFilter, setGatewayFilter] = useUrlState('gateway', '', { allowed: loading ? null : gateways.map(g => g.id) })
+  const [storedFilter, setStoredFilter] = useUrlList('stored', NONE, { allowed: ['with', 'without'], aliases: STORED_ALIASES })
+  const [gatewayFilter, setGatewayFilter] = useUrlList('gateway', NONE, { allowed: loading ? null : gateways.map(g => g.id) })
   const [search, setSearch] = useUrlState('search')
   const [draggingPlay, setDraggingPlay] = useState(false)
   // Set when a file comes in through "Play a file…" or a drop on the card: once it has been stored,
@@ -251,28 +264,26 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }))
   }, [subjectKind, gateways, devices, captureBySubject, gatewayName, gatewayById])
 
-  const matchingRows = useMemo(() => {
+  // Each list filter is any of its values, and the two combine with AND; each value's count is over
+  // what the other filter and the search let through. The gateway filter is the Devices tab's alone.
+  const { rows: matchingRows, counts: facetCounts } = useMemo(() => {
     const needle = search.trim().toLowerCase()
-    return allRows.filter(row => {
-      if (storedFilter === 'with' && !row.capture) return false
-      if (storedFilter === 'without' && row.capture) return false
-      if (gatewayFilter && row.gatewayId !== gatewayFilter) return false
-      if (!needle) return true
-      return row.name.toLowerCase().includes(needle)
-        || (row.sparkplugId || '').toLowerCase().includes(needle)
-    })
-  }, [allRows, storedFilter, gatewayFilter, search])
+    return applyFacets(allRows, [
+      { key: 'stored', chosen: storedFilter, values: row => [row.capture ? 'with' : 'without'] },
+      { key: 'gateway', chosen: subjectKind === 'device' ? gatewayFilter : NONE, values: row => [row.gatewayId] },
+    ], row => !needle || row.name.toLowerCase().includes(needle)
+      || (row.sparkplugId || '').toLowerCase().includes(needle))
+  }, [allRows, storedFilter, gatewayFilter, search, subjectKind])
   const [rows, sort] = useSortableRows(matchingRows, subjectKind === 'device' ? DEVICE_SORT : GATEWAY_SORT)
 
   // A filter counts only on a tab that shows it -- otherwise switching tabs with one set would show
   // "Clear filters (1)" for a control that is not on screen. The gateway filter is on Devices only.
   const activeFilterCount = !subjectKind ? 0 : (
-    (storedFilter !== 'all' ? 1 : 0)
+    (storedFilter.length ? 1 : 0)
     + (search.trim() ? 1 : 0)
-    + (subjectKind === 'device' && gatewayFilter ? 1 : 0)
+    + (subjectKind === 'device' && gatewayFilter.length ? 1 : 0)
   )
-  const clearFilters = () => { setStoredFilter('all'); setSearch(''); setGatewayFilter('') }
-  const withCapture = allRows.filter(r => r.capture).length
+  const clearFilters = () => { setStoredFilter([]); setSearch(''); setGatewayFilter([]) }
 
   /** Every subject the upload dialog can file a capture against, both tabs at once. */
   const allSubjects = useMemo(() => ([
@@ -344,13 +355,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }
   })
 
-  const onDownload = async (capture) => {
+  const onDownload = async (capture, subject) => {
     setBusyId(capture.id)
     try {
       const url = await api.captureUrl(capture.storage_path)
       // A signed URL in a new tab rather than a fetch-and-blob: the bucket is private, the link is
       // short-lived, and the browser's own download handling is what an operator expects.
       window.open(url, '_blank', 'noopener')
+      showToast(`Downloading the capture of ${subject.name}…`, 'success')
     } catch (err) {
       showToast(err.message, 'error')
     } finally {
@@ -358,15 +370,15 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }
   }
 
+  // Run from Delete capture's dialog, which shows a refusal and stays open. Read again either way.
   const onDelete = async () => {
     try {
       await api.deleteCapture(deleteFor)
+      setDeleteFor(null)
       showToast('Capture deleted.', 'success')
-    } catch (err) {
-      showToast(err.message, 'error')
+    } finally {
+      await refreshAll()
     }
-    setDeleteFor(null)
-    await refreshAll()
   }
 
   const onFilePicked = (event) => {
@@ -510,33 +522,31 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   ariaLabel="Search subjects"
                 />
 
-                <select
-                  className="form-control control-md"
+                <FilterDropdown
+                  label="Capture"
+                  noun="subject"
+                  plural="choices"
+                  options={STORED_OPTIONS}
                   value={storedFilter}
-                  onChange={e => setStoredFilter(e.target.value)}
-                  aria-label="Stored capture filter"
-                >
-                  <option value="all">All subjects ({allRows.length})</option>
-                  <option value="with">With a capture ({withCapture})</option>
-                  <option value="without">Without a capture ({allRows.length - withCapture})</option>
-                </select>
+                  onChange={setStoredFilter}
+                  counts={facetCounts.stored}
+                  everyIsAny
+                  width="md"
+                />
 
                 {/* Only on the Devices tab, where a device's gateway is how the four devices behind
                     one machine are found. */}
                 {subjectKind === 'device' && (
-                  <select
-                    className="form-control control-lg"
+                  <FilterDropdown
+                    label="Gateway"
+                    noun="gateway"
+                    plural="gateways"
+                    options={gateways.map(g => ({ value: g.id, label: g.name }))}
                     value={gatewayFilter}
-                    onChange={e => setGatewayFilter(e.target.value)}
-                    aria-label="Gateway filter"
-                  >
-                    <option value="">All gateways</option>
-                    {gateways.map(g => (
-                      <option key={g.id} value={g.id}>
-                        {g.name} ({devices.filter(d => d.gateway_id === g.id).length})
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setGatewayFilter}
+                    counts={facetCounts.gateway}
+                    width="lg"
+                  />
                 )}
               </>
             )}
@@ -851,7 +861,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             pending: busyId === capture.id,
             pendingLabel: 'Preparing…',
             title: 'Download the capture file',
-            onClick: () => onDownload(capture)
+            onClick: () => onDownload(capture, selected)
           },
           capture && {
             label: 'Delete capture',
@@ -943,9 +953,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       {playFor && (
         <StartPlaybackModal
           capture={playFor}
+          subjectName={subjectName(playFor.subject_sparkplug_id) || playFor.subject_sparkplug_id}
           knownDeviceIds={knownDeviceIds}
           onConfirm={onPlay}
           onCancel={() => setPlayFor(null)}
+          showToast={showToast}
         />
       )}
 

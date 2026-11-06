@@ -23,7 +23,7 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Sign Out of All Other Sessions**, on the **Sessions** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens. Select **Sign Out of All Other Sessions** in the dialog to end them.
 - **MFA** (multi-factor authentication) lists the authenticator apps you have added. **Add Authenticator** adds one, and **Remove** on a row removes it. **Your MFA**, below, says how, and what it changes when you sign in.
 - **Allowed Apps** lists each app you let sign you in, such as Grafana. **Revoke** on a row takes that back. **Apps you have allowed**, below, says what it does.
-- **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of Studio and the forge, in every browser. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Sessions** tab.
+- **Sign Out**, in the account menu, signs you out of the dashboard in this browser. Your other browsers stay signed in, and so do Grafana and Node-RED, which keep their own sign-in. It also signs you out of the forge in every browser, and of Studio where your site runs it. Where the dashboard is still signed in, they sign you in again by themselves. To sign out everywhere else, use **Sign Out of All Other Sessions** on the **Sessions** tab.
 - **A browser you do not use for 7 days** asks you to sign in again. An open dashboard keeps itself signed in, so a wall display stays open. The site can set another time, or none.
 
 ## Calling the API as yourself
@@ -43,7 +43,7 @@ What the token can do:
 - Signing out of this browser ends it.
 - The dashboard renews its own token before it runs out. It does not renew the copy you made.
 
-A tool that needs a token that lasts longer, such as a script or a service, should not use yours. It uses a machine identity's token instead. A machine identity is an account for software, not a person. An Administrator issues its token on the **Access Control** page.
+A tool that needs a token that lasts longer, such as a script or a service, should not use yours. It uses a machine identity's token instead. A machine identity is an account for software, not a person. Its token works on the API, the i3X server, the AAS API and the Factory+ Directory. An Administrator issues its token on the **Access Control** page.
 
 ## Where your choices are kept
 
@@ -88,7 +88,7 @@ Your picture shows at a glance whose session is open. That helps on a shared PC,
 
 ## Your sessions
 
-A session is one sign-in. Each browser you sign in on has its own. So do Grafana, Node-RED, Studio and the forge, and any program that signs in as you.
+A session is one sign-in. Each browser you sign in on has its own. So do Grafana, Node-RED and the forge, Studio where your site runs it, and any program that signs in as you.
 
 The **Sessions** tab lists your sessions and nobody else's. The one you are using comes first, marked **This browser**. The rest follow, the most recently used first.
 
@@ -111,7 +111,11 @@ What ending a session does:
 
 MFA (multi-factor authentication) asks for a code from an authenticator app on your phone. With an authenticator added, signing in asks for the code after your password. Someone who learns your password then cannot sign in without your phone. Any app that shows 6-digit codes works.
 
-Every role can set up MFA. Nothing on this site requires it yet.
+Every role can set up MFA. An Administrator can make it required on the **Settings** page, under **Security**.
+
+While it is required, Administrators and Shopfloor Managers need it to change the platform. That covers saving a change, deciding an approval, issuing a credential and every change on People. It covers signing in to Node-RED, Studio and the forge too. Without an authenticator you can still read everything, and Grafana still signs you in. A change you try is refused, with a link to this tab. Add an authenticator, and try again.
+
+Operators and Auditors are never asked for it.
 
 To add one:
 
@@ -134,11 +138,11 @@ What happens when you sign in:
 - **A password reset link** asks for your code before you choose the new password.
 - **If you remove the app you signed in with** and have another, the dashboard asks for a code from the other one.
 
-**If you lose your phone**, ask an Administrator to select **Reset MFA** in your drawer on **Access Control › People**. Your password alone then signs you in, and you can add a new authenticator here.
+**If you lose your phone**, ask an Administrator to select **Reset MFA** in your drawer on **Access Control › People**. Your password alone then signs you in, and you can add a new authenticator here. While MFA is required, add one before you change anything.
 
 ## Apps you have allowed
 
-Some apps sign you in with your Aber account: Grafana, Node-RED, Studio and the forge. The first time one does, it asks you to allow it. You answer once, and it remembers.
+Some apps sign you in with your Aber account: Grafana, Node-RED and the forge, and Studio where your site runs it. The first time one does, it asks you to allow it. You answer once, and it remembers.
 
 The **Allowed Apps** tab lists the apps you have allowed, and nobody else's. The newest comes first.
 

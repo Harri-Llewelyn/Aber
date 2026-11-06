@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
-import { IconLock, IconTag, IconCheck } from '../common/Icons'
+import { IconAlertTriangle, IconLock, IconTag, IconCheck } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { HelpTip } from '../common/HelpTip'
 import { Modal } from '../common/Modal'
@@ -303,15 +303,16 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
               })}
             </div>
 
+            {/* Each holds Save, so each is said as a problem, under the grid. */}
             {!yearIsValid && (
-              <div className="form-hint hint-warning">
-                Year of construction must be four digits. IDTA types it as a string, so a range or a
+              <div className="form-hint hint-danger">
+                <IconAlertTriangle size={12} /> Year of construction must be four digits. IDTA types it as a string, so a range or a
                 week code would be legitimate on a plate — but the column accepts only a year.
               </div>
             )}
             {!uriIsValid && (
-              <div className="form-hint hint-warning">
-                Product URI must be an absolute IRI, including its scheme — <span className="mono">https://…</span>
+              <div className="form-hint hint-danger">
+                <IconAlertTriangle size={12} /> Product URI must be an absolute IRI, including its scheme — <span className="mono">https://…</span>
               </div>
             )}
           </>

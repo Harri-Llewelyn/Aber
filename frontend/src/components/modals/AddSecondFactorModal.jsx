@@ -3,8 +3,9 @@ import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { IconScan } from '../common/Icons'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import {
-  CODE_LENGTH, groupedSecret, isCode, nextFactorName, normaliseCode, qrImageSource,
+  CODE_LENGTH, groupedSecret, isCode, nextFactorName, qrImageSource,
 } from '../../utils/secondFactor'
 
 /**
@@ -19,6 +20,9 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
   // GoTrue's enrolment once it exists: { id, friendly_name, qr_code, secret }.
   const [enrolment, setEnrolment] = useState(null)
   const [code, setCode] = useState('')
+  // The code step's own first edit: the name typed at the first step does not count for it, and a
+  // refusal clears it with the code, so the refusal is not joined by a prompt for a new code.
+  const [codeEdited, setCodeEdited] = useState(false)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const nameRef = useRef(null)
@@ -27,6 +31,10 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
   const trimmed = name.trim()
   const taken = factors.some(f => (f.friendly_name || '').trim().toLowerCase() === trimmed.toLowerCase())
   const nameProblem = !trimmed ? null : taken ? 'You already have an authenticator with that name.' : null
+  // Why the step's confirm is off, where its field does not say so already.
+  const problem = enrolment
+    ? (isCode(code) ? null : `Enter the ${CODE_LENGTH}-digit code your app shows`)
+    : (trimmed ? null : 'Give it a name')
 
   // The second step's field, once it is drawn: initialFocus is read only as the dialog opens.
   useEffect(() => { if (enrolment) codeRef.current?.focus() }, [enrolment])
@@ -44,10 +52,7 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
   }, [trimmed])
 
   const confirm = useCallback(async () => {
-    if (!isCode(code)) {
-      setError(`Enter the ${CODE_LENGTH}-digit code your app shows.`)
-      return
-    }
+    if (!isCode(code)) return
     setBusy(true)
     setError(null)
     try {
@@ -57,6 +62,7 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
     } catch (err) {
       setError(err.message)
       setCode('')
+      setCodeEdited(false)
       setBusy(false)
       codeRef.current?.focus()
     }
@@ -79,6 +85,8 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
         ? 'Scan the QR code with your authenticator app, or type the key into it. Then enter the 6-digit code the app shows.'
         : 'Use an authenticator app on your phone: any app that shows 6-digit codes. After this, signing in asks for its code after your password. Adding it signs you out of your other browsers and services, such as Grafana and Node-RED. This browser stays signed in.'}
       initialFocus={nameRef}
+      problem={problem}
+      touched={enrolment ? codeEdited : undefined}
       error={error}
       footer={(
         <>
@@ -89,8 +97,8 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
               pendingLabel="Checking…"
               className="btn btn-primary"
               onClick={confirm}
-              disabled={!normaliseCode(code)}
-              title={normaliseCode(code) ? undefined : 'Enter the code your app shows first'}
+              disabled={problem !== null}
+              title={problem ?? undefined}
             >
               Add Authenticator
             </ActionButton>
@@ -100,8 +108,8 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
               pendingLabel="Starting…"
               className="btn btn-primary"
               onClick={start}
-              disabled={!trimmed || !!nameProblem}
-              title={!trimmed ? 'Give it a name first' : nameProblem || undefined}
+              disabled={problem !== null || !!nameProblem}
+              title={problem || nameProblem || undefined}
             >
               Continue
             </ActionButton>
@@ -120,14 +128,15 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
             <div className="form-hint">Choose a time-based key if your app asks. The spaces do not matter.</div>
           </div>
           <div className="form-group">
-            <label className="form-label" htmlFor="second-factor-new-code">Code</label>
+            <label className="form-label" htmlFor="second-factor-new-code">Code <RequiredMark /></label>
             <input
               ref={codeRef}
               id="second-factor-new-code"
               className="form-control mono second-factor-code"
               value={code}
-              onChange={e => { setCode(e.target.value); setError(null) }}
+              onChange={e => { setCode(e.target.value); setCodeEdited(true); setError(null) }}
               onKeyDown={e => { if (e.key === 'Enter' && !busy) confirm() }}
+              aria-required="true"
               inputMode="numeric"
               autoComplete="one-time-code"
               maxLength={CODE_LENGTH + 2}
@@ -141,7 +150,7 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
         </>
       ) : (
         <div className="form-group">
-          <label className="form-label" htmlFor="second-factor-name">Name</label>
+          <label className="form-label" htmlFor="second-factor-name">Name <RequiredMark /></label>
           <input
             ref={nameRef}
             id="second-factor-name"
@@ -149,6 +158,7 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
             value={name}
             onChange={e => { setName(e.target.value); setError(null) }}
             onKeyDown={e => { if (e.key === 'Enter' && trimmed && !nameProblem && !busy) start() }}
+            aria-required="true"
             maxLength={60}
             autoComplete="off"
             disabled={busy}

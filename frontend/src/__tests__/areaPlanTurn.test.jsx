@@ -7,13 +7,14 @@ import { CellPlacementPicker } from '../components/common/CellPlacementPicker'
 import { PlanViewer } from '../components/common/PlanViewer'
 import { api } from '../api'
 import { tooltipOf } from '../test/tooltips'
+import { areaUrl } from '../routes'
 
 /**
  * A plan turned on screen (plan_rotation). The image turns about the frame's centre; the pins stay
  * upright and are placed where the turn puts their place; a click is turned back into the drawing
  * as uploaded; and the expanded viewer fits the turned frame. The panel's Turn left and Turn right
- * turn a draft the preview draws, and Save Turn writes it once and reloads. jsdom lays nothing out,
- * so the boxes are given sizes here.
+ * turn a draft the preview draws, and Save Turn writes it once, says so and reloads. jsdom lays
+ * nothing out, so the boxes are given sizes here.
  */
 
 vi.mock('../api', async () => {
@@ -258,6 +259,24 @@ describe('Turn left and Turn right', () => {
     expect(drawn()).toBe(0)
   })
 
+  it('say what Save Turn saved, once, naming the area and linking to it', async () => {
+    api.setAreaPlanRotation.mockResolvedValue({})
+    const showToast = vi.fn()
+    const { unmount } = panel({ showToast })
+    press('Turn right')
+    await act(async () => { press('Save Turn') })
+    expect(showToast).toHaveBeenCalledTimes(1)
+    expect(showToast).toHaveBeenCalledWith('Plan of Assembly Hall turned 180° clockwise', 'success', { to: areaUrl('a') })
+    unmount()
+
+    // Back to the drawing as uploaded, which is no turn at all.
+    showToast.mockClear()
+    panel({ showToast })
+    press('Turn left')
+    await act(async () => { press('Save Turn') })
+    expect(showToast).toHaveBeenCalledWith('Plan of Assembly Hall turned back to how it was drawn', 'success', { to: areaUrl('a') })
+  })
+
   it('offer nothing to save once the turns come back to the saved one', () => {
     panel()
     press('Turn left')
@@ -325,6 +344,7 @@ describe('Turn left and Turn right', () => {
     press('Turn left')
     await act(async () => { press('Save Turn') })
     expect(showToast).toHaveBeenCalledWith('You do not have permission to change this area.', 'error')
+    expect(showToast).toHaveBeenCalledTimes(1)
     expect(onChanged).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Save Turn' })).toBeEnabled()
     expect(drawn()).toBe(0)

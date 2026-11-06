@@ -12,7 +12,8 @@ import { personUrl } from '../routes'
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: {
     listPeople: vi.fn(),
     personSessionSummary: vi.fn(),
@@ -118,13 +119,13 @@ describe('Reset MFA', () => {
       'operator@site.test had no MFA to reset', 'success', { to: personUrl(OPERATOR) }))
   })
 
-  it('shows a refusal as an error', async () => {
+  it('shows a refusal in the dialog', async () => {
     api.resetPersonMfa.mockRejectedValue(new Error('insufficient privileges to reset a person\'s second factor'))
     const toast = renderPeople()
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Reset MFA' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Reset MFA' }))
-    await waitFor(() => expect(toast).toHaveBeenCalledWith(
-      'insufficient privileges to reset a person\'s second factor', 'error'))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('insufficient privileges to reset a person\'s second factor')
+    expect(toast).not.toHaveBeenCalledWith(expect.anything(), 'error')
   })
 
   it('is greyed out in your own drawer, pointing at Profile', async () => {

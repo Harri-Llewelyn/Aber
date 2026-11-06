@@ -50,7 +50,9 @@ worth adopting:
 tables, and it is why i3X costs a read-side adapter where AAS cost an exporter plus a metamodel.
 
 AAS and i3X are kept side by side because they are different artefacts, not rival formats: **an AAS
-shell is a document handed over** (a snapshot, self-contained), **i3X is a live endpoint queried**.
+shell describes one asset**, as a document handed over (a snapshot, self-contained) or read live
+from `aas-api`; **i3X is an address space queried** for values and their changes, across every
+asset.
 
 ## Why it is a separate long-lived service
 
@@ -587,14 +589,25 @@ the Sparkplug/NCMD command path, where they are audited.
 this server's address and a setup for i3X Explorer, an MCP client and curl, with the token already
 in each. What follows is for a token from a script, or a client the dialog has no setup for.
 
-Two rules decide whether any i3X client works against this server, and both fail in ways that
-do not name the cause. The addresses below are the dev cluster's, with `npm run dev:forward`
-running: the API on `http://127.0.0.1:54321` and i3X on `http://localhost:8090/v1`. On a
-deployment they are `https://api.<domain>` and `https://i3x.<domain>/v1`.
+Three rules decide whether any i3X client works against this server, and each fails in a way that
+does not name the cause. On a deployment the addresses are `https://api.<domain>` and
+`https://i3x.<domain>/v1`. The dev cluster gives i3X two:
+
+| Address | Needs | Who can use it |
+| :--- | :--- | :--- |
+| `http://i3x.localhost/v1` | nothing: the Ingress on port 80 | browsers, i3X Explorer's desktop build, `curl` (`curl.exe` in PowerShell) |
+| `http://localhost:8090/v1` | `npm run dev:forward` running | every client, Node and Python included |
+
+Browsers, Electron and `curl` resolve `*.localhost` themselves. Node and Python ask the system's
+resolver, which answers it only on some machines: systemd-resolved does, and on Windows it depends
+on the network's DNS server. Where nothing answers, they fail with `ENOTFOUND` or
+`getaddrinfo failed`. So the MCP server and the conformance suite, both Node, take the forward,
+which works everywhere. The API has the same pair: `http://api.localhost`, or
+`http://127.0.0.1:54321` through the forward.
 
 **1. The base URL includes `/v1`.** Clients are given a base URL and append the spec's paths to
 it; this server answers **404 for anything outside `/v1`**, including `/info`. A client pointed
-at `http://localhost:8090` fails its version probe and quietly decides the server is pre-1.0,
+at `http://i3x.localhost` fails its version probe and quietly decides the server is pre-1.0,
 after which nothing it sends is in the right shape.
 
 **2. The token is an access token, not the publishable key.** Use your own, from **Profile → Copy
@@ -605,7 +618,7 @@ required` — because it stands for `anon`. A script with no dashboard gets one 
 grant:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
+curl -s -X POST "http://api.localhost/auth/v1/token?grant_type=password" \
   -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "Content-Type: application/json" \
   -d '{"email":"<email>","password":"<password>"}' \
   | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
@@ -622,6 +635,12 @@ first sign.
 Issue it on Access Control and copy the setup the dialog gives, or mint one from a shell.
 [The token](#the-token) says how.
 
+**3. "Failed to connect" means nothing answered at that address.** A refused connection, or a
+client saying it failed to connect to the server, is neither a token nor a `/v1` problem: no
+server is listening there. On the dev cluster it usually means the address is the forward,
+`localhost:8090`, and `npm run dev:forward` isn't running. Use `http://i3x.localhost/v1`, or start
+the forward.
+
 ### i3X Explorer
 
 [`ace-technologies-inc/i3X-Explorer`](https://github.com/ace-technologies-inc/i3X-Explorer) is a
@@ -629,9 +648,11 @@ generic browse client for any i3X server, and the practical way to eyeball the a
 
 | Field | Value |
 | :--- | :--- |
-| Server URL | `http://localhost:8090/v1` |
+| Server URL | `http://i3x.localhost/v1` on the dev cluster, `https://i3x.<domain>/v1` on a site |
 | Authentication | `Bearer Token` |
 | Token | the Read-only API client's token, or the `access_token` above |
+
+`http://localhost:8090/v1` works too while `npm run dev:forward` runs.
 
 **The desktop build works as it is.** Its Electron shell sets `webSecurity: false` to reach any i3X
 server, so it sends no CORS preflight. **The browser build needs its origin allowed.**
@@ -645,7 +666,8 @@ A page on another origin can call this server when that origin is on its allow-l
 passes the list the gateway uses, `aber.corsOrigins`, as `I3X_CORS_ORIGINS`: the dashboard's and
 Swagger UI's origins, plus `global.corsExtraOrigins`. There is no second list to keep in step. So
 Swagger UI's "Try it out" works against i3X, and so would a dashboard page that called it. The
-spec offers two servers: the dev forward, and a site's i3X URL, which you type in.
+spec offers three servers: the dev cluster's Ingress, the dev forward, and a site's i3X URL, which
+you type in.
 
 - **Only an exact match is answered.** The response then carries `Access-Control-Allow-Origin` with
   that origin, never `*`, because requests carry a bearer token. Every response carries
@@ -707,6 +729,10 @@ that "whatever is newest" is not a safe default.
 
 **`I3X_BASE_URL` must include `/v1`.** The client does not append it. Without it, `connect` fails in
 a way that looks like the server being down.
+
+**On the dev cluster, `npm run dev:forward` must be running.** The client runs on Node, which may
+not resolve `i3x.localhost` (see [Connecting a client](#connecting-a-client)), so `I3X_BASE_URL` is
+the forward. On a site it is `https://i3x.<domain>/v1`.
 
 `I3X_AUTH_SCHEME` is case-insensitive — `bearer` and `Bearer` both work. `none` is the default, and
 is what an omitted scheme gets you; see the troubleshooting note below for why that failure is not
@@ -836,10 +862,13 @@ consults; withdrawing the principal refuses every token that names it. What that
 - **This server** refuses it within 15 seconds, because it authenticates every request but
   `GET /info` through PostgREST ([Security](#security)). An open stream ends at its next
   15-second keepalive.
-- **Storage, Realtime and the edge runtime do not.** They check only the signature, and accept a
-  revoked token until it expires.
+- **`aas-api` and the Factory+ Directory** refuse it on its next request. Each checks its caller
+  with one PostgREST call made as the caller, as this server does, and keeps no cache.
+- **Storage and Realtime do not.** They check only the signature, and accept a revoked token until
+  it expires. The other edge functions check a caller with GoTrue, which refuses every machine
+  identity's token, revoked or not.
 
-So the expiry still bounds those three, which is why `--days` is a real decision: a token revoked
+So the expiry still bounds those two, which is why `--days` is a real decision: a token revoked
 after a laptop left the building still reaches them until it expires. **Do not rotate the signing
 key to withdraw one token**: that invalidates every token in the stack, including the stack's own
 keys. No service accepts an HS256 token from 1.8.0, so one a site issued while it signed HS256 is
@@ -870,6 +899,7 @@ Three suites, and none substitutes for another.
 
 ```bash
 # The arbiter: CESMII's own 60 tests. CI runs this against the k3d stack over a port-forward.
+# It runs on Node, which may not resolve i3x.localhost, so locally it takes `npm run dev:forward` too.
 git clone https://github.com/cesmii/i3X.git && git -C i3X checkout 3eae7ea4 && cd i3X/conformance-tests
 node bin/i3x-test.js run http://localhost:8090/v1 --token "$TOKEN"
 
@@ -923,7 +953,7 @@ with the Directory's:
 | 12v | an area counts its cells and devices, as the Directory does, with no components (#496) |
 | 12w | history is a metric's scalars, or a device's maps naming its metrics (#500) |
 | 12x | a device's map carries forward a value set before the window (#500) |
-| 12y | a series cut by `limit` is a 206 naming where to resume; malformed windows are 400s (#500, #501) |
+| 12y | the historian holds a metric's two samples as two rows; `limit` 1 cuts at the older one's stored instant with a 206, and resuming there returns it; malformed windows are 400s (#500, #501) |
 | 12z | archiving a subscribed device withdraws it once, with a 206 (#518); runs last and restores it |
 
 12a–12f are older: read-only, fail-closed, a single root, live values, and values scoped by RLS.

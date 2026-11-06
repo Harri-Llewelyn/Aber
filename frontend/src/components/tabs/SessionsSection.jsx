@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
+import { studioEnabled } from '../../config'
 import { EmptyState } from '../common/EmptyState'
-import { HelpTip } from '../common/HelpTip'
 import { IconLogOut, IconShieldAlert } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { SessionsTable } from '../common/SessionsTable'
@@ -42,15 +42,14 @@ export function SessionsSection({ isPerson = true, showToast }) {
 
   useEffect(() => { if (isPerson) load() }, [isPerson, load])
 
+  // Both run from a dialog, which shows a refusal and stays open. Read again either way.
   const end = async () => {
     const session = confirmingEnd
     try {
       await api.endMySession(session.id)
-      showToast?.(`Session ended: ${sessionLabel(session)}.`, 'success', { to: SESSIONS_URL })
-    } catch (err) {
-      showToast?.(err.message, 'error')
-    } finally {
       setConfirmingEnd(null)
+      showToast?.(`Session ended: ${sessionLabel(session)}.`, 'success', { to: SESSIONS_URL })
+    } finally {
       await load()
     }
   }
@@ -58,15 +57,13 @@ export function SessionsSection({ isPerson = true, showToast }) {
   const endOthers = async () => {
     try {
       const ended = await api.signOutOtherSessions()
+      setConfirmingOthers(false)
       showToast?.(
         ended > 0 ? `Signed out of ${plural(ended, 'other session')}.` : 'You had no other sessions to sign out of.',
         ended > 0 ? 'success' : 'info',
         { to: SESSIONS_URL },
       )
-    } catch (err) {
-      showToast?.(err.message, 'error')
     } finally {
-      setConfirmingOthers(false)
       await load()
     }
   }
@@ -76,33 +73,23 @@ export function SessionsSection({ isPerson = true, showToast }) {
   // A fragment, not a wrapper: the table must stay a direct child of the card, which scrolls it.
   return (
     <>
-      <div className="card-body profile-section-head">
-        <div className="profile-section-heading">
-          <h4 className="profile-section-title">Sessions</h4>
-          <HelpTip
-            label="About sessions"
-            text="Ending a session stops its access to the API at once. Grafana and Node-RED notice a little later. A session nobody uses for 7 days, or the time your site sets, ends by itself."
-          />
-          {isPerson && (
-            <div className="profile-section-actions">
-              <Tooltip text={sessions && others === 0 ? 'You have no other sessions.' : null}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  disabled={!sessions || others === 0}
-                  onClick={() => setConfirmingOthers(true)}
-                >
-                  <IconLogOut size={13} /> Sign Out of All Other Sessions
-                </button>
-              </Tooltip>
-            </div>
-          )}
+      {/* The tab explains itself in its tooltip; the row under the bar holds only its button. */}
+      {isPerson && (
+        <div className="filter-bar">
+          <div className="filter-bar-actions">
+            <Tooltip text={sessions && others === 0 ? 'You have no other sessions.' : null}>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={!sessions || others === 0}
+                onClick={() => setConfirmingOthers(true)}
+              >
+                <IconLogOut size={13} /> Sign Out of All Other Sessions
+              </button>
+            </Tooltip>
+          </div>
         </div>
-        <p className="profile-section-note">
-          Every browser and service you are signed in to. A service signs you in from its own server,
-          so it shows no device. No address is recorded.
-        </p>
-      </div>
+      )}
 
       {!isPerson ? (
         <EmptyState message="A machine identity signs in with a token, so it has no sessions to list." />
@@ -137,7 +124,7 @@ export function SessionsSection({ isPerson = true, showToast }) {
         <ConfirmModal
           title="Sign Out of All Other Sessions"
           icon={<IconLogOut size={18} />}
-          message="This ends every session but the one you are using: your other browsers and programs, and your Grafana, Node-RED, Studio and forge sign-ins, in this browser too. This browser stays signed in to the dashboard."
+          message={`This ends every session but the one you are using: your other browsers and programs, and your Grafana, Node-RED${studioEnabled() ? ', Studio' : ''} and forge sign-ins, in this browser too. This browser stays signed in to the dashboard.`}
           confirmLabel="Sign Out of All Other Sessions"
           pendingLabel="Signing out…"
           onConfirm={endOthers}

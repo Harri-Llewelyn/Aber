@@ -11,7 +11,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 ## Finding a person
 
 - The **search** box matches the display name and the email address.
-- The **role** filter offers each role, and **No role**. The **status** filter offers the Status column's states. Each option shows how many people it would list.
+- The **role** filter offers each role, and **No role**. The **status** filter offers the Status column's states. Each takes several values: tick every one you want. Each value shows how many people have it, among those the other filter and the search let through.
 - People whose access is removed are hidden. Select **Show removed** to list them. The button shows how many there are, and appears only while there are some. While it is on, the status filter also offers **Access removed**.
 - A **Sign-in still open** row is never hidden. Its removal did not finish, so it still needs **Remove Access**.
 - **Clear filters** resets the search, both filters and Show removed. When nothing matches, the list says so.
@@ -28,7 +28,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Role** is shown on each row, and in the person's drawer. Each person holds one role. To change it, select **Change Role** in their drawer.
 - **Administrator** can do everything, including this page, backups and settings.
 - **Shopfloor Manager** manages areas, cells, gateways and devices, and decides the quarantine queue.
-- **Operator** reads the shopfloor and its live readings, and can propose changes.
+- **Operator** reads the shopfloor and its live readings, and can propose changes and acknowledge an alert.
 - **Auditor** reads the Audit Trail, including who was given access.
 - **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it.
 - Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, **Reset MFA**, **View Their Changes**, and **Remove Access** or **Restore Access**.
@@ -50,6 +50,8 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Reset MFA** asks you to confirm. Then it removes every authenticator the person has added for [MFA](../guides/glossary.md#mfa-multi-factor-authentication), so their password alone signs them in. Use it when they have lost the phone or app that shows their codes.
 - Reset MFA leaves their sessions signed in. To sign them out as well, use **End Sessions**. They can add a new authenticator on their **Profile** page's **MFA** tab.
 - Each reset is recorded in the Audit Trail, with how many authenticators it removed. You cannot reset your own here: remove your authenticators on your **Profile** page's **MFA** tab.
+- **While Settings requires MFA**, every change on this page needs it: adding a person, a role, a password, ending sessions, Reset MFA, an app, a machine identity or a broker account. Add an authenticator on your **Profile** page first. Reading the page does not need it.
+- Giving someone the Administrator or Shopfloor Manager role while MFA is required signs them out of Node-RED, Studio and the forge. Their next sign-in there asks for MFA.
 - **If the only Administrator loses their phone**, nobody can reset it here. Whoever runs the server can remove it with the site's secret key, as the [security model](../../docs/security-model.md#resetting-the-only-administrators-second-factor) shows. Keep two Administrators, so each can reset the other.
 - **Change Email** gives them a new address to sign in with. It works straight away. No email is sent to either address, so tell them yourself.
 - Changing the address ends all their sessions, so they sign in again with the new one. Their role, name and history stay.
@@ -74,7 +76,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 An app such as Grafana can sign a person in with their Aber account. The first time it does, it asks the person to allow it. They answer once, and it remembers. **Apps** lists every app that can do this, and who has allowed each.
 
 - **App** is the app's name. The name it was registered with is shown under it.
-- **Registered** says how the app was added, and when. **Part of Aber** marks Aber's own four apps: Grafana, Node-RED, Studio and the forge. **Added by hand** is an app added through the sign-in service's admin API.
+- **Registered** says how the app was added, and when. **Part of Aber** marks Aber's own apps: Grafana, Node-RED and the forge, and Studio where your site runs it. **Added by hand** is an app added through the sign-in service's admin API.
 - **Sends people back to** lists the addresses the sign-in service may send a person to after they sign in. It refuses any other.
 - **Type** is **Confidential** for an app that holds a secret, on a server. A **Public** app holds none.
 - **People** is how many people allow the app now.
@@ -87,14 +89,15 @@ An app such as Grafana can sign a person in with their Aber account. The first t
 - The app's sessions for that person end at once. The API refuses them straight away. Studio and the forge refuse their next request. Node-RED signs them out within a minute, and Grafana within an hour.
 - The app asks them to allow it again the next time it signs them in. Their role and their other sessions do not change.
 - A person can revoke their own approval on their **Profile** page, on the **Allowed Apps** tab.
+- **View Audit Trail**, in the app's drawer, opens the Audit Trail on the app's own history: when it was registered, removed or restored. A person allowing an app, or that approval being revoked, is in that person's history instead.
 - **Remove App** stops an app signing anyone in. A dialog says how many people allow it. Select **Remove App** to do it. Every approval of it ends, and so does every session it holds.
-- **Aber's own four apps cannot be removed.** Aber registers them again each time it starts, so their **Remove App** is greyed out.
+- **Aber's own apps cannot be removed.** Aber registers them again each time it starts, so their **Remove App** is greyed out.
 - Each act is recorded in the Audit Trail, with who did it. That covers an app registered or removed, and an approval given or revoked. An approval given or revoked is in the person's lane. Registering and removing an app are in the app's own lane, **Apps**.
 
 ## The other tabs
 
 - **Broker credentials** has one row per gateway, with the credential it uses to connect to the broker.
-- The **search** box matches a gateway's name and its MQTT username. The **state filter** offers each credential state with its count.
+- The **search** box matches a gateway's name and its MQTT username. The **state filter** offers each credential state with its count. Tick every state you want.
 - Archived gateways are hidden. Select **Show archived** to list them. While it is on, the state filter also offers **Archived**. **Clear filters** resets the search, the filter and Show archived.
 - **Type** is the kind of gateway: Remote, Third-party, Host, Simulated or Playback.
 - **Credential** is what Aber issued and recorded. **Broker** is what the broker holds right now, read live. They sit side by side because they can disagree, and a disagreement is worth looking into.
@@ -110,7 +113,8 @@ An app such as Grafana can sign a person in with their Aber account. The first t
 - **New Machine Identity** creates an identity for a process that uses Aber through the API. You give a name, a purpose and permissions from a fixed menu, then issue its first token.
 - Machines propose, and people decide. The menu's two writes are filing change proposals and versioning schemas. Nothing on it lets a machine write a device, decide a proposal or a quarantine, or change who has access.
 - A machine identity reaches the database only. A process that speaks MQTT is issued a broker account instead.
-- **Read-only API client** is the identity for a tool that only reads: i3X Explorer, an MCP client, Swagger UI or a script. Issue it a token, and give the tool that token. It reads telemetry, and cannot read the Audit Trail or change anything.
+- **Read-only API client** is the identity for a tool that only reads: i3X Explorer, an MCP client, an AAS client, Swagger UI or a script. Issue it a token, and give the tool that token. It reads telemetry and the assets' shells, and cannot read the Audit Trail or change anything.
+- A machine identity's token works on the REST API, the i3X server, the AAS API and the Factory+ Directory. The other edge functions take a person's token only.
 - After **Issue Token**, the dialog says how to connect, for any identity that reads telemetry. It gives the i3X server's address and a setup for each client, with the token already in it. The setups go when the dialog closes, as the token does.
 - The pencil beside an identity's name changes its name or purpose. What it holds is fixed when it is created, because a wider grant would apply to every token already issued for it.
 - **Holds** is the permissions the identity has, and **Reaches** is what those let it get to. Hover over its name for its purpose. The purpose tells you whether an unfamiliar identity is safe to leave alone, or safe to remove.
@@ -168,7 +172,7 @@ A system outside Aber that only reads the broker can have an account of its own.
 
 **Withdrawing a machine identity reaches further than revoking its tokens.** Tokens are revoked one at a time. Withdrawing the identity refuses every token that names it. That includes tokens nobody remembered issuing, and tokens issued afterwards. To stop a machine's access, withdraw its identity.
 
-Neither reaches everything. Revoking stops a token at the API. Storage, realtime, the edge functions and Studio check only the token's signature, so a revoked token keeps working there until it expires. Reinstating an identity brings back the identity, but not the tokens revoked with it.
+Neither reaches everything. Revoking stops a token at the API, the AAS API and the Factory+ Directory at once, and at the i3X server within 15 seconds. Storage and realtime check only the token's signature, so a revoked token keeps working there until it expires. Reinstating an identity brings back the identity, but not the tokens revoked with it.
 
 A machine identity lives on one of two sides, and nothing holds both. A database identity is a set of permissions. A broker identity is an entry in the broker's access list (ACL). A gateway signs in to the broker with the account issued for it.
 

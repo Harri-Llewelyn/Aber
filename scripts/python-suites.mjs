@@ -385,6 +385,15 @@ export const SUITES = {
       'credential was re-issued at message 8 ended COMPLETED with all 41 counted and 7 in the ' +
       'historian. A capture is read from a temporary file a message at a time, in flat memory.',
   },
+  'ingestion/test_playback_metrics.py': {
+    lanes: ['unit'],
+    why:
+      "The playback worker's metrics endpoint: one series, aber_playback_jobs_total{outcome}, " +
+      'with failed, cancelled and completed at zero from startup and no other label value, so an ' +
+      'unauthenticated port carries no id. Each outcome is counted once the finish is recorded, as ' +
+      'playback_finish() ranks them, and the startup sweep counts what it failed. Without it a ' +
+      'failed playback leaves no trace in Prometheus.',
+  },
   'ingestion/test_playback_session.py': {
     lanes: ['unit'],
     why:
@@ -521,7 +530,9 @@ export const SUITES = {
     lanes: ['db'],
     why:
       'Prints what has_role() and has_authority() cost per call, and the plan of a read their ' +
-      'policy guards, so a change to either is measured before and after on the same database. ' +
+      "policy guards, so a change to either is measured before and after on the same database; " +
+      "and what they cost for an app's token, which holds nothing (0235), and beside the MFA " +
+      'predicate a write policy adds (0251). ' +
       'Fails only on a wrong answer, never on a number.',
   },
   'supabase/migrations/test_first_administrator.py': {
@@ -565,6 +576,13 @@ export const SUITES = {
       'the current state of a live alert -- the pill disappears while Grafana still has it ' +
       'firing. The suite also runs the naive predicate against the same fixture and asserts it ' +
       'DOES destroy the row, so the other cases cannot pass vacuously.',
+  },
+  'supabase/migrations/test_alert_history_is_kept_for_90_days.py': {
+    lanes: ['db'],
+    why:
+      "0244 and 0002's block -- that a fresh install seeds 90 days, that a site still at 1.7's 7 " +
+      'moves to 90 once and a site at 30 keeps 30, each across two boots, that a 7 chosen after the ' +
+      'upgrade stays, and that the prune falls back to 90 days.',
   },
   'supabase/migrations/test_cold_archive_destination.py': {
     lanes: ['db'],
@@ -636,6 +654,43 @@ export const SUITES = {
       'value; each run fires the next query to directory_prometheus_url(), which liveness reads too, ' +
       'and liveness sets a scraped service UNKNOWN when a probe fails. Every signed-in user reads the ' +
       'figures and no role writes them; the gateway count stands when the historian is out.',
+  },
+  'supabase/migrations/test_history_reads_each_series_carried_forward.py': {
+    lanes: ['db'],
+    why:
+      "0233's telemetry_carried(), over local tables standing in for the historian's rollups: a " +
+      'quiet bucket carries the last value and says so, a bucket with readings has their average, ' +
+      'minimum and maximum from the widest rollup that divides it, each series is seeded from the ' +
+      'rollups before the window, a series silent longer than raw retention still seeds, nothing is ' +
+      'carried past now, bad bounds are refused before any read, and it reads as the caller.',
+  },
+  'supabase/migrations/test_history_counts_where_readings_arrived.py': {
+    lanes: ['db'],
+    why:
+      "0245's telemetry_coverage(), over local tables standing in for the historian's device rollups: " +
+      'one row per device, its counts an array with a 0 for a block with none, read unsummed at the ' +
+      "rollups' own widths and summed from the widest that divides a wider block for 40 devices or " +
+      'fewer, what the rollup has counted on every row, bad bounds refused before any read, and it ' +
+      'reads as the caller.',
+  },
+  'supabase/migrations/test_reading_a_service_s_logs_is_recorded.py': {
+    lanes: ['db'],
+    why:
+      "0225 -- that a read of a service's logs on the System page writes one SERVICE_LOGS_READ row " +
+      "in the service's lane of the security domain, naming the Administrator and the read's " +
+      'service, level, filter and range; that the database, not the caller, decides a row is due: ' +
+      "one on the first load and on each change, none on a refresh or a repeated direct call, and " +
+      "another person's reads are not the caller's; that only an Administrator may write one; and " +
+      'that a parameter outside the function\'s rule is refused with no row.',
+  },
+  'supabase/migrations/test_a_logs_read_names_a_range_or_a_fixed_window.py': {
+    lanes: ['db'],
+    why:
+      "0230 -- that a read of a service's logs names a rolling range or a fixed window's two ends: " +
+      "a fixed window's row records its ends in UTC to the millisecond, one row for each new window " +
+      'and none for a repeat, whatever offset or session time zone the ends arrive in; a range or ' +
+      'two ends, never both, in order and at most 169 hours apart; and one six-argument form after ' +
+      '0225 and 0230 replay over the four-argument one.',
   },
   'supabase/migrations/test_backup_health.py': {
     lanes: ['db'],
@@ -765,6 +820,14 @@ export const SUITES = {
       'another identity\'s token, a person\'s session, a key and anon record nothing. The hook ' +
       'refuses a revoked token first. Only an Administrator or an Auditor reads it, and a replay ' +
       'keeps it.',
+  },
+  'supabase/migrations/test_aas_api_and_the_directory_accept_a_machine_identity_s_token.py': {
+    lanes: ['db'],
+    why:
+      '0224. auth_probe(), called as PostgREST calls it, answers a machine identity\'s token, which ' +
+      'carries no aud, and a person\'s session. The hook refuses a revoked token, a withdrawn ' +
+      'identity, a removed person and an ended session first. anon and service_role may not run ' +
+      'it, even through a plan prepared for authenticated, and a replay keeps its grants.',
   },
   'supabase/migrations/test_archiving_is_a_lifecycle.py': {
     lanes: ['db'],
@@ -989,6 +1052,24 @@ export const SUITES = {
       'in again on, and that every token naming a live session, or none, is still served: a ' +
       'false refusal here is the whole API down.',
   },
+  'supabase/migrations/test_an_app_s_token_reaches_only_its_own_routes.py': {
+    lanes: ['db'],
+    why:
+      "0235 -- that a token GoTrue issued to an app, which carries a client_id, is refused by " +
+      'auth_pre_request() before any other arm and holds no role or permission in has_role() and ' +
+      "has_authority(), so a row a role gates is closed to it; and that a token with no client_id " +
+      'is served and answered as before: a false refusal here is the whole API down.',
+  },
+  'supabase/migrations/test_with_mfa_required_a_write_needs_a_session_that_gave_its_code.py': {
+    lanes: ['db'],
+    why:
+      "0251 -- that with security.require_mfa_for_managers on, every write policy and function " +
+      'that calls require_mfa() refuses an Administrator or a Shopfloor Manager at aal1 and admits ' +
+      'them at aal2, federated or with the switch off; that an Operator and a machine identity are ' +
+      "never asked; that every has_role() site naming a covered role asks or is in " +
+      'supabase/mfa-exemptions.json; and that turning it on, or granting a covered role while it is ' +
+      "on, ends the app sessions Grafana's excepted, with one SESSIONS_ENDED row per person.",
+  },
   'supabase/migrations/test_a_person_can_see_and_end_their_other_sessions.py': {
     lanes: ['db'],
     why:
@@ -1067,6 +1148,15 @@ export const SUITES = {
       'approval and session; and that each act, by the dashboard or by GoTrue itself, writes its ' +
       "row naming who did it, while a boot's re-seed writes none.",
   },
+  'supabase/migrations/test_with_studio_off_db_init_says_so_without_a_warning.py': {
+    lanes: ['db'],
+    why:
+      "0002 -- that Studio's client block, run as db-init's psql runs it, says Studio is off in a " +
+      'NOTICE and never a WARNING; that it removes a client an earlier boot registered, approvals ' +
+      'and sessions with it, recorded once and not on the next boot, and restores it when Studio ' +
+      'is on again; that Studio on without its secret warns naming the login and the secret to ' +
+      'set; and that an unset value is today\'s behaviour and never removes.',
+  },
   'supabase/migrations/test_an_administrator_s_read_only_broker_account_is_recorded.py': {
     lanes: ['db'],
     why:
@@ -1112,6 +1202,78 @@ export const SUITES = {
       'expiry, a decision from before 0222 and a client write leave none; and that the function is ' +
       'declared once, with p_changed_by last, however 0168 and 0222 replay over it.',
   },
+  'supabase/migrations/test_an_audit_trail_filter_takes_several_values.py': {
+    lanes: ['db'],
+    why:
+      '0227 -- that audit_trail_page() keeps the rows matching any value of each of its three ' +
+      'lists, combined with AND; that a one-element list returns what the single value did, and ' +
+      'NULL or an empty list is no constraint; that the cursor, the totals, the purged rule, the ' +
+      "search and the caller's own policies hold under lists; and that one list form is left, " +
+      'with its grants, however 0001, 0168, 0222 and 0227 replay over the single-value form.',
+  },
+  'supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py': {
+    lanes: ['db'],
+    why:
+      '0228 -- that audit_event_class() answers every case in test-harness/fixtures/' +
+      'audit-event-classes.json, the four reads included, and stays an IMMUTABLE SQL function ' +
+      "the planner inlines; that audit_trail_page(p_class) keeps those classes' rows and labels " +
+      "each event; that p_counts leaves each filter's own choice out of its own counts; that a " +
+      "backup request's id finds the backup it took; and that one form is left, with its grants " +
+      'and its five class indexes, however 0001, 0168, 0222, 0227 and 0228 replay over the form ' +
+      'from before.',
+  },
+  'supabase/migrations/test_a_million_row_trail_answers_in_under_a_second.py': {
+    lanes: ['db'],
+    why:
+      "0228's target -- that on a trail of a million rows audit_trail_page() answers a page, its " +
+      'total and its counts in under a second with a class chosen, as an Administrator with the ' +
+      "policies on, and that its totals are exact. It attaches ten months of 2001 and drops them, " +
+      'so it belongs on a throwaway database and nowhere else.',
+  },
+  'supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py': {
+    lanes: ['db'],
+    why:
+      "0229 -- that audit_trail_action_kinds() names every (action, kind) pair the trail's writers " +
+      'can produce, read from the catalog, and no other, and that each pair carries the classes ' +
+      'audit_event_class() answers for it. The Audit Trail narrows its filters by its mirror.',
+  },
+  'supabase/migrations/test_a_person_acknowledges_an_alert.py': {
+    lanes: ['db'],
+    why:
+      '0231 and 0232 -- that an Operator, a Shopfloor Manager and an Administrator acknowledge a ' +
+      'firing alert they may read, with a reason from the closed set, and that a resolved, superseded ' +
+      'or acknowledged one, Other without a note and every other role are refused; who withdraws; ' +
+      'that a new occurrence inherits the acknowledgement until the fingerprint resolves; and the ' +
+      'audit rows, their lane, their class and who reads them.',
+  },
+  'supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py': {
+    lanes: ['db'],
+    why:
+      '0240 and 0241 -- that a Shopfloor Manager and an Administrator schedule, change and end a ' +
+      'suppression window and every other role is refused; the CHECKs; that a window covers its ' +
+      "device, its gateway's own alerts, or each device in its cell when the alert is read, and never " +
+      'a platform or machine identity alert; that platform_alerts_active says suppressed before, ' +
+      'during and after it and keeps its columns; that an occurrence records the window that first ' +
+      "covered it and nothing clears it; and the audit rows in the subject's lane.",
+  },
+  'supabase/migrations/test_history_lists_the_alerts_that_fired.py': {
+    lanes: ['db'],
+    why:
+      "0243 -- that alert_occurrences() lists each occurrence overlapping the window, at its edges " +
+      'too; that a firing occurrence a later one replaced ends where that one starts; newest first, ' +
+      'filtered by asset and bounded; each row the whole occurrence; and that the select policy ' +
+      "decides the rows, a machine identity's alert reaching an Administrator alone.",
+  },
+  'supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py': {
+    lanes: ['db'],
+    why:
+      '0247 to 0250 -- that an alert is queued once as it starts firing and once as it resolves, ' +
+      'and never on a repeat upsert or a stamp; every arm of the send decision, and that a ' +
+      'suppressed alert is held until its window ends; that reminders ' +
+      'stop when the alert is acknowledged, resolved or no longer confirmed by its writer; the ' +
+      'Notifications settings, their rules and who writes them; the webhook\'s address, signing key ' +
+      'and test by role; and that no machine identity\'s alert is ever selected for the webhook.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1155,6 +1317,15 @@ export const SUITES = {
       'counted in expected_publishers, which gates the critical Ingestion Consuming Nothing, and ' +
       'a real device still counted.',
   },
+  'supabase/migrations/test_a_failed_or_stuck_job_is_a_platform_condition.py': {
+    lanes: ['db'],
+    why:
+      "0226's three platform_health arms, each through the query of the Grafana rule that reads " +
+      'it: a failed job for an hour and then gone, a job stuck five minutes past its own limits ' +
+      'and not before, and a silent playback worker only while a playback waits. The last is ' +
+      "the one that would page for ever: the heartbeat is seeded at 'epoch', and a site without " +
+      'the worker never reports, so the suite holds it silent with nothing queued.',
+  },
   'supabase/migrations/test_a_shadow_gateway_holds_no_health.py': {
     lanes: ['db'],
     why:
@@ -1180,20 +1351,21 @@ export const SUITES = {
   'supabase/functions/aas-api/test_aas_api.py': {
     lanes: ['unit', 'stack'],
     why:
-      'The IDTA 02001/02002 read surface. Nine of its forty checks run offline and guard what is ' +
-      'true of the SOURCE regardless of a stack -- above all that this function is never granted ' +
-      'the service-role key, which is the entire security argument for it being a separate ' +
-      'function. THE TEST THAT MATTERS MOST needs the stack: TestExportAgreement fetches the same ' +
-      'asset through aas-export and through aas-api and asserts the two describe it identically. ' +
-      'That agreement is the whole reason the mapping lives in _shared/aas/shell.ts, and it is ' +
-      'the property that would rot silently -- an ERP reading a live submodel and a partner ' +
-      'reading a shipped .aasx would disagree, with both endpoints reporting success.',
+      'The IDTA-01002 (AAS Part 2) read surface. Nine of its forty-six checks run offline and ' +
+      'guard what is true of the SOURCE regardless of a stack -- above all that this function is ' +
+      'never granted the service-role key, which is the entire security argument for it being a ' +
+      'separate function. THE TEST THAT MATTERS MOST needs the stack: TestExportAgreement fetches ' +
+      'the same asset through aas-export and through aas-api and asserts the two describe it ' +
+      'identically. That agreement is the whole reason the mapping lives in _shared/aas/shell.ts, ' +
+      'and it is the property that would rot silently -- an ERP reading a live submodel and a ' +
+      'partner reading a shipped .aasx would disagree, with both endpoints reporting success. The ' +
+      'live layer also reads as the Read-only API client with no apikey, and revokes its token.',
   },
   'supabase/functions/fplus-directory/test_fplus_directory.py': {
     lanes: ['unit', 'stack'],
     why:
       'The Factory+ Directory adapter, and above all the reverse schema lookup. Six of its ' +
-      'nineteen checks run offline: that the registry entry still grants no service-role key -- a ' +
+      'twenty-seven checks run offline: that the registry entry still grants no service-role key -- a ' +
       'Directory is a live read over the WHOLE address space, so the key would hand every ' +
       'authenticated user a view their policies do not grant -- and that the bearer check still ' +
       'precedes routing, which is the entire boundary in front of these key-auth-exempt routes. ' +
@@ -1201,7 +1373,8 @@ export const SUITES = {
       '/v1/schema/{uuid} answer the same question from opposite ends, composed by different ' +
       'queries, and a disagreement is a 200 at both endpoints. The live layer provisions a second ' +
       'device attached through set_device_schemas(), the Devices page\'s writer, beside the ' +
-      'shared fixture\'s, so the reverse lookup is asserted over a set.',
+      'shared fixture\'s, so the reverse lookup is asserted over a set. Every route answers the ' +
+      'Read-only API client\'s token as it answers a person, and refuses it once revoked.',
   },
   'supabase/migrations/test_third_party_gateway.py': {
     lanes: ['db'],
@@ -1276,6 +1449,16 @@ export const SUITES = {
       'lease does nothing and answers 200, and every test holds the lease so the report it reads ' +
       'is its own pass\'s. Needs the ' +
       'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',
+  },
+  'supabase/functions/notification-dispatch/test_notification_dispatch.py': {
+    lanes: ['stack'],
+    why:
+      'Aber\'s dispatcher end to end (0247, 0248): a firing alert written with psql reaches a ' +
+      'receiver pod signed with the Standard Webhooks headers; an acknowledgement before the ' +
+      'reminder stops it, an unacknowledged alert is reminded, a resolve follows its firing ' +
+      'message, and an address whose host is not allowed is refused before anything is posted. ' +
+      'Configures the webhook as the database owner and puts back what the stack held. Needs ' +
+      'kubectl, the functions image with notification-dispatch, and NetworkPolicies off.',
   },
   'backup-service/test_backup_service.py': {
     lanes: ['stack'],
@@ -1367,8 +1550,9 @@ export const SUITES = {
       'neither can see -- a credential nothing had issued, and a worker that read its credentials ' +
       'once at startup. Each left every page saying the right thing and no telemetry moving, ' +
       'because a refused MQTT connection is invisible past CONNECT and Sparkplug publishes at ' +
-      'QoS 0. So this mints the credential (which is what exercises the DELIVERY path), waits for ' +
-      'the worker to report that it holds the target, replays a fixture, and asserts the rows ' +
+      'QoS 0. So this mints the credential (which is what exercises the DELIVERY path), waits until ' +
+      "the worker's credential file holds what the delivery Secret holds and the worker reports " +
+      'it, replays a fixture, and asserts the rows ' +
       'arrived. The recorded gateway and device are fixtures the suite makes, since a fresh ' +
       'install has none (#731). THE SENTINEL METRIC IS LOAD BEARING: a historian holding live ' +
       'traffic and earlier runs cannot say which rows one replay wrote, and a metric name unique to ' +
@@ -1456,7 +1640,10 @@ export const SUITES = {
       'collected at all -- while the container stayed healthy, `alloy validate` passed and every ' +
       'static check in this repository reported PASS. Where observability.alloy.logForward is on, ' +
       'it also checks that a forward to the in-cluster Loki delivers a second, labelled copy, and ' +
-      'that a forward nothing answers does not stop lines reaching the in-cluster store.',
+      'that a forward nothing answers does not stop lines reaching the in-cluster store. The same ' +
+      "drop is read back through service-logs, as the System page's Logs tab reads it: an " +
+      "Administrator's read finds the device's line with its fields, an Operator's is refused, and " +
+      'the read is one Audit Trail row however often it repeats.',
   },
   'supabase/test_auth_rate_limit.py': {
     lanes: ['stack'],
@@ -1493,6 +1680,15 @@ export const SUITES = {
       'and each time the refresh token is refused. Only GoTrue itself can show that its token ' +
       'endpoint honours the ended session.',
   },
+  'supabase/test_each_app_s_token_reaches_only_its_own_routes.py': {
+    lanes: ['stack'],
+    why:
+      "Each app's token reaches only its own routes (0235): a seeded account completes each of the " +
+      "four apps' authorization-code flows, and each app's token reaches GoTrue and its own " +
+      "userinfo function and is refused with the gateway's 403 on PostgREST, Storage and every " +
+      "other function, while the person's dashboard token reaches them all. Only GoTrue can issue " +
+      'a token that names an app, and only the gateway decides on it.',
+  },
   'supabase/test_a_token_s_use_is_recorded.py': {
     lanes: ['stack'],
     why:
@@ -1509,6 +1705,17 @@ export const SUITES = {
       'A throwaway Auditor enrols a TOTP factor, signs in again at aal1 and reaches aal2 with a code ' +
       'computed here (RFC 6238), and an Administrator resets it, which leaves one MFA_RESET row and ' +
       'the session signed in. Phone and WebAuthn enrolment are refused.',
+  },
+  'supabase/test_a_second_factor_guards_what_changes_the_platform.py': {
+    lanes: ['stack'],
+    why:
+      "With MFA required, a manager's change to the platform needs a session that gave its code " +
+      '(0251), which only the running gateway, GoTrue and the edge runtime show together. A ' +
+      'throwaway Shopfloor Manager, made with the secret key, enrols a TOTP factor: the consent step ' +
+      "refuses its aal1 session on both of Node-RED's consent calls and admits its aal2 session, " +
+      "Grafana's sign-in passes at aal1, gateway-bundle refuses aal1 before it reads a gateway, and " +
+      "turning the switch on ends its Node-RED session while its Grafana session refreshes. The " +
+      'switch goes back to what it was and the person is deleted.',
   },
   'supabase/test_no_service_accepts_the_shared_secret.py': {
     lanes: ['stack'],
@@ -1539,6 +1746,14 @@ export const SUITES = {
       'A replay written days late reaches the rollups: the window ingestion records is refreshed by ' +
       'the historian job, as ingest_writer can record it and read nothing. The policies reach back ' +
       '25 hours, so without the job the rollups show the outage as a gap the raw table does not have.',
+  },
+  'timescaledb/test_device_rollups.py': {
+    lanes: ['stack'],
+    why:
+      "History's Overview counts from two device rollups, 5 minutes from telemetry_1m and an hour " +
+      "from telemetry_1h, each materialised only, reconciled once, kept as long as its width's series " +
+      "rollup, and filled back a chunk a run to its own source's oldest bucket; fdw_reader reads what " +
+      'they hold.',
   },
   'timescaledb/test_physical_backup.py': {
     lanes: ['stack'],

@@ -8,12 +8,15 @@
  */
 import { COLD_STORAGE_DIALOG_KEYS } from './utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite'
+import { WEBHOOK_DIALOG_KEYS } from './utils/notifications'
 import { pageTabsOf } from './navigation'
 
 /** Settings a page's own destination dialog edits, with the page a search for one opens. */
 const EDITED_ON = new Map([
   ...COLD_STORAGE_DIALOG_KEYS.map(k => [k, { tabId: 'cold-storage', page: 'Cold Storage' }]),
-  ...BACKUP_OFFSITE_SETTING_KEYS.map(k => [k, { tabId: 'backups', page: 'Backups' }])
+  ...BACKUP_OFFSITE_SETTING_KEYS.map(k => [k, { tabId: 'backups', page: 'Backups' }]),
+  // The webhook's dialog is on Settings itself, on the tab its toolbar is.
+  ...WEBHOOK_DIALOG_KEYS.map(k => [k, { tabId: 'settings', section: 'notifications', page: 'Settings' }])
 ])
 
 /**
@@ -22,6 +25,9 @@ const EDITED_ON = new Map([
  */
 export const PAGE_KEYWORDS = {
   'site-map':       ['dashboard', 'home', 'shopfloor', 'map', 'site map', 'overview', 'status'],
+  // What somebody types wanting a reading over time rather than now.
+  'history':        ['chart', 'charts', 'graph', 'trend', 'trends', 'plot', 'over time', 'time series',
+                     'readings', 'telemetry history', 'past readings', 'carried forward'],
   // Every word somebody would reach for while holding the thing rather than its name: an
   // operator searches "request" or "ask", an approver searches "approve" or "pending".
   'approvals':      ['proposal', 'proposals', 'approve', 'reject', 'pending', 'queue', 'request',
@@ -84,7 +90,11 @@ export const CARDS = [
   { id: 'system-applications',  ...tabCard('system', 'applications'), keywords: ['grafana', 'node-red', 'studio', 'uis'] },
   { id: 'system-ingestion',     ...tabCard('system', 'ingestion'), keywords: ['mosquitto', 'broker', 'daemon'] },
   { id: 'system-infrastructure', ...tabCard('system', 'infrastructure'), keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
+  // Administrator only, as the tab is: buildTargets offers a card only while its tab is the viewer's.
+  { id: 'system-logs',          ...tabCard('system', 'logs'), keywords: ['log', 'log lines', 'service logs', 'errors', 'traceback', 'loki', 'why did it fail'] },
 
+  { id: 'history-overview',     ...tabCard('history', 'overview'), keywords: ['coverage', 'gaps', 'where readings arrived', 'silent devices', 'lanes'] },
+  { id: 'history-alerts',       ...tabCard('history', 'alerts'), keywords: ['alert history', 'past alerts', 'fired', 'resolved alerts', 'acknowledged alerts', 'acknowledgements'] },
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },
@@ -108,7 +118,8 @@ export const CARDS = [
 /**
  * Everything this session can reach, as one flat list. Takes the already-filtered pages, so
  * `tabIsVisible` is the only predicate deciding what a session may see. A card inherits its page's
- * visibility, and so does a setting.
+ * visibility, and a card that opens one tab its tab's: a page's `pageTabs` arrive without the tabs
+ * this session may not see (visiblePages, navigation.jsx). A setting inherits its page's.
  *
  * `settings` are rows, not a listed constant -- a migration adds one and nothing here would know --
  * but they are a closed set of a dozen short labels, so they are matched here alongside the pages
@@ -127,8 +138,12 @@ export function buildTargets(visibleTabs, settings = []) {
   }))
 
   const reachable = new Set(visibleTabs.map(t => t.id))
+  const tabShown = (c) => {
+    const tabs = visibleTabs.find(t => t.id === c.tab)?.pageTabs
+    return !c.section || !tabs || tabs.some(t => t.id === c.section)
+  }
   const cards = CARDS
-    .filter(c => reachable.has(c.tab))
+    .filter(c => reachable.has(c.tab) && tabShown(c))
     .map(c => ({
       kind: 'card',
       key: `card:${c.id}`,

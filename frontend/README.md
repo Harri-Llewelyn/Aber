@@ -73,6 +73,8 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/ashrae223.js` (`ASHRAE223_GROUP`) | the one metric group registered under ASHRAE 223P, and the group its seeded metrics file under |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
+| `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
+| `utils/unsPath.js` (`placeNameProblem()`) | the characters `areas_name_topic_safe` and `cells_name_topic_safe` refuse in a name (mirror check 64) |
 
 Each is guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or `test_aas_export.py`.
 `sparkplugId.js` matters most — it derives an **immutable wire identity**, so a divergence cannot
@@ -106,6 +108,27 @@ builders build each entry with `catalogPropertyEntry()` in `utils/schemaProperty
 `hasPermission(uuid)` from `usePermissions`, against `PERMISSION_UUIDS` in `constants.js`. Gating
 is a UI affordance only — RLS is the enforcement, and every gated action is independently refused
 by the database.
+
+### A tab can be gated by role
+
+A page's `TABS` entry takes a `role` or a `permission`, and so does each of its `pageTabs`. System's
+Logs tab (`SYSTEM_LOGS_TAB`) carries `role: 'Administrator'` on a page every role opens.
+`tabIsVisible()` decides both, and `visiblePages(hasPermission, userRole)` in `navigation.jsx`
+returns the pages a viewer may open, each with only the tabs they may see. `App.jsx` computes it
+once, and the four places a tab is offered read that one answer:
+
+- **the rail**, whose list of a page's tabs is the page's `pageTabs` as `visiblePages` gives them;
+- **the search**: `buildTargets()` offers a card that opens a tab only while the page's tabs hold
+  it;
+- **the page's tab bar**: the page asks `tabIsVisible()` for the gated tab itself, as System does
+  for Logs, because it builds its bar from more than the list;
+- **the address**: `urlNamesWithheldTab()` sends anyone who opens a tab they may not see to the
+  page's first tab, query and all, as a hidden page sends them to the Site Map. It waits for the
+  role, so an Administrator reloading on the tab stays there; System holds its own address too,
+  through `useUrlTab`'s `ready`, until `rolePending` is false.
+
+Hiding a tab removes a signpost and nothing more. Logs is read through `service-logs`, which refuses
+everyone but an Administrator for itself. `tabRoleGating.test.jsx` holds the four places.
 
 ### What looks clickable
 
@@ -169,8 +192,9 @@ There are no arrow-key rules, which a tree would bring and nobody expects in a m
   click away, so a click on a tabbed page's icon opens the page, as any page's does.
 - **Settings' categories** come from the database, so the rail lists `SETTINGS_TABS`, the frontend's
   copy in the database's order, before the page has read them. A category missing from it still
-  shows on the page. System lists its three groups; the page adds a tab for any service type no
-  group claims.
+  shows on the page. System lists its three groups, and Logs for an Administrator ([A tab can be
+  gated by role](#a-tab-can-be-gated-by-role)); the page adds a tab for any service type no group
+  claims.
 - **Profile** is not in the rail, so its tabs are on its tab bar only.
 
 ### Tooltips
@@ -272,6 +296,50 @@ So `filteredAssets`, `attentionCount` and `tagOptions` are `useMemo`d, and the p
 **Miss a dependency and the table silently stops responding to that filter** — a worse bug than the
 slowness, so the list names every value the predicate reads, in the order it reads them.
 
+### A group of rows opens and closes under one heading
+
+`common/GroupHeading.jsx` is the heading of a group of rows a reader can close. It is a disclosure
+button (the WAI-ARIA Disclosure pattern) with a chevron, an optional icon, the group's name and its
+count: "Devices · 12". The chevron points up while open and down while closed, as a table's group
+rows do, and the name takes `.table-group-label`'s look. In place of a count, `detail` takes words,
+cut before the name is (`OverflowText`): a Filters panel's section says what is chosen in its list.
+
+```jsx
+<GroupHeading open={open} onToggle={() => toggle(kind)} label="Devices" count={12}
+  countLabel="12 lanes" icon={<IconCpu size={12} />} controls={lanesId} />
+```
+
+- **The page keeps the state.** The button only reports a press. The page decides which groups are
+  open, hides the element named in `controls` while its group is closed, and lays out the row the
+  button sits in. A screen reader hears the name and `countLabel`: "Devices, 12 lanes".
+- **A closed group still shows what happened in it.** On the Audit Trail a closed section's heading
+  row keeps one summary track, with every event of its lanes clustered as a lane's are. Opening an
+  event there opens the section too. The History page is to group its lanes by area and cell
+  under the same heading.
+- **Which groups are closed belongs to the viewer, in this browser.** The Audit Trail keeps its
+  closed sections in localStorage (`aber_audit_trail_closed_sections`, read and written inside
+  `try`), not in the address, so a shared link opens every section. Expand all and Collapse all
+  (`ExpandAllToggle`, outlined) sit at the end of the key's row.
+
+### Cut text slides on hover or focus
+
+`common/OverflowText.jsx` draws one line that may not fit, cut with an ellipsis at rest. While the
+pointer is on it, or on the button or link it sits in, or that control has keyboard focus, text
+that is really cut slides at about reading pace (`SLIDE_PX_PER_SECOND`) until its end shows. It
+slides back when they leave.
+
+- It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
+  control's tooltip must carry the whole text.
+- It measures as it activates (`scrollWidth` against `clientWidth`), as `CopyableId` does, so a
+  drawer opening needs no listener. `onMeasure(cut)` hears each measurement.
+- A section heading's `detail` (`GroupHeading`) is its button's tooltip while it is cut, and only
+  then, through `onMeasure`. The tooltip does not describe the button (`describe={false}`): the
+  heading's sr-only words already give a screen reader the whole value.
+- The whole text is always in the DOM, so a screen reader hears all of it.
+
+The Audit Trail's lane names use it first. The dashboard's other cut lines move onto it with
+[#1219](https://github.com/Harri-Llewelyn/Aber/issues/1219).
+
 ### A page's summary is one row of cards
 
 Backups and Cold Storage sum up their list in one row of `common/SummaryCard.jsx` cards between the
@@ -338,6 +406,45 @@ on the backdrop.
   its error slot, a refused copy beside the value.
 - jsdom has no `showModal()`. `src/test/setup.js` stubs it to set `open`, so the tests assert what
   `Modal` does itself; the inert page and the top layer are checked in a real browser.
+
+### A dialog says why it cannot go ahead
+
+A dialog whose confirm cannot go ahead yet says why where the person is looking. Its confirm looks
+refused while it cannot. `dialogSaysWhy.test.jsx` holds the pattern for the dialogs a form holds.
+
+- **A held confirm is greyed.** `ActionButton` adds `btn-disabled` whenever it is disabled and not
+  pending, as it does for `permitted={false}`. A pending one keeps `btn-loading`, which stays
+  legible. The `disabled` attribute alone changes nothing in `App.css`, so a dialog's confirm is an
+  `ActionButton`, never a plain `<button disabled>`.
+- **The first problem is said above the buttons.** Pass it as `Modal`'s `problem`, or null when
+  there is none. `Modal` draws it between the body and the error slot, so it stays in view while the
+  body scrolls. It is the form's warning hint (`form-hint hint-danger`, with its icon), in a live
+  region.
+- **It appears from the person's first edit, never on open.** A dialog that has just opened does
+  not scold. A dialog with steps passes `touched` for the step it is on, and so does one that waits
+  for a particular field (Change Password waits for the new password).
+- **A form with buttons of its own** inside a dialog (Attach a link) draws `FormProblem` above them.
+- **A problem with one field's value as typed is said under that field,** in its hint: too long,
+  not an email address, a name already taken. It is not repeated above the buttons.
+- **An edit that changes nothing is not a problem.** Its confirm is greyed and its tooltip says so.
+  Nothing is said in red, because the form shows it.
+- **A required field says so on its label** with `RequiredMark`, and its control carries
+  `aria-required`. `App.css` draws the asterisk, so the label's text stays the field's name.
+- **A refusal from the database or a function is shown in `Modal`'s `error`,** worded as it came.
+  The dialog stays open with what was typed. A handler run from a dialog throws its refusal, rather
+  than toasting it behind the dialog.
+- **`ConfirmModal` shows a rejected `onConfirm` in its own error slot.** So its `onConfirm` closes
+  the dialog only once the act has succeeded.
+- **The tooltip on a held confirm can stay,** but it is never the only place the reason is.
+
+Three kinds of dialog explain themselves another way:
+
+- **A typed gate** says what to type in its label: ConfirmModal's `requireTyped`, and a gateway's
+  credential and setup dialogs.
+- **The schema builder** keeps Save pressable. Pressing it reveals what is missing beside each
+  field, because its problems are spread across a long form.
+- **A role that may not act** sees `permitted={false}`, with the roles that may in the tooltip
+  ([Permission gating](#permission-gating)).
 
 ### A plan and a 3D model open expanded
 
@@ -440,6 +547,40 @@ Top to bottom: the alert, the fields, the facts (`beforeActions`, such as a gate
 actions, and last the tools (`children`, such as Capture's drop zone). A tool is last because its
 height is not known, and above the actions it could push Edit Details off the drawer.
 
+- **Suppression windows are a tool, after the actions.** The device, gateway and cell drawers pass
+  `common/SuppressionWindows.jsx` as `children`, since its list has no fixed height. It lists the
+  current and upcoming windows with `context-panel-section-label`, as a gateway's Devices are, each
+  with a NOW or UPCOMING badge beside its reason, its times by `formatDateTime()` and who scheduled
+  it. A device's drawer passes its current cell, whose windows are listed marked From cell and
+  changed from the cell's drawer. A Shopfloor Manager or an Administrator (`maySuppress()`) gets
+  Schedule window…, Change… and End now, or Cancel window before it starts. The dialogs
+  (`modals/SuppressionWindowModal.jsx`) take local times with `datetime-local`, as the time control's
+  custom range does; End now and Cancel window ask first, and the confirm repeats the act's name.
+  The end field's `max` is the window's own start plus `alerts.suppression_max_days` (`useSetting`,
+  falling back to `SUPPRESSION_MAX_DAYS`, 7), and a hint under it names the limit and its Settings
+  tab. An end past it is refused inline, as an end in the past is; a change of the reason alone is
+  not measured, as the writer does not measure it. The section reads again at its next window's
+  start or end.
+- **The alert names no evaluator.** The banner above the fields (`ContextPanel`'s `alert`) says
+  Alert firing, Alert acknowledged or Alert suppressed, since when, with the counter's lines under
+  it: who acknowledged it and why, or until when a window keeps it quiet and why. A suppressed one
+  takes a dashed neutral outline and a crossed bell, since it colours nothing. The Devices page
+  hands the banner the device's alert from `alertIndex(..., { suppressed: true })`.
+- **A control that changes what the drawer shows goes in `nav`**, a slot at the drawer's full width
+  under its header and above the fields. It continues the header's band, takes the header's rule,
+  and stays in view while the body scrolls. The Audit Trail's step buttons are there, in their two
+  rows under the position line ("Event 3 of 7 · Entity 2 of 9"). In the header's subtitle they
+  stopped short of the close button.
+- **A person or a machine identity links where the viewer can follow it.** In the Audit Trail's
+  drawer, User ID and Machine identity are the name as a link to Access Control › People
+  (`personUrl`, which opens a removed person too) or › Machine identities (`identityUrl`, by the
+  principal id), for a viewer the rail shows Access Control to (`tabIsVisible`). For anyone else
+  the name is text. The id's `CopyableId` chip sits beside the name, since a link and a copy cannot
+  share one click.
+- **An entity's own page is one action away**, named for the page: "View in Devices" (`entityUrl`).
+  The Audit Trail offers it for a device, gateway, cell, area or schema its lookups still hold, so a
+  deleted entity gets none.
+
 - **The actions are two to a row** in a drawer wide enough for two 200px columns, about 440px and
   up, and one to a row below that. The first primary action and a danger action take the whole row.
   Eight actions one to a row took 331px of a 1080 screen's drawer; two to a row they take 220px.
@@ -488,12 +629,13 @@ so a commissioning burst of five or six rows lands on one pixel. Two fixes were 
   moments on the page were the ones it could not draw. Three fanned dots and five look alike, so
   it could not be counted either.
 - **Nudging along the time axis** would make the same pair of events appear different distances
-  apart depending on the range control, and it would erase the causation signal: perfect overlap
+  apart depending on the time window, and it would erase the causation signal: perfect overlap
   is the visual signature of one act.
 
 Markers closer than `CLUSTER_GAP_PX` (14px, one marker plus its ring) become one badge carrying the
-count. Grouping is by **pixel** distance, not by time, so the range control acts as a zoom and a
-cluster dissolves into its members as the same events move apart on screen. The badge sits at the
+count. Grouping is by **pixel** distance, not by time, so the time window acts as a zoom and a
+cluster dissolves into its members as the same events move apart on screen. A drag across the trail
+or Zoom in narrows the window ([One time control](#one-time-control-for-every-period)). The badge sits at the
 mean of its members' positions, so the x-axis still tells the truth, and its hover says whether the
 members share a `causation_id` (one act) or merely a timestamp. Ordering inside a cluster falls
 back to `event_id`, the order the rows were written, which is also how `causationSiblings()` orders
@@ -509,9 +651,14 @@ The event drawer moves along a lane and between lanes, like a cursor in a grid:
   rows of one transaction, which share a time, in the order they were written.
 - **↑ and ↓, or Previous Entity and Next Entity,** move to the lane drawn above or below, across
   section headings, and open its event nearest in time to the one open (`nearestInTime`; the
-  earlier of two as near). The order is the one on screen when the key is pressed, so a poll that
-  re-ranks the lanes moves the next press with it. Neither pair wraps. While the drawer is open the
-  page keeps all four keys, so ↑ and ↓ do not scroll the timeline; Page Up and Page Down still do.
+  earlier of two as near). A closed section's lanes are skipped. An event open in a closed section
+  stays lit on that section's summary track, ← and → still step along its lane there, and ↑ and ↓
+  leave it for the drawn lanes either side. The order is the one on screen when the key is pressed,
+  so a poll that re-ranks the lanes moves the next press with it. Neither pair wraps. While the
+  drawer is open the page keeps all four keys, so ↑ and ↓ do not scroll the timeline; Page Up and
+  Page Down still do.
+- **A lane's name opens its newest loaded event,** the change a reader most often wants, and ←
+  steps back from there. The name is the label's button, named "Open the latest change to Line 1".
 - **They stand down** where `shortcutAllowed` (`shortcuts.js`) says, so a dialog in front, a field,
   a select and Ctrl, Cmd or Alt all keep them, and for a key a control has already taken. They are
   not character keys, so the Single-key shortcuts setting does not cover them.
@@ -523,8 +670,9 @@ The event drawer moves along a lane and between lanes, like a cursor in a grid:
   Updated, 14:02, Press 4"). It is drawn with the drawer and speaks after a step only, by key or
   button, so opening the drawer reads as it does on every page.
 - **The marker follows.** After every step the selected marker is scrolled into view (`nearest`).
-  Its `scroll-margin` keeps it clear of the pinned axis row, the section heading and the label
-  column.
+  Its `scroll-margin` keeps it clear of the pinned axis row and the section heading. The timeline
+  never scrolls sideways: the label column is a share of the width (140px to 260px) and the track
+  takes the rest, however much the drawer takes.
 
 ### What the Access Control page claims, and how it says so
 
@@ -600,7 +748,7 @@ people allow it. A click or Enter opens its drawer, `?app=<id>` (`appUrl()`), in
 as a person's. The drawer reads `app_approvals()` when it opens and draws the people in
 `components/common/AppApprovalsTable.jsx`, the table Profile's list of approvals shares; Revoke calls
 `revoke_app_approval()` and Remove App `remove_app()`, each after a dialog that says what ends.
-Remove App is disabled for Aber's own four, which db-init registers again on every boot.
+Remove App is disabled for Aber's own apps, which db-init registers again on every boot.
 
 **Change Password**, the Password row's action on Profile's Account tab, opens `ChangePasswordModal`.
 `utils/passwords.js` sends the current password with the new one in one
@@ -664,6 +812,26 @@ shown, and replacing it asks first: `set_archive_credential()` overwrites it wit
 nothing can show either value again. A first key goes straight in. Its `useCredential()` hook
 writes the key when the dialog saves, before archiving is switched on, and names a 403 as a refusal.
 
+### Why Settings › Notifications has a panel of its own
+
+A settings row holds a string, a number, a boolean or JSON, and the webhook needs more:
+`NotificationsPanel` (`components/tabs/NotificationsPanel.jsx`) wraps the category's table, which
+keeps its header row, with a toolbar above it and the delivery log below it. The toolbar is an
+Administrator's, as every change on Settings is; anyone else is told whose it is and reads the log.
+
+- **`WebhookModal`** holds the address, a `CredentialField` as the destination dialogs' keys are, and
+  the allowed hosts, so `notifications.webhook_allowed_hosts` is left out of the table
+  (`WEBHOOK_DIALOG_KEYS`) and the search opens this tab for it. The hosts are saved before the
+  address, and an address whose host is not listed is said while it is typed.
+- **`SigningKeyModal`** shows the key once, as `ServiceTokenModal` shows a machine identity's token:
+  asked first, revealed with a copy button, gone on close. Rotating says the old key stops at once.
+- **Send a test** queues the message through `queue_test_notification()`, since the dispatcher is
+  never reachable from a browser, and reads its log row each second until it has left `pending`.
+- **The delivery log** polls every 30 seconds, as Backups does. Each outcome is a word in its badge,
+  and a long subject or error is cut and slides on hover (`OverflowText`).
+- **`notifications.webhook_min_severity`** is a choice in its row, from `SETTING_OPTIONS`
+  (`utils/notifications.js`), which mirror check 58 holds to the database's guard.
+
 ### Why a reload waits for the auth server
 
 A session can end on the server while the browser still holds its tokens: a Sign Out in another
@@ -706,8 +874,9 @@ factor. The screen lists the person's factors from GoTrue, takes six digits, and
 them with `challengeAndVerify()`. The `aal2` session reaches `App.jsx` through
 `onAuthStateChange`. Sign Out is on the screen. `pages/OAuthConsent.jsx` asks the same before it
 reads an authorization request, because Grafana, Node-RED, Studio and the forge sign in through
-the dashboard's session. The question is a prompt, not a gate: nothing on the server reads `aal`
-yet, and an answer that cannot be read opens the dashboard.
+the dashboard's session. The question is a prompt, not a gate, and an answer that cannot be read
+opens the dashboard. The gate is the server's, while Settings requires MFA (`0251`): the consent
+page shows the gateway's refusal with a link to Profile › MFA and no note about expiry.
 
 ### Profile, and the preferences that follow the person
 
@@ -802,8 +971,8 @@ Value, Actions), header row and all, so the two read alike.
 
 - **`telemetry` is unpublishable, not merely unpublished.** It is a `postgres_fdw` foreign table
   whose rows enter TimescaleDB's WAL, never Supabase's. Adding it to the publication does not
-  error — it silently emits nothing, which is the worse failure. **Do not "fix" the telemetry
-  inspector (`modals/TelemetryModal.jsx`) by subscribing it.**
+  error — it silently emits nothing, which is the worse failure. **Do not "fix" History's charts
+  (`tabs/HistoryDevice.jsx`) by subscribing them**: they read again on Refresh and on its timer.
 - **Never delete `usePolling`.** Realtime has no replay: a dropped socket loses every change in the
   gap and the client is not told. The 60 s poll is also the only path carrying the exponential
   backoff, and the only one that reports a refresh's outcome (see **When the dashboard stops
@@ -854,13 +1023,15 @@ tab; the strip is the signal that matters, because full screen and pinned tabs h
   going at its longest interval instead of stopping, so a token the auth client refreshes a moment
   later gets through and clears the strip. The strip lives in the signed-in shell, so it never
   shows over the sign-in page, and the state is reset when the shell mounts and unmounts.
-- **An edge function's refusal shows at once and stays.** Each function asks the auth server about
-  its caller (`auth.getUser()`), so it is the first to learn that a session ended elsewhere, while
-  PostgREST goes on answering on the dead token. Every function call's error in `api.js` passes
-  through `functionFailure()`. A 401 whose body says the session no longer exists
-  (`isSessionRefusal()` in `utils/sessionError.js`) is then checked with the auth server's `/user`
-  (`authServerRefusesSession()`). The functions answer the same "Invalid user token" when they
-  could not reach the auth server at all, and the strip stays until the next sign-in, so the label
+- **An edge function's refusal shows at once and stays.** Each function checks its caller as it is
+  called: most ask the auth server (`auth.getUser()`), and aas-api and the Factory+ Directory ask
+  PostgREST (`auth_pre_request()`, which refuses an ended session with `session_not_found` since
+  0205). So a function call can be the first request to meet a session that ended elsewhere. Every
+  function call's error in `api.js` passes through `functionFailure()`. A 401 whose body says the
+  session no longer exists (`isSessionRefusal()` in `utils/sessionError.js`) is then checked with
+  the auth server's `/user` (`authServerRefusesSession()`). The functions that ask the auth server
+  answer the same "Invalid user token" when they could not reach it at all, and the strip stays
+  until the next sign-in, so the label
   alone is not enough. Only a 401 or 403 from `/user` calls `reportSessionRefused()` and gives the
   error the code `SESSION_REFUSED`. A live session, an unreachable server or no answer within 10
   seconds leaves the error as it was. Refusals that arrive together share one check. The check is a
@@ -1029,18 +1200,19 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Page | Tabs in the path | Query keys (drawer last) |
 | :--- | :--- | :--- |
 | Site Map | | `archived`; the panel: `area`, `cell` or `lane` |
+| History | `overview` (the default, also the bare `/history`) or `device`, then the device's id (`/history/device/<id>`; `/history/device` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); the picker: `search`, `sort` |
 | Areas | | `search`, `lifecycle`, `sort`; `area` |
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
 | Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
-| Audit Trail | | `search`, `type`, `action`, `changed_by`, `range`, `since`, `until`, `deleted`; `event` |
+| Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Uncatalogued: `name`, `sort` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |
 | Archives | `retired` | `sort` |
-| System | the group | `sort` |
+| System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)) |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
 | Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
@@ -1089,13 +1261,14 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read` |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
-| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana |
+| `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
@@ -1122,6 +1295,81 @@ buttons side by side, Change destination and Take a backup, with the main one st
 toolbar follows this rule: a side panel keeps exactly one primary action, and Discard stays
 outlined beside Save. `toolbarActionsFilled.test.js` reads every `.filter-bar-actions` group in
 the source and fails on an outlined button written into one.
+
+**Refresh and its interval are one control**, `RefreshButton` (`common/RefreshButton.jsx`), as
+Grafana's refresh picker is. The filled Refresh button reads again now. The select joined to its
+right half sets how often it happens by itself: Off, then the page's intervals. A page that
+refreshes both by hand and on a timer uses it, not a button and a select apart: System › Logs and
+History. `everyDisabledReason`, a sentence, turns the interval half off and is its tooltip, while
+the Refresh half still reads; History passes one while its window has ended.
+
+**Every list filter takes several values, through one shared part**, `common/FilterChecklist.jsx`,
+as Home Assistant's entity filters do. A filter that picks from a list is never a `<select>`; a
+yes-or-no choice stays a toggle button in the toolbar.
+
+- **In the toolbar it is a `FilterDropdown`**: a `ToolbarPopover` button where the select was,
+  the same width (`width`: `sm`, `md` or `lg`), so the row keeps its shape whatever is chosen. It
+  reads "Any status" with nothing chosen, the value with one, and "2 statuses" with several
+  (`filterWords`). A page may name a choice, as Schemas' Current is Active and Draft. Its name is
+  "Status: Any status", and its panel ends in Clear, which returns it to its default.
+- **In a Filters panel it is a `FilterList`**, with an optional HelpTip, and the panel's own Clear
+  resets it. A yes-or-no choice in a panel is a `FilterCheck` checkbox: Show deleted entities, Show
+  replay lanes.
+- **A Filters panel with several lists makes each a section that opens and closes**, as Home
+  Assistant's filter pane does, so the panel is the one scroller. `FiltersPopover` finds the
+  `FilterList`s written into it and draws each under a `GroupHeading` that says what is chosen in
+  it: "Entity · 2 chosen", the value's name when one is chosen, or the name alone.
+  - One section is open at a time. As the panel opens, the first list whose choice differs from its
+    `defaultValue` opens, or else the first list. Devices' Lifecycle at Active does not count.
+  - An open list is at full height, with its search box over it. Only a toolbar dropdown's list
+    scrolls on its own. The panel's `FilterCheck` boxes stay under the sections.
+  - Which section is open is not in the address, and starts again each time the panel opens. A
+    pressed heading keeps the focus while the list it closes goes.
+  - A panel with one list draws its label, not a heading.
+  - Write each list straight into the panel, not inside a `<div>`, or the panel cannot find it.
+    Check 203 holds this, and that nothing in App.css scrolls a list inside the panel.
+- **The checklist** draws the values under headings when the options carry a `group`, and flat
+  when none does. A heading's checkbox chooses or clears its group, and is mixed while some of it
+  is chosen. Over eight values it has a search box; while a search is typed, a heading acts on the
+  values it shows. Each value's count is the rows that have it among those the page's other
+  filters let through (`applyFacets`, `utils/listFilters.js`). ↑ and ↓ move between the
+  checkboxes, Space ticks one, and Escape clears the search before it closes the panel.
+- **An option is `{ value, label, group?, note? }`.** `note` is why a value cannot occur with what
+  else is chosen ("not with Cells"). The row dims its name and shows the note before the count, and
+  the note is part of the checkbox's name. A page keeps such a value listed only while it is chosen,
+  so a choice that stops applying stays to be undone and is never cleared by itself.
+- **One meaning everywhere**: any value within a filter, every filter together, and nothing chosen
+  is no constraint. Lifecycle (`LIFECYCLE_OPTIONS`) is Active and Archived and opens on Active;
+  both chosen, like none, shows every row.
+- **The address carries the list** (`useUrlList`, `hooks/useUrlState.js`): `?status=online,offline`,
+  with a comma inside one value escaped. A link written with one value opens as a list of one. An
+  old single value, such as `lifecycle=all`, is read through its alias and the address rewritten
+  as the values it meant. A change replaces the history entry, as `useUrlState` does.
+- **The Audit Trail's three lists are the server's** (`audit_trail_page()`'s arrays, `0227`), so
+  they filter before the row limit. Its kinds are grouped by `group` in `AUDIT_TRAIL_ENTITY_TYPES`
+  (the plant, the model, capture, security), its actions by `AUDIT_TRAIL_ACTION_GROUPS`, and
+  Changed by into People and Machine identities.
+- **Its kinds and actions carry the server's counts** (`p_counts`, `0228`), each under every filter
+  but its own, asked for with the first page and the poll. **They narrow each other by
+  `AUDIT_TRAIL_ACTION_KINDS`**, the mirror of `audit_trail_action_kinds()` (`0229`, mirror check 43):
+  a list offers a value that can occur with the other lists' choices and the legend's classes, one
+  that did occur, and one that is chosen, noted where it cannot occur. With no kind chosen, an action
+  is one the role's own kinds can have.
+- **The Audit Trail's legend is its class filter.** The server names each event's class
+  (`audit_event_class()`, `0228`) and the page draws that marker; it has no rules of its own.
+  Each class's entry is a counted toggle, `btn-ghost` or `btn-primary` with `aria-pressed`, as a
+  toolbar's counted toggles are. Several may be on, none on is every class, and the address keeps
+  them as `?class=lifecycle,read`. `AUDIT_TRAIL_CLASSES` lists them in the legend's order and mirror
+  check 44 holds them, and `MARKERS`, to the function and its indexes. Read is a grey eye in
+  `--text-muted`. In a toggle each marker sits on a disc in `--bg-card` (`.trail-legend-disc`), as
+  it sits on the card on the track, so a pressed toggle's accent fill never meets it.
+  `themeContrast.test.js` holds every marker at 3:1 on the track and in its toggle, pressed or not,
+  in both themes. The legend sits at the right-hand end of the row above the timeline, with Expand
+  all and Collapse all at its start, over the section headings they act on.
+- **Checks.** Check 193 (`scripts/check-docs-drift.mjs`) refuses a select in a toolbar, but System ›
+  Logs' Service and Level, each one value `service-logs` takes. Check 194 holds the Audit Trail
+  help's group names to `constants.js`. Mirror check 42 (`scripts/check-mirror-drift.mjs`) holds
+  each kind's domain, and so its group, to `audit_domain_for()`.
 
 `CardHeading` takes no buttons: it has no `actions` prop, and `cardHeading.test.jsx` fails on a
 page that passes one. So a page's main button is in the same place whether or not it has tabs.
@@ -1155,6 +1403,343 @@ button, and marks the four rows Off. `aria-keyshortcuts` names `?` on that butto
 search box (read from `SingleKeyShortcutsContext`) and Control+K or Meta+K on the top bar's search.
 The first two, and the `/` hint, go while the switch is off. `[` and `]` are named on no element,
 because the tab they open changes; the shortcuts list covers them.
+
+### One time control for every period
+
+**A page that shows a period uses `common/TimeWindowControl.jsx`**, the Audit Trail first. The
+arithmetic is `utils/timeWindow.js`, and `hooks/useTimeWindow.js` keeps the window in the address.
+A page needs three lines:
+
+```jsx
+const [win, setWin] = useTimeWindow({ ranges: TIME_PRESETS, allTime: true, fallback: ALL_TIME })
+<TimeWindowControl value={win} onChange={setWin} ranges={TIME_PRESETS} allTime />
+const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' for no bound
+```
+
+- **The props.** `value` and `onChange` are the window. `ranges` is the rolling ranges the page
+  offers: `TIME_PRESETS` (15 minutes to 30 days) or some of them. `allTime` adds All time. `spans`
+  is the spans the switch offers: `SPAN_IDS` (all four, the default) or some of them. Pass the
+  same to `useTimeWindow`, with `fallback`, the window shown when the address names none. Pass
+  module-level constants, as the window is memoised on them. The Audit Trail offers every range,
+  every span and All time, and falls back to All time. System › Logs offers its own five ranges
+  (Last 6 hours among them), Day and Week, and no All time, since a read covers at most 7 days; it
+  falls back to Last 1 hour.
+- **A span a page does not offer is passed over** in the address, which then falls back, and Jump
+  to lands on Day, or on the first span offered where Day is not.
+- **Left to right**: ‹, the window in words with a chevron, ›, then the Day | Week | Month | Year
+  `SegmentedControl`, then Zoom in and Zoom out where the page asks for them. Today is in the
+  popover's Jump to, not a button of its own. It goes after the search box, which stays first. It is one unit that does
+  not wrap inside itself, so a toolbar that wraps moves it whole.
+- **The words open a `ToolbarPopover`**, the frame `FiltersPopover` is drawn in: the same place,
+  arrow, Escape and click-outside rules, and the chevron every popover's button ends in. Focus moves to the panel's first control as it opens,
+  in the Filters panel too. The groups are Jump to (Today, Yesterday, A week ago, A month ago,
+  Start of the year, and a date field), Rolling, and Custom range (two `datetime-local` boxes and
+  Show range).
+- **The arithmetic is local calendar time.** A day runs from one local midnight to the next, so a
+  step moves by date, never by 24 hours: 25 October 2026 was 25 hours long in London. Weeks start on
+  Monday. Choosing a span keeps the day shown. Under a rolling or custom window, or All time, no
+  span is chosen; choosing one shows the span that holds the window's end. A rolling window
+  becomes fixed when stepped, measured from the current minute. A custom window steps by its own
+  length, by date when it is whole days.
+- **The arrows** are named by the span (Previous day, Next week), or Earlier and Later for a window
+  that steps by its own length. › is `aria-disabled` while the window holds now, as the Audit Trail
+  drawer's end buttons are, and both are under All time. The tooltip says why. No key is bound: `[`
+  and `]` change tab, and the arrow keys step the Audit Trail's drawer. An arrow, Today or a span
+  is said in a polite `role="status"` line ("Showing Tue 3 Nov").
+- **The address.** A calendar window is `span` and `at` (`?span=day&at=2026-11-02`; no `at` means
+  today). A rolling one is `range`. A custom one is `from` and `to`, local `YYYY-MM-DDTHH:mm`, and
+  `to` is the first minute outside the window. The Audit Trail's older `since` and `until` are read
+  as `from` and `to`, and the address is rewritten that way. The old `until` included its whole
+  minute, so its `to` is a minute later and the same rows come back. A step, a span or a choice in
+  the popover replaces the history entry; a zoom adds one.
+- **Zoom is opt-in: `zoom`.** It adds Zoom in and Zoom out after the switch, in the expanded plan's
+  order and with its glyphs (`IconZoomIn`, `IconZoomOut`). Zoom in shows the middle half of the
+  window and Zoom out twice it about the same middle, each as a custom window to the second
+  (`zoomIn`, `zoomOut`). Zoom in stops at `ZOOM_FLOOR_MS` (one minute), since under an hour the axis
+  prints seconds. Zoom out has no limit, but a window that would end past the current minute is
+  moved back to end with it, so it holds now. A rolling window is measured from the current minute,
+  as a step measures it. Where a window has no bounds of its own (All time, or a custom range with
+  an end left out), Zoom in halves `extent`, the `{ start, end }` the page's axis draws; Zoom out is
+  off under All time. An off button is `aria-disabled` with its reason in the tooltip, as the arrows
+  are. The Audit Trail and History pass `zoom`; System › Logs does not.
+- **Back undoes a zoom.** A zoom calls `onChange(next, { replace: false })`, and `useTimeWindow`'s
+  setter then adds a history entry (`navigate()` without `replace`). Everything else calls
+  `onChange(next)`, which replaces the entry. A page that wraps `onChange` passes the second
+  argument on.
+- **A drag across the Audit Trail zooms too.** A mouse or pen press on the axis or an empty part of a
+  track, moved at least `BAND_DRAG_PX` (4px), shades a band (`.trail-band`) through
+  `hooks/useBandDrag.js`. It is drawn on the axis, on each section heading and in the gridlines
+  layer, as the hatched parts are. The axis words
+  it with `bandWords` ("10:05 – 10:40, 35 min"), and a release sets `bandWindow(start, end,
+  axisMs)`: to the minute on an axis of an hour or more, to the second under one, and never under
+  the floor. A press on a marker or a badge starts no band, so it still opens; nor does touch, so a
+  finger scrolls the page. Escape drops a band, and keeps the key from the drawer. Both functions
+  take times, not pixels, so another timeline's drag can use them: History's does, through the same
+  `useBandDrag`, which takes the track to press, what to skip and the track's end padding.
+- **The words** come from `windowWords`, in the browser's locale, as the axis ticks are, so a
+  language setting can pass its own. No date library.
+- **The axis is the window.** On the Audit Trail, All time's axis is the events'; any other window's
+  is the window itself, with calendar ticks at local hours, days, weeks or quarters
+  (`calendarTicks`). A window that runs on past now draws "Now 15:20" there (`.trail-now`). The
+  part after it is hatched and says "Nothing recorded yet" (`.trail-shade`).
+- **A bounded window loads everything in it.** Under any window but All time the Audit Trail asks
+  for page after page by itself, until no page is left or `WINDOW_EVENT_CAP` (2,000) events are
+  loaded. Each page is a request that scans the whole match, and every event is a marker to lay out
+  and cluster, so a busy month stops there. Only then, when loading stopped short of the window's
+  start, is the part before the oldest loaded event hatched, and it says when the cap stopped it.
+  Show more goes on from there a page at a time. A page that fails, or adds nothing, stops the loop,
+  and a page asked for under an older filter is dropped when it lands. All time loads one page and
+  keeps Show more.
+
+### History and its chart
+
+**History charts a device's readings over a window** (`tabs/HistoryTab.jsx`, `tabs/HistoryDevice.jsx`).
+Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each rule.
+
+- **The window** is the shared `TimeWindowControl` with every rolling range (`TIME_PRESETS`) and
+  every span, and no All time. It falls back to Last 24 hours (`DEFAULT_HISTORY_WINDOW`).
+- **The read** is `api.readCarriedTelemetry()`, the RPC `telemetry_carried()` (`0233`): one row per
+  metric per bucket, a bucket with no reading carried forward and marked `is_carried`.
+- **The row cap picks the resolution.** `pickResolution()` takes the finest of `HISTORY_RESOLUTIONS`
+  (`api.js`: the rollups' 1 minute, 5 minutes and 1 hour, then 1 day) whose rows, buckets times
+  the metrics chosen, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from
+  the one holding the window's start, on the epoch grid the rollups use. When no resolution fits
+  every metric, the coarsest reads them in parts. The page says which it shows ("3 of 10 metrics,
+  in 1-minute buckets").
+- **Buckets** (`HISTORY_BUCKETS`, `?bucket=`) is Auto, `pickResolution()`'s pick, or one size, in
+  a `ToolbarPopover` as the time window is. `resolutionFor()` reads a coarser size with every
+  metric in one read. A finer one would pass the cap: `bucketOptions()` lists it `aria-disabled`
+  with `TOO_MANY_BUCKETS` as its tooltip, and an address naming one is read at Auto's pick, the
+  status line saying so. A toolbar keeps no `<select>` (check 193), so this is not one.
+- **Text reads apart under Auto** (`readPlan()`). A metric's kind is known before it is read, from
+  its catalog datatype (`datatypeKind()`: String, Text and UUID are text, Boolean a flag, the rest
+  numbers). Text metrics read at `readableResolution()`: the finest whose buckets are each at least
+  `TEXT_BUCKET_MIN_PX` (3px) across the chart and whose rows fit the cap, since one-minute buckets
+  over a day run a strip's words together. The width is a chart box's, measured at each read; a
+  change of width settles for 300 ms and reads the text again only when it changes their pick.
+  Numbers, flags and a metric the catalog does not know keep `pickResolution()` for their own
+  count. The status line says "3 metrics, in 1-minute buckets; text in 5-minute buckets", and each
+  chart's summary names its own bucket. A Buckets choice reads every chart at it, text included. A
+  coarser bucket keeps only its last value, so a state held inside one is not drawn ([#1370](https://github.com/Harri-Llewelyn/Aber/issues/1370)).
+- **The metrics** are those the device's last birth declared and those its schemas model
+  (`deviceMetrics()`); each one's valid range is its schemas' `minimum` and `maximum`
+  (`validRanges()`), and its unit the catalog's. **Metrics** in the toolbar is a `FilterDropdown`
+  over them (`?metric=`, `useUrlList`); nothing chosen charts every one. A name the device does not
+  have is dropped from the address, so a device switched to keeps the names it shares.
+- **Clear filters** counts and resets the window (off `DEFAULT_HISTORY_WINDOW`), the metrics and
+  the buckets. The device is the page's subject, not a filter, and stays.
+- **The charts are grouped by catalog datatype** (`metricGroups()`), each group named as the
+  Metrics page names the type (`datatypeLabel()`) and in `GROUP_ORDER`: Double, Float, the
+  integers, Boolean, String, Text, any other type by its code, then Other for a metric the catalog
+  does not know. Each group is a `GroupHeading` with its count, which opens and closes it, and
+  `ExpandAllToggle` does every group from the start of the row above the charts (`history-header`), as the Audit Trail has it over its sections. A closed
+  group only unmounts its charts: the reads, the row cap and the Metrics filter are unchanged. Which
+  are closed is kept in this browser (`CLOSED_GROUPS_KEY`, localStorage, by datatype code, read and
+  written in try/catch), not in the address. The Metrics dropdown's options carry the same
+  `group`, so its checklist draws them under the same headings.
+- **The charts scroll inside the card**, as Overview's lanes do (`.card-fill-scroll.trail-timeline`,
+  then `.trail-scroll`): the toolbar and the row above the charts stay, and a group's heading pins
+  while its charts are in view. A chart is its box's width, so a scrollbar narrows it
+  (`TimeSeriesChart` resizes uPlot on its box), and never sideways.
+- **Refresh** is `RefreshButton` with `HISTORY_REFRESH_EVERY` (Off, 30 s, 1 min, 5 min; no 10 s,
+  since each read reads every chart again). The interval is the page's state, as Logs keeps it, so
+  it outlasts a change of device. `usePolling` runs it only while the window reaches now
+  (`holdsNow()`); for a window that has ended the interval half is off with the reason. A read in
+  flight keeps the charts on screen, and only the newest read lands.
+- **Export CSV** (`filter-bar-actions`, after Clear filters and before Refresh, as the Audit
+  Trail places its own) opens `TelemetryExportModal` with what the page shows: the device, the
+  metrics chosen and the window, resolved to ISO bounds as it opens and named in its first line
+  (`exportWords()`). The dialog has no range of its own. It pages `/api/v1/telemetry` per metric
+  up to `TELEMETRY_EXPORT_MAX_ROWS` (50,000) across them, raw by default and never a rollup in
+  its place: it labels each resolution with its horizon and warns, with the finest that covers
+  it, when the window starts before the one chosen. The file's first line names the resolution.
+  An `ActionButton` gated on `telemetry:read`, as the device drawer's View Telemetry was, which
+  History replaced.
+- **Zoom** is the time control's `zoom` and a drag across any chart (`useBandDrag` over each
+  `.u-over` and state strip, which are the window's width). The page holds the band and every chart
+  shades it (`band`, `.chart-band` with the trail's look) with `bandWords()`; a release calls
+  `setWin(bandWindow(start, end, axisMs), { replace: false })`, so Back undoes it, keeping the
+  metrics and the buckets. uPlot's own selection stays off: one band covers the number charts and
+  the state strips alike, and Escape, the 4px click and touch behave as on the Audit Trail.
+- **The address** is `/history/device/<id>` with the window's keys, `metric` and `bucket`;
+  `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
+  (`routes.js`). Choosing a device adds a history entry.
+
+**Overview is History's first tab and its default** (`tabs/HistoryOverview.jsx`): where readings
+arrived over the window, a lane per device, before anything is charted. Its arithmetic is in
+`utils/history.js` too, and `__tests__/historyOverview.test.jsx` holds each rule.
+
+- **The layout is the Audit Trail's lane grid**, on its classes (`.trail-swimlanes`, `.trail-axis`,
+  `.trail-section`, `.trail-lane`, `.trail-lane-label`, `.trail-track`): a label column of
+  `--trail-label-width`, then a 28px track a row, under the trail's axis with its empty corner. A
+  group is a section row, its `GroupHeading` in the label column (a cell's a step in, pinned one
+  row below its area's) and, when closed, its merged strip in the track. The grid scrolls inside
+  the card (`.card-fill-scroll.trail-timeline`, then `.trail-scroll`), so the axis and the headings
+  pin and the row above the lanes stays. Overview's axis follows the Audit Trail's, not the Device
+  tab's charts: the tracks run from the label column to the card's edge, and no longer span the
+  charts' plot gutters (`PLOT_LEFT_PX`, `PLOT_RIGHT_PX`). Overview's own rules (`.overview-*`) are
+  only what it adds; the Audit Trail is unchanged.
+- **The read** is `api.readCoverage()`, the RPC `telemetry_coverage()` (`0245`): one row per device,
+  its readings in each block as an array, and the stretch the historian's device rollups have
+  counted. It reads every device in parts of `COVERAGE_MAX_DEVICES` (1,000), again on Refresh and
+  its timer, and when a settled width changes the blocks. A window older than the 5-minute device
+  rollup reaches comes back in hours (`block_width`); the strips are laid on the width that came back
+  (`readWidth()`), and the status line names it.
+- **The blocks** (`coverageBlock()`): `COVERAGE_SMALL_SELECTION` (40) devices or fewer take the
+  finest of `COVERAGE_BLOCKS` at about one block per `COVERAGE_BLOCK_PX` (4px) of the strip. More
+  take the device rollups' own widths only, 5 minutes up to 26 hours and 1 hour up to
+  `COVERAGE_LARGE_MAX_HOURS` (a week), so nothing is summed on the historian. A longer window reads
+  the devices the search matches when they are 40 or fewer, and otherwise says why
+  (`TOO_LONG_FOR_MANY`). The status line names the block size.
+- **The groups** (`overviewGroups()`) place devices as the Site Map does, from the same helpers
+  (`inServiceDevices()`, `groupDevicesByCell()`, `areaWideInService()`, the location sources): each
+  area in service with its cells and its Area-Wide devices, the cells in no area, then Site-Wide,
+  Simulated and Unassigned. Archived devices are left off, as on the Site Map. Each heading is a
+  `GroupHeading` with "4 devices" as its `detail`; a closed group draws one strip of its devices'
+  counts merged and renders none of its lanes. Which are open is kept in this browser
+  (`OVERVIEW_GROUPS_KEY`, `{ key: open }`, in try/catch); on a first visit every group is open
+  unless there are more than `OVERVIEW_OPEN_LANES_MAX` (200) lanes.
+- **A lane's label** is its tick box, its status dot (`badge-dot` with `deviceDotStyle()`, and
+  "Offline" in words, as the trail's deleted flag is), its name (`OverflowText` in a link to its
+  charts) and its metric count as `.trail-lane-qualifier`. **Its track** holds its strip, runs of
+  one shade (`coverageSteps()`, `coverageRuns()`), four steps of `--coverage-1` to `--coverage-4`
+  against the strip's busiest block, each run one box, a block with none the track's own colour;
+  and at its right-hand end "No readings since 15:00" (`readingsStopWords()`). The steps
+  are one sequential blue ramp a theme, held by `themeContrast.test.js` to the ordered-ramp rule:
+  lightness moves one way and the step nearest the card clears 2:1. The future is the trail's
+  `.trail-shade-future`; a stretch the rollups have not counted yet (`uncountedStretches()`) is
+  `.overview-uncounted`, cross-hatched, and the status line says "Coverage before 3 Oct is still
+  being computed" (`uncountedWords()`).
+- **The readout**: the block under the pointer, on a lane's track or a closed group's, in words
+  (`blockReadoutWords()`): "10:05–10:10 · 412 readings", "No readings", "No readings yet" after
+  now, or "Not counted yet". A step under 3:1 is why: the count never depends on the colour. It is
+  the tooltip's bubble and arrow (`.tooltip-bubble`), portalled as the tooltip is, centred under the
+  block and kept to its track (`placeReadout()`), above it only where the scroll area has no room
+  below, as on the last lane: never over the strip it reads. A scroll closes it, and none is drawn
+  while a box is drawn or held.
+- **The selection box** is a drag across the tracks (`useBandDrag` over `.overview-swimlanes
+  .trail-track`, whose band carries the press's and the pointer's `clientY`; the rows under that
+  stretch are the box's devices). While it is drawn, the axis names it (`.trail-band-words`, held
+  inside the track near either end, with `boxWords()`). Once released it stays, and
+  `SelectionPopover` opens beside it, as on AMRC ACS's Datasets page: its words, **Chart** (the
+  Device tab for one device at the box's window, off for several with `CHART_SEVERAL_REASON` as its
+  tooltip), **Zoom** (the window as a new history entry) and **Clear**. It is portalled to
+  `<body>` and fixed, as `ToolbarPopover` is, so the card cannot clip it, below the box's visible
+  part or above it where the window has no room (`placeSelection()`), with the popovers' arrow
+  (*Popover arrows*, `.overview-popover::before`). The popover itself takes focus as it opens, not
+  its first action, whose tooltip would cover the box; Tab reaches the actions and stays inside it. Escape, Clear, a press outside, a scroll and a resize close it and clear the
+  box, and focus goes back to the box's first lane. The tick boxes (`?device=`, telemetry keys) are
+  the other way: the toolbar's **Chart**, on for exactly one, charts it at the control's window.
+  Export CSV is the Device tab's alone. `.history-header` holds Collapse all, the status line and
+  the key, with `.trail-header`'s room above and below, on Overview and the Device tab alike.
+- **The address** is `/history/overview` with the window's keys and `device`; bare `/history` opens
+  Overview too (`historyPath()`, `overviewAddress()`), and `/history/device` is the picker.
+
+**`common/TimeSeriesChart.jsx` is the one time-series chart**, on uPlot, which later tabs reuse.
+It draws the bucket's average as the line and its minimum to maximum as a band. A carried bucket
+is on a dashed line, never on the solid one, so a quiet stretch never reads as a measured one. A
+flag steps between false and true, and a state is a strip of its runs in text.
+
+- **The head** reads the bucket under the pointer, and otherwise the latest reading
+  (`latestWords()`): the newest bucket a reading arrived in, never a carried one, with its `last`
+  value and the bucket's start, since a bucket is not a reading's timestamp.
+- **A state** is `stateRuns()`, clipped to the window and to now. Each value's colour comes from
+  its text: `stateHue()` hashes it (djb2, then murmur3's finaliser, so names a character apart do
+  not land a degree apart) to a hue, which the box carries as `--state-hue` through React's style,
+  the CSSOM, so the CSP is unchanged. App.css draws it as `oklch()` of the theme's
+  `--chart-state-l` and `--chart-state-c` and that hue, with a stronger edge. The same value is the
+  same colour on every chart, device, refresh and session, and a value never seen before has one.
+  At those tokens every hue is inside sRGB, the label clears 7.4:1 (dark) and 13:1 (light) on its
+  box, and the edge 3:1 on the card; `themeContrast.test.js` walks all 360 hues. A hash is not a
+  meaning: two values can land near each other (about one pair in twelve within 15°), and IDLE is
+  not grey, so each box keeps its name and colour is never the only cue. `colourLiterals.test.js`
+  allows an `oklch()` of three tokens alone, which writes no colour. A carried stretch inside a run
+  is hatched. Under the strip, `stateKey()` names the `STATE_KEY_MAX` (6) values with the most time
+  and counts the rest as others. The head reads the run under the pointer (`runWords()`). The data
+  read is the same as a number's: a state held only inside one bucket is not shown.
+
+| Prop | What it is |
+| :--- | :--- |
+| `metric`, `unit` | The title, "Spindle/LOAD (kW)", which names the figure and its chart |
+| `starts` | Each bucket's start in seconds: `bucketStarts(start, end, minutes)` |
+| `series` | `chartSeries(rows, starts)`: `kind`, then `avg`, `min`, `max`, `carried`, `states` and `last`, one entry a bucket |
+| `start`, `end` | The window in milliseconds. The time axis is exactly the window |
+| `now` | The clock. Inside the window, a Now line and label, and a hatched "No readings yet" after it |
+| `minutes` | The bucket's width: a state strip's runs, and the times the head says |
+| `validRange` | `{ minimum, maximum }` from the schemas, or null: a dotted line labelled "valid range" |
+| `summary` | `chartSummary()`: the metric, the window, the resolution, the latest reading and its bucket, the lowest and highest, a state's shares, the carried buckets and the valid range, for a screen reader |
+| `syncKey` | Charts sharing it share the cursor, so every chart of a device shows the same moment |
+| `band` | A drag's band, `{ lo, hi, mid, words }` (fractions of the window, and `bandWords()`), shaded over the plot or the strip, or null |
+| `height` | The plot's height in pixels, 140 by default |
+| `plugins` | uPlot plugins for a number or flag chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state strip takes none |
+
+- **No sideways scrolling.** The chart is its container's width, and a `ResizeObserver` resizes it.
+- **Colours and the font are the theme's tokens** (`chartPalette()`), read again when
+  `<html data-theme>` changes, so a theme switch redraws it.
+- **uPlot's own drag selection is off** (`cursor.drag` x and y false, `select` hidden): a chart
+  never rescales itself, and the page's window is the only zoom. A drag zooms that window (`band`).
+- **Under the Content-Security-Policy**, uPlot sets styles through the DOM (`element.style`), which
+  `style-src` allows, and its stylesheet is imported through the bundle. The chart's first comment
+  carries uPlot's MIT notice, because the build drops uPlot's own (NOTICE.md).
+- A browser that cannot draw on a canvas gets the summary and a line saying the chart could not be
+  drawn.
+
+### History's Alerts tab
+
+**History's Alerts tab lists the alert occurrences that fired over the window** (`tabs/HistoryAlerts.jsx`,
+`/history/alerts`), from every writer, as the viewer may read them. Its arithmetic is
+`utils/alertHistory.js`, and `__tests__/alertHistory.test.js` and `historyAlerts.test.jsx` hold it.
+
+- **The read** is `api.readAlertOccurrences()`, the RPC `alert_occurrences()` (`0243`): the
+  occurrences that overlap the window, not only those that started in it, newest first, at most
+  `ALERT_HISTORY_LIMIT` (1,000). It asks for one more, and the status line says when more fired.
+  Each row is `{ occurrence, ended_at, replaced }`, which `occurrenceRow()` flattens: the whole
+  `platform_alerts` row, when it ended, and whether a later occurrence of the same alert replaced
+  it. `firing` is a firing occurrence nothing replaced. `overlapsWindow()` states the overlap rule
+  in the browser, for the tests and the shading.
+- **The window** is the page's: the same `TimeWindowControl`, ranges, spans, zoom and fallback as
+  the Device tab, read by `HistoryTab` and passed in. The refresh timer is the page's too.
+- **The toolbar**: the search first (the alert's name, summary, subject, acknowledger and note, in
+  the browser), the window, then **Asset**, a `FilterDropdown` of every device and gateway by
+  name, valued by Sparkplug id (`assetOptions()`, `?asset=`), which goes into the read. Clear
+  filters resets the window and the assets. Area and cell filters are not built.
+- **The address** is `alertsAddress(win, { assets })`: `/history/alerts` with the window's keys and
+  `asset`, and `search` and `sort` as the toolbar and the table write them.
+- **The columns**, each sortable (`ALERT_SORT`) and newest first until one is chosen: Alert (name
+  and summary, `AlertCell`), Severity (a badge with its word), Subject (`alertSubject()`: a device
+  or gateway linked through `onSelectDevice` and `onSelectGateway`, as the alert counter's row is;
+  Platform-wide or Machine identity in words, linked where `alertPage()` names a page), Started,
+  Ended (`EndedCell`: Firing, or "(fired again)" with why for a replaced one), Duration
+  (`lengthText()`, "so far" while firing) and Acknowledged (who, the reason, when and the note). A
+  mark about the occurrence itself goes in `AlertCell`, after the name. `SuppressedMark` is one:
+  the alert counter's crossed bell and "Suppressed", where the row's `suppression_window_id`
+  (`0240`) names the window that first covered it. That stamp says neither whether a window covers
+  it now nor until when, so the mark has no "until".
+- **The acknowledger is named by the email their token carried** (`acknowledgerName()`), here and
+  in the alert counter. `display_names_for()` answers only for the people a caller can already
+  see, so a name would show to some readers and not others.
+- **The empty states** say which: nothing fired, nothing on the assets chosen, nothing matches the
+  search, or, for a role that is not an Administrator, nothing the viewer may see, since a machine
+  identity's alerts reach an Administrator alone. `retentionWords()` adds that alerts are kept for
+  `alerts.retention_days` (`useSetting`, falling back to `ALERT_RETENTION_DAYS`, 90) when the window
+  starts before that.
+
+**The Device tab shades the periods an alert on the device was firing** (`hooks/useAlertBands.js`,
+`common/alertBands.js`). With each read the charts make, the hook reads the device's alerts over
+the same window and builds `alertBands()`: each occurrence clipped to the window, a still-firing
+one running to the read's moment, where the lines stop. `alertBandsPlugin()` passes them to every
+number and flag chart through `plugins`.
+
+- **Inside the plot area only**, from `bbox`, so a band lines up with the text strips' gutters.
+  Under the series, a translucent fill of `--danger`. Over them, a solid `--danger` edge where the
+  occurrence's own start or end falls inside the window, and its name in `--danger-text` inside the
+  band's foot where it fits. Several alerts each draw their own, so an overlap is deeper.
+- **Never colour alone**: the edges and names, a readout and a key. While the pointer is on a
+  chart (not on the charts its cursor is synced to), `.chart-alert-readout` at the plot's foot
+  names each alert firing at that moment (`bandText()`). The row above the charts keys the shading
+  in words with a link to the Alerts tab for the device and window (`AlertKey`).
+- **A failed read shades nothing.** The charts go on, and the read's thunk lets a stub without the
+  method read as no alerts. A state strip is not drawn by uPlot and is not shaded.
 
 ---
 
@@ -1197,13 +1782,13 @@ in "building management system".
   in the toolbar, never the heading ([The toolbar](#the-toolbar)).
 - **Scroll.** Every page scrolls inside its card, Access Control, System and Approvals included.
 - **Counts.** None on card headings, section headings or tabs. A count stays where it states what is
-  loaded ("30 of 55" beside Show more), what a filter option or toggle holds ("Active (4)", "Show
-  deleted entities (3351)"), what an export will write, or how much work is waiting (a Quarantine
-  or Awaiting tab, the sidebar).
+  loaded ("30 of 55" beside Show more), what a filter value or toggle holds (Active 4 beside its
+  checkbox, "Needs attention (3)"), what an export will write, or how much work is waiting (a
+  Quarantine or Awaiting tab, the sidebar).
 - **Queues are tabs.** Devices' quarantine queue is its Quarantine tab, not a card above the roster;
   a tab with work waiting takes `attention`.
-- **Clear filters (N).** N counts every control that is off its default, the lifecycle select
-  included. The button (`common/ClearFilters.jsx`) sits at the right end of the toolbar, first in
+- **Clear filters (N).** N counts every control that is off its default, the lifecycle filter
+  included, and a list filter once however many values it holds. The button (`common/ClearFilters.jsx`) sits at the right end of the toolbar, first in
   `.filter-bar-actions` when the page has buttons.
 - **Empty states** tell "none yet" from "none match".
 - **Permission hints** name the roles that hold the permission ("Requires Administrator or Shopfloor
@@ -1490,7 +2075,7 @@ one exists (a gateway's Launch UI); otherwise Restore when archived; otherwise E
 `showToast(msg, type)` (`hooks/useToast.js`) is the one call every page makes, with `type` one of
 `success` (the default), `info`, `warning` or `error`. Each call puts a toast in the bottom-right
 corner and records the same message in the history behind the bell in the top bar, unless it
-passes `{ record: false }`, as a Grafana alert does.
+passes `{ record: false }`, as an alert's toast does.
 
 - **Three groups, and the group is not the severity.** Every message is in one group: **Info**
   (routine news, successes included), **Warning** (the dashboard's own failures and warnings) or
@@ -1561,17 +2146,45 @@ passes `{ record: false }`, as a Grafana alert does.
   it, and an unread state that followed a user between browsers would need a per-user table with
   RLS. Supabase Queues (pgmq) does not fit that either, because a queue is single-consumer and
   cannot fan one event out to several signed-in users.
-- **Grafana alerts are toasts only.** `usePlatformAlerts` passes `{ group: 'alert', record: false }`
+- **Alerts are toasts only.** `usePlatformAlerts` passes `{ group: 'alert', record: false }`
   for a firing and a resolved alert. The toast shows, with the Alert group's icon and colour and a
-  link to the rule, but nothing is recorded, so the bell's badge never counts what the alert
+  link where `alertToastUrl()` says, but nothing is recorded, so the bell's badge never counts what the alert
   counter already counts. `readStoredHistory` drops any Alert entry a tab stored before this. The
-  counter shows what is firing now. Grafana's alert history (Alerting > History,
-  `GRAFANA_ALERT_HISTORY_URL`, linked from the counter's footer) is the record of what fired and
-  cleared, including an alert that came and went while nobody was looking. That page needs
-  Grafana's alert state history in Loki (`grafana/README.md`).
+  counter shows what is firing now. History's Alerts tab, linked from the counter's footer
+  (**Alert history**), is the record of what fired and cleared, including an alert that came and
+  went while nobody was looking, from every writer ([History's Alerts tab](#historys-alerts-tab)).
 - **A firing alert toasts its name only.** The summary can be several sentences with a SQL
   statement, which stacked as tall blocks, kept a warning up longer and was read aloud in full by
   the `role="alert"` region. The summary is in the alert counter's list.
+- **The counter counts what nobody has acknowledged** (`common/AlertPill.jsx`, 0231). The pill's
+  number, the tab title and the favicon count the firing alerts with no acknowledgement
+  (`unacknowledgedAlerts()` in `utils/alertAcknowledgement.js`, which `App` passes to the title and
+  the favicon). The list keeps an acknowledged alert, after the others, with a hollow dot, a tick and
+  who acknowledged it, when, the reason and the note. **Acknowledge** opens `AcknowledgeAlertModal`:
+  a reason from the closed set, unchosen to start, and a note Other requires. **Withdraw** asks
+  first, and is offered to the acknowledger, a Shopfloor Manager and an Administrator. Both write an
+  Audit Trail row, so each ends with a success toast that is recorded and links to what the alert is
+  about (`alertSubjectUrl()`). The dialogs are drawn inside the counter's wrapper, so a click in one
+  is not a click outside the list. Another person's acknowledgement arrives as an `UPDATE` on
+  `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
+  acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
+  outranks any acknowledged one. The acknowledger is named by the email their token carried
+  (`acknowledgerName()`, `utils/alertHistory.js`), the same on every surface: no display name is
+  readable by every role, since `display_names_for()` answers only the people a caller can already
+  see.
+- **A suppressed alert is not counted and colours nothing** (0240). `platform_alerts_active` says
+  whether a suppression window covers each alert as it is read, with the window's reason and end.
+  `countedAlerts()` (`utils/alertSuppression.js`) leaves acknowledged and suppressed alerts out of
+  the pill's number, the tab title and the favicon, and `alertIndex()` leaves a suppressed one out,
+  so no pin, chip or row colours it. The list keeps it, after the acknowledged ones, with a muted
+  ring struck through, a crossed bell, "Suppressed until" its end, and the reason under it. **A
+  window's start and end write nothing**, so `usePlatformAlerts` reads again a second after the
+  nearest end of a window that covers an alert, or start of one still to come (`nextSuppressionChange()`),
+  and at least two seconds after a read, so a clock ahead of the server's asks again until the
+  answer changes. An alert whose window ends while it fires toasts as if it had just fired; a
+  suppressed alert toasts neither firing nor resolved. A drawer that schedules, changes or ends a
+  window calls `requestAlertsRefresh()`, so this tab reads at once; another tab learns of an early
+  end at its next reconcile. The windows table is not in the realtime publication.
 - **A message links to what it is about.** `showToast(msg, type, { to })` takes a destination as
   text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
   message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a
@@ -1605,12 +2218,32 @@ passes `{ record: false }`, as a Grafana alert does.
   a failure of what was just tried, since the person is still on the form; a failure whose fix is
   elsewhere still links there. `__tests__/notificationLinks.test.js` reads every `showToast` call:
   one that is not an error passes `to`, or is in its `NO_LINK` list with the reason.
+- **A refusal for want of MFA links to Profile › MFA, from any page.** While Settings requires MFA,
+  the database, the edge functions and the gateway's consent step refuse a manager or an
+  Administrator whose session gave no code with one sentence, `MFA_REQUIRED_MESSAGE` in
+  `utils/secondFactor.js` (mirror check 60). `showToast` recognises it (`destinationOf` in
+  `hooks/useToast.js`): an error or warning carrying it, given no `to`, links to `MFA_TAB_URL`. So
+  no page recognises it itself. A form's own inline error shows the sentence as text.
+- **Every action that writes an Audit Trail row ends with a success toast** (#1316), so the bell
+  lists it as well as the trail. Save Turn, Show Credential, a capture's Download, Prepare replay
+  lanes and your own display name's Save each toast, as every other audited action does. It is one
+  toast for each action, however many rows it writes: Add Person writes two and toasts once, and
+  publishing a schema toasts once for all its devices. The type is `success`; one chosen at run
+  time may be `info` when nothing changed, as Cancel's is for a backup the service already took.
+  `__tests__/auditedActionsToast.test.js` reads what writes the trail from the migrations: the
+  functions that insert into `audit_trail`, the tables whose triggers do, and the functions and
+  edge functions that write those. It finds each `api.js` method and route that reaches one, and
+  requires each call of it under `src/` to reach a success `showToast` after it, in its own
+  function and outside a `catch`. `TOASTED_BY` names a call whose toast is made by the code it
+  hands over to, such as the Profile row a hook returns to, and `NO_TOAST` an exception with its
+  reason: OAuth consent's Allow, which leaves the dashboard. Rows nobody writes from the dashboard
+  (the backup service, the cron, ingestion, a machine's edge function) have nobody to toast to.
 - **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act;
-  it drops only when Grafana resolves the alert. The history says what the dashboard said, and its
-  count drops when the list is opened. One badge cannot follow both: if opening the list cleared
-  it, a critical alert still firing would vanish from the bar, and if it did not, routine messages
-  would add to the alarm's number. So each counts its own, and an alert is counted once, by the
-  pill.
+  it drops when the alert resolves or a person acknowledges it. The history says what the dashboard
+  said, and its count drops when the list is opened. One badge cannot follow both: if opening the
+  list cleared it, a critical alert still firing would vanish from the bar, and if it did not,
+  routine messages would add to the alarm's number. So each counts its own, and an alert is counted
+  once, by the pill.
 
 ---
 
@@ -1656,8 +2289,8 @@ arrows point up from `left: 50%` of the wrapper, so they follow the pill as its 
 account menu is `position: fixed`, and so is its arrow: it points left from the panel's left border,
 60px or 240px, 65px above the window's bottom, the centre of the account row over the foot's
 padding and its 34px Collapse all tabs row. Change the foot's padding or its rows and that number
-moves with it. The Filters panel
-is shifted to stay inside the window, so `FiltersPopover` sets `--arrow-x`, the button's centre from
+moves with it. The Filters panel, and the time window's in the same frame (`ToolbarPopover`),
+is shifted to stay inside the window, so `ToolbarPopover` sets `--arrow-x`, the button's centre from
 the panel's left edge, and the arrow stays over the button. `popoverArrows.test.jsx` holds the rules
 to these numbers; jsdom lays nothing out, so screenshots are the check that they line up.
 
@@ -1676,6 +2309,10 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   a pinned `thead` at `--table-head-height`, which `.table-scroll` and `.card-fill > .table-wrap`
   set to the header's fixed height (12px padding twice plus a 16px line, so keep header cells on one
   line). It works the same whether the scroller is a `.card-fill` card body or a `.table-scroll`.
+- **A badge is one line** (`.badge`, `white-space: nowrap`). Its pill radius rounds a badge that
+  wraps into an oval. A long label widens its column instead, or is split into several badges that
+  wrap between them: a devices column's summary is one badge per figure, a `TagList` entry with
+  `parts`, which still counts once toward the list's limit (`badgeOneLine.test.js`).
 - **A row that opens a side panel has `row-selectable` and shows a chevron.** The CSS draws it on
   the row's last cell as a mask, reserving space on the right; a row without the class shows none.
   Row click opens the panel; a click on a button, link or input inside the row does not
@@ -1687,6 +2324,11 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
   header that cannot be sorted takes one as a `ColumnHeader`.
   A click sorts ascending, a second descending, and a third returns the table to the order it had,
   which is left as it was: a table nobody sorts reads as before, and no header claims that order.
+  - **Every sortable header shows its arrow at rest**: the sorted column its up or down arrow, the
+    others a double arrow in `--text-dim` that steps up to `--text-primary` on hover or focus. A
+    touch screen has no hover, and the arrow is what tells a sortable header from a plain one, so
+    no rule hides it (`sortableTables.test.js`) and it holds 3:1 on the header's ground
+    (`themeContrast.test.js`). A `ColumnHeader` has no arrow.
   - **A column sorts by what it means, not by its text** (`utils/tableSort.js`): `text` in natural
     order ("Line 9" before "Line 10"), `number`, `time` by instant, and `rank`, a number the column
     works out. A status ranks by its badge's colour, `severityRank(tone)`, so ascending puts red and

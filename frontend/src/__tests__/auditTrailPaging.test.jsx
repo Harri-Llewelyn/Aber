@@ -11,6 +11,7 @@ import {
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { AUDIT_TRAIL_ENTITY_TYPES } from '../constants'
+import { filterList, offered } from '../test/listFilters'
 import { tooltipOf } from '../test/tooltips'
 
 // Spread from the real module, not replaced: api.js exports constants the tab reads at import time,
@@ -281,19 +282,14 @@ describe('AuditTrailTab section coverage', () => {
     render(<AuditTrailTab />)
     await screen.findByLabelText('Gateways lanes')
 
-    // The kind filter lives in the Filters popover.
-    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    const select = screen.getByRole('combobox', { name: 'Entity' })
-    const options = [...select.querySelectorAll('option')]
+    // The kind filter is a list in the Filters popover, its kinds under the groups' headings.
+    const options = offered(filterList('Entity'))
 
-    for (const { kind, label } of AUDIT_TRAIL_ENTITY_TYPES) {
-      const option = options.find(o => o.value === kind)
-      expect(option, `no filter option for ${kind}`).toBeTruthy()
-      expect(option.textContent).toBe(label)
+    for (const { label } of AUDIT_TRAIL_ENTITY_TYPES) {
+      expect(options, `no filter value for ${label}`).toContain(label)
     }
-    // Every entry, plus the unfiltered default and nothing else.
-    expect(options).toHaveLength(AUDIT_TRAIL_ENTITY_TYPES.length + 1)
-    expect(options[0].value).toBe('')
+    // Every entry and nothing else.
+    expect(options).toHaveLength(AUDIT_TRAIL_ENTITY_TYPES.length)
   })
 
   it('draws a lane for every entity it holds, and the foot counts the events', async () => {
@@ -307,7 +303,7 @@ describe('AuditTrailTab section coverage', () => {
 
     render(<AuditTrailTab />)
     await screen.findByLabelText('Gateways lanes')
-    expect(screen.getAllByRole('separator')).toHaveLength(3)
+    expect(document.querySelectorAll('.trail-section')).toHaveLength(3)
     expect(document.querySelectorAll('.trail-lane:not(.trail-axis)')).toHaveLength(3)
     expect(screen.getByText('All 3 shown.')).toBeInTheDocument()
   })
@@ -425,9 +421,12 @@ describe('AuditTrailTab total', () => {
     const count = await screen.findByText('2 of 467')
     expect(count.parentElement).toHaveClass('list-foot')
     expect(count.nextElementSibling).toHaveTextContent(/Show \d+ more/)
-    // The row above the timeline holds the key alone, with the scroller directly under it.
+    // The row above the timeline holds Collapse all and, at its right-hand end, the key, with the
+    // scroller directly under it.
     const header = document.querySelector('.trail-header')
-    expect([...header.children].map(c => c.className)).toEqual(['trail-legend'])
+    expect(header.children).toHaveLength(2)
+    expect(header.children[0]).toHaveTextContent('Collapse all')
+    expect(header.children[1]).toHaveClass('trail-legend')
     expect(header.nextElementSibling).toHaveClass('trail-scroll')
     // And not in the corner, which is only the spacer that lines the ticks up.
     expect(document.querySelector('.trail-axis-corner').textContent).toBe('')

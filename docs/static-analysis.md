@@ -45,7 +45,7 @@ Nothing is cached between runs: the pinned ESLint installs into `.cache/lint/esl
 | `lint:deno` | deno lint 2.5.6, and deno check and deno test with the Deno the functions image builds with | `supabase/functions` | Deno's recommended rules except `no-import-prefix`, type errors, and failing `*_test.ts` | none: an inline `// deno-lint-ignore RULE -- reason` |
 | `scan:secrets` | gitleaks 8.30.1 | Every commit on every ref (`--history=head`: the checked-out commit's history), and what is not committed yet | Keys, tokens and passwords, printed redacted | `.gitleaksignore`, by fingerprint, for committed findings only; with `--ignore-union`, every branch's list too, never a pull request head's |
 | `scan:config` | trivy config 0.74.0 | The chart rendered three times from `values-prod.yaml.example`: as it stands, with every optional workload on, and with the workloads a switch replaces (see below); and every Dockerfile | HIGH and CRITICAL misconfiguration: security contexts, root users, host mounts | `scripts/lint/config-allowlist.json`, by check and resource |
-| `scan:source` | Semgrep 1.140.0, `p/default` and `p/security-audit` | The tree, except generated files and the chart's Go templates | Injection, unsafe APIs, workflow supply chain, Dockerfile users | `scripts/lint/semgrep-allowlist.json`, by rule, file and the text of the line |
+| `scan:source` | Semgrep 1.140.0, `p/default` and `p/security-audit` | Every tracked file except those `.semgrepignore` lists: generated files and the chart's Go templates | Injection, unsafe APIs, workflow supply chain, Dockerfile users | `scripts/lint/semgrep-allowlist.json`, by rule, file and the text of the line |
 | `audit:deps` | npm audit, pip-audit 2.9.0 | `frontend/package-lock.json`, `ingestion/` and `i3x/requirements.txt` | Known advisories, HIGH and above for npm and all of them for Python | `scripts/lint/dependency-allowlist.json`, by advisory id |
 
 ## The chart scan's three renders
@@ -94,6 +94,34 @@ Each key is chosen to survive unrelated edits:
   changing it makes the finding new. A line whose text repeats in the same file shares one entry.
 - **trivy** keys name the check and the resource (the container of a workload, or the Dockerfile),
   never a line number.
+
+A tracked file that Semgrep cannot parse, whole or in part, fails `scan:source`. Semgrep only warns
+about such a file, and no rule reads the part it could not parse, so a finding there would pass
+unseen. Rewrite the construct the parser stops at. A file left as it is, such as a working shell
+script that Semgrep's bash parser does not fully read, is named in
+[`scripts/scan-source.mjs`](../scripts/scan-source.mjs) with its reason and the number of places
+the parser stops. One more place fails the scan.
+
+Semgrep's bash parser stops at these forms of valid shell. Each has a form it reads, with the same
+behaviour:
+
+- A `case` on one line: put each pattern on a line of its own.
+- `\"` or `\\` inside a bracket expression, as in `*[[:space:]\"\\]*`: give each its own
+  pattern, `*[[:space:]]* | *\"* | *\\*`.
+- A bare `|` in a pattern, as in `${slot#*|}`: escape it, `${slot#*\|}`.
+- `(` or `<` in the text of `${v:-text}`, `${v:+text}` or `${v:?text}`, as in `${v:-(none)}`: set
+  the value on a line of its own, or use `[` and `]`.
+- A one-line here-document inside a function, when the line starts with an expansion: split the
+  value with `${v%% *}` and `${v#* }` instead.
+- `if ! { ...; }`: use a subshell, `if ! ( ... )`, when the group sets no variables.
+- `${{ }}` in a workflow's `run:` step, which the workflow rules read as bash: pass it through the
+  step's `env:` instead.
+
+A tracked file that Semgrep did not read fails `scan:source` too, by path. Semgrep leaves a file
+out without an error in two cases: the file is over its size limit, or its own ignore list names it.
+So the scan sets no size limit, and [`.semgrepignore`](../.semgrepignore) replaces Semgrep's list,
+which leaves out every `test/` directory. A file the scan should not read goes in `.semgrepignore`,
+with its reason.
 
 ## Against a running stack
 

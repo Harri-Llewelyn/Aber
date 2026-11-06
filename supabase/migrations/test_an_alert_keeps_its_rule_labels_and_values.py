@@ -44,12 +44,15 @@ VALUES = {"A": 74.5, "B": 74.5, "C": 1}
 
 BASELINE = Path(__file__).resolve().parent / "0001_baseline_schema.sql"
 
-# The view's columns as 1.7.0 left them, and as 0001 states them now.
+# The view's columns as 1.7.0 left them, and as 0001 states them now: 0220's three, then 0231's
+# acknowledgement, then 0240's suppression.
 VIEW_COLUMNS_1_7 = [
     "id", "fingerprint", "entity_type", "entity_id", "sparkplug_id", "alert_name", "severity",
     "status", "summary", "starts_at", "ends_at", "recorded_at",
 ]
-ACTIVE_VIEW_COLUMNS = VIEW_COLUMNS_1_7 + ["rule_uid", "labels", "values"]
+ACTIVE_VIEW_COLUMNS = VIEW_COLUMNS_1_7 + ["rule_uid", "labels", "values"] + [
+    "acknowledged_at", "acknowledged_by", "acknowledged_by_email", "acknowledgement_reason", "acknowledgement_note",
+] + ["suppressed", "suppressing_window_id", "suppression_reason", "suppressed_until"]
 
 # What the webhook upserts, as PostgREST's merge-duplicates writes it: every column it sends is
 # updated on a conflict with the occurrence key.

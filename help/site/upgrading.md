@@ -90,6 +90,8 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   [*The upgrade to 1.7.0*](#the-upgrade-to-170-checks-storage-policies-and-the-databases-grants).
 - **Upgrading to 1.8.0?** Add the signing values it needs, and list the tokens to mint again,
   first: see [*every token is signed ES256*](#from-180-every-token-is-signed-es256).
+- **Use Supabase Studio?** Turn it and postgres-meta on in your values first: see
+  [*Studio and postgres-meta are off by default*](#from-180-studio-and-postgres-meta-are-off-by-default).
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
@@ -196,6 +198,11 @@ binaries but leaves the database's extension at its old version until someone up
 on every upgrade, in its own session. It does nothing when there is nothing to update, and **it fails
 the step if the two versions still disagree afterwards**, rather than letting the historian run old
 definitions on new binaries. You do nothing: it is part of `helm upgrade`.
+
+Before that, the step waits for the historian to restart on the new image, for up to 10 minutes by
+default (`initJobs.waitTimeout`). Its log says `Waiting for the historian to offer TimescaleDB`
+while it waits. If the time runs out, the step fails and names the version the historian has and
+the one the new release needs.
 
 The same step sets the raw readings' chunk interval, worked out from
 `timescaledb.retention.expectedRowsPerDay` and the historian's memory limit unless `chunkInterval` is
@@ -1663,6 +1670,104 @@ The reasons, and how to rotate the key pair later, are in
 [supabase/README.md](../../supabase/README.md#signing-with-es256).
 
 ---
+
+### From 1.8.0, Studio and postgres-meta are off by default
+
+`supabaseStudio.enabled` and `supabaseMeta.enabled` now default to `false` (#1354). Up to 1.7.x
+the chart ran both on every site, though Studio's route was off by default. Aber's dashboard does the
+site's own work, and Studio carried most of the image scan's findings.
+
+The upgrade removes the `supabase-studio` and `supabase-meta` Deployments on a site that never set
+the keys. It also removes the gateway's studio listener, its port and its Secret keys. Studio keeps
+nothing on a volume, so nothing is lost: its saved SQL snippets went with each replaced pod.
+
+To keep Studio, set both keys before upgrading. Keep `ingress.routes.studio` and its two secrets as
+they were:
+
+```yaml
+supabaseStudio:
+  enabled: true
+supabaseMeta:
+  enabled: true
+```
+
+The two are on or off together, and the render fails if only one is on. So does
+`ingress.routes.studio: true` with Studio off.
+
+- **Studio's sign-in is removed.** On a site that ran Studio, the first boot with Studio off removes
+  its OAuth client. Each person's approval of it is revoked and its sessions end. The Audit Trail
+  records each, and db-init's log says so in a NOTICE. Turn Studio on again and Aber registers
+  it again, and each person approves it once more.
+- **The System page** shows Studio's row with no image recorded, as for any service the chart does
+  not deploy.
+
+### From 1.8.0, alert history is kept for 90 days
+
+From 1.8.0, Aber keeps a resolved alert for 90 days, not 7. The History page's new **Alerts** tab
+lists them, with who acknowledged each and why. The alert counter's **Alert history** link opens
+that tab, in place of Grafana's alert history.
+
+- **A site at 7 days moves to 90 at the upgrade.** The upgrade cannot tell 7 chosen on purpose from
+  7 never changed, so both move. It happens once, on the first start of 1.8.0, and the Audit Trail
+  records it as a change to the setting, with no person named.
+- **Any other value is kept.** A site that chose 30 days keeps 30.
+- **To keep 7 days**, set **Alert history kept for (days)** back to 7 after the upgrade. It is on
+  the **Settings** page, on the **Retention** tab. Later restarts and upgrades leave it at 7.
+
+The table grows with the alerts that fire, not with the readings, so 90 days takes little space. An
+alert that is still firing is never removed, however old it is.
+
+### From 1.8.0, the historian counts its older readings for History's Overview
+
+History's Overview, new in 1.8.0, shows where readings arrived. It reads two new rollups on the
+historian, which count each device's readings every 5 minutes and every hour. The upgrade creates
+them empty, and the historian fills them in the background. Nothing waits for it.
+
+- **The last 25 hours** are counted within a few minutes of the upgrade.
+- **Older history is counted in the background, every 2 minutes.** Each run counts six more hours
+  of the 5-minute rollup and a week more of the hourly one.
+  - **The hourly one reaches back as far as your hourly rollup** (5 years by default). At the storage
+    basis, 1,000 devices of 10 metrics, it fills in about 9 hours.
+  - **The 5-minute one reaches back as far as your 1-minute rollup** (180 days by default). At the
+    storage basis it fills in about a day.
+  - A smaller site takes less. A window older than the 5-minute one reaches is shown in hours.
+- **Until then, Overview hatches the older part of a window** and says so, for example
+  "Coverage before 3 Oct is still being computed". The Device tab's charts read the existing rollups
+  and are complete at once.
+
+The rollups use about a tenth of the space of `telemetry_5m`. Nothing needs setting.
+
+### From 1.8.0, alerts can be sent to a webhook
+
+Aber can now post each alert to a webhook: when it starts firing, as a reminder while it fires
+unacknowledged, and when it resolves. An Administrator sets it up on Settings › Notifications. Until
+then nothing is sent, and the upgrade changes nothing a site must act on.
+
+**The functions pod opens the connection to the webhook.** A site with `networkPolicy.enabled`
+must let it reach each webhook host. Without a rule every message fails, and the delivery log says
+the receiver could not be reached. Add the rule to `networkPolicy.extraEgress`, which the chart
+applies as one NetworkPolicy:
+
+```yaml
+networkPolicy:
+  extraEgress:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/component: supabase-functions
+    policyTypes: [Egress]
+    egress:
+      - to: [{ ipBlock: { cidr: 203.0.113.20/32 } }]
+        ports: [{ protocol: TCP, port: 443 }]
+```
+
+- **Already using `extraEgress` for the auth pod's mail relay?** Its `podSelector` picks the auth
+  pod alone. Widen it to the functions pod too, with
+  `matchExpressions: [{ key: app.kubernetes.io/component, operator: In, values: [supabase-auth, supabase-functions] }]`,
+  and add the webhook's rule beside the relay's.
+- **A receiver inside the cluster** needs the same rule, with a `namespaceSelector` and a
+  `podSelector` in place of the `ipBlock`.
+
+A site without NetworkPolicies has nothing to do.
 
 ## Backups
 

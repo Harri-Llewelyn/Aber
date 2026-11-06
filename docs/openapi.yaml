@@ -798,6 +798,83 @@ paths:
         '401':
           description: Granted to authenticated users only; `anon` is refused.
 
+  /rest/v1/rpc/telemetry_carried:
+    post:
+      tags: [Telemetry]
+      summary: Read series carried forward across quiet buckets
+      description: |
+        What the History page reads (`0233`). One row per series per bucket of the window, a series
+        being one asset and one metric, every pair of the two lists. A bucket with readings has
+        their weighted average, minimum, maximum and last values. **A bucket with none carries the
+        last value forward**, with `is_carried` true and `n_rows` 0: under report-by-exception a
+        quiet bucket means unchanged. Each series is seeded from the rollups before the window,
+        never from raw, so a series silent longer than raw retention still seeds.
+
+        Buckets lie on the epoch grid, as the rollups' do. The source is the widest rollup whose
+        width divides the bucket, and a wider bucket is combined from it on the historian. Nothing
+        is carried past now, and a series with no value yet has no row. `SECURITY INVOKER`, so it
+        reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, bucket, asset_ids, metric_names]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                bucket: { type: string, example: '01:00:00', description: 'A PostgreSQL interval: a whole number of minutes, at least one, with no months, e.g. `5 minutes` or `1 day`.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id).' }
+                metric_names: { type: array, items: { type: string }, example: [Systems/TEMPERATURE] }
+      responses:
+        '200':
+          description: The buckets, ordered by asset, metric and bucket.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryCarriedBucket' } }
+        '400': { description: 'Bounds out of order, a bad bucket, a list missing, or more than 50,000 rows (buckets times series), refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
+  /rest/v1/rpc/telemetry_coverage:
+    post:
+      tags: [Telemetry]
+      summary: Count where readings arrived, a device at a time, block by block
+      description: |
+        What History's Overview reads (`0245`). One row per device asked for: how many readings it
+        sent in each block of the window, over every metric, as `counts`, oldest block first and 0
+        for a block with none. Block i starts at `first_block` plus i times `block_width`. Read from
+        the historian's rollups per device, never raw telemetry.
+
+        **More than 40 devices take 5-minute or 1-hour blocks only**, the rollups' own widths, so
+        nothing is summed on the historian. Forty or fewer may take any whole number of 5 minutes.
+        The source follows each block's age: an hourly block comes from the hourly device rollup up
+        to its watermark and from the 5-minute one after it, and a block under an hour over a window
+        older than the 5-minute rollup reaches is read hourly, as `block_width` says.
+        `computed_from` to `computed_to` is what the rollup has counted: a block outside it is not
+        counted yet, which is not a block with no readings. `SECURITY INVOKER`, so it reads what the
+        caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, block, asset_ids]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                block: { type: string, example: '00:05:00', description: 'A PostgreSQL interval: a whole number of 5 minutes, at least one, with no months. More than 40 devices take `5 minutes` or `1 hour` only.' }
+                asset_ids: { type: array, items: { type: string }, maxItems: 1000, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id), at most 1,000.' }
+      responses:
+        '200':
+          description: One row per device, ordered by device.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryCoverageRow' } }
+        '400': { description: 'Bounds out of order, a bad block, no devices, more than 1,000 devices, a summed block for more than 40, or more than 360,000 device-buckets to read, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   # --------------------------------------------------------------- Audit ----
   /rest/v1/audit_trail:
     get:
@@ -814,7 +891,8 @@ paths:
         `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
         `device_nameplate`, `device_submodels`, `schemas`, `metric_catalog` and `change_proposals` in
         the asset lane, and `user_roles`, `service_principals`, `broker_accounts` (a read-only broker
-        account, 0218), `system_settings`, `backup_jobs` and `backups` in the security lane. A trail older than their retirement also holds `area_floors`,
+        account, 0218), `system_settings`, `backup_jobs`, `backups` and `service_logs` (a read of a
+        service's logs, 0225) in the security lane. A trail older than their retirement also holds `area_floors`,
         `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
         entity's history after deleting it, collect the ids first.
 
@@ -846,9 +924,20 @@ paths:
         previous answer's `next_cursor` back as `p_before_recorded_at` and `p_before_id`. A null
         `next_cursor` is the only end of the data.
 
-        `p_changed_by` keeps the rows one person or machine identity wrote, matched on `changed_by`
-        (`0222`). Any role that reads the trail may filter by any id; the same policies decide which
-        of that actor's rows come back.
+        `p_entity_type`, `p_action` and `p_changed_by` are arrays (`0227`). Each keeps the rows
+        that match any of its values, and the three are combined with AND. Null or an empty array is
+        no constraint, and a one-element array is that one value.
+
+        `p_changed_by` keeps the rows those people or machine identities wrote, matched on
+        `changed_by` (`0222`). Any role that reads the trail may filter by any id; the same
+        policies decide which of those actors' rows come back.
+
+        `p_class` is an array of the classes `audit_event_class()` sorts events into: `created`,
+        `operational`, `configuration`, `lifecycle` and `read` (`0228`). It is combined with the
+        other lists by AND, and each event carries its `class`. With `p_counts`, the answer's
+        `counts` gives each class, kind and action its events under every filter but its own, so
+        choosing an action does not empty the action counts. A search for a backup request's id also
+        finds the backup it took.
       requestBody:
         content:
           application/json:
@@ -857,15 +946,17 @@ paths:
               properties:
                 p_limit: { type: integer, default: 200, description: 'Rows per page, 1 to 1000.' }
                 p_include_purged: { type: boolean, default: false, description: 'Include rows about an area, cell, gateway, device or schema no live table holds.' }
-                p_entity_type: { type: string, description: 'One `AuditTrailEntry.entity_type`, e.g. `devices`.' }
-                p_action: { type: string, description: 'One `AuditTrailEntry.action`, e.g. `UPDATE`.' }
+                p_entity_type: { type: array, nullable: true, items: { type: string }, description: 'Any of these `AuditTrailEntry.entity_type` values, e.g. `["gateways", "devices"]`. Null or empty is no constraint.' }
+                p_action: { type: array, nullable: true, items: { type: string }, description: 'Any of these `AuditTrailEntry.action` values, e.g. `["INSERT", "DELETE"]`. Null or empty is no constraint.' }
                 p_entity_ids: { type: array, items: { type: string, format: uuid }, description: 'Only these entities. An empty array matches nothing.' }
                 p_since: { type: string, format: date-time }
                 p_until: { type: string, format: date-time }
                 p_before_recorded_at: { type: string, format: date-time, description: 'The cursor, with `p_before_id`.' }
                 p_before_id: { type: integer, format: int64 }
                 p_search: { type: string, description: 'A substring of the entity id or the name the timeline shows; 1 to 18 digits also match the row id and the transaction id.' }
-                p_changed_by: { type: string, format: uuid, description: 'Only the rows this person or machine identity wrote: the `changed_by` id.' }
+                p_changed_by: { type: array, nullable: true, items: { type: string, format: uuid }, description: 'Only the rows these people or machine identities wrote: any of these `changed_by` ids. Null or empty is no constraint.' }
+                p_class: { type: array, nullable: true, items: { type: string, enum: [created, operational, configuration, lifecycle, read] }, description: 'Any of these classes. Null or empty is no constraint.' }
+                p_counts: { type: boolean, default: false, description: 'Also answer `counts`.' }
       responses:
         '200':
           description: One page, and facts about the whole match.
@@ -879,6 +970,14 @@ paths:
                   purged_assets: { type: integer, description: 'Deleted entities the filters cover.' }
                   truncated: { type: boolean, description: 'There is a next page.' }
                   next_cursor: { type: object, nullable: true, properties: { recorded_at: { type: string, format: date-time }, id: { type: integer, format: int64 } } }
+                  counts:
+                    type: object
+                    nullable: true
+                    description: 'With `p_counts` only: events per class, per `entity_type` and per `action`, each under every filter but its own. A value with no events is absent.'
+                    properties:
+                      class: { type: object, additionalProperties: { type: integer } }
+                      entity_type: { type: object, additionalProperties: { type: integer } }
+                      action: { type: object, additionalProperties: { type: integer } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/revoked_service_tokens:
@@ -894,9 +993,12 @@ paths:
         That is the `TOKEN_REVOKED` entry in `/rest/v1/audit_trail`, which is append-only and
         carries the original mint in `old_data` so it stays readable after the row here is gone.
 
-        **Revocation reaches PostgREST only.** `supabase-storage`, `supabase-realtime` and the
-        edge runtime each verify the signature for themselves, against `SUPABASE_JWT_JWKS`, and
-        consult no denylist, so a listed token still satisfies those three until it expires.
+        **Revocation reaches PostgREST and what checks a token through it:** the i3X server,
+        within its 15-second cache, and `aas-api` and `fplus-directory`, which call
+        `auth_probe()` as the caller. `supabase-storage` and `supabase-realtime` each verify the
+        signature for themselves, against `SUPABASE_JWT_JWKS`, and consult no denylist, so a
+        listed token still satisfies those two until it expires. The other edge functions check a
+        caller with GoTrue, which refuses every machine identity's token, listed or not.
 
         Read is `Administrator` and `Auditor`; `anon` is granted nothing.
       parameters:
@@ -1749,7 +1851,7 @@ paths:
         `deleted_at`, as GoTrue's admin `DELETE /auth/v1/admin/oauth/clients/{id}` does, and in the
         same transaction revokes every approval of it and deletes every session it holds, so no
         refresh token it was issued works. An `APP_REMOVED` row in the app's lane, and an
-        `APP_APPROVAL_REVOKED` row in each person's, name you. Aber's own four apps are refused:
+        `APP_APPROVAL_REVOKED` row in each person's, name you. Aber's own apps are refused:
         `0002` registers them again on every boot. Administrator only.
       requestBody:
         required: true
@@ -1898,7 +2000,392 @@ paths:
         '400': { description: 'A username outside the subscriber scheme (`22023`).' }
         '403': { description: 'Not an Administrator (`42501`).' }
 
+  /rest/v1/rpc/record_service_logs_read:
+    post:
+      tags: [Auth]
+      summary: Record a read of a service's logs
+      description: |
+        Called by `/functions/v1/service-logs` in the caller's session (`0225`, `0230`), before it
+        returns the lines it read. Writes one `SERVICE_LOGS_READ` row in the `service_logs` lane
+        of the security domain: the service (as `name`), the level, the text filter (null when
+        none), and the range key for a rolling window or the two ends (`from` and `to`, in UTC to
+        the millisecond) for a fixed one, with you in `changed_by`. The entity id is the md5 of
+        `service_logs:` and the service, so every read of one service is one lane.
+
+        Writes nothing and returns null when those are your last recorded read of the last 24
+        hours: the database decides when a row is due, so a refresh is never recorded twice and a
+        read with new parameters always is. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_service, p_level, p_filter, p_range]
+              properties:
+                p_service: { type: string, description: '1-128 characters on one line.' }
+                p_level:   { type: string, enum: [any, error, warning, info, debug] }
+                p_filter:  { type: string, maxLength: 200, description: 'As sent; empty for none.' }
+                p_range:   { type: string, nullable: true, enum: [15m, 1h, 6h, 24h, 7d], description: 'A rolling window''s key; null for a fixed window.' }
+                p_from:    { type: string, format: date-time, nullable: true, description: 'A fixed window''s start. Leave it out, or null, for a rolling window.' }
+                p_to:      { type: string, format: date-time, nullable: true, description: 'A fixed window''s end: after `p_from`, and at most 169 hours after it.' }
+      responses:
+        '200':
+          description: The audit row's id, or null when the read repeats your last.
+          content:
+            application/json:
+              schema: { type: integer, nullable: true }
+        '400': { description: 'A level, range, service name, filter or window outside the rule (`22023`): a range or two ends, not both, the ends in order and at most 169 hours apart.' }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/acknowledge_alert:
+    post:
+      tags: [Registry]
+      summary: Acknowledge a firing alert, with a reason
+      description: |
+        Marks one firing occurrence in `platform_alerts` as seen by you, with a reason and an
+        optional note (`0231`). It stays firing: the dashboard keeps it listed and stops counting
+        it. A new occurrence of the same fingerprint inherits the acknowledgement until the alert
+        resolves.
+
+        An Operator, a Shopfloor Manager or an Administrator may call it, on a row they may read:
+        an alert about a machine identity is an Administrator's alone, and any other caller gets
+        the 404 a missing row gets. Writes one `ALERT_ACKNOWLEDGED` row in the Audit Trail, in the
+        alert's `platform_alerts` lane, or the identity's `service_principals` lane for an alert
+        about its token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_alert_id, p_reason]
+              properties:
+                p_alert_id: { type: string, format: uuid, description: 'The occurrence: `id` from `platform_alerts_active`.' }
+                p_reason: { type: string, enum: [investigating, known_cause, planned_work, sensor_or_model_fault, threshold_wrong, other] }
+                p_note: { type: string, nullable: true, maxLength: 200, description: 'Trimmed; blank is none. Required with `other`.' }
+      responses:
+        '200':
+          description: The row, acknowledged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceAlert' }
+        '400': { description: 'A resolved occurrence, or one a newer occurrence has replaced (`23514`); a reason outside the set, a note over 200 characters, or `other` without a note (`22023`).' }
+        '403': { description: 'Not an Operator, a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No alert with that id that you may read.' }
+        '409': { description: 'Already acknowledged (`23505`). The message names who and when.' }
+
+  /rest/v1/rpc/withdraw_alert_acknowledgement:
+    post:
+      tags: [Registry]
+      summary: Withdraw an alert's acknowledgement
+      description: |
+        Clears the acknowledgement of one firing occurrence, so the dashboard counts it again
+        (`0231`). The person who acknowledged it may withdraw it, and so may a Shopfloor Manager or
+        an Administrator. A resolved occurrence keeps its acknowledgement as its record. Writes one
+        `ALERT_ACKNOWLEDGEMENT_WITHDRAWN` row in the Audit Trail, whose `old_data` holds the
+        acknowledgement and whose it was.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_alert_id]
+              properties:
+                p_alert_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The row, unacknowledged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceAlert' }
+        '400': { description: 'Not acknowledged, or resolved (`23514`).' }
+        '403': { description: 'Not the acknowledger, a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No alert with that id that you may read.' }
+
+  /rest/v1/rpc/schedule_alert_suppression_window:
+    post:
+      tags: [Registry]
+      summary: Schedule a suppression window on a device, a gateway or a cell
+      description: |
+        Keeps a subject's alerts quiet for a period, such as planned maintenance (`0240`). An alert
+        that fires inside the window is still recorded, marked suppressed: the dashboard does not
+        count it or colour anything for it, and it is not sent. It ends by itself at `p_ends_at`.
+
+        A device window covers the device's own alerts. A gateway window covers the gateway's own
+        alerts, not its devices'. A cell window covers every device in the cell at the moment an
+        alert is read, so a device moved out of the cell is no longer covered. Platform and
+        machine identity alerts are never covered.
+
+        A Shopfloor Manager or an Administrator may call it. A start in the past, or none, is now.
+        The end may be at most `alerts.suppression_max_days` after the start: 7 days unless an
+        Administrator changes it on Settings › Retention. Writes one `SUPPRESSION_WINDOW_SCHEDULED`
+        row in the Audit Trail, in the subject's own lane.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_subject_kind, p_subject_id, p_ends_at, p_reason]
+              properties:
+                p_subject_kind: { type: string, enum: [device, gateway, cell] }
+                p_subject_id: { type: string, format: uuid, description: 'The device''s, gateway''s or cell''s `id`.' }
+                p_starts_at: { type: string, format: date-time, nullable: true, description: 'Null, or a time already past, is now.' }
+                p_ends_at: { type: string, format: date-time, description: 'After the start and after now, and at most `alerts.suppression_max_days` after the start.' }
+                p_reason: { type: string, minLength: 1, maxLength: 200, description: 'Trimmed. Every signed-in reader sees it beside the alert.' }
+      responses:
+        '200':
+          description: The window.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
+        '400': { description: 'A subject kind outside the three, no end, an end not after the start and now, a window longer than `alerts.suppression_max_days` (the message names the limit), or a blank or long reason (`22023`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No such device, gateway or cell.' }
+
+  /rest/v1/rpc/change_alert_suppression_window:
+    post:
+      tags: [Registry]
+      summary: Change a suppression window's start, end or reason
+      description: |
+        A null argument keeps what the window has (`0240`). A window that has started keeps its
+        start, and one that has ended is kept as it was. A change of the start or the end is held to
+        `alerts.suppression_max_days`, measured from the window's own start: the new one, or the one
+        it has. A change of the reason alone is not, so a window longer than a since-lowered limit
+        keeps its end. Writes one `SUPPRESSION_WINDOW_CHANGED`
+        row in the Audit Trail, with the window before and after, or nothing when nothing changed.
+        A Shopfloor Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_window_id]
+              properties:
+                p_window_id: { type: string, format: uuid }
+                p_starts_at: { type: string, format: date-time, nullable: true, description: 'Only for a window that has not started. A time already past is now.' }
+                p_ends_at: { type: string, format: date-time, nullable: true, description: 'After the start and after now, and at most `alerts.suppression_max_days` after the start.' }
+                p_reason: { type: string, nullable: true, minLength: 1, maxLength: 200 }
+      responses:
+        '200':
+          description: The window, changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
+        '400': { description: 'An ended window, or a new start for a started one (`23514`); an end not after now and the start, new times longer than `alerts.suppression_max_days` (the message names the limit), or a blank or long reason (`22023`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No such window.' }
+
+  /rest/v1/rpc/end_alert_suppression_window:
+    post:
+      tags: [Registry]
+      summary: End a suppression window now
+      description: |
+        A window that has started ends now, with who ended it, and its subject's alerts count again
+        (`0240`): one still firing is then sent, as if it had just fired. A window that has not
+        started is cancelled: it covered nothing, so it is deleted. Writes one
+        `SUPPRESSION_WINDOW_ENDED` or `SUPPRESSION_WINDOW_CANCELLED` row in the Audit Trail. A
+        Shopfloor Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_window_id]
+              properties:
+                p_window_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The window as it ended, or as it was before it was cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
+        '400': { description: 'The window has already ended (`23514`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
+        '404': { description: 'No such window.' }
+
+  /rest/v1/rpc/alert_occurrences:
+    post:
+      tags: [Registry]
+      summary: Read the alerts that fired over a window
+      description: |
+        What History's Alerts tab and its chart shading read (`0243`). Every `platform_alerts`
+        occurrence that overlaps `[p_from, p_to)`, newest first: one that started before the window
+        and ended in it, or is still firing, is returned as well as one that started in it. One that
+        ended at `p_from` or started at `p_to` is not.
+
+        Each row is the whole occurrence, in `occurrence`, with two columns beside it. `ended_at` is
+        `ends_at`, or, for a firing occurrence that a later occurrence of the same fingerprint
+        replaced, that one's start; null while it is still firing. `replaced` is true for such an
+        occurrence: nothing resolves the older row, so read alone it would show as firing.
+
+        `SECURITY INVOKER`, so the table's select policy decides the rows: a `service_identity`
+        alert is returned to an Administrator alone (`0204`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_from, p_to]
+              properties:
+                p_from: { type: string, format: date-time }
+                p_to: { type: string, format: date-time, description: 'After `p_from`.' }
+                p_sparkplug_ids: { type: array, nullable: true, items: { type: string }, example: [dev220000000000400080000], description: 'Keep the alerts about these devices and gateways. Null keeps every one; an empty list keeps none.' }
+                p_limit: { type: integer, minimum: 1, maximum: 5000, default: 1000 }
+      responses:
+        '200':
+          description: The occurrences, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    occurrence: { $ref: '#/components/schemas/DeviceAlert' }
+                    ended_at: { type: string, format: date-time, nullable: true }
+                    replaced: { type: boolean }
+        '400': { description: 'A bound missing, bounds out of order, or a limit outside 1 to 5,000 (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+
   # ------------------------------------------------------------ Registry ----
+  /rest/v1/rpc/notification_webhook_status:
+    post:
+      tags: [Registry]
+      summary: Whether the webhook is set up
+      description: |
+        For an Administrator: whether the webhook's address is in the vault, and when its signing
+        key was issued (`0248`). Never either value. Anybody else is told `visible: false` and
+        nothing more.
+      responses:
+        '200':
+          description: The webhook's state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  visible: { type: boolean }
+                  url_set: { type: boolean, nullable: true }
+                  signing_key_issued_at: { type: string, format: date-time, nullable: true }
+
+  /rest/v1/rpc/set_notification_webhook_url:
+    post:
+      tags: [Registry]
+      summary: Set the webhook's address
+      description: |
+        Writes the address Aber posts each alert to into the vault, through
+        `set_foreign_credential()` (`0248`). A webhook URL is a bearer secret its receiver issued,
+        so nothing reads it back. Its host must also be on `notifications.webhook_allowed_hosts`,
+        which is checked as each message is sent. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_url]
+              properties:
+                p_url: { type: string, maxLength: 2048, description: 'An http or https URL with no user name in it. Trimmed.' }
+      responses:
+        '204': { description: 'Stored.' }
+        '400': { description: 'Not an http or https URL, or one naming a user (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/clear_notification_webhook_url:
+    post:
+      tags: [Registry]
+      summary: Remove the webhook
+      description: |
+        Deletes the webhook's address from the vault, which stops the webhook, and drops each
+        message still waiting for it (`0248`). The signing key is kept. Administrator only.
+      responses:
+        '200':
+          description: How many waiting messages were dropped.
+          content:
+            application/json:
+              schema: { type: integer }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/issue_notification_signing_key:
+    post:
+      tags: [Registry]
+      summary: Issue or rotate the webhook's signing key, shown once
+      description: |
+        Generates the key each webhook message is signed with, `whsec_` and 32 random bytes in
+        base64 as Standard Webhooks writes one, keeps it in the vault and returns it: the only time
+        it is shown (`0248`). Issuing again rotates it, and the old key stops signing at once.
+        Writes one `SIGNING_KEY_ISSUED` row in the Audit Trail, which never holds the key.
+        Administrator only.
+      responses:
+        '200':
+          description: The key.
+          content:
+            application/json:
+              schema: { type: string, example: whsec_<base64> }
+        '403': { description: 'Not an Administrator (`42501`).' }
+
+  /rest/v1/rpc/queue_test_notification:
+    post:
+      tags: [Registry]
+      summary: Send the webhook a test
+      description: |
+        Queues an `aber.test` message to the webhook and returns its id (`0248`). The row with that
+        id in `/rest/v1/notification_deliveries` says how it went once the dispatcher has sent it;
+        a test is tried once. Keeps the newest 20 finished tests. Administrator only.
+      responses:
+        '200':
+          description: The delivery log row's id.
+          content:
+            application/json:
+              schema: { type: string, format: uuid }
+        '403': { description: 'Not an Administrator (`42501`).' }
+        '409': { description: 'The webhook has no address, or no signing key, yet (`55000`).' }
+
+  /rest/v1/notification_deliveries:
+    get:
+      tags: [Registry]
+      summary: Read the delivery log
+      description: |
+        One row per message to one channel: an alert occurrence starting to fire, resolving or
+        reminding, or a test (`0247`). It is the queue `notification-dispatch` drains and the log
+        the Settings page shows. Every signed-in role reads it; a row about an alert is read
+        through that alert's own policy, so a row about a machine identity's alert reaches an
+        Administrator alone. No role writes it.
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [pending, sent, dropped, dead] }, description: 'e.g. `eq.dead`' }
+        - { name: event, in: query, schema: { type: string, enum: [firing, resolved, reminder, test] } }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching messages.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid, description: 'Also the CloudEvents id and the webhook-id header, the same on every retry.' }
+                    alert_id: { type: string, format: uuid, nullable: true, description: 'The occurrence; null for a test.' }
+                    event: { type: string, enum: [firing, resolved, reminder, test] }
+                    channel: { type: string, enum: [webhook] }
+                    state: { type: string, enum: [pending, sent, dropped, dead] }
+                    attempts: { type: integer, description: 'Posts made. A hold is not one.' }
+                    next_attempt_at: { type: string, format: date-time }
+                    last_attempt_at: { type: string, format: date-time, nullable: true }
+                    finished_at: { type: string, format: date-time, nullable: true }
+                    response_status: { type: integer, nullable: true }
+                    last_error: { type: string, nullable: true, maxLength: 500, description: 'In the dispatcher''s words; never the address.' }
+                    requested_by: { type: string, format: uuid, nullable: true, description: 'For a test, the Administrator who sent it.' }
+                    created_at: { type: string, format: date-time }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/asset_config:
     get:
       tags: [Registry]
@@ -2439,18 +2926,20 @@ paths:
   /rest/v1/platform_alerts:
     get:
       tags: [Registry]
-      summary: Read the Grafana alert occurrence log
+      summary: Read the alert occurrence log
       description: |
-        One row per alert **occurrence**, written by the `grafana-alert-webhook` edge function when
-        Grafana notifies. Append-only on `(fingerprint, starts_at)`: a Grafana fingerprint is a hash
-        of the alert instance's labels and is stable across every fire → resolve → fire cycle, so
-        pairing it with `starts_at` is what makes this a history rather than a latest-state table.
-        An occurrence transitions `firing` → `resolved` in place.
+        One row per alert **occurrence**. Grafana evaluates the platform's own rules
+        (`grafana/provisioning/alerting/`) and posts each notification to the `grafana-alert-webhook`
+        edge function, which writes the row. Append-only on `(fingerprint, starts_at)`: a Grafana
+        fingerprint is a hash of the alert instance's labels and is stable across every fire →
+        resolve → fire cycle, so pairing it with `starts_at` is what makes this a history rather than
+        a latest-state table. An occurrence transitions `firing` → `resolved` in place.
 
-        **Nothing in this platform evaluates alert conditions.** Grafana owns the rules, the
-        evaluation interval, the state history and the silences — see
-        `grafana/provisioning/alerting/`. This table is the landing record, and it is what the
-        dashboard subscribes to over Realtime.
+        **Aber holds the record.** This table keeps each occurrence with its acknowledgement and the
+        suppression window that covered it, for `alerts.retention_days` (90 by default, `0244`).
+        History's Alerts tab reads it through `/rest/v1/rpc/alert_occurrences`, Aber's dispatcher
+        sends it on (`/functions/v1/notification-dispatch`), and the dashboard subscribes to it over
+        Realtime.
 
         `sparkplug_id` is the immutable wire identity, never the device name. `entity_id` is resolved
         at write time and is nullable: an alert that fired is a thing that happened, and it is kept
@@ -2465,6 +2954,13 @@ paths:
         Each row written since 0220 keeps the uid of the rule that raised it (`rule_uid`) and the
         alert's `labels` and `values` as Grafana sent them. The upsert key is still
         `(fingerprint, starts_at)`.
+
+        **An occurrence can be acknowledged (0231)**: who, when, a reason and a note, in five
+        columns. `status` stays `firing` or `resolved`, and an acknowledgement never resolves a
+        row. Write them through `/rest/v1/rpc/acknowledge_alert` and
+        `/rest/v1/rpc/withdraw_alert_acknowledgement`; no role may write them here. A new
+        occurrence of a fingerprint takes the acknowledgement of the one before it while that one
+        is still firing, so an acknowledgement holds until the alert resolves.
       parameters:
         - { name: sparkplug_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`' }
         - { name: status, in: query, schema: { type: string, enum: [firing, resolved] }, description: 'e.g. `eq.firing`' }
@@ -3090,7 +3586,14 @@ paths:
         A `service_identity` row is returned to an Administrator alone, as from `platform_alerts`.
 
         It returns `rule_uid`, `labels` and `values` as `platform_alerts` does (0220). The dashboard
-        links each alert to its rule by `rule_uid`.
+        links each alert to its rule by `rule_uid`. An acknowledged alert is still firing, so it is
+        still returned, with its acknowledgement (0231); the dashboard counts only the rows whose
+        `acknowledged_at` is null.
+
+        A suppressed alert is still firing too, so it is returned with `suppressed` true and the
+        window that covers it now: its id, its reason and when it ends (0240). Whether a row is
+        suppressed is decided as it is read, so a window's start and end take effect with no write.
+        The dashboard counts and colours only the rows that are neither acknowledged nor suppressed.
       parameters:
         - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
         - $ref: '#/components/parameters/Select'
@@ -3100,6 +3603,30 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DeviceAlert' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/alert_suppression_windows:
+    get:
+      tags: [Registry]
+      summary: Read the suppression windows
+      description: |
+        One row per window on a device, a gateway or a cell (0240): its start, its end, its reason,
+        who scheduled it and, if it was ended early, who ended it. Every signed-in role reads every
+        window, as the drawers list them. Nobody writes the table here: use
+        `/rest/v1/rpc/schedule_alert_suppression_window`, `/rest/v1/rpc/change_alert_suppression_window`
+        and `/rest/v1/rpc/end_alert_suppression_window`.
+      parameters:
+        - { name: device_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - { name: gateway_id, in: query, schema: { type: string } }
+        - { name: cell_id, in: query, schema: { type: string } }
+        - { name: ends_at, in: query, schema: { type: string, format: date-time }, description: 'e.g. `gt.2026-11-05T09:00:00Z` for the current and upcoming windows.' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching windows.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AlertSuppressionWindow' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/device_nameplate:
@@ -3700,7 +4227,7 @@ paths:
                   data: { type: array, items: { $ref: '#/components/schemas/Device' } }
         '400': { description: 'Missing or malformed `device_id`.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: insufficient privileges.' }
+        '403': { description: 'Forbidden: insufficient privileges. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: 'No device has that `device_id` or `merge_into_device_id`. The body is `{"error": "Device not found"}`.' }
         '500': { $ref: '#/components/responses/FunctionFailure' }
 
@@ -3795,7 +4322,7 @@ paths:
               schema: { type: string, format: binary }
         '400': { description: '`gateway_id` missing, or the gateway is Host or Third-party, not Remote.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
+        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: No such gateway. }
         '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
@@ -3897,7 +4424,7 @@ paths:
                       and password on its Security tab instead.
         '400': { description: '`gateway_id` malformed, absent, or naming a Remote or archived gateway.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
+        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '500':
           description: >-
             The credential service is not configured for this deployment.
@@ -3948,10 +4475,11 @@ paths:
         would be one nobody could ever withdraw. That is the one case where this endpoint discards
         a valid credential rather than returning it.
 
-        > **Revocation reaches PostgREST only.** `revoke_service_token()` denylists the `jti` and
-        > `auth_pre_request()` refuses it on every subsequent API request — but storage, realtime,
-        > and the edge runtime verify the signature independently. For those three the expiry is
-        > still the only bound, which is why the ceiling is 90 days and shorter is better.
+        > **Revocation reaches PostgREST and what checks a token through it.** `revoke_service_token()`
+        > denylists the `jti` and `auth_pre_request()` refuses it on every subsequent API request,
+        > to i3X and to `aas-api` and `fplus-directory` as well — but storage and realtime verify the
+        > signature independently. For those two the expiry is still the only bound, which is why
+        > the ceiling is 90 days and shorter is better.
       requestBody:
         required: true
         content:
@@ -4008,7 +4536,7 @@ paths:
             it can sign in, does not exist, or the mint could not be recorded. In the last case no
             token is returned even though one was signed.
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator.' }
+        '403': { description: 'Forbidden: requires Administrator. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '500':
           description: >-
             `JWT_KEYS` is not set, so this worker cannot sign.
@@ -4110,7 +4638,7 @@ paths:
                   factors_removed: { type: integer, description: '`reset-mfa`: how many second factors GoTrue deleted.' }
         '400': { description: 'Malformed request, an unknown role, or the database refused the person.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Requires Administrator; or your own access, password, second factor or address.' }
+        '403': { description: 'Requires Administrator; or your own access, password, second factor or address. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: No such person. }
         '409': { description: 'The address is already in use, the last Administrator, a removed person, or access in the other state.' }
         '500': { $ref: '#/components/responses/FunctionFailure' }
@@ -4268,7 +4796,7 @@ paths:
                               allow: { type: boolean }
                   read_at: { type: string, format: date-time }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator.' }
+        '403': { description: 'Forbidden: requires Administrator. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '405': { description: Method not allowed. }
         '500':
           description: >-
@@ -4338,7 +4866,7 @@ paths:
                   audit_recorded: { type: boolean, description: 'False when the Audit Trail row could not be written; the act was done.' }
         '400': { description: 'Malformed request, an unknown action, a missing or malformed name or description, or a username outside the subscriber scheme.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Forbidden: requires Administrator.' }
+        '403': { description: 'Forbidden: requires Administrator. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: '`delete`: the broker holds no account by that name. Nothing was recorded.' }
         '405': { description: Method not allowed. }
         '500':
@@ -4354,6 +4882,122 @@ paths:
                   - type: object
                     properties: { error: { type: string }, details: { type: string } }
         '503': { description: 'The credential service is unreachable or refused. For `create` nothing the page can use was made; retry.' }
+
+  /functions/v1/service-logs:
+    get:
+      tags: [Edge Functions]
+      summary: A service's newest log lines
+      description: |
+        The System page's Logs tab. Without `service`, the services that wrote a line to the log
+        store in the window: between `from` and `to`, or in the last 7 days for a rolling `range`,
+        however short, so the list does not shrink at 15 minutes. With one, that service's newest
+        lines, newest first, in a rolling window (`range`, back from now) or a fixed one (`from` and
+        `to`). A `service` must be in the same list.
+
+        **Parameters, never a query.** The function builds the one query shape from these:
+        `service`'s stream, then `filter` as a quoted line filter, then `level` read from each
+        line's JSON `level` field. Any other parameter is refused (400), so no caller value reaches
+        the store as anything but a quoted string. A line that is not JSON names no level, and
+        shows only under `level=any`.
+
+        **Ceilings.** A read covers at most 7 days (`range`, or `from` and `to` at most 169 hours
+        apart: a week that holds a clock change is an hour longer), returns at most 500 lines
+        (`limit`, 200 by default), and waits 10 seconds for the store. A `limit` over 500 is clamped, and
+        `clamped` says so and why; any other value outside the rules is refused. A line longer
+        than 8 KiB is cut at a character, ending ` … [cut at 8 KiB]`, and `cut` is true.
+
+        **Each new read is recorded.** `record_service_logs_read()` (0225, 0230) writes a
+        `SERVICE_LOGS_READ` row in the Audit Trail as the caller, when `service`, `level`,
+        `filter` or the window differs from the caller's last recorded read, so a refresh writes
+        nothing (`audit: unchanged`). A rolling window is recorded as its `range`, never the times
+        it resolved to, so the last hour a minute later is the same read; a fixed one as its two
+        ends, so a repeat of it is too. The lines are returned only once that call has answered.
+        Listing the services records nothing.
+
+        The store is the Loki Grafana reads: the chart's own, or `grafana.lokiUrl`. With neither
+        the answer is `observability: false`. Requires `Administrator`: the lines carry failed
+        sign-ins, addresses and emails. A machine identity's token is refused (401). No
+        service-role key.
+      parameters:
+        - { name: service, in: query, schema: { type: string, maxLength: 128 }, description: 'A service the store lists for the window. Without it, the answer is the list alone.' }
+        - { name: level, in: query, schema: { type: string, enum: [any, error, warning, info, debug], default: any } }
+        - { name: filter, in: query, schema: { type: string, maxLength: 200 }, description: 'Text a line must contain, matched exactly, case and all.' }
+        - { name: range, in: query, schema: { type: string, enum: [15m, 1h, 6h, 24h, 7d], default: 1h }, description: 'How far back from now. The keys are the Audit Trail page''s. Not with `from` and `to`.' }
+        - { name: from, in: query, schema: { type: string, format: date-time }, description: 'A fixed window''s start: an ISO 8601 instant with an offset, such as `2026-11-02T00:00:00Z`. Given with `to`, and never with `range`.' }
+        - { name: to, in: query, schema: { type: string, format: date-time }, description: 'A fixed window''s end, the first moment outside it: after `from`, and at most 169 hours after it.' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, default: 200 }, description: 'Lines to return; over 500 is clamped to 500.' }
+      responses:
+        '200':
+          description: 'The list, or the lines. Sent with `Cache-Control: no-store`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  observability: { type: boolean, description: 'False when the deployment has no log store; `details` says so.' }
+                  details:  { type: string }
+                  services: { type: array, items: { type: string } }
+                  service:  { type: string }
+                  level:    { type: string }
+                  filter:   { type: string }
+                  range:    { type: string, nullable: true, description: 'The rolling range read; null for a fixed window.' }
+                  limit:    { type: integer }
+                  from:     { type: string, format: date-time, description: 'Where the lines read start: the fixed window''s, or now less the range.' }
+                  to:       { type: string, format: date-time, description: 'Where they end: the fixed window''s, or now.' }
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        time:    { type: string, format: date-time }
+                        ns:      { type: string, description: 'When the line was written, in nanoseconds since the epoch.' }
+                        level:   { type: string, nullable: true, description: "A JSON line's `level`; null for any other line." }
+                        message: { type: string, nullable: true, description: "A JSON line's `msg`, with its traceback (`exc`) after it; null for any other line." }
+                        fields:
+                          type: object
+                          description: "A JSON line's `reason`, `device` and `edge_node`, where it has them."
+                          additionalProperties: { type: string }
+                        line:    { type: string, description: 'The line as the service wrote it.' }
+                        cut:     { type: boolean }
+                  more:    { type: boolean, description: 'The read stopped at `limit`: older lines in the range were left out.' }
+                  clamped:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        parameter: { type: string }
+                        asked:     { type: integer }
+                        used:      { type: integer }
+                        why:       { type: string }
+                  audit: { type: string, enum: [recorded, unchanged] }
+        '400': { description: 'A parameter that is not one, a value outside the rules (a window with both `range` and `from`, one end, the ends out of order, or more than 169 hours long among them), or a service the store does not list for the window, because it wrote nothing between `from` and `to`, or in the last 7 days for a `range`. `details` names the window, in UTC for a fixed one. Nothing was read or recorded.' }
+        '401': { description: Missing or invalid Authorization header, or a token GoTrue does not take for a person. }
+        '403': { description: 'Forbidden: requires Administrator.' }
+        '405': { description: Method not allowed. }
+        '500':
+          description: >-
+            SUPABASE_URL or the publishable key is not set on this deployment (`details` names it).
+            Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    properties: { error: { type: string }, details: { type: string } }
+        '503':
+          description: 'The log store could not be read, or the read could not be recorded in the Audit Trail, so no lines are returned.'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FunctionError' }
+        '504':
+          description: 'The log store did not answer within 10 seconds. A shorter range or a filter asks less of it.'
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FunctionError' }
 
   /functions/v1/enroll-gateway:
     post:
@@ -4574,37 +5218,83 @@ paths:
             application/json:
               schema:
                 type: object
+                description: The Environment is under `aas`, beside what was exported and how it went.
+                required: [success, device, stats, aas]
                 properties:
-                  assetAdministrationShells: { type: array, items: { type: object } }
-                  submodels: { type: array, items: { type: object } }
-                  conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. The definition is the vocabulary''s own text (`concept_definitions`) where one defines the id, and catalog text only otherwise. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
-                  stats: { type: object }
+                  success: { type: boolean, enum: [true] }
+                  device:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      name: { type: string }
+                      sparkplug_id: { type: string }
+                  stats: { type: object, description: 'Counts of submodels, attached schemas, telemetry and KPI metrics, unmapped semantic ids and concept descriptions, and `has_3d_model`. `model_url_resolves_only_on_this_host: true` is present when the 3D model reference points at this host.' }
+                  warning: { type: string, description: 'Present only when the shell''s 3D model reference resolves on this host alone, naming `AAS_MODEL_PUBLIC_BASE`. The shell is still valid.' }
+                  aas:
+                    type: object
+                    description: The AAS V3 Environment (IDTA-01001 Part 1).
+                    properties:
+                      assetAdministrationShells: { type: array, items: { type: object } }
+                      submodels: { type: array, items: { type: object } }
+                      conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. The definition is the vocabulary''s own text (`concept_definitions`) where one defines the id, and catalog text only otherwise. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
             application/asset-administration-shell-package+xml:
               schema: { type: string, format: binary }
         '400': { description: 'Missing `device_id`, a non-UUID `device_id`, or an unknown `format`.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail.' }
+        '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: No such device. }
-        '500': { $ref: '#/components/responses/FunctionFailure' }
+        '500':
+          description: |
+            Either the function failed (`FunctionFailure`: a fixed sentence and a request id), or,
+            for `aasx` and `bundle`, it refused to package a device whose 3D model it could not
+            bundle while the fallback URL points at this host. That refusal is `{error, hint}`:
+            `error` names `AAS_MODEL_PUBLIC_BASE` and its value, and `hint` says to bring the model
+            under `AAS_MAX_BUNDLED_MODEL_BYTES` instead. Set `AAS_MODEL_PUBLIC_BASE` to an address
+            other machines reach, or shrink the model, and export again.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    required: [error, hint]
+                    properties:
+                      error: { type: string }
+                      hint: { type: string }
 
   /functions/v1/aas-api:
     get:
       tags: [Edge Functions]
       summary: AAS repository root — the routes this service serves
       description: |
-        The IDTA 02001/02002 **read-only** repository surface, served live from the database over
-        the same mapping `aas-export` uses (`supabase/functions/_shared/aas/shell.ts`). A shipped
-        `.aasx` and this endpoint therefore cannot describe the same machine differently — the
-        agreement is asserted by `test_aas_api.py`.
+        The **read-only** AAS repository surface of IDTA-01002 (AAS Part 2, the API), served live
+        from the database over the same mapping `aas-export` uses
+        (`supabase/functions/_shared/aas/shell.ts`). A shipped `.aasx` and this endpoint therefore
+        cannot describe the same machine differently — the agreement is asserted by
+        `test_aas_api.py`.
+
+        **What a client sends.** A bearer token and nothing else: a person's, from **Profile →
+        Copy Token**, or a machine identity's, from **Access Control**. No `apikey`. On a site the
+        base URL is `https://api.<domain>/functions/v1/aas-api`; on the development stack,
+        `http://api.localhost/functions/v1/aas-api`.
+
+        **Not served:** the Registry and Discovery interfaces, concept descriptions (the JSON
+        export carries them), writes, and the `$metadata`, `$reference` and `$path` modifiers,
+        which answer `404`; only `/$value` is handled. `GET /shells` reads `limit` and
+        `cursor` alone, so a search by `assetIds` or `idShort` gets every shell.
 
         **This path itself answers `404`**, because there is no resource at a repository root and
         the specification defines no index. The body lists what *is* served, for the benefit of
-        somebody who found this URL in a config file. Start at `/description`.
+        somebody who found this URL in a config file. Start at `/description`. The root alone
+        still needs the `apikey`: the gateway exempts the paths below it.
 
-        **Reads as the caller and holds no service-role key**, unlike `aas-export`. RLS decides
-        what comes back, which is why it is a separate function: `main/index.ts` forwards only
-        the environment each worker's registry entry names, so the separation is enforced by the
-        runtime rather than by care.
+        **Reads as the caller and holds no service-role key**, unlike `aas-export`, which is why it
+        is a separate function: `main/index.ts` forwards only the environment each worker's
+        registry entry names, so the separation is enforced by the runtime rather than by care.
+        Every relation a shell is read from admits every signed-in caller, so every caller, person
+        or machine identity, sees the same shells.
 
         Every route is a `GET`. Writes would bypass the dashboard's role model and its
         `audit_trail` record, so the advertised profiles are the read-only SSP-002 pair.
@@ -4625,22 +5315,17 @@ paths:
   /functions/v1/aas-api/description:
     get:
       tags: [Edge Functions]
-      summary: AAS repository self-description (IDTA 02002)
+      security: []
+      summary: AAS repository self-description (IDTA-01002)
       description: |
         The service profiles this deployment implements. It reports profiles and nothing about
         the fleet.
 
-        **The function does not authenticate this route; the gateway does.** IDTA 02002 expects
-        it readable before a client holds a credential — the same argument that keeps the
-        Factory+ Directory's `/ping` open — and this endpoint is written that way. But it falls
-        under the gated `/functions/v1/` catch-all, so **an `apikey` is required in practice**
-        and a client without one gets `401` before the function is reached.
-
-        That gap is recorded, not accidental: making it a fifth `key-auth` exemption widens the
-        gateway's open surface, which is a decision to take on its own rather than as a side
-        effect. See `docs/gateway.md`. Note the asymmetry if it is taken — only
-        `/description` belongs outside the gate; every other `aas-api` route authenticates the
-        caller itself and fails closed.
+        **Open: no `apikey` and no token.** The specification expects it readable before a client
+        holds a credential — the same argument that keeps the Factory+ Directory's `/ping` open.
+        The gateway exempts every `/functions/v1/aas-api/` route from its `apikey` check, because
+        a standard AAS client sends a bearer token and nothing else (`docs/gateway.md`). Every
+        other `aas-api` route authenticates the caller itself and fails closed.
 
         Both advertised profiles are **SSP-002, the read-only variants**. Every route below is a
         `GET`; asset data is authored through the dashboard, which has the role model and writes
@@ -4659,16 +5344,22 @@ paths:
   /functions/v1/aas-api/shells:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List Asset Administration Shells
       description: |
         Every shell this deployment publishes — one per non-archived device — built live from
         the **same mapping `aas-export` uses** (`supabase/functions/_shared/aas/shell.ts`), so a
         shipped `.aasx` and this endpoint cannot describe the same machine differently.
 
-        **Reads as the caller, and holds no service-role key.** RLS decides what comes back. That
-        is the difference from `aas-export`, which composes a document under the service role
-        after checking the caller's role, and it is why these are two functions rather than two
-        routes: `main/index.ts` forwards only the environment each worker's registry entry names.
+        **Reads as the caller, and holds no service-role key.** Every relation a shell is read from
+        admits every signed-in caller, so every caller sees the same shells. That is the
+        difference from `aas-export`, which composes a document under the service role after
+        checking the caller's role, and it is why these are two functions rather than two routes:
+        `main/index.ts` forwards only the environment each worker's registry entry names.
+
+        **`limit` and `cursor` are the only parameters read.** `assetIds` and `idShort` are
+        ignored, so a client searching by asset id gets every shell, a page at a time.
 
         **Pagination.** `limit` (default 20, capped at 100) and an opaque `cursor`. A cursor names
         the next *device*, so a page carries every item belonging to the devices it covers — the
@@ -4678,7 +5369,7 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
-          description: Each device on a page costs seven queries and one shell construction.
+          description: Each device on a page costs up to ten queries and one shell construction.
         - name: cursor
           in: query
           schema: { type: string }
@@ -4703,9 +5394,11 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get one Asset Administration Shell
       description: |
-        **`aasIdentifier` is base64url-encoded**, as IDTA 02002 requires for every Identifier in
+        **`aasIdentifier` is base64url-encoded**, as IDTA-01002 requires for every Identifier in
         a path. Not plain base64: `/` is legal there and is a path separator, so an identifier
         containing one would split across two segments and the route would silently not match.
         Padding is optional.
@@ -4733,6 +5426,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}/submodel-refs:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List a shell's submodel references
       parameters:
         - name: aasIdentifier
@@ -4751,6 +5446,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}/asset-information:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get a shell's AssetInformation
       description: |
         `assetKind` and the `globalAssetId` — the identifier the whole shell hangs off, derived
@@ -4772,6 +5469,8 @@ paths:
   /functions/v1/aas-api/shells/{aasIdentifier}/submodels/{submodelIdentifier}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get a submodel through its shell
       description: |
         The same object as `/submodels/{submodelIdentifier}`, with one extra condition: the
@@ -4803,6 +5502,8 @@ paths:
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List a submodel's elements
       description: |
         Paginated in the same envelope as every other list, though one submodel's elements always
@@ -4828,17 +5529,21 @@ paths:
   /functions/v1/aas-api/submodels:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: List submodels
       description: |
-        Every submodel across every shell. Same pagination as `/shells`.
+        Every submodel across every shell. Same pagination as `/shells`, so **`limit` counts
+        devices, not submodels**: a page holds every submodel of up to `limit` devices.
 
-        Append **`/$value`** for IDTA 02002's ValueOnly serialisation — the metamodel stripped
+        Append **`/$value`** for IDTA-01002's ValueOnly serialisation — the metamodel stripped
         down to values, which is the shape an ERP actually wants: `body.SerialNumber` rather than
         a walk through `submodelElements[]` matching on `idShort`.
       parameters:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: How many devices' submodels a page holds.
         - name: cursor
           in: query
           schema: { type: string }
@@ -4854,6 +5559,8 @@ paths:
   /functions/v1/aas-api/submodels/{submodelIdentifier}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get one submodel
       description: |
         base64url-encoded identifier, as above. Also reachable as
@@ -4884,6 +5591,8 @@ paths:
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}:
     get:
       tags: [Edge Functions]
+      security:
+        - bearerAuth: []
       summary: Get one submodel element by idShortPath
       description: |
         `idShortPath` is the specification's dotted form — `Metrics.Systems_TEMPERATURE`. A
@@ -5334,6 +6043,32 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: This deployment has no forge configured, or the role lookup failed. The listener lets the request through.
+  /functions/v1/consent-gate:
+    get:
+      tags: [Edge Functions]
+      summary: Whether the MFA switch lets this person approve this app's sign-in (the API listener's ext_authz step)
+      description: |
+        Called by the gateway's API listener on GoTrue's consent endpoints alone,
+        `/auth/v1/oauth/authorizations/{id}` and `…/{id}/consent`, with the original method and path
+        under `/consent-gate` and the caller's bearer. Asks GoTrue whether the session exists, then
+        reads the person's role from `user_roles`, the token's `aal` and `amr`, the Settings row
+        `security.require_mfa_for_managers` and the authorization's app, on every call.
+
+        Admits a role the switch does not cover, a session that gave its code or another identity
+        provider signed in, a switch that is off, and Grafana's sign-in. Answers in GoTrue's error
+        shape, whose `msg` the consent page shows. The listener fails closed: a 5xx or no answer
+        within 3 seconds refuses the consent. **Acts only on the caller.** Any method is accepted.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Admitted. The listener passes the request to GoTrue.
+        '401':
+          description: No bearer, or one GoTrue refuses. `error_code` is `no_authorization` or `bad_jwt`.
+        '403':
+          description: An Administrator or Shopfloor_Manager whose session gave no code, while Settings requires MFA, for an app that is not Grafana. `error_code` is `mfa_required`, and `msg` says to add an authenticator on Profile › MFA.
+        '503':
+          description: GoTrue, the role, the switch or the authorization could not be read (`error_code` `consent_check_unavailable`). The listener refuses the consent.
   /functions/v1/studio-admission:
     post:
       tags: [Edge Functions]
@@ -5432,6 +6167,62 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: FORGE_SWEEP_SECRET is not configured, or this deployment has no forge.
+  /functions/v1/notification-dispatch:
+    post:
+      tags: [Edge Functions]
+      summary: Send what the notification queue holds (Aber's dispatcher)
+      description: |
+        **Called by the database, not by a browser.** `request_notification_dispatch()` (migration
+        `0247`) reaches this through the gateway with `pg_net` as a message is queued, and
+        `sweep_notifications()` every minute from `pg_cron` while one is due.
+
+        One pass takes each due row of `notification_deliveries`, oldest first, asks
+        `platform_alert_send_decision()` whether it still applies, and posts it to the webhook: a
+        CloudEvents 1.0 event in structured JSON mode, signed with the Standard Webhooks headers
+        `webhook-id`, `webhook-timestamp` and `webhook-signature` (`v1,` and the base64
+        HMAC-SHA256 of `id.timestamp.body`). An address whose host is not allowed is refused, a
+        redirect is a failure and is not followed, and a receiver has 10 seconds to answer. A
+        failure is retried after 30 seconds, doubling to an hour, and is dead after the tenth
+        attempt.
+
+        Authorised by the dispatch secret in the `x-dispatch-secret` header, **not** by the
+        publishable key. The database generated it and alone sends it. Every message comes from the
+        queue, never from the request.
+
+        **One pass at a time**, under `notification_dispatch_lease`: a call that finds it held does
+        nothing and answers 200 with `already_dispatching: true`.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - in: header
+          name: x-dispatch-secret
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Ignored; a pass takes no parameters.
+      responses:
+        '200':
+          description: >-
+            The pass completed, with how many rows were `sent`, `dropped`, `held`, `failed` (to be
+            retried) and `dead`. Or, with the body `{"already_dispatching": true}` and nothing else,
+            another pass holds the lease and this call did nothing.
+        '401':
+          description: The secret is missing or wrong.
+        '405':
+          description: Not a POST.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
+        '502':
+          description: >-
+            The caller, the lease or the queue could not be read, and the pass stopped there.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
+        '503':
+          description: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not configured.
   /functions/v1/forge-signout:
     get:
       tags: [Edge Functions]
@@ -5541,11 +6332,13 @@ components:
         identity's token from **Access Control**. Paste it without the word `Bearer`. Your own
         token acts as you and lasts at most an hour; a machine identity's lasts 7 to 90 days.
         A script with no dashboard gets one from `POST /auth/v1/token?grant_type=password`.
+        A machine identity's token works on the `/rest/v1/` paths, `aas-api` and the Factory+
+        Directory. The other edge functions take a person's token only.
     apiKeyAuth:
       type: apiKey
       in: header
       name: apikey
-      description: The publishable key (`sb_publishable_*`). Required on every request except the public-storage and userinfo endpoints.
+      description: The publishable key (`sb_publishable_*`). Required on every request except the public-storage, userinfo, Factory+ Directory and `aas-api` endpoints.
     AlertWebhookBearer:
       type: http
       scheme: bearer
@@ -5587,7 +6380,11 @@ components:
     Unauthorized:
       description: Missing or invalid credentials.
     Forbidden:
-      description: Authenticated, but the role is not permitted. RLS policies fail closed.
+      description: >-
+        Authenticated, but the role is not permitted. RLS policies fail closed. While Settings
+        requires MFA, a write an Administrator or Shopfloor_Manager makes from a session that gave
+        no code is refused too: `code` 42501, `details` `mfa_required`, and a `message` that says to
+        add an authenticator on Profile › MFA.
     NotFound:
       description: |
         A row the call names does not exist: the proposal, the schema, or the asset a proposal
@@ -6042,6 +6839,39 @@ components:
         n_double: { type: integer, description: 'Number of numeric samples in the bucket.' }
         n_rows: { type: integer, description: 'Number of samples of any type in the bucket.' }
 
+    TelemetryCarriedBucket:
+      type: object
+      description: |
+        One bucket of one series from `/rest/v1/rpc/telemetry_carried`. A bucket with readings has
+        their summary; a quiet one carries the last value before it as its average, minimum,
+        maximum and last.
+      properties:
+        bucket_ts: { type: string, format: date-time, description: 'Start of the bucket.' }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        metric_name: { type: string, example: Systems/TEMPERATURE }
+        avg_double: { type: number, nullable: true, description: 'Weighted mean of the readings, or the carried value.' }
+        min_double: { type: number, nullable: true }
+        max_double: { type: number, nullable: true }
+        last_double: { type: number, nullable: true, description: 'The value at the end of the bucket, carried or read.' }
+        last_string: { type: string, nullable: true, description: 'A state metric''s value at the end of the bucket, carried or read.' }
+        last_bool: { type: boolean, nullable: true }
+        n_rows: { type: integer, description: 'Readings in the bucket; 0 when carried.' }
+        is_carried: { type: boolean, description: 'No reading arrived in the bucket, and its values are the last before it.' }
+
+    TelemetryCoverageRow:
+      type: object
+      description: |
+        One device's readings in each block from `/rest/v1/rpc/telemetry_coverage`, and what the
+        historian's device rollup has counted.
+      properties:
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        first_block: { type: string, format: date-time, description: 'Start of the first block, on the epoch grid.' }
+        block_width: { type: string, example: '00:05:00', description: 'The block, a PostgreSQL interval: the one asked for, or an hour for a window older than the 5-minute rollup reaches.' }
+        counts: { type: array, items: { type: integer }, description: 'Readings in each block, oldest first; 0 for none.' }
+        computed_from: { type: string, description: 'The oldest moment the rollup has counted, or `-infinity`.' }
+        computed_to: { type: string, description: 'The newest moment the rollup has counted, or `infinity`.' }
+        complete: { type: boolean, description: 'The rollup has counted all the history it will.' }
+
     AssetConfigRow:
       type: object
       description: One DBIRTH birth-certificate parameter.
@@ -6064,7 +6894,8 @@ components:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
-                 backups, capture_jobs, captures, playback_jobs, oauth_clients]
+                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts,
+                 notification_channels]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -6079,7 +6910,10 @@ components:
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED,
                  CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
                  CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED,
-                 APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED]
+                 APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED,
+                 SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN,
+                 SUPPRESSION_WINDOW_SCHEDULED, SUPPRESSION_WINDOW_CHANGED, SUPPRESSION_WINDOW_ENDED,
+                 SUPPRESSION_WINDOW_CANCELLED, SIGNING_KEY_ISSUED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -6100,7 +6934,18 @@ components:
             the person's `user_roles` lane, so an act inside GoTrue is recorded too. A read-only
             broker account's creation and deletion are an `INSERT` and a `DELETE` in the
             `broker_accounts` lane, written by `record_broker_account_created()` and
-            `record_broker_account_deleted()` (0218).
+            `record_broker_account_deleted()` (0218). `SERVICE_LOGS_READ` (0225) is an
+            Administrator reading a service's log lines on the System page, in that service's
+            `service_logs` lane, written by `record_service_logs_read()` when the read differs
+            from their last. `ALERT_ACKNOWLEDGED` and `ALERT_ACKNOWLEDGEMENT_WITHDRAWN` (0231) are
+            written by `acknowledge_alert()` and `withdraw_alert_acknowledgement()`, in the alert's
+            `platform_alerts` lane, or in a machine identity's `service_principals` lane for an
+            alert about its token. The `SUPPRESSION_WINDOW_` actions (0240) are written by
+            `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and
+            `end_alert_suppression_window()`, in the lane of the device, gateway or cell the window
+            covers. `SIGNING_KEY_ISSUED` (0248) is an Administrator issuing or rotating the webhook's
+            signing key, in the webhook's `notification_channels` lane, written by
+            `issue_notification_signing_key()`; the key is never in the row.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
@@ -6123,6 +6968,13 @@ components:
             The lane, which decides who may read the row: `asset` is readable by Administrator,
             Shopfloor_Manager and Auditor, `security` by Administrator and Auditor. Stamped by a
             trigger from `audit_domain_for()`; a writer cannot supply it.
+        class:
+          type: string
+          enum: [created, operational, configuration, lifecycle, read]
+          description: >-
+            In `audit_trail_page()`'s answer only, not a column: the class `audit_event_class()`
+            sorts the row into (0228), which the Audit Trail's legend draws. `read` is a row that
+            records access and changes nothing.
         recorded_at: { type: string, format: date-time }
 
     DirectoryService:
@@ -6802,7 +7654,10 @@ components:
     DeviceAlert:
       type: object
       description: |
-        One Grafana alert occurrence. Written by `grafana-alert-webhook`; never by a user.
+        One alert occurrence. `grafana-alert-webhook` writes the alert itself. A person writes the
+        acknowledgement columns through `/rest/v1/rpc/acknowledge_alert` and
+        `/rest/v1/rpc/withdraw_alert_acknowledgement`, and the database stamps
+        `suppression_window_id`. No role writes the table directly.
       properties:
         id: { type: string, format: uuid }
         fingerprint:
@@ -6867,6 +7722,65 @@ components:
             Null on a row written before 0220, when Grafana sent none, or for a rule Grafana could
             not evaluate (it sends -1 for each).
           example: { A: 74.5, B: 74.5, C: 1 }
+        acknowledged_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When a person acknowledged this occurrence, or the earlier occurrence it inherited the
+            acknowledgement from (0231). Null while unacknowledged. Written only by
+            `/rest/v1/rpc/acknowledge_alert` and `/rest/v1/rpc/withdraw_alert_acknowledgement`.
+        acknowledged_by: { type: string, format: uuid, nullable: true, description: 'The `auth.users` id of the person who acknowledged it.' }
+        acknowledged_by_email: { type: string, nullable: true, description: 'Their email address as their token carried it when they acknowledged.' }
+        acknowledgement_reason:
+          type: string
+          nullable: true
+          enum: [investigating, known_cause, planned_work, sensor_or_model_fault, threshold_wrong, other]
+        acknowledgement_note: { type: string, nullable: true, maxLength: 200, description: 'Their own words, trimmed. Required with the reason `other`.' }
+        suppression_window_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            The suppression window that first covered this occurrence, for history (0240): stamped as
+            it starts in one, or when one opens while it fires, and never cleared. On
+            `platform_alerts` only; whether an alert is suppressed now is `suppressed`, below.
+        last_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the row's writer last said it still holds (0247): `grafana-alert-webhook` stamps
+            it on every post, Grafana's repeats included. A firing row confirmed more than 13 hours
+            ago is sent no reminder. Not returned by `platform_alerts_active`.
+        suppressed:
+          type: boolean
+          description: |
+            On `platform_alerts_active` only (0240): whether a suppression window covers the alert
+            now, decided as the row is read. A suppressed alert is not counted, colours nothing and
+            is not sent.
+        suppressing_window_id: { type: string, format: uuid, nullable: true, description: 'On `platform_alerts_active` only: the window that covers it now. Of several, the one that ends last.' }
+        suppression_reason: { type: string, nullable: true, description: 'On `platform_alerts_active` only: that window''s reason.' }
+        suppressed_until: { type: string, format: date-time, nullable: true, description: 'On `platform_alerts_active` only: when that window ends. The alert counts again then if it is still firing.' }
+
+    AlertSuppressionWindow:
+      type: object
+      description: |
+        A scheduled period on one device, gateway or cell during which its alerts are recorded but
+        marked suppressed (0240). Exactly one of `device_id`, `gateway_id` and `cell_id` is set.
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid, nullable: true }
+        gateway_id: { type: string, format: uuid, nullable: true, description: 'The gateway''s own alerts, not its devices''.' }
+        cell_id: { type: string, format: uuid, nullable: true, description: 'Every device in the cell when an alert is read.' }
+        starts_at: { type: string, format: date-time, description: 'Never before it was scheduled.' }
+        ends_at: { type: string, format: date-time, description: 'The first moment it no longer covers. Now, when it was ended early.' }
+        reason: { type: string, minLength: 1, maxLength: 200 }
+        created_by: { type: string, format: uuid, description: 'The `auth.users` id of the person who scheduled it.' }
+        created_by_email: { type: string, nullable: true, description: 'Their email address as their token carried it.' }
+        created_at: { type: string, format: date-time }
+        ended_by: { type: string, format: uuid, nullable: true, description: 'Who ended it early, or null.' }
+        ended_by_email: { type: string, nullable: true }
 
     DeviceNameplate:
       type: object

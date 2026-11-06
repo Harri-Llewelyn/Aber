@@ -56,7 +56,7 @@ describe('context drawer alert banner', () => {
   })
 
   /**
-   * The deep link out. The banner says thresholds and silences live in Grafana, so this is the one
+   * The deep link out. Its tooltip says thresholds and state history live in Grafana, so this is the one
    * thing in the presentational panel that navigates on its own.
    */
   describe('View in Grafana', () => {

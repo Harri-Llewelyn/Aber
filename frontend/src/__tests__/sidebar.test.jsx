@@ -164,9 +164,11 @@ describe('the grouping', () => {
     /* No captions: a heading would have to hold its box in the collapsed state, leaving blank
        strips in the resting rail. */
     expect(document.querySelector('.sidebar-group-label')).toBeNull()
-    for (const caption of ['Assets', 'Modelling', 'History', 'Administration']) {
+    for (const caption of ['Assets', 'Modelling', 'Administration']) {
       expect(screen.queryByText(caption), `the "${caption}" heading came back`).toBeNull()
     }
+    // History is a page as well as the name of the group the Audit Trail leads: only the page is drawn.
+    expect(screen.getAllByText('History').map(el => el.closest('a')?.getAttribute('href'))).toEqual(['/history'])
   })
 
   it('names every item even while the labels are invisible', () => {

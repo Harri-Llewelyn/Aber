@@ -46,6 +46,11 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // the audit rows (0218) are written as the caller.
   "broker-subscriber": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
 
+  // A service's recent log lines for the System page's Logs tab, Administrator only. LOKI_URL is the
+  // log store Grafana reads, which has no access control of its own; unset, the function answers
+  // that observability is off. No service-role key: the audit row (0225) is written as the caller.
+  "service-logs": ["LOKI_URL"],
+
   // Signs a long-lived JWT for a service principal and reveals it once. Its signing key, JWT_KEYS
   // (the ES256 private key GoTrue signs with), is the widest secret in this map: it signs anything, including a `service_role` token that storage,
   // realtime and the edge runtime accept without consulting the denylist. It is signed here rather
@@ -147,8 +152,8 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "ASSET_EXPORT_MAX_TRAIL_ROWS",
   ],
 
-  // The IDTA 02001/02002 read surface over the same mapping aas-export uses. No service-role key: a
-  // live API over the whole asset space reads as the caller and lets RLS answer. Two functions
+  // The IDTA-01002 (AAS Part 2) read surface over the same mapping aas-export uses. No service-role
+  // key: a live API over the whole asset space reads as the caller and lets RLS answer. Two functions
   // rather than two routes, because envForFunction() forwards only what an entry names, so one
   // worker cannot hold a key the other is denied. The AAS_* set is duplicated so the identifiers
   // this serves are the identifiers aas-export mints; no STORAGE_MODEL_BUCKET or
@@ -168,6 +173,12 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GRAFANA_ALERT_WEBHOOK_SECRET",
   ],
 
+  // Aber's dispatcher (0247): drains the notification queue and posts each message to the webhook.
+  // Asked for by the database through pg_net with the dispatch secret it generated, which the
+  // function checks through an RPC, so no secret of its own is forwarded. The service-role key is
+  // for the queue's RPCs; the dashboard's address is each message's source and link.
+  "notification-dispatch": ["SUPABASE_SERVICE_ROLE_KEY", "FRONTEND_PUBLIC_URL"],
+
   // Resolves a role from public.user_roles for Grafana's OIDC `api_url`.
   "grafana-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
 
@@ -185,6 +196,10 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // The studio listener's ext_authz step: whether the caller is an Administrator in user_roles now.
   // The service key is for that lookup, after GoTrue has verified the caller's session.
   "studio-admission": ["SUPABASE_SERVICE_ROLE_KEY"],
+  // The API listener's ext_authz step on GoTrue's consent endpoints: whether the MFA switch lets
+  // this person approve this app's sign-in. The service key reads their role, the switch and the
+  // authorization's app, after GoTrue has verified the session.
+  "consent-gate": ["SUPABASE_SERVICE_ROLE_KEY"],
   // Gitea's own sign-out link, routed here by the forge listener: ends the door's GoTrue session,
   // then sends the browser to the dashboard's /sign-out. The service key is for the sign-out; the
   // dashboard's address is where the browser goes next.

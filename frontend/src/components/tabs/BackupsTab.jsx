@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
-import { useUrlState } from '../../hooks/useUrlState'
-import { backupUrl } from '../../routes'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import { backupUrl, trailUrl } from '../../routes'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -15,7 +16,7 @@ import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import { CardHeading } from '../common/CardHeading'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconAlertTriangle, IconDatabase, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
+import { IconAlertTriangle, IconDatabase, IconHardDrive, IconHistory, IconShieldAlert, IconX } from '../common/Icons'
 import { SummaryCard, SummaryCards } from '../common/SummaryCard'
 import { cronIntervalSeconds } from '../../utils/cronInterval'
 import { formatBytes, formatClockTime, formatDateTime, formatDuration, formatRelative, NO_VALUE, plural } from '../../utils/format'
@@ -23,6 +24,7 @@ import { nextHistorianBackup } from '../../utils/historianBackupSchedule'
 import { readFlag, readSetting } from '../../config'
 import { Tooltip } from '../common/Tooltip'
 import { ColumnHeader } from '../common/SortHeader'
+import { PERMISSION_UUIDS } from '../../constants'
 
 /**
  * How old the last successful backup may be before the page says backups have stopped: the nightly
@@ -75,14 +77,24 @@ const capitalised = (db) => `${db.noun.charAt(0).toUpperCase()}${db.noun.slice(1
 const PAGE_SIZE = 30
 
 /**
- * The list's filter. A cancelled run is listed under All only: it neither failed nor completed.
- * `empty` is what the list says when the filter matches nothing.
+ * The list's Status filter: how a run ended, any of which a run may have; none is every run. The
+ * list is read a page at a time, so the database filters it. `empty` is what the list says when
+ * one status matches nothing. A link from before reads `status=all` as none.
  */
-const FILTERS = {
-  all: { label: 'All runs', statuses: ['COMPLETED', 'FAILED', 'CANCELLED'] },
-  completed: { label: 'Completed', statuses: ['COMPLETED'], empty: 'No run has completed yet.' },
-  failed: { label: 'Failed', statuses: ['FAILED'], empty: 'No run has failed.' }
-}
+const STATUS_OPTIONS = [
+  { value: 'completed', label: 'Completed', status: 'COMPLETED', empty: 'No run has completed yet.' },
+  { value: 'failed', label: 'Failed', status: 'FAILED', empty: 'No run has failed.' },
+  { value: 'cancelled', label: 'Cancelled', status: 'CANCELLED', empty: 'No run was cancelled.' },
+]
+const ANY_STATUS = Object.freeze([])
+const STATUS_ALIASES = Object.freeze({ all: ANY_STATUS })
+/** The statuses a choice asks the database for. */
+const statusesFor = (chosen) => STATUS_OPTIONS
+  .filter(o => chosen.length === 0 || chosen.includes(o.value)).map(o => o.status)
+/** What the list says when a choice matches no run. */
+const emptyFor = (chosen) => (chosen.length === 1
+  ? STATUS_OPTIONS.find(o => o.value === chosen[0])?.empty
+  : 'No run ended in these ways.')
 
 /**
  * Backups without a shell.
@@ -93,12 +105,13 @@ const FILTERS = {
  * exists; the bytes never come here, and restore is a runbook. Administrator only, as the RLS and
  * every RPC are; App re-checks the role before rendering this.
  */
-export function BackupsTab({ showToast }) {
+export function BackupsTab({ showToast, hasPermission }) {
+  const canReadTrail = !!hasPermission?.(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   const [runs, setRuns] = useState([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState(null)
   const [activeJob, setActiveJob] = useState(null)
-  const [filter, setFilter] = useUrlState('status', 'all', { allowed: Object.keys(FILTERS) })
+  const [filter, setFilter] = useUrlList('status', ANY_STATUS, { allowed: STATUS_OPTIONS.map(o => o.value), aliases: STATUS_ALIASES })
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [loading, setLoading] = useState(true)
   const [paging, setPaging] = useState(false)
@@ -124,7 +137,7 @@ export function BackupsTab({ showToast }) {
     const call = ++lastCall.current
     const on = { historian: historianOn, platform: platformOn }
     const [page, active, sum, floor, destination, ...states] = await Promise.all([
-      api.listBackupRuns({ statuses: FILTERS[filter].statuses, limit }),
+      api.listBackupRuns({ statuses: statusesFor(filter), limit }),
       api.activeBackupJob(),
       api.backupRunSummary(),
       // Soft: without it the Retention cells cannot say a backup is kept as one of the newest.
@@ -178,18 +191,15 @@ export function BackupsTab({ showToast }) {
     }
   })
 
+  // Run from Release backup's dialog, which shows a refusal and stays open.
   const onRelease = async () => {
     const backup = releaseFor
-    setReleaseFor(null)
     await runKeyed(backup.id, async () => {
-      try {
-        const released = await api.releaseBackup(backup.id)
-        showToast(released ? `Released the backup from ${formatDateTime(backup.taken_at)}. The retention window now applies.` : 'That backup was not pinned.', released ? 'success' : 'info',
-          { to: backupUrl(backup.id) })
-        await refresh()
-      } catch (err) {
-        showToast(err.message, 'error')
-      }
+      const released = await api.releaseBackup(backup.id)
+      setReleaseFor(null)
+      showToast(released ? `Released the backup from ${formatDateTime(backup.taken_at)}. The retention window now applies.` : 'That backup was not pinned.', released ? 'success' : 'info',
+        { to: backupUrl(backup.id) })
+      await refresh()
     })
   }
 
@@ -206,7 +216,7 @@ export function BackupsTab({ showToast }) {
   const onRemoveDestination = async () => {
     await api.clearBackupOffsiteDestination()
     setEditingDestination(false)
-    showToast('Off-site destination removed. Copies already made stay in the bucket.', 'info', { to: backupUrl() })
+    showToast('Off-site destination removed. Copies already made stay in the bucket.', 'success', { to: backupUrl() })
     await refresh()
   }
 
@@ -225,7 +235,7 @@ export function BackupsTab({ showToast }) {
   // cleared, so the run is in the list and its panel opens on the next load.
   const newestId = summary?.latestOutcome?.id || null
   const openNewest = () => {
-    if (selectedId !== newestId && filter !== 'all' && !runs.some(r => r.id === newestId)) onFilter('all')
+    if (selectedId !== newestId && filter.length > 0 && !runs.some(r => r.id === newestId)) onFilter(ANY_STATUS)
     toggleRun(newestId)
   }
 
@@ -242,17 +252,18 @@ export function BackupsTab({ showToast }) {
           {/* The status filter narrows the list of runs, so it waits for one. */}
           <div className="filter-bar">
             {!loading && !neverRun && (
-              <select
-                className="form-control control-sm"
+              <FilterDropdown
+                label="Status"
+                noun="status"
+                plural="statuses"
+                options={STATUS_OPTIONS}
                 value={filter}
-                onChange={e => onFilter(e.target.value)}
-                aria-label="Run status filter"
-              >
-                {Object.entries(FILTERS).map(([id, f]) => <option key={id} value={id}>{f.label}</option>)}
-              </select>
+                onChange={onFilter}
+                width="sm"
+              />
             )}
             <div className="filter-bar-actions">
-              <ClearFilters count={filter === 'all' ? 0 : 1} onClear={() => onFilter('all')} />
+              <ClearFilters count={filter.length ? 1 : 0} onClear={() => onFilter(ANY_STATUS)} />
               <DestinationButton destination={offsite} onEdit={() => setEditingDestination(true)} />
               {/* The main button, last. Disabled rather than hidden while one is in flight: the
                   gate refuses a second anyway, and the callout below says why. */}
@@ -302,8 +313,8 @@ export function BackupsTab({ showToast }) {
           ) : runs.length === 0 ? (
             <EmptyState
               message="No backups yet."
-              filtered={filter !== 'all'}
-              filteredMessage={FILTERS[filter].empty}
+              filtered={filter.length > 0}
+              filteredMessage={emptyFor(filter)}
             />
           ) : (
             <div className="table-wrap">
@@ -362,6 +373,7 @@ export function BackupsTab({ showToast }) {
         onRelease={setReleaseFor}
         onClose={() => setSelectedId(null)}
         showToast={showToast}
+        canReadTrail={canReadTrail}
       />
 
       {PHYSICAL.filter(db => physical[db.key] !== undefined).map(db => (
@@ -863,7 +875,7 @@ function retentionText(backup, kept, retentionDays) {
  * One run's details: the whole of a failure, the queued, started and finished times, and the files
  * a backup holds. Release is its one action, on a pinned backup.
  */
-function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, onRelease, onClose, showToast }) {
+function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, onRelease, onClose, showToast, canReadTrail }) {
   const b = run?.backup
   const badge = run ? (STATUS_BADGES[run.status] || { tone: 'neutral', label: run.status }) : null
   const outcome = run ? runOutcome(run) : null
@@ -884,14 +896,24 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
     ] : [])
   ] : []
 
-  const actions = b?.pinned ? [{
-    label: 'Release',
-    primary: true,
-    pending: releasing,
-    pendingLabel: 'Releasing…',
-    onClick: () => onRelease(b),
-    title: 'Let the retention window apply to this backup'
-  }] : []
+  const actions = run ? [
+    b?.pinned && {
+      label: 'Release',
+      primary: true,
+      pending: releasing,
+      pendingLabel: 'Releasing…',
+      onClick: () => onRelease(b),
+      title: 'Let the retention window apply to this backup'
+    },
+    // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+    // Searched by the request's id, with no kind: the search finds the backup it took as well, so
+    // the request's lane and the backup's show together.
+    canReadTrail && {
+      label: 'View Audit Trail', icon: <IconHistory size={13} />,
+      to: trailUrl(run.id),
+      title: 'Open the Audit Trail on this run: its request, and the backup it took, released or pruned'
+    },
+  ].filter(Boolean) : []
 
   return (
     <ContextPanel

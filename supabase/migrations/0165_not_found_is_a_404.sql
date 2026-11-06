@@ -62,6 +62,7 @@ BEGIN
         RAISE EXCEPTION 'not permitted to decide change proposals'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     SELECT * INTO v_proposal FROM public.change_proposals
      WHERE id = p_proposal_id FOR UPDATE;
@@ -395,6 +396,7 @@ BEGIN
         RAISE EXCEPTION 'insufficient privileges to discard a schema draft'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     SELECT * INTO v_draft FROM public.schemas WHERE id = p_schema_id FOR UPDATE;
     IF NOT FOUND THEN
@@ -562,6 +564,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to version a schema'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   IF v_parent_id IS NULL THEN
     RAISE EXCEPTION 'parent_schema_id is required' USING ERRCODE = 'null_value_not_allowed';
@@ -639,6 +642,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to publish a schema version'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   IF v_draft_id IS NULL THEN
     RAISE EXCEPTION 'draft_schema_id is required' USING ERRCODE = 'null_value_not_allowed';
@@ -709,6 +713,7 @@ BEGIN
         RAISE EXCEPTION 'not permitted to decide change proposals'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     IF COALESCE(TRIM(p_reason), '') = '' THEN
         -- A REASON IS THE WHOLE POINT OF A REJECTION. Without one the proposer learns only that
@@ -771,6 +776,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to relocate devices'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   IF p_moves IS NULL OR jsonb_typeof(p_moves) <> 'array' THEN
     RAISE EXCEPTION 'p_moves must be a JSON array of moves, got %',

@@ -4,6 +4,7 @@
  * the device, from the database; threshold and condition alerting belongs in Grafana.
  */
 import { isNeverSeen, isProvisioningOverdue } from './deviceProvisioning';
+import { isAcknowledged } from './alertAcknowledgement';
 
 /**
  * The three lifecycle states, in the order of precedence they are resolved in. QUARANTINED
@@ -46,14 +47,15 @@ export function deviceStatusChipClass(status) {
  * it red relays a judgement rather than making one.
  *
  * Precedence: archived (a decommissioned machine reads inert), then alerting (an OFFLINE device
- * with a firing alert is the most urgent thing on the page), then status.
+ * with a firing alert is the most urgent thing on the page), then status. An acknowledged alert is
+ * the hollow chip: still red, since it still fires, but somebody has it.
  *
  * @param {object} device  a device row
- * @param {object|null} alert  the worst alert firing on it -- see utils/deviceAlerts.js
+ * @param {object|null} alert  the alert that decides its state -- see utils/deviceAlerts.js
  */
 export function deviceChipClass(device, alert) {
   if (device?.is_archived) return 'chip-offline';
-  if (alert) return 'chip-danger';
+  if (alert) return isAcknowledged(alert) ? 'chip-acknowledged' : 'chip-danger';
   return deviceStatusChipClass(deviceLifecycleStatus(device));
 }
 /**
@@ -64,6 +66,17 @@ export function deviceDotColor(device, alert) {
   if (device?.is_archived) return 'var(--text-muted)';
   if (alert) return 'var(--danger)';
   return deviceStatusDotColor(deviceLifecycleStatus(device));
+}
+/**
+ * The status dot's style: deviceDotColor() filled, or a ring of it once the alert that decides the
+ * device's state is acknowledged, so the two alert states differ by shape as well as by words.
+ */
+export function deviceDotStyle(device, alert) {
+  const colour = deviceDotColor(device, alert);
+  if (alert && !device?.is_archived && isAcknowledged(alert)) {
+    return { background: 'transparent', boxShadow: `inset 0 0 0 1.5px ${colour}` };
+  }
+  return { background: colour };
 }
 /** Badge class for the Devices table and the context drawer. */
 export function deviceStatusBadgeClass(status) {
@@ -147,10 +160,22 @@ export function deviceSummaryCounts(devices = []) {
   return counts
 }
 
-/** The summary's words: Online and Offline always, Awaiting first birth only while a device is. */
-export function deviceSummaryText(devices = []) {
+/**
+ * The summary's figures: Online and Offline always, Awaiting first birth only while a device is.
+ * Each is drawn as a badge of its own, so the summary wraps between them.
+ */
+export function deviceSummaryParts(devices = []) {
   const { online, offline, awaitingBirth } = deviceSummaryCounts(devices)
-  return `${online} Online / ${offline} Offline${awaitingBirth ? ` / ${awaitingBirth} Awaiting first birth` : ''}`
+  return [
+    { key: 'online', content: `${online} Online` },
+    { key: 'offline', content: `${offline} Offline` },
+    awaitingBirth && { key: 'awaitingBirth', content: `${awaitingBirth} Awaiting first birth` }
+  ].filter(Boolean)
+}
+
+/** The summary in one line of words: the figures, joined. */
+export function deviceSummaryText(devices = []) {
+  return deviceSummaryParts(devices).map(p => p.content).join(' / ')
 }
 
 /**
@@ -179,8 +204,8 @@ export function deviceColumnTags(devices = [], counted = devices) {
     {
       key: '__summary__',
       priority: true,
-      className: 'badge badge-sm badge-neutral',
-      content: deviceSummaryText(counted)
+      label: deviceSummaryText(counted),
+      parts: deviceSummaryParts(counted).map(p => ({ ...p, className: 'badge badge-sm badge-neutral' }))
     },
     ...devices.map(d => ({
       key: d.asset_id,

@@ -21,10 +21,11 @@ This page does not make backups itself. **Take a backup** queues a request, and 
 - **Replace Key** asks before it overwrites the stored key, because the old one cannot be recovered. A wrong key shows only when the next off-site copy fails.
 - **Address the bucket by path** is for MinIO and most self-hosted stores. Leave it off for AWS, R2 and B2.
 - **Remove the destination** stops the copies and deletes the secret key. Copies already made stay in the bucket.
-- **The filter**, at the left of the toolbar, shows every run, or only the completed ones, or only the failed ones. A cancelled run is listed under all runs only.
+- **The status filter**, at the left of the toolbar, shows every run, or only the runs that ended in the ways you tick: **Completed**, **Failed** or **Cancelled**.
 - **The columns cannot be sorted.** The list loads 30 runs at a time, newest first, and a sort would cover only the runs loaded. Use the filter to narrow it, or load older runs from the foot of the list.
 - The list shows the newest 30 runs that match the filter. The foot says how many are loaded, such as `30 of 57`, beside **Show 27 more**. That adds older runs, up to 30 at a time. At the end it says **All 57 shown.**
 - **A run** opens its panel when you select anywhere on its row, or press Enter or Space on it. The panel shows the whole of any failure, and when the run was queued, started and finished. For a backup, it shows where its files are, each file with its size, and its off-site copy. **Release** is there too, on a pinned backup.
+- **View Audit Trail**, in a run's panel, opens the Audit Trail on the run. It shows two lanes side by side: the request, and the backup it took. The backup's lane holds when it was taken, released and pruned, even once the backup is gone. A run that was cancelled or failed took no backup, so it shows the request alone. It is offered to whoever may open the Audit Trail.
 
 ## The cards above the list
 
@@ -41,7 +42,7 @@ The **Backup runs** card answers this. It shows how long ago the last good backu
 
 When the answer is no, the card says one of these:
 
-- **Last run failed**, in red, and none has succeeded since. Select the card: it opens the failed run, with the reason. If the list's filter hides that run, the filter goes back to all runs. A failure followed by a success is history: it stays in the list, and the card goes back to **Up to date**.
+- **Last run failed**, in red, and none has succeeded since. Select the card: it opens the failed run, with the reason. If the list's filter hides that run, the filter goes back to every run. A failure followed by a success is history: it stays in the list, and the card goes back to **Up to date**.
 - **None in 36 hours**, in amber: the nightly schedule has missed a night. A stopped backup service looks like this too, because a service that is not running records no failure. Before the first success, the hours count from the first backup queued.
 - **Slow**, in amber, with how long the last backup took beside the median. The last backup took more than half the time between scheduled backups. Backups grow with the data. One that keeps growing will run into the next, so look at what has grown.
 

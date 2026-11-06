@@ -402,6 +402,21 @@ describe('Display name', () => {
     await waitFor(() => expect(onSaveDisplayName).toHaveBeenLastCalledWith(null))
   })
 
+  // set_display_name() writes DISPLAY_NAME_CHANGED, so Save ends with a toast, worded as Change Name's on People.
+  it('says what you are shown as once it is saved, linking to this tab', async () => {
+    const showToast = vi.fn()
+    const onSaveDisplayName = vi.fn().mockResolvedValueOnce('Owain ap Rhys').mockResolvedValueOnce(null)
+    renderProfile({ displayName: 'Owain Operator', onSaveDisplayName, showToast })
+    fireEvent.change(nameBox(), { target: { value: 'Owain ap Rhys' } })
+    fireEvent.click(within(row('Display name')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('You are now shown as Owain ap Rhys', 'success', { to: '/profile/account' }))
+
+    fireEvent.change(nameBox(), { target: { value: '' } })
+    fireEvent.click(within(row('Display name')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(showToast).toHaveBeenLastCalledWith('You are now shown by email alone', 'success', { to: '/profile/account' }))
+    expect(showToast).toHaveBeenCalledTimes(2)
+  })
+
   it('puts the saved name back on Discard', () => {
     const onSaveDisplayName = vi.fn()
     renderProfile({ displayName: 'Owain Operator', onSaveDisplayName })
@@ -422,11 +437,13 @@ describe('Display name', () => {
 
   it("shows the database's sentence when a save is refused, and keeps the draft", async () => {
     const onSaveDisplayName = vi.fn().mockRejectedValue(new Error('A display name cannot contain a control character, such as a line break or a tab.'))
-    renderProfile({ displayName: null, onSaveDisplayName })
+    const showToast = vi.fn()
+    renderProfile({ displayName: null, onSaveDisplayName, showToast })
     fireEvent.change(nameBox(), { target: { value: 'Owain' } })
     fireEvent.click(within(row('Display name')).getByRole('button', { name: 'Save' }))
     expect(await within(row('Display name')).findByText(/cannot contain a control character/)).toBeInTheDocument()
     expect(nameBox()).toHaveValue('Owain')
+    expect(showToast).not.toHaveBeenCalled()
   })
 
   it('is not offered to a machine identity', () => {

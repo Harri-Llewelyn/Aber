@@ -2791,10 +2791,17 @@ SELECT set_config('aber.grafana_oauth_client_secret', '', false);
 
 -- Studio's door: the client the gateway's studio listener authenticates as (`...0003`).
 -- Registered here since the fold of archived migration 0081, in the shape of the Grafana client
--- above. An absent secret skips the registration with a WARNING; the gateway then answers with a
--- login that cannot complete rather than with an error naming this row.
+-- above. db-init passes studio_enabled from supabaseStudio.enabled:
+--   false  a NOTICE, and a client an earlier boot registered is removed as remove_app() removes
+--          one, so the site holds the clients a default install holds; true again restores it.
+--   true   registered; an absent secret skips it with a WARNING, and the door's login then
+--          cannot complete.
+--   unset  (an older chart, a hand-run psql) as true.
+-- Reasoning: supabase/README.md, "The second listener, which is Studio's login".
+\if :{?studio_enabled} \else \set studio_enabled '' \endif
 \if :{?studio_oauth_client_secret} \else \set studio_oauth_client_secret '' \endif
 
+SELECT set_config('aber.studio_enabled',             :'studio_enabled',             false) \g /dev/null
 SELECT set_config('aber.studio_oauth_client_secret', :'studio_oauth_client_secret', false) \g /dev/null
 SELECT set_config('aber.studio_public_url',          :'studio_public_url',          false) \g /dev/null
 
@@ -2803,6 +2810,7 @@ DECLARE
   -- Pinned, not generated: supabase/envoy.yaml carries this as the listener's `client_id`, and a
   -- fresh UUID on every stack rebuild would silently break the login.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000003';
+  v_enabled   TEXT := coalesce(current_setting('aber.studio_enabled', true), '');
   v_secret    TEXT := current_setting('aber.studio_oauth_client_secret', true);
   v_base      TEXT := rtrim(
                         COALESCE(
@@ -2810,10 +2818,42 @@ DECLARE
                           'http://127.0.0.1:54323'),
                         '/');
   v_hash      TEXT;
+  v_approvals INTEGER;
+  v_sessions  INTEGER;
+  v_removed   INTEGER;
 BEGIN
+  IF v_enabled NOT IN ('', 'true', 'false') THEN
+    RAISE EXCEPTION 'studio_enabled is %, not true or false: db-init passes supabaseStudio.enabled', v_enabled;
+  END IF;
+
+  -- remove_app()'s three statements, approvals and sessions first, so each revoked approval is a row
+  -- in its person's lane and the client's removal one row in its own. Each matches nothing once
+  -- done, so a later boot changes and records nothing.
+  IF v_enabled = 'false' THEN
+    UPDATE auth.oauth_consents k
+       SET revoked_at = greatest(clock_timestamp(), k.granted_at)
+     WHERE k.client_id = v_client_id AND k.revoked_at IS NULL;
+    GET DIAGNOSTICS v_approvals = ROW_COUNT;
+    DELETE FROM auth.sessions s WHERE s.oauth_client_id = v_client_id;
+    GET DIAGNOSTICS v_sessions = ROW_COUNT;
+    UPDATE auth.oauth_clients c
+       SET deleted_at = clock_timestamp(), updated_at = clock_timestamp()
+     WHERE c.id = v_client_id AND c.deleted_at IS NULL;
+    GET DIAGNOSTICS v_removed = ROW_COUNT;
+    IF v_removed > 0 THEN
+      RAISE NOTICE 'Studio is off (supabaseStudio.enabled), so its OAuth client is not registered. '
+                   'The one an earlier boot registered is removed: % approval(s) revoked, % session(s) ended.',
+                   v_approvals, v_sessions;
+    ELSE
+      RAISE NOTICE 'Studio is off (supabaseStudio.enabled), so its OAuth client is not registered.';
+    END IF;
+    RETURN;
+  END IF;
+
   IF v_secret IS NULL OR v_secret = '' THEN
     RAISE WARNING 'studio_oauth_client_secret not supplied; skipping client registration. '
-                  'The listener will answer a login it cannot complete.';
+                  'The Studio login at % cannot complete until secrets.studioOAuthClientSecret '
+                  '(the Secret key STUDIO_OAUTH_CLIENT_SECRET) is set and the release upgraded.', v_base;
     RETURN;
   END IF;
 
@@ -7465,7 +7505,7 @@ ON CONFLICT (template_id, id_short) DO UPDATE SET
   ordinal          = EXCLUDED.ordinal;
 
 -- -------------------------------------------------------------------------------------------
--- Declared settings  (16 rows)
+-- Declared settings  (17 rows)
 -- -------------------------------------------------------------------------------------------
 -- Through seed_setting(), not as INSERTs: the function refreshes label, description and bounds
 -- on every replay while leaving the value alone, so an operator's change survives a restart.
@@ -7504,17 +7544,52 @@ SELECT public.seed_setting(
     'DEFAULT_POLL_SECONDS (60) in AuditTrailTab.jsx'
 );
 
+-- 1.8.0 keeps alert history for 90 days, not 7. A site still at 7 moves to 90 once, at the upgrade,
+-- and any other value is kept. The guard is the description: every release from 1.0.0 to 1.7.x
+-- wrote the text below, and the seed_setting() call after it writes 1.8's. So only the first boot
+-- of 1.8 matches, and a 7 chosen after the upgrade stays. updated_by cannot tell: a migration's
+-- write leaves it NULL too. 0244 checks it. supabase/README.md, "Alert history is kept for 90
+-- days (0244)".
+UPDATE public.system_settings
+   SET value = to_jsonb(90)
+ WHERE key = 'alerts.retention_days'
+   AND value = to_jsonb(7)
+   AND description =
+    'How long a resolved or superseded alert occurrence is kept before the nightly prune removes '
+    'it. The telemetry that triggered the alert is retained separately under the historian''s own '
+    'policy, so shortening this destroys no measurement -- only the record that a threshold was '
+    'crossed. A currently firing alert is never removed however old it is.';
+
 SELECT public.seed_setting(
     'alerts.retention_days',
-    to_jsonb(7),
+    to_jsonb(90),
     'number',
     'Retention',
     'Alert history kept for (days)',
     'How long a resolved or superseded alert occurrence is kept before the nightly prune removes '
-    'it. The telemetry that triggered the alert is retained separately under the historian''s own '
-    'policy, so shortening this destroys no measurement -- only the record that a threshold was '
-    'crossed. A currently firing alert is never removed however old it is.',
+    'it, 90 days unless changed here. History''s Alerts tab lists what is kept. The telemetry that '
+    'triggered an alert is retained separately under the historian''s own policy, so shortening '
+    'this destroys no measurement -- only the record that a threshold was crossed. Who '
+    'acknowledged an alert stays in the Audit Trail. A currently firing alert is never removed '
+    'however old it is.',
     'the p_retain default in prune_platform_alerts()'
+);
+
+-- How long a suppression window may last. A window ends by itself, so this is how long a forgotten
+-- one can keep a machine quiet. The writers read it (0240); supabase/README.md, "An alert stays
+-- quiet during planned work (0240)".
+SELECT public.seed_setting(
+    'alerts.suppression_max_days',
+    to_jsonb(7),
+    'number',
+    'Retention',
+    'Longest suppression window (days)',
+    'The most days a suppression window may last, from its start to its end, 7 unless changed '
+    'here. A Shopfloor Manager or an Administrator schedules a window on a device, a gateway or '
+    'a cell, and its alerts are recorded but not counted or sent until it ends. A longer window '
+    'is refused when it is scheduled or its times change. Lowering this leaves the windows '
+    'already scheduled as they are: each still ends by itself.',
+    'seven days, in check_alert_suppression_window_length()'
 );
 
 -- ---------------------------------------------------------------------------------------------
@@ -7555,6 +7630,25 @@ SELECT public.seed_setting(
     'prune removes it. What an approval CHANGED lives in audit_trail under its own retention; '
     'this governs only the queue entry and the rationale attached to it.',
     'ninety days, in prune_closed_proposals()'
+);
+
+-- ---------------------------------------------------------------------------------------------
+-- Security
+-- ---------------------------------------------------------------------------------------------
+-- Off on every install, so a fresh stack's first sign-in is not an enrolment. mfa_satisfied()
+-- (0001) reads it on every check, so a change applies to the next request; turning it on also ends
+-- every covered person's app sessions but Grafana's (0251).
+SELECT public.seed_setting(
+    'security.require_mfa_for_managers',
+    to_jsonb(false),
+    'boolean',
+    'Security',
+    'Require MFA to change the platform',
+    'When on, an Administrator or Shopfloor Manager needs MFA to make any change their role allows, '
+    'and to sign in to Node-RED, Studio or the forge. Reading is never refused, and Grafana is not '
+    'covered. Each person adds an authenticator on Profile › MFA. Turning it on signs every covered '
+    'person out of those apps.',
+    'off: nobody is asked for MFA'
 );
 
 -- ---------------------------------------------------------------------------------------------
@@ -7885,6 +7979,61 @@ END;
 $$;
 
 -- -------------------------------------------------------------------------------------------
+-- Notifications  (3 rows)
+-- -------------------------------------------------------------------------------------------
+-- What Aber's dispatcher sends (0247, 0248). A channel's route is its own keys, named
+-- notifications.<channel>_*, so a second channel adds keys and changes none of these. Each is
+-- checked by notification_setting_guard(), and the Notifications tab of the Settings page edits
+-- them. The webhook's address and signing key are in the vault, never here.
+SELECT public.seed_setting(
+    'notifications.webhook_min_severity',
+    to_jsonb('warning'::text),
+    'string',
+    'Notifications',
+    'Lowest severity the webhook sends',
+    'An alert at this severity or above is posted to the webhook when it starts firing, as a '
+    'reminder while it fires unacknowledged, and when it resolves: info, warning or critical. '
+    'An alert about a machine identity''s token is never posted.',
+    'warning, in notification_severity_carried()'
+);
+
+SELECT public.seed_setting(
+    'notifications.webhook_allowed_hosts',
+    '[]'::jsonb,
+    'json',
+    'Notifications',
+    'Hosts the webhook may post to',
+    'The host names the webhook''s address may name, as a list such as ["hooks.example.net"]. An '
+    'address whose host is not listed is refused when a message is sent, and the delivery log '
+    'says so. Empty refuses every address.',
+    NULL
+);
+
+SELECT public.seed_setting(
+    'notifications.reminder_hours',
+    to_jsonb(12),
+    'number',
+    'Notifications',
+    'Remind every (hours)',
+    'How often an alert that is still firing, and that nobody has acknowledged, is sent again. '
+    'Twelve hours is Grafana''s own repeat interval. An alert its writer has stopped confirming is '
+    'not reminded.',
+    '12, in queue_platform_alert_reminders()'
+);
+
+-- Administrator-only, as a destination is: the hosts say where alerts go.
+UPDATE public.system_settings
+   SET sensitive = true
+ WHERE key = 'notifications.webhook_allowed_hosts'
+   AND NOT sensitive;
+
+-- A week at most: a reminder less often than that is not a reminder.
+UPDATE public.system_settings
+   SET min_value = 1, max_value = 168
+ WHERE key = 'notifications.reminder_hours'
+   AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 168);
+
+-- -------------------------------------------------------------------------------------------
 -- The forge-sweep lease  (1 row)
 -- -------------------------------------------------------------------------------------------
 -- The one row claim_forge_sweep(), renew_forge_sweep() and release_forge_sweep() move.
@@ -7905,6 +8054,13 @@ UPDATE public.system_settings
    SET min_value = 1, max_value = 3650
  WHERE key = 'alerts.retention_days'
    AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 3650);
+
+-- MIN 1, NOT 0: zero would refuse every window. MAX 90: a season, past which a window is the
+-- maintenance switch it must not be.
+UPDATE public.system_settings
+   SET min_value = 1, max_value = 90
+ WHERE key = 'alerts.suppression_max_days'
+   AND (min_value IS DISTINCT FROM 1 OR max_value IS DISTINCT FROM 90);
 
 -- Bounds set by UPDATE, not by extra arguments: adding parameters to seed_setting() creates an
 -- overload. MIN 1, not 0: zero would export every chunk the moment it closes. The ceiling is a

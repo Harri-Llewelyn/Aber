@@ -6,6 +6,7 @@ import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
 import { getByTooltip, tooltipOf } from '../test/tooltips'
+import { pick } from '../test/listFilters'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -82,14 +83,10 @@ const rowFor = (name) => {
 }
 
 /**
- * Bring superseded versions into the registry through the status filter. isCurrentSchema() is
- * `status !== archived`, so a separate toggle would be a status filter able to contradict the
- * dropdown.
+ * Bring superseded versions into the registry through the status filter, every status chosen. A
+ * separate toggle would be a status filter able to contradict it.
  */
-const revealArchived = () => fireEvent.change(
-  screen.getByLabelText('Filter schemas by lifecycle state'),
-  { target: { value: 'all' } }
-)
+const revealArchived = () => pick('Status', 'active', 'draft', 'archived')
 
 /**
  * Select a schema row and return its context panel, where View / Edit Draft / Create Version live.
@@ -302,10 +299,12 @@ describe('Downloading a version definition', () => {
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
     await clickRowDownload('Robot_Arm_Schema_v2')
 
-    await waitFor(() => expect(anchors.length).toBe(1))
+    // The download's own anchor: the drawer draws links of its own, View Audit Trail among them.
+    const downloads = () => anchors.filter(a => a.hasAttribute('download'))
+    await waitFor(() => expect(downloads().length).toBe(1))
     // `.schema.json`, so editors and JSON Schema tooling recognise it -- the whole point of
     // opening the file elsewhere.
-    expect(anchors[0].getAttribute('download')).toBe('Robot_Arm_Schema_v2.schema.json')
+    expect(downloads()[0].getAttribute('download')).toBe('Robot_Arm_Schema_v2.schema.json')
   })
 
   it('downloads an archived version too — reading history is not a privileged act', async () => {
@@ -465,7 +464,9 @@ describe('Detail modal — read-only vs draft', () => {
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.post).not.toHaveBeenCalled()
-    expect(showToast).toHaveBeenCalledWith('schema is active and immutable', 'error')
+    // Said in the dialog, which stays open with the edits: a toast would be drawn behind it.
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('schema is active and immutable')
+    expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
   })
 
   describe('a save keeps what the dialog does not edit', () => {

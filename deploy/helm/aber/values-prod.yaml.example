@@ -65,8 +65,8 @@ secrets:
   #                                 for Service_Playback)
   #   MQTT_PLAYBACK_CREDENTIALS    (read only when playback.enabled, and may be empty)
   #   SMTP_PASSWORD                (read only when supabaseAuth.smtp.host is set)
-  #   STUDIO_OAUTH_CLIENT_SECRET   (read only when ingress.routes.studio is on)
-  #   STUDIO_PROXY_HMAC_SECRET     (read only when ingress.routes.studio is on)
+  #   STUDIO_OAUTH_CLIENT_SECRET   (read only when supabaseStudio.enabled; needed with ingress.routes.studio)
+  #   STUDIO_PROXY_HMAC_SECRET     (read only when supabaseStudio.enabled; needed with ingress.routes.studio)
   #
   # STILL A SET. SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are JWTs signed ES256 by the
   # private key in SUPABASE_JWT_KEYS; SUPABASE_JWT_KEYS and SUPABASE_JWT_JWKS hold EC keys alone,
@@ -213,10 +213,11 @@ secrets:
   grafanaAdminPassword: ""
   grafanaOAuthClientSecret: ""
 
-  # Studio's door. NEEDED ONLY IF `ingress.routes.studio` is turned on -- that route publishes the
-  # gateway's studio listener, which runs an OAuth flow and admits `Administrator` alone, and the
-  # render fails naming these two rather than publishing a login nobody can complete. Left empty
-  # here because the route is off by default and a console on a public hostname is a decision.
+  # Studio's door. NEEDED ONLY IF `ingress.routes.studio` is turned on, which needs Studio itself on
+  # (supabaseStudio and supabaseMeta, both off by default). The route publishes the gateway's studio
+  # listener, which runs an OAuth flow and admits `Administrator` alone, and the render fails naming
+  # these two rather than publishing a login nobody can complete. Left empty here because a console
+  # on a public hostname is a decision.
   #
   # openssl rand -hex 32, both. The first is one credential in two places (the gateway presents it,
   # migration 0081 stores its hash); the second signs the session cookie and is nothing else's.
@@ -339,7 +340,12 @@ networkPolicy:
   #   3000  grafana, natively
   #   9901  supabase-envoy's admin listener (requires supabaseEnvoy.metrics.enabled). Envoy serves
   #         /ready AND /stats/prometheus from this one port.
+  #   3001  supabase-rest's admin server
+  #   9108  ingestion (requires ingestion.metrics.enabled)
+  #   9109  the playback worker (requires playback.metrics.enabled)
   #   9234  the mosquitto exporter sidecar (requires mosquitto.metrics.enabled)
+  #   9187  the postgres_exporter sidecars of supabase-db and timescaledb (requires
+  #         databaseMetrics.enabled)
   #
   # CHANGE THE NAMESPACE to wherever your Prometheus runs. `monitoring` is the convention;
   # kube-prometheus-stack's own chart default is its release namespace. The label
@@ -365,7 +371,15 @@ networkPolicy:
           - protocol: TCP
             port: 9901
           - protocol: TCP
+            port: 3001
+          - protocol: TCP
+            port: 9108
+          - protocol: TCP
+            port: 9109
+          - protocol: TCP
             port: 9234
+          - protocol: TCP
+            port: 9187
 
 # ---------------------------------------------------------------------------------------------
 # TLS. Requires cert-manager AND `kubectl apply -f deploy/k8s/internal-ca.yaml` FIRST -- the CA is
@@ -516,8 +530,8 @@ supabaseFunctions:
   aas:
     # PERMANENT ONCE A SHELL LEAVES THE SITE. Every globalAssetId and submodel id an AAS export
     # carries is this plus the asset's sparkplug_id, so changing it later gives every asset a new
-    # identity to whoever imported the old one. Set it before the first export, under a domain
-    # your organisation controls; the default, aber.local, belongs to nobody.
+    # identity to whoever imported the old one. Set it before the first export or aas-api read,
+    # under a domain your organisation controls; the default, aber.local, belongs to nobody.
     baseIri: https://aber.example.com/ids/asset/
 frontend:          { replicas: 3 }
 

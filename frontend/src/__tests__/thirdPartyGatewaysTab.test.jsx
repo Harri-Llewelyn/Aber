@@ -2,6 +2,7 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
+import { pick, valuesShown } from '../test/listFilters'
 import { api } from '../api'
 
 /**
@@ -80,9 +81,8 @@ describe('a Third-party gateway in the list', () => {
 
   it('is what the Type filter lists under Third-party', async () => {
     await show([gateway(), gateway({ gateway_id: 'gw-host', gateway_name: 'Host_Node', deployment: 'host' })])
-    const filter = screen.getByRole('combobox', { name: 'Type' })
-    expect([...filter.options].map(o => o.textContent)).toContain('Third-party')
-    fireEvent.change(filter, { target: { value: 'third_party' } })
+    expect(valuesShown('Type')).toContain('Third-party 1')
+    pick('Type', 'third_party')
     const names = [...document.querySelectorAll('tbody tr td strong')].map(el => el.textContent)
     expect(names).toEqual(['Vendor_Node'])
   })

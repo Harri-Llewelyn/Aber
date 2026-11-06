@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { deviceUrl, devicesForSchemaUrl, schemaUrl } from '../../routes'
+import { deviceUrl, devicesForSchemaUrl, schemaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -12,23 +12,24 @@ import { ConfirmModal } from '../modals/ConfirmModal'
 import { downloadJSON } from '../../utils/downloadJSON'
 import {
   schemaVersionLabel, schemaStatus, statusBadgeClass, statusLabel, isSchemaEditable,
-  canForkSchema, nextVersion, isCurrentSchema, schemaVersion, SCHEMA_STATUS
+  canForkSchema, nextVersion, schemaVersion, SCHEMA_STATUS
 } from '../../utils/schemaVersion'
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ActionButton } from '../common/ActionButton'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
-import { Tooltip } from '../common/Tooltip'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import {
-  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTrash
+  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTrash, IconHistory
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
-import { useUrlState } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
+import { applyFacets } from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { plural } from '../../utils/format'
 import { schemaIdsForDevice } from '../../utils/deviceTags'
@@ -41,6 +42,25 @@ import { isShadowDevice } from '../../utils/fleetCounts'
  * Quarantine tab.
  */
 const countsTowards = (d) => isDeviceInService(d) && !d.is_quarantined
+
+/**
+ * The Status filter's values. It opens on Current, the active and draft versions, so superseded
+ * ones stay out of the working list until asked for, and a draft stays in, since opening one is the
+ * only way to finish it. A link from before reads `current` and `all` as the statuses each meant.
+ */
+const STATUS_OPTIONS = [
+  { value: SCHEMA_STATUS.ACTIVE, label: 'Active' },
+  { value: SCHEMA_STATUS.DRAFT, label: 'Draft' },
+  { value: SCHEMA_STATUS.ARCHIVED, label: 'Archived' },
+]
+const STATUS_VALUES = STATUS_OPTIONS.map(o => o.value)
+const CURRENT = Object.freeze([SCHEMA_STATUS.ACTIVE, SCHEMA_STATUS.DRAFT])
+const STATUS_ALIASES = Object.freeze({ current: CURRENT, all: STATUS_VALUES })
+const sameSet = (a, b) => a.length === b.length && a.every(v => b.includes(v))
+/** The status a schema is filtered under; one the filter does not name is Active, as a missing one is. */
+const statusValueOf = (sc) => (STATUS_VALUES.includes(schemaStatus(sc)) ? schemaStatus(sc) : SCHEMA_STATUS.ACTIVE)
+/** The button says Current for the default. */
+const statusWords = (value) => (sameSet(value, CURRENT) ? 'Current' : null)
 
 /**
  * @param {Function} onSelectSchema Opens the Devices page filtered to a schema.
@@ -67,10 +87,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   // The draft awaiting a discard confirmation. Held as the OBJECT so the dialog can name the
   // version it is about -- "discard the draft" is not a sentence somebody should have to trust.
   const [discardTarget, setDiscardTarget] = useState(null)
-  // `current` is the default status, so superseded versions stay out of the working list until
-  // asked for.
-  const [statusFilter, setStatusFilter] = useUrlState('status', 'current', {
-    allowed: ['current', SCHEMA_STATUS.ACTIVE, SCHEMA_STATUS.DRAFT, SCHEMA_STATUS.ARCHIVED, 'all']
+  // Current, the active and draft versions, is the default, so superseded versions stay out of the
+  // working list until asked for.
+  const [statusFilter, setStatusFilter] = useUrlList('status', CURRENT, {
+    allowed: STATUS_VALUES, aliases: STATUS_ALIASES
   })
   const [schemaSearch, setSchemaSearch] = useUrlState('search')
 
@@ -101,16 +121,16 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
   const deviceCountFor = (schemaUuid) => devicesForSchema(schemaUuid).length
 
-  /** Save a schema the builder composed. A device is given its schema on the Devices page. */
+  /**
+   * Save a schema the builder composed. A device is given its schema on the Devices page. This and
+   * the handlers below run from a dialog, which shows a refusal as the database worded it and stays
+   * open, so each throws one rather than toasting it behind the dialog.
+   */
   const handleBuilderSubmit = async (schemaPayload) => {
-    try {
-      const created = await api.post('/api/v1/schemas', schemaPayload)
-      showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success', { to: schemaUrl(created?.schema_uuid) })
-      setShowBuilderModal(false)
-      load()
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    const created = await api.post('/api/v1/schemas', schemaPayload)
+    showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success', { to: schemaUrl(created?.schema_uuid) })
+    setShowBuilderModal(false)
+    load()
   }
 
   /**
@@ -120,78 +140,62 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
    */
   const handleFork = async (changeDescription) => {
     const parent = forkTarget
-    try {
-      const draft = await api.post(`/api/v1/schemas/${parent.schema_uuid}/versions`, {
-        change_description: changeDescription
-      })
-      setForkTarget(null)
-      const refreshed = await api.get('/api/v1/schemas')
-      setSchemas(refreshed)
-      setDetailSchema(refreshed.find(s => s.schema_uuid === draft.schema_uuid) || null)
-      showToast(`Draft v${draft.version} created as '${draft.schema_name}'`, 'success', { to: schemaUrl(draft.schema_uuid) })
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    const draft = await api.post(`/api/v1/schemas/${parent.schema_uuid}/versions`, {
+      change_description: changeDescription
+    })
+    setForkTarget(null)
+    const refreshed = await api.get('/api/v1/schemas')
+    setSchemas(refreshed)
+    setDetailSchema(refreshed.find(s => s.schema_uuid === draft.schema_uuid) || null)
+    showToast(`Draft v${draft.version} created as '${draft.schema_name}'`, 'success', { to: schemaUrl(draft.schema_uuid) })
   }
 
   const handleSaveDraft = async (patch) => {
     if (!detailSchema) return
-    try {
-      await api.put(`/api/v1/schemas/${detailSchema.schema_uuid}`, patch)
-      const refreshed = await api.get('/api/v1/schemas')
-      setSchemas(refreshed)
-      setDetailSchema(refreshed.find(s => s.schema_uuid === detailSchema.schema_uuid) || null)
-      showToast(`Draft '${detailSchema.schema_name}' saved`, 'success', { to: schemaUrl(detailSchema.schema_uuid) })
-    } catch (e) {
-      showToast(e.message, 'error')
-      // Rethrown so the modal's publish path does not activate a version whose edits were rejected.
-      throw e
-    }
+    // A refusal is thrown, so the dialog's publish path does not activate a version whose edits
+    // were rejected.
+    await api.put(`/api/v1/schemas/${detailSchema.schema_uuid}`, patch)
+    const refreshed = await api.get('/api/v1/schemas')
+    setSchemas(refreshed)
+    setDetailSchema(refreshed.find(s => s.schema_uuid === detailSchema.schema_uuid) || null)
+    showToast(`Draft '${detailSchema.schema_name}' saved`, 'success', { to: schemaUrl(detailSchema.schema_uuid) })
   }
 
   const handlePublish = async () => {
     if (!detailSchema) return
     // The draft becomes the active version, under the same id.
     const published = detailSchema
-    try {
-      const result = await api.post(`/api/v1/schemas/${published.schema_uuid}/publish`, {})
-      setDetailSchema(null)
-      // Devices carry the schema binding, so both lists are stale after a publish.
-      load()
-      const moved = result.devices_rebound || 0
-      showToast(
-        `'${published.schema_name}' v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
-        (moved > 0 ? ` — ${plural(moved, 'device')} moved to v${result.version}` : ''),
-        'success',
-        { to: schemaUrl(published.schema_uuid) }
-      )
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    const result = await api.post(`/api/v1/schemas/${published.schema_uuid}/publish`, {})
+    setDetailSchema(null)
+    // Devices carry the schema binding, so both lists are stale after a publish.
+    load()
+    const moved = result.devices_rebound || 0
+    showToast(
+      `'${published.schema_name}' v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
+      (moved > 0 ? ` — ${plural(moved, 'device')} moved to v${result.version}` : ''),
+      'success',
+      { to: schemaUrl(published.schema_uuid) }
+    )
   }
 
   /** Discard the open draft. One draft may exist per lineage, so this is the way out besides publishing. */
   const handleDiscardDraft = async () => {
     if (!discardTarget) return
-    try {
-      const result = await api.post(`/api/v1/schemas/${discardTarget.schema_uuid}/discard`, {})
-      setDiscardTarget(null)
-      setDetailSchema(null)
-      // The lineage moved and so may device bindings, so both lists are stale.
-      load()
-      const detached = result.devices_detached || 0
-      showToast(
-        `Draft v${result.version} of '${discardTarget.schema_name}' discarded` +
-        (detached > 0
-          // Said out loud rather than left to be discovered: a draft can be attached to a machine
-          // to try it out, and those attachments go with it.
-          ? ` — ${plural(detached, 'device')} detached`
-          : ''),
-        'success'
-      )
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+    const result = await api.post(`/api/v1/schemas/${discardTarget.schema_uuid}/discard`, {})
+    setDiscardTarget(null)
+    setDetailSchema(null)
+    // The lineage moved and so may device bindings, so both lists are stale.
+    load()
+    const detached = result.devices_detached || 0
+    showToast(
+      `Draft v${result.version} of '${discardTarget.schema_name}' discarded` +
+      (detached > 0
+        // Said out loud rather than left to be discovered: a draft can be attached to a machine
+        // to try it out, and those attachments go with it.
+        ? ` — ${plural(detached, 'device')} detached`
+        : ''),
+      'success'
+    )
   }
 
   /**
@@ -212,17 +216,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   }
 
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
-  // Drafts stay in the working list: opening one is the only way to finish it. See isCurrentSchema().
-  const archivedCount = schemas.filter(s => !isCurrentSchema(s)).length
-  const currentCount = schemas.length - archivedCount
-  const draftCount = schemas.filter(s => schemaStatus(s) === SCHEMA_STATUS.DRAFT).length
-  const activeCount = schemas.filter(s => schemaStatus(s) === SCHEMA_STATUS.ACTIVE).length
-
-  const matchesStatusFilter = (s) => {
-    if (statusFilter === 'all') return true
-    if (statusFilter === 'current') return isCurrentSchema(s)
-    return schemaStatus(s) === statusFilter
-  }
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
 
   /**
    * Narrows the registry by name, UUID and change description, all columns of this table, so a hit
@@ -233,8 +227,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     !schemaSearchTerm || [s.schema_name, s.schema_uuid, s.change_description]
       .some(field => String(field || '').toLowerCase().includes(schemaSearchTerm))
 
-  const inStatusView = schemas.filter(matchesStatusFilter)
-  const matchingSchemas = inStatusView.filter(matchesSchemaSearch)
+  // Status is any of its values; each value's count is over what the search lets through.
+  const { rows: matchingSchemas, counts: facetCounts } = applyFacets(schemas, [
+    { key: 'status', chosen: statusFilter, values: sc => [statusValueOf(sc)] },
+  ], matchesSchemaSearch)
 
   // Version sorts by its number. The device count is what the Devices column shows.
   const sortColumns = useMemo(() => {
@@ -252,8 +248,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   }, [devices])
   const [visibleSchemas, sort] = useSortableRows(matchingSchemas, sortColumns)
   // Drives the Clear button and its count. `current` is the resting state, not a filter.
-  const schemaFilterCount = (statusFilter !== 'current' ? 1 : 0) + (schemaSearchTerm ? 1 : 0)
-  const clearSchemaFilters = () => { setStatusFilter('current'); setSchemaSearch('') }
+  const schemaFilterCount = (sameSet(statusFilter, CURRENT) ? 0 : 1) + (schemaSearchTerm ? 1 : 0)
+  const clearSchemaFilters = () => { setStatusFilter(CURRENT); setSchemaSearch('') }
 
   /**
    * Arriving from a device drawer's Schema chip, as the search: an exact uuid opens that schema's
@@ -267,11 +263,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     (s, term) => s.schema_uuid === term,
     (s) => {
       setSelectedId(s.schema_uuid)
-      setStatusFilter(prev => {
-        const shown = prev === 'all'
-          || (prev === 'current' ? isCurrentSchema(s) : schemaStatus(s) === prev)
-        return shown ? prev : 'all'
-      })
+      setStatusFilter(prev => (prev.length === 0 || prev.includes(schemaStatus(s)) ? prev : [...prev, schemaStatus(s)]))
     }
   )
 
@@ -305,21 +297,20 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               ariaLabel="Search the schema registry"
             />
 
-            <Tooltip text="Current hides superseded versions.">
-              <select
-                className="form-control control-md"
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
-                aria-label="Filter schemas by lifecycle state"
-              >
-                {/* Counts in the labels: they answer "is there any history at all?" without selecting. */}
-                <option value="current">Current ({currentCount})</option>
-                <option value={SCHEMA_STATUS.ACTIVE}>Active ({activeCount})</option>
-                <option value={SCHEMA_STATUS.DRAFT}>Draft ({draftCount})</option>
-                <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
-                <option value="all">All versions ({schemas.length})</option>
-              </select>
-            </Tooltip>
+            <FilterDropdown
+              label="Status"
+              noun="status"
+              plural="statuses"
+              options={STATUS_OPTIONS}
+              value={statusFilter}
+              onChange={setStatusFilter}
+              counts={facetCounts.status}
+              defaultValue={CURRENT}
+              words={statusWords}
+              everyIsAny
+              width="md"
+              tip="Current is the active and draft versions: it hides superseded ones."
+            />
 
             <div className="filter-bar-actions">
               <ClearFilters count={schemaFilterCount} onClear={clearSchemaFilters} />
@@ -598,6 +589,12 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             title: selectedSchema.schema_definition
               ? `Save ${selectedSchema.schema_name}.schema.json to open in an editor or JSON Schema tool`
               : 'This version has no definition to download'
+          },
+          // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+          canReadTrail && {
+            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            to: trailUrl(selectedSchema.schema_uuid, 'SCHEMA'),
+            title: 'Open the Audit Trail filtered to this schema version'
           },
         ].filter(Boolean) : []}
       />

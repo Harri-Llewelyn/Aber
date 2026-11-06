@@ -157,6 +157,10 @@ BEGIN
             'An Administrator can, on the People tab.'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    -- Naming someone else is a People act; your own name is yours at any assurance.
+    IF p_user_id IS DISTINCT FROM v_caller THEN
+        PERFORM public.require_mfa();
+    END IF;
     IF p_user_id IS NULL OR NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_user_id) THEN
         PERFORM public.raise_not_found(format('person %s not found', coalesce(p_user_id::text, 'NULL')));
     END IF;

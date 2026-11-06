@@ -342,6 +342,13 @@ BEGIN
   IF to_regclass('public.telemetry_horizons') IS NOT NULL THEN
     EXECUTE format('GRANT SELECT ON public.telemetry_horizons TO %I', v_role);
   END IF;
+  -- History's Overview: the device rollups and what they hold, guarded as above. A view calls its
+  -- function as the reader, so EXECUTE on the SECURITY DEFINER function behind it too.
+  IF to_regclass('public.telemetry_device_coverage') IS NOT NULL THEN
+    EXECUTE format('GRANT SELECT ON public.telemetry_device_5m, public.telemetry_device_1h, '
+                   'public.telemetry_device_coverage TO %I', v_role);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION public.telemetry_device_coverage_rows() TO %I', v_role);
+  END IF;
   IF to_regclass('public.storage_footprint') IS NOT NULL THEN
     EXECUTE format('GRANT SELECT ON public.storage_footprint TO %I', v_role);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.storage_footprint_rows() TO %I', v_role);
@@ -437,6 +444,16 @@ BEGIN
       RAISE EXCEPTION
         'roles self-check: fdw_reader cannot read the physical backup tables the platform '
         'projects as timescale.physical_backup_*, so a read through its mapping is refused.';
+    END IF;
+
+    IF to_regclass('public.telemetry_device_coverage') IS NOT NULL
+       AND NOT (has_table_privilege('fdw_reader', 'public.telemetry_device_5m', 'SELECT')
+            AND has_table_privilege('fdw_reader', 'public.telemetry_device_1h', 'SELECT')
+            AND has_table_privilege('fdw_reader', 'public.telemetry_device_coverage', 'SELECT')
+            AND has_function_privilege('fdw_reader', 'public.telemetry_device_coverage_rows()', 'EXECUTE')) THEN
+      RAISE EXCEPTION
+        'roles self-check: fdw_reader cannot read the device rollups or what they hold, so History''s '
+        'Overview is refused through its mapping.';
     END IF;
 
     RAISE NOTICE 'roles self-check passed: fdw_reader reads the projection and writes nothing.';

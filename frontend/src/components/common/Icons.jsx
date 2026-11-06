@@ -571,6 +571,20 @@ export const IconChevronRight = ({ size = 14, className = "", style = {}, ...res
   </svg>
 )
 
+export const IconChevronLeft = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+)
+
+// The time window's button, which opens the jump-to, rolling and custom choices.
+export const IconCalendar = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <rect width={18} height={18} x={3} y={4} rx={2} />
+    <path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" />
+  </svg>
+)
+
 // The marker for the row Enter will take in the search palette.
 export const IconCornerDownLeft = ({ size = 14, className = "", style = {}, ...rest }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
@@ -594,6 +608,16 @@ export const IconBell = ({ size = 14, className = "", style = {}, ...rest }) => 
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
     <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
     <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+  </svg>
+)
+
+// A suppressed alert: still recorded, kept quiet by a suppression window.
+export const IconBellOff = ({ size = 14, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5" />
+    <path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    <path d="m2 2 20 20" />
   </svg>
 )
 
@@ -678,7 +702,7 @@ export const IconFlaskConical = ({ size = 16, className = "", style = {}, ...res
 )
 
 /* The expanded view of an area's plan or a device's 3D model: the button that opens it, and the
-   plan's zoom controls. */
+   plan's zoom controls, which the time control's Zoom in and Zoom out share. */
 export const IconMaximize2 = ({ size = 14, className = "", style = {}, ...rest }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
     <path d="M15 3h6v6" /><path d="m21 3-7 7" />
@@ -707,5 +731,13 @@ export const IconScan = ({ size = 14, className = "", style = {}, ...rest }) => 
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
     <path d="M3 7V5a2 2 0 0 1 2-2h2" /><path d="M17 3h2a2 2 0 0 1 2 2v2" />
     <path d="M21 17v2a2 2 0 0 1-2 2h-2" /><path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+  </svg>
+)
+
+// Lucide's chart-line: the History page, readings over time. Not IconActivity, which means live
+// telemetry, and not IconHistory, the Audit Trail's.
+export const IconChartLine = ({ size = 16, className = "", style = {}, ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} {...rest}>
+    <path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="m19 9-5 5-4-4-3 3" />
   </svg>
 )

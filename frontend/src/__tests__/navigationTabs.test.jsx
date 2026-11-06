@@ -53,9 +53,9 @@ describe('one list per page', () => {
     expect(Object.entries(CATEGORY_DESCRIPTIONS)).toEqual(SETTINGS_TABS.map(t => [t.label, t.description]))
   })
 
-  it('names the ten tabbed pages, Profile among them though the rail does not draw it', () => {
+  it('names the eleven tabbed pages, Profile among them though the rail does not draw it', () => {
     expect(tabbed.map(t => t.id).sort()).toEqual([
-      'access-control', 'approvals', 'archives', 'capture', 'devices', 'metrics',
+      'access-control', 'approvals', 'archives', 'capture', 'devices', 'history', 'metrics',
       'profile', 'settings', 'system', 'vocabulary',
     ])
   })

@@ -128,6 +128,39 @@ describe('the download call', () => {
     expect(callers).toEqual(['components/tabs/CaptureTab.jsx'])
     const page = fs.readFileSync(path.join(SRC, 'components/tabs/CaptureTab.jsx'), 'utf8')
     expect(page.match(/\bcaptureUrl\(/g)).toHaveLength(1)
-    expect(page).toMatch(/const onDownload = async \(capture\) => \{[^}]*api\.captureUrl\(capture\.storage_path\)/)
+    expect(page).toMatch(/const onDownload = async \(capture, subject\) => \{[^}]*api\.captureUrl\(capture\.storage_path\)/)
+  })
+})
+
+/**
+ * Prepare replay lanes writes: ensure_shadow_devices() makes a device row for each lane it has not
+ * made before, each with its Audit Trail row. It ends with one toast, which counts lanes rather
+ * than recorded ids, because one device recorded under two of its ids has one lane.
+ */
+describe('Prepare replay lanes', () => {
+  const ALSO = 'a0000000-0000-4000-8000-000000000088'
+  const TWO_IDS = { ...LISTLESS, id: 'cap-2', manifest: { birth_captured: true, device_ids: [RECORDED, ALSO] } }
+  const prepare = async (showToast) => {
+    render(<StartPlaybackModal capture={TWO_IDS} subjectName="Spindle 4" onConfirm={vi.fn()} onCancel={vi.fn()} showToast={showToast} />)
+    fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: TARGET.id } })
+    fireEvent.click(await screen.findByRole('button', { name: /Prepare replay lanes/ }))
+    await waitFor(() => expect(api.ensureShadowLanes).toHaveBeenCalledWith('cap-2'))
+  }
+
+  it('says how many lanes are ready, for what, and opens them on the Devices page', async () => {
+    api.ensureShadowLanes.mockResolvedValue({ [RECORDED]: 'dev770000000000400080000', [ALSO]: 'dev770000000000400080000' })
+    const showToast = vi.fn()
+    await prepare(showToast)
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('1 replay lane ready for Spindle 4.', 'success',
+      { to: `/devices?gateway=${TARGET.id}&replay=1` }))
+    expect(showToast).toHaveBeenCalledTimes(1)
+  })
+
+  it('says nothing but the refusal when the lanes are refused', async () => {
+    api.ensureShadowLanes.mockRejectedValue(new Error('ensure_shadow_devices: the capture records device dev880000000000400080000, which this stack does not know.'))
+    const showToast = vi.fn()
+    await prepare(showToast)
+    expect(await screen.findByText(/which this stack does not know/)).toBeInTheDocument()
+    expect(showToast).not.toHaveBeenCalled()
   })
 })

@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { strToU8 } from "fflate";
 
 import { resolveUserRole } from "../_shared/roles.ts";
+import { secondFactorRefusal } from "../_shared/secondFactor.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { serverError } from "../_shared/failure.ts";
@@ -286,6 +287,9 @@ export default async function handler(req: Request): Promise<Response> {
           "enrolment token, which an appliance exchanges for a broker credential.",
       });
     }
+    // No service-role key here: the caller's client reads the switch, which every role may read.
+    const mfa = await secondFactorRefusal(supabaseUser, userRole, authHeader);
+    if (mfa) return json(mfa.status, mfa.body);
 
     const body = await req.json().catch(() => ({}));
     const gatewayId = typeof body?.gateway_id === "string" ? body.gateway_id : "";

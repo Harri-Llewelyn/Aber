@@ -7,6 +7,7 @@ import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 import { devicesForSchemaUrl, devicesInCellUrl, schemaRejectionsUrl } from '../routes'
 import { PERMISSION_UUIDS } from '../constants'
+import { dropdownButton, pick, picked, valuesShown } from '../test/listFilters'
 import { tabLink } from '../test/tabBar'
 
 vi.mock('../api', async () => {
@@ -102,6 +103,7 @@ const routeGet = (overrides = {}) => (path) => {
 }
 
 const allowAll = () => true
+const queryOf = (key) => new URLSearchParams(window.location.search).get(key)
 const noop = () => {}
 
 /**
@@ -162,6 +164,50 @@ describe('DevicesTab filters', () => {
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
     expect(screen.getByText('CNC_02')).toBeTruthy()
     expect(screen.queryByText('Robot_03')).toBeNull()
+  })
+
+  it('takes two statuses at once, any of which a device may be in, and keeps them in the address', async () => {
+    api.get.mockImplementation(routeGet())
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+
+    pick('Status', 'online', 'unborn')
+    await waitFor(() => expect(screen.queryByText('CNC_02')).toBeNull())
+    expect(screen.getByText('CNC_01')).toBeTruthy()
+    expect(screen.getByText('Robot_03')).toBeTruthy()
+    expect(dropdownButton('Status')).toHaveTextContent('2 statuses')
+    expect(queryOf('status')).toBe('online,unborn')
+  })
+
+  it('counts each value among the devices the other filters let through', async () => {
+    api.get.mockImplementation(routeGet())
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+
+    expect(valuesShown('Gateway')).toEqual(['Line_A_Gateway 2', 'Sim_Gateway 1'])
+    pick('Status', 'offline')
+    // CNC_02 is the offline device, on Line_A_Gateway; Robot_03 has never spoken.
+    expect(valuesShown('Gateway')).toEqual(['Line_A_Gateway 1', 'Sim_Gateway 0'])
+  })
+
+  it('opens on the lists an address names, and a link written with one value', async () => {
+    window.history.replaceState({}, '', '/devices?gateway=gw-1,gw-2&schema=schema-robot')
+    api.get.mockImplementation(routeGet())
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('Robot_03')).toBeTruthy())
+    expect(screen.getByText('CNC_02')).toBeTruthy()
+    expect(screen.queryByText('CNC_01')).toBeNull()
+    expect(picked('Gateway')).toEqual(['gw-1', 'gw-2'])
+    expect(picked('Schema')).toEqual(['schema-robot'])
+  })
+
+  it('reads an older link\'s lifecycle=all as Active and Archived, and writes it so', async () => {
+    window.history.replaceState({}, '', '/devices?lifecycle=all')
+    api.get.mockImplementation(routeGet({ devices: [...ALL_DEVICES, { ...offlineDevice, asset_id: 'aaaaaaaa-0000-4000-8000-000000000009', asset_name: 'Old_CNC', is_archived: true }] }))
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('Old_CNC')).toBeTruthy())
+    expect(queryOf('lifecycle')).toBe('active,archived')
+    expect(picked('Lifecycle')).toEqual(['active', 'archived'])
   })
 
   it('reads the schema filter from the ?schema= query parameter', async () => {
@@ -262,7 +308,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'online' } })
+    pick('Status', 'online')
     await waitFor(() => expect(screen.queryByText('CNC_02')).toBeNull())
     expect(screen.getByText('CNC_01')).toBeTruthy()
   })
@@ -272,7 +318,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'unborn' } })
+    pick('Status', 'unborn')
     // CNC_02 is OFFLINE but has a first_dbirth_at, so it is not "never seen".
     await waitFor(() => expect(screen.queryByText('CNC_02')).toBeNull())
     expect(screen.getByText('Robot_03')).toBeTruthy()
@@ -286,7 +332,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'offline' } })
+    pick('Status', 'offline')
     await waitFor(() => expect(screen.getByText('CNC_02')).toBeTruthy())
     expect(screen.queryByText('Robot_03')).toBeNull()
   })
@@ -298,7 +344,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'unborn' } })
+    pick('Status', 'unborn')
     await waitFor(() => expect(screen.getByText('Robot_03')).toBeTruthy())
 
     // Scoped to the row: "Online" is also the text of an option in the filter above it.
@@ -346,7 +392,7 @@ describe('DevicesTab filters', () => {
 
     // gw-2 / cell-2 is the quarantined device's gateway. Only Robot_03 should surface.
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    fireEvent.change(screen.getByRole('combobox', { name: 'Gateway' }), { target: { value: 'gw-2' } })
+    pick('Gateway', 'gw-2')
 
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
     const tableNames = deviceTableRows().map(r => r.textContent)
@@ -371,7 +417,7 @@ describe('DevicesTab filters', () => {
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-    fireEvent.change(screen.getByRole('combobox', { name: 'Gateway' }), { target: { value: 'gw-2' } })
+    pick('Gateway', 'gw-2')
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
     expect(screen.getByText('Robot_03')).toBeTruthy()
   })
@@ -382,7 +428,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('Robot_03')).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'offline' } })
+    pick('Status', 'offline')
     const clear = await screen.findByRole('button', { name: /Clear filters/ })
     expect(clear.textContent).toContain('2')
 
@@ -402,7 +448,7 @@ describe('GatewaysTab filters', () => {
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
 
     // Both rows have status: 'ONLINE' stored; only one is live.
-    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'STALE' } })
+    pick('Status', 'STALE')
     await waitFor(() => expect(screen.queryByText('Line_A_Gateway')).toBeNull())
     expect(screen.getByText('Sim_Gateway')).toBeTruthy()
   })
@@ -415,7 +461,7 @@ describe('GatewaysTab filters', () => {
     renderGateways()
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), { target: { value: 'remote' } })
+    pick('Type', 'remote')
     await waitFor(() => expect(screen.queryByText('Sim_Gateway')).toBeNull())
     expect(screen.getByText('Line_A_Gateway')).toBeTruthy()
   })
@@ -432,9 +478,35 @@ describe('GatewaysTab filters', () => {
     renderGateways()
     await waitFor(() => expect(screen.getByText('Host_Connector')).toBeTruthy())
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), { target: { value: 'simulated' } })
+    pick('Type', 'simulated')
     await waitFor(() => expect(screen.queryByText('Host_Connector')).toBeNull())
     expect(screen.getByText('Sim_Fleet')).toBeTruthy()
+  })
+
+  it('takes two statuses and two types, any of each, and keeps them in the address', async () => {
+    api.get.mockImplementation(routeGet())
+    renderGateways()
+    await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
+
+    pick('Status', 'ONLINE', 'STALE')
+    expect(screen.getByText('Line_A_Gateway')).toBeTruthy()
+    expect(screen.getByText('Sim_Gateway')).toBeTruthy()
+    pick('Type', 'host')
+    await waitFor(() => expect(screen.queryByText('Line_A_Gateway')).toBeNull())
+    expect(queryOf('status')).toBe('ONLINE,STALE')
+    expect(queryOf('type')).toBe('host')
+    expect(dropdownButton('Status')).toHaveTextContent('2 statuses')
+    expect(screen.getByRole('button', { name: /Clear filters \(2\)/ })).toBeTruthy()
+  })
+
+  it('opens a link written with one status, and an older lifecycle=all', async () => {
+    window.history.replaceState({}, '', '/gateways?status=STALE&lifecycle=all')
+    api.get.mockImplementation(routeGet())
+    renderGateways()
+    await waitFor(() => expect(screen.getByText('Sim_Gateway')).toBeTruthy())
+    expect(screen.queryByText('Line_A_Gateway')).toBeNull()
+    expect(dropdownButton('Lifecycle')).toHaveTextContent('Any lifecycle')
+    expect(queryOf('lifecycle')).toBe('active,archived')
   })
 
   it('points at the gateway reporting quarantined devices', async () => {
@@ -462,6 +534,24 @@ describe('CellsTab filters', () => {
     expect(screen.getByText('Weld Cell 2')).toBeTruthy()
   })
 
+  it('takes Active and Archived at once, and opens a link written with one of them', async () => {
+    const withArchived = [...cells, { cell_id: 'cell-9', cell_name: 'Old Bay 9', is_archived: true, gateways: [], devices: [] }]
+    api.get.mockImplementation(routeGet({ cells: withArchived }))
+    window.history.replaceState({}, '', '/cells?lifecycle=archived')
+    const first = renderCells()
+    await waitFor(() => expect(screen.getByText('Old Bay 9')).toBeTruthy())
+    expect(screen.queryByText('Assembly Line 1')).toBeNull()
+    first.unmount()
+
+    window.history.replaceState({}, '', '/cells')
+    renderCells()
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeTruthy())
+    pick('Lifecycle', 'active', 'archived')
+    expect(screen.getByText('Old Bay 9')).toBeTruthy()
+    expect(queryOf('lifecycle')).toBe('active,archived')
+    expect(dropdownButton('Lifecycle')).toHaveTextContent('Any lifecycle')
+  })
+
   it('finds cells with no gateways or no devices', async () => {
     api.get.mockImplementation(routeGet())
     renderCells()
@@ -473,5 +563,4 @@ describe('CellsTab filters', () => {
   })
 })
 
-// The fleet-wide metric filter has no equivalent in the per-device telemetry modal; see
-// telemetryModal.test.jsx.
+// A device's metric filter is History's (historyPage.test.jsx), not a fleet-wide one.

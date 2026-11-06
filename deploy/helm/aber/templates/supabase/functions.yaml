@@ -16,8 +16,8 @@ spec:
     {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # The gateway routes /functions/v1/ here on port 9000, including the two exact-path
-      # exemptions for grafana-userinfo and nodered-userinfo.
+      # The gateway routes /functions/v1/ here on port 9000, its exemptions included: the two
+      # userinfo paths, /functions/v1/aas-api/, and the Directory's /ping and /v1/.
       port: 9000
       targetPort: http
       protocol: TCP
@@ -231,6 +231,15 @@ spec:
                    door's session. Unset, it falls back to the door's own sign-out and warns. */}}
             - name: FRONTEND_PUBLIC_URL
               value: {{ include "aber.frontendUrl" . | quote }}
+            {{- /* service-logs, for System › Logs: the Loki Grafana reads, the chart's own or
+                   grafana.lokiUrl. Unset where there is neither, and the function says
+                   observability is off. The chart's own is reached over the NetworkPolicy edge
+                   supabase-functions -> loki; an external one, under networkPolicy.enabled, needs a
+                   rule in networkPolicy.extraEgress. */}}
+            {{- with include "aber.lokiUrlOrNone" . }}
+            - name: LOKI_URL
+              value: {{ . | quote }}
+            {{- end }}
           # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
           # supabase/edge-runtime:v1.77.0 by probing it directly:
           #

@@ -11,7 +11,7 @@ import urllib.request
 import psycopg2
 import paho.mqtt.client as mqtt
 import sparkplug_b_pb2
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # The report is written with ✅/❌ markers, which raise UnicodeEncodeError on a cp1252 Windows
 # console. Force UTF-8 on the streams.
@@ -1625,6 +1625,37 @@ def is_scalar(value):
     return not isinstance(value, (dict, list))
 
 
+def instant_of(text):
+    """An RFC 3339 timestamp as an aware datetime to the microsecond, the historian's precision, or
+    None."""
+    try:
+        return datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def shown_samples(rows):
+    """[(instant, value)] as `value at <UTC to the microsecond>`, in the form i3X names a cut, for a
+    failure's detail."""
+    return "[" + ", ".join(
+        f"{value!r} at {instant.astimezone(timezone.utc).isoformat(timespec='microseconds')[:-6]}Z"
+        for instant, value in rows) + "]"
+
+
+def stored_samples(device, metric, window):
+    """One metric's rows in `window`, newest first, as [(instant, value)]: read from the historian
+    itself, not through i3X, so a history check can say what i3X had to read."""
+    conn = get_timescaledb_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT time, val_double, val_string, val_bool FROM telemetry WHERE asset_id = %s "
+                        "AND metric_name = %s AND time >= %s AND time <= %s ORDER BY time DESC",
+                        (device, metric, instant_of(window["startTime"]), instant_of(window["endTime"])))
+            return [(row[0], next((v for v in row[1:] if v is not None), None)) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def plant_history():
     """Plant device A's recorded DATA: (sparkplug_id, [(ms, {name: value})] oldest first, its two
     metric names, and a window one second wider than the samples on each side)."""
@@ -1924,12 +1955,10 @@ def check_i3x_history_carries_forward(ctx):
                    f"{first} = {before[-1]} carried forward")
 
 
-def check_i3x_history_bounds(ctx):
-    device, samples, first, _second, window = plant_history()
-    series = [(ms, m[first]) for ms, m in reversed(samples) if first in m]
-    wrong = []
-    if len(series) < 2:
-        return False, f"{first} has {len(series)} sample(s) in the fixture; a cut needs two"
+def resume_after_the_cut(ctx, device, first, window, stored):
+    """Check 12y's cut over `stored`, the historian's two rows newest first: `limit` 1 answers the
+    newer with a 206 naming the older one's own instant, and asking again with that instant as
+    endTime returns the older. Returns what was wrong, each naming the rows and the request."""
     metric = f"{device}/{first}"
     status, answer = i3x_request("POST", "/objects/history", ctx.token,
                                  {"elementIds": [metric], "limit": 1, **window})
@@ -1941,17 +1970,48 @@ def check_i3x_history_bounds(ctx):
     if (status != 206 or (answer.get("responseDetail") or {}).get("status") != 206
             or (answer.get("responseDetail") or {}).get("title") != "Partial results returned"
             or item.get("success") is not True or (item.get("responseDetail") or {}).get("status") != 206
-            or [v.get("value") for v in values] != [series[0][1]] or cut is None):
-        wrong.append(f"limit 1: HTTP {status}, responseDetail {answer.get('responseDetail')}, item "
-                     f"{item.get('success')} {item.get('responseDetail')}, values {values}")
+            or [v.get("value") for v in values] != [stored[0][1]] or cut is None):
+        return [f"limit 1: HTTP {status}, responseDetail {answer.get('responseDetail')}, item "
+                f"{item.get('success')} {item.get('responseDetail')}, values {values}, the historian "
+                f"holding {shown_samples(stored)}"]
+    if instant_of(cut.group(1)) != stored[1][0]:
+        return [f"limit 1 names {cut.group(1)} as where to resume; the older sample is stored as "
+                f"{shown_samples(stored[1:])}"]
+    again = {"elementIds": [metric], "limit": 1, "startTime": window["startTime"], "endTime": cut.group(1)}
+    status, answer = i3x_request("POST", "/objects/history", ctx.token, again)
+    answer = answer or {}
+    item = (answer.get("results") or [{}])[0]
+    rest = (item.get("result") or {}).get("values") or []
+    if status == 200 and item.get("success") is True and [v.get("value") for v in rest] == [stored[1][1]]:
+        return []
+    # Read again, so a failure shows whether a row went missing between the two requests.
+    try:
+        now = shown_samples(stored_samples(device, first, window))
+    except Exception as err:
+        now = f"unreadable ({type(err).__name__}: {err})"
+    return [f"limit 1 cut at {cut.group(1)}, the historian holding {shown_samples(stored)}; then "
+            f"{json.dumps(again)} answered HTTP {status}, item success {item.get('success')!r} "
+            f"{item.get('responseDetail')}, response {answer.get('responseDetail')}, values {rest}, "
+            f"expected [{stored[1][1]!r}]; the historian now holds {now}"]
+
+
+def check_i3x_history_bounds(ctx):
+    device, samples, first, _second, window = plant_history()
+    series = [(ms, m[first]) for ms, m in reversed(samples) if first in m]
+    wrong = []
+    if len(series) < 2:
+        return False, f"{first} has {len(series)} sample(s) in the fixture; a cut needs two"
+    metric = f"{device}/{first}"
+    # Two rows at the two instants published, read from the historian: otherwise the cut below
+    # would test the fixture, not the server.
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    planted = [(epoch + timedelta(milliseconds=ms), value) for ms, value in series]
+    stored = stored_samples(device, first, window)
+    if stored != planted:
+        wrong.append(f"the historian holds {first} from {window['startTime']} to {window['endTime']} "
+                     f"as {shown_samples(stored)}; this run published {shown_samples(planted)}")
     else:
-        status, answer = i3x_request("POST", "/objects/history", ctx.token,
-                                     {"elementIds": [metric], "limit": 1, "startTime": window["startTime"],
-                                      "endTime": cut.group(1)})
-        rest = (((answer or {}).get("results") or [{}])[0].get("result") or {}).get("values") or []
-        if status != 200 or [v.get("value") for v in rest] != [series[1][1]]:
-            wrong.append(f"again with endTime {cut.group(1)}: HTTP {status}, values {rest}, expected "
-                         f"[{series[1][1]!r}]")
+        wrong += resume_after_the_cut(ctx, device, first, window, stored)
     for label, fields in (
         ("startTime after endTime", {"startTime": window["endTime"], "endTime": window["startTime"]}),
         ("a startTime that is not a timestamp", {"startTime": "2026-09-28T10:00:00Z),or(x",
@@ -1964,8 +2024,9 @@ def check_i3x_history_bounds(ctx):
             wrong.append(f"{label} answered {status}, expected 400")
     if wrong:
         return False, "; ".join(wrong)
-    return True, ("a series cut by its limit is a 206 naming where to resume, resuming there returns "
-                  "the next value, and three malformed windows are each a 400")
+    return True, ("the historian holds the two samples as two rows, a series cut by its limit is a 206 "
+                  "naming the older one's stored instant, resuming there returns it, and three malformed "
+                  "windows are each a 400")
 
 
 def check_i3x_subscription_follows_its_owner(ctx):

@@ -16,7 +16,7 @@ import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { askAuthServer, clearInvalidSession } from './utils/sessionError'
 import { useSessionRecheck } from './hooks/useSessionRecheck'
 import { signOutOfThisBrowser, signedOutNotice } from './utils/signOut'
-import { TABS, pageTitleOf, tabIsVisible } from './navigation'
+import { TABS, pageTitleOf, tabIsVisible, urlNamesWithheldTab, visiblePages } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
 import { AuthShell } from './components/auth/AuthShell'
 import { SecondFactorScreen } from './components/auth/SecondFactorChallenge'
@@ -85,6 +85,7 @@ import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
 import { useHelpExpanded } from './hooks/useHelpExpanded'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
+import { countedAlerts } from './utils/alertSuppression'
 import { useNavSignals } from './hooks/useNavSignals'
 import { BugReportModal } from './components/modals/BugReportModal'
 import { ShortcutsModal } from './components/modals/ShortcutsModal'
@@ -92,6 +93,7 @@ import { ChangePasswordModal } from './components/modals/ChangePasswordModal'
 
 // Lazy-load Tab components
 const SiteMapTab       = lazy(() => import('./components/tabs/SiteMapTab').then(m => ({ default: m.SiteMapTab })))
+const HistoryTab       = lazy(() => import('./components/tabs/HistoryTab').then(m => ({ default: m.HistoryTab })))
 const AreasTab         = lazy(() => import('./components/tabs/AreasTab').then(m => ({ default: m.AreasTab })))
 const CellsTab         = lazy(() => import('./components/tabs/CellsTab').then(m => ({ default: m.CellsTab })))
 const GatewaysTab      = lazy(() => import('./components/tabs/GatewaysTab').then(m => ({ default: m.GatewaysTab })))
@@ -566,9 +568,12 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
 
   useQuarantineAlerts(showToast)
 
-  // Grafana's firing alerts, via platform_alerts. Owned by App rather than a tab so an alert is
-  // visible whichever page is open. Each alert's toast links to its rule in Grafana.
+  // The firing alerts, from platform_alerts_active. Owned by App rather than a tab so an alert is
+  // visible whichever page is open. Each toast links where alertToastUrl() says. The counter, the
+  // title and the favicon count the ones nobody has acknowledged and no window suppresses; the
+  // pages and the counter's list are handed them all.
   const firingAlerts = usePlatformAlerts(showToast)
+  const countedCount = countedAlerts(firingAlerts).length
 
   // Whether the page is still refreshing, from every poll and Realtime channel. Read by the strip
   // under the bar and the tab title.
@@ -578,8 +583,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // page differ, and the pill's count, so the tab and the bar never disagree. The icon's red dot
   // follows the same count, for a pinned tab that shows no title.
   const url = useUrl()
-  useDocumentTitle(pageTitleOf(tab, url), firingAlerts.length, connection.status !== CONNECTION_OK)
-  useAlertFavicon(firingAlerts.length)
+  useDocumentTitle(pageTitleOf(tab, url), countedCount, connection.status !== CONNECTION_OK)
+  useAlertFavicon(countedCount)
 
   // What the rail flags, with a number, to a viewer who can act on it: quarantine, offline gateways,
   // unfiled cells and waiting proposals. Owned here for the same reason the alerts are.
@@ -620,9 +625,18 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
     />
   )
 
-  // Computed once and used twice: the rail draws it and the search palette indexes it. Filtering
-  // in both places would let the search offer a page the rail does not.
-  const navTabs = TABS.filter(t => tabIsVisible(t, hasPermission, userRole))
+  // Computed once and used three times: the rail draws it, the search palette indexes it and the
+  // router reads its tabs. Filtering in each place would let one offer a page or a tab another
+  // does not. A tab with a `role` (System's Logs) is left out of its page for anyone else.
+  const navTabs = useMemo(() => visiblePages(hasPermission, userRole), [hasPermission, userRole])
+
+  /* A tab this viewer may not see, named in the address, opens its page's first tab instead, as
+     the effect above leaves a page. Waits for loadingPerms for the same reason. */
+  useEffect(() => {
+    if (!loadingPerms && urlNamesWithheldTab(navTabs, tab, url)) setTab(tab, {}, { replace: true })
+  }, [loadingPerms, navTabs, tab, url, setTab])
+
+
   // The export warning links to Metrics with Unmapped on, only for a reader who has that page.
   const unmappedMetricsTo = navTabs.some(t => t.id === 'metrics') ? unmappedMetricsUrl() : undefined
   // Where each rail entry goes: the bare page, except Devices, which opens the Quarantine tab while
@@ -681,6 +695,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             alerts={firingAlerts}
             onSelectDevice={showDevice}
             onSelectGateway={showGateway}
+            userRole={userRole}
+            userId={session?.user?.id}
+            showToast={showToast}
           />
 
           {/* What the toasts said, beside what is wrong now and separate from it: the pill's count
@@ -743,10 +760,11 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
+            {tab === 'history'        && <HistoryTab hasPermission={hasPermission} showToast={showToast} userRole={userRole} onSelectDevice={showDevice} onSelectGateway={showGateway} />}
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
-            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
+            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} userRole={userRole} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} activeAlerts={firingAlerts} unmappedMetricsTo={unmappedMetricsTo} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} userRole={userRole} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} activeAlerts={firingAlerts} unmappedMetricsTo={unmappedMetricsTo} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
             {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (
@@ -758,7 +776,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} />}
             {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
             {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
-            {tab === 'system'         && <SystemTab showToast={showToast} />}
+            {tab === 'system'         && <SystemTab showToast={showToast} userRole={userRole} rolePending={loadingPerms} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
                 proposer's own rows. The transition guard and RLS re-derive the proposer from
                 auth.uid(). */}
@@ -781,7 +799,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
                 the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
             {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} userRole={userRole} currentUserId={session?.user?.id} hasPermission={hasPermission} />}
-            {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
+            {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} hasPermission={hasPermission} />}
             {tab === 'settings' && !loadingPerms && <SettingsTab showToast={showToast} readOnly={userRole !== 'Administrator'} />}
             {/* Every person's own page. Appearance writes through useUserSettings, as the account
                 menu's theme and sidebar layout switches do. */}

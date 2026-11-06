@@ -155,6 +155,16 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
     expect(onSelectSchema).toHaveBeenCalledWith('sch-machining')
   })
 
+  it("device drawer -> View History opens the History page's Device tab on that device", async () => {
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
+    await openRow('Sim_CNC_Mill_01')
+
+    const action = within(panel()).getByRole('link', { name: /View History/ })
+    expect(action).toHaveAttribute('href', '/history/device/dev-1')
+    fireEvent.click(action)
+    expect(window.location.pathname).toBe('/history/device/dev-1')
+  })
+
   it('schema drawer -> device chip hands over the device id', async () => {
     const onSelectDevice = vi.fn()
     render(<SchemasTab showToast={vi.fn()} hasPermission={() => true} onSelectSchema={vi.fn()}
@@ -428,7 +438,7 @@ describe('arriving with an identifier opens that entity\'s drawer', () => {
     window.history.replaceState(null, '', deviceUrl('dev-1'))
     render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
-    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('all')
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('active,archived')
     await waitFor(() => expect(list().getByText('Sim_CNC_Mill_01')).toBeInTheDocument())
   })
 
@@ -437,7 +447,7 @@ describe('arriving with an identifier opens that entity\'s drawer', () => {
     window.history.replaceState(null, '', gatewayUrl('gw-1'))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
-    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('all')
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('active,archived')
     await waitFor(() => expect(list().getByText('Sim_Gateway_CNC')).toBeInTheDocument())
   })
 

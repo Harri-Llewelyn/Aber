@@ -597,6 +597,7 @@ BEGIN
         RAISE EXCEPTION 'not permitted to decide change proposals'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     SELECT * INTO v_proposal FROM public.change_proposals
      WHERE id = p_proposal_id FOR UPDATE;
@@ -1106,152 +1107,192 @@ COMMENT ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) I
 
 --
 
--- audit_trail_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text, uuid) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.audit_trail_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text DEFAULT NULL::text, p_action text DEFAULT NULL::text, p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_recorded_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id bigint DEFAULT NULL::bigint, p_search text DEFAULT NULL::text, p_changed_by uuid DEFAULT NULL::uuid) RETURNS jsonb
-    LANGUAGE sql STABLE
+-- audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text, uuid[], text[], boolean) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.audit_trail_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text[] DEFAULT NULL::text[], p_action text[] DEFAULT NULL::text[], p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_recorded_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id bigint DEFAULT NULL::bigint, p_search text DEFAULT NULL::text, p_changed_by uuid[] DEFAULT NULL::uuid[], p_class text[] DEFAULT NULL::text[], p_counts boolean DEFAULT false) RETURNS jsonb
+    LANGUAGE plpgsql STABLE
     SET search_path TO 'public'
+    SET plan_cache_mode TO 'force_custom_plan'
     AS $_$
-WITH term AS (
-    SELECT CASE WHEN p_search IS NULL OR btrim(p_search) = '' THEN NULL ELSE btrim(p_search) END AS raw
-),
-pattern AS (
-    -- The search as a LIKE pattern, built once. THE METACHARACTERS ARE ESCAPED: the box promises
-    -- a substring of a name or an id, and an unescaped '%' would silently return the whole trail
-    -- to somebody who typed a percentage into it. Backslash is the default LIKE escape, so the
-    -- backslashes have to be doubled first or an escape would be introduced by the escaping.
-    SELECT CASE
-             WHEN t.raw IS NULL THEN NULL
-             ELSE '%' || replace(replace(replace(t.raw, '\', '\\'), '%', '\%'), '_', '\_') || '%'
-           END AS pattern,
-           -- THE SAME TERM AS A ROW ID, when it is nothing but digits. 18 at most: bigint tops out
-           -- at 19, and a cast that overflows raises rather than missing.
-           CASE
-             WHEN t.raw ~ '^[0-9]{1,18}$' THEN t.raw::bigint
-             ELSE NULL
-           END AS id_term
-      FROM term t
-),
--- MATERIALIZED, AND MEASURED. Without it Postgres inlines this CTE and the helper lands in the
--- per-row Filter of every partition scan -- a STABLE function is allowed to be called once and is
--- not promised to be. On 4,065 rows that took a search from 53ms to 583ms, which is the shape of
--- cost that looks like "the trail got big" rather than like a query doing the wrong thing.
-q AS MATERIALIZED (
-    SELECT p.pattern,
-           p.id_term,
-           public.audit_trail_user_ids_matching(p.pattern)        AS user_ids,
-           public.audit_trail_backup_job_ids_matching(p.pattern)  AS job_ids
-      FROM pattern p
-),
-matching AS (
-    SELECT t.*,
-           -- SIX TYPES, FIVE PROBES, and the mismatch is `device_nameplate`: it is keyed by its
-           -- device's id, so `devices` answers for it. A type is listed here only if one of the
-           -- probes below can be asked about its rows -- `user_roles` and `service_principals`
-           -- are auth.users rows with no public table to read, and would otherwise answer "absent
-           -- from all five" about a person who is perfectly present. An entity type whose table
-           -- has been RETIRED is a third case this still does not answer: "the table is gone" is
-           -- not "the row is gone", so `area_floors` remains drawn and cannot be hidden.
-           t.entity_type IN ('areas', 'cells', 'gateways', 'devices', 'schemas', 'device_nameplate')
-       AND NOT EXISTS (SELECT 1 FROM public.areas    a WHERE a.id = t.entity_id)
-       AND NOT EXISTS (SELECT 1 FROM public.cells    c WHERE c.id = t.entity_id)
-       AND NOT EXISTS (SELECT 1 FROM public.gateways g WHERE g.id = t.entity_id)
-       AND NOT EXISTS (SELECT 1 FROM public.devices  d WHERE d.id = t.entity_id)
-       AND NOT EXISTS (SELECT 1 FROM public.schemas  s WHERE s.id = t.entity_id)
-               AS is_purged
-      FROM public.audit_trail t
-     CROSS JOIN q
-     WHERE (p_entity_type IS NULL OR t.entity_type = p_entity_type)
-       AND (p_action      IS NULL OR t.action      = p_action)
-       AND (p_entity_ids  IS NULL OR t.entity_id   = ANY (p_entity_ids))
-       AND (p_since       IS NULL OR t.recorded_at >= p_since)
-       AND (p_until       IS NULL OR t.recorded_at <= p_until)
-       -- The rows one person or machine identity wrote, by the id the trigger stamped.
-       AND (p_changed_by  IS NULL OR t.changed_by  = p_changed_by)
-       -- THE ID AND THE NAME THE TIMELINE DRAWS. Both snapshots are read because an INSERT has
-       -- only `new_data` and a DELETE only `old_data`, and an UPDATE that renames something is
-       -- findable under either name, which is what somebody searching for the old one wants.
-       AND (q.pattern IS NULL
-            OR t.entity_id::text ILIKE q.pattern
-            -- THE OTHER TWO IDS THE DRAWER SHOWS: this audit row, and the transaction that wrote
-            -- it. Only when the term is nothing but digits, so this adds rows to a numeric search
-            -- and changes no other one.
-            OR (q.id_term IS NOT NULL
-                AND (t.id = q.id_term OR t.causation_id = q.id_term))
-            -- The person a role assignment is about, who is not in the payload. Empty for a caller
-            -- who may not ask, which matches no row.
-            OR t.entity_id = ANY (q.user_ids)
-            -- The note and the produced backup's stamp, which are on two tables and in no payload.
-            -- Empty on the same terms, and for the same reason.
-            OR t.entity_id = ANY (q.job_ids)
-            OR EXISTS (
-                 SELECT 1
-                   FROM unnest(ARRAY['name', 'sparkplug_id', 'schema_name',
-                                     'label', 'key', 'role', 'stamp', 'origin']) AS f(field)
-                  WHERE (t.new_data ->> f.field) ILIKE q.pattern
-                     OR (t.old_data ->> f.field) ILIKE q.pattern
-               ))
-),
-visible AS (
-    SELECT * FROM matching
-     WHERE (p_include_purged OR NOT is_purged)
-       -- The cursor is applied here and not in `matching`: `purged_assets` and `total_matching` are
-       -- counted over `matching` and are facts about everything the filters select, not about what
-       -- is left after paging.
-       AND (p_before_id IS NULL
-            OR p_before_recorded_at IS NULL
-            OR (recorded_at, id) < (p_before_recorded_at, p_before_id))
-     ORDER BY recorded_at DESC, id DESC
-     LIMIT greatest(1, least(coalesce(p_limit, 200), 1000))
-)
-SELECT jsonb_build_object(
-    'events', coalesce(
-        (SELECT jsonb_agg(
-                  (to_jsonb(v) - 'is_purged')
-                  -- HOW MANY ROWS THE TRANSACTION WROTE (0139), over the whole table and not the
-                  -- page, so the drawer can tell a single-row act from a group whose other rows
-                  -- the filters hide or a later page holds. One probe of
-                  -- idx_audit_trail_causation per row on the page. Under the caller's own
-                  -- policies, like the rows themselves: it is the number a reader could load.
-                  -- Null where there is no causation: NULL is not a group, and counting it would
-                  -- make every legacy row one act.
-                  || jsonb_build_object('transaction_rows',
-                       CASE WHEN v.causation_id IS NULL THEN NULL
-                            ELSE (SELECT count(*) FROM public.audit_trail d
-                                   WHERE d.causation_id = v.causation_id)
-                       END)
-                  ORDER BY v.recorded_at DESC, v.id DESC)
-           FROM visible v),
-        '[]'::jsonb),
-    'purged_assets', (SELECT count(DISTINCT entity_id) FROM matching WHERE is_purged),
-    -- HOW LONG THE TRAIL IS UNDER THESE FILTERS, so a reader holding one page knows what fraction
-    -- of it that is. Counted under the SAME predicate `visible` opens with, minus the cursor and
-    -- the limit -- so it does not move as the reader pages, and a page can never report more rows
-    -- than the total it is a fraction of.
-    'total_matching', (SELECT count(*) FROM matching WHERE p_include_purged OR NOT is_purged),
-    -- KEPT, AND IT MEANS "THERE IS A NEXT PAGE". It used to mean "your view is cut off", which was
-    -- the same thing when there was no way to ask for more. Callers that only ever showed a banner
-    -- keep working unchanged.
-    'truncated', (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000)),
-    -- WHERE THE READER GOT TO, or null at the end of the trail. Null is the ONLY end-of-data
-    -- signal a caller should trust: an empty `events` array with a non-null cursor cannot happen,
-    -- but a full page that happens to be the last one is ordinary, so "fewer rows than I asked
-    -- for" is not a reliable test and callers must not invent one.
-    'next_cursor', CASE
-        WHEN (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000))
-        THEN (SELECT jsonb_build_object('recorded_at', v.recorded_at, 'id', v.id)
-                FROM visible v ORDER BY v.recorded_at ASC, v.id ASC LIMIT 1)
-        ELSE NULL
-    END
-);
+-- PLANNED FOR EACH CALL, WITH ITS VALUES. force_custom_plan makes every argument a constant to the
+-- planner, so a filter nobody chose folds away, a window prunes the months outside it, and a class
+-- not asked for drops its branch. A generic plan keeps all of them, and reads every row.
+--
+-- THE CLASSES ARE READ FROM THEIR INDEXES. audit_trail_matching() (0228) returns one class's rows,
+-- and each class has a partial index covering what the filters, the policies and the counts read.
+-- So the counts are an index-only scan, and the page is the newest few of each class, merged.
+DECLARE
+  v_all       text[] := ARRAY['created', 'operational', 'configuration', 'lifecycle', 'read'];
+  v_raw       text := nullif(btrim(p_search), '');
+  v_pattern   text;
+  v_id_term   bigint;
+  -- Ids the search matches by something not in the row: a person, a backup job's note or stamp,
+  -- and the backups a job took.
+  v_also      uuid[] := '{}'::uuid[];
+  -- Every entity the purged rule can find, so a row's test is one lookup.
+  v_live      uuid[];
+  v_limit     integer := greatest(1, least(coalesce(p_limit, 200), 1000));
+  -- NULL or an empty list is no constraint.
+  v_types     text[] := CASE WHEN cardinality(p_entity_type) > 0 THEN p_entity_type END;
+  v_actions   text[] := CASE WHEN cardinality(p_action) > 0 THEN p_action END;
+  v_people    uuid[] := CASE WHEN cardinality(p_changed_by) > 0 THEN p_changed_by END;
+  v_classes   text[] := CASE WHEN cardinality(p_class) > 0 THEN p_class END;
+  v_counts    boolean := coalesce(p_counts, false);
+  v_since     timestamptz := coalesce(p_since, '-infinity');
+  v_until     timestamptz := coalesce(p_until, 'infinity');
+  -- Both halves of the cursor, or neither.
+  v_before_at timestamptz := CASE WHEN p_before_id IS NOT NULL THEN p_before_recorded_at END;
+  v_before_id bigint := CASE WHEN p_before_recorded_at IS NOT NULL THEN p_before_id END;
+  -- The classes the page is drawn from, and the classes counted: all of them for the counts, which
+  -- leave each filter's own choice out of its own figures.
+  v_page      text[];
+  v_scan      text[];
+  v_scan_types   text[];
+  v_scan_actions text[];
+BEGIN
+  IF v_raw IS NOT NULL THEN
+    -- The search as a LIKE pattern. THE METACHARACTERS ARE ESCAPED: an unescaped '%' would return
+    -- the whole trail to somebody who typed a percentage. Backslashes first, as LIKE's escape.
+    v_pattern := '%' || replace(replace(replace(v_raw, '\', '\\'), '%', '\%'), '_', '\_') || '%';
+    -- The same term as a row id, when it is nothing but digits; 18 at most, so the cast cannot
+    -- overflow.
+    IF v_raw ~ '^[0-9]{1,18}$' THEN
+      v_id_term := v_raw::bigint;
+    END IF;
+    v_also := public.audit_trail_user_ids_matching(v_pattern)
+           || public.audit_trail_backup_job_ids_matching(v_pattern);
+    -- A backup request's id also finds the backup it took: the Backup taken row records the job,
+    -- and every later row of that backup is keyed by the backup's own id. Read from the trail,
+    -- since a pruned backup's row is gone from `backups`.
+    IF v_raw ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+      v_also := v_also || ARRAY(
+        SELECT DISTINCT b.entity_id FROM public.audit_trail b
+         WHERE b.entity_type = 'backups' AND b.action = 'BACKUP_TAKEN'
+           AND b.new_data ->> 'job_id' = lower(v_raw));
+    END IF;
+  END IF;
+
+  v_live := ARRAY(SELECT a.id FROM public.areas a UNION ALL SELECT c.id FROM public.cells c
+                  UNION ALL SELECT g.id FROM public.gateways g UNION ALL SELECT d.id FROM public.devices d
+                  UNION ALL SELECT s.id FROM public.schemas s);
+  v_page := coalesce(v_classes, v_all);
+  v_scan := CASE WHEN v_counts THEN v_all ELSE v_page END;
+  v_scan_types := CASE WHEN v_counts THEN NULL ELSE v_types END;
+  v_scan_actions := CASE WHEN v_counts THEN NULL ELSE v_actions END;
+
+  RETURN (
+    WITH counted AS (
+      SELECT * FROM public.audit_trail_matching('created', v_scan_types, v_scan_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, NULL, NULL) WHERE 'created' = ANY (v_scan)
+      UNION ALL
+      SELECT * FROM public.audit_trail_matching('operational', v_scan_types, v_scan_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, NULL, NULL) WHERE 'operational' = ANY (v_scan)
+      UNION ALL
+      SELECT * FROM public.audit_trail_matching('configuration', v_scan_types, v_scan_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, NULL, NULL) WHERE 'configuration' = ANY (v_scan)
+      UNION ALL
+      SELECT * FROM public.audit_trail_matching('lifecycle', v_scan_types, v_scan_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, NULL, NULL) WHERE 'lifecycle' = ANY (v_scan)
+      UNION ALL
+      SELECT * FROM public.audit_trail_matching('read', v_scan_types, v_scan_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, NULL, NULL) WHERE 'read' = ANY (v_scan)
+    ),
+    -- One row per class, kind and action, and per deleted entity, so the totals, the purged count
+    -- and the counts are sums over a few hundred rows rather than over the trail.
+    tally AS MATERIALIZED (
+      SELECT r.class, r.entity_type, r.action, r.is_purged,
+             CASE WHEN r.is_purged THEN r.entity_id END AS gone,
+             count(*) AS n
+        FROM counted r
+       GROUP BY 1, 2, 3, 4, 5
+    ),
+    judged AS MATERIALIZED (
+      SELECT g.*,
+             (v_types   IS NULL OR g.entity_type = ANY (v_types))   AS by_type,
+             (v_actions IS NULL OR g.action      = ANY (v_actions)) AS by_action,
+             (v_classes IS NULL OR g.class       = ANY (v_classes)) AS by_class,
+             (p_include_purged OR NOT g.is_purged) AS shown
+        FROM tally g
+    ),
+    -- The newest of each class after the cursor, merged. A class with nothing to show is not read.
+    page AS MATERIALIZED (
+      SELECT c.id, c.recorded_at, c.class FROM (
+        (SELECT m.id, m.recorded_at, m.class FROM public.audit_trail_matching('created', v_types, v_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, v_before_at, v_before_id) m
+          WHERE 'created' = ANY (v_page) AND (p_include_purged OR NOT m.is_purged)
+            AND EXISTS (SELECT 1 FROM judged j WHERE j.class = 'created' AND j.shown AND j.by_type AND j.by_action)
+          ORDER BY m.recorded_at DESC, m.id DESC LIMIT v_limit)
+        UNION ALL
+        (SELECT m.id, m.recorded_at, m.class FROM public.audit_trail_matching('operational', v_types, v_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, v_before_at, v_before_id) m
+          WHERE 'operational' = ANY (v_page) AND (p_include_purged OR NOT m.is_purged)
+            AND EXISTS (SELECT 1 FROM judged j WHERE j.class = 'operational' AND j.shown AND j.by_type AND j.by_action)
+          ORDER BY m.recorded_at DESC, m.id DESC LIMIT v_limit)
+        UNION ALL
+        (SELECT m.id, m.recorded_at, m.class FROM public.audit_trail_matching('configuration', v_types, v_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, v_before_at, v_before_id) m
+          WHERE 'configuration' = ANY (v_page) AND (p_include_purged OR NOT m.is_purged)
+            AND EXISTS (SELECT 1 FROM judged j WHERE j.class = 'configuration' AND j.shown AND j.by_type AND j.by_action)
+          ORDER BY m.recorded_at DESC, m.id DESC LIMIT v_limit)
+        UNION ALL
+        (SELECT m.id, m.recorded_at, m.class FROM public.audit_trail_matching('lifecycle', v_types, v_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, v_before_at, v_before_id) m
+          WHERE 'lifecycle' = ANY (v_page) AND (p_include_purged OR NOT m.is_purged)
+            AND EXISTS (SELECT 1 FROM judged j WHERE j.class = 'lifecycle' AND j.shown AND j.by_type AND j.by_action)
+          ORDER BY m.recorded_at DESC, m.id DESC LIMIT v_limit)
+        UNION ALL
+        (SELECT m.id, m.recorded_at, m.class FROM public.audit_trail_matching('read', v_types, v_actions, p_entity_ids, v_since, v_until, v_people, v_live, v_pattern, v_id_term, v_also, v_before_at, v_before_id) m
+          WHERE 'read' = ANY (v_page) AND (p_include_purged OR NOT m.is_purged)
+            AND EXISTS (SELECT 1 FROM judged j WHERE j.class = 'read' AND j.shown AND j.by_type AND j.by_action)
+          ORDER BY m.recorded_at DESC, m.id DESC LIMIT v_limit)
+      ) c
+      ORDER BY c.recorded_at DESC, c.id DESC
+      LIMIT v_limit
+    )
+    SELECT jsonb_build_object(
+      'events', coalesce(
+          (SELECT jsonb_agg(
+                    to_jsonb(t)
+                    || jsonb_build_object(
+                         'class', p.class,
+                         -- HOW MANY ROWS THE TRANSACTION WROTE (0139), over the whole table and not
+                         -- the page, under the caller's own policies. Null where there is no
+                         -- causation: NULL is not a group.
+                         'transaction_rows',
+                         CASE WHEN t.causation_id IS NULL THEN NULL
+                              ELSE (SELECT count(*) FROM public.audit_trail d WHERE d.causation_id = t.causation_id)
+                         END)
+                    ORDER BY t.recorded_at DESC, t.id DESC)
+             FROM page p
+             JOIN public.audit_trail t ON t.id = p.id AND t.recorded_at = p.recorded_at),
+          '[]'::jsonb),
+      'purged_assets', (SELECT count(DISTINCT gone) FROM judged
+                         WHERE is_purged AND by_type AND by_action AND by_class),
+      -- HOW LONG THE TRAIL IS UNDER THESE FILTERS, without the cursor, so it does not move as the
+      -- reader pages.
+      'total_matching', (SELECT coalesce(sum(n), 0) FROM judged
+                          WHERE shown AND by_type AND by_action AND by_class),
+      -- THERE IS A NEXT PAGE. Null next_cursor is the only end-of-data signal.
+      'truncated', (SELECT count(*) FROM page) >= v_limit,
+      'next_cursor', CASE
+          WHEN (SELECT count(*) FROM page) >= v_limit
+          THEN (SELECT jsonb_build_object('recorded_at', p.recorded_at, 'id', p.id)
+                  FROM page p ORDER BY p.recorded_at ASC, p.id ASC LIMIT 1)
+      END,
+      -- Each class's, kind's and action's events under every filter but its own, when asked for.
+      'counts', CASE WHEN v_counts THEN jsonb_build_object(
+          'class', (SELECT coalesce(jsonb_object_agg(x.class, x.n), '{}') FROM
+                      (SELECT class, sum(n) AS n FROM judged WHERE shown AND by_type AND by_action
+                        GROUP BY class) x),
+          'entity_type', (SELECT coalesce(jsonb_object_agg(x.entity_type, x.n), '{}') FROM
+                      (SELECT entity_type, sum(n) AS n FROM judged WHERE shown AND by_action AND by_class
+                        GROUP BY entity_type) x),
+          'action', (SELECT coalesce(jsonb_object_agg(x.action, x.n), '{}') FROM
+                      (SELECT action, sum(n) AS n FROM judged WHERE shown AND by_type AND by_class
+                        GROUP BY action) x))
+      END
+    )
+  );
+END
 $_$;
 
 
-ALTER FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid) OWNER TO postgres;
+ALTER FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid[], p_class text[], p_counts boolean) OWNER TO postgres;
 
 --
 
--- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid) :: COMMENT
-COMMENT ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid) IS 'One page of the Audit Trail, with deleted entities filtered server-side and counted over the whole match rather than the page. `total_matching` is how many rows the filters select in total, under the same purged rule as the page, so a reader knows what fraction of the trail they hold. Keyset paged on (recorded_at DESC, id DESC): pass the previous response''s `next_cursor` back as p_before_recorded_at/p_before_id. A null next_cursor is the only end-of-data signal. `p_search` matches the entity id and the audit-snapshot fields the timeline labels a lane from, so an entity is findable by the name the page shows for it; LIKE metacharacters in it are literal. A term of 1 to 18 digits ALSO matches the audit row''s own id and its causation_id (0121), which is how the other two ids the event drawer shows are searchable; it is an additional disjunct, so a numeric name still matches by name. `p_changed_by` keeps the rows whose changed_by is that person''s or machine identity''s id, under the caller''s own policies (0222). `transaction_rows` on each event is how many rows share its causation_id, counted over the whole table under the caller''s own policies rather than over the page, and null where there is no causation (0139). Two labels are not in any payload and are matched through a SECURITY DEFINER helper each: the person a role assignment is about (0115), and a backup job''s note and the stamp of the backup it produced (0118). `is_purged` applies to areas, cells, gateways, devices, schemas and device nameplates -- every entity type this function can probe a table for. A type with no readable table behind it (user_roles and service_principals, which are auth.users rows; area_floors, whose table was retired) is never called deleted. `purged_assets` keeps its wire name and counts all of them.';
+-- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid[], p_class text[], p_counts boolean) :: COMMENT
+COMMENT ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid[], p_class text[], p_counts boolean) IS 'One page of the Audit Trail, with deleted entities filtered server-side and counted over the whole match rather than the page. `total_matching` is how many rows the filters select in total, under the same purged rule as the page, so a reader knows what fraction of the trail they hold. Keyset paged on (recorded_at DESC, id DESC): pass the previous response''s `next_cursor` back as p_before_recorded_at/p_before_id. A null next_cursor is the only end-of-data signal. `p_search` matches the entity id and the audit-snapshot fields the timeline labels a lane from, so an entity is findable by the name the page shows for it; LIKE metacharacters in it are literal. A term of 1 to 18 digits ALSO matches the audit row''s own id and its causation_id (0121), which is how the other two ids the event drawer shows are searchable; it is an additional disjunct, so a numeric name still matches by name. A backup request''s id also matches the rows of the backup it took, found through its Backup taken row (0228). `p_entity_type`, `p_action`, `p_changed_by` and `p_class` are lists, each matched as any of its values, and the four are combined with AND: NULL or an empty list is no constraint, and a one-element list is the single value it holds (0227). `p_changed_by` keeps the rows whose changed_by is one of those people''s or machine identities'' ids, under the caller''s own policies (0222). `p_class` keeps the rows audit_event_class() puts in those classes, and each event carries its `class` (0228). With `p_counts`, `counts` gives each class, kind and action its events under every filter but its own. `transaction_rows` on each event is how many rows share its causation_id, counted over the whole table under the caller''s own policies rather than over the page, and null where there is no causation (0139). Two labels are not in any payload and are matched through a SECURITY DEFINER helper each: the person a role assignment is about (0115), and a backup job''s note and the stamp of the backup it produced (0118). `is_purged` applies to areas, cells, gateways, devices, schemas, device nameplates and device schema attachments -- every entity type this function can probe a table for. A type with no readable table behind it (user_roles and service_principals, which are auth.users rows; area_floors, whose table was retired) is never called deleted. `purged_assets` keeps its wire name and counts all of them.';
 
 --
 
@@ -1375,6 +1416,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to mint a gateway broker credential'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT * INTO v_gateway FROM public.gateways WHERE id = p_gateway_id;
   IF NOT FOUND THEN
@@ -1986,6 +2028,7 @@ BEGIN
         RAISE EXCEPTION 'cancel_backup_job: only an Administrator may cancel a backup'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     -- PENDING only. A RUNNING job is the service's: pg_dump is under way, and a row flipped under
     -- it would leave the job finishing into a state that says it did not.
@@ -2119,6 +2162,7 @@ BEGIN
         RAISE EXCEPTION 'only an Administrator may remove the off-site backup destination'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
     PERFORM public.set_backup_offsite_destination('', '', '', '', '', '', false);
     DELETE FROM vault.secrets WHERE name = 'backup_offsite_secret_access_key';
 END;
@@ -2387,6 +2431,7 @@ BEGIN
         RAISE EXCEPTION 'insufficient privileges to create a machine principal'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     IF v_name IS NULL OR length(v_name) = 0 THEN
         RAISE EXCEPTION
@@ -2589,6 +2634,7 @@ BEGIN
         RAISE EXCEPTION 'insufficient privileges to describe a machine principal'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     v_actor := auth.uid();
     IF v_actor IS NULL THEN
@@ -2734,6 +2780,7 @@ BEGIN
         RAISE EXCEPTION 'insufficient privileges to discard a schema draft'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     SELECT * INTO v_draft FROM public.schemas WHERE id = p_schema_id FOR UPDATE;
     IF NOT FOUND THEN
@@ -3414,6 +3461,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to version a schema'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   IF v_parent_id IS NULL THEN
     RAISE EXCEPTION 'parent_schema_id is required' USING ERRCODE = 'null_value_not_allowed';
@@ -4235,7 +4283,8 @@ CREATE OR REPLACE FUNCTION public.has_authority(allowed_permissions text[]) RETU
     AS $$
     -- One arm or the other, never both: the trigger on user_roles guarantees an identity cannot be
     -- in both sets. An anonymous caller takes the person arm, matches nothing, and returns false.
-    SELECT CASE
+    -- A token GoTrue issued to an app carries its client_id and holds no permission (0235).
+    SELECT coalesce(auth.jwt() ->> 'client_id', '') = '' AND CASE
         WHEN public.is_machine_principal(auth.uid()) THEN EXISTS (
             SELECT 1
               FROM public.principal_permissions pp
@@ -4260,7 +4309,7 @@ ALTER FUNCTION public.has_authority(allowed_permissions text[]) OWNER TO postgre
 --
 
 -- FUNCTION has_authority(allowed_permissions text[]) :: COMMENT
-COMMENT ON FUNCTION public.has_authority(allowed_permissions text[]) IS 'True when the caller holds any of these PERMISSIONS. A machine principal resolves through principal_permissions, a person through user_roles -> role_permissions, and nothing resolves through both. Use it where a policy would otherwise name a role that machine principals happen to share; has_role() remains the predicate for the 58 sites that name Administrator or Shopfloor_Manager, which no machine has ever satisfied.';
+COMMENT ON FUNCTION public.has_authority(allowed_permissions text[]) IS 'True when the caller holds any of these PERMISSIONS. A machine principal resolves through principal_permissions, a person through user_roles -> role_permissions, and nothing resolves through both. A token GoTrue issued to an app, which carries a client_id, holds none (0235). Use it where a policy would otherwise name a role that machine principals happen to share; has_role() remains the predicate for the 58 sites that name Administrator or Shopfloor_Manager, which no machine has ever satisfied.';
 
 --
 
@@ -4269,7 +4318,8 @@ CREATE OR REPLACE FUNCTION public.has_role(allowed_roles text[]) RETURNS boolean
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
     AS $$
-  SELECT EXISTS (
+  -- A token GoTrue issued to an app carries its client_id and holds no role (0235).
+  SELECT coalesce(auth.jwt() ->> 'client_id', '') = '' AND EXISTS (
     SELECT 1
     FROM public.user_roles ur
     JOIN public.roles r ON r.id = ur.role_id
@@ -5248,6 +5298,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to issue a gateway enrolment token'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   -- BOUNDED, because the TTL arrives from a client. A 30-minute default matches the time it takes
   -- to carry a bundle to an appliance and boot it; the ceiling is a day, past which a "short-lived
@@ -5717,11 +5768,46 @@ CREATE OR REPLACE FUNCTION public.may_manage_captures() RETURNS boolean
     LANGUAGE sql STABLE
     SET search_path TO 'public'
     AS $$
-    SELECT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']);
+    -- Every capture and playback act a person makes asks this first; require_mfa() refuses a
+    -- session the MFA switch does not admit (0251).
+    SELECT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND public.require_mfa();
 $$;
 
 
 ALTER FUNCTION public.may_manage_captures() OWNER TO postgres;
+
+--
+
+-- mfa_satisfied() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.mfa_satisfied() RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $$
+  -- As the caller, whom RLS lets read the setting (not sensitive) and their own user_roles row.
+  -- Whether the MFA switch admits the caller: it is off, the caller holds no covered role (a
+  -- machine identity holds none), the session gave its code (aal2), or another identity provider
+  -- signed it in. The switch is read first, so a site that never turns it on pays one lookup.
+  -- Mirror check 59 holds this to _shared/secondFactor.ts, the edge functions' copy.
+  SELECT NOT coalesce((SELECT s.value = 'true'::jsonb
+                         FROM public.system_settings s
+                        WHERE s.key = 'security.require_mfa_for_managers'), false)
+      OR NOT EXISTS (SELECT 1
+                       FROM public.user_roles ur
+                       JOIN public.roles r ON r.id = ur.role_id
+                      WHERE ur.user_id = auth.uid()
+                        AND r.name = ANY (ARRAY['Administrator', 'Shopfloor_Manager']))
+      OR coalesce(auth.jwt() ->> 'aal', '') = 'aal2'
+      OR coalesce(auth.jwt() -> 'amr' @> '[{"method": "oauth"}]'::jsonb
+                  OR auth.jwt() -> 'amr' @> '[{"method": "sso/saml"}]'::jsonb, false);
+$$;
+
+
+ALTER FUNCTION public.mfa_satisfied() OWNER TO postgres;
+
+--
+
+-- FUNCTION mfa_satisfied() :: COMMENT
+COMMENT ON FUNCTION public.mfa_satisfied() IS 'Whether the Settings row security.require_mfa_for_managers admits the caller to change the platform: true while it is off, for a caller holding neither Administrator nor Shopfloor_Manager (every machine identity included), for an aal2 session, and for one whose amr names another identity provider (oauth, sso/saml). Read live on every call. require_mfa() is the form the policies and functions call (0251).';
 
 --
 
@@ -5825,6 +5911,36 @@ $$;
 
 
 ALTER FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) OWNER TO postgres;
+
+--
+
+-- platform_alert_suppressing_window(text, uuid, timestamp with time zone) :: FUNCTION
+-- 0240's, declared in place because platform_alerts_active calls it on every boot. The one place
+-- an alert's suppression is decided, so its signature stays as it is: the sender calls it too.
+-- A device is covered by its own windows and by its current cell's, read when called whatever
+-- p_at is; a gateway by its own. Of several windows, the one that ends last answers.
+CREATE OR REPLACE FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone DEFAULT now()) RETURNS uuid
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $$
+  SELECT w.id
+    FROM public.alert_suppression_windows w
+   WHERE p_entity_id IS NOT NULL
+     AND w.starts_at <= p_at
+     AND w.ends_at > p_at
+     AND CASE p_entity_type
+           WHEN 'device' THEN w.device_id = p_entity_id
+                           OR w.cell_id = (SELECT dl.effective_cell_id FROM public.device_locations dl
+                                            WHERE dl.device_id = p_entity_id)
+           WHEN 'gateway' THEN w.gateway_id = p_entity_id
+           ELSE false
+         END
+   ORDER BY w.ends_at DESC, w.starts_at, w.id
+   LIMIT 1
+$$;
+
+
+ALTER FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) OWNER TO postgres;
 
 --
 
@@ -6451,9 +6567,10 @@ BEGIN
 
         -- `make_interval(days => numeric)` does not exist -- the days argument is an integer and
         -- the overload resolution fails rather than rounding. Seconds takes a double, which is
-        -- why 0030 used this form and why it is kept.
+        -- why 0030 used this form and why it is kept. The fallback is the seeded default, 90
+        -- days (0244).
         v_retain := COALESCE(make_interval(secs => v_days::double precision * 86400.0),
-                             interval '7 days');
+                             interval '90 days');
     ELSE
         v_retain := p_retain;
     END IF;
@@ -6510,6 +6627,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to publish a schema version'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   IF v_draft_id IS NULL THEN
     RAISE EXCEPTION 'draft_schema_id is required' USING ERRCODE = 'null_value_not_allowed';
@@ -6662,6 +6780,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to record a gateway credential issue'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT * INTO v_gateway FROM public.gateways WHERE id = p_gateway_id;
   IF NOT FOUND THEN
@@ -7013,8 +7132,8 @@ BEGIN
   IF v_ttl_days > public.service_token_max_days() THEN
     RAISE EXCEPTION
       'record_service_token_issued: a token may not outlive % days (asked for %). A token can be '
-      'revoked against the API (0074), but storage, realtime and the edge functions verify the '
-      'signature only -- so the expiry is still the only bound that reaches every service.',
+      'revoked against the API (0074), but storage and realtime verify the signature only -- so '
+      'the expiry is still the only bound that reaches every service.',
       public.service_token_max_days(), round(v_ttl_days, 1)
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
@@ -7419,6 +7538,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to reinstate a service principal'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   v_actor := auth.uid();
   IF v_actor IS NULL THEN
@@ -7564,6 +7684,7 @@ BEGIN
         RAISE EXCEPTION 'not permitted to decide change proposals'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     IF COALESCE(TRIM(p_reason), '') = '' THEN
         -- A REASON IS THE WHOLE POINT OF A REJECTION. Without one the proposer learns only that
@@ -7620,6 +7741,7 @@ BEGIN
         RAISE EXCEPTION 'release_backup: only an Administrator may release a backup'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     UPDATE public.backups
        SET pinned = false, released_at = now(), released_by = auth.uid()
@@ -7760,6 +7882,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to relocate devices'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   IF p_moves IS NULL OR jsonb_typeof(p_moves) <> 'array' THEN
     RAISE EXCEPTION 'p_moves must be a JSON array of moves, got %',
@@ -7977,6 +8100,7 @@ BEGIN
         RAISE EXCEPTION 'request_backup: only an Administrator may take a backup'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     -- Reported rather than left to the index, so the refusal says what is in the way. A PENDING
     -- row nobody has claimed is the sign the service is not running, and the message says so.
@@ -8216,6 +8340,36 @@ ALTER FUNCTION public.require_ingestion_caller(p_fn text) OWNER TO postgres;
 
 --
 
+-- require_mfa() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.require_mfa() RETURNS boolean
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    -- True, or a refusal: a policy that answered false would hide an UPDATE or DELETE as zero rows,
+    -- which reads as success. A policy calls it once per statement, as (SELECT public.require_mfa()).
+    IF public.mfa_satisfied() THEN
+        RETURN true;
+    END IF;
+    -- The sentence the dashboard links to Profile › MFA (utils/secondFactor.js); mirror check 59.
+    RAISE EXCEPTION 'MFA is required for this. Add an authenticator on Profile › MFA, then try again.'
+        USING ERRCODE = 'insufficient_privilege',
+              DETAIL = 'mfa_required',
+              HINT = 'Settings requires MFA of Administrators and Shopfloor Managers who change the '
+                     'platform, and this session has not given a code from an authenticator app.';
+END;
+$$;
+
+
+ALTER FUNCTION public.require_mfa() OWNER TO postgres;
+
+--
+
+-- FUNCTION require_mfa() :: COMMENT
+COMMENT ON FUNCTION public.require_mfa() IS 'mfa_satisfied() as a guard: true, or 42501 (PostgREST answers 403) with the sentence that points to Profile › MFA and the detail mfa_required. Beside has_role() in every write policy that admits Administrator or Shopfloor_Manager, and after the role check in every function that changes the platform for them (0251).';
+
+--
+
 -- require_playback_caller(text) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.require_playback_caller(p_fn text) RETURNS void
     LANGUAGE plpgsql STABLE
@@ -8418,6 +8572,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to revoke a service principal'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   v_actor := auth.uid();
   IF v_actor IS NULL THEN
@@ -8547,6 +8702,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to revoke a service token'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   v_actor := auth.uid();
   IF v_actor IS NULL THEN
@@ -8650,7 +8806,7 @@ ALTER FUNCTION public.revoke_service_token(p_jti text) OWNER TO postgres;
 --
 
 -- FUNCTION revoke_service_token(p_jti text) :: COMMENT
-COMMENT ON FUNCTION public.revoke_service_token(p_jti text) IS 'Administrator-only. Adds a minted token''s jti to the denylist auth_pre_request() consults, and records a TOKEN_REVOKED row. Refuses a jti with no TOKEN_MINTED record and one that has already expired. Reaches PostgREST only -- storage, realtime, the edge runtime and Studio verify the JWT secret independently.';
+COMMENT ON FUNCTION public.revoke_service_token(p_jti text) IS 'Administrator-only. Adds a minted token''s jti to the denylist auth_pre_request() consults, and records a TOKEN_REVOKED row. Refuses a jti with no TOKEN_MINTED record and one that has already expired. Reaches PostgREST, and through it i3X, aas-api and the Factory+ Directory, which check each caller there; storage and realtime verify the signature independently.';
 
 --
 
@@ -8737,7 +8893,7 @@ ALTER FUNCTION public.service_token_max_days() OWNER TO postgres;
 --
 
 -- FUNCTION service_token_max_days() :: COMMENT
-COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-api-token.mjs. revoke_service_token() and revoke_service_principal() withdraw a token at PostgREST; storage, realtime, the edge runtime and Studio verify the signature alone, so the expiry is the only bound that reaches every service.';
+COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-api-token.mjs. revoke_service_token() and revoke_service_principal() withdraw a token at PostgREST and at what checks a caller through it; storage and realtime verify the signature alone, so the expiry is the only bound that reaches every service.';
 
 --
 
@@ -8828,6 +8984,7 @@ BEGIN
         RAISE EXCEPTION 'only an Administrator may set the off-site backup destination'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    PERFORM public.require_mfa();
 
     UPDATE public.system_settings s
        SET value = v.value
@@ -12493,8 +12650,10 @@ ALTER TABLE public.permissions
 --
 
 -- platform_alerts :: TABLE
--- rule_uid, labels and values are 0220's, stated here so that platform_alerts_active, below, can
--- select them on every boot.
+-- rule_uid, labels and values are 0220's, and the five acknowledgement columns 0231's, stated here
+-- so that platform_alerts_active, below, can select them on every boot. suppression_window_id is
+-- 0240's: the window that first covered the occurrence. last_confirmed_at is 0247's, stated with
+-- them; the view does not select it.
 CREATE TABLE IF NOT EXISTS public.platform_alerts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     fingerprint text NOT NULL,
@@ -12511,6 +12670,13 @@ CREATE TABLE IF NOT EXISTS public.platform_alerts (
     rule_uid text,
     labels jsonb,
     "values" jsonb,
+    acknowledged_at timestamp with time zone,
+    acknowledged_by uuid,
+    acknowledged_by_email text,
+    acknowledgement_reason text,
+    acknowledgement_note text,
+    suppression_window_id uuid,
+    last_confirmed_at timestamp with time zone,
     CONSTRAINT platform_alerts_asset_has_wire_id CHECK (((entity_type = ANY (ARRAY['platform'::text, 'service_identity'::text])) OR (sparkplug_id IS NOT NULL))),
     CONSTRAINT platform_alerts_entity_type_valid CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text, 'service_identity'::text]))),
     CONSTRAINT platform_alerts_resolved_has_end CHECK (((status <> 'resolved'::text) OR (ends_at IS NOT NULL))),
@@ -12538,7 +12704,14 @@ ALTER TABLE public.platform_alerts
     ADD COLUMN IF NOT EXISTS recorded_at timestamp with time zone DEFAULT now() NOT NULL,
     ADD COLUMN IF NOT EXISTS rule_uid text,
     ADD COLUMN IF NOT EXISTS labels jsonb,
-    ADD COLUMN IF NOT EXISTS "values" jsonb;
+    ADD COLUMN IF NOT EXISTS "values" jsonb,
+    ADD COLUMN IF NOT EXISTS acknowledged_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS acknowledged_by uuid,
+    ADD COLUMN IF NOT EXISTS acknowledged_by_email text,
+    ADD COLUMN IF NOT EXISTS acknowledgement_reason text,
+    ADD COLUMN IF NOT EXISTS acknowledgement_note text,
+    ADD COLUMN IF NOT EXISTS suppression_window_id uuid,
+    ADD COLUMN IF NOT EXISTS last_confirmed_at timestamp with time zone;
 
 ALTER TABLE public.platform_alerts
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
@@ -12555,7 +12728,14 @@ ALTER TABLE public.platform_alerts
     ALTER COLUMN recorded_at SET DEFAULT now(),
     ALTER COLUMN rule_uid DROP DEFAULT,
     ALTER COLUMN labels DROP DEFAULT,
-    ALTER COLUMN "values" DROP DEFAULT;
+    ALTER COLUMN "values" DROP DEFAULT,
+    ALTER COLUMN acknowledged_at DROP DEFAULT,
+    ALTER COLUMN acknowledged_by DROP DEFAULT,
+    ALTER COLUMN acknowledged_by_email DROP DEFAULT,
+    ALTER COLUMN acknowledgement_reason DROP DEFAULT,
+    ALTER COLUMN acknowledgement_note DROP DEFAULT,
+    ALTER COLUMN suppression_window_id DROP DEFAULT,
+    ALTER COLUMN last_confirmed_at DROP DEFAULT;
 
 DO $c$ BEGIN
 
@@ -12659,11 +12839,44 @@ COMMENT ON COLUMN public.platform_alerts.sparkplug_id IS 'The immutable Sparkplu
 
 --
 
+-- alert_suppression_windows :: TABLE
+-- 0240's, stated here because platform_alerts_active, below, joins it on every boot: its columns,
+-- its row security, and who reads it. Every signed-in role reads every window; nobody writes one but
+-- 0240's functions, which also hold its constraints and its comments.
+CREATE TABLE IF NOT EXISTS public.alert_suppression_windows (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    device_id uuid,
+    gateway_id uuid,
+    cell_id uuid,
+    starts_at timestamp with time zone NOT NULL,
+    ends_at timestamp with time zone NOT NULL,
+    reason text NOT NULL,
+    created_by uuid NOT NULL,
+    created_by_email text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    ended_by uuid,
+    ended_by_email text
+);
+
+ALTER TABLE public.alert_suppression_windows OWNER TO postgres;
+ALTER TABLE public.alert_suppression_windows ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON TABLE public.alert_suppression_windows FROM PUBLIC, anon, authenticated, service_role;
+GRANT SELECT ON TABLE public.alert_suppression_windows TO authenticated, service_role;
+
+SELECT public.replay_policy('public.alert_suppression_windows', 'alert_suppression_windows_select_authenticated', $ddl$
+CREATE POLICY alert_suppression_windows_select_authenticated ON public.alert_suppression_windows FOR SELECT TO authenticated USING (true);
+$ddl$);
+
+--
+
 -- platform_alerts_active :: VIEW
--- rule_uid, labels and values are 0220's. CREATE OR REPLACE VIEW cannot drop, rename or retype a
--- column, so a database holding another column list drops the view here first; once the list
--- matches, a boot drops nothing. Nothing depends on the view. Its comment follows, and its grants
--- are restated in the ACL section.
+-- rule_uid, labels and values are 0220's, and the acknowledgement columns 0231's: an acknowledged
+-- alert is still firing, so it stays listed. The suppression columns are 0240's: a suppressed alert
+-- is still firing too, and platform_alert_suppressing_window() decides it as the row is read.
+-- CREATE OR REPLACE VIEW cannot drop, rename or retype a column, so a database holding another
+-- column list drops the view here first; once the list matches, a boot drops nothing. Nothing
+-- depends on the view. Its comment follows, and its grants are restated in the ACL section.
 DO $shape$
 BEGIN
     IF to_regclass('public.platform_alerts_active') IS NOT NULL
@@ -12674,29 +12887,44 @@ BEGIN
                'id uuid', 'fingerprint text', 'entity_type text', 'entity_id uuid', 'sparkplug_id text',
                'alert_name text', 'severity text', 'status text', 'summary text',
                'starts_at timestamp with time zone', 'ends_at timestamp with time zone',
-               'recorded_at timestamp with time zone', 'rule_uid text', 'labels jsonb', 'values jsonb'] THEN
+               'recorded_at timestamp with time zone', 'rule_uid text', 'labels jsonb', 'values jsonb',
+               'acknowledged_at timestamp with time zone', 'acknowledged_by uuid', 'acknowledged_by_email text',
+               'acknowledgement_reason text', 'acknowledgement_note text',
+               'suppressed boolean', 'suppressing_window_id uuid', 'suppression_reason text',
+               'suppressed_until timestamp with time zone'] THEN
         DROP VIEW public.platform_alerts_active;
     END IF;
 END
 $shape$;
 
+-- The predicate is a function in FROM, so it runs once per firing alert and the window's reason
+-- and end are joined by its answer.
 CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='true') AS
- SELECT id,
-    fingerprint,
-    entity_type,
-    entity_id,
-    sparkplug_id,
-    alert_name,
-    severity,
-    status,
-    summary,
-    starts_at,
-    ends_at,
-    recorded_at,
-    rule_uid,
-    labels,
-    "values"
-   FROM ( SELECT DISTINCT ON (a.fingerprint) a.id,
+ SELECT newest.id,
+    newest.fingerprint,
+    newest.entity_type,
+    newest.entity_id,
+    newest.sparkplug_id,
+    newest.alert_name,
+    newest.severity,
+    newest.status,
+    newest.summary,
+    newest.starts_at,
+    newest.ends_at,
+    newest.recorded_at,
+    newest.rule_uid,
+    newest.labels,
+    newest."values",
+    newest.acknowledged_at,
+    newest.acknowledged_by,
+    newest.acknowledged_by_email,
+    newest.acknowledgement_reason,
+    newest.acknowledgement_note,
+    (s.window_id IS NOT NULL) AS suppressed,
+    s.window_id AS suppressing_window_id,
+    w.reason AS suppression_reason,
+    w.ends_at AS suppressed_until
+   FROM ((( SELECT DISTINCT ON (a.fingerprint) a.id,
             a.fingerprint,
             a.entity_type,
             a.entity_id,
@@ -12710,9 +12938,16 @@ CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='tru
             a.recorded_at,
             a.rule_uid,
             a.labels,
-            a."values"
+            a."values",
+            a.acknowledged_at,
+            a.acknowledged_by,
+            a.acknowledged_by_email,
+            a.acknowledgement_reason,
+            a.acknowledgement_note
            FROM public.platform_alerts a
           ORDER BY a.fingerprint, a.starts_at DESC, a.recorded_at DESC) newest
+     LEFT JOIN LATERAL public.platform_alert_suppressing_window(newest.entity_type, newest.entity_id, now()) s(window_id) ON (true))
+     LEFT JOIN public.alert_suppression_windows w ON ((w.id = s.window_id)))
   WHERE (status = 'firing'::text);
 
 
@@ -12721,7 +12956,7 @@ ALTER VIEW public.platform_alerts_active OWNER TO postgres;
 --
 
 -- VIEW platform_alerts_active :: COMMENT
-COMMENT ON VIEW public.platform_alerts_active IS 'Currently firing alerts, one row per Grafana fingerprint (the newest occurrence). A later resolved occurrence supersedes an earlier firing one, so a missed resolve cannot pin a stale alert.';
+COMMENT ON VIEW public.platform_alerts_active IS 'Currently firing alerts, one row per Grafana fingerprint (the newest occurrence). A later resolved occurrence supersedes an earlier firing one, so a missed resolve cannot pin a stale alert. An acknowledged alert is still listed, with who acknowledged it, when and why (0231). A suppressed alert is still listed, with the window that covers it now, its reason and its end, as platform_alert_suppressing_window() decides it when the row is read (0240).';
 
 --
 
@@ -14350,6 +14585,65 @@ ALTER TABLE timescale.telemetry_raw_window
     ALTER COLUMN raw_window DROP DEFAULT,
     ALTER COLUMN archive_armed DROP DEFAULT,
     ALTER COLUMN archive_reported_at DROP DEFAULT;
+
+--
+
+-- telemetry_device_5m :: FOREIGN TABLE
+-- The historian's rollups per device (timescaledb/aggregates.sql), read by telemetry_coverage()
+-- (0245) a device and a bucket a row. 10,000 rows a fetch: an Overview read brings hundreds of
+-- thousands across, and at the default 100 a fetch the round trips were half its time.
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_5m (
+    bucket timestamp with time zone NOT NULL,
+    asset_id text NOT NULL,
+    n_rows numeric
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_device_5m',
+    fetch_size '10000'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_device_5m OWNER TO postgres;
+
+--
+
+-- telemetry_device_1h :: FOREIGN TABLE
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_1h (
+    bucket timestamp with time zone NOT NULL,
+    asset_id text NOT NULL,
+    n_rows numeric
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_device_1h',
+    fetch_size '10000'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_device_1h OWNER TO postgres;
+
+--
+
+-- telemetry_device_coverage :: FOREIGN TABLE
+-- What each device rollup holds, so History's Overview can tell a block not yet counted from one with no
+-- reading. Two rows, from the historian's catalogue.
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_device_coverage (
+    relation text,
+    computed_from timestamp with time zone,
+    computed_to timestamp with time zone,
+    complete boolean
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_device_coverage'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_device_coverage OWNER TO postgres;
 
 --
 
@@ -16790,14 +17084,14 @@ ALTER TABLE public.areas ENABLE ROW LEVEL SECURITY;
 -- areas areas_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.areas', 'areas_delete_privileged', $ddl$
-CREATE POLICY areas_delete_privileged ON public.areas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY areas_delete_privileged ON public.areas FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- areas areas_insert_privileged :: POLICY
 SELECT public.replay_policy('public.areas', 'areas_insert_privileged', $ddl$
-CREATE POLICY areas_insert_privileged ON public.areas FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY areas_insert_privileged ON public.areas FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -16811,7 +17105,7 @@ $ddl$);
 
 -- areas areas_update_privileged :: POLICY
 SELECT public.replay_policy('public.areas', 'areas_update_privileged', $ddl$
-CREATE POLICY areas_update_privileged ON public.areas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY areas_update_privileged ON public.areas FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -16839,14 +17133,14 @@ ALTER TABLE public.asset_config ENABLE ROW LEVEL SECURITY;
 -- asset_config asset_config_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.asset_config', 'asset_config_delete_privileged', $ddl$
-CREATE POLICY asset_config_delete_privileged ON public.asset_config FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY asset_config_delete_privileged ON public.asset_config FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- asset_config asset_config_insert_privileged :: POLICY
 SELECT public.replay_policy('public.asset_config', 'asset_config_insert_privileged', $ddl$
-CREATE POLICY asset_config_insert_privileged ON public.asset_config FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY asset_config_insert_privileged ON public.asset_config FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -16860,7 +17154,7 @@ $ddl$);
 
 -- asset_config asset_config_update_privileged :: POLICY
 SELECT public.replay_policy('public.asset_config', 'asset_config_update_privileged', $ddl$
-CREATE POLICY asset_config_update_privileged ON public.asset_config FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY asset_config_update_privileged ON public.asset_config FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -16951,7 +17245,7 @@ ALTER TABLE public.captures ENABLE ROW LEVEL SECURITY;
 -- captures captures_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.captures', 'captures_delete_privileged', $ddl$
-CREATE POLICY captures_delete_privileged ON public.captures FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY captures_delete_privileged ON public.captures FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -16972,14 +17266,14 @@ ALTER TABLE public.cells ENABLE ROW LEVEL SECURITY;
 -- cells cells_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.cells', 'cells_delete_privileged', $ddl$
-CREATE POLICY cells_delete_privileged ON public.cells FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY cells_delete_privileged ON public.cells FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- cells cells_insert_privileged :: POLICY
 SELECT public.replay_policy('public.cells', 'cells_insert_privileged', $ddl$
-CREATE POLICY cells_insert_privileged ON public.cells FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY cells_insert_privileged ON public.cells FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -16993,7 +17287,7 @@ $ddl$);
 
 -- cells cells_update_privileged :: POLICY
 SELECT public.replay_policy('public.cells', 'cells_update_privileged', $ddl$
-CREATE POLICY cells_update_privileged ON public.cells FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY cells_update_privileged ON public.cells FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17035,14 +17329,14 @@ ALTER TABLE public.device_nameplate ENABLE ROW LEVEL SECURITY;
 -- device_nameplate device_nameplate_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_delete_privileged', $ddl$
-CREATE POLICY device_nameplate_delete_privileged ON public.device_nameplate FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_nameplate_delete_privileged ON public.device_nameplate FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- device_nameplate device_nameplate_insert_privileged :: POLICY
 SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_insert_privileged', $ddl$
-CREATE POLICY device_nameplate_insert_privileged ON public.device_nameplate FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_nameplate_insert_privileged ON public.device_nameplate FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17056,7 +17350,7 @@ $ddl$);
 
 -- device_nameplate device_nameplate_update_privileged :: POLICY
 SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_update_privileged', $ddl$
-CREATE POLICY device_nameplate_update_privileged ON public.device_nameplate FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_nameplate_update_privileged ON public.device_nameplate FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17070,14 +17364,14 @@ ALTER TABLE public.device_submodels ENABLE ROW LEVEL SECURITY;
 -- device_submodels device_submodels_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.device_submodels', 'device_submodels_delete_privileged', $ddl$
-CREATE POLICY device_submodels_delete_privileged ON public.device_submodels FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_submodels_delete_privileged ON public.device_submodels FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- device_submodels device_submodels_insert_privileged :: POLICY
 SELECT public.replay_policy('public.device_submodels', 'device_submodels_insert_privileged', $ddl$
-CREATE POLICY device_submodels_insert_privileged ON public.device_submodels FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_submodels_insert_privileged ON public.device_submodels FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17091,7 +17385,7 @@ $ddl$);
 
 -- device_submodels device_submodels_update_privileged :: POLICY
 SELECT public.replay_policy('public.device_submodels', 'device_submodels_update_privileged', $ddl$
-CREATE POLICY device_submodels_update_privileged ON public.device_submodels FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY device_submodels_update_privileged ON public.device_submodels FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17105,14 +17399,14 @@ ALTER TABLE public.devices ENABLE ROW LEVEL SECURITY;
 -- devices devices_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.devices', 'devices_delete_privileged', $ddl$
-CREATE POLICY devices_delete_privileged ON public.devices FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY devices_delete_privileged ON public.devices FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- devices devices_insert_privileged :: POLICY
 SELECT public.replay_policy('public.devices', 'devices_insert_privileged', $ddl$
-CREATE POLICY devices_insert_privileged ON public.devices FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY devices_insert_privileged ON public.devices FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17126,7 +17420,7 @@ $ddl$);
 
 -- devices devices_update_privileged :: POLICY
 SELECT public.replay_policy('public.devices', 'devices_update_privileged', $ddl$
-CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17145,14 +17439,14 @@ ALTER TABLE public.directory_services ENABLE ROW LEVEL SECURITY;
 -- directory_services directory_services_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.directory_services', 'directory_services_delete_privileged', $ddl$
-CREATE POLICY directory_services_delete_privileged ON public.directory_services FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY directory_services_delete_privileged ON public.directory_services FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- directory_services directory_services_insert_privileged :: POLICY
 SELECT public.replay_policy('public.directory_services', 'directory_services_insert_privileged', $ddl$
-CREATE POLICY directory_services_insert_privileged ON public.directory_services FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY directory_services_insert_privileged ON public.directory_services FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17166,7 +17460,7 @@ $ddl$);
 
 -- directory_services directory_services_update_privileged :: POLICY
 SELECT public.replay_policy('public.directory_services', 'directory_services_update_privileged', $ddl$
-CREATE POLICY directory_services_update_privileged ON public.directory_services FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY directory_services_update_privileged ON public.directory_services FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17195,14 +17489,14 @@ ALTER TABLE public.gateways ENABLE ROW LEVEL SECURITY;
 -- gateways gateways_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.gateways', 'gateways_delete_privileged', $ddl$
-CREATE POLICY gateways_delete_privileged ON public.gateways FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY gateways_delete_privileged ON public.gateways FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- gateways gateways_insert_privileged :: POLICY
 SELECT public.replay_policy('public.gateways', 'gateways_insert_privileged', $ddl$
-CREATE POLICY gateways_insert_privileged ON public.gateways FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY gateways_insert_privileged ON public.gateways FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17216,7 +17510,7 @@ $ddl$);
 
 -- gateways gateways_update_privileged :: POLICY
 SELECT public.replay_policy('public.gateways', 'gateways_update_privileged', $ddl$
-CREATE POLICY gateways_update_privileged ON public.gateways FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY gateways_update_privileged ON public.gateways FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17258,14 +17552,14 @@ ALTER TABLE public.links ENABLE ROW LEVEL SECURITY;
 -- links links_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.links', 'links_delete_privileged', $ddl$
-CREATE POLICY links_delete_privileged ON public.links FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY links_delete_privileged ON public.links FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- links links_insert_privileged :: POLICY
 SELECT public.replay_policy('public.links', 'links_insert_privileged', $ddl$
-CREATE POLICY links_insert_privileged ON public.links FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY links_insert_privileged ON public.links FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17279,7 +17573,7 @@ $ddl$);
 
 -- links links_update_privileged :: POLICY
 SELECT public.replay_policy('public.links', 'links_update_privileged', $ddl$
-CREATE POLICY links_update_privileged ON public.links FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+CREATE POLICY links_update_privileged ON public.links FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17307,7 +17601,7 @@ ALTER TABLE public.metric_catalog ENABLE ROW LEVEL SECURITY;
 -- metric_catalog metric_catalog_insert_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.metric_catalog', 'metric_catalog_insert_privileged', $ddl$
-CREATE POLICY metric_catalog_insert_privileged ON public.metric_catalog FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY metric_catalog_insert_privileged ON public.metric_catalog FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17321,7 +17615,7 @@ $ddl$);
 
 -- metric_catalog metric_catalog_update_privileged :: POLICY
 SELECT public.replay_policy('public.metric_catalog', 'metric_catalog_update_privileged', $ddl$
-CREATE POLICY metric_catalog_update_privileged ON public.metric_catalog FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY metric_catalog_update_privileged ON public.metric_catalog FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17335,7 +17629,7 @@ ALTER TABLE public.metric_groups ENABLE ROW LEVEL SECURITY;
 -- metric_groups metric_groups_insert_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.metric_groups', 'metric_groups_insert_privileged', $ddl$
-CREATE POLICY metric_groups_insert_privileged ON public.metric_groups FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY metric_groups_insert_privileged ON public.metric_groups FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17349,7 +17643,7 @@ $ddl$);
 
 -- metric_groups metric_groups_update_privileged :: POLICY
 SELECT public.replay_policy('public.metric_groups', 'metric_groups_update_privileged', $ddl$
-CREATE POLICY metric_groups_update_privileged ON public.metric_groups FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY metric_groups_update_privileged ON public.metric_groups FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17562,14 +17856,14 @@ ALTER TABLE public.schemas ENABLE ROW LEVEL SECURITY;
 -- schemas schemas_delete_privileged :: POLICY
 BEGIN;
 SELECT public.replay_policy('public.schemas', 'schemas_delete_privileged', $ddl$
-CREATE POLICY schemas_delete_privileged ON public.schemas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY schemas_delete_privileged ON public.schemas FOR DELETE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
 
 -- schemas schemas_insert_privileged :: POLICY
 SELECT public.replay_policy('public.schemas', 'schemas_insert_privileged', $ddl$
-CREATE POLICY schemas_insert_privileged ON public.schemas FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY schemas_insert_privileged ON public.schemas FOR INSERT TO authenticated WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 
 --
@@ -17583,7 +17877,7 @@ $ddl$);
 
 -- schemas schemas_update_privileged :: POLICY
 SELECT public.replay_policy('public.schemas', 'schemas_update_privileged', $ddl$
-CREATE POLICY schemas_update_privileged ON public.schemas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY schemas_update_privileged ON public.schemas FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17611,7 +17905,7 @@ $ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 
 -- system_settings system_settings_update_admin :: POLICY
 SELECT public.replay_policy('public.system_settings', 'system_settings_update_admin', $ddl$
-CREATE POLICY system_settings_update_admin ON public.system_settings FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+CREATE POLICY system_settings_update_admin ON public.system_settings FOR UPDATE TO authenticated USING ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa))) WITH CHECK ((public.has_role(ARRAY['Administrator'::text]) AND ( SELECT public.require_mfa() AS require_mfa)));
 $ddl$);
 COMMIT;
 
@@ -17719,10 +18013,10 @@ GRANT ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text)
 
 --
 
--- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid) :: ACL
-REVOKE ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid) TO service_role;
-GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid) TO authenticated;
+-- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid[], p_class text[], p_counts boolean) :: ACL
+REVOKE ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid[], p_class text[], p_counts boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid[], p_class text[], p_counts boolean) TO service_role;
+GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text[], p_action text[], p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text, p_changed_by uuid[], p_class text[], p_counts boolean) TO authenticated;
 
 --
 
@@ -18316,6 +18610,13 @@ GRANT ALL ON FUNCTION public.may_manage_captures() TO authenticated;
 
 --
 
+-- FUNCTION mfa_satisfied() :: ACL
+REVOKE ALL ON FUNCTION public.mfa_satisfied() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.mfa_satisfied() TO service_role;
+GRANT ALL ON FUNCTION public.mfa_satisfied() TO authenticated;
+
+--
+
 -- FUNCTION peek_gateway_enrollment_token(p_token text) :: ACL
 REVOKE ALL ON FUNCTION public.peek_gateway_enrollment_token(p_token text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.peek_gateway_enrollment_token(p_token text) TO service_role;
@@ -18332,6 +18633,15 @@ GRANT ALL ON FUNCTION public.place_cell_in_its_area() TO service_role;
 REVOKE ALL ON FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) TO service_role;
 GRANT ALL ON FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 numeric, p_y2 numeric, p_aspect numeric) TO authenticated;
+
+--
+
+-- FUNCTION platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) :: ACL
+-- Every reader of platform_alerts_active calls it, and so does the sender. anon by name, as after
+-- the sweep.
+REVOKE ALL ON FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) FROM PUBLIC, anon;
+GRANT ALL ON FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) TO service_role;
+GRANT ALL ON FUNCTION public.platform_alert_suppressing_window(p_entity_type text, p_entity_id uuid, p_at timestamp with time zone) TO authenticated;
 
 --
 
@@ -18599,6 +18909,13 @@ REVOKE ALL ON FUNCTION public.require_backup_service_caller(p_fn text) FROM PUBL
 REVOKE ALL ON FUNCTION public.require_ingestion_caller(p_fn text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.require_ingestion_caller(p_fn text) TO service_role;
 GRANT ALL ON FUNCTION public.require_ingestion_caller(p_fn text) TO authenticated;
+
+--
+
+-- FUNCTION require_mfa() :: ACL
+REVOKE ALL ON FUNCTION public.require_mfa() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.require_mfa() TO service_role;
+GRANT ALL ON FUNCTION public.require_mfa() TO authenticated;
 
 --
 
@@ -19104,6 +19421,13 @@ GRANT SELECT ON TABLE public.telemetry_1h TO authenticated;
 
 --
 
+-- TABLE telemetry_device_5m, telemetry_device_1h, telemetry_device_coverage :: ACL
+-- Read by telemetry_coverage() (0245) as its caller, as the rollups are read.
+GRANT SELECT ON TABLE timescale.telemetry_device_5m, timescale.telemetry_device_1h,
+    timescale.telemetry_device_coverage TO authenticated, service_role;
+
+--
+
 -- TABLE telemetry_1m :: ACL
 GRANT SELECT ON TABLE timescale.telemetry_1m TO authenticated;
 GRANT SELECT ON TABLE timescale.telemetry_1m TO service_role;
@@ -19366,7 +19690,7 @@ BEGIN
             'audit_domain_for(text, text)',
             'audit_telemetry_columns()',
             'audit_trail_backup_job_ids_matching(text)',
-            'audit_trail_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text, uuid)',
+            'audit_trail_page(integer, boolean, text[], text[], uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text, uuid[], text[], boolean)',
             'audit_trail_user_ids_matching(text)',
             'auth_pre_request()',
             'authorize_host_gateway_credential(uuid)',

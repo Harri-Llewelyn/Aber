@@ -8,7 +8,8 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconInbox } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
-import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { FilterDropdown } from '../common/FilterChecklist'
 import { APPROVALS_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
@@ -21,6 +22,8 @@ import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
+import { ActionButton } from '../common/ActionButton'
+import { RequiredMark } from '../common/RequiredMark'
 import { formatDateTime, formatRelative } from '../../utils/format'
 import { canDecide } from '../../utils/proposalAuthority'
 import { cellIconEntry } from '../../utils/cellIcon'
@@ -51,6 +54,11 @@ export const KINDS = [
 ]
 
 const KIND_BY_ID = new Map(KINDS.map(l => [l.id, l]))
+
+/** The Kind filter's values. A link from before reads `kind=all` as no kind chosen. */
+const KIND_OPTIONS = KINDS.map(l => ({ value: l.id, label: l.label }))
+const NO_KINDS = Object.freeze([])
+const KIND_ALIASES = Object.freeze({ all: NO_KINDS })
 
 /**
  * A readable label for a proposable key. Presentation only, and it falls back rather than filters:
@@ -257,33 +265,48 @@ function DiffTable({ proposal, names, replaced }) {
   )
 }
 
+/** Reject's reason, which the database requires; a refusal is shown here as it was worded. */
 function RejectDialog({ onCancel, onConfirm, busy }) {
   const [reason, setReason] = useState('')
-  const blank = reason.trim() === ''
+  const [error, setError] = useState(null)
+  const problem = reason.trim() === '' ? 'Say why it is rejected' : null
+  const reject = async () => {
+    setError(null)
+    try {
+      await onConfirm(reason.trim())
+    } catch (err) {
+      setError(err?.message || 'That was refused.')
+    }
+  }
   return (
     <Modal
       title="Reject this proposal"
       icon={<IconX size={18} />}
       size="sm"
-      onClose={onCancel}
+      onClose={busy ? () => {} : onCancel}
+      problem={problem}
+      error={error}
       footer={
         <>
-          <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-          <button
+          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+          <ActionButton
             type="button"
             className="btn btn-danger"
-            disabled={blank || busy}
-            onClick={() => onConfirm(reason.trim())}
+            pending={busy}
+            pendingLabel="Rejecting…"
+            disabled={problem !== null}
+            title={problem ?? undefined}
+            onClick={reject}
           >
             Reject
-          </button>
+          </ActionButton>
         </>
       }
     >
       {/* A CHECK constraint requires the reason: a rejected proposal frees its slot at once, so
           the reason is what makes a second attempt different from the first. */}
       <label className="form-label" htmlFor="reject-reason">
-        Why? The proposer sees this, and it is the only thing they get other than “no”.
+        Why? The proposer sees this, and it is the only thing they get other than “no”. <RequiredMark />
       </label>
       <textarea
         id="reject-reason"
@@ -292,6 +315,7 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
         value={reason}
         onChange={e => setReason(e.target.value)}
         placeholder="That machine is being retired next month."
+        aria-required="true"
       />
     </Modal>
   )
@@ -392,13 +416,15 @@ function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMes
 }
 
 /**
- * The filter both queues share. `entity_id` is searchable because a route from elsewhere arrives
- * pointed at one subject by uuid.
+ * The filter both queues share. `kinds` is the kinds chosen, any of which a proposal may be; none,
+ * or `'all'`, is every kind, and one kind may be passed alone. `entity_id` is searchable because a
+ * route from elsewhere arrives pointed at one subject by uuid.
  */
-export function filterProposals(rows, kind, query, names = new Map()) {
+export function filterProposals(rows, kinds, query, names = new Map()) {
   const needle = String(query || '').trim().toLowerCase()
+  const chosen = Array.isArray(kinds) ? kinds : (kinds && kinds !== 'all' ? [kinds] : [])
   return rows.filter(p => {
-    if (kind !== 'all' && p.entity_type !== kind) return false
+    if (chosen.length > 0 && !chosen.includes(p.entity_type)) return false
     if (!needle) return true
     // The fields somebody remembers about a request: subject, reason, rationale, the proposer's
     // name, email or machine name, and the id.
@@ -408,9 +434,12 @@ export function filterProposals(rows, kind, query, names = new Map()) {
   })
 }
 
-/** The kind-and-text filter bar, identical over both queues because the queues are one shape. */
-function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, label }) {
-  const activeFilterCount = (kind !== 'all' ? 1 : 0) + (query ? 1 : 0)
+/**
+ * The kind-and-text filter bar, identical over both queues because the queues are one shape.
+ * `counts` is each kind's count among the proposals the search lets through.
+ */
+function ProposalFilters({ kind, onKind, counts, query, onQuery, placeholder, label }) {
+  const activeFilterCount = (kind.length ? 1 : 0) + (query ? 1 : 0)
   return (
     <div className="filter-bar">
       <SearchInput
@@ -420,21 +449,18 @@ function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, labe
         placeholder={placeholder}
         ariaLabel={`Filter ${label} by what they are about`}
       />
-      <select
-        className="form-control control-md"
+      <FilterDropdown
+        label="Kind"
+        noun="kind"
+        plural="kinds"
+        options={KIND_OPTIONS}
         value={kind}
-        onChange={e => onKind(e.target.value)}
-        aria-label={`Filter ${label} by kind`}
-      >
-        <option value="all">All kinds ({rows.length})</option>
-        {KINDS.map(l => (
-          <option key={l.id} value={l.id}>
-            {l.label} ({rows.filter(p => p.entity_type === l.id).length})
-          </option>
-        ))}
-      </select>
+        onChange={onKind}
+        counts={counts}
+        width="md"
+      />
       <div className="filter-bar-actions">
-        <ClearFilters count={activeFilterCount} onClear={() => { onKind('all'); onQuery('') }} />
+        <ClearFilters count={activeFilterCount} onClear={() => { onKind(NO_KINDS); onQuery('') }} />
       </div>
     </div>
   )
@@ -461,9 +487,9 @@ export function ApprovalsTab({
   const [selectedId, setSelectedId] = useUrlState('proposal', '', { allowed: loading ? null : proposals.map(p => p.id) })
   // The tab, in the path: `/approvals` (Awaiting a decision) or `/approvals/decided`.
   const [queue, setQueue, queueHref] = useUrlTab('approvals', QUEUES.map(q => q.id), 'open')
-  // The queue on show filters by one kind and one search, in the address. A queue change drops
-  // them, so each queue opens unfiltered. A device drawer's hand-over arrives as `?search=<id>`.
-  const [kindFilter, setKindFilter] = useUrlState('kind', 'all', { allowed: ['all', ...KINDS.map(k => k.id)] })
+  // The queue on show filters by kinds and one search, in the address. A queue change drops them,
+  // so each queue opens unfiltered. A device drawer's hand-over arrives as `?search=<id>`.
+  const [kindFilter, setKindFilter] = useUrlList('kind', NO_KINDS, { allowed: KINDS.map(k => k.id), aliases: KIND_ALIASES })
   const [queryFilter, setQueryFilter] = useUrlState('search')
   const [decidedKind, setDecidedKind] = [kindFilter, setKindFilter]
   const [decidedQuery, setDecidedQuery] = [queryFilter, setQueryFilter]
@@ -539,6 +565,15 @@ export function ApprovalsTab({
   const openFiltered = useMemo(
     () => filterProposals(open, openKind, openQuery, personNames), [open, openKind, openQuery, personNames])
 
+  /** Each kind's count in a queue, among the proposals its search lets through. */
+  const kindCounts = (rows, query) => {
+    const counts = new Map()
+    for (const p of filterProposals(rows, NO_KINDS, query, personNames)) {
+      counts.set(p.entity_type, (counts.get(p.entity_type) || 0) + 1)
+    }
+    return counts
+  }
+
   /* What waits on this viewer, by the rule the sidebar's count uses: lanes they may decide, and not
      their own requests. */
   const waiting = useMemo(
@@ -571,6 +606,11 @@ export function ApprovalsTab({
   }, [trailId])
   const replaced = trailId === null ? null : replacedByTrail.get(trailId)
 
+  /**
+   * Approve or reject. A refusal is the database's sentence: an approval can fail because the patch
+   * violates a CHECK, and that sentence is the one the approver needs. Reject's dialog shows it; an
+   * approval is a drawer button, so its refusal is a toast, which is in view there.
+   */
   const decide = async (proposal, action, reason) => {
     setBusyId(proposal.id)
     try {
@@ -583,8 +623,7 @@ export function ApprovalsTab({
       setRejecting(null)
       await refresh()
     } catch (e) {
-      // The message is the database's: an approval can fail because the patch violates a CHECK, and
-      // that sentence is the one the approver needs.
+      if (action === 'reject') throw e
       showToast?.(e?.message || 'That was refused.', 'error')
     } finally {
       setBusyId(null)
@@ -679,7 +718,7 @@ export function ApprovalsTab({
           {queue === 'open' ? (
             <>
               <ProposalFilters
-                rows={open} kind={openKind} onKind={setOpenKind}
+                kind={openKind} onKind={setOpenKind} counts={kindCounts(open, openQuery)}
                 query={openQuery} onQuery={setOpenQuery}
                 label="open proposals"
                 placeholder="Search subject, proposer or rationale…"
@@ -689,7 +728,7 @@ export function ApprovalsTab({
                 selectedId={selectedId}
                 onSelect={toggleSelected}
                 loading={loading}
-                filtered={openKind !== 'all' || Boolean(openQuery)}
+                filtered={openKind.length > 0 || Boolean(openQuery)}
                 emptyMessage="Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves."
                 filteredMessage="Nothing open matches these filters."
               />
@@ -697,7 +736,7 @@ export function ApprovalsTab({
           ) : (
             <>
               <ProposalFilters
-                rows={decided} kind={decidedKind} onKind={setDecidedKind}
+                kind={decidedKind} onKind={setDecidedKind} counts={kindCounts(decided, decidedQuery)}
                 query={decidedQuery} onQuery={setDecidedQuery}
                 label="decided proposals"
                 placeholder="Search subject, proposer or reason…"
@@ -707,7 +746,7 @@ export function ApprovalsTab({
                 selectedId={selectedId}
                 onSelect={toggleSelected}
                 loading={loading}
-                filtered={decidedKind !== 'all' || Boolean(decidedQuery)}
+                filtered={decidedKind.length > 0 || Boolean(decidedQuery)}
                 emptyMessage="Nothing has been decided yet."
                 filteredMessage="No decided proposal matches these filters."
               />

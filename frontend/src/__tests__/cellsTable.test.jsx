@@ -5,6 +5,8 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
 import { tooltipOf } from '../test/tooltips'
+import { dropdownButton, openDropdown, pick } from '../test/listFilters'
+import { deviceSummaries } from '../test/deviceSummary'
 
 /**
  * The Cells page as a table. The context drawer holds the UUID, both membership lists as linking
@@ -62,7 +64,7 @@ const ready = async () => waitFor(() => expect(table()).toBeTruthy())
 
 // The list opens on Active; an archived cell is one filter away.
 const showArchived = async () => {
-  fireEvent.change(await screen.findByLabelText('Lifecycle'), { target: { value: 'archived' } })
+  await waitFor(() => pick('Lifecycle', 'archived'))
   await ready()
 }
 
@@ -122,7 +124,7 @@ describe('assigned gateways and devices', () => {
     await ready()
 
     const row = rowFor('Assembly Line 1')
-    expect(within(row).getByText('1 Online / 1 Offline')).toBeTruthy()
+    expect(deviceSummaries(row)).toContain('1 Online / 1 Offline')
     expect(within(row).getByText('CNC_Mill_01')).toBeTruthy()
   })
 
@@ -144,7 +146,7 @@ describe('assigned gateways and devices', () => {
     await ready()
 
     const row = rowFor('Assembly Line 1')
-    expect(within(row).getByText('1 Online / 0 Offline')).toBeTruthy()
+    expect(deviceSummaries(row)).toContain('1 Online / 0 Offline')
     expect(within(row).getByText('CNC_Old (archived)')).toBeTruthy()
 
     // Line 1 holds three device rows but one device in service, so it sorts before Line 2's two.
@@ -172,7 +174,7 @@ describe('assigned gateways and devices', () => {
       ]
     })
     await ready()
-    expect(within(rowFor('Assembly Line 1')).getByText('1 Online / 1 Offline / 1 Awaiting first birth')).toBeTruthy()
+    expect(deviceSummaries(rowFor('Assembly Line 1'))).toContain('1 Online / 1 Offline / 1 Awaiting first birth')
 
     fireEvent.click(within(table()).getByText('Assembly Line 1'))
     await waitFor(() => expect(panel()).toBeTruthy())
@@ -351,7 +353,7 @@ describe('the row and its drawer', () => {
     await waitFor(() => expect(panel()).toBeTruthy())
 
     const link = within(panel()).getByRole('link', { name: /Show Its Devices/ })
-    expect(link.getAttribute('href')).toBe('/devices?cell=cell-1&lifecycle=all')
+    expect(link.getAttribute('href')).toBe('/devices?cell=cell-1&lifecycle=active,archived')
     // The Devices page's list leaves quarantined devices to its Quarantine table.
     expect(tooltipOf(link)).toMatch(/1 quarantined device is in its Quarantine table\.$/)
   })
@@ -447,7 +449,7 @@ describe('filters still narrow the table', () => {
   it('starts the toolbar with the search box, then the lifecycle', async () => {
     renderCells({}, { cells: [] })
     await waitFor(() => expect(document.querySelector('.empty-state')).toBeTruthy())
-    expect(expectSearchFirst('Search cells').nextElementSibling).toBe(screen.getByLabelText('Lifecycle'))
+    expect(expectSearchFirst('Search cells').nextElementSibling).toBe(dropdownButton('Lifecycle'))
   })
 
   it('says there are none yet on an empty stack, with no count on the heading', async () => {
@@ -457,14 +459,16 @@ describe('filters still narrow the table', () => {
     expect(document.querySelector('.card-header .section-count')).toBeNull()
   })
 
-  it('opens on Active, with the counts in the lifecycle options rather than on the heading', async () => {
+  it('opens on Active, with the counts beside the lifecycle values rather than on the heading', async () => {
     renderCells({}, {
       cells: [CELL, { ...CELL, cell_id: 'cell-2', cell_name: 'Paint Shop', gateways: [] }, { ...CELL, cell_id: 'cell-3', cell_name: 'Old Bay', is_archived: true }]
     })
     await ready()
-    expect(screen.getByLabelText('Lifecycle')).toHaveValue('active')
+    expect(dropdownButton('Lifecycle')).toHaveTextContent('Active')
     expect(within(table()).queryByText('Old Bay')).toBeNull()
-    expect(within(screen.getByLabelText('Lifecycle')).getByRole('option', { name: 'Active (2)' })).toBeInTheDocument()
+    expect(within(openDropdown('Lifecycle')).getByRole('checkbox', { name: 'Active 2' }).checked).toBe(true)
+    expect(within(openDropdown('Lifecycle')).getByRole('checkbox', { name: 'Archived 1' }).checked).toBe(false)
+    fireEvent.click(dropdownButton('Lifecycle'))
     fireEvent.change(screen.getByPlaceholderText(/Search by Cell UUID or name/), { target: { value: 'paint' } })
     expect(within(table()).getByText('Paint Shop')).toBeInTheDocument()
     expect(document.querySelector('.card-header .section-count')).toBeNull()

@@ -39,11 +39,11 @@ describe('every tab tooltip', () => {
   })
 
   it('covers every tab of the pages it lists', () => {
-    expect(TOOLTIPS).toHaveLength(6 + 2 + 2 + 4 + 2 + 3 + 5 + 5 + 4)
+    expect(TOOLTIPS).toHaveLength(6 + 2 + 2 + 4 + 2 + 3 + 5 + 7 + 4)
   })
 
   it('has a sentence for each Settings category the database seeds', () => {
     // Backups' settings are all edited in its destination dialog, so it never shows a tab.
-    expect(Object.keys(CATEGORY_DESCRIPTIONS).sort()).toEqual(['Approvals', 'Audit Trail', 'Cold Storage', 'Retention', 'Site'])
+    expect(Object.keys(CATEGORY_DESCRIPTIONS).sort()).toEqual(['Approvals', 'Audit Trail', 'Cold Storage', 'Notifications', 'Retention', 'Security', 'Site'])
   })
 })

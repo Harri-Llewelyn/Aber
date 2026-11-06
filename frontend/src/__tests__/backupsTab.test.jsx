@@ -5,6 +5,7 @@ import { backupUrl } from '../routes'
 import { BackupsTab, BACKUP_STALE_HOURS, physicalBackupState, keptBecause, backupWarnings } from '../components/tabs/BackupsTab'
 import { nextHistorianBackup } from '../utils/historianBackupSchedule'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
+import { PERMISSION_UUIDS } from '../constants'
 
 /**
  * The Backups page. What has to hold: the page never takes a backup itself, only queues one and
@@ -41,6 +42,7 @@ vi.mock('../hooks/usePolling', () => ({ usePolling: vi.fn() }))
 
 import { api } from '../api'
 import { expectCardHeading, pageToolbar } from '../test/cardHeading'
+import { dropdownButton, pick } from '../test/listFilters'
 import { getByTooltip, tooltipOf } from '../test/tooltips'
 
 const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
@@ -126,7 +128,7 @@ describe('the list of runs', () => {
     const header = expectCardHeading('Backups', /newest first/)
     expect(header.querySelector('.section-count')).toBeNull()
     const bar = pageToolbar()
-    expect(within(bar).getByLabelText('Run status filter')).toBeInTheDocument()
+    expect(within(bar).getByRole('button', { name: /^Status: / })).toBeInTheDocument()
     const actions = bar.querySelector(':scope > .filter-bar-actions')
     const buttons = within(actions).getAllByRole('button').map(b => b.textContent.trim())
     expect(buttons).toEqual(['Set a destination', 'Take a backup'])
@@ -310,6 +312,31 @@ describe('a run\'s panel', () => {
     fireEvent.click(within(screen.getByTestId('run-j-3')).getAllByRole('cell')[0])
     expect(panel()).toHaveTextContent('pg_dump timescaledb failed: connection refused')
     expect(panel().querySelector('.context-action')).toBeNull()
+  })
+
+  it('opens the Audit Trail on the run for a reader of the trail, searched by the request with no kind', async () => {
+    /* One search finds both histories: the request's, and the backup's it took, released or pruned
+       (audit_trail_page(), 0228). A kind would hide one of the two lanes. */
+    const hasPermission = vi.fn((p) => p === PERMISSION_UUIDS.AUDIT_TRAIL_READ)
+    render(<BackupsTab showToast={vi.fn()} hasPermission={hasPermission} />)
+    fireEvent.click(within(await screen.findByTestId('run-j-1')).getAllByRole('cell')[0])
+    const link = within(panel()).getByRole('link', { name: /View Audit Trail/ })
+    const href = new URL(link.getAttribute('href'), 'http://x')
+    expect(href.pathname).toBe('/audit-trail')
+    expect(href.searchParams.get('search')).toBe('j-1')
+    expect(href.searchParams.has('type')).toBe(false)
+    expect([...panel().querySelectorAll('.context-action')].map(a => a.textContent.trim()))
+      .toEqual(['Release', 'View Audit Trail'])
+
+    // A failed run took no backup, and its own lane is still there to read.
+    fireEvent.click(within(screen.getByTestId('run-j-3')).getAllByRole('cell')[0])
+    expect(within(panel()).getByRole('link', { name: /View Audit Trail/ })).toBeTruthy()
+  })
+
+  it('offers no View Audit Trail to a reader who may not open it', async () => {
+    render(<BackupsTab showToast={vi.fn()} hasPermission={() => false} />)
+    fireEvent.click(within(await screen.findByTestId('run-j-1')).getAllByRole('cell')[0])
+    expect(within(panel()).queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
   })
 })
 
@@ -503,15 +530,17 @@ describe('the off-site copy', () => {
     expect(screen.getByLabelText('Secret access key').value).toBe('rotated')
   })
 
-  it('removes the destination after asking', async () => {
+  it('removes the destination after asking, and says so as a success, as Save does', async () => {
     api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
     api.clearBackupOffsiteDestination.mockResolvedValue(true)
-    renderTab()
+    const { props } = renderTab()
     fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove the destination' }))
     expect(screen.getByText(/Copies already made stay in the bucket/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(api.clearBackupOffsiteDestination).toHaveBeenCalled())
+    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
+      'Off-site destination removed. Copies already made stay in the bucket.', 'success', { to: backupUrl() }))
   })
 })
 
@@ -600,12 +629,12 @@ describe('the row of cards', () => {
     api.backupRunSummary.mockResolvedValue({ ...TREND, latestOutcome: { id: 'j-3', status: 'FAILED', started_at: hoursAgo(1), finished_at: hoursAgo(1) } })
     renderTab()
     await screen.findByTestId('run-j-3')
-    fireEvent.change(screen.getByLabelText('Run status filter'), { target: { value: 'completed' } })
+    pick('Status', 'completed')
     await waitFor(() => expect(screen.queryByTestId('run-j-3')).toBeNull())
 
     fireEvent.click(card('runs'))
     await waitFor(() => expect(panel()).toHaveTextContent('pg_dump timescaledb failed: connection refused'))
-    expect(screen.getByLabelText('Run status filter')).toHaveValue('all')
+    expect(dropdownButton('Status')).toHaveTextContent('Any status')
     expect(screen.getByTestId('run-j-3')).toHaveClass('row-selected')
   })
 
@@ -698,8 +727,6 @@ describe('the row of cards', () => {
 })
 
 describe('the filter and the pages', () => {
-  const filter = () => screen.getByLabelText('Run status filter')
-
   it('asks for every finished run by default, a page of 30', async () => {
     renderTab()
     await screen.findByTestId('run-j-1')
@@ -709,7 +736,7 @@ describe('the filter and the pages', () => {
   it('shows only the failed runs under Failed', async () => {
     renderTab()
     await screen.findByTestId('run-j-1')
-    fireEvent.change(filter(), { target: { value: 'failed' } })
+    pick('Status', 'failed')
     await waitFor(() => expect(screen.queryByTestId('run-j-1')).toBeNull())
     expect(api.listBackupRuns).toHaveBeenLastCalledWith({ statuses: ['FAILED'], limit: 30 })
     expect(screen.getAllByTestId(/^run-/).map(r => r.dataset.testid)).toEqual(['run-j-3'])
@@ -718,17 +745,38 @@ describe('the filter and the pages', () => {
   it('shows only the completed runs under Completed, pruned ones included, and no cancelled one', async () => {
     renderTab()
     await screen.findByTestId('run-j-1')
-    fireEvent.change(filter(), { target: { value: 'completed' } })
+    pick('Status', 'completed')
     await waitFor(() => expect(screen.queryByTestId('run-j-3')).toBeNull())
     expect(api.listBackupRuns).toHaveBeenLastCalledWith({ statuses: ['COMPLETED'], limit: 30 })
     expect(screen.getAllByTestId(/^run-/).map(r => r.dataset.testid)).toEqual(['run-j-1', 'run-j-2', 'run-j-5'])
+  })
+
+  it('asks for several statuses at once, and keeps them in the address', async () => {
+    renderTab()
+    await screen.findByTestId('run-j-1')
+    pick('Status', 'failed', 'cancelled')
+    await waitFor(() => expect(api.listBackupRuns).toHaveBeenLastCalledWith({ statuses: ['FAILED', 'CANCELLED'], limit: 30 }))
+    expect(dropdownButton('Status')).toHaveTextContent('2 statuses')
+    expect(new URLSearchParams(window.location.search).get('status')).toBe('failed,cancelled')
+  })
+
+  it('opens a link written with one status, and reads an old status=all as every run', async () => {
+    window.history.replaceState(null, '', '/backups?status=failed')
+    const first = renderTab()
+    await waitFor(() => expect(api.listBackupRuns).toHaveBeenLastCalledWith({ statuses: ['FAILED'], limit: 30 }))
+    first.unmount()
+
+    window.history.replaceState(null, '', '/backups?status=all')
+    renderTab()
+    await waitFor(() => expect(api.listBackupRuns).toHaveBeenLastCalledWith({ statuses: ['COMPLETED', 'FAILED', 'CANCELLED'], limit: 30 }))
+    expect(window.location.search).toBe('')
   })
 
   it('says so when a filter matches nothing', async () => {
     serveRuns([PINNED, SCHEDULED])
     renderTab()
     await screen.findByTestId('run-j-1')
-    fireEvent.change(filter(), { target: { value: 'failed' } })
+    pick('Status', 'failed')
     expect(await screen.findByText('No run has failed.')).toBeInTheDocument()
   })
 
@@ -755,7 +803,7 @@ describe('the filter and the pages', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show 15 more' }))
     await waitFor(() => expect(api.listBackupRuns).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 60 })))
 
-    fireEvent.change(filter(), { target: { value: 'completed' } })
+    pick('Status', 'completed')
     await waitFor(() => expect(api.listBackupRuns).toHaveBeenLastCalledWith({ statuses: ['COMPLETED'], limit: 30 }))
   })
 })
@@ -862,7 +910,7 @@ describe('whether backups are working now', () => {
     await screen.findByTestId('backup-summary')
     api.backupRunSummary.mockRejectedValue(new Error('backup_summary: permission denied'))
     // The next load fails; the cards keep the last answer, and the error above them says so.
-    fireEvent.change(screen.getByLabelText('Run status filter'), { target: { value: 'failed' } })
+    pick('Status', 'failed')
     const error = await screen.findByText('backup_summary: permission denied')
     expect(screen.getByTestId('backup-summary')).not.toContainElement(error)
     expect(error.compareDocumentPosition(screen.getByTestId('backup-summary')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -874,7 +922,7 @@ describe('whether backups are working now', () => {
     renderTab()
     expect(await screen.findByText('No backups yet.')).toBeInTheDocument()
     expect(card('runs')).toBeNull()
-    expect(screen.queryByLabelText('Run status filter')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Status: / })).toBeNull()
   })
 })
 

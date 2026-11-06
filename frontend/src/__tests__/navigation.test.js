@@ -35,10 +35,19 @@ describe('the groups', () => {
     }
   })
 
-  it('leads with the Site Map alone', () => {
-    // The landing page, and the one page that answers "how is everything right now" rather than
-    // belonging to a subject.
-    expect(TABS.filter(t => t.group === NAV_GROUPS[0].id).map(t => t.id)).toEqual(['site-map'])
+  it('leads with the Site Map, and History directly below it', () => {
+    // The landing page answers "how is everything right now" rather than belonging to a subject,
+    // and History answers the same over a period. Nothing else joins them.
+    expect(TABS.filter(t => t.group === NAV_GROUPS[0].id).map(t => t.id)).toEqual(['site-map', 'history'])
+  })
+
+  it('leaves History ungated, as the Site Map is', () => {
+    const history = TABS.find(t => t.id === 'history')
+    expect(history.label).toBe('History')
+    expect(history.permission).toBeUndefined()
+    expect(history.role).toBeUndefined()
+    expect(tabIsVisible(history, () => false, 'Operator')).toBe(true)
+    expect(history.pageTabs.map(t => t.id)).toEqual(['overview', 'device', 'alerts'])
   })
 
   /**

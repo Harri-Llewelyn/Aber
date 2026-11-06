@@ -81,7 +81,10 @@ python ingestion/test_structured_logging.py
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
 # the log store exists to keep is actually being kept. Where observability.alloy.logForward is on,
 # it also checks the forward: pointed at the in-cluster Loki with an external label, a line arrives
-# twice; pointed at an address nothing answers, lines still reach the in-cluster store.
+# twice; pointed at an address nothing answers, lines still reach the in-cluster store. The same
+# drop is read back through service-logs, as the System page's Logs tab reads it: an
+# Administrator's read finds the device's line with its reason and device, an Operator's is
+# refused, and the read is one Audit Trail row however often it repeats.
 python test-harness/test_log_pipeline.py
 # Sign-in is limited per client, through Traefik and the gateway. Needs the stack up. A probe pod
 # spends its limit and the host must still sign in: it fails if GoTrue limits nothing, and if
@@ -104,10 +107,17 @@ python supabase/functions/manage-people/test_account_pictures_stack.py
 # The seeded Operator signs in to Grafana's client as Grafana does (the code flow with PKCE, the
 # consent page's approval, the code exchanged with the secret) and the app's refresh token works.
 # Then the person revokes through GoTrue, and in a second round an Administrator revokes through
-# revoke_app_approval(): each time the refresh token is refused, the API refuses the app's access
-# token, the next sign-in asks again, the person's dashboard is still served, and the Audit Trail
-# names who revoked it.
+# revoke_app_approval(): each time the refresh token is refused, Grafana's userinfo function refuses
+# the app's access token, the next sign-in asks again, the person's dashboard is still served, and
+# the Audit Trail names who revoked it.
 python supabase/test_revoking_an_app_ends_its_refresh_token.py
+# Each app's token reaches only its own routes (0235). Needs the stack up, with each app's client
+# secret. The seeded Shopfloor Manager signs in to Grafana, Node-RED and the Studio and forge doors
+# as each does, and each app's token reaches /auth/v1/user and its own userinfo function, and is
+# refused with the gateway's 403 on a PostgREST read, a Storage read and every other function. The
+# person's dashboard token reaches all of them, and an app's ID token is not served as the person.
+# An app whose client is not registered (Studio's when Studio is off) is skipped, with the reason.
+python supabase/test_each_app_s_token_reaches_only_its_own_routes.py
 # A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
 # the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
 # request with it, and reads its row back: the identity and the current UTC hour. A second request
@@ -120,6 +130,16 @@ python supabase/test_a_token_s_use_is_recorded.py
 # Reset MFA removes the factor, writes one MFA_RESET row and leaves the session signed in; your own
 # reset and a non-Administrator's are refused. The account's access is removed at the end.
 python supabase/test_a_person_can_enrol_a_second_factor.py
+# With MFA required, a change to the platform needs a session that gave its code (0251). Needs the
+# stack up, with the secret key and the Grafana and Node-RED client secrets. A throwaway Shopfloor
+# Manager, made with the secret key, enrols a TOTP factor (codes computed from its secret). With
+# security.require_mfa_for_managers on, the consent step refuses its aal1 session on both of
+# Node-RED's consent calls and admits its aal2 one, Grafana's sign-in passes at aal1, and
+# gateway-bundle refuses aal1 before it reads a gateway. Turning the switch on ends its Node-RED
+# session, won at aal1, while its Grafana session still refreshes, and writes one SESSIONS_ENDED
+# row. The switch is set back and the person deleted. Turning it on ends every covered person's app
+# sessions but Grafana's.
+python supabase/test_a_second_factor_guards_what_changes_the_platform.py
 # No service accepts a token signed with the shared secret. Needs the stack up, with the release
 # Secret's keys in the environment (dev-cluster test gives them). The seeded Administrator's ES256
 # session is served by PostgREST, GoTrue, a Realtime channel join, Storage, the Node-RED admin API
@@ -138,7 +158,9 @@ python test-harness/test_load_generator.py
 # no seq on the NDEATH, a timestamp on every metric, and is_historical on a replay.
 python test-harness/test_load_generator_payloads.py
 # The broker verdict the stack suites read a credential from: a timeout is retried and is never a
-# refusal, so a slow runner neither fails a working credential nor passes a revocation.
+# refusal, so a slow runner neither fails a working credential nor passes a revocation. And the
+# playback worker's credential file, found from its Deployment and read beside the delivery Secret:
+# a file behind the Secret is a gap naming both by fingerprint, never by value.
 python test-harness/test_stack_exec.py
 # The sign-in every stack suite uses: a 429 is waited out within a bound, then fails naming the
 # status, and is never read as missing seed accounts.
@@ -182,6 +204,11 @@ python ingestion/test_playback_credentials.py
 # has not dropped: a replay whose credential was re-issued partway used to end COMPLETED with every
 # message counted. A capture is read from a temporary file a message at a time, in flat memory.
 python ingestion/test_playback_worker_loop.py
+# The playback worker's metrics endpoint: one series, aber_playback_jobs_total{outcome}, with
+# failed, cancelled and completed at zero from startup and no other label value. Each outcome is
+# counted once the finish is recorded, as playback_finish() ranks them, and the startup sweep
+# counts the jobs it failed. Port 0 disables the endpoint, and any path but /metrics is a 404.
+python ingestion/test_playback_metrics.py
 # The playback worker's Sparkplug session -- the NDEATH Will, the NDEATH that ends every job, and
 # the bdSeq the replayed NBIRTH shares with both, so the Playback gateway reads OFFLINE after a replay
 python ingestion/test_playback_session.py
@@ -208,7 +235,8 @@ python ingestion/test_capture_lifecycle_stack.py
 # see -- a credential nothing had issued, and a worker that read its credentials once at startup.
 # Each left every page saying the right thing and no telemetry moving. So this mints the credential
 # (which is what exercises the delivery path), waits out the kubelet's Secret refresh, replays a
-# fixture, and asserts the rows arrived. THE SENTINEL METRIC IS LOAD BEARING: a name unique to the
+# fixture, and asserts the rows arrived. Before each replay, this suite and the two capture suites
+# wait until the worker's credential file, read with kubectl, holds what the delivery Secret holds. THE SENTINEL METRIC IS LOAD BEARING: a name unique to the
 # run can only have come from the replay, which is what makes "it landed under the replay lane and
 # under nothing else" checkable against a live historian. The fixture also holds the recorded
 # appliance's node heartbeat, with health and an outage report: the Playback gateway must record a
@@ -308,6 +336,15 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # reads it from there.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... GITEA_MACHINE_TOKEN=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
+# Aber's dispatcher, end to end (0247, 0248). A receiver pod of the ingestion image prints each
+# request it is sent; the webhook is pointed at it as the database owner, and what the stack held
+# is put back afterwards. A firing alert written with psql arrives signed with the Standard
+# Webhooks headers, an acknowledgement before the reminder stops it, an unacknowledged alert is
+# reminded, a resolve follows its firing message, and an address whose host is not allowed is
+# refused with nothing posted. Needs kubectl, notification-dispatch in the functions image and
+# NetworkPolicies off; skips without the keys.
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/notification-dispatch/test_notification_dispatch.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
 # service's gates; a requested backup is taken -- both dumps, the storage objects, the forge and,
@@ -366,7 +403,10 @@ SUPABASE_PUBLISHABLE_KEY=... MQTT_INGESTION_PASSWORD=... \
 # names only its purpose, and a delete naming a gateway or a platform principal reaches no broker
 # command. And the half of `scripts/scan-secrets.mjs` that needs no Docker: the history scope it
 # takes, an unknown one refused, and the accepted list `--ignore-union` reads from a throwaway
-# repository's branches, never from its pull request head, tag or stash. And the signing set
+# repository's branches, never from its pull request head, tag or stash. And the half of
+# `scripts/scan-source.mjs` that needs no Docker: which of Semgrep's errors fail the scan, a tracked
+# file it could not parse, whole or in part, beyond its named exceptions, and a tracked file outside
+# `.semgrepignore` that its report does not list as read. And the signing set
 # (`scripts/lib/signing-set.mjs`) completing values set up before 1.8.0, HS256 or ES256 with the
 # `oct` key, as `npm run setup` and `keys:rotate -- --signing-keys` apply it: what each gains, what
 # it keeps, and that a second run changes nothing.
@@ -415,8 +455,10 @@ python supabase/migrations/test_user_roles_rls.py
 # refuses as before, and a machine principal is refused. Every test rolls back.
 python supabase/migrations/test_user_roles_name_their_person_by_uuid.py
 # What has_role() and has_authority() cost per call (median of 5 runs of 10,000), beside the loop
-# alone, and EXPLAIN ANALYZE of a read user_roles' policy guards. Printed, never asserted: run it on
-# the same database before and after a change to either function or the table they read.
+# alone, and EXPLAIN ANALYZE of a read user_roles' policy guards, and the two for an app's token
+# (0235), and has_role() beside mfa_satisfied() with the MFA switch off and on, with the plan of an
+# UPDATE whose policy reads the switch once (0251). Printed, never asserted: run it on the same
+# database before and after a change to either function or the table they read.
 python supabase/migrations/test_role_checks_are_timed.py
 # The approvals queue (0086). The one that matters asserts what this item must NOT have done: an
 # Operator gained a write to the QUEUE and still cannot update a device, insert one, or write a
@@ -505,6 +547,11 @@ python supabase/migrations/test_audit_trail_partitioning.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_gateway_flow_deployed.py
 python supabase/migrations/test_platform_alerts_retention.py
+# Alert history is kept for 90 days (0244). 0002's block for the setting, read out of the file and
+# run twice as two boots: a fresh install seeds 90, 1.7's row at 7 moves to 90 once, a site at 30
+# keeps 30, and a 7 an Administrator chooses after the upgrade stays. The prune falls back to 90
+# days with the setting gone. Every test rolls back.
+python supabase/migrations/test_alert_history_is_kept_for_90_days.py
 python supabase/migrations/test_system_settings_rls.py
 # The site's Sparkplug group (0131), which is DISPLAYED and not editable. An Administrator holds
 # GRANT UPDATE (value) on system_settings, so a direct PostgREST write is admitted by RLS and only
@@ -530,6 +577,37 @@ python supabase/migrations/test_release_check.py
 # role writes them, anon reads nothing; the gateway count is online of enrolled, and stands when the
 # historian is out. Every test rolls back.
 python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
+# History reads each series carried forward (0233). Local tables stand in for the historian's
+# rollups and raw telemetry. A quiet bucket carries the last value, flagged is_carried; a bucket with
+# readings has their weighted average, minimum, maximum and last value, from the widest rollup whose
+# width divides it. Each series is seeded from the rollups before the window, from telemetry_1h
+# when it is older than its own rollup keeps, and never from raw, so a series silent longer than raw
+# retention still seeds. Nothing is carried past now; a series with nothing to carry has no row;
+# bad bounds and reads over 50,000 rows are refused before any read; anon may not call it, and it
+# reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_reads_each_series_carried_forward.py
+# History counts where readings arrived (0245). Local tables stand in for the historian's device
+# rollups and the coverage view. One row per device asked for, its counts an array,
+# oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider
+# one summed from the widest rollup that divides it for 40 devices or fewer; nothing finer than 5
+# minutes; more than 40 take 5 minutes or 1 hour only. Each row carries what
+# the rollup has counted. Bad bounds, more than 1,000 devices and reads over 360,000 buckets are
+# refused before any read; anon may not call it, and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_counts_where_readings_arrived.py
+# Reading a service's logs is recorded (0225). record_service_logs_read() writes one
+# SERVICE_LOGS_READ row in the service's lane of the security domain, naming the Administrator and
+# the read's service, level, filter and range. The database decides a row is due: one on the first
+# load and on each change, none on a refresh or a repeated direct call, and another person's reads
+# are not the caller's. Only an Administrator may write one; a level, range, service or filter
+# outside the function's rule is refused with no row. An Auditor reads the rows and a Shopfloor
+# Manager does not. Every test rolls back.
+python supabase/migrations/test_reading_a_service_s_logs_is_recorded.py
+# A read of a service's logs names a range or a fixed window (0230). A fixed window's row records
+# its two ends in UTC to the millisecond and no range; one row for each new window and none for a
+# repeat, whatever offset or session time zone the ends arrive in; a range or two ends, never both,
+# in order and at most 169 hours apart; one six-argument form, its ends defaulting to NULL, after
+# 0225 and 0230 replay over the four-argument one. Every test rolls back.
+python supabase/migrations/test_a_logs_read_names_a_range_or_a_fixed_window.py
 # A person's own preferences (0188, 0194). Each person reads, creates and changes their own
 # user_settings row and nobody else's, an Administrator included; anon and service_role hold
 # nothing; the CHECKs refuse an unknown theme or sidebar mode; single-key shortcuts start on and
@@ -641,6 +719,13 @@ python supabase/migrations/test_a_service_token_warns_before_it_expires.py
 # and an Auditor read the table, nobody else does, and nobody writes it directly. A replay of 0209
 # keeps what was recorded. Every test rolls back.
 python supabase/migrations/test_a_service_token_shows_when_it_was_last_used.py
+# aas-api and the Factory+ Directory accept a machine identity's token (0224). auth_probe() is
+# called as PostgREST calls it, the hook and then the probe with the token's claims: a machine
+# identity's token with no aud and a person's session pass, and the hook refuses a revoked token, a
+# withdrawn identity, a removed person and an ended session first. anon and service_role are
+# refused, also through a plan prepared for authenticated; a replay of 0224 keeps the grants.
+# Every test rolls back.
+python supabase/migrations/test_aas_api_and_the_directory_accept_a_machine_identity_s_token.py
 # Archiving is a lifecycle (0124). Areas archive like everything else and their archive moves
 # nothing beneath them (device_locations and cells.area_id are read before and after); the purge
 # job names areas last and its DELETE is guarded by the area-wide assets that still name the area,
@@ -694,6 +779,13 @@ python supabase/migrations/test_only_the_seed_makes_a_playback_gateway.py
 # replay. Its replay lanes are never counted in expected_publishers, and a real device that has
 # published, or sits behind a gateway that has reported, still is (0185).
 python supabase/migrations/test_a_shadow_gateway_is_never_stale.py
+# A failed or stuck capture or playback, and a silent playback worker, are platform conditions
+# (0226), each read through its Grafana rule's own query. A failed job gives a row for an hour and
+# then none. A job stuck five minutes past its own limits gives one, and one just inside gives none.
+# A silent worker gives one only while a playback is queued or running, so nothing queued is silent,
+# the seeded 'epoch' row included. The failure gates write no Audit Trail row, and grafana_reader
+# runs each rule and reads no table behind it. Every test rolls back.
+python supabase/migrations/test_a_failed_or_stuck_job_is_a_platform_condition.py
 # A shadow gateway holds no health (0186): the chain leaves the Playback gateway no reading, the
 # migration clears what a replay left and nothing else and changes nothing on a second boot, a
 # heartbeat with no health records none and no FLOW_DEPLOYED row, and the daemon's role reads the
@@ -752,6 +844,23 @@ python supabase/migrations/test_service_principal_revocation.py
 # person's other sessions, and every token that names no session, are still served. A removed
 # person is told their access was removed. Every test rolls back.
 python supabase/migrations/test_the_api_refuses_a_token_whose_session_has_ended.py
+# An app's token (0235): the client_id arm of the same hook, and the two role checks. A token GoTrue
+# issued to an app is refused before every other arm, for every app and every API role, and holds
+# no role or permission, a machine's arm included, so a row a role gates is closed to it; a row any
+# signed-in account reads is not, the gap Realtime keeps. A token with no client_id, or an empty or
+# null one, is served and answered as before. Every test rolls back.
+python supabase/migrations/test_an_app_s_token_reaches_only_its_own_routes.py
+# MFA required (0251), with request.jwt.claims at aal1, aal2 and a federated amr. The Settings row
+# is off by default and every role reads it; an Administrator turns it on from any session and off
+# only with a code. mfa_satisfied() for every role, a machine identity and no role, the switch on
+# and off. Every write policy and function that calls require_mfa() refuses an Administrator or a
+# Shopfloor Manager at aal1 while it is on (42501, detail mfa_required) and admits them otherwise;
+# an Operator and a machine identity are refused by role alone, never asked for MFA. Every has_role()
+# site naming a covered role asks, or is in supabase/mfa-exemptions.json, and a planted one is
+# caught. Turning it on ends every covered person's app sessions but Grafana's, refresh tokens with
+# them, with one SESSIONS_ENDED row each; a covered role granted while it is on ends that person's.
+# Every test rolls back.
+python supabase/migrations/test_with_mfa_required_a_write_needs_a_session_that_gave_its_code.py
 # A person's own sessions (0206). list_my_sessions() returns the caller's and nobody else's, the
 # one their token names first, a service's by its name, refreshed_at read as UTC, and no address
 # or token column; end_my_session() ends one, whose token auth_pre_request() then refuses, refuses
@@ -822,6 +931,13 @@ python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor
 # whether a dashboard call or GoTrue's own role wrote the table, and 0002's re-seed of a stack app
 # writes none. Every test rolls back.
 python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py
+# With Studio off, db-init says so without a warning (0002). Studio's client block runs as db-init's
+# psql runs it, with studio_enabled false, true and unset. False is a NOTICE, never a WARNING. A
+# client an earlier boot registered is removed, its approvals revoked and its sessions ended, with
+# one APP_REMOVED and an APP_APPROVAL_REVOKED per approval, and the next boot records nothing. True
+# again restores it. True without the secret warns, naming the Studio login and the secret to set.
+# Unset is today's behaviour and never removes; any other value fails the boot. Every test rolls back.
+python supabase/migrations/test_with_studio_off_db_init_says_so_without_a_warning.py
 # An Administrator's read-only broker account is recorded (0218). record_broker_account_created()
 # writes one INSERT row and record_broker_account_deleted() one DELETE row, in the broker_accounts
 # lane of the security domain, naming the Administrator, with the account's name, description and
@@ -863,6 +979,76 @@ python supabase/migrations/test_an_area_plan_can_be_turned.py
 # after 0168 and 0222 replay, and after 0222 replays over the ten-argument form; 0222's self-check
 # refuses two. Every test rolls back.
 python supabase/migrations/test_a_decision_keeps_its_decider_s_address_and_the_trail_filters_by_actor.py
+# An Audit Trail filter takes several values (0227). audit_trail_page() keeps the rows matching any
+# value of p_entity_type, p_action and p_changed_by, and combines the three with AND. A
+# one-element list returns what the single value did; NULL or an empty list is no constraint; a
+# value no row holds matches nothing. The cursor, total_matching, the purged rule, the search and
+# the caller's own policies hold under lists. One list form is declared, with its grants: after
+# the chain, after 0001's declaration and sweep, 0168, 0222 and 0227 replay over the single-value
+# form, and after 0227 alone does. Its self-check refuses two forms and a single-value argument.
+# Every test rolls back.
+python supabase/migrations/test_an_audit_trail_filter_takes_several_values.py
+# The Audit Trail sorts events into classes in the database (0228). audit_event_class() answers
+# every case in test-harness/fixtures/audit-event-classes.json, the four reads included, and stays
+# an IMMUTABLE SQL function the planner inlines. audit_trail_page(p_class) keeps the rows of any of
+# its classes, combined with the other lists by AND, and labels each event; the cursor, the totals
+# and the caller's policies hold. p_counts gives each class, kind and action its events under every
+# filter but its own, the search, the people and the purged rule included. A backup request's id
+# finds the backup it took, released and pruned; a cancelled request's, its own lane; another id,
+# what it did. One form is declared, with its grants and its five class indexes, after the chain
+# and after 0001's declaration and sweep, 0168, 0222, 0227 and 0228 replay over the form from
+# before. Every test rolls back.
+python supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py
+# A million-row Audit Trail answers a class-filtered page in under a second (0228). Attaches ten
+# months of 2001, a hundred thousand rows each, filled as tables of their own and attached so their
+# indexes are built as a stack has them (25 to 50 s), and drops them afterwards. As an Administrator,
+# the first page with Lifecycle chosen and its counts, the same with two classes, and the next page
+# each answer in under a second, the median of three warm calls; the totals, the deleted count and
+# the counts are exact. Every time is printed. NEVER POINT IT AT A STACK ANYBODY USES.
+python supabase/migrations/test_a_million_row_trail_answers_in_under_a_second.py
+# The Audit Trail knows which kinds each action is written for (0229). audit_trail_action_kinds()
+# names every (action, kind) pair the trail's writers can produce, read from the catalog (the audit
+# trigger's tables and operations, and each function that inserts an audit row), and no other; a
+# writer whose kind or action cannot be read fails it. Each pair's classes are audit_event_class()'s.
+# Read-only.
+python supabase/migrations/test_the_audit_trail_knows_which_kinds_each_action_is_written_for.py
+# A person acknowledges an alert (0231, 0232). An Operator, a Shopfloor Manager and an
+# Administrator each acknowledge a firing alert with a reason; an Auditor and a machine identity are
+# refused, and a machine identity's alert is not there for anyone but an Administrator. A resolved,
+# superseded or acknowledged occurrence is refused, the last naming who and when, and so is Other
+# without a note. The acknowledger, a Shopfloor Manager or an Administrator withdraws. A new
+# occurrence inherits the acknowledgement while the one before is firing, and nothing once the
+# fingerprint resolves. Each act writes one operational audit row in the alert's lane, or in a
+# machine identity's own in the security lane. Every test rolls back.
+python supabase/migrations/test_a_person_acknowledges_an_alert.py
+# An alert stays quiet during planned work (0240, 0241). A Shopfloor Manager and an Administrator
+# schedule, change and end a suppression window on a device, a gateway or a cell; an Operator, an
+# Auditor and a machine identity are refused, and nobody writes the table directly. A device window
+# covers the device, a gateway window the gateway's own alerts, and a cell window each device in the
+# cell when the alert is read, so a device moved out is no longer covered. Platform and machine
+# identity alerts are never covered. platform_alerts_active says suppressed before, during and after
+# a window, with every column it returned before. An occurrence records the window that first
+# covered it, at its start or when a window opens over it, and nothing clears it. Each act writes
+# one audit row in the subject's lane. Every test rolls back.
+python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
+# History lists the alerts that fired (0243). alert_occurrences() lists each occurrence that
+# overlaps the window, not only one that started in it, and none that ended at its start or started
+# at its end. A firing occurrence a later one of the same fingerprint replaced ends where that one
+# starts. Newest first, filtered by asset, bounded by its limit, each row the whole occurrence. An
+# Operator, a Shopfloor Manager and an Auditor read every alert but a machine identity's, which an
+# Administrator reads too. Every test rolls back.
+python supabase/migrations/test_history_lists_the_alerts_that_fired.py
+# Aber sends each alert to a webhook (0247-0249). The trigger queues a firing message as an
+# occurrence starts firing and a resolve as it resolves, and nothing on a repeat upsert or a
+# last_confirmed_at stamp, below the route, before the webhook has an address and a key, or for a
+# machine identity's alert. Every arm of platform_alert_send_decision(), with 0250's suppression
+# hold: held inside a window, sent once it ends, and nothing for an occurrence that resolved inside
+# it. Reminders past the
+# interval, and none unconfirmed, acknowledged, resolved or replaced; the three Notifications
+# settings, each one's rule and who reads and writes them; the address, the signing key (shown once,
+# rotated, a SIGNING_KEY_ISSUED row) and the test by role; the lease, the dispatch secret and each
+# recorded outcome. Every test rolls back.
+python supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an
@@ -906,6 +1092,11 @@ python timescaledb/test_physical_backup.py
 python timescaledb/test_rollup_compression.py
 # A replay days late reaching the rollups: the window ingestion records, refreshed by the job.
 python timescaledb/test_rollup_refresh.py
+# History's Overview counts from two device rollups: telemetry_device_5m from telemetry_1m and
+# telemetry_device_1h from telemetry_1h, materialised only, one of each policy, kept as long as the
+# series rollup of their width. One backfill job, a row a rollup; its window walks back a chunk at a
+# time and stops at the hour holding its source's oldest bucket. Changes nothing.
+python timescaledb/test_device_rollups.py
 # The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
 # because roles.sql skips creating the role on the same condition.
 python timescaledb/test_historian_role_grants.py
@@ -1317,6 +1508,10 @@ Both end with the same checks:
 
 - every StatefulSet, Deployment and DaemonSet rolls out, one `kubectl rollout status` at a time
   (`helm --wait` deadlocks a first install, see [`help/site/running-the-server.md`](../help/site/running-the-server.md#a-from-the-published-chart-no-image-builds));
+- the historian's TimescaleDB extension is installed at the version its image ships, the one
+  `timescaledb/Dockerfile` is built `FROM`. On `upgrade` from a release with an older TimescaleDB,
+  this shows the maintenance hook waited for the new historian pod before it updated the extension
+  ([`timescaledb/README.md`](../timescaledb/README.md#why-on-every-boot-and-in-this-order));
 - `helm test` passes;
 - every running pod's built image carries the checkout's tag;
 - the first administrator signs in through Traefik, over HTTPS to `api.rehearsal.aber.test` with a
@@ -1366,7 +1561,8 @@ layer on.
 
 **No CI job installs with the layer off**, though that is the chart's default and what most sites
 run. The helm-chart job's render checks hold that default: with the layer off, the forge's policy
-is the only one rendered. Every developer's `npm run dev:up` installs without the layer. A second,
+is the only one a default install renders. With Studio on, Studio's and postgres-meta's join it,
+each admitting its one caller, and still admit only that caller with the layer on. Every developer's `npm run dev:up` installs without the layer. A second,
 smaller k3d job with the layer off would cost another cluster's minutes on every push, for a
 configuration that differs from the one CI runs only in its NetworkPolicy objects.
 
@@ -1477,7 +1673,8 @@ arrive with no CI result.
 not something this repository can act on, and failing on it would train everyone to ignore the job.
 Its image list is rendered out of the chart (`helm template`) rather than written in the workflow, and it
 refuses to run if it finds fewer than ten — "found nothing to scan" must not look like "found
-nothing wrong".
+nothing wrong". The optional workloads are rendered on, except Studio and postgres-meta, which stay
+off as in a default install: a site that runs them takes on two images the scan does not cover.
 
 **The workflow runs [`scripts/scan-images.mjs`](../scripts/scan-images.mjs), which is `npm run
 scan:images` on a laptop**: the same images, Trivy in the pinned container `scan:config` uses

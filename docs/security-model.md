@@ -20,12 +20,12 @@ unrecognised role produces `403`.
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; the Dynamic Security plugin's roles ([`mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`mosquitto/README.md`](../mosquitto/README.md)) confine each gateway to `spBv1.0/+/+/<own-id>/#`, and revocation drops a live session |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise: the daemon connects as `ingest_writer` (`ingestion.dbUser`, with `secrets.ingestWriterPassword`), which may INSERT and cannot UPDATE, DELETE or TRUNCATE, and it refuses to run as the historian superuser — see [Historian roles](#historian-roles) |
-| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](../supabase/README.md)); password sign-ins and recovery limited per client address and in total, ahead of GoTrue's own limits; `nosniff` on every response, `no-store` on sign-in, `Strict-Transport-Security` under `https`; every request in an access log that leaves out the query and credentials ([`docs/gateway.md`](gateway.md)) |
+| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **five** documented exemptions ([`supabase/README.md`](../supabase/README.md)); a token GoTrue issued to an app reaches only `/auth/v1/` and its own app's functions ([below](#an-apps-token-reaches-only-its-own-routes)); password sign-ins and recovery limited per client address and in total, ahead of GoTrue's own limits; a multipart boundary over 70 characters refused before storage-api; `nosniff` on every response, `no-store` on sign-in, `Strict-Transport-Security` under `https`; every request in an access log that leaves out the query and credentials ([`docs/gateway.md`](gateway.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `audit_trail` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
-| **Supabase Studio** | Behind the gateway's `studio` listener: an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`). Off the Ingress by default |
+| **Supabase Studio** | Off by default, with postgres-meta. Where a site runs it: behind the gateway's `studio` listener, an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`), and off the Ingress unless `ingress.routes.studio` |
 | **The forge** | Behind the gateway's `forge` listener: the same login, admitting `Administrator` and `Shopfloor_Manager` (`0094`). Gitea's own HTTP port is reachable only from the gateway; the edge functions reach its API through the gateway's `forge-api` listener, which serves `/api/` alone and removes the identity headers |
 
 **An error tells the caller what to fix, never how the platform is built.** A refusal the caller
@@ -80,6 +80,11 @@ it is what a human debugging the FDW connects through.
 
 `timescaledb/test_historian_role_grants.py` asserts both halves for both roles — what they can do,
 and what they must not.
+
+**Supabase Studio is off in a default install,** with postgres-meta, which serves it alone: Aber's
+dashboard does the site's work. What follows holds where a site turns both on. Then a
+NetworkPolicy, rendered whatever `networkPolicy.enabled` says, lets only the gateway reach Studio's
+port and only Studio reach postgres-meta, which runs any SQL as `supabase_admin` with no login.
 
 **Supabase Studio is a database console with no login, roles or session of its own.** Whoever
 reaches it holds the SQL editor, the table editor and the Vault UI **as the database owner** — for
@@ -231,22 +236,22 @@ people's accounts in GoTrue, and it is narrow by construction.
   `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` off. GoTrue keeps the session that made
   the change and ends the person's others. No Audit Trail row is written: GoTrue records
   `user_updated_password` in its own audit log (`auth.audit_log_entries`).
-- **A second factor can be enrolled; nothing requires one yet** (1.7.0). Any person, every role,
-  may add a TOTP factor on Profile › Security through GoTrue's factor API (auth-js
+- **A second factor can be enrolled by anyone, and Settings can require one** (1.7.0, 1.8.0). Any
+  person, every role, may add a TOTP factor on Profile › MFA through GoTrue's factor API (auth-js
   `supabase.auth.mfa`). The chart sets the `GOTRUE_MFA_*` variables in
   `templates/supabase/auth.yaml`: TOTP enrol and verify on, as GoTrue defaults; phone off (it needs
   an SMS provider); WebAuthn off (it needs a hostname relying-party id and a secure context);
   recovery codes off (auth-js has no client for them). A password sign-in with a factor enrolled is
   `aal1`. The dashboard then asks for the code before it opens, before the OAuth consent page
   approves a service, and before a password reset, which GoTrue refuses from `aal1` for an account
-  with a factor. It does not ask when `amr` names a federated method (`oauth`, `sso/saml`). **That
-  question is the dashboard's, not enforcement:** no policy, edge function or gateway rule reads
-  `aal`, so a session that skips it keeps every right its role has, as a password-only session
-  does. GoTrue's own rules do apply. Removing a verified factor, and adding another, need an `aal2`
-  session. Verifying a code deletes every other `aal1` session the person holds, and GoTrue issues
-  the OAuth clients' sessions (Grafana, Node-RED, Studio, the forge) at `aal1`, so each code ends
-  those. A person adding or removing their own factor writes no Audit Trail row; GoTrue records it
-  in `auth.audit_log_entries`.
+  with a factor. It does not ask when `amr` names a federated method (`oauth`, `sso/saml`). That
+  question is the dashboard's. **Enforcement is the Settings row** described in
+  [MFA required to change the platform](#mfa-required-to-change-the-platform): off by default, and
+  while it is off nothing reads `aal`. GoTrue's own rules always apply. Removing a verified factor,
+  and adding another, need an `aal2` session. Verifying a code deletes every other `aal1` session
+  the person holds, and GoTrue issues the OAuth clients' sessions (Grafana, Node-RED, Studio, the
+  forge) at `aal1`, so each code ends those. A person adding or removing their own factor writes no
+  Audit Trail row; GoTrue records it in `auth.audit_log_entries`.
 - **Reset MFA, by an Administrator** (`0216`). For someone who has lost their authenticator.
   `manage-people`'s `reset-mfa` asks `record_person_mfa_reset()` first with `p_check_only`, which
   refuses your own account and a machine identity (a removed person's factors may be reset). Then
@@ -269,6 +274,53 @@ people's accounts in GoTrue, and it is narrow by construction.
 What a removal does not reach at once is an [accepted risk](#a-removed-person-keeps-what-a-session-already-holds),
 and so is what an ended session still reaches ([below it](#an-ended-session-keeps-storage-realtime-and-grafana-until-its-token-expires)).
 
+### MFA required to change the platform
+
+A Settings row, **Require MFA to change the platform** (`security.require_mfa_for_managers`, Settings
+› Security), turns enforcement on (`0251`). It is off on every install, so a new stack's first
+sign-in is not an enrolment. Only an Administrator may change it, and each change is an Audit Trail
+row, as every setting's is. While it is on, an **Administrator or a Shopfloor Manager** changes the
+platform only from a session that gave its code (`aal2`), or one another identity provider signed
+in (`amr`). Operators and Auditors are never asked. A refused act answers 403 with one sentence,
+which says to add an authenticator on Profile › MFA; the dashboard links it there.
+
+| Surface | With the switch on, at `aal1` |
+| :--- | :--- |
+| Every write policy that admits either role (the areas, devices, gateways, cells, schemas, settings and their kin; the storage writes to 3D models, plans, captures and exports) | Refused: `require_mfa()` beside `has_role()`, which raises rather than answering false, so an UPDATE is never a silent zero rows |
+| Every function that changes the platform for them: proposals' decisions, relocation, schemas, credentials and enrolment tokens, machine identities and tokens, backups, apps, every People act, captures and playback | Refused, after the role check |
+| `aas-export`, `approve-quarantine`, `broker-inventory`, `broker-subscriber`, `gateway-bundle`, `gateway-credential`, `manage-people`, `mint-service-token` | Refused before they act, by `_shared/secondFactor.ts` |
+| Signing in to Node-RED, Studio, the forge or any app an Administrator adds | Refused at the consent step (below) |
+| Grafana's sign-in, and `grafana-userinfo` | Not covered: Grafana changes dashboards, not the plant |
+| Every read, and a person's own account (sessions, picture, name, factors), and an alert's acknowledgement | Not covered |
+| Machine identities | Never covered: they hold no role, so the predicate admits them wherever they write |
+
+`supabase/mfa-exemptions.json` names each role-checked site that does not ask, with its reason.
+Mirror check 59 fails on a new write policy or function that neither asks nor is named there.
+
+**The consent step.** GoTrue issues every token an app holds at `aal1`, whatever the person's
+dashboard session is, so no door can read the assurance from its own token. Every app's token is
+won through the dashboard's consent page, whose two calls (`GET /auth/v1/oauth/authorizations/{id}`
+and `POST …/{id}/consent`) carry the person's own session. The gateway's `ext_authz` filter asks
+`consent-gate` on that prefix alone. The function reads the switch, the person's role, the token's
+`aal` and `amr`, and the sign-in's app, live, and admits Grafana's sign-in at `aal1`. It fails
+closed: when `consent-gate` gives no answer within 3 seconds, or a 5xx, no app's sign-in is
+approved, Grafana's included, while the dashboard and open app sessions carry on. Every other
+spelling of the prefix is answered by the gateway itself.
+
+**App sessions won at `aal1` end.** No app session records the assurance of the consent that won
+it, and every one is `aal1`. So when the switch turns on, every covered person's app sessions end,
+Grafana's excepted, and when a person gains a covered role while it is on, theirs do. Each is one
+`SESSIONS_ENDED` row per person, naming the apps.
+
+**Why `aal2` means something here.** 1.8 signs every token with GoTrue's ES256 key alone, and no
+service accepts one signed with the shared secret (#1007). So whoever holds that secret cannot mint
+an `aal2` claim. Whoever holds the ES256 private key (`JWT_KEYS`, held by GoTrue and
+`mint-service-token`) still can, as they can mint any role.
+
+**Recovery.** An Administrator resets another person's factor from a session that gave its own code.
+A site whose only Administrator has lost their authenticator uses the secret key, below, then adds a
+new authenticator on Profile › MFA. Adding one brings that session to `aal2`, so nothing locks out.
+
 ### Resetting the only Administrator's second factor
 
 Reset MFA needs another Administrator. A site whose only Administrator has lost their
@@ -284,7 +336,9 @@ curl -s -X DELETE "https://api.<domain>/auth/v1/admin/users/<user id>/factors/<f
 
 The first answer lists the account under `users`, with its `factors`. A deletion this way writes no
 Audit Trail row; GoTrue's own audit log records it. Keep two Administrators, so that each can reset
-the other's from People.
+the other's from People. With MFA required, each resets the other's from a session that gave its own
+code; the secret key's way works whatever the switch says, and afterwards the Administrator adds a
+new authenticator on Profile › MFA.
 
 ## Machine identities
 
@@ -317,12 +371,69 @@ an oversight: it makes those gates the only route rather than the tidy one.
 **Tokens are revocable at PostgREST** (`0074`–`0076`): `auth_pre_request` runs before every request
 and refuses a JWT whose `jti` has been revoked, and a whole machine identity can be withdrawn.
 Expiry still bounds everything else — 90 days for any token naming a **principal**, ten years only
-for the anon and service-role keys, which name nobody. Storage, Realtime, the edge runtime and Studio
-verify the signature for themselves and are not reached by a revocation (see
+for the anon and service-role keys, which name nobody. The i3X server, `aas-api` and the Factory+
+Directory check every token through PostgREST, so a revocation reaches them too. Storage and
+Realtime verify the signature for themselves and are not reached by a revocation (see
 [Accepted risks](#accepted-risks)). The **Access Control** tab states what is outstanding.
 
 The mechanism and its limits are in
 [`supabase/README.md`](../supabase/README.md#the-access-control-page-states-what-is-outstanding).
+
+## An app's token reaches only its own routes
+
+GoTrue's OAuth server signs a person in to an app, and the app gets an access token that names the
+person. The token also names the app, in its `client_id` claim. A token with a `client_id` reaches
+GoTrue and its own app's functions, and nothing else. The person's role does not travel with it
+(`0235`). A token with no `client_id` is the dashboard's, a script's or a machine identity's, and
+is unchanged.
+
+| Surface | A token GoTrue issued to an app |
+| :--- | :--- |
+| GoTrue (`/auth/v1/`) | Reached, as the person's own session reaches it: every app's functions check the session at `/auth/v1/user`, and the forge's sign-out ends it at `/auth/v1/logout` |
+| Its own app's functions | Reached, on the API listener: `grafana-userinfo` for Grafana, `nodered-userinfo` for Node-RED |
+| Every other function, gated or exempt | 403 at the gateway |
+| PostgREST, directly or relayed by i3X, `aas-api` or the Directory | 403 at the gateway. `auth_pre_request()` refuses it too, before every other check, since the gateway cannot tell a relayed request from a direct one |
+| Storage | 403 at the gateway. `has_role()` and `has_authority()` answer false for it, so a row a role gates is closed even to a request that reached Storage another way |
+| Realtime | 403 at the gateway when the token is in the handshake. Inside the join message the gateway cannot see it: a row a role gates is still closed, and a row any signed-in account reads is delivered, [an accepted risk](#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account) |
+
+The refusal is decided on a token the gateway has verified. A token that does not verify, has
+expired or carries no `client_id` goes on as before, and its upstream answers it.
+
+**The four apps, and what each calls with its token.** Each was checked against the code. Every one
+reads the person's role from `user_roles` with the service key, never with the app's token, and
+exchanges and refreshes its token with its own client secret, not with the token.
+
+| App | Client id | Calls with its token | How |
+| :--- | :--- | :--- | :--- |
+| Grafana | `c0ffee00-0000-4000-8000-000000000001` | `grafana-userinfo` (its `api_url`), which asks GoTrue for `/auth/v1/user` | through the API listener |
+| Node-RED | `c0ffee00-0000-4000-8000-000000000002` | `nodered-userinfo`, at sign-in and once a minute, which asks GoTrue for `/auth/v1/user` | through the API listener |
+| Studio's door | `c0ffee00-0000-4000-8000-000000000003` | `studio-admission`, on every request, which asks GoTrue for `/auth/v1/user` | from its own listener, straight to the edge runtime; the function reaches GoTrue through the API listener |
+| The forge's door | `c0ffee00-0000-4000-8000-000000000004` | `forge-membership` on every request, which asks GoTrue for `/auth/v1/user`, and `forge-signout` at Gitea's Sign Out, which ends the session at `/auth/v1/logout` | from its own listener, straight to the edge runtime; the functions reach GoTrue through the API listener |
+
+So the doors reach `/auth/v1/` alone on the API listener. An app an Administrator registers that is
+not one of these four reaches `/auth/v1/` alone too: GoTrue's endpoints for the person's own
+account, and none of Aber's data or functions.
+The routes are fixed in the gateway's configuration (`supabase/envoy.yaml`, the API listener's
+`rbac` filter). `scripts/check-gateway-surface.mjs` holds them as `APP_ROUTES`, and mirror check 48
+holds their client ids to the apps the stack registers and their functions to the ones that exist.
+
+**Revisit when** an app that is not Aber's is given more than a sign-in. What such an app may reach
+is then a grant an Administrator chooses for that app, designed once with the MCP clients' sign-in.
+
+## An alert that leaves the site
+
+**Aber posts an alert to one webhook, and only where an Administrator has said it may** (`0247`,
+`0248`). The address is a foreign credential in the vault, and its host must be on
+`notifications.webhook_allowed_hosts`, an Administrator-only setting matched exactly, or the message
+is refused before it is posted. The post follows no redirect, so a receiver cannot send it anywhere
+the list does not name. Each message is signed with an HMAC-SHA256 key Aber generates and shows once
+(the Standard Webhooks headers), so a receiver can tell it came from this site, unaltered. The
+dispatcher runs as the service role, past RLS, so the database applies each row's visibility
+itself: **no alert about a machine identity's token ever leaves**, because only an Administrator may
+read one and a webhook is read by whoever the receiver lets in. The dispatcher itself answers only
+the database, which proves itself with a secret it generated. **Revisit when** a second channel can
+reach named roles: email (#325 part 2) could carry a machine identity's alert to Administrators
+alone.
 
 **Known issues** — things that can be worked on — are tracked as
 [GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues). **Accepted risks are not**, and
@@ -368,12 +479,15 @@ evidence of access: a public or partner-facing deployment, a shared cluster, or 
 multi-tenancy. At that point the choice is dropping these tables from the publication and
 polling instead, or waiting for upstream to authenticate before delivering the envelope.
 
-### Revocation reaches PostgREST and nothing else
+### Revocation reaches PostgREST and what checks a token through it
 
 `0074` made a token revocable at the one choke point PostgREST offers (`PGRST_DB_PRE_REQUEST`).
-Storage, Realtime and the edge runtime verify the signature for themselves and consult no table, so
-a revoked token still opens those doors until its own `exp` — at most 90 days for a token naming a
-principal.
+It reaches whatever checks a token with a PostgREST call made as the caller: the i3X server, within
+its 15-second cache, and `aas-api` and the Factory+ Directory, which call `auth_probe()` (`0224`).
+Storage and Realtime verify the signature for themselves and consult no table, so a revoked token
+still opens those doors until its own `exp` — at most 90 days for a token naming a principal. The
+other edge functions check a caller with GoTrue's `getUser()`, which refuses every machine
+identity's token, revoked or not, because it carries no `aud`.
 
 Who can sign one is narrow: GoTrue and `mint-service-token` hold the ES256 private key, and every
 verifier holds the public key, which signs nothing. No service accepts a token signed with the
@@ -420,6 +534,8 @@ Three windows remain:
   refused. Grafana maps a role only at sign-in, so a role changed without a removal lasts until the
   next sign-in.
 - **Storage and Realtime, up to an hour.** Read-only, and only what any signed-in account reads.
+  An app's token reads the same over Realtime for as long as the app is allowed
+  ([below](#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account)).
 - **Studio when its check fails.** A 5xx from `studio-admission` admits on the token's claim, so a
   removed Administrator could reach Studio while the edge runtime or the API is down, until the
   door's cookie expires (3600 s).
@@ -430,6 +546,23 @@ the token's expiry, which was the bound on every surface before `0170`.
 
 **Revisit if** `jwtExpiry` is raised, which lengthens the Grafana, Storage and Realtime windows with
 it, or if a role change in Grafana ever has to be immediate.
+
+### An app's token still receives what Realtime sends any signed-in account
+
+An [app's token reaches only its own routes](#an-apps-token-reaches-only-its-own-routes), with one
+gap. A Realtime client sends its token inside the WebSocket's join message, where the gateway
+cannot read it, and Realtime does not run `auth_pre_request()`. So an allowed app's token still
+receives, over Realtime, the changes to published rows any signed-in account may read: `areas`,
+`cells`, `devices` and `gateways`, and the platform alerts that are not about a service identity.
+A row a role gates is refused, because `has_role()` and `has_authority()` answer false for the
+token: capture and playback jobs, and a service identity's alerts.
+
+**Accepted because** it is read-only, and only what any signed-in account reads. The four apps that
+can be allowed are Aber's own, and none of them opens Realtime. An Administrator sees every app a
+person allowed, and taking the approval back ends the app's sessions.
+
+**Revisit when** an app that is not Aber's is given a grant of its own, or a published table
+carries something a person's role alone should read.
 
 ### An ended session keeps Storage, Realtime and Grafana until its token expires
 
@@ -592,7 +725,7 @@ keeps one. Only a Playback gateway's password is delivered to the playback worke
 or Simulated gateway's never reaches it. Showing a password is Administrator only, each showing is
 a `CREDENTIAL_SHOWN` row in the Audit Trail, and the copy is deleted when the gateway is archived
 or deleted. An Administrator could already issue a new password for any gateway, which gives the
-same access.
+same access. Showing one is a read, so it is not refused when Settings requires MFA (`0251`).
 
 **Revisit if** Host gateways come to publish for machines whose data matters more than the
 platform's own, or if a role other than `Administrator` needs to see a password. At that point,

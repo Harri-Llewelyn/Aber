@@ -27,6 +27,7 @@ BEGIN
     RAISE EXCEPTION 'insufficient privileges to keep a gateway credential'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  PERFORM public.require_mfa();
 
   SELECT * INTO v_gateway FROM public.gateways WHERE id = p_gateway_id;
   IF NOT FOUND THEN

@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -10,6 +10,7 @@ import {
   AUDIT_TRAIL_SECURITY_ROLES,
   auditTrailEntityTypesFor
 } from '../constants'
+import { filterList, offered } from '../test/listFilters'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -17,11 +18,12 @@ vi.mock('../api', async () => {
   return { ...actual, api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn(), post: vi.fn(), put: vi.fn() } }
 })
 
-// The three audit_domain_for() names, and the three kinds it files there by its fail-closed
-// default: the two backup kinds, since an act on the whole database is an Administrator's to
-// perform, and a read-only broker account (0218), which only an Administrator makes. So each is an
+// The three audit_domain_for() names, and the kinds it files there by its fail-closed default:
+// the two backup kinds, since an act on the whole database is an Administrator's to perform, a
+// read-only broker account (0218), which only an Administrator makes, an app that signs people in,
+// and a read of a service's logs (0225), which only an Administrator may make. So each is an
 // Administrator's and an Auditor's to read.
-const SECURITY_LABELS = ['Role assignments', 'Machine identities', 'Broker accounts', 'Apps', 'Settings', 'Backup jobs', 'Backups']
+const SECURITY_LABELS = ['Role assignments', 'Machine identities', 'Broker accounts', 'Apps', 'Service logs', 'Notification channels', 'Settings', 'Backup jobs', 'Backups']
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -38,7 +40,7 @@ describe('which entity types a role is offered', () => {
     for (const e of AUDIT_TRAIL_ENTITY_TYPES) expect(['asset', 'security']).toContain(e.domain)
   })
 
-  it('the security kinds are exactly the six the policy guards', () => {
+  it('the security kinds are exactly the ones the policy guards', () => {
     const security = AUDIT_TRAIL_ENTITY_TYPES.filter(e => e.domain === 'security').map(e => e.label)
     expect(security.sort()).toEqual([...SECURITY_LABELS].sort())
   })
@@ -70,10 +72,9 @@ describe('the filter bar on the page', () => {
   const optionsOffered = async (userRole) => {
     render(<AuditTrailTab userRole={userRole} />)
     // The kind filter lives in the Filters popover.
-    fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }))
-    const select = await screen.findByRole('combobox', { name: 'Entity' })
+    await screen.findByRole('button', { name: /^Filters/ })
     await waitFor(() => expect(api.get).toHaveBeenCalled())
-    return [...select.options].map(o => o.textContent)
+    return offered(filterList('Entity'))
   }
 
   it('does not list the security lanes for a manager', async () => {

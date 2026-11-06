@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 import { resolveUserRole } from "../_shared/roles.ts";
+import { secondFactorRefusal } from "../_shared/secondFactor.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 
@@ -79,6 +80,9 @@ Deno.serve(async (req) => {
       details: "Reading the broker's accounts requires Administrator.",
     });
   }
+  // No service-role key here: the caller's client reads the switch, which every role may read.
+  const mfa = await secondFactorRefusal(supabase, userRole, authHeader);
+  if (mfa) return json(mfa.status, mfa.body);
 
   try {
     const response = await fetch(`${credentialUrl.replace(/\/+$/, "")}/clients`, {

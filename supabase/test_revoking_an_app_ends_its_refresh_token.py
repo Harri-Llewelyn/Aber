@@ -8,9 +8,9 @@ refresh token works. Then the approval is taken back twice over:
   * by the person, through GoTrue's DELETE /user/oauth/grants (Profile's Revoke);
   * by an Administrator, through revoke_app_approval() (the Apps tab's Revoke).
 
-Each time the app's refresh token is refused, its access token is refused at the API, the next
-sign-in asks for consent again, and the person's own dashboard session is still served. The
-Audit Trail names who revoked it.
+Each time the app's refresh token is refused, its access token is refused at its own userinfo
+route, the next sign-in asks for consent again, and the person's own dashboard session is still
+served. The Audit Trail names who revoked it. The app's token never reaches the API itself (0235).
 
     python supabase/test_revoking_an_app_ends_its_refresh_token.py
 
@@ -40,6 +40,8 @@ ADMIN = "admin@aber.local"
 GRAFANA = "c0ffee00-0000-4000-8000-000000000001"
 SCOPE = "openid email profile"
 READ = "/rest/v1/areas?select=id&limit=1"
+# The one route of Grafana's own that its token reaches besides GoTrue; it asks GoTrue for the session.
+USERINFO = "/functions/v1/grafana-userinfo"
 STRICT = os.getenv("REQUIRE_SEEDED_ACCOUNTS", "").lower() in ("1", "true", "yes")
 
 
@@ -180,17 +182,18 @@ class RevokingAnAppEndsItsRefreshToken(unittest.TestCase):
         status, _, text = refresh(refresh_token)
         self.assertEqual(status, 200, f"the app's refresh token did not work before any revoke: {text[:300]}")
         body = json.loads(text)
+        status, _, text = request(USERINFO, token=body["access_token"])
+        self.assertEqual(status, 200, f"the app's access token was not served on its own route: {text[:300]}")
         status, _, text = request(READ, token=body["access_token"])
-        self.assertEqual(status, 200, f"the app's access token was not served: {text[:300]}")
+        self.assertEqual(status, 403, f"the app's access token reached the API: {text[:300]}")
         return body["access_token"], body["refresh_token"]
 
     def assert_access_ended(self, access, refresh_token):
         status, _, text = refresh(refresh_token)
         self.assertIn(status, (400, 401), f"the app's refresh token still works ({status}): {text[:300]}")
         self.assertNotIn("access_token", text)
-        status, _, text = request(READ, token=access)
-        self.assertEqual(status, 401, f"the app's access token is still served: {text[:300]}")
-        self.assertEqual(json.loads(text).get("code"), "session_not_found", text[:300])
+        status, _, text = request(USERINFO, token=access)
+        self.assertEqual(status, 401, f"the app's access token is still served on its own route: {text[:300]}")
         status, _, text = request(READ, token=self.person_token)
         self.assertEqual(status, 200, f"the revoke ended the person's own dashboard session: {text[:300]}")
         listed = rpc(self.person_token, "list_my_app_approvals")

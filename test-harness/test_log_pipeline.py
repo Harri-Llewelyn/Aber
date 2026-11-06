@@ -42,6 +42,7 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ingestion"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import stack_exec  # noqa: E402  -- the probe pod
+import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 LOKI = os.getenv("LOKI_TEST_URL", "http://127.0.0.1:3100")
 PROM = os.getenv("PROMETHEUS_TEST_URL", "http://127.0.0.1:9090")
@@ -49,9 +50,15 @@ MQTT_HOST = os.getenv("MQTT_TEST_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_TEST_PORT", "1883"))
 GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
 
+# The gateway, for the System page's Logs tab: service-logs reads the same store for a person.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
+PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+DEMO_PASSWORD = os.getenv("ABER_DEMO_PASSWORD", "aber123")
+
 # The reason this suite drives. One of the ten in ingestion.py, chosen because it is reachable
 # with a single publish and needs no fixture: an unregistered device is refused by definition.
 REASON = "quarantined_or_unregistered"
+DROPPED = f'aber_ingestion_messages_dropped_total{{reason="{REASON}"}}'
 
 # How long to wait for a line to travel daemon -> Docker -> Alloy -> Loki. Alloy's discovery
 # refresh is 15s and its batch wait is a few seconds on top, so this is deliberately generous:
@@ -121,6 +128,31 @@ def parse_record(stream, value):
         ) from None
 
 
+def sign_in(testcase, email):
+    """A seeded person's access token and id, or a skip (a failure under REQUIRE) naming why not."""
+    status, body = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, DEMO_PASSWORD)
+    if status != 200:
+        skip_or_fail(testcase, stack_sign_in.describe(email, status, body))
+    return body["access_token"], body["user"]["id"]
+
+
+def gateway_get(path, bearer):
+    """(status, parsed JSON) for a GET through the gateway as `bearer`."""
+    req = urllib.request.Request(f"{SUPABASE_URL}{path}",
+                                 headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {bearer}"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as err:
+        raw = err.read().decode()
+        return err.code, (json.loads(raw) if raw.strip() else None)
+
+
+def service_logs(bearer, **params):
+    """The System page's Logs tab's read: GET /functions/v1/service-logs with these parameters."""
+    return gateway_get(f"/functions/v1/service-logs?{urllib.parse.urlencode(params)}", bearer)
+
+
 def prom_query(expr):
     q = urllib.parse.urlencode({"query": expr})
     return get_json(f"{PROM}/api/v1/query?{q}")["data"]["result"]
@@ -134,6 +166,17 @@ def prom_scalar(expr, default=0.0):
 def prom_by_pod(expr):
     """{pod: value} for a query whose answer keeps the `pod` label."""
     return {r["metric"].get("pod", ""): float(r["value"][1]) for r in prom_query(expr)}
+
+
+def prom_by_series(selector):
+    """{(pod, instance): value} for each series a selector matches, unsummed."""
+    return {(r["metric"].get("pod", ""), r["metric"].get("instance", "")): float(r["value"][1])
+            for r in prom_query(selector)}
+
+
+def series_that_rose(before, after):
+    """The series in `after` above their own value in `before`, or absent from it and at least 1."""
+    return {s: v for s, v in after.items() if (v > before[s] if s in before else v >= 1)}
 
 
 def fresh(selector):
@@ -359,8 +402,7 @@ class DropPairTestCase(unittest.TestCase):
         # run and drops nothing, so the suite would pass while testing nothing.
         cls.device = "dev" + secrets.token_hex(11)[:21]
 
-        cls.before = prom_scalar(
-            f'sum(aber_ingestion_messages_dropped_total{{reason="{REASON}"}})')
+        cls.before = prom_by_series(DROPPED)
 
         client = mqtt.Client(protocol=mqtt.MQTTv5)
         client.username_pw_set(user or "", password)
@@ -383,19 +425,23 @@ class DropPairTestCase(unittest.TestCase):
     def test_the_drop_was_counted_in_prometheus(self):
         """Half one of the pair. Without this the log assertion below proves nothing about the
         counter, and the two halves are only interesting together."""
+        # Per series, never summed. The capture-lifecycle suite evicts the ingestion pod earlier in
+        # the lane, and the old pod's series stays visible for the five-minute lookback beside the
+        # new pod's: a sum can stay flat if the old one ages out as the new one counts the drop.
         deadline = time.time() + 60
         after = self.before
         while time.time() < deadline:
-            after = prom_scalar(
-                f'sum(aber_ingestion_messages_dropped_total{{reason="{REASON}"}})')
-            if after > self.before:
+            after = prom_by_series(DROPPED)
+            if series_that_rose(self.before, after):
                 return
             time.sleep(5)
         self.fail(
-            f"the drop counter for reason={REASON} did not increase "
-            f"({self.before} -> {after}) after publishing DDATA for an unregistered device. "
+            f"no series of the drop counter for reason={REASON} rose after publishing DDATA for an "
+            f"unregistered device.\n  before, by (pod, instance): {self.before}\n"
+            f"  after,  by (pod, instance): {after}\n"
             f"Either the broker refused the publish (check the credential), or the daemon did "
-            f"not take the drop arm."
+            f"not take the drop arm. If the log-store half of this pair passes, the drop happened "
+            f"and the values above show where its count went."
         )
 
     def test_the_same_drop_is_readable_in_the_log_store_naming_the_device(self):
@@ -474,6 +520,70 @@ class DropPairTestCase(unittest.TestCase):
             f"the store holds reasons Prometheus does not export: {sorted(fields - labels)}. "
             f"A panel filtered on one of those would link to logs that exist and never resolve.",
         )
+
+    def test_the_same_drop_reads_back_on_the_system_page_s_logs_tab(self):
+        """
+        THE LOGS TAB'S READ, through the gateway, the function and the store. An Administrator's
+        read of ingestion's lines, filtered by the dropped device's id, returns the drop's line
+        with its reason and device as fields; an Operator's is refused; the read is one Audit
+        Trail row, and the same read again writes none. The same lines read through a fixed
+        window's two ends are one more row, which names the ends, and a refresh of it writes none.
+
+        The filter is the device id, which is random per run, so the line is the one this run
+        caused, and the read's parameters are new to the Administrator: the first answer is a row.
+        """
+        if not PUBLISHABLE_KEY:
+            skip_or_fail(self, "SUPABASE_PUBLISHABLE_KEY is not set, so nobody can sign in to read the logs")
+        operator, _ = sign_in(self, "operator@aber.local")
+        status, body = service_logs(operator, service="ingestion", filter=self.device, range="15m")
+        self.assertEqual(403, status, f"an Operator read the logs: {body}")
+
+        admin, admin_id = sign_in(self, "admin@aber.local")
+        audits, lines, body = [], [], None
+        deadline = time.time() + PROPAGATION_TIMEOUT
+        while time.time() < deadline:
+            status, body = service_logs(admin, service="ingestion", filter=self.device, range="15m")
+            self.assertEqual(200, status, body)
+            self.assertTrue(body["observability"], f"service-logs says observability is off: {body}")
+            audits.append(body["audit"])
+            lines = [entry for entry in body["lines"] if self.device in entry["line"]]
+            if lines:
+                break
+            time.sleep(5)
+        self.assertTrue(lines, f"service-logs returned no line naming {self.device} within "
+                               f"{PROPAGATION_TIMEOUT}s, though Loki holds it (the test above): {body}")
+        self.assertEqual(REASON, lines[0]["fields"].get("reason"))
+        self.assertEqual(self.device, lines[0]["fields"].get("device"))
+        self.assertEqual("WARNING", lines[0]["level"])
+
+        # A refresh: the same read, recorded once however often it was polled above.
+        status, again = service_logs(admin, service="ingestion", filter=self.device, range="15m")
+        self.assertEqual((200, "unchanged"), (status, again["audit"]), again)
+        self.assertEqual(["recorded"] + ["unchanged"] * (len(audits) - 1), audits)
+
+        # The same lines through a fixed window, as the tab sends a day, a week or a step: its two
+        # ends, through PostgREST to the six-argument record. One row, and a refresh writes none.
+        minute = time.time() // 60 * 60
+        ends = [time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t)) for t in (minute - 15 * 60, minute + 60)]
+        window = {"service": "ingestion", "filter": self.device, "from": ends[0], "to": ends[1]}
+        status, fixed = service_logs(admin, **window)
+        self.assertEqual((200, "recorded", None), (status, fixed.get("audit"), fixed.get("range")), fixed)
+        self.assertTrue([e for e in fixed["lines"] if self.device in e["line"]], fixed)
+        status, fixed_again = service_logs(admin, **window)
+        self.assertEqual((200, "unchanged"), (status, fixed_again["audit"]), fixed_again)
+
+        query = urllib.parse.urlencode({
+            "action": "eq.SERVICE_LOGS_READ", "entity_type": "eq.service_logs",
+            "changed_by": f"eq.{admin_id}", "new_data->>filter": f"eq.{self.device}",
+            "select": "new_data", "order": "id.asc",
+        })
+        status, rows = gateway_get(f"/rest/v1/audit_trail?{query}", admin)
+        self.assertEqual(200, status, rows)
+        self.assertEqual([
+            {"name": "ingestion", "level": "any", "filter": self.device, "range": "15m"},
+            {"name": "ingestion", "level": "any", "filter": self.device,
+             "from": ends[0].replace("Z", ".000Z"), "to": ends[1].replace("Z", ".000Z")},
+        ], [r["new_data"] for r in rows])
 
 
 class MultilineTestCase(unittest.TestCase):

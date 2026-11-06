@@ -9,11 +9,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  AuditTrailTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow, MARKERS, CLUSTER_GAP_PX
+  AuditTrailTab, tickFormatter, shortId, MARKERS, CLUSTER_GAP_PX
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
 import { tooltipOf } from '../test/tooltips'
+import { closePanel, filterList, openFiltersPanel, toggleInList, offered } from '../test/listFilters'
 
 /* Newlines normalised on read, because `cssRule()` matches multi-line selectors with `\n` and
    .gitattributes checks this file out with the platform's native ending, CRLF on Windows. */
@@ -41,13 +42,15 @@ const EVENTS = [
     timestamp: '2026-08-02T12:00:00Z', description: 'Action UPDATE on devices [dev-1]',
     changed_by: 'user-uuid-1', actor_source: 'user',
     old_data: { id: 'dev-1', name: 'Simulated_CNC_01', status: 'OFFLINE', last_heartbeat: '2026-08-02T11:59:00Z' },
-    new_data: { id: 'dev-1', name: 'Simulated_CNC_01', status: 'ONLINE',  last_heartbeat: '2026-08-02T12:00:00Z' }
+    new_data: { id: 'dev-1', name: 'Simulated_CNC_01', status: 'ONLINE',  last_heartbeat: '2026-08-02T12:00:00Z' },
+    class: 'operational'
   },
   {
     event_id: 2, entity_type: 'gateways', entity_id: 'gw-1', event_type: 'INSERT',
     timestamp: '2026-08-02T11:00:00Z', description: 'Action INSERT on gateways [gw-1]',
     changed_by: 'ingestion-principal-1', actor_source: 'ingestion',
-    old_data: null, new_data: { id: 'gw-1', name: 'Host_Gateway_NodeRED', status: 'ONLINE' }
+    old_data: null, new_data: { id: 'gw-1', name: 'Host_Gateway_NodeRED', status: 'ONLINE' },
+    class: 'created'
   },
   // A cell that no longer exists, which is what a DELETE means: absent from CELLS because
   // /api/v1/cells cannot return a deleted row, so only its final snapshot can name it.
@@ -55,7 +58,8 @@ const EVENTS = [
     event_id: 3, entity_type: 'cells', entity_id: 'cell-gone', event_type: 'DELETE',
     timestamp: '2026-08-02T10:00:00Z', description: 'Action DELETE on cells [cell-gone]',
     changed_by: null, actor_source: null,
-    old_data: { id: 'cell-gone', name: 'Decommissioned Line' }, new_data: null
+    old_data: { id: 'cell-gone', name: 'Decommissioned Line' }, new_data: null,
+    class: 'lifecycle'
   },
   // A schema rebinding, which separates the amber class from the blue one. There is no SCHEMA
   // action in the database; it is an UPDATE that touched `schema_id`.
@@ -64,7 +68,8 @@ const EVENTS = [
     timestamp: '2026-08-02T09:00:00Z', description: 'Action UPDATE on devices [dev-2]',
     changed_by: 'user-uuid-1', actor_source: 'user',
     old_data: { id: 'dev-2', name: 'Press_02', schema_id: null },
-    new_data: { id: 'dev-2', name: 'Press_02', schema_id: 'schema-9' }
+    new_data: { id: 'dev-2', name: 'Press_02', schema_id: 'schema-9' },
+    class: 'configuration'
   },
   // Archiving is likewise an UPDATE, distinguished only by a boolean that rose to true.
   {
@@ -72,14 +77,16 @@ const EVENTS = [
     timestamp: '2026-08-02T08:00:00Z', description: 'Action UPDATE on devices [dev-2]',
     changed_by: 'user-uuid-1', actor_source: 'user',
     old_data: { id: 'dev-2', name: 'Press_02', is_archived: false },
-    new_data: { id: 'dev-2', name: 'Press_02', is_archived: true }
+    new_data: { id: 'dev-2', name: 'Press_02', is_archived: true },
+    class: 'lifecycle'
   },
   // Nameable from nowhere: absent from DEVICES, and carrying no snapshot to recover a name from.
   // The third fall -- a truncated id -- exists for exactly this row.
   {
     event_id: 6, entity_type: 'devices', entity_id: '99999999-8888-7777-6666-555555555555',
     event_type: 'UPDATE', timestamp: '2026-08-02T07:00:00Z', description: 'Action UPDATE',
-    changed_by: 'service-principal-1', actor_source: 'service', old_data: null, new_data: null
+    changed_by: 'service-principal-1', actor_source: 'service', old_data: null, new_data: null,
+    class: 'operational'
   }
 ]
 const ENTITY_COUNT = new Set(EVENTS.map(e => e.entity_id)).size
@@ -114,9 +121,13 @@ const show = async () => {
  */
 const showAll = async () => {
   await show()
-  fireEvent.click(screen.getByRole('button', { name: /Show deleted entities/i }))
+  showDeleted()
   await waitFor(() => expect(screen.getByRole('button', { name: /Clear filters/ })).toBeInTheDocument())
 }
+
+/** Show deleted entities, a checkbox in the Filters panel: ticked, and the panel shut again. */
+const deletedBox = () => within(openFiltersPanel()).queryByRole('checkbox', { name: /^Show deleted entities/ })
+const showDeleted = () => { fireEvent.click(deletedBox()); closePanel() }
 
 /** Every marker on the timeline, in DOM order. */
 const nodes = () => [...document.querySelectorAll('.trail-node')]
@@ -128,16 +139,26 @@ const selectEvent = async (pattern) => {
   await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
 }
 
-const rangeSelect = () => screen.getByRole('combobox', { name: 'Time range' })
+/** The time control in the bar, its button showing the window in words, and its popover. */
+const timeControl = () => screen.getByRole('group', { name: 'Time window' })
+const windowWords = () => timeControl().querySelector('.time-window-pick').textContent
+const windowChoices = () => {
+  if (!screen.queryByRole('dialog', { name: 'Choose a time window' })) {
+    fireEvent.click(timeControl().querySelector('.time-window-pick'))
+  }
+  return screen.getByRole('dialog', { name: 'Choose a time window' })
+}
+const chooseWindow = (name) => fireEvent.click(within(windowChoices()).getByRole('button', { name }))
+const customRange = (from, to) => {
+  const dialog = windowChoices()
+  fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: from } })
+  fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: to } })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Show range' }))
+}
+const params = () => new URL(lastTrailUrl(), 'http://x').searchParams
 
 /** The kind and action filters live in the Filters popover, which is opened first. */
-const openFilters = () => {
-  if (!document.querySelector('.filters-popover')) {
-    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
-  }
-}
-const kindSelect = () => { openFilters(); return screen.getByRole('combobox', { name: 'Entity' }) }
-const actionSelect = () => { openFilters(); return screen.getByRole('combobox', { name: 'Action' }) }
+const openFilters = () => { openFiltersPanel() }
 
 describe('Audit Trail card header', () => {
   it('names the page with its icon, title and description, and nothing else', async () => {
@@ -148,7 +169,7 @@ describe('Audit Trail card header', () => {
 })
 
 describe('Audit Trail filter bar', () => {
-  it('keeps search and the time range in the bar, and the kind and action in the Filters popover', async () => {
+  it('keeps search and the time window in the bar, and the kind and action in the Filters popover', async () => {
     await show()
 
     // The same `.filter-bar` the Gateways and Devices pages use, not a row of controls wedged
@@ -156,21 +177,37 @@ describe('Audit Trail filter bar', () => {
     const bar = document.querySelector('.filter-bar')
     expect(bar).toBeTruthy()
     expect(within(bar).getByPlaceholderText('Search a name or any ID…')).toBeInTheDocument()
-    expect(bar.contains(rangeSelect())).toBe(true)
-    expect(screen.queryByRole('combobox', { name: 'Entity' })).toBeNull()
+    expect(bar.contains(timeControl())).toBe(true)
+    expect(screen.queryByRole('group', { name: 'Entity' })).toBeNull()
 
     openFilters()
     const popover = screen.getByRole('dialog', { name: 'Filters' })
-    expect(within(popover).getByRole('combobox', { name: 'Entity' })).toBeInTheDocument()
+    expect(within(popover).getByRole('group', { name: 'Entity' })).toBeInTheDocument()
     // The wording is load-bearing: this control filters `audit_trail.action`, while the markers
     // show a derived classification. See auditTrailActionFilter.test.jsx.
-    expect(within(popover).getByRole('combobox', { name: 'Action' })).toBeInTheDocument()
+    expect(within(popover).getByRole('button', { name: 'Action' })).toHaveAttribute('aria-expanded', 'false')
+    expect(filterList('Action')).toBeInTheDocument()
+  })
+
+  it('groups the kinds as the timeline groups its sections, and takes several of them', async () => {
+    await show()
+    const kinds = filterList('Entity')
+    expect(within(kinds).getAllByRole('group').map(g => g.getAttribute('aria-labelledby') && document.getElementById(g.getAttribute('aria-labelledby')).textContent))
+      .toEqual(['The plant', 'The model', 'Capture', 'Security'])
+    expect(offered(within(kinds).getByRole('group', { name: 'The plant' }))).toEqual(['Areas', 'Cells', 'Gateways', 'Devices', 'Alerts'])
+    toggleInList('Entity', 'Gateways')
+    toggleInList('Entity', 'Devices')
+    await waitFor(() => expect(params().get('entity_type')).toBe('GATEWAY,DEVICE'))
+    expect(window.location.search).toBe('?type=GATEWAY,DEVICE')
+    // The heading takes the whole group.
+    fireEvent.click(within(kinds).getByRole('checkbox', { name: 'The plant' }))
+    await waitFor(() => expect(params().get('entity_type')).toBe('AREA,CELL,GATEWAY,DEVICE,ALERT'))
   })
 
   it('counts the popover\'s own filters on its button, and its Clear resets only those', async () => {
     await show()
-    fireEvent.change(kindSelect(), { target: { value: 'GATEWAY' } })
-    fireEvent.change(actionSelect(), { target: { value: 'DELETE' } })
+    toggleInList('Entity', 'Gateways')
+    toggleInList('Action', 'Delete')
     fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
 
     await waitFor(() => expect(screen.getByRole('button', { name: /^Filters/ })).toHaveTextContent('Filters (2)'))
@@ -184,16 +221,27 @@ describe('Audit Trail filter bar', () => {
 
   it('filters by entity type', async () => {
     await show()
-    fireEvent.change(kindSelect(), { target: { value: 'GATEWAY' } })
+    toggleInList('Entity', 'Gateways')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('entity_type=GATEWAY'))
   })
 
-  it('filters by audit event type', async () => {
+  it('filters by audit event type, and by several at once', async () => {
     await show()
-    fireEvent.change(actionSelect(), { target: { value: 'DELETE' } })
-
+    toggleInList('Action', 'Delete')
     await waitFor(() => expect(lastTrailUrl()).toContain('action=DELETE'))
+    toggleInList('Action', 'Insert')
+    await waitFor(() => expect(params().get('action')).toBe('INSERT,DELETE'))
+    expect(window.location.search).toBe('?action=INSERT,DELETE')
+  })
+
+  it('opens a link written with one kind or one action, as an older page wrote it', async () => {
+    window.history.replaceState(null, '', '/audit-trail?type=CELL&action=UPDATE')
+    await show()
+    await waitFor(() => expect(params().get('entity_type')).toBe('CELL'))
+    expect(params().get('action')).toBe('UPDATE')
+    expect(within(filterList('Entity')).getByRole('checkbox', { name: 'Cells' }).checked).toBe(true)
+    expect(within(filterList('Action')).getByRole('checkbox', { name: 'Update' }).checked).toBe(true)
   })
 
   /* SENT AS THE TYPED TEXT, not resolved to ids here. It is still a database predicate rather than
@@ -230,11 +278,12 @@ describe('Audit Trail filter bar', () => {
     expect(lastTrailUrl()).not.toContain('entity_ids=')
   })
 
-  it('counts the active filters and clears them together, the time range included', async () => {
+  it('counts the active filters and clears them together, the time window included', async () => {
     await show()
-    fireEvent.change(actionSelect(), { target: { value: 'UPDATE' } })
+    toggleInList('Action', 'Update')
+    closePanel()
     fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
-    fireEvent.change(rangeSelect(), { target: { value: '7d' } })
+    chooseWindow('Last 7 days')
 
     const clear = await screen.findByRole('button', { name: /Clear filters/ })
     expect(clear.textContent).toContain('(3)')
@@ -242,20 +291,22 @@ describe('Audit Trail filter bar', () => {
     fireEvent.click(clear)
     await waitFor(() => expect(lastTrailUrl()).not.toContain('action='))
     expect(lastTrailUrl()).not.toContain('since=')
-    expect(rangeSelect().value).toBe('all')
+    expect(windowWords()).toBe('All time')
+    expect(window.location.search).toBe('')
   })
 })
 
 /**
- * The time range is pushed down: `limit=200` is applied by the database to rows ordered
+ * The time window is pushed down: `limit=200` is applied by the database to rows ordered
  * newest-first, so a window filtered in the browser would spend its row budget on events outside
- * the window. These assert on the URL because that is where the difference is observable.
+ * the window. These assert on the URL because that is where the difference is observable. The
+ * control itself is timeWindowControl.test.jsx; the arithmetic is timeWindow.test.js.
  */
-describe('Audit Trail time range', () => {
+describe('Audit Trail time window', () => {
   it('defaults to All time and sends no bound at all', async () => {
     await show()
 
-    expect(rangeSelect().value).toBe('all')
+    expect(windowWords()).toBe('All time')
     expect(lastTrailUrl()).not.toContain('since=')
     expect(lastTrailUrl()).not.toContain('until=')
   })
@@ -267,84 +318,115 @@ describe('Audit Trail time range', () => {
     expect(nodes().length).toBe(EVENTS.length)
   })
 
-  it('sends a since bound for a preset, computed at fetch time', async () => {
+  it('sends a since bound for a rolling range, computed at fetch time', async () => {
     await show()
-    fireEvent.change(rangeSelect(), { target: { value: '24h' } })
+    chooseWindow('Last 24 hours')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('since='))
-    const since = new URL(lastTrailUrl(), 'http://x').searchParams.get('since')
-    const ageMs = Date.now() - new Date(since).getTime()
+    const ageMs = Date.now() - new Date(params().get('since')).getTime()
     // 24 hours, give or take the time the test took to run.
     expect(ageMs).toBeGreaterThan(23.9 * 60 * 60 * 1000)
     expect(ageMs).toBeLessThan(24.1 * 60 * 60 * 1000)
+    // Open at the top, so a row written while the request runs still counts.
+    expect(lastTrailUrl()).not.toContain('until=')
+    expect(window.location.search).toBe('?range=24h')
   })
 
-  it('sends both bounds for a custom range, and only shows the pickers in that mode', async () => {
+  it('sends both bounds for a custom range, in local time, stopping at the start of the end minute', async () => {
     await show()
-    expect(screen.queryByLabelText('Range start')).toBeNull()
-
-    fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
-    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T09:30' } })
-    fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T09:45' } })
+    customRange('2026-08-01T09:30', '2026-08-01T09:45')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('until='))
-    const params = new URL(lastTrailUrl(), 'http://x').searchParams
-    // Local, not UTC: an operator choosing 09:30 means 09:30 where they stand. The end bound is
-    // widened to the end of that minute.
-    expect(new Date(params.get('since')).getTime())
+    // Local, not UTC: an operator choosing 09:30 means 09:30 where they stand. `until` is the last
+    // millisecond inside, since the trail's query includes it.
+    expect(new Date(params().get('since')).getTime())
       .toBe(new Date('2026-08-01T09:30:00.000').getTime())
-    expect(new Date(params.get('until')).getTime())
-      .toBe(new Date('2026-08-01T09:45:59.999').getTime())
+    expect(new Date(params().get('until')).getTime())
+      .toBe(new Date('2026-08-01T09:44:59.999').getTime())
+    expect(window.location.search).toBe('?from=2026-08-01T09%3A30&to=2026-08-01T09%3A45')
+    expect(windowWords()).toMatch(/^Sat,? 1 Aug( 2026)?, 09:30 – 09:45$/)
   })
 
   it('takes a window narrower than a day, which the date pickers could not express', async () => {
     /* The point of the sub-day zoom: `type="date"` bounded the narrowest window at 24 hours, so on
        a stack commissioned this morning "All time" and "today" drew the same picture. */
     await show()
-    fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
-    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T16:11' } })
-    fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T16:12' } })
+    customRange('2026-08-01T16:11', '2026-08-01T16:12')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('until='))
-    const params = new URL(lastTrailUrl(), 'http://x').searchParams
-    const spanMs = new Date(params.get('until')) - new Date(params.get('since'))
+    const spanMs = new Date(params().get('until')) - new Date(params().get('since'))
     expect(spanMs).toBeLessThan(2 * 60 * 1000)
     expect(spanMs).toBeGreaterThan(0)
   })
 
-  it('still understands a date-only bound, tested on the function rather than the input', () => {
-    /* A `datetime-local` input refuses a date-only value, so this cannot be driven through the DOM.
-       `timeWindow` is an exported pure function whose contract says a bare date means the whole of
-       that day, so it is tested directly. */
-    const { since, until } = timeWindow('custom', '2026-08-01', '2026-08-03')
-    expect(new Date(since).getTime()).toBe(new Date('2026-08-01T00:00:00.000').getTime())
-    expect(new Date(until).getTime()).toBe(new Date('2026-08-03T23:59:59.999').getTime())
+  it('refuses a custom range whose end is not after its start', async () => {
+    await show()
+    const dialog = windowChoices()
+    fireEvent.change(within(dialog).getByLabelText('From'), { target: { value: '2026-08-01T10:00' } })
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: '2026-08-01T09:00' } })
+    expect(within(dialog).getByRole('button', { name: 'Show range' })).toBeDisabled()
   })
 
-  it('offers the sub-day presets, with All time still the default', async () => {
+  it('asks for the calendar day an address names, from local midnight to the next', async () => {
+    window.history.replaceState(null, '', '/?span=day&at=2026-08-02')
     await show()
-    const values = [...rangeSelect().querySelectorAll('option')].map(o => o.value)
 
-    expect(values).toContain('15m')
-    expect(values).toContain('1h')
-    // All time stays first and stays selected: most arrivals here are a handover from a device
-    // row, and a rolling default would answer that click with an empty timeline.
-    expect(values[0]).toBe('all')
-    expect(rangeSelect().value).toBe('all')
+    await waitFor(() => expect(lastTrailUrl()).toContain('until='))
+    expect(new Date(params().get('since')).getTime()).toBe(new Date(2026, 7, 2).getTime())
+    expect(new Date(params().get('until')).getTime()).toBe(new Date(2026, 7, 3).getTime() - 1)
+    expect(windowWords()).toMatch(/^Sun,? 2 Aug/)
   })
 
-  it('asks for a 15-minute window when that preset is chosen', async () => {
+  /* Links already sent still open: the older names are read as `from` and `to`, and the window they
+     named is the window shown. The address is then written the one way. */
+  it('opens a link written with the older since and until as the same window', async () => {
+    window.history.replaceState(null, '', '/?range=custom&since=2026-08-01T09%3A30&until=2026-08-01T09%3A45')
     await show()
-    fireEvent.change(rangeSelect(), { target: { value: '15m' } })
+
+    await waitFor(() => expect(lastTrailUrl()).toContain('until='))
+    expect(new Date(params().get('since')).getTime())
+      .toBe(new Date('2026-08-01T09:30:00.000').getTime())
+    // The older `until` included its whole minute, so the same rows come back.
+    expect(new Date(params().get('until')).getTime())
+      .toBe(new Date('2026-08-01T09:45:59.999').getTime())
+    await waitFor(() => expect(window.location.search).toBe('?from=2026-08-01T09%3A30&to=2026-08-01T09%3A46'))
+  })
+
+  it('still understands a date-only bound in an older link, as the whole of each day', async () => {
+    window.history.replaceState(null, '', '/?range=custom&since=2026-08-01&until=2026-08-03')
+    await show()
+
+    await waitFor(() => expect(lastTrailUrl()).toContain('until='))
+    expect(new Date(params().get('since')).getTime()).toBe(new Date(2026, 7, 1).getTime())
+    expect(new Date(params().get('until')).getTime()).toBe(new Date(2026, 7, 4).getTime() - 1)
+    expect(windowWords()).toMatch(/^Sat,? 1 Aug( 2026)? – Mon,? 3 Aug( 2026)?$/)
+  })
+
+  it('offers the sub-day ranges and All time, with All time still the default', async () => {
+    await show()
+    const rolling = within(windowChoices()).getByRole('group', { name: 'Rolling' })
+    const offered = within(rolling).getAllByRole('button').map(b => b.textContent)
+
+    expect(offered).toEqual(['Last 15 minutes', 'Last 1 hour', 'Last 24 hours', 'Last 7 days', 'Last 30 days', 'All time'])
+    // All time stays the one chosen: most arrivals here are a handover from a device row, and a
+    // rolling default would answer that click with an empty timeline.
+    expect(within(rolling).getByRole('button', { name: 'All time' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('asks for a 15-minute window when that range is chosen', async () => {
+    await show()
+    chooseWindow('Last 15 minutes')
 
     await waitFor(() => expect(lastTrailUrl()).toContain('since='))
-    const since = new URL(lastTrailUrl(), 'http://x').searchParams.get('since')
-    const ageMs = Date.now() - new Date(since).getTime()
+    const ageMs = Date.now() - new Date(params().get('since')).getTime()
     expect(ageMs).toBeGreaterThan(14.5 * 60 * 1000)
     expect(ageMs).toBeLessThan(15.5 * 60 * 1000)
+    // The popover closes on a choice and the button says what was chosen.
+    expect(screen.queryByRole('dialog', { name: 'Choose a time window' })).toBeNull()
+    expect(windowWords()).toBe('Last 15 minutes')
   })
 
-  it('says the range is why the timeline is empty, rather than blaming the filters', async () => {
+  it('says the window is why the timeline is empty, rather than blaming the filters', async () => {
     api.get.mockImplementation((path) => {
       if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve([])
       if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
@@ -353,8 +435,8 @@ describe('Audit Trail time range', () => {
     render(<AuditTrailTab />)
     await waitFor(() => expect(screen.getByText(/No audit trail events/)).toBeInTheDocument())
 
-    fireEvent.change(rangeSelect(), { target: { value: '24h' } })
-    await waitFor(() => expect(screen.getByText(/Widen it, or switch back to All time/)).toBeInTheDocument())
+    chooseWindow('Last 24 hours')
+    await waitFor(() => expect(screen.getByText(/Step back, widen it, or switch back to All time/)).toBeInTheDocument())
   })
 
   // A source guard on the pushdown: the window must reach the database as RPC arguments and not be
@@ -458,15 +540,19 @@ describe('Audit Trail swimlanes', () => {
      comparable against its neighbours' without scrolling. */
   it('groups lanes under Cells, Gateways and Devices, in containment order', async () => {
     await showAll()
-    const headings = [...document.querySelectorAll('.trail-section .trail-section-name')]
+    const headings = [...document.querySelectorAll('.trail-section .group-heading-label')]
       .map(h => h.textContent)
     expect(headings).toEqual(['Cells', 'Gateways', 'Devices'])
   })
 
-  it('puts no count on a section heading', async () => {
+  it('counts each section\'s lanes on its heading', async () => {
     await showAll()
-    const headings = [...document.querySelectorAll('.trail-section')].map(s => s.textContent)
-    expect(headings).toEqual(['Cells', 'Gateways', 'Devices'])
+    // "Devices · 3" on screen; the count's words for a screen reader.
+    const counts = [...document.querySelectorAll('.trail-section .group-heading-count [aria-hidden="true"]')]
+      .map(c => c.textContent)
+    expect(counts).toEqual(['· 1', '· 1', '· 3'])
+    expect(screen.getByRole('button', { name: 'Devices, 3 lanes' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'Cells, 1 lane' })).toBeInTheDocument()
   })
 
   it('omits a section with nothing in it rather than drawing an empty heading', async () => {
@@ -482,7 +568,7 @@ describe('Audit Trail swimlanes', () => {
     await show()
 
     // Only device lanes are present, so Cells and Gateways must not appear as empty headings.
-    const headings = [...document.querySelectorAll('.trail-section .trail-section-name')].map(h => h.textContent)
+    const headings = [...document.querySelectorAll('.trail-section .group-heading-label')].map(h => h.textContent)
     expect(headings).toEqual(['Devices'])
   })
 
@@ -583,29 +669,50 @@ describe('Audit Trail marker shapes', () => {
   const shapeOf = (el) => el.querySelector('.trail-node-mark')?.getAttribute('data-shape')
   const pathOf = (el) => el.querySelector('.trail-node-shape')?.getAttribute('d')
 
-  it('gives each class its own shape', async () => {
+  /* The fixture with a read added, so every class is on the track. */
+  const READ = {
+    event_id: 7, entity_type: 'gateways', entity_id: 'gw-1', event_type: 'CREDENTIAL_SHOWN',
+    timestamp: '2026-08-02T06:00:00Z', description: 'Action CREDENTIAL_SHOWN on gateways [gw-1]',
+    changed_by: 'user-uuid-1', actor_source: 'user', old_data: null,
+    new_data: { name: 'Host_Gateway_NodeRED', sparkplug_id: 'gw1' }, class: 'read'
+  }
+  const withRead = () => api.get.mockImplementation((path) => {
+    if (path.startsWith('/api/v1/audit-trail')) return Promise.resolve([...EVENTS, READ])
+    if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
+    if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+    if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
+    return Promise.resolve([])
+  })
+
+  it('gives each class its own shape, Read an eye', async () => {
+    withRead()
     await showAll()
     const byKind = {}
     for (const n of nodes()) {
       const kind = Object.keys(MARKERS).find(k => n.classList.contains(`trail-node-${k}`))
       byKind[kind] = { shape: shapeOf(n), path: pathOf(n) }
     }
-    // The fixture holds all four classes.
+    // The fixture holds all five classes.
     expect(Object.keys(byKind).sort()).toEqual(Object.keys(MARKERS).sort())
     expect(byKind).toMatchObject({
-      operational: { shape: 'circle' },
-      creation:    { shape: 'square' },
-      governance:  { shape: 'diamond' },
-      critical:    { shape: 'triangle' },
+      operational:   { shape: 'circle' },
+      created:       { shape: 'square' },
+      configuration: { shape: 'diamond' },
+      lifecycle:     { shape: 'triangle' },
+      read:          { shape: 'eye' },
     })
-    expect(new Set(Object.values(byKind).map(v => v.path)).size).toBe(4)
+    expect(new Set(Object.values(byKind).map(v => v.path)).size).toBe(5)
+  })
+
+  it('lists the classes in the legend in the server\'s order, Read after Lifecycle', () => {
+    expect(Object.keys(MARKERS)).toEqual(['created', 'operational', 'configuration', 'lifecycle', 'read'])
   })
 
   it('draws the legend with the same marker the track draws', async () => {
+    withRead()
     await showAll()
-    const items = [...document.querySelectorAll('.trail-legend .trail-legend-item')]
-      .filter(i => i.querySelector('.trail-node-mark'))
-    expect(items).toHaveLength(4)
+    const items = [...document.querySelectorAll('.trail-legend .trail-legend-toggle')]
+    expect(items).toHaveLength(5)
     for (const item of items) {
       const kind = Object.keys(MARKERS).find(k => item.textContent === MARKERS[k].label)
       const onTrack = nodes().find(n => n.classList.contains(`trail-node-${kind}`))
@@ -614,6 +721,19 @@ describe('Audit Trail marker shapes', () => {
       expect(shapeOf(item)).toBe(shapeOf(onTrack))
       expect(pathOf(item)).toBe(pathOf(onTrack))
     }
+  })
+
+  it('keeps the same marker on a pressed toggle, on the card-coloured disc it has at rest', async () => {
+    withRead()
+    await showAll()
+    const toggles = () => [...document.querySelectorAll('.trail-legend .trail-legend-toggle')]
+    const marks = () => toggles().map(item => item.querySelector('.trail-legend-disc > .trail-node-mark')?.outerHTML)
+    const atRest = marks()
+    expect(atRest.every(Boolean)).toBe(true)
+    for (const item of toggles()) fireEvent.click(item)
+    await waitFor(() => expect(toggles().map(item => item.getAttribute('aria-pressed'))).toEqual(Array(5).fill('true')))
+    expect(toggles().every(item => item.classList.contains('btn-primary'))).toBe(true)
+    expect(marks()).toEqual(atRest)
   })
 
   it('keeps every shape inside the 13px box the clustering maths measures', async () => {
@@ -643,21 +763,21 @@ describe('Audit Trail marker shapes', () => {
 })
 
 /**
- * The derived marker taxonomy. `audit_trail.action` holds only INSERT / UPDATE / DELETE;
- * archiving, quarantining and schema rebinding are all UPDATEs distinguished by what the diff
- * touched, so the classifier is the only thing that tells them apart.
+ * The marker taxonomy. The server names each event's class (audit_event_class(), 0228); the rules
+ * that tell an archival from a schema rebinding, both UPDATEs, are held in SQL against
+ * test-harness/fixtures/audit-event-classes.json. The page draws the class it is given.
  */
 describe('Audit Trail event classification', () => {
   const classOf = (pattern) => nodeFor(pattern).className
 
-  it('paints an INSERT as creation', async () => {
+  it('paints an INSERT the server calls created as created', async () => {
     await show()
-    expect(classOf(/INSERT on Host_Gateway_NodeRED/)).toContain('trail-node-creation')
+    expect(classOf(/INSERT on Host_Gateway_NodeRED/)).toContain('trail-node-created')
   })
 
-  it('paints a DELETE as lifecycle-critical', async () => {
+  it('paints a DELETE the server calls lifecycle as lifecycle', async () => {
     await showAll()
-    expect(classOf(/DELETE on Decommissioned Line/)).toContain('trail-node-critical')
+    expect(classOf(/DELETE on Decommissioned Line/)).toContain('trail-node-lifecycle')
   })
 
   it('paints an ordinary status change as operational', async () => {
@@ -665,90 +785,25 @@ describe('Audit Trail event classification', () => {
     expect(classOf(/UPDATE on Simulated_CNC_01/)).toContain('trail-node-operational')
   })
 
-  it('paints a schema rebinding as governance, though its action is only UPDATE', async () => {
+  it('paints a schema rebinding as configuration, though its action is only UPDATE', async () => {
     await show()
-    const governance = nodes().filter(n => n.className.includes('trail-node-governance'))
-    expect(governance.length).toBe(1)
+    const configuration = nodes().filter(n => n.className.includes('trail-node-configuration'))
+    expect(configuration.length).toBe(1)
   })
 
-  it('paints an archival as critical, though its action is only UPDATE', async () => {
+  it('paints an archival as lifecycle, though its action is only UPDATE', async () => {
     await showAll()
-    // Two UPDATEs on Press_02; exactly one of them flipped is_archived to true.
-    const critical = nodes().filter(n => n.className.includes('trail-node-critical'))
+    const lifecycle = nodes().filter(n => n.className.includes('trail-node-lifecycle'))
     // The DELETE, plus the archival.
-    expect(critical.length).toBe(2)
+    expect(lifecycle.length).toBe(2)
   })
 
-  it('paints a metric deprecation as critical and its restore as operational', () => {
-    // Both are UPDATEs on metric_catalog; `deprecated` rising is a retirement, as `is_archived` is.
-    const deprecate = {
-      event_type: 'UPDATE',
-      old_data: { name: 'Controller/EXECUTION', deprecated: false, superseded_by: null },
-      new_data: { name: 'Controller/EXECUTION', deprecated: true, superseded_by: 'm2' }
-    }
-    const restore = { event_type: 'UPDATE', old_data: deprecate.new_data, new_data: deprecate.old_data }
-    expect(classifyEvent(deprecate, diffFields(deprecate.old_data, deprecate.new_data))).toBe('critical')
-    expect(classifyEvent(restore, diffFields(restore.old_data, restore.new_data))).toBe('operational')
-  })
-
-  /* Shapes taken from a reseeded stack: the commonest event is a device's first DBIRTH, which
-     arrives as one update touching three columns at once, and classifying on any one in isolation
-     gets it wrong. */
-  it('calls a real first DBIRTH operational, not governance', () => {
-    const event = {
-      event_type: 'UPDATE',
-      old_data: { status: 'OFFLINE', first_dbirth_at: null, identity_source: null },
-      new_data: { status: 'ONLINE', first_dbirth_at: '2026-08-17T15:11:20Z', identity_source: 'sparkplug' }
-    }
-    // `identity_source` is provenance the ingestion daemon writes, not configuration an operator
-    // declared, and it never moves on its own -- so it must not drag the whole event amber.
-    expect(classifyEvent(event, diffFields(event.old_data, event.new_data))).toBe('operational')
-  })
-
-  it('calls a real cell relocation operational', () => {
-    const event = {
-      event_type: 'UPDATE',
-      old_data: { cell_id: null }, new_data: { cell_id: 'cell-a' }
-    }
-    expect(classifyEvent(event, diffFields(event.old_data, event.new_data))).toBe('operational')
-  })
-
-  /* The database's judgement, read from the row: `audit_domain` is stamped at insert time by one
-     closed classifier, so the browser does not re-derive "is this about who may do what". */
-  it('calls any security-domain row governance, whatever its verb', () => {
-    // A service principal's INSERT is the case that used to come out green. Nothing was created
-    // on the shopfloor; somebody was given a way to reach the stack.
-    const event = {
-      event_type: 'INSERT',
-      audit_domain: 'security',
-      new_data: { roles: ['Administrator'], can_sign_in: false }
-    }
-    expect(classifyEvent(event, diffFields(null, event.new_data))).toBe('governance')
-  })
-
-  it('still derives a marker for a row that carries no domain', () => {
-    // Rows reach this function from fixtures and from older page state without the column. An
-    // absent domain must fall through to the derivation rather than default to anything.
-    const event = { event_type: 'INSERT', new_data: { asset_name: 'CNC-01' } }
-    expect(classifyEvent(event, diffFields(null, event.new_data))).toBe('creation')
-  })
-
-  it('calls a role grant and a role revocation governance, not creation or lifecycle', () => {
-    // Asserted on the ACTION alone, without a domain, because the two arms are independent: the
-    // action arm is what a row reaching the page from an older cache would be classified by.
-    for (const action of ['ROLE_GRANTED', 'ROLE_REVOKED']) {
-      const event = { event_type: action, new_data: { role: 'Administrator' } }
-      expect(classifyEvent(event, diffFields(null, event.new_data))).toBe('governance')
-    }
-  })
-
-  it('calls attaching or detaching a device schema governance, not creation or lifecycle', () => {
-    // A device_submodels row is a schema binding: attaching one is a governance act.
-    const row = { device_id: 'dev-1', schema_id: 'sch-1', submodel_key: null }
-    const attach = { event_type: 'INSERT', entity_type: 'device_submodels', new_data: row }
-    const detach = { event_type: 'DELETE', entity_type: 'device_submodels', old_data: row }
-    expect(classifyEvent(attach, diffFields(null, attach.new_data))).toBe('governance')
-    expect(classifyEvent(detach, diffFields(detach.old_data, null))).toBe('governance')
+  it('draws a class it has no marker for as operational, rather than nothing', async () => {
+    api.get.mockImplementation((path) => (path.startsWith('/api/v1/audit-trail')
+      ? Promise.resolve([{ ...EVENTS[0], class: 'unheard_of' }])
+      : Promise.resolve(path.startsWith('/api/v1/devices') ? DEVICES : [])))
+    await show()
+    expect(classOf(/UPDATE on Simulated_CNC_01/)).toContain('trail-node-operational')
   })
 
   it('carries a legend, because nothing else in the UI says what amber means', async () => {
@@ -1048,21 +1103,27 @@ describe('Audit Trail — removed tag filter', () => {
     expect(screen.queryByTitle(/carry this tag/i)).not.toBeInTheDocument()
   })
 
-  it('leaves two controls in the bar, four in the custom range mode, and three in the popover', async () => {
+  it('leaves the search box and the time window in the bar, and three filters in the popover', async () => {
     await show()
 
-    // The bar's own controls: the search box and the range. Export is a button, not a control.
+    // The bar's one field is the search box; the time window is buttons. Export is a button too.
     const controls = () => document.querySelectorAll('.filter-bar select, .filter-bar input')
-    expect(controls().length).toBe(2)
+    expect(controls().length).toBe(1)
+    expect(document.querySelector('.filter-bar').contains(timeControl())).toBe(true)
 
-    // The date pickers are not present until they mean something. Two controls sitting inert
-    // beside the presets are two controls whose relationship to them has to be guessed at.
-    fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
-    await waitFor(() => expect(controls().length).toBe(4))
+    // The custom range's boxes are in the time window's popover, so they are not in the bar sitting
+    // inert beside everything else until a custom range is wanted.
+    expect(within(windowChoices()).getAllByLabelText(/^(From|To)$/)).toHaveLength(2)
+    expect(controls().length).toBe(1)
+    fireEvent.keyDown(document, { key: 'Escape' })
 
     openFilters()
-    // The kind, the action and Changed by.
-    expect(screen.getByRole('dialog', { name: 'Filters' }).querySelectorAll('select')).toHaveLength(3)
+    // The kind, the action and Changed by, each a list in a section; Show deleted entities is a
+    // checkbox under them.
+    const panel = screen.getByRole('dialog', { name: 'Filters' })
+    expect(panel.querySelectorAll('.filter-section')).toHaveLength(3)
+    expect(panel.querySelectorAll('select')).toHaveLength(0)
+    expect(within(panel).getByRole('checkbox', { name: /^Show deleted entities/ })).toBeInTheDocument()
   })
 
   it('puts export at the right-hand end of the toolbar, after Clear filters', async () => {
@@ -1121,13 +1182,13 @@ describe('Audit Trail — removed tag filter', () => {
      from `service_role`, so hiding is a filter and removal is an administrative act. The fixture
      already contains the case: `cell-gone` and the orphan UUID on event 6. */
   describe('events for assets that no longer exist', () => {
-    const toggle = () => screen.getByRole('button', { name: /Show deleted entities/i })
+    const toggle = () => deletedBox()
 
     it('counts distinct ASSETS, not the events belonging to them', async () => {
       /* The control counts purged entities, not their rows: two in the fixture, however many rows
          they own. */
       await show()
-      expect(toggle()).toHaveTextContent('Show deleted entities (2)')
+      expect(toggle()).toHaveAccessibleName('Show deleted entities 2')
     })
 
     it('hides them by default, and that is not an active filter', async () => {
@@ -1141,7 +1202,7 @@ describe('Audit Trail — removed tag filter', () => {
 
     it('showing them is the deviation, so Clear filters appears', async () => {
       await show()
-      fireEvent.click(toggle())
+      showDeleted()
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
@@ -1150,24 +1211,25 @@ describe('Audit Trail — removed tag filter', () => {
 
     it('Clear filters returns them to hidden', async () => {
       await show()
-      fireEvent.click(toggle())
+      showDeleted()
       fireEvent.click(await screen.findByRole('button', { name: /Clear filters/ }))
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)'))
     })
 
-    it('is styled as the toggle Gateways and Cells already use', async () => {
-      /* The same control shape as Has quarantined devices and Empty: `btn btn-sm`, ghost at rest
-         and primary when engaged, with an icon and a count. The label says Show because hiding is
-         the default. */
+    it('is a checkbox in the Filters panel, not a button in the bar, and the panel counts it', async () => {
+      /* It took the room that pushed the toolbar onto a second line. In the panel it is a checkbox
+         beside the lists, with its count, and "Filters (n)" counts it. The label says Show because
+         hiding is the default. */
       await show()
-      expect(toggle()).toHaveClass('btn', 'btn-sm', 'btn-ghost')
-      expect(toggle()).not.toHaveClass('btn-primary')
+      expect(within(document.querySelector('.filter-bar')).queryByRole('button', { name: /Show deleted entities/ })).toBeNull()
+      expect(toggle().checked).toBe(false)
 
-      fireEvent.click(toggle())
-      await waitFor(() => expect(toggle()).toHaveClass('btn-primary'))
-      expect(toggle()).not.toHaveClass('btn-ghost')
+      showDeleted()
+      await waitFor(() => expect(screen.getByRole('button', { name: /^Filters/ })).toHaveTextContent('Filters (1)'))
+      expect(toggle().checked).toBe(true)
+      expect(window.location.search).toBe('?deleted=1')
     })
 
     it('drops those events from the export as well as the timeline', async () => {
@@ -1176,7 +1238,7 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
       expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)')
 
-      fireEvent.click(toggle())
+      showDeleted()
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
     })
@@ -1195,7 +1257,7 @@ describe('Audit Trail — removed tag filter', () => {
       })
       await show()
 
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
 
     it('hides nothing while the asset lookups are still outstanding', async () => {
@@ -1210,7 +1272,7 @@ describe('Audit Trail — removed tag filter', () => {
 
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
 
     it('does not treat an ARCHIVED asset as deleted', async () => {
@@ -1230,7 +1292,7 @@ describe('Audit Trail — removed tag filter', () => {
       render(<AuditTrailTab />)
       await waitFor(() => expect(screen.getByText('Press_02')).toBeInTheDocument())
 
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
   })
 
@@ -1271,14 +1333,13 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
 
       expect(screen.queryByText('VALIDATE_Schema_Robot')).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /Show deleted entities/i }))
-        .toHaveTextContent('Show deleted entities (1)')
+      expect(deletedBox()).toHaveAccessibleName('Show deleted entities 1')
     })
 
     it('reveals it, named from its snapshot, when asked', async () => {
       withSchemas(() => Promise.resolve([]))
       await show()
-      fireEvent.click(screen.getByRole('button', { name: /Show deleted entities/i }))
+      showDeleted()
 
       expect(await screen.findByText('VALIDATE_Schema_Robot')).toBeInTheDocument()
     })
@@ -1288,7 +1349,7 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
 
       expect(screen.getByText('Robot pose')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
 
     it('hides nothing when the schemas lookup was refused, rather than hiding all of them', async () => {
@@ -1299,7 +1360,7 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
 
       expect(await screen.findByText('VALIDATE_Schema_Robot')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
       expect(document.querySelector('.trail-lane-gone')).toBeNull()
     })
 
@@ -1324,7 +1385,7 @@ describe('Audit Trail — removed tag filter', () => {
       await waitFor(() => expect(document.querySelector('.trail-lane-label')).toBeTruthy())
 
       expect(document.querySelector('.trail-lane-gone')).toBeNull()
-      expect(screen.queryByRole('button', { name: /Show deleted entities/i })).not.toBeInTheDocument()
+      expect(deletedBox()).toBeNull()
     })
   })
 
@@ -1526,8 +1587,9 @@ describe('Audit Trail — removed tag filter', () => {
       // edge above it.
       const label = heading.querySelector('.trail-lane-label')
       expect(label).toBeTruthy()
-      expect(label.querySelector('.trail-section-name')).toBeTruthy()
-      expect(label.querySelector('.trail-section-count')).toBeNull()
+      // The label column holds the heading's button: its name and its lane count.
+      expect(label.querySelector('button.group-heading .group-heading-label')).toBeTruthy()
+      expect(label.querySelector('.group-heading-count')).toBeTruthy()
       expect(heading.querySelector('.trail-track')).toBeTruthy()
       // Not a pill: nothing draws a badge any more.
       expect(ruleFor('.trail-section-badge')).toBeUndefined()
@@ -1675,14 +1737,18 @@ describe('Audit Trail timeline density', () => {
     expect(rule('.trail-track')).toMatch(/height:\s*28px/)
   })
 
-  it('pins the lane label so it survives horizontal scrolling', () => {
-    expect(rule('.trail-lane-label')).toMatch(/position:\s*sticky/)
-    // Opaque, or the markers scroll over the label instead of under it.
+  it('keeps the lane label opaque and above its track', () => {
+    // Opaque, or a wide badge near the window's start would paint over the name.
+    expect(rule('.trail-lane-label')).toMatch(/position:\s*relative/)
     expect(rule('.trail-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
   })
 
-  it('scrolls the lanes horizontally rather than the page', () => {
-    expect(rule('.trail-scroll')).toMatch(/overflow-x:\s*auto/)
+  it('never scrolls the lanes sideways: the track narrows to fit instead', () => {
+    // A window always fits the width, however much the drawer takes.
+    expect(rule('.trail-scroll')).toMatch(/overflow-x:\s*hidden/)
+    expect(rule('.trail-swimlanes')).not.toMatch(/min-width/)
+    expect(rule('.trail-track')).toMatch(/min-width:\s*0;/)
+    expect(rule('.trail-swimlanes')).toMatch(/--trail-label-width:\s*clamp\(/)
   })
 
   it('caps the raw payload height so it cannot push the accordion off the drawer', () => {

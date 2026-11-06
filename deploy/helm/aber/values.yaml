@@ -197,7 +197,7 @@ secrets:
   grafanaAlertWebhookSecret: ""
 
   # Studio's door: the OAuth client the gateway uses (hashed by 0081) and its cookie-signing key.
-  # Empty by default, consistent with `routes.studio: false`. Fail-closed at both ends.
+  # Read only with supabaseStudio on; needed only with `routes.studio` on. Fail-closed at both ends.
   studioOAuthClientSecret: ""
   studioProxyHmacSecret: ""
 
@@ -270,6 +270,10 @@ timescaledb:
   # The extension's daily usage report. Off because this stack has no egress to it; `basic`
   # restores the upstream default.
   telemetryLevel: "off"
+  # Merged onto the historian's pod, so a change rolls it. The dev loop sets `checksum/image` to
+  # the id of the historian image it imported under the same tag, so a rebuilt historian restarts
+  # during `helm upgrade`, as a new image tag makes it restart on a real upgrade.
+  podAnnotations: {}
   # --- Telemetry lifecycle --------------------------------------------------------------------
   # Applied by the `timescaledb-retention` hook Job on every install and upgrade, so these are
   # authoritative against a database that already holds data. Any PostgreSQL interval; `never`
@@ -554,7 +558,7 @@ realtime:
   enabled: true
   image:
     repository: supabase/realtime
-    tag: v2.134.10
+    tag: v2.143.3
     pullPolicy: IfNotPresent
   # Never more than one: Realtime holds a logical replication slot, which is per-instance state.
   replicas: 1
@@ -654,7 +658,7 @@ supabaseRest:
   enabled: true
   image:
     repository: postgrest/postgrest
-    tag: v14.17
+    tag: v14.18
     pullPolicy: IfNotPresent
   # Stateless; an HPA candidate.
   replicas: 1
@@ -731,7 +735,8 @@ supabaseFunctions:
   # can reach.
   aas:
     # Namespaces every globalAssetId and submodel id the shell carries. Permanent once a shell has
-    # left the site: set it before the first export, under a domain the organisation controls.
+    # left the site: set it before the first export or aas-api read, under a domain the
+    # organisation controls.
     baseIri: https://aber.local/ids/asset/
     # Where a consumer fetches the samples a Time Series LinkedSegment points at. Derived from
     # publicUrls.supabase when empty.
@@ -748,7 +753,7 @@ supabaseStorage:
   enabled: true
   image:
     repository: supabase/storage-api
-    tag: v1.74.0
+    tag: v1.81.0
     pullPolicy: IfNotPresent
   # One replica on the file backend (a single-writer ReadWriteOnce PVC). s3 lifts that.
   replicas: 1
@@ -797,23 +802,30 @@ supabaseStorage:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }
 
+# postgres-meta serves Studio's database pages and nothing else: it runs any SQL it is sent as
+# supabase_admin, with no login of its own. On exactly when supabaseStudio is; the render fails
+# when the two differ.
 supabaseMeta:
-  enabled: true
+  enabled: false
   image:
     # The version the official stack pairs with the Studio tag below (Zod-coupled).
     repository: supabase/postgres-meta
-    tag: v0.99.0
+    tag: v0.100.0
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }
 
+# Supabase Studio, the database administrator's console: tables, SQL, storage and accounts, as the
+# database owner. Aber's dashboard does the site's own work, so Studio is off. To turn it on, set
+# this and supabaseMeta.enabled; to reach it from a browser, also ingress.routes.studio with its two
+# secrets (help/site/running-the-server.md, *Reaching the stack*).
 supabaseStudio:
-  enabled: true
+  enabled: false
   image:
     repository: supabase/studio
-    tag: 2026.09.28-sha-5e59b60
+    tag: 2026.10.12-sha-3699278
     pullPolicy: IfNotPresent
   replicas: 1
   organizationName: Aber
@@ -991,6 +1003,13 @@ playback:
   enabled: true
   # How often an idle worker looks for a queued job.
   pollIntervalSeconds: 3
+  # The worker's Prometheus endpoint, shaped like ingestion.metrics. It serves one series, the jobs
+  # the worker ended by outcome (aber_playback_jobs_total). No credential, so a count and nothing
+  # else. Alloy scrapes it through the pod's annotations, and telemetry.serviceMonitor through the
+  # headless playback-metrics Service.
+  metrics:
+    enabled: true
+    port: 9109
   resources:
     requests: { cpu: 25m, memory: 96Mi }
     limits: { memory: 256Mi }
@@ -1292,6 +1311,10 @@ grafana:
   # stock cluster log stack sets namespace/pod/container and no `service`, so the datasource
   # connects and every query returns nothing. Relabel `service` to the workload name in that
   # collector.
+  #
+  # The edge functions read the same Loki for the System page's Logs tab (LOKI_URL). With neither
+  # this nor observability.enabled the tab says observability is off. An external Loki under
+  # networkPolicy.enabled needs a networkPolicy.extraEgress rule from supabase-functions.
   prometheusUrl: ""
   lokiUrl: ""
   # Bundled datasource plugins a site keeps running although grafana.ini disables them, e.g.
@@ -1418,10 +1441,11 @@ ingress:
   # Per-route overrides, keyed by the route names in aber.ingressRoutes: frontend,
   # supabase, nodered, grafana, studio, docs, gitea, mqtt.
   #
-  # Studio is off by default as an EXPOSURE decision: the route points at the gateway's studio
-  # listener (an Administrator login), but a database console on a public hostname is reachable
-  # by anyone who can reach the ingress. Turning it on requires secrets.studioOAuthClientSecret
-  # and secrets.studioProxyHmacSecret (the render fails naming them). Without the route:
+  # Studio's route is off by default as an EXPOSURE decision, even where supabaseStudio is on: it
+  # points at the gateway's studio listener (an Administrator login), but a database console on a
+  # public hostname is reachable by anyone who can reach the ingress. Turning it on requires
+  # supabaseStudio.enabled, secrets.studioOAuthClientSecret and secrets.studioProxyHmacSecret (the
+  # render fails naming what is missing). Without the route:
   #   kubectl -n <ns> port-forward svc/supabase-studio 54323:3000
   #
   # The studio and gitea logins set Secure cookies, which a browser keeps only on an https origin
@@ -1690,7 +1714,14 @@ gatewayCredential:
 # stack where every pod is healthy and nothing reaches anything.
 networkPolicy:
   enabled: false
-  # ONE POLICY THAT IS RENDERED EVEN WITH `enabled` OFF, and the only one: the forge's web port.
+  # POLICIES THAT RENDER WITH `enabled` OFF.
+  #
+  # Where a site runs Studio and postgres-meta, one each, whatever `enabled` says. postgres-meta
+  # runs any SQL as supabase_admin with no login, so only Studio's pods may reach it, on 8080.
+  # Studio's own port skips the gateway's sign-in, so only the gateway may reach it, on 3000.
+  # With `enabled` on, the generated pairs admit the same peers, so neither widens.
+  #
+  # And the forge's web port, which `enabled` replaces with the generated pair:
   #
   # Gitea runs with reverse-proxy authentication so the gateway's `forge` listener can hand a
   # verified identity down as a header, and Gitea trusts that header FROM ANY PEER

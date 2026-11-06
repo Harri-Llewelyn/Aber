@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { IconFileCode } from '../common/Icons'
+import { IconAlertTriangle, IconFileCode } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
@@ -7,6 +7,7 @@ import { catalogPropertyEntry, isNumericType, rangeError } from '../../utils/sch
 import { groupCatalog } from '../../utils/metricGroup'
 import { STANDARD_OPTIONS, LOCAL_EXTENSION_LABEL } from '../../utils/standards'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { SemanticIdField } from '../common/SemanticIdField'
 import { Tooltip } from '../common/Tooltip'
 
@@ -22,20 +23,14 @@ export const PICKER_ROW_LABEL = {
   display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 auto', minWidth: 0, padding: '8px 12px', cursor: 'pointer'
 }
 
-/** The asterisk beside a label that must be filled in, with the convention spelled out on hover. */
-function RequiredMark() {
-  return (
-    <Tooltip text="Required: the schema cannot be saved without it">
-      <span style={{ color: 'var(--danger)', marginLeft: '3px' }} aria-hidden="true">*</span>
-    </Tooltip>
-  )
-}
+/** What the asterisk means on this form's labels. */
+const REQUIRED = 'Required: the schema cannot be saved without it'
 
-/** What a save attempt found missing, beneath the field it is about. */
+/** What a save attempt found missing, beneath the field it is about, in the form's warning hint. */
 function FieldError({ children }) {
   return (
-    <div role="alert" style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '4px' }}>
-      {children}
+    <div role="alert" className="form-hint hint-danger">
+      <IconAlertTriangle size={12} /> {children}
     </div>
   )
 }
@@ -119,6 +114,8 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
   // Set by a save attempt, not by typing: a form that turns red while a name is half-typed accuses
   // the reader of an error they are in the middle of not making.
   const [showRequired, setShowRequired] = useState(false)
+  // A refusal of the save, as the database worded it. The builder stays open with what was chosen.
+  const [error, setError] = useState(null)
 
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
 
@@ -186,7 +183,14 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
      just tried to save is actually asking. */
   const handleSave = () => {
     if (!canSave) { setShowRequired(true); return }
-    runSubmit(() => onSubmit(buildSchemaPayload()))
+    runSubmit(async () => {
+      setError(null)
+      try {
+        await onSubmit(buildSchemaPayload())
+      } catch (err) {
+        setError(err.message)
+      }
+    })
   }
 
   return (
@@ -198,6 +202,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
       size="wide"
       fill
       onClose={onCancel}
+      error={error}
       footer={
         <>
           <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>Cancel</button>
@@ -217,13 +222,14 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
     >
       <div className="form-group">
         <label className="form-label" htmlFor="schema-builder-name">
-          Schema Name <RequiredMark />
+          Schema Name <RequiredMark title={REQUIRED} />
         </label>
         <input
           id="schema-builder-name"
           className="form-control"
           style={nameMissing ? INVALID_FIELD : undefined}
           aria-invalid={nameMissing || undefined}
+          aria-required="true"
           value={schemaName}
           onChange={e => setSchemaName(e.target.value)}
           placeholder="e.g. Six-Axis-Robot-Arm-Standard"
@@ -249,7 +255,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
 
       <div className="form-group modal-fill" style={{ display: 'flex', flexDirection: 'column', minHeight: '260px' }}>
         <label className="form-label">
-          Metrics <RequiredMark />
+          Metrics <RequiredMark title={REQUIRED} />
           <span className="section-count">{selectedMetrics.length} selected</span>
         </label>
         {metricsMissing && <FieldError>Tick at least one metric. A schema with none constrains nothing.</FieldError>}

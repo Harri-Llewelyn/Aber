@@ -178,7 +178,7 @@ jobs:
           # the moment the claim became `1,600+`; a bound only ever becomes conservative.
           ACTUAL=$(printf '%s' "$STRIPPED" | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
           CLAIMED=$(grep -oE 'Frontend — [0-9,]+\+? tests' docs/testing.md | grep -oE '[0-9,]+' | tr -d ',')
-          echo "vitest reports ${ACTUAL:-<unparsed>}; docs/testing.md claims at least ${CLAIMED:-<absent>}"
+          echo "vitest reports ${ACTUAL:-[unparsed]}; docs/testing.md claims at least ${CLAIMED:-[absent]}"
           # An empty ACTUAL is a broken check, not a documentation problem -- say which.
           if [ -z "$ACTUAL" ]; then
             echo "::error::could not read the test count out of vitest's output; this check needs fixing, not docs/testing.md"
@@ -395,6 +395,12 @@ jobs:
           helm template aber deploy/helm/aber \
             -f deploy/helm/aber/values-dev.yaml > /tmp/rendered.yaml
           echo "Rendered $(grep -c '^kind:' /tmp/rendered.yaml) objects."
+          # Studio and postgres-meta are off by default; this render turns them and the route on, so the
+          # checks below see their objects too.
+          helm template aber deploy/helm/aber -f deploy/helm/aber/values-dev.yaml \
+            --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true --set ingress.routes.studio=true \
+            > /tmp/rendered-studio.yaml
+          echo "Rendered $(grep -c '^kind:' /tmp/rendered-studio.yaml) objects with Studio on."
 
       # kubeconform, not `kubectl apply --dry-run=client`: kubectl performs API discovery before it
       # validates and fails with no cluster. This catches a list item read as a mapping (`Authorization:
@@ -407,7 +413,7 @@ jobs:
           docker run --rm -v /tmp:/tmp ghcr.io/yannh/kubeconform:v0.6.7 \
             -strict -summary -ignore-missing-schemas \
             -kubernetes-version "${KUBECONFORM_K8S_VERSION}" \
-            /tmp/rendered.yaml
+            /tmp/rendered.yaml /tmp/rendered-studio.yaml
         env:
           # Matches the chart's kubeVersion floor closely enough to catch field-level mistakes; the
           # schemas are per-release, so this pins WHICH API surface the manifests are judged against.
@@ -614,7 +620,19 @@ jobs:
           # The studio route with no door credentials publishes a login nobody can complete. Skipped
           # under existingSecret, which the existingSecret keys step below renders.
           expect_failure "studio route with no door credentials" "Studio's door has no credentials" \
-            -f "$DEV" --set secrets.studioOAuthClientSecret=
+            -f "$DEV" --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true \
+            --set ingress.routes.studio=true --set secrets.studioOAuthClientSecret=
+
+          # The studio route publishes a console the install does not run.
+          expect_failure "studio route with Studio off" "supabaseStudio.enabled is false" \
+            -f "$DEV" --set ingress.routes.studio=true
+
+          # postgres-meta serves Studio alone: Studio without it fails its database pages, and it
+          # without Studio is SQL as supabase_admin, with no login, for nobody.
+          expect_failure "Studio on, postgres-meta off" "supabaseMeta.enabled is false" \
+            -f "$DEV" --set supabaseStudio.enabled=true
+          expect_failure "postgres-meta on, Studio off" "supabaseMeta.enabled is true" \
+            -f "$DEV" --set supabaseMeta.enabled=true
 
           # An Ingress with empty `host:` fields is ACCEPTED by the API server and then matches every
           # request that reaches the controller.
@@ -821,17 +839,19 @@ jobs:
       # values-prod.yaml.example's key list to templates/secret.yaml; this holds secret.yaml to the
       # keys the pods read from an external Secret, both ways, with the optional workloads on. A key
       # read and not rendered is missing from the list; a key rendered and read by nothing is dead.
-      # values-dev.yaml publishes the studio route; its two values are blanked because an external
-      # Secret holds them, and the render must not ask for them.
+      # Both renders turn Studio and postgres-meta on, so Studio's keys are compared too. The second
+      # also publishes its route, with the two values blanked: an external Secret holds them, and the
+      # render must not ask for them.
       - name: Verify The Keys Read From existingSecret Are The Keys The Chart's Secret Renders
         run: |
           set -euo pipefail
           DEV=deploy/helm/aber/values-dev.yaml
           helm template aber deploy/helm/aber -f "$DEV" --set global.publicBaseDomain=localhost \
+            --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true \
             > /tmp/own-secret.yaml
           helm template aber deploy/helm/aber -f "$DEV" --set global.publicBaseDomain=localhost \
             --set secrets.existingSecret=ci-render-check \
-            --set ingress.routes.studio=true \
+            --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true --set ingress.routes.studio=true \
             --set secrets.studioOAuthClientSecret= --set secrets.studioProxyHmacSecret= \
             --set playback.enabled=true --set releaseCheck.enabled=true --set e2e.enabled=true \
             --set loadTest.enabled=true --set backup.enabled=true --set backupService.enabled=true \
@@ -951,6 +971,8 @@ jobs:
               ('e2e-validate', 'i3x-service', 8090, 'validate.py checks 12-12f'),
               # Enrolment's repository, the sweep and the door's placement: blocked, each skips the forge.
               ('supabase-functions', 'supabase-envoy', 8003, "the forge's API through the forge-api listener"),
+              # The System page's Logs tab: blocked, every read says the log store could not be read.
+              ('supabase-functions', 'loki', 3100, "service-logs: the System page's Logs tab"),
           ]
           for src, dst, port, why in REQUIRED:
               if (src, dst, port) not in egress:
@@ -1074,6 +1096,139 @@ jobs:
           print("The forge is not reachable by an arbitrary pod on a default install.")
           PY
 
+      # Studio and postgres-meta are off by default; where a site turns them on, one policy each renders
+      # whatever networkPolicy.enabled says (#1360). postgres-meta runs any SQL as supabase_admin with
+      # no login, and Studio's own port skips the gateway's sign-in, so each admits its one caller. With
+      # the layer on, the generated pairs must not widen either.
+      - name: Verify Studio And postgres-meta Admit Only Their One Caller
+        run: |
+          helm template aber deploy/helm/aber -f deploy/helm/aber/values-dev.yaml \
+            --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true > /tmp/netpol-studio-off.yaml
+          helm template aber deploy/helm/aber -f deploy/helm/aber/values-dev.yaml \
+            --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true \
+            --set networkPolicy.enabled=true --set backup.enabled=true --set e2e.enabled=true \
+            > /tmp/netpol-studio-on.yaml
+          python3 - /tmp/netpol-studio-off.yaml /tmp/netpol-studio-on.yaml <<'PY'
+          import sys, yaml
+          COMP = 'app.kubernetes.io/component'
+          ANY = '*'
+          errors = []
+
+          def policies(path):
+              return [d for d in yaml.safe_load_all(open(path, encoding='utf-8'))
+                      if d and d.get('kind') == 'NetworkPolicy']
+
+          def selects(doc, component):
+              # Whether the policy's podSelector picks the component's pods. A selector on other labels alone
+              # picks every pod of the release; an expression on another key is read as matching.
+              sel = doc['spec'].get('podSelector') or {}
+              comp = (sel.get('matchLabels') or {}).get(COMP)
+              if comp is not None and comp != component:
+                  return False
+              for e in sel.get('matchExpressions') or []:
+                  if e.get('key') != COMP:
+                      continue
+                  op, values = e.get('operator'), e.get('values') or []
+                  if (op == 'In' and component not in values) or (op == 'NotIn' and component in values) \
+                          or op == 'DoesNotExist':
+                      return False
+              return True
+
+          def admitted(docs, component):
+              # Every peer admitted to the component, by port, across EVERY policy that selects it: policies
+              # add up, so the union is what reaches the pod. A rule with no `from`, or no `ports`, is open.
+              allowed = {}
+              for d in docs:
+                  if not selects(d, component) or 'Ingress' not in (d['spec'].get('policyTypes') or ['Ingress']):
+                      continue
+                  for rule in d['spec'].get('ingress') or []:
+                      peers = rule.get('from')
+                      who = {ANY} if not peers else {
+                          ((p.get('podSelector') or {}).get('matchLabels', {}).get(COMP)
+                           or (p.get('ipBlock') or {}).get('cidr')
+                           or ('namespace' if p.get('namespaceSelector') is not None else ANY))
+                          for p in peers}
+                      for p in rule.get('ports') or [{'port': ANY}]:
+                          allowed.setdefault(p['port'], set()).update(who)
+              return allowed
+
+          WANT = {'supabase-meta': {8080: {'supabase-studio'}}, 'supabase-studio': {3000: {'supabase-envoy'}}}
+
+          # The layer off, Studio and postgres-meta on: one policy each, beside the forge's, and nothing else.
+          off = policies(sys.argv[1])
+          names = sorted(d['metadata']['name'] for d in off)
+          if names != ['aber-forge-identity-header', 'aber-meta-studio-only', 'aber-studio-gateway-only']:
+              errors.append(f"with the layer off and Studio on, expected the forge's, meta's and Studio's policies; got {names}")
+          for comp, want in WANT.items():
+              own = [d for d in off if (d['spec'].get('podSelector') or {}).get('matchLabels', {}).get(COMP) == comp]
+              for d in own:
+                  if d['spec'].get('policyTypes') != ['Ingress'] or d['spec'].get('egress'):
+                      errors.append(f"{d['metadata']['name']} must be Ingress-only, with no egress rule")
+              got = admitted(off, comp)
+              if got != want:
+                  errors.append(f"with the layer off, {comp} must admit {want} and nothing else; got {got}")
+
+          # The layer on, Studio on: the generated pairs add no peer and no port to either.
+          on = policies(sys.argv[2])
+          for comp, want in WANT.items():
+              got = admitted(on, comp)
+              if got != want:
+                  errors.append(f"with the layer on, {comp} admits {got}; it must admit {want} alone, as with it off")
+
+          for e in errors:
+              print(f"::error::{e}")
+          if errors:
+              sys.exit(1)
+          print("  ok  postgres-meta admits Studio alone on 8080, and Studio the gateway alone on 3000, with the layer off or on")
+          PY
+
+      # With Studio off the dashboard is told so: VITE_STUDIO_ENABLED "false", no address, and no
+      # Studio door in the CSP's connect-src, so sign-out beacons nothing nobody serves. With Studio
+      # on, both name the door as before. The forge's door is in both.
+      - name: Verify The Dashboard Names No Studio Door With Studio Off
+        run: |
+          set -euo pipefail
+          DEV=deploy/helm/aber/values-dev.yaml
+          helm template aber deploy/helm/aber -f "$DEV" --show-only templates/apps/frontend.yaml > /tmp/door-studio-off.yaml
+          helm template aber deploy/helm/aber -f "$DEV" --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true \
+            --show-only templates/apps/frontend.yaml > /tmp/door-studio-on.yaml
+          python3 - /tmp/door-studio-off.yaml /tmp/door-studio-on.yaml <<'PY'
+          import re, sys, yaml
+          from urllib.parse import urlsplit
+
+          def read(path):
+              """The frontend ConfigMap's VITE_STUDIO_ENABLED, VITE_STUDIO_URL and VITE_GITEA_URL, and the CSP's connect-src."""
+              data = next(d['data'] for d in yaml.safe_load_all(open(path, encoding='utf-8'))
+                          if d and d['kind'] == 'ConfigMap' and 'config.js' in (d.get('data') or {}))
+              setting = lambda name: (re.search(rf'^\s*{name}: "(.*)",$', data['config.js'], re.M) or [None, None])[1]
+              connect = re.search(r'connect-src ([^;"]*)', data['content-security-policy.conf'])
+              return {n: setting(n) for n in ('VITE_STUDIO_ENABLED', 'VITE_STUDIO_URL', 'VITE_GITEA_URL')}, \
+                  (connect.group(1).split() if connect else None)
+
+          errors = []
+          off, off_connect = read(sys.argv[1])
+          on, on_connect = read(sys.argv[2])
+          door = on['VITE_STUDIO_URL'] or ''
+          host = urlsplit(door).hostname
+          forge = '{0.scheme}://{0.netloc}'.format(urlsplit(on['VITE_GITEA_URL'] or ''))
+          if on['VITE_STUDIO_ENABLED'] != 'true' or not host:
+              errors.append(f"with Studio on, config.js says VITE_STUDIO_ENABLED {on['VITE_STUDIO_ENABLED']!r} and VITE_STUDIO_URL {door!r}")
+          elif not on_connect or not any(urlsplit(s).hostname == host for s in on_connect):
+              errors.append(f"with Studio on, the CSP's connect-src {on_connect} leaves out Studio's door {door}")
+          if off['VITE_STUDIO_ENABLED'] != 'false' or off['VITE_STUDIO_URL'] != '':
+              errors.append(f"with Studio off, config.js says VITE_STUDIO_ENABLED {off['VITE_STUDIO_ENABLED']!r} and VITE_STUDIO_URL {off['VITE_STUDIO_URL']!r}")
+          if off_connect is None or (host and any(urlsplit(s).hostname == host for s in off_connect)):
+              errors.append(f"with Studio off, the CSP's connect-src {off_connect} still names Studio's door {host}")
+          for name, connect in (('off', off_connect), ('on', on_connect)):
+              if forge not in (connect or []):
+                  errors.append(f"with Studio {name}, the CSP's connect-src {connect} leaves out the forge's door {forge}")
+          for e in errors:
+              print(f"::error::{e}")
+          if errors:
+              sys.exit(1)
+          print(f"  ok  with Studio off the dashboard names no Studio door and the CSP leaves {host} out; with it on, both name {door}")
+          PY
+
       # The same property with broker TLS on: `mosquitto.tls.internalClients` moves every in-cluster
       # client to 8883 and must move their edges too. A second render because the port is a
       # render-time choice. e2e is on because e2e-validate is one of the clients asserted, and its
@@ -1171,12 +1326,14 @@ jobs:
 
       # TLS to the databases: with postgresTls on, each database gets a Certificate, its pg_hba
       # admits the network on TLS only, every client that opens a connection carries the CA one
-      # way or another, and no `sslmode=disable` survives the render.
+      # way or another, and no `sslmode=disable` survives the render. Studio is on so postgres-meta
+      # renders and its CA is checked too.
       - name: Verify TLS To The Databases Renders Closed
         run: |
           helm template aber deploy/helm/aber \
             -f deploy/helm/aber/values-dev.yaml \
             --set postgresTls.enabled=true \
+            --set supabaseStudio.enabled=true --set supabaseMeta.enabled=true \
             --set e2e.enabled=true --set coldArchive.enabled=true \
             --set backup.enabled=true --set backupService.enabled=true \
             > /tmp/db-tls.yaml
@@ -1355,7 +1512,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import re, sys
-          docs = open('/tmp/rendered.yaml', encoding='utf-8').read().split('\n---\n')
+          docs = open('/tmp/rendered-studio.yaml', encoding='utf-8').read().split('\n---\n')
 
           def env(name, kind='Deployment'):
               for d in docs:
@@ -1916,10 +2073,10 @@ jobs:
                   bad.append(f"{job}: up={r['value'][1]}")
               else:
                   print(f"  ok  {job}")
-          # What Alloy scrapes with the dev values: the annotated pods, the two databases' exporters,
-          # the host, and the kubelet with its cAdvisor. A job lost from this set is reported; one
-          # added must be declared here.
-          expected = {'ingestion', 'mosquitto', 'supabase-db', 'timescaledb', 'supabase-envoy',
+          # What Alloy scrapes with the dev values: the annotated pods (the playback worker's among
+          # them), the two databases' exporters, the host, and the kubelet with its cAdvisor. A job lost
+          # from this set is reported; one added must be declared here.
+          expected = {'ingestion', 'playback', 'mosquitto', 'supabase-db', 'timescaledb', 'supabase-envoy',
                       'supabase-rest', 'grafana', 'prometheus', 'loki', 'alloy', 'node', 'kubelet',
                       'cadvisor'}
           for want in sorted(expected - set(seen)):
@@ -2165,9 +2322,11 @@ jobs:
       # With NetworkPolicies on, as the install rehearsal has them, when the last release is 1.1.0 or
       # later; the enforcement probes run after the upgrade.
       - name: Upgrade The Last Release To The Checkout (site-rehearsal upgrade)
+        env:
+          FROM_SIGNING: ${{ matrix.signing }}
         run: >-
           node scripts/site-rehearsal.mjs upgrade --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
-          --from-signing=${{ matrix.signing }}
+          --from-signing="$FROM_SIGNING"
 
       - name: Diagnostics On Failure
         if: failure()
