@@ -3425,8 +3425,8 @@ rows, that `0232`'s rows are still there, and who may run it.
 ### History lists the alerts that fired (0243)
 
 The alert counter shows what is firing now, and until this the record of what fired and cleared was
-Grafana's Alerting > History. Grafana never sees an alert that Aber's own evaluator raises
-([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)), and leaves the default install by 2.0.
+Grafana's Alerting > History. Grafana won't see the alerts Aber's own evaluator is to raise
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)), and is to leave the default install by 2.0.
 So History has an Alerts tab, and its charts shade the periods an alert was firing. Both read
 **`alert_occurrences(p_from, p_to, p_sparkplug_ids, p_limit)`**, over `platform_alerts` from every
 writer.
