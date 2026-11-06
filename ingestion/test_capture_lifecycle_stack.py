@@ -61,8 +61,8 @@ sys.path.insert(0, str(INGESTION))
 sys.path.insert(0, str(INGESTION.parent / "test-harness"))
 
 from test_playback_replay import (  # noqa: E402
-    PUBLISHABLE_KEY, SUPABASE_URL, Session, _epoch_seconds, _request, capture_version, historian,
-    sign_in, skip_or_fail,
+    PUBLISHABLE_KEY, SUPABASE_URL, Session, _request, await_playback_credential, capture_version,
+    historian, sign_in, skip_or_fail,
 )
 from test_recorded_capture_replay import (  # noqa: E402
     MQTT_HOST, MQTT_PORT, TERMINAL, FixtureEdgeNode, delete_broker_account, download, msg_type,
@@ -88,8 +88,6 @@ LIVE_BIRTH_TIMEOUT = 45
 CLAIM_TIMEOUT = 30
 REBIRTH_TIMEOUT = 15
 FINISH_TIMEOUT = 60
-CREDENTIAL_TIMEOUT = 240
-WORKER_STALE_SECONDS = 120
 JOB_TIMEOUT = 120
 HISTORIAN_TIMEOUT = 60
 HISTORIAN_SETTLE = 3
@@ -337,34 +335,9 @@ class StackSteps:
         return raw, json.loads(raw.decode("utf-8"))
 
     @classmethod
-    def _worker_holds(cls, wanted):
-        status, rows = cls.session.rest(
-            "/playback_worker_status?select=held_edge_nodes,reported_at&limit=1")
-        if status != 200 or not rows or wanted not in (rows[0].get("held_edge_nodes") or []):
-            return False
-        if time.time() - _epoch_seconds(rows[0]["reported_at"]) > WORKER_STALE_SECONDS:
-            return False
-        status, stale = cls.session.rest("/rpc/playback_stale_credentials", method="POST", body={})
-        return status == 200 and not any(r.get("sparkplug_id") == wanted for r in (stale or []))
-
-    @classmethod
     def _ensure_worker_credential(cls):
-        """Issued only when the worker does not already hold a current one."""
-        wanted = cls.playback_gateway["sparkplug_id"]
-        if cls._worker_holds(wanted):
-            return
-        status, body = _request(
-            f"{SUPABASE_URL}/functions/v1/gateway-credential", method="POST",
-            body={"gateway_id": cls.playback_gateway["id"]},
-            headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {cls.session.token}",
-                     "Content-Type": "application/json"},
-        )
-        if status != 200 or (body or {}).get("playback_delivered") is not True:
-            raise AssertionError(f"could not issue and deliver the playback credential: {status} "
-                                 f"{(body or {}).get('error')} {(body or {}).get('details')}")
-        if not poll(lambda: cls._worker_holds(wanted), bool, CREDENTIAL_TIMEOUT, 3):
-            raise AssertionError(f"the playback worker did not report holding {wanted}'s current "
-                                 f"credential within {CREDENTIAL_TIMEOUT}s")
+        """Issued only when none has been delivered."""
+        await_playback_credential(cls.session, cls.playback_gateway)
 
     @classmethod
     def _lanes_for(cls, capture_id):
@@ -658,11 +631,8 @@ class CaptureLifecycleOnTheStack(StackSteps, unittest.TestCase):
                                                  RESTART_TIMEOUT, 2)
         cls.after_restart = cls._await_playback_gateway("OFFLINE")
         await_rollout("playback")
-        # The worker back, and holding the Playback gateway, before anything else replays.
-        if not poll(lambda: cls._worker_holds(cls.playback_gateway["sparkplug_id"]), bool,
-                    CREDENTIAL_TIMEOUT, 3):
-            raise AssertionError("the restarted playback worker never reported holding the "
-                                 "Playback gateway's credential")
+        # The worker back, and holding the Playback gateway's credential, before anything else replays.
+        await_playback_credential(cls.session, cls.playback_gateway)
 
     @classmethod
     def _ingestion_eviction(cls):
