@@ -1,11 +1,18 @@
 import React, { useRef, useState } from 'react'
 import { usePendingAction } from '../../hooks/usePendingAction'
+import { useSetting } from '../../hooks/useSettings'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { IconAlertTriangle, IconBellOff } from '../common/Icons'
 import { localMinute, parseLocal } from '../../utils/timeWindow'
 import { formatDateTime } from '../../utils/format'
-import { SUPPRESSION_REASON_MAX, windowState } from '../../utils/alertSuppression'
+import {
+  SUPPRESSION_MAX_DAYS, SUPPRESSION_MAX_DAYS_KEY, SUPPRESSION_MAX_DAYS_PLACE, SUPPRESSION_REASON_MAX, dayWords,
+  suppressionMaxDays, windowState,
+} from '../../utils/alertSuppression'
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const MINUTE_MS = 60 * 1000
 
 /** What a window on each kind of subject keeps quiet, for the dialogs' leads. */
 function covers(kind, name) {
@@ -18,8 +25,9 @@ function covers(kind, name) {
 /**
  * Schedule a suppression window, or change one: a start, an end and a reason. Times are in local
  * time, as the History page's custom range takes them. A start already past is now, as the
- * database takes it; a window that has started keeps its start. A refusal is shown in the dialog
- * as the database worded it.
+ * database takes it; a window that has started keeps its start. The end may be at most
+ * `alerts.suppression_max_days` after the start, as the writers hold it. A refusal is shown in the
+ * dialog as the database worded it.
  *
  * `window` is the window to change, or null to schedule one. `onConfirm` receives
  * `{ startsAt, endsAt, reason }` as ISO strings and text, with null for what a change keeps.
@@ -44,13 +52,22 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
   const endChanged = !changing || end !== localMinute(new Date(window.ends_at))
   const reasonChanged = !changing || trimmed !== window.reason
 
+  // The limit runs from the start the database will hold: the window's own while it stays, else the
+  // field's, or now for one already past. A change of the reason alone is not held to it, as the
+  // writer does not hold it, so a window longer than a since-lowered limit keeps its end.
+  const maxDays = suppressionMaxDays(useSetting(SUPPRESSION_MAX_DAYS_KEY, SUPPRESSION_MAX_DAYS))
+  const measuredFrom = started || (changing && !startChanged) ? new Date(window.starts_at)
+    : startAt ? new Date(Math.max(startAt.getTime(), Date.now())) : null
+  const latestEnd = measuredFrom ? new Date(measuredFrom.getTime() + maxDays * DAY_MS) : null
+
   const problem = !startAt && !started ? 'Choose a start'
     : !endAt ? 'Choose an end'
       : endAt.getTime() <= Date.now() ? 'The end must be in the future'
         : endAt <= (started ? new Date(window.starts_at) : startAt) ? 'The end must come after the start'
-          : trimmed === '' ? 'Give a reason'
-            : changing && !startChanged && !endChanged && !reasonChanged ? 'Nothing has changed'
-              : null
+          : (startChanged || endChanged) && latestEnd && endAt > latestEnd ? `A window can last at most ${dayWords(maxDays)}`
+            : trimmed === '' ? 'Give a reason'
+              : changing && !startChanged && !endChanged && !reasonChanged ? 'Nothing has changed'
+                : null
 
   const submit = () => run(async () => {
     setError(null)
@@ -132,7 +149,13 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
             value={end}
             onChange={e => { setEnd(e.target.value); setTouched(true) }}
             disabled={pending}
+            // Down to the minute, so the picker never offers a minute the database refuses.
+            max={latestEnd ? localMinute(new Date(Math.floor(latestEnd.getTime() / MINUTE_MS) * MINUTE_MS)) : undefined}
+            aria-describedby="suppression-end-limit"
           />
+          <p className="form-hint" id="suppression-end-limit">
+            At most {dayWords(maxDays)}, set on {SUPPRESSION_MAX_DAYS_PLACE}.
+          </p>
         </div>
       </div>
       <p className="form-hint">

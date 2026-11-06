@@ -5,9 +5,11 @@ import { AlertPill } from '../components/common/AlertPill'
 import { ContextPanel } from '../components/common/ContextPanel'
 import { alertIndex, alertForDevice, alertState } from '../utils/deviceAlerts'
 import {
-  countedAlerts, isSuppressed, maySuppress, nextSuppressionChange, windowState, SUPPRESSION_WINDOW_ROLES,
+  countedAlerts, isSuppressed, maySuppress, nextSuppressionChange, suppressionMaxDays, windowState,
+  SUPPRESSION_MAX_DAYS, SUPPRESSION_MAX_DAYS_KEY, SUPPRESSION_WINDOW_ROLES,
 } from '../utils/alertSuppression'
 import { formatDateTime } from '../utils/format'
+import { localMinute } from '../utils/timeWindow'
 import { tooltipOf } from '../test/tooltips'
 import { cellUrl, deviceUrl, gatewayUrl } from '../routes'
 
@@ -18,7 +20,8 @@ import { cellUrl, deviceUrl, gatewayUrl } from '../routes'
  * whose window ends while it fires toasts as if it had just fired; the drawer's banner names no
  * evaluator and says acknowledged and suppressed as the list does; and the drawers' Suppression
  * windows section offers its acts to a Shopfloor Manager and an Administrator alone, each ending
- * with a toast that links to the subject.
+ * with a toast that links to the subject. The dialog holds the end to the site's longest window
+ * from the window's own start, names the limit under the end field, and refuses past it.
  */
 
 vi.mock('../api', async () => {
@@ -26,6 +29,7 @@ vi.mock('../api', async () => {
   return {
     ...actual,
     api: {
+      get: vi.fn(),
       acknowledgeAlert: vi.fn(),
       withdrawAlertAcknowledgement: vi.fn(),
       listSuppressionWindows: vi.fn(),
@@ -41,8 +45,13 @@ const { ALERTS_REFRESH_EVENT } = await import('../hooks/usePlatformAlerts')
 
 const DEVICE_ID = 'aaaaaaaa-0000-4000-8000-000000000240'
 const CELL_ID = 'cccccccc-0000-4000-8000-000000000240'
+const MINUTE = 60 * 1000
 const HOUR = 3600 * 1000
+const DAY = 24 * HOUR
 const iso = (ms) => new Date(ms).toISOString()
+const floorMinute = (ms) => Math.floor(ms / MINUTE) * MINUTE
+/** A moment as a datetime-local field holds it, to the minute. */
+const minute = (ms) => localMinute(new Date(floorMinute(ms)))
 
 const alert = (over = {}) => ({
   id: 'a1',
@@ -275,6 +284,8 @@ describe('a drawer\'s Suppression windows section', () => {
 
   beforeEach(() => {
     showToast = vi.fn()
+    // No row: the dialog takes the seeded 7 days.
+    api.get.mockReset().mockResolvedValue([])
     api.listSuppressionWindows.mockReset().mockResolvedValue([current, upcoming, fromCell])
     api.scheduleSuppressionWindow.mockReset().mockResolvedValue({})
     api.changeSuppressionWindow.mockReset().mockResolvedValue({})
@@ -373,16 +384,102 @@ describe('a drawer\'s Suppression windows section', () => {
     window.removeEventListener(ALERTS_REFRESH_EVENT, refreshed)
   })
 
-  it('shows the database\'s refusal in the dialog', async () => {
-    api.scheduleSuppressionWindow.mockRejectedValue(new Error('A window must end after it starts, and after now.'))
+  it('shows the database\'s refusal in the dialog, as a page that read an older limit meets it', async () => {
+    const refusal = 'A window can last at most 1 day, set on Settings › Retention.'
+    api.scheduleSuppressionWindow.mockRejectedValue(new Error(refusal))
     await show('Administrator')
     fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
     const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
-    fireEvent.change(within(dialog).getByLabelText('End'), { target: { value: '2099-01-01T10:00' } })
+    fireEvent.change(within(dialog).getByLabelText('End'), { target: { value: minute(now + 2 * DAY) } })
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'x' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule window' }))
-    expect(await within(dialog).findByText('A window must end after it starts, and after now.')).toBeTruthy()
+    expect(await within(dialog).findByText(refusal)).toBeTruthy()
     expect(showToast).not.toHaveBeenCalled()
+  })
+
+  it('bounds the end at the start plus the site\'s longest window, and names it under the end field', async () => {
+    api.get.mockResolvedValue([{ key: SUPPRESSION_MAX_DAYS_KEY, value: 3 }])
+    await show('Shopfloor_Manager')
+    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
+    const hint = await within(dialog).findByText('At most 3 days, set on Settings › Retention.')
+    const endField = within(dialog).getByLabelText('End')
+    expect(endField).toHaveAttribute('aria-describedby', hint.id)
+
+    // From a start of its own, not from now.
+    const start = now + DAY
+    fireEvent.change(within(dialog).getByLabelText('Start'), { target: { value: minute(start) } })
+    expect(endField).toHaveAttribute('max', minute(start + 3 * DAY))
+  })
+
+  it('refuses an end past the limit, saying so under the times from the first edit', async () => {
+    api.get.mockResolvedValue([{ key: SUPPRESSION_MAX_DAYS_KEY, value: 3 }])
+    await show('Shopfloor_Manager')
+    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
+    await within(dialog).findByText('At most 3 days, set on Settings › Retention.')
+    const confirm = within(dialog).getByRole('button', { name: 'Schedule window' })
+    const start = now + DAY
+    fireEvent.change(within(dialog).getByLabelText('Start'), { target: { value: minute(start) } })
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Shutdown week' } })
+
+    fireEvent.change(within(dialog).getByLabelText('End'), { target: { value: minute(start + 3 * DAY + MINUTE) } })
+    expect(within(dialog).getByText(/A window can last at most 3 days/).closest('.hint-danger')).toBeTruthy()
+    expect(confirm).toBeDisabled()
+    expect(confirm).toHaveClass('btn-disabled')
+    fireEvent.click(confirm)
+    expect(api.scheduleSuppressionWindow).not.toHaveBeenCalled()
+
+    // Exactly the limit is accepted, as the database accepts it.
+    fireEvent.change(within(dialog).getByLabelText('End'), { target: { value: minute(start + 3 * DAY) } })
+    expect(within(dialog).queryByText(/A window can last at most/)).toBeNull()
+    fireEvent.click(confirm)
+    await waitFor(() => expect(api.scheduleSuppressionWindow).toHaveBeenCalledWith('device', DEVICE_ID, {
+      startsAt: new Date(floorMinute(start)).toISOString(),
+      endsAt: new Date(floorMinute(start + 3 * DAY)).toISOString(),
+      reason: 'Shutdown week',
+    }))
+  })
+
+  it('takes the seeded limit where the setting cannot be read or is out of its bounds', async () => {
+    expect(suppressionMaxDays(30)).toBe(30)
+    for (const stored of [0, 91, '30', null, undefined]) expect(suppressionMaxDays(stored)).toBe(SUPPRESSION_MAX_DAYS)
+    api.get.mockRejectedValue(new Error('offline'))
+    await show('Shopfloor_Manager')
+    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
+    expect(within(dialog).getByText(`At most ${SUPPRESSION_MAX_DAYS} days, set on Settings › Retention.`)).toBeTruthy()
+  })
+
+  it('holds a change of the end to the window\'s own start', async () => {
+    api.get.mockResolvedValue([{ key: SUPPRESSION_MAX_DAYS_KEY, value: 1 }])
+    await show('Shopfloor_Manager')
+    fireEvent.click(within(item('Belt change on the feeder')).getByRole('button', { name: 'Change…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Change window' })
+    await within(dialog).findByText('At most 1 day, set on Settings › Retention.')
+    const started = Date.parse(current.starts_at)
+    const endField = within(dialog).getByLabelText('End')
+    expect(endField).toHaveAttribute('max', minute(started + DAY))
+    fireEvent.change(endField, { target: { value: minute(started + DAY + MINUTE) } })
+    expect(within(dialog).getByText(/A window can last at most 1 day/)).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Change window' })).toBeDisabled()
+  })
+
+  it('lets a window longer than a since-lowered limit change its reason alone', async () => {
+    const long = { ...current, id: 'w-long', reason: 'Shutdown fortnight', ends_at: iso(now + 10 * DAY) }
+    api.listSuppressionWindows.mockResolvedValue([long])
+    api.get.mockResolvedValue([{ key: SUPPRESSION_MAX_DAYS_KEY, value: 1 }])
+    render(<SuppressionWindows kind="device" subjectId={DEVICE_ID} subjectName="Press_04"
+      userRole="Shopfloor_Manager" showToast={showToast} />)
+    fireEvent.click(within((await screen.findByText('Shutdown fortnight')).closest('.suppression-window'))
+      .getByRole('button', { name: 'Change…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Change window' })
+    await within(dialog).findByText('At most 1 day, set on Settings › Retention.')
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Shutdown fortnight, phase 2' } })
+    expect(within(dialog).queryByText(/A window can last at most/)).toBeNull()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Change window' }))
+    await waitFor(() => expect(api.changeSuppressionWindow).toHaveBeenCalledWith(
+      'w-long', { startsAt: null, endsAt: null, reason: 'Shutdown fortnight, phase 2' }))
   })
 
   it('changes a started window\'s end or reason, keeping its start', async () => {
