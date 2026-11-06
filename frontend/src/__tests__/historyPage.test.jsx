@@ -784,3 +784,64 @@ describe("the charts' groups", () => {
     ])
   })
 })
+
+describe('more charts than the card holds', () => {
+  const TWELVE = '2b3e0c4a-7777-4000-8000-000000000007'
+  const names = Array.from({ length: 12 }, (_, i) => `Press/SENSOR_${String(i + 1).padStart(2, '0')}`)
+  // Eight doubles and four Int32s: two groups, each heading inside the scroller it pins to.
+  const twelveCatalog = names.map((name, i) => ({ name, units: 'bar', datatype: i < 8 ? 10 : 3 }))
+  const css = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+  /** The declarations of the rule for exactly this selector, at the start of a line. */
+  const rule = (selector) => {
+    const at = css.indexOf(`\n${selector} {`)
+    return at < 0 ? '' : css.slice(at, css.indexOf('}', at))
+  }
+
+  beforeEach(() => {
+    api.get.mockImplementation((p) => {
+      if (p.startsWith('/api/v1/devices')) return Promise.resolve([{ asset_id: TWELVE, asset_name: 'Line 4 press', last_birth_metrics: names }])
+      if (p.startsWith('/api/v1/metric-catalog')) return Promise.resolve(twelveCatalog)
+      return Promise.resolve([])
+    })
+  })
+
+  it('scrolls the charts inside the card, under the toolbar and the row above them, as Overview does', async () => {
+    await visit(`/history/device/${TWELVE}`)
+    expect(await screen.findAllByRole('figure')).toHaveLength(12)
+
+    // The card's one part that gives way, holding the row above the charts and then the scroller.
+    const body = document.querySelector('.history-body')
+    expect(body).toHaveClass('card-fill-scroll', 'trail-timeline')
+    expect(body.parentElement).toHaveClass('card-fill')
+    const scroller = body.querySelector(':scope > .trail-scroll')
+    expect([...body.children].map(c => c.className)).toEqual(['history-header', 'trail-scroll'])
+    // Each chart's screen-reader summary sits inside its chart, which positions it (App.css).
+    expect(scroller.querySelectorAll('.history-chart > .sr-only')).toHaveLength(12)
+
+    // Every chart and every group heading scrolls; the toolbar and the header row do not.
+    for (const figure of screen.getAllByRole('figure')) expect(scroller).toContainElement(figure)
+    expect([...scroller.querySelectorAll('.history-group-head')]).toHaveLength(2)
+    expect(scroller).not.toContainElement(document.querySelector('.history-header'))
+    expect(scroller).not.toContainElement(screen.getByRole('button', { name: /Collapse all/ }))
+    const status = document.querySelector('.history-meta')
+    expect(status).toHaveTextContent(/^12 metrics, in /)
+    expect(scroller).not.toContainElement(status)
+    expect(document.querySelector('.history-header')).not.toContainElement(document.querySelector('.filter-bar'))
+    expect(body).not.toContainElement(document.querySelector('.filter-bar'))
+  })
+
+  it("leans on the shared rules: the box keeps overflow visible, the scroller scrolls only down, and a group's heading pins", () => {
+    // jsdom applies no stylesheet, so the rules the layout rests on are read from App.css.
+    expect(rule('.card-fill > .trail-timeline')).toMatch(/overflow: visible;/)
+    expect(rule('.trail-timeline > .trail-scroll')).toMatch(/min-height: 0;/)
+    expect(rule('.trail-scroll')).toMatch(/overflow-x: hidden;[\s\S]*overflow-y: auto;/)
+    const head = rule('.history-group-head')
+    expect(head).toMatch(/position: sticky;/)
+    expect(head).toMatch(/top: 0;/)
+    // Over a chart's band words and alert readout, which sit at z-index 2.
+    expect(Number(head.match(/z-index: (\d+);/)?.[1])).toBeGreaterThan(2)
+    // A chart holds its absolute screen-reader summary, so the summary scrolls with it rather than
+    // being placed against the page, where it lengthened the page at a short window (found live).
+    expect(rule('.history-chart')).toMatch(/position: relative;/)
+  })
+})
