@@ -20,6 +20,10 @@ What is held here:
   * The stamp: an occurrence that starts in a window, and one already firing when a window opens
     over it, record the window; nothing clears or moves it.
   * The audit rows: their action, the subject's lane, their class and their snapshots.
+  * The longest window, alerts.suppression_max_days: a window of exactly the limit is accepted and
+    one a minute longer refused, for a schedule and a change, measured from the window's own start;
+    the setting's bounds, and only an Administrator changing it; a lowered limit leaving a window
+    alone; and 7 days where the setting is missing or out of range.
 
 EVERY TEST ROLLS BACK. platform_alerts is in the realtime publication: a committed row reaches every
 connected dashboard as a firing alert.
@@ -51,6 +55,8 @@ PEOPLE = (
 )
 ACTIONS = ["SUPPRESSION_WINDOW_SCHEDULED", "SUPPRESSION_WINDOW_CHANGED", "SUPPRESSION_WINDOW_ENDED",
            "SUPPRESSION_WINDOW_CANCELLED"]
+
+LIMIT_KEY = "alerts.suppression_max_days"
 
 # Every column platform_alerts_active returned before this file, then the four it adds.
 VIEW_COLUMNS_BEFORE = [
@@ -406,6 +412,113 @@ class Changing(WindowsBase):
         window = self.window(device_id=self.device)
         self.change(MANAGER_ID, window, reason="Planned maintenance")
         self.assertEqual(self.audit_rows(), [])
+
+
+class TheLongestWindow(WindowsBase):
+    """alerts.suppression_max_days, which both writers hold a window to from its own start. The
+    times are in hours, so no calendar day stretches one."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_limit(7)
+
+    def set_limit(self, days):
+        """As the owner, past the Settings page; the test rolls it back."""
+        self.cur.execute("UPDATE public.system_settings SET value = to_jsonb(%s) WHERE key = %s;", (days, LIMIT_KEY))
+
+    def assertTooLong(self, sentence, fn, *args, **kwargs):
+        refusal = self.assertRefused("22023", fn, *args, **kwargs)
+        self.assertEqual(refusal.diag.message_primary, sentence)
+
+    def ends(self, window_id):
+        self.cur.execute("SELECT ends_at FROM public.alert_suppression_windows WHERE id = %s;", (window_id,))
+        return self.cur.fetchone()[0]
+
+    def test_the_setting_is_declared_in_retention_from_1_to_90(self):
+        self.cur.execute("SELECT value_type, category, label, min_value, max_value, read_only, sensitive"
+                         "  FROM public.system_settings WHERE key = %s;", (LIMIT_KEY,))
+        self.assertEqual(self.cur.fetchone(),
+                         ("number", "Retention", "Longest suppression window (days)", 1, 90, False, False))
+
+    def test_a_window_of_exactly_the_limit_is_accepted_and_a_minute_more_refused(self):
+        sentence = "A window can last at most 7 days, set on Settings › Retention."
+        self.schedule(MANAGER_ID, "device", self.device, ends="+168 hours")
+        self.assertTooLong(sentence, self.schedule, MANAGER_ID, "device", self.device, ends="+168 hours 1 minute")
+        # A start in the past is now, and the limit runs from there.
+        self.assertTooLong(sentence, self.schedule, MANAGER_ID, "cell", self.cell, starts="-1 hour",
+                           ends="+168 hours 1 minute")
+        # A later start carries the limit with it.
+        self.schedule(ADMIN_ID, "gateway", self.gateway, starts="+48 hours", ends="+216 hours")
+        self.assertTooLong(sentence, self.schedule, ADMIN_ID, "gateway", self.gateway, starts="+48 hours",
+                           ends="+216 hours 1 minute")
+        self.assertEqual([r[0] for r in self.audit_rows()], ["SUPPRESSION_WINDOW_SCHEDULED"] * 2)
+
+    def test_the_sentence_names_the_live_limit(self):
+        self.set_limit(1)
+        self.assertTooLong("A window can last at most 1 day, set on Settings › Retention.",
+                           self.schedule, MANAGER_ID, "device", self.device, ends="+25 hours")
+        self.set_limit(1.5)
+        self.schedule(MANAGER_ID, "device", self.device, ends="+36 hours")
+        self.assertTooLong("A window can last at most 1.5 days, set on Settings › Retention.",
+                           self.schedule, MANAGER_ID, "device", self.device, ends="+36 hours 1 minute")
+
+    def test_a_change_is_measured_from_the_window_s_own_start(self):
+        sentence = "A window can last at most 7 days, set on Settings › Retention."
+        started = self.window(device_id=self.device, starts="-48 hours", ends="+1 hour")
+        self.change(MANAGER_ID, started, ends="+120 hours")
+        # A day more each time would creep past the limit; the stored start stops it.
+        self.assertTooLong(sentence, self.change, MANAGER_ID, started, ends="+120 hours 1 minute")
+
+        upcoming = self.window(cell_id=self.cell, starts="+24 hours", ends="+25 hours")
+        self.change(MANAGER_ID, upcoming, starts="+48 hours", ends="+216 hours")
+        self.assertTooLong(sentence, self.change, MANAGER_ID, upcoming, ends="+216 hours 1 minute")
+        # Moving the start earlier lengthens the window, and is measured from the new start.
+        self.assertTooLong(sentence, self.change, MANAGER_ID, upcoming, starts="+1 hour")
+        self.assertTooLong(sentence, self.change, MANAGER_ID, upcoming, starts="-1 hour")
+
+    def test_the_setting_is_held_to_1_to_90_and_only_an_administrator_changes_it(self):
+        for days in (0, 0.5, 91):
+            with self.subTest(days=days):
+                self.cur.execute("SAVEPOINT limit_bound;")
+                with self.assertRaises(psycopg2.errors.CheckViolation):
+                    self.set_limit(days)
+                self.cur.execute("ROLLBACK TO SAVEPOINT limit_bound;")
+        for days in (1, 90):
+            self.set_limit(days)
+
+        update = "UPDATE public.system_settings SET value = to_jsonb(30) WHERE key = %s RETURNING key;"
+        self.assertEqual(self.as_person(MANAGER_ID, update, (LIMIT_KEY,)), [])
+        self.assertEqual(self.as_person(ADMIN_ID, update, (LIMIT_KEY,)), [(LIMIT_KEY,)])
+        # The owner's writes above are audited too, with no person named.
+        self.cur.execute("SELECT action, changed_by::text, new_data ->> 'value' FROM public.audit_trail"
+                         " WHERE entity_type = 'system_settings' AND new_data ->> 'key' = %s"
+                         "   AND changed_by IS NOT NULL AND recorded_at >= now();", (LIMIT_KEY,))
+        self.assertEqual(self.cur.fetchall(), [("UPDATE", ADMIN_ID, "30")])
+
+    def test_a_lowered_limit_leaves_a_window_alone(self):
+        self.set_limit(30)
+        window = self.schedule(MANAGER_ID, "device", self.device, ends="+480 hours")[0]
+        before = self.ends(window)
+        self.set_limit(7)
+        self.assertEqual(self.ends(window), before)
+        self.assertTrue(self.active(self.alert(self.device))[0])
+        # A new reason changes no time, so it is not measured; a new end is.
+        self.change(MANAGER_ID, window, reason="Gearbox swap")
+        self.assertEqual(self.ends(window), before)
+        self.assertTooLong("A window can last at most 7 days, set on Settings › Retention.",
+                           self.change, MANAGER_ID, window, ends="+240 hours")
+        self.change(MANAGER_ID, window, ends="+168 hours")
+
+    def test_a_missing_or_out_of_range_setting_is_7_days(self):
+        sentence = "A window can last at most 7 days, set on Settings › Retention."
+        self.set_limit(30)
+        self.cur.execute("UPDATE public.system_settings SET min_value = NULL, max_value = NULL, value = to_jsonb(365)"
+                         " WHERE key = %s;", (LIMIT_KEY,))
+        self.schedule(MANAGER_ID, "device", self.device, ends="+168 hours")
+        self.assertTooLong(sentence, self.schedule, MANAGER_ID, "device", self.device, ends="+168 hours 1 minute")
+        self.cur.execute("DELETE FROM public.system_settings WHERE key = %s;", (LIMIT_KEY,))
+        self.schedule(MANAGER_ID, "device", self.device, ends="+168 hours")
+        self.assertTooLong(sentence, self.schedule, MANAGER_ID, "device", self.device, ends="+168 hours 1 minute")
 
 
 class Ending(WindowsBase):

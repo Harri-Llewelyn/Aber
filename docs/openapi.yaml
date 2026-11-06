@@ -2119,7 +2119,9 @@ paths:
         machine identity alerts are never covered.
 
         A Shopfloor Manager or an Administrator may call it. A start in the past, or none, is now.
-        Writes one `SUPPRESSION_WINDOW_SCHEDULED` row in the Audit Trail, in the subject's own lane.
+        The end may be at most `alerts.suppression_max_days` after the start: 7 days unless an
+        Administrator changes it on Settings › Retention. Writes one `SUPPRESSION_WINDOW_SCHEDULED`
+        row in the Audit Trail, in the subject's own lane.
       requestBody:
         required: true
         content:
@@ -2131,7 +2133,7 @@ paths:
                 p_subject_kind: { type: string, enum: [device, gateway, cell] }
                 p_subject_id: { type: string, format: uuid, description: 'The device''s, gateway''s or cell''s `id`.' }
                 p_starts_at: { type: string, format: date-time, nullable: true, description: 'Null, or a time already past, is now.' }
-                p_ends_at: { type: string, format: date-time, description: 'After the start, and after now.' }
+                p_ends_at: { type: string, format: date-time, description: 'After the start and after now, and at most `alerts.suppression_max_days` after the start.' }
                 p_reason: { type: string, minLength: 1, maxLength: 200, description: 'Trimmed. Every signed-in reader sees it beside the alert.' }
       responses:
         '200':
@@ -2139,7 +2141,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
-        '400': { description: 'A subject kind outside the three, no end, an end not after the start and now, or a blank or long reason (`22023`).' }
+        '400': { description: 'A subject kind outside the three, no end, an end not after the start and now, a window longer than `alerts.suppression_max_days` (the message names the limit), or a blank or long reason (`22023`).' }
         '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
         '404': { description: 'No such device, gateway or cell.' }
 
@@ -2149,7 +2151,10 @@ paths:
       summary: Change a suppression window's start, end or reason
       description: |
         A null argument keeps what the window has (`0240`). A window that has started keeps its
-        start, and one that has ended is kept as it was. Writes one `SUPPRESSION_WINDOW_CHANGED`
+        start, and one that has ended is kept as it was. A change of the start or the end is held to
+        `alerts.suppression_max_days`, measured from the window's own start: the new one, or the one
+        it has. A change of the reason alone is not, so a window longer than a since-lowered limit
+        keeps its end. Writes one `SUPPRESSION_WINDOW_CHANGED`
         row in the Audit Trail, with the window before and after, or nothing when nothing changed.
         A Shopfloor Manager or an Administrator may call it.
       requestBody:
@@ -2162,7 +2167,7 @@ paths:
               properties:
                 p_window_id: { type: string, format: uuid }
                 p_starts_at: { type: string, format: date-time, nullable: true, description: 'Only for a window that has not started. A time already past is now.' }
-                p_ends_at: { type: string, format: date-time, nullable: true, description: 'After the start, and after now.' }
+                p_ends_at: { type: string, format: date-time, nullable: true, description: 'After the start and after now, and at most `alerts.suppression_max_days` after the start.' }
                 p_reason: { type: string, nullable: true, minLength: 1, maxLength: 200 }
       responses:
         '200':
@@ -2170,7 +2175,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AlertSuppressionWindow' }
-        '400': { description: 'An ended window, or a new start for a started one (`23514`); an end not after now and the start, or a blank or long reason (`22023`).' }
+        '400': { description: 'An ended window, or a new start for a started one (`23514`); an end not after now and the start, new times longer than `alerts.suppression_max_days` (the message names the limit), or a blank or long reason (`22023`).' }
         '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
         '404': { description: 'No such window.' }
 

@@ -3318,8 +3318,7 @@ Grafana.
   The writers refuse a subject that is not there.
   `starts_at` and `ends_at` are required, `ends_at` after `starts_at`. `reason` is required, trimmed
   and 1 to 200 characters, as an acknowledgement's note is. `created_by`, its email from the token
-  and `created_at` say who scheduled it, and `ended_by` and its email who ended it early. A window
-  has no maximum length.
+  and `created_at` say who scheduled it, and `ended_by` and its email who ended it early.
 - **What a window covers.** A device window covers the alerts whose `entity_type` is `device` and
   whose `entity_id` is that device. A gateway window covers the gateway's own alerts, not its
   devices'. A cell window covers every device whose cell is that cell when the alert is read, by
@@ -3369,6 +3368,27 @@ the audit row belongs in the subject's lane, which the generic audit trigger can
 - **A change keeps history.** A NULL argument keeps what the window has. A window that has started
   keeps its start, and one that has ended is kept as it was (`23514`). The end must stay after now:
   ending is `end_alert_suppression_window()`'s.
+- **A window lasts at most `alerts.suppression_max_days`**, so a forgotten one still ends soon.
+  `0002` declares it in the Retention category: 7 days, from 1 to 90, which only an Administrator
+  changes (`system_settings_update_admin`), each change an Audit Trail row. A setting rather than a
+  constant, because a site's planned shutdown may run past a week.
+  - `check_alert_suppression_window_length(p_starts_at, p_ends_at)` refuses an end more than the
+    limit after the start, `22023`, with *A window can last at most 7 days, set on Settings ›
+    Retention.* and the live value. A window of exactly the limit is accepted. A missing row, or a
+    value outside 1 to 90, is 7 days, so the limit never refuses every window. A part day is taken
+    as it is, as the other day settings take one. Both writers call it; nothing outside the
+    database may.
+  - **Scheduling** measures from the start the window gets: now, for a start in the past.
+  - **A change of the start or the end** measures from the window's own start: the new one when the
+    change moves it, else the stored one. So an end cannot creep out a day at a time. A change of
+    the reason alone is not measured.
+  - **A window already longer keeps its end** when the limit is lowered, and at the upgrade. It
+    ends by itself, so nothing rewrites it. Its next change of the times is held to the limit.
+  - **Declared in `0240`**, the one file that declares the two writers, as `0251` added their
+    guard in place. `0240` is unreleased, so no installed site runs the unbounded body. A copy in a
+    later file would leave it standing in `0240` for every boot to replay first.
+  - The dialog sets its end field's `max` from the same setting and names the limit beneath it.
+    The database stays the authority: a stale page is refused with the sentence above.
 - **Ending early** sets `ends_at` to now and records who ended it. A window that has not started
   covered nothing, so ending it cancels it: the row is deleted, and its audit row keeps it.
 - **Each act writes one audit row** in the subject's own lane: `devices`, `gateways` or `cells`, with
@@ -3400,10 +3420,12 @@ The file's self-check asserts the table's row security, its one read policy and 
 service role writes it; each constraint; the stamp column, its two triggers and the minute job; the
 view's four columns under `security_invoker`; the function's one form, volatility, pin and grants,
 and that it covers no platform alert and no alert without a subject; the writers' `SECURITY DEFINER`,
-pin and grants; and that a request with no identity is refused by each.
+pin and grants; that a request with no identity is refused by each; and the longest window's
+setting and bounds, and that its check admits a day and refuses past 90 days.
 `test_an_alert_stays_quiet_during_planned_work.py` holds each role's writes, the CHECKs, what each
-kind of window covers before, during and after, a device moved out of its cell, the stamp, and the
-audit rows.
+kind of window covers before, during and after, a device moved out of its cell, the stamp, the
+audit rows, and the longest window: at the limit and a minute past it, a change measured from the
+window's own start, the setting's bounds, a lowered limit and a missing setting.
 
 ### The Audit Trail files a suppression window's acts (0241)
 
