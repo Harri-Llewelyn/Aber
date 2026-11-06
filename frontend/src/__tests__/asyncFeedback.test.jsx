@@ -56,9 +56,9 @@ describe('ActionButton pending state', () => {
     expect(onClick).not.toHaveBeenCalled()
   })
 
-  // btn-disabled means "you may not do this" and greys the control out. A running action is not
+  // btn-disabled means "this cannot go ahead" and greys the control out. A running action is not
   // a refused one, and saying so would be a lie told at the worst moment.
-  it('does not reach for the not-permitted styling', () => {
+  it('does not reach for the refused styling', () => {
     render(<ActionButton pending pendingLabel="Saving…">Save</ActionButton>)
     expect(screen.getByRole('button').className).not.toMatch(/btn-disabled/)
   })
