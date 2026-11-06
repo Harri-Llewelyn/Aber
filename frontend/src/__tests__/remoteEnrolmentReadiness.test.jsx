@@ -121,6 +121,8 @@ describe('remote enrolment readiness', () => {
     expect(screen.queryByText(BANNER)).toBeNull()
     openNew()
     expect(screen.getByText(/On save you will be given an install command, or a bundle/)).toBeTruthy()
+    // Held only for its name, which every gateway needs.
+    fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'Bench' } })
     expect(save().disabled).toBe(false)
   })
 
@@ -129,6 +131,7 @@ describe('remote enrolment readiness', () => {
     await waitFor(() => expect(api.enrolmentReadiness).toHaveBeenCalled())
     expect(screen.queryByText(BANNER)).toBeNull()
     openNew()
+    fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'Bench' } })
     expect(save().disabled).toBe(false)
   })
 

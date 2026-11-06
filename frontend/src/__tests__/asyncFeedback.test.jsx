@@ -338,6 +338,7 @@ describe('CellsTab save button', () => {
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: /New Cell|Add Cell|Create/i }))
+    fireEvent.change(screen.getByLabelText('Cell Name'), { target: { value: 'Assembly Line 2' } })
 
     const save = screen.getByRole('button', { name: /^Save$/ })
     fireEvent.click(save)
