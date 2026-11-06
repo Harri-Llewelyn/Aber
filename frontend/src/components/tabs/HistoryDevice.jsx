@@ -424,8 +424,9 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
         </div>
       </div>
 
-      {/* Measured for the text charts' bucket width (chartPx). */}
-      <div className="history-body" ref={bodyRef}>
+      {/* Measured for the text charts' bucket width (chartPx). The part of the card that gives way,
+          as Overview's lanes are: the row above the charts stays, and .trail-scroll scrolls them. */}
+      <div className="history-body card-fill-scroll trail-timeline" ref={bodyRef}>
       {reading?.problem ? (
         <EmptyState icon={<IconChartLine size={36} />} message={reading.problem} />
       ) : reading?.error ? (
@@ -459,6 +460,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
             )}
           </div>
           {/* A press on a chart or a strip and a drag zooms (useBandDrag). */}
+          <div className="trail-scroll">
           <div className="history-groups" onPointerDown={startBand}>
             {chartGroups.map(g => {
               const open = !closedGroups.has(g.key)
@@ -499,6 +501,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
                 </section>
               )
             })}
+          </div>
           </div>
         </>
       )}

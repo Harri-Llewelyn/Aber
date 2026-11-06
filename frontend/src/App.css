@@ -6187,13 +6187,19 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .alert-history-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .alert-history-ack-who { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--text-primary); }
 .alert-history-ack-who svg { flex-shrink: 0; color: var(--success-text); }
-/* What the device page shows under its toolbar; its width sets the text charts' buckets. */
+/* What the device page shows under its toolbar; its width sets the text charts' buckets. It is the
+   card's .card-fill-scroll.trail-timeline, so .history-header stays and .trail-scroll holds the
+   groups; a chart takes that scroller's width, less its scrollbar. */
 .history-body { min-width: 0; }
 /* The charts in groups by datatype, each under a heading strip that opens and closes it, as the
-   Vocabulary page's sections are drawn. */
+   Vocabulary page's sections are drawn. A heading pins to the top of the scroller while its charts
+   are in view, over their band words and readouts (z-index 2), as .trail-section pins. */
 .history-groups { display: flex; flex-direction: column; min-width: 0; }
 .history-group { min-width: 0; }
 .history-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   background: var(--bg-base);
   box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
 }

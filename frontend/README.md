@@ -1493,6 +1493,10 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   are closed is kept in this browser (`CLOSED_GROUPS_KEY`, localStorage, by datatype code, read and
   written in try/catch), not in the address. The Metrics dropdown's options carry the same
   `group`, so its checklist draws them under the same headings.
+- **The charts scroll inside the card**, as Overview's lanes do (`.card-fill-scroll.trail-timeline`,
+  then `.trail-scroll`): the toolbar and the row above the charts stay, and a group's heading pins
+  while its charts are in view. A chart is its box's width, so a scrollbar narrows it
+  (`TimeSeriesChart` resizes uPlot on its box), and never sideways.
 - **Refresh** is `RefreshButton` with `HISTORY_REFRESH_EVERY` (Off, 30 s, 1 min, 5 min; no 10 s,
   since each read reads every chart again). The interval is the page's state, as Logs keeps it, so
   it outlasts a change of device. `usePolling` runs it only while the window reaches now
