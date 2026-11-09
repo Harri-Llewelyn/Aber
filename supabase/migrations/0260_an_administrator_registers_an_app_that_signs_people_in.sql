@@ -176,7 +176,7 @@ DECLARE
   c_max_uris  CONSTANT integer := 10;
   c_max_name  CONSTANT integer := 80;
   v_name      text := btrim(p_name);
-  v_uris      text[] := '{}';
+  v_uris      text[] := ARRAY[]::text[];
   v_uri       text;
   v_problem   text;
   v_domain    text;
