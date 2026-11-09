@@ -750,6 +750,19 @@ class AnOutage(EvaluatorBase):
         self.assertEqual([r[0] for r in self.not_evaluated()], ["resolved"])
 
 
+    def test_a_trigger_deleted_while_the_run_read_ends_the_run_quietly(self):
+        self.owner()
+        # A read that names a trigger that is gone by the time the run writes what it found.
+        self.cur.execute(
+            "CREATE OR REPLACE FUNCTION public.machine_condition_readings()"
+            " RETURNS TABLE (trigger_id uuid, entity_id uuid, metric_name text, comparison text, threshold double precision,"
+            "                value double precision, observed_at timestamp with time zone, breached boolean)"
+            " LANGUAGE sql AS $$ SELECT gen_random_uuid(), gen_random_uuid(), 'x'::text, 'above'::text, 1::double precision,"
+            "                           2::double precision, now(), true $$;")
+        self.assertEqual(self.evaluate(0), 0)
+        self.assertEqual(self.not_evaluated(), [], "a trigger deleted mid-run is no outage")
+
+
 class TheStateTable(Standing):
     def test_every_signed_in_role_reads_it_and_anon_does_not(self):
         self.apply(automation(triggers=[trigger(**{"for": None})]))
