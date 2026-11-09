@@ -16,12 +16,13 @@ const NAMED_EVERY = 3
  * same from the cell. One cell is in the tab order, and the arrow keys, Home and End move between
  * them. A machine with no `cells` row says `absent` in words, or that it does not report the metric.
  *
- * `rows` are the machines, `{ key, name, device?, absent? }`, in the order shown. `grid` is hourGrid()'s
- * answer: each machine's 24 hours and the lowest and highest value.
+ * `rows` are the machines, `{ key, name, device?, absent? }`, in the order shown: the Area tab's are
+ * its cells, `noun` "Cell". `grid` is hourGrid()'s answer: each row's 24 hours and the lowest and
+ * highest value.
  *
  *   <HourHeatmap rows={rows} grid={hourGrid(readings, keys)} metric="Spindle/LOAD" unit="kW" />
  */
-export function HourHeatmap({ rows, grid, metric, unit }) {
+export function HourHeatmap({ rows, grid, metric, unit, noun = 'Machine' }) {
   const id = useId()
   const body = useRef(null)
   // The cell that is in the tab order, and the one being read out, as [row, hour] or null.
@@ -81,7 +82,7 @@ export function HourHeatmap({ rows, grid, metric, unit }) {
         onPointerLeave={() => setPoint(null)}
       >
         <div className="heatmap-row" role="row">
-          <span className="heatmap-label" role="columnheader"><span className="sr-only">Machine</span></span>
+          <span className="heatmap-label" role="columnheader"><span className="sr-only">{noun}</span></span>
           {HOURS_OF_DAY.map(h => (
             <span key={h} className="heatmap-hour" role="columnheader" aria-label={hourWords(h)}>
               <span aria-hidden="true">{h % NAMED_EVERY === 0 ? String(h).padStart(2, '0') : ''}</span>

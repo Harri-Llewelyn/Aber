@@ -135,9 +135,9 @@ describe('the Cell tab and its address', () => {
   it('is a tab after Device, with a path of its own, and picks a cell at /history/cell', async () => {
     await visit('/history/cell?range=7d')
     const tabs = within(screen.getByRole('navigation', { name: 'History' })).getAllByRole('link')
-    expect(tabs.map(t => t.textContent)).toEqual(['Overview', 'Device', 'Cell', 'Alerts'])
-    expect(tabs[2]).toHaveAttribute('aria-current', 'page')
-    expect(tabs[2]).toHaveAttribute('href', '/history/cell')
+    expect(tabs.map(t => t.textContent)).toEqual(['Overview', 'Device', 'Metric', 'Cell', 'Area', 'Alerts'])
+    expect(tabs[3]).toHaveAttribute('aria-current', 'page')
+    expect(tabs[3]).toHaveAttribute('href', '/history/cell')
     const table = screen.getByRole('table', { name: /choose a cell/i })
     const links = within(table).getAllByRole('link')
     expect(links.map(l => l.textContent)).toEqual(['Empty cell', 'Turning', 'Welding'])

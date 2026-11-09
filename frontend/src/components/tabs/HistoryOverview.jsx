@@ -23,9 +23,9 @@ import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { DEVICE_STATUS, deviceLifecycleStatus } from '../../utils/deviceStatus'
 import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds } from '../../utils/timeWindow'
 import {
-  CHART_SEVERAL_REASON, COVERAGE_KEY, COVERAGE_PER_READ, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW,
+  COVERAGE_KEY, COVERAGE_PER_READ, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW,
   ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_LONG_FOR_MANY, axisTicks, blockReadoutWords,
-  blockWords, boxWords, bucketStarts, coverageBlock, coverageCounts, coverageRuns, coverageSteps, coverageSummary,
+  blockWords, boxWords, bucketStarts, chartAddress, coverageBlock, coverageCounts, coverageRuns, coverageSteps, coverageSummary,
   deviceMatches, deviceMetrics, groupIsOpen, groupKeys, inReads, mergeCounts, nowFraction, overviewGroups, pickedAddress,
   readOverviewGroups, readWidth, readingsStopWords, telemetryKey, uncountedStretches, uncountedWords, writeOverviewGroups,
 } from '../../utils/history'
@@ -240,20 +240,15 @@ function CoverageKey({ uncounted }) {
 }
 
 /**
- * Chart, for the devices picked: the Device tab for one, at `win`. With several it is off and says
- * why, keeping its Tab stop (`aria-disabled`) so the reason reaches a keyboard.
+ * Chart, for the devices picked, at `win`: the Device tab for one; for several, the Metric tab narrowed
+ * to them, on the metric most of them report. `chartFor(keys, win)` is the address (chartAddress()).
  */
-function ChartButton({ keys, win, names }) {
+function ChartButton({ keys, win, names, chartFor }) {
   const several = keys.length > 1
-  const chart = () => { if (!several && keys.length) navigate(pickedAddress(keys[0], win)) }
+  const chart = () => { if (keys.length) navigate(chartFor(keys, win)) }
   return (
-    <Tooltip text={several ? CHART_SEVERAL_REASON : `Chart ${names.get(keys[0]) ?? 'this device'}'s readings over this window`}>
-      <button
-        type="button"
-        className={`btn btn-primary btn-sm${several ? ' btn-disabled' : ''}`}
-        aria-disabled={several ? 'true' : undefined}
-        onClick={chart}
-      >
+    <Tooltip text={several ? `Compare these ${keys.length} devices across a metric they report, on the Metric tab` : `Chart ${names.get(keys[0]) ?? 'this device'}'s readings over this window`}>
+      <button type="button" className="btn btn-primary btn-sm" onClick={chart}>
         <IconChartLine size={13} aria-hidden="true" /> Chart
       </button>
     </Tooltip>
@@ -263,13 +258,13 @@ function ChartButton({ keys, win, names }) {
 
 /**
  * The selection's words and actions in a popover beside the box, as on the Datasets page of AMRC's
- * ACS: Chart (the Device tab, for one device), Zoom and Clear. Portalled to <body> as the toolbar's
+ * ACS: Chart (the Device tab for one device, the Metric tab for several), Zoom and Clear. Portalled to <body> as the toolbar's
  * popovers are, so the card cannot clip it, and fixed below the box's visible part, or above it
  * (placeSelection()), its arrow at the box's centre. Focus moves to its first action that is not off,
  * and Tab stays inside it. Escape, Clear, a press outside, a scroll and a resize close it, and the
  * box with it (`onClose`).
  */
-function SelectionPopover({ box, layerRef, words, keys, win, names, onZoom, onClose }) {
+function SelectionPopover({ box, layerRef, words, keys, win, names, chartFor, onZoom, onClose }) {
   const ref = useClickOutside(onClose)
   const [pos, setPos] = useState(null)
   useEscapeKey(onClose)
@@ -333,7 +328,7 @@ function SelectionPopover({ box, layerRef, words, keys, win, names, onZoom, onCl
     >
       <p className="overview-popover-words" role="status">{words}</p>
       <div className="overview-popover-actions">
-        <ChartButton keys={keys} win={win} names={names} />
+        <ChartButton keys={keys} win={win} names={names} chartFor={chartFor} />
         <Tooltip text="Show this stretch of the window, as a new step in your browser's history">
           <button type="button" className="btn btn-primary btn-sm" onClick={onZoom}>
             <IconZoomIn size={13} aria-hidden="true" /> Zoom
@@ -361,7 +356,7 @@ function SelectionPopover({ box, layerRef, words, keys, win, names, onZoom, onCl
  *
  * A drag across the tracks draws a selection box: the devices whose rows it covers and the stretch
  * of the window it spans, named on the axis while it is drawn. On release a popover beside it holds
- * its words, Chart (the Device tab, for one device), Zoom (the page's window, as a new history entry)
+ * its words, Chart (the Device tab for one device, the Metric tab for several), Zoom (the page's window, as a new history entry)
  * and Clear (SelectionPopover). The box is a shortcut: each lane's tick box picks devices
  * (`?device=`), the toolbar then offers Chart at the time control's window, and the control zooms.
  */
@@ -373,6 +368,11 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   const placed = useMemo(() => groups.flatMap(g => g.devices), [groups])
   const keys = useMemo(() => placed.map(telemetryKey), [placed])
   const names = useMemo(() => new Map(placed.map(d => [telemetryKey(d), d.asset_name])), [placed])
+  const byKey = useMemo(() => new Map(placed.map(d => [telemetryKey(d), d])), [placed])
+  const chartFor = useCallback(
+    (picked, at) => chartAddress(picked.map(k => byKey.get(k)).filter(Boolean), schemas, at),
+    [byKey, schemas]
+  )
   const metricCounts = useMemo(
     () => new Map(placed.map(d => [telemetryKey(d), deviceMetrics(d, schemas).length])),
     [placed, schemas]
@@ -671,8 +671,8 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
         <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} zoom />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
-          {/* The tick boxes' way to Chart, without a drag: on for exactly one device. */}
-          {ticked.length > 0 && <ChartButton keys={ticked} win={win} names={names} />}
+          {/* The tick boxes' way to Chart, without a drag. */}
+          {ticked.length > 0 && <ChartButton keys={ticked} win={win} names={names} chartFor={chartFor} />}
           <RefreshButton
             onRefresh={() => read().catch(() => {})}
             busy={busy}
@@ -774,6 +774,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
                         keys={shownBox.keys}
                         win={boxWindow}
                         names={names}
+                        chartFor={chartFor}
                         onZoom={zoomToBox}
                         onClose={closeBox}
                       />

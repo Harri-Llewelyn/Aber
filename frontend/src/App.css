@@ -6266,6 +6266,10 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .multiple-link { min-width: 0; color: var(--accent-text); text-decoration: none; }
 .multiple-link:hover .multiple-name-text,
 .multiple-link:focus-visible .multiple-name-text { text-decoration: underline; }
+/* Where a device sits, after its name, on the Metric tab, whose devices are in several places. */
+.multiple-place { min-width: 0; font-size: 12px; font-weight: 400; color: var(--text-muted); }
+/* The Metric tab's pager under the charts: Previous, the page, Next. It sits after the scroller. */
+.history-pager { justify-content: center; }
 /* A machine that does not report the metric: a line in words where its chart would be. */
 .multiple-absent { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--text-muted); }
 /* A section's body under its heading, and the words that open it. */

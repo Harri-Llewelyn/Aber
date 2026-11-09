@@ -14,9 +14,10 @@ function MemberHead({ member }) {
     <span className="multiple-name">
       {member.device && <DeviceStatusDot device={member.device} />}
       {member.to ? (
-        <RouteLink to={member.to} className="multiple-link" title={`Chart ${member.name}'s readings over this window`}>{name}</RouteLink>
+        <RouteLink to={member.to} className="multiple-link" title={member.linkTitle ?? `Chart ${member.name}'s readings over this window`}>{name}</RouteLink>
       ) : name}
       {offline && <span className="device-offline-word">Offline</span>}
+      {member.place && <OverflowText className="multiple-place">{member.place}</OverflowText>}
     </span>
   )
 }
@@ -25,12 +26,14 @@ function MemberHead({ member }) {
  * One metric across several members, a chart each, stacked on one time axis and on ONE value scale,
  * so the member that differs shows as it is: the lowest minimum to the highest maximum across them
  * all (sharedScale()), said in words above the charts. The Cell tab's machines are its members;
- * the Area and Metric tabs reuse it for theirs. A member with no `series` is not charted: it says
+ * the Metric tab's are devices and the Area tab's are cells (`noun` names them, and `scope` says
+ * where the scale holds, such as "on this page"). A member with no `series` is not charted: it says
  * `absent` in words, or that it does not report the metric, never an empty chart.
  *
- * Each member is `{ key, name, device?, to?, series?, starts?, validRange?, read?, plugins?, absent? }`.
+ * Each member is `{ key, name, device?, place?, to?, linkTitle?, series?, starts?, validRange?, read?, plugins?, absent? }`;
+ * `place` is where it sits, said after its name ("Turning · Hall B").
  * `series` and `starts` are what chartSeries() or changeSeries() give; `device` adds its status dot
- * and `to` makes its name a link; `read` is the read a text or flag chart shows when the page's
+ * and `to` makes its name a link, titled `linkTitle`; `read` is the read a text or flag chart shows when the page's
  * `stateLine` says another; `plugins` are its uPlot plugins, such as its alert bands. `resolution`
  * and `windowText` name the read in each chart's summary for a screen reader. The time axis, the
  * pointer, the zoom band and the unit are the page's: `syncKey` shares one pointer across the
@@ -41,6 +44,7 @@ function MemberHead({ member }) {
  */
 export function SmallMultiples({
   members, metric, unit, start, end, now, resolution, windowText, syncKey, band = null, stateLine = null, height = 110,
+  noun = 'machine', scope = '',
 }) {
   const charted = members.filter(m => m.series)
   // The scale by value: a chart is drawn again when its `yRange` is another array, so the same ends are the same one.
@@ -53,7 +57,7 @@ export function SmallMultiples({
     <div className="multiples">
       {scale && charted.length > 1 && (
         <p className="multiples-scale">
-          {`One scale for every machine: ${readingWords(scale[0])} to ${readingWords(scale[1], unit)}.`}
+          {`One scale for every ${noun}${scope ? ` ${scope}` : ''}: ${readingWords(scale[0])} to ${readingWords(scale[1], unit)}.`}
         </p>
       )}
       {members.map(m => {

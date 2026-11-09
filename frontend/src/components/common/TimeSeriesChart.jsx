@@ -429,7 +429,7 @@ export function TimeSeriesChart({
 function hoverWords(x, series, i, unit, minutes) {
   const when = momentWords(x * 1000, minutes)
   const v = series.avg[i]
-  if (v === null) return `${when} · no reading yet`
+  if (v === null) return series.withheld?.[i] ? `${when} · total withheld, a machine had no value` : `${when} · no reading yet`
   if (series.kind === 'flag') {
     const both = series.marked?.[i] > 1 ? ', both values in this bucket' : ''
     return `${when} · ${v ? 'true' : 'false'}${series.carried[i] ? ', carried forward' : ''}${both}`

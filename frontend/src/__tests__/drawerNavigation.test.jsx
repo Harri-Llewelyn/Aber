@@ -5,10 +5,11 @@ import { renderHook } from '@testing-library/react'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { CellsTab } from '../components/tabs/CellsTab'
+import { AreasTab } from '../components/tabs/AreasTab'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { useArrivalSelection } from '../hooks/useArrivalSelection'
 import { api } from '../api'
-import { cellHistoryUrl, cellUrl, deviceUrl, gatewayUrl, schemaUrl } from '../routes'
+import { areaHistoryUrl, cellHistoryUrl, cellUrl, deviceUrl, gatewayUrl, schemaUrl } from '../routes'
 
 /**
  * Cross-drawer navigation: the hops between the pages' context drawers. Two halves have to work and
@@ -74,6 +75,7 @@ const routeGet = (overrides = {}) => (path) => {
   if (path.includes('/telemetry')) return Promise.resolve(overrides.telemetry ?? [])
   if (path.includes('/config')) return Promise.resolve(overrides.config ?? [])
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(overrides.cells ?? [cell])
+  if (path.startsWith('/api/v1/areas')) return Promise.resolve(overrides.areas ?? [])
   if (path.startsWith('/api/v1/gateways')) return Promise.resolve(overrides.gateways ?? [gateway])
   if (path.startsWith('/api/v1/devices')) return Promise.resolve(overrides.devices ?? [device])
   if (path.startsWith('/api/v1/schemas')) return Promise.resolve(overrides.schemas ?? [SCHEMA])
@@ -175,6 +177,19 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
     expect(cellHistoryUrl('cell-1')).toBe('/history/cell/cell-1')
     fireEvent.click(action)
     expect(window.location.pathname).toBe('/history/cell/cell-1')
+  })
+
+  it("area drawer -> View History opens the History page's Area tab on that area, as the cell drawer's does", async () => {
+    api.get.mockImplementation(routeGet({ areas: [{ area_id: 'area-1', area_name: 'Hall B', description: null, icon: 'Factory', cells: [], plan_path: null, plan_aspect: null }] }))
+    render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
+      onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
+    await openRow('Hall B')
+
+    const action = within(panel()).getByRole('link', { name: /View History/ })
+    expect(action).toHaveAttribute('href', '/history/area/area-1')
+    expect(areaHistoryUrl('area-1')).toBe('/history/area/area-1')
+    fireEvent.click(action)
+    expect(window.location.pathname).toBe('/history/area/area-1')
   })
 
   it('schema drawer -> device chip hands over the device id', async () => {
