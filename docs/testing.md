@@ -607,6 +607,14 @@ python supabase/migrations/test_history_reads_each_series_carried_forward.py
 # dropped is still read from raw. Bad bounds and more than 50 series are refused before any read;
 # anon may not call it, and it reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_reads_every_change_of_a_text_or_a_flag.py
+# History averages a metric by the hour of the day (0265). A local table stands in for the
+# historian's hourly rollup. One row per device per hour of the day in the time zone given: the mean
+# of that hour across the window's days, a quiet hour counted as the value carried into it and every
+# hour weighed alike. The hour moves with the zone, with a clock change inside the window, and, in a
+# zone offset by part of an hour, files a bucket under the hour it starts in; a text or a flag has no
+# row. An unknown zone, bad bounds and more than 50,000 hours times devices are refused before any
+# read; anon may not call it, and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_averages_a_metric_by_the_hour_of_day.py
 # History counts where readings arrived (0245). Local tables stand in for the historian's device
 # rollups and the coverage view. One row per device asked for, its counts an array,
 # oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider
@@ -1079,6 +1087,19 @@ python supabase/migrations/test_a_person_acknowledges_an_alert.py
 # covered it, at its start or when a window opens over it, and nothing clears it. Each act writes
 # one audit row in the subject's lane. Every test rolls back.
 python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
+# Automations are kept as rows (0255, 0256, 0257). The three tables: every role reads, nobody writes
+# directly, anon touches nothing, the CHECKs and keys hold. Who writes: a Shopfloor Manager and an
+# Administrator; an Operator, an Auditor and a machine are refused; the second factor. apply_automations():
+# a dry run writes nothing, one refusal writes nothing, new / changed / unchanged are told apart, a
+# re-upload keeps the rows that still fit, a document never deletes, a list of devices is one row each,
+# and the rendered document applies as unchanged. The Audit Trail rows, the lifecycle of a device
+# (archive, restore, delete) with the alerts it resolves, and automations_for_entity(). Every test rolls back.
+python supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py
+# The automations JSON Schema and apply_automations() agree (0256). Every file in
+# supabase/automations-fixtures/ is one document and one reason: the schema and the function must
+# both accept each valid one, and both refuse each invalid one, or the schema accept what only the
+# database can know. The schema's fields are all described and every object closed. Needs jsonschema.
+python supabase/migrations/test_the_automations_schema_and_the_function_agree.py
 # History lists the alerts that fired (0243). alert_occurrences() lists each occurrence that
 # overlaps the window, not only one that started in it, and none that ended at its start or started
 # at its end. A firing occurrence a later one of the same fingerprint replaced ends where that one

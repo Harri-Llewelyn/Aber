@@ -1,0 +1,20 @@
+{
+  "about": "`triggers` is a list.",
+  "path": "$[0].triggers",
+  "database": false,
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": {
+        "trigger": "threshold"
+      },
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ]
+    }
+  ]
+}

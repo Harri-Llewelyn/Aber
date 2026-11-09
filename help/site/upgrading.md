@@ -1730,6 +1730,24 @@ that tab, in place of Grafana's alert history.
 The table grows with the alerts that fire, not with the readings, so 90 days takes little space. An
 alert that is still firing is never removed, however old it is.
 
+### From 1.8.0, the database keeps automations
+
+From 1.8.0, the platform database keeps automations: rules that raise an alert when a device's
+reading goes above or below a number. The upgrade adds three empty tables and changes nothing a
+site must act on. A Shopfloor Manager or an Administrator writes them on the Automations page.
+
+- **A device's automations follow it.** Archiving a device archives the triggers that name it, and
+  an automation left with no trigger is turned off. Restoring the device brings its triggers back
+  and leaves the automation off, for a person to turn on. Deleting a device removes them.
+- **An alert ends with its automation.** Turning one off, or deleting it, resolves the alerts it
+  raised. So does archiving or deleting the device they were about.
+- **A metric an automation watches cannot be deleted** from the metric catalogue. Delete the
+  automation first, or deprecate the metric.
+- **The file's format** is described by a JSON Schema the dashboard serves at
+  `/json-schema/automations.schema.json`. VS Code's YAML extension can read it.
+
+Grafana's own alert rules are untouched.
+
 ### From 1.8.0, the historian counts its older readings for History's Overview
 
 History's Overview, new in 1.8.0, shows where readings arrived. It reads two new rollups on the

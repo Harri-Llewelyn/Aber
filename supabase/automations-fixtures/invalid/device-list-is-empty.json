@@ -1,0 +1,26 @@
+{
+  "about": "A list names at least one device.",
+  "path": "$[0].triggers[0].device",
+  "database": false,
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": [],
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ]
+    }
+  ]
+}

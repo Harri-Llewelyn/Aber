@@ -2,9 +2,10 @@
 
 History shows a site's readings over a period you choose. Open it to see how a device has behaved: whether a temperature crept up overnight, when a spindle stopped, or what a reading was last Tuesday.
 
-The page opens on **Overview**, its first tab. It shows where readings arrived from every device over the window, before anything is charted. The other two tabs:
+The page opens on **Overview**, its first tab. It shows where readings arrived from every device over the window, before anything is charted. The other three tabs:
 
 - **Device** draws one chart for each metric of one device, stacked down the page on the same time axis. Point at a chart to read the value at that moment; every chart shows the same moment. Otherwise each chart's title line shows its latest reading.
+- **Cell** compares one metric across every machine in a cell. A chart for each machine sits on the same scale, so the odd one stands out. Below them, a grid shows the metric's mean at each hour of the day. See [The Cell tab](#the-cell-tab-comparing-the-machines-in-a-cell).
 - **Alerts** lists every alert that fired over the window, with who acknowledged it and why. See [Alerts](#alerts).
 
 Everyone who can sign in can open History. Each lane and chart shows only what your account may read.
@@ -213,6 +214,45 @@ An export holds at most 50,000 rows, shared across the metrics. Once it reaches 
 
 Exporting needs permission to read telemetry. Without it, **Export CSV** is off and names the roles that have it.
 
+## The Cell tab: comparing the machines in a cell
+
+The Cell tab shows one metric across every machine in a cell. Use it to find the machine that behaves differently from the rest.
+
+1. Select the **Cell** tab under the page's name. It lists the cells.
+2. Select a cell's name. Or open the cell on the Cells page and select **View History**.
+3. Choose the **metric** in the toolbar. It starts on the metric most of the cell's machines report. The list says how many machines report each metric.
+4. Choose the period in the **time window**. **Zoom in**, **Zoom out** and a drag across a chart work as on the Device tab.
+5. To compare another cell, select its name in the toolbar. It keeps the window, and the metric where the other cell reports it.
+
+The tab has two sections. Select a section's name to close it, or **Collapse all** to close both. Both sections show the machines in service in the cell. An archived device is not shown.
+
+### Over the window
+
+- **Each machine has a chart.** Its title line carries the machine's status dot and its name. Select the name to open that machine's charts on the Device tab. An offline machine says **Offline**.
+- **Every chart uses the same scale.** The line above the charts says what it is, for example **One scale for every machine: 13.9 to 88.1 kW**. A machine that runs harder than the rest stands out, because all the charts are drawn to the same height.
+- **Every chart shares the time axis.** Point at one chart to read the value at that moment. Every chart shows the same moment.
+- **A machine that does not report the metric** gets a line in words instead of a chart, for example **Press 1 does not report Spindle/LOAD.**
+- **A text or flag metric** is drawn as on the Device tab: a strip for each machine, showing every change. See [Text and flags: every change](#text-and-flags-every-change).
+- **A shaded red stretch** means an alert on that machine was firing. See [What a chart shows](#what-a-chart-shows).
+
+The page reads every machine at once, in the smallest buckets that keep the read to at most 5,000 points. The line above the charts says which, for example **20 machines, in 5-minute buckets**. A point is one bucket of one machine, so more machines get larger buckets. When even 1-day buckets would be too many, the page reads the machines in parts and says so.
+
+### By hour of the day
+
+The grid has a row for each machine and a column for each hour, **00** to **23**. Each cell is coloured by the metric's mean at that hour across the days in the window.
+
+- **The hours are in your browser's time zone.** The line above the grid names it, for example **Europe/London**. Across a clock change, an hour moves with the clock.
+- **A lighter or darker blue means a higher value,** lighter in the dark theme and darker in the light one. The key above the grid says which values each shade stands for, for example **20 to 40.75 kW**. **No value** is an hour with no reading to show.
+- **One scale covers every machine,** so one machine's busy hour shows against the others'.
+- **Point at a cell, or move to it with the arrow keys,** to read it in words under the grid, for example **Lathe 3 · 14:00–15:00 · 54 kW, the mean of 7 days**.
+- **A quiet hour counts as the last value.** Machines send a reading only when a value changes, so a steady machine holds its last value. The mean counts that value for the hour.
+- **Every hour weighs the same,** however many readings it held.
+- **A text or flag metric has no mean.** The grid says it needs a number.
+
+The grid reads one hourly summary for each hour of the window for each machine, at most 50,000 in all. For a cell of 20 machines, that is at most 104 days. A longer window says so, and the charts above it are not affected. Choose a shorter window, or a cell with fewer machines.
+
+In a time zone that is offset by part of an hour, such as India's, each hourly summary starts at half past the hour. It is counted in the hour it starts in.
+
 ## Alerts
 
 The **Alerts** tab lists every alert that fired over the window, newest first. An alert that started before the window and was still firing in it is listed too.
@@ -249,6 +289,9 @@ A few things to know:
 - **Loading readings…** means the page is reading the device's metrics. A long window takes longer.
 - **The readings could not be read** names what went wrong. Usually the database that holds the readings could not be reached. Select **Refresh** to try again.
 - **No device answers to this address** means the link names a device that no longer exists. Select **Choose another device**.
+- **No cell answers to this address** means the link names a cell that no longer exists. Select **Choose another cell**.
+- **No device is in service in this cell** means every device in it is archived, or none has been placed there.
+- **The heatmap needs a number** means the metric is text or a flag. Its charts show every change, and the grid has nothing to average.
 - **This device has declared no metrics** means it has not started up since it was registered, and no schema attached to it lists any metric.
 - **Loading alerts…** means the Alerts tab is reading the alerts in the window.
 - **No alert fired in this window** means just that. With assets chosen, it says **No alert fired on the assets chosen in this window**.

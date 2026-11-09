@@ -721,6 +721,14 @@ describe("History's Overview shades, fewer readings to more", () => {
   })
 })
 
+describe("History's hour-of-day heatmap shades", () => {
+  // The Cell tab colours a machine's mean at each hour with Overview's ramp, so the rule above holds
+  // it in both themes. A step of its own would be a ramp nobody checked.
+  it.each([1, 2, 3, 4])('colours step %i with --coverage-%i', (i) => {
+    expect(APP_CSS).toContain(`.heatmap-step-${i} { background: var(--coverage-${i}); }`)
+  })
+})
+
 describe('theme token hygiene', () => {
   it('defines the same token names in both themes', () => {
     // A token present in one theme and missing in the other resolves to nothing at runtime,

@@ -55,7 +55,7 @@ const TABLES = {
   'components/tabs/DevicesTab.jsx': { sortable: 2 },
   'components/tabs/GatewaysTab.jsx': { sortable: 1 },
   'components/tabs/HistoryAlerts.jsx': { sortable: 1 },
-  'components/tabs/HistoryTab.jsx': { sortable: 1 },
+  'components/tabs/HistoryTab.jsx': { sortable: 2 },
   'components/tabs/MetricsTab.jsx': { sortable: 4 },
   'components/tabs/NotificationsPanel.jsx': {
     sortable: 0,

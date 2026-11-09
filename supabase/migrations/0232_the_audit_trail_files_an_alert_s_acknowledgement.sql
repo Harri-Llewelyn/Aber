@@ -13,6 +13,10 @@
 --     so an acknowledgement is one class wherever it is filed. The class indexes were built with
 --     the rules before; they are rebuilt when a row they could hold wrongly exists.
 --   * audit_trail_action_kinds() lists both actions on both kinds.
+--   * An automation's acts (0256, 0257) are filed in the asset lane under `automations`, and
+--     classed by their action: a creation is created, a change configuration, enabling or
+--     disabling operational, a deletion lifecycle. They are rules for a table every role reads and
+--     an Administrator or a Shopfloor Manager writes, as `metric_catalog` is.
 --
 -- Each function is redeclared whole, unchanged but for these lines: 0001, 0168, 0193, 0228 and
 -- 0229 replay first on every boot, and the last declaration stands.
@@ -23,7 +27,7 @@
 -- -------------------------------------------------------------------------------------------------
 -- 1. The lane
 -- -------------------------------------------------------------------------------------------------
--- Unchanged from 0193 but for `platform_alerts` in the asset list.
+-- Unchanged from 0193 but for `platform_alerts` and `automations` in the asset list.
 CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action text) RETURNS text
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'public'
@@ -38,12 +42,13 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
     -- deliberately: a Manager may mint a host-run gateway's broker credential. `schemas` and
     -- `metric_catalog` are Administrator-only writes to tables every authenticated user reads.
     -- The capture and playback acts are a Manager's, on tables the same three roles read. An
-    -- alert's acknowledgement is an Operator's, a Manager's or an Administrator's.
+    -- alert's acknowledgement is an Operator's, a Manager's or an Administrator's. An automation is
+    -- written by a Manager or an Administrator, and read by every role.
     WHEN p_entity_type IN ('areas', 'cells', 'devices', 'gateways', 'links',
                            'schemas', 'device_nameplate', 'device_submodels', 'change_proposals',
                            'cell_links', 'gateway_links', 'device_links',
                            'metric_catalog', 'captures', 'capture_jobs', 'playback_jobs',
-                           'platform_alerts')
+                           'platform_alerts', 'automations')
       THEN 'asset'
 
     -- Fail-closed: a new entity_type nobody classified is restricted rather than exposed.
@@ -56,8 +61,8 @@ ALTER FUNCTION public.audit_domain_for(p_entity_type text, p_action text) OWNER 
 -- -------------------------------------------------------------------------------------------------
 -- 2. The class
 -- -------------------------------------------------------------------------------------------------
--- Unchanged from 0228 but for the acknowledgements' rule, after the reads and before the security
--- lane's. IMMUTABLE and with no SET clause, as the class indexes need: see 0228.
+-- Unchanged from 0228 but for the acknowledgements' rule and the automations' four, after the reads
+-- and before the security lane's. IMMUTABLE and with no SET clause, as the class indexes need: see 0228.
 CREATE OR REPLACE FUNCTION public.audit_event_class(p_action text, p_entity_type text, p_audit_domain text,
                                                     p_old_data jsonb, p_new_data jsonb) RETURNS text
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
@@ -68,6 +73,15 @@ CREATE OR REPLACE FUNCTION public.audit_event_class(p_action text, p_entity_type
     -- An alert acknowledged or its acknowledgement withdrawn, in either lane.
     WHEN p_action IN ('ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN')
       THEN 'operational'
+    -- An automation: written, changed, switched on or off, or deleted, whatever its snapshots say.
+    WHEN p_action = 'AUTOMATION_CREATED'
+      THEN 'created'
+    WHEN p_action = 'AUTOMATION_CHANGED'
+      THEN 'configuration'
+    WHEN p_action IN ('AUTOMATION_ENABLED', 'AUTOMATION_DISABLED')
+      THEN 'operational'
+    WHEN p_action = 'AUTOMATION_DELETED'
+      THEN 'lifecycle'
     WHEN p_audit_domain = 'security'
       THEN 'configuration'
     WHEN p_action IN ('SCHEMA_REJECTION', 'TOKEN_MINTED', 'TOKEN_REVOKED', 'ROLE_GRANTED', 'ROLE_REVOKED')
