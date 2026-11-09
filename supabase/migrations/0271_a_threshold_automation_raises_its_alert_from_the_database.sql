@@ -37,8 +37,9 @@
 -- -------------------------------------------------------------------------------------------------
 -- The only statement that reaches the historian is the first INSERT, inside its own block, so what a
 -- failure leaves is what the block rolled back. A foreign-key failure there is a trigger deleted
--- while the run was reading: the next run reads what is left, and nothing is raised. Whether a pair
--- breaches is the one expression the three statements below repeat.
+-- while the run was reading, and a deadlock or a serialization failure is a person's act meeting
+-- the run: the next run reads what is left, and nothing is raised. Whether a pair breaches is the
+-- one expression the three statements below repeat.
 --
 -- Firing is what platform_alerts says. A state that claims to fire with no open occurrence (its
 -- alert resolved by the lifecycle, or the automation turned off and on within a minute) starts its
@@ -75,7 +76,7 @@ BEGIN
            threshold = excluded.threshold;
     GET DIAGNOSTICS v_read = ROW_COUNT;
   EXCEPTION
-    WHEN foreign_key_violation THEN
+    WHEN foreign_key_violation OR deadlock_detected OR serialization_failure THEN
       RETURN 0;
     WHEN OTHERS THEN
       GET STACKED DIAGNOSTICS v_sqlstate = RETURNED_SQLSTATE, v_message = MESSAGE_TEXT;

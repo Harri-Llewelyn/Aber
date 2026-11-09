@@ -4727,7 +4727,8 @@ never ask which wrote a row. A separate worker is not needed: the spike
   fires and nothing resolves meanwhile: a state nobody observed is never written, the rule
   `refresh_directory_liveness()` follows. The error's own text goes to the server's log, not to a
   row every role reads. A foreign-key failure in that block is a trigger deleted while the run read,
-  and ends the run quietly: the next one reads what is left.
+  and a deadlock or serialization failure is a person's act meeting the run. Each ends the run
+  quietly: the next one reads what is left.
 - **What is no longer live is forgotten.** The state of a disabled automation, an archived trigger
   or device, or a trigger given another device or metric is deleted by the next run. It cannot fire
   meanwhile, since only a live pair is read. The alerts of such a trigger are resolved by `0257`'s
@@ -4745,7 +4746,8 @@ never ask which wrote a row. A separate worker is not needed: the spike
 **A person can be refused with a deadlock.** Deleting or turning off an automation resolves its
 alerts (0257), which takes their rows before the trigger rows. A run that writes the same alerts
 takes the trigger rows first, through the state table's foreign key. When the two meet, Postgres
-ends one with `40P01`. If it is the run, nothing was written and the next minute's run reads again.
+ends one with `40P01`. If it is the run, nothing was written and no alert is raised, and the next
+minute's run reads again.
 If it is the person, the act is refused and succeeds when tried again. It needs the two to overlap
 for the length of a run, under a second at 10,000 pairs, and an automation with alerts firing.
 
