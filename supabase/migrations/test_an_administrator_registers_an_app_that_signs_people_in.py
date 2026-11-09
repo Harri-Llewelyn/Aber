@@ -250,8 +250,11 @@ class RegisteringAnApp(RegisterBase):
                  "redirect_uris", "grant_types", "created_at", "updated_at"]
         for kind in ("confidential", "public"):
             app = self.register(f"Scan {kind}", [REDIRECT], kind)
-            self.cur.execute(f"SELECT {', '.join(f'({c} IS NULL)' for c in plain)} FROM auth.oauth_clients WHERE id = %s;",
-                             (app["id"],))
+            self.cur.execute(
+                "SELECT (id IS NULL), (client_secret_hash IS NULL), (registration_type IS NULL), (client_type IS NULL),"
+                "       (token_endpoint_auth_method IS NULL), (redirect_uris IS NULL), (grant_types IS NULL),"
+                "       (created_at IS NULL), (updated_at IS NULL)"
+                "  FROM auth.oauth_clients WHERE id = %s;", (app["id"],))
             self.assertEqual(dict(zip(plain, self.cur.fetchone())), {c: False for c in plain}, kind)
 
     def test_two_secrets_differ_and_so_do_two_ids(self):
