@@ -1569,8 +1569,8 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   it, when the window starts before the one chosen. The file's first line names the resolution.
   An `ActionButton` gated on `telemetry:read`, as the device drawer's View Telemetry was, which
   History replaced.
-- **Zoom** is the time control's `zoom` and a drag across any chart (`useBandDrag` over each
-  `.u-over` and state strip, which are the window's width). The page holds the band and every chart
+- **Zoom** is the time control's `zoom` and a drag across any chart (`useChartBand`, shared with the Cell
+  tab, over `useBandDrag` on each `.u-over` and state strip, which are the window's width). The page holds the band and every chart
   shades it (`band`, `.chart-band` with the trail's look) with `bandWords()`; a release calls
   `setWin(bandWindow(start, end, axisMs), { replace: false })`, so Back undoes it, keeping the
   metrics and the buckets. uPlot's own selection stays off: one band covers the number charts and

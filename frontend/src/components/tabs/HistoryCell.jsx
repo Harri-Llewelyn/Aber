@@ -157,7 +157,6 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
   const reporters = useMemo(() => machines.filter(d => deviceMetrics(d, schemas).includes(metric)), [machines, schemas, metric])
   const keys = useMemo(() => reporters.map(telemetryKey), [reporters])
   const keysKey = keys.join('\n')
-  const ranges = useMemo(() => new Map(reporters.map(d => [telemetryKey(d), validRanges(d, schemas).get(metric) ?? null])), [reporters, schemas, metric])
 
   const [reading, setReading] = useState(null)
   const [heat, setHeat] = useState(null)
@@ -182,7 +181,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
       return
     }
     const resolution = picked ?? pickResolution(start.getTime(), end.getTime(), 1)
-    const span = { start: start.getTime(), end: end.getTime(), resolution, at, keys, windowText: windowWords(win, at) }
+    const span = { start: start.getTime(), end: end.getTime(), resolution, at, keys, metric, unit, kind, windowText: windowWords(win, at) }
     if (keys.length === 0) {
       setReading({ ...span, byAsset: new Map(), changes: new Map(), reads: 0 })
       return
@@ -223,7 +222,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
       return
     }
     if (stateKind) {
-      setHeat({ needsNumber: true })
+      setHeat({ needsNumber: true, metric, unit, keys })
       return
     }
     const plan = hourOfDayPlan(start.getTime(), end.getTime(), keys.length)
@@ -233,14 +232,14 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
     }
     const zone = browserTimeZone()
     if (keys.length === 0) {
-      setHeat({ grid: hourGrid([], []), zone, start: start.getTime(), end: end.getTime() })
+      setHeat({ grid: hourGrid([], []), zone, metric, unit, keys })
       return
     }
     setHeat(h => ({ ...(h?.grid ? h : {}), loading: true }))
     try {
       const rows = await api.readHourOfDay({ from: start.toISOString(), to: end.toISOString(), assetIds: keys, metricName: metric, timeZone: zone }, { signal })
       if (id !== latestHeat.current) return
-      setHeat({ grid: hourGrid(rows, keys), zone, start: start.getTime(), end: end.getTime() })
+      setHeat({ grid: hourGrid(rows, keys), zone, metric, unit, keys })
     } catch (e) {
       if (e?.name !== 'AbortError' && !signal?.aborted && id === latestHeat.current) {
         setHeat({ error: e?.message || 'The hours of the day could not be read.' })
@@ -280,33 +279,34 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
     const readers = new Set(reading.keys)
     return machines.map(d => {
       const key = telemetryKey(d)
-      const to = pickedAddress(d.asset_id, win, { metrics: [metric] })
-      if (!readers.has(key)) return { key, name: d.asset_name, device: d, to, absent: silentWords(d.asset_name, metric) }
+      const to = pickedAddress(d.asset_id, win, { metrics: [reading.metric] })
+      if (!readers.has(key)) return { key, name: d.asset_name, device: d, to, absent: silentWords(d.asset_name, reading.metric) }
       // Every change when the change read has them; else the buckets, marked where it counted more than one value.
       const change = reading.changes.get(key) ?? null
       const every = changeSeries(change, span)
       const at = every ? every.starts : starts
       const series = every ? every.series : markBuckets(chartSeries(reading.byAsset.get(key) || [], at), at, change)
       return {
-        key, name: d.asset_name, device: d, to, series, starts: at, validRange: ranges.get(key) ?? null,
+        key, name: d.asset_name, device: d, to, series, starts: at, validRange: validRanges(d, schemas).get(reading.metric) ?? null,
         read: readWords(change, reading.resolution),
       }
     })
     // The window only through the read, which names its own: a new window is a new read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reading, machines, metric, ranges])
+  }, [reading, machines, schemas])
   // The alert bands apart from the series, so the alerts arriving does not draw every chart again.
   const shown = members.map(m => (m.series ? { ...m, plugins: alerts.byId.get(m.key)?.plugins } : m))
   const stateLine = useMemo(
-    () => stateReadLine(members.filter(m => m.read).map(m => ({ kind, words: m.read }))),
-    [members, kind]
+    () => stateReadLine(members.filter(m => m.read).map(m => ({ kind: reading.kind, words: m.read }))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [members]
   )
 
+  // The heatmap's rows are the machines that reported the metric it was read for.
   const heatRows = useMemo(() => machines.map(d => {
     const key = telemetryKey(d)
-    return { key, name: d.asset_name, device: d, absent: keys.includes(key) ? null : silentWords(d.asset_name, metric) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [machines, keysKey, metric])
+    return { key, name: d.asset_name, device: d, absent: (heat?.keys ?? []).includes(key) ? null : silentWords(d.asset_name, heat?.metric) }
+  }), [machines, heat])
 
   const setOpen = (list, open) => setClosed(prev => {
     const next = new Set(prev)
@@ -332,7 +332,10 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
 
   const total = machines.length
   const silent = total - keys.length
-  const heading = unit ? `${metric} (${unit})` : metric
+  // What the sections show is what was read: the metric asked for next waits for its read to land.
+  const shownMetric = reading?.metric ?? metric
+  const shownUnit = reading ? reading.unit : unit
+  const heading = shownUnit ? `${shownMetric} (${shownUnit})` : shownMetric
 
   return (
     <>
@@ -386,14 +389,14 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
               <div className="history-groups">
                 {section('machines', 'Over the window', `${heading} · ${total} ${total === 1 ? 'machine' : 'machines'}`, (
                   keys.length === 0 ? (
-                    <p className="cell-note">{`None of the machines in ${cell.name} reports ${metric}.`}</p>
+                    <p className="cell-note">{`None of the machines in ${cell.name} reports ${shownMetric}.`}</p>
                   ) : (
                     // A press on a chart or a strip and a drag zooms (useChartBand).
                     <div onPointerDown={startBand}>
                       <SmallMultiples
                         members={shown}
-                        metric={metric}
-                        unit={unit}
+                        metric={shownMetric}
+                        unit={shownUnit}
                         start={reading.start}
                         end={reading.end}
                         now={now}
@@ -407,7 +410,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
                   )
                 ))}
                 {section('hours', 'By hour of the day', `${heading} · mean at each hour`, (
-                  <HeatBody heat={heat} rows={heatRows} metric={metric} unit={unit} />
+                  <HeatBody heat={heat} rows={heatRows} />
                 ))}
               </div>
             </div>
@@ -419,7 +422,8 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
 }
 
 /** The heatmap's body: its grid, or in words why there is none. */
-function HeatBody({ heat, rows, metric, unit }) {
+function HeatBody({ heat, rows }) {
+  const { metric, unit } = heat ?? {}
   if (!heat || (heat.loading && !heat.grid)) return <LoadingState label="the hours of the day" />
   if (heat.needsNumber) return <p className="cell-note">{`The heatmap needs a number. ${metric} is text or a flag, so it is charted above by its changes, not averaged.`}</p>
   if (heat.problem) return <p className="cell-note">{heat.problem}</p>

@@ -11,7 +11,7 @@ const NO_IDS = Object.freeze([])
  * alert_occurrences() (0243) as the Alerts tab reads them. `span` is the read the charts drew,
  * `{ start, end, at }` in milliseconds, or null before one: the alerts are read again with each
  * read, so Refresh and the timer reach them too. A failed read gives none, and the charts go on
- * without it. `key` is the ids joined, so a new array of the same ids is the same read.
+ * without it. The ids are compared by value: a new array of the same ids is the same read.
  */
 function useOccurrences(sparkplugIds, span) {
   const [rows, setRows] = useState(null)
