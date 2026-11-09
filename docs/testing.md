@@ -947,6 +947,15 @@ python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor
 # whether a dashboard call or GoTrue's own role wrote the table, and 0002's re-seed of a stack app
 # writes none. Every test rolls back.
 python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py
+# An Administrator registers an app that signs people in (0260). register_app() adds one client as
+# 0002 adds the stack's four: manual, the code and refresh grants, a confidential app's secret
+# returned once and kept as the SHA-256 hash GoTrue compares, a public app's none. Only an
+# Administrator may, and with Settings requiring a second factor only from a session that gave its
+# code. A bad name, type or address is refused in words that name it: app_redirect_problem() answers
+# every case in test-harness/fixtures/app-redirect-addresses.json, which the dialog's rule shares. A
+# name already held is refused whatever its case and with or without "Aber ". The registration is one
+# Audit Trail row naming the Administrator, with neither the secret nor its hash. Every test rolls back.
+python supabase/migrations/test_an_administrator_registers_an_app_that_signs_people_in.py
 # With Studio off, db-init says so without a warning (0002). Studio's client block runs as db-init's
 # psql runs it, with studio_enabled false, true and unset. False is a NOTICE, never a WARNING. A
 # client an earlier boot registered is removed, its approvals revoked and its sessions ended, with

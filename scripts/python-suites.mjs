@@ -1148,6 +1148,17 @@ export const SUITES = {
       'unknown person, a machine identity and a missing count are refused with no row, while a ' +
       "removed person's factors may be reset and no session ends.",
   },
+  'supabase/migrations/test_an_administrator_registers_an_app_that_signs_people_in.py': {
+    lanes: ['db'],
+    why:
+      '0260 -- that an Administrator registers an app the way 0002 registers the stack\'s own (manual, ' +
+      "the code and refresh grants, the secret kept as GoTrue's SHA-256 hash) and gets a confidential " +
+      "app's secret once and a public app none; that nobody else may, and a second factor is asked " +
+      'first while Settings requires one; that a bad name, type or address is refused in words that ' +
+      "name it, an address by the fixture the dialog's rule shares, and a name already held whatever " +
+      'its case or "Aber " prefix; and that the registration is one row naming the Administrator ' +
+      'with neither the secret nor its hash.',
+  },
   'supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py': {
     lanes: ['db'],
     why:
