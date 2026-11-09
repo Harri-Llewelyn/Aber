@@ -165,7 +165,7 @@ COMMENT ON FUNCTION public.app_redirect_problem(p_uri text, p_site_domain text) 
 -- Returns {id, name, client_type, redirect_uris, client_secret}. The id is the client_id an app is
 -- given. The secret is in this answer and nowhere else: only its hash is kept, so a lost one is
 -- remove_app() and a new registration. A public app has none and uses PKCE alone; GoTrue refuses a
--- secret from one. A confidential app authenticates at the token endpoint with HTTP Basic, the
+-- secret from one, and its row holds an empty hash, the value GoTrue itself writes and can read. A confidential app authenticates at the token endpoint with HTTP Basic, the
 -- method it is registered for, which GoTrue enforces exactly.
 CREATE OR REPLACE FUNCTION public.register_app(p_name text, p_redirect_uris text[], p_client_type text) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
@@ -231,6 +231,10 @@ BEGIN
   IF p_client_type = 'confidential' THEN
     v_secret := translate(rtrim(encode(extensions.gen_random_bytes(32), 'base64'), '='), '+/', '-_');
     v_hash := rtrim(translate(encode(extensions.digest(v_secret, 'sha256'), 'base64'), '+/', '-_'), '=');
+  ELSE
+    -- Not NULL: GoTrue scans client_secret_hash into a Go string, so a NULL fails the client's lookup
+    -- and every authorize answers 500. It writes '' for a public client (models/oauth_client.go).
+    v_hash := '';
   END IF;
 
   INSERT INTO auth.oauth_clients (
@@ -256,7 +260,7 @@ COMMENT ON FUNCTION public.register_app(p_name text, p_redirect_uris text[], p_c
   'signs people in with Aber: registration_type manual, the authorization_code and refresh_token '
   'grants, 1 to 10 redirect addresses that app_redirect_problem() allows, and a name nobody holds '
   'now. A confidential app gets a secret, returned here once and kept only as its hash; a public one '
-  'uses PKCE alone. Returns {id, name, client_type, redirect_uris, client_secret}. 0217''s trigger '
+  'uses PKCE alone and holds the empty hash GoTrue writes for one (NULL does not scan). Returns {id, name, client_type, redirect_uris, client_secret}. 0217''s trigger '
   'writes APP_REGISTERED naming the Administrator. Dynamic registration stays off (0260).';
 
 -- -------------------------------------------------------------------------------------------------

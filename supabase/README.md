@@ -4272,7 +4272,10 @@ one `auth.oauth_clients` row the way `0002` inserts the stack's four: `registrat
 `authorization_code,refresh_token`, `client_secret_basic` for a confidential app and `none` for a
 public one. A confidential app's secret is 32 random bytes in base64url, returned in the answer and
 kept as `base64url(sha256(secret))`, the hash GoTrue compares (`ValidateClientSecret`, v2.197.0).
-The id is the `client_id`. The issue first named GoTrue's admin API. Two things in v2.197.0 decided
+A public app's secret hash is `''` and not NULL: GoTrue scans the column into a Go string
+(`OAuthServerClient`, v2.197.0, which also wants `''` there), so a NULL fails the app's lookup and
+every authorize answers 500. Its other plain columns are all given; `client_uri`, `logo_uri` and
+`deleted_at` are pointers there and stay NULL. The id is the `client_id`. The issue first named GoTrue's admin API. Two things in v2.197.0 decided
 against it:
 
 - **The admin API cannot take the addresses a shopfloor needs.** `POST /admin/oauth/clients` runs

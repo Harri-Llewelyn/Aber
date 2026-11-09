@@ -232,13 +232,27 @@ class RegisteringAnApp(RegisterBase):
         self.assertIsNone(err, err)
         self.assertEqual(rows, [])
 
-    def test_a_public_app_is_registered_with_no_secret_and_no_hash(self):
+    def test_a_public_app_is_registered_with_no_secret_and_the_empty_hash_gotrue_writes(self):
         app = self.register("Plant Viewer", ["http://localhost:5173/cb"], "public")
         self.assertIsNone(app["client_secret"])
         self.assertEqual(app["client_type"], "public")
         row = self.client(app["id"])
-        self.assertEqual((row["client_type"], row["auth_method"], row["hash"]), ("public", "none", None))
+        # '' and not NULL: GoTrue scans client_secret_hash into a Go string, so a NULL fails every
+        # authorize of the app with a 500 (v2.197.0 models/oauth_client.go; Validate wants "" for a public one).
+        self.assertEqual((row["client_type"], row["auth_method"], row["hash"]), ("public", "none", ""))
         self.assertEqual(row["registration_type"], "manual")
+
+    def test_no_column_gotrue_scans_into_a_plain_value_is_null_for_either_kind_of_app(self):
+        # The columns of GoTrue's OAuthServerClient (v2.197.0) that are a string, a uuid or a time.Time and
+        # not a pointer: a NULL in any of them fails the client's lookup. client_name, client_uri, logo_uri
+        # and deleted_at are pointers and may be NULL.
+        plain = ["id", "client_secret_hash", "registration_type", "client_type", "token_endpoint_auth_method",
+                 "redirect_uris", "grant_types", "created_at", "updated_at"]
+        for kind in ("confidential", "public"):
+            app = self.register(f"Scan {kind}", [REDIRECT], kind)
+            self.cur.execute(f"SELECT {', '.join(f'({c} IS NULL)' for c in plain)} FROM auth.oauth_clients WHERE id = %s;",
+                             (app["id"],))
+            self.assertEqual(dict(zip(plain, self.cur.fetchone())), {c: False for c in plain}, kind)
 
     def test_two_secrets_differ_and_so_do_two_ids(self):
         a = self.register("First", [REDIRECT])
