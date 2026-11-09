@@ -849,6 +849,20 @@ Administrator's, as every change on Settings is; anyone else is told whose it is
   and a long subject or error is cut and slides on hover (`OverflowText`).
 - **`notifications.webhook_min_severity`** is a choice in its row, from `SETTING_OPTIONS`
   (`utils/notifications.js`), which mirror check 58 holds to the database's guard.
+- **Email has the webhook's layout.** The toolbar adds **Set up email** (a warning while no role is
+  told or the site has no relay, **Change email** after) and **Email a test**. **`EmailModal`** ticks
+  the roles told, in the dashboard's order (`PERSON_ROLES`), and saves
+  `notifications.email_roles`, which is left out of the table (`EMAIL_DIALOG_KEYS`) as the hosts are.
+  Its Save is greyed until a role changes. `notifications.email_min_severity` is a choice in its row.
+  **Email a test** queues `queue_test_email_notification()` and toasts how it went, in the
+  dispatcher's words.
+- **Every role reads who is emailed.** A line under the toolbar names the roles told, or says nobody is
+  yet, and a warning above it says in words when the site cannot send: the relay and the sender are
+  the functions pod's environment, so the page asks the dispatcher (`GET
+  /functions/v1/notification-dispatch`, `api.notificationEmail()`). If it cannot be asked the page
+  says nothing about the relay rather than guess.
+- **The delivery log has a Channel column**, and an email row's badge says how many people the relay
+  took it for. The log never holds an address.
 
 ### Why a reload waits for the auth server
 
@@ -901,7 +915,7 @@ page shows the gateway's refusal with a link to Profile › MFA and no note abou
 Two pages, two scopes, and each says which in its heading's note. **Profile**
 (`components/tabs/ProfileTab.jsx`, page id `profile`, tabs `account`, `appearance` and `security`) is
 the signed-in person's own: "Applies to you, on any browser". **Settings** is the site's: "Applies to
-everyone on this site". Account and Appearance reuse the Settings table (Setting, Description,
+everyone on this site". Account, Appearance and Notifications reuse the Settings table (Setting, Description,
 Value, Actions), header row and all, so the two read alike.
 
 - **Security is a tab of sections, each with its own heading, About tip and line under it.** The
@@ -958,6 +972,15 @@ Value, Actions), header row and all, so the two read alike.
   arrives is not undone by it.
 - **Without the row the page works as it did before.** A failed read or write leaves `source` at
   `browser`: Appearance says the choices are this browser's, and a change holds here only.
+- **Desktop notifications are one more column of that row** (`supabase/README.md`, `0264`):
+  Profile › Notifications has one switch, off until the person turns it on, held until Save as
+  Appearance's are. Saving it on asks the browser for permission, in the click that is the gesture
+  (`useNotificationPermission`), and a refusal leaves the choice on, because it follows the person to
+  their other browsers; the tab says so and how to allow it again. Over plain HTTP, or with no
+  `Notification` API, the switch is disabled and says why, each in its own words
+  (`UNAVAILABLE_WORDS` in `utils/notificationPermission.js`), as the clipboard falls back where
+  `CopyableId` has none. A choice already on can still be turned off there. The browser's copy is
+  `aber_desktop_notifications`. See *A firing alert can raise a desktop notification*, below.
 - **A person may have a display name** (`supabase/README.md`, `0203`). Profile's Account tab has a
   Display name row (`DisplayNameRow` in `ProfileTab.jsx`), where the person sets or clears it. The
   account menu shows the name with the email address under it. People, the Audit Trail, Approvals
@@ -2339,6 +2362,40 @@ passes `{ record: false }`, as an alert's toast does.
   list cleared it, a critical alert still firing would vanish from the bar, and if it did not,
   routine messages would add to the alarm's number. So each counts its own, and an alert is counted
   once, by the pill.
+
+### A firing alert can raise a desktop notification
+
+For a person who turned it on (Profile › Notifications), a dashboard tab raises a browser
+notification as an alert starts firing. It is not a toast and not a message: nothing is queued and
+nothing is recorded, and with no dashboard tab open nothing arrives. `hooks/useDesktopAlerts.js`
+returns `sync(rows)`, which `usePlatformAlerts` calls with every read of `platform_alerts_active`,
+so a notification has the visibility the alert counter has and follows the same set.
+
+- **One notification per occurrence, when it starts firing.** An occurrence is a row, by `id`: new
+  to the tab since its last read, or out of a suppression window while still firing, as the toast
+  decides it. The first read, a refresh, a Grafana repeat (the webhook upserts the same row) and a
+  dismissed notification raise nothing. Turning the setting on raises nothing for what is already
+  firing. `tag` is the id, so a second open tab's notification replaces this one's instead of
+  stacking; the shared tag is the specification's, and has not been tried in every browser.
+- **It closes with the alert.** When the occurrence resolves, is acknowledged or becomes suppressed,
+  and when the person turns the setting off or the dashboard closes. An acknowledged or suppressed
+  alert raises nothing, so a withdrawn acknowledgement raises nothing either.
+- **What it says.** The title is the alert's name. The body is the severity in words, then the
+  subject and where it is: *Critical on device Press 4, in Machine Shop › Cell 3.* The name and
+  place are read for that one alert (`api.readAlertSubject`), for at most two seconds, and the
+  Sparkplug id stands in when they cannot be. No value from the summary: those are in the counter.
+  The icon is `/favicon.svg`; a browser that draws no SVG icon shows its own.
+- **A click opens the alert as the counter's row does.** It focuses this window, then calls
+  `showDevice` or `showGateway` with the Sparkplug id, at the asset's own address; the page
+  `alertPage()` names for a machine identity or a capture job; or the rule in Grafana, in a new tab
+  (`alertOpener` in `utils/desktopNotifications.js`).
+- **The browser asks once per session.** A person with it on, in a browser that has not been asked,
+  is asked at the first click or key press, the gesture Firefox and Safari require; the tab keeps an
+  Allow Notifications button for when they dismiss it. Nothing is asked where the browser cannot raise one.
+  The tab remembers that it asked, with a constant in session storage and nothing of the person: who
+  is signed in is held in memory only, so a reload keeps the answer, while signing out or another
+  person's id clears it and the next person is asked. Nothing derived from the session (an id, an
+  email, a token) is written to browser storage.
 
 ---
 

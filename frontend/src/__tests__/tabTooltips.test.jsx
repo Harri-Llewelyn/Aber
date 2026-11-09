@@ -39,7 +39,7 @@ describe('every tab tooltip', () => {
   })
 
   it('covers every tab of the pages it lists', () => {
-    expect(TOOLTIPS).toHaveLength(6 + 2 + 2 + 4 + 2 + 4 + 5 + 7 + 4)
+    expect(TOOLTIPS).toHaveLength(6 + 2 + 2 + 4 + 2 + 4 + 6 + 7 + 4)
   })
 
   it('has a sentence for each Settings category the database seeds', () => {

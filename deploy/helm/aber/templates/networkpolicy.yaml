@@ -662,8 +662,8 @@ spec:
 ---
 {{/*
 Escape hatch, and the reason one is needed. Some flows cannot be expressed from inside this chart:
-an off-cluster SMTP relay for GoTrue, an External Secrets Operator webhook, an S3 endpoint for
-backups, a corporate proxy. They are declared here rather than by weakening the default-deny.
+an off-cluster SMTP relay for GoTrue and for the dispatcher in supabase-functions, an External Secrets
+Operator webhook, an S3 endpoint for backups, a corporate proxy. They are declared here rather than by weakening the default-deny.
 
 ALSO: SOME CNIs DO NOT EXEMPT KUBELET PROBES from ingress policy. k3s's default controller does, and
 so do Calico and Cilium -- but if every pod goes unready the moment this is enabled, that is the

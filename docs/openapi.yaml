@@ -2649,6 +2649,24 @@ paths:
         '403': { description: 'Not an Administrator (`42501`).' }
         '409': { description: 'The webhook has no address, or no signing key, yet (`55000`).' }
 
+  /rest/v1/rpc/queue_test_email_notification:
+    post:
+      tags: [Registry]
+      summary: Email the caller a test
+      description: |
+        Queues a test email to the caller's own address and returns its id (`0263`). The row with
+        that id in `/rest/v1/notification_deliveries` says how it went once the dispatcher has sent
+        it; a test is tried once. It checks the whole path: the relay, the sender and the message.
+        Keeps the newest 20 finished email tests. Administrator only.
+      responses:
+        '200':
+          description: The delivery log row's id.
+          content:
+            application/json:
+              schema: { type: string, format: uuid }
+        '403': { description: 'Not an Administrator (`42501`).' }
+        '409': { description: 'The account has no email address (`55000`).' }
+
   /rest/v1/notification_deliveries:
     get:
       tags: [Registry]
@@ -2662,6 +2680,7 @@ paths:
       parameters:
         - { name: state, in: query, schema: { type: string, enum: [pending, sent, dropped, dead] }, description: 'e.g. `eq.dead`' }
         - { name: event, in: query, schema: { type: string, enum: [firing, resolved, reminder, test] } }
+        - { name: channel, in: query, schema: { type: string, enum: [webhook, email] } }
         - $ref: '#/components/parameters/Select'
       responses:
         '200':
@@ -2676,7 +2695,7 @@ paths:
                     id: { type: string, format: uuid, description: 'Also the CloudEvents id and the webhook-id header, the same on every retry.' }
                     alert_id: { type: string, format: uuid, nullable: true, description: 'The occurrence; null for a test.' }
                     event: { type: string, enum: [firing, resolved, reminder, test] }
-                    channel: { type: string, enum: [webhook] }
+                    channel: { type: string, enum: [webhook, email] }
                     state: { type: string, enum: [pending, sent, dropped, dead] }
                     attempts: { type: integer, description: 'Posts made. A hold is not one.' }
                     next_attempt_at: { type: string, format: date-time }
@@ -2685,6 +2704,8 @@ paths:
                     response_status: { type: integer, nullable: true }
                     last_error: { type: string, nullable: true, maxLength: 500, description: 'In the dispatcher''s words; never the address.' }
                     requested_by: { type: string, format: uuid, nullable: true, description: 'For a test, the Administrator who sent it.' }
+                    recipients: { type: integer, nullable: true, description: 'For an email, how many people the relay took it for (`0263`). A count, never the addresses.' }
+                    refused: { type: integer, nullable: true, description: 'For an email, how many addresses the relay refused while taking the others.' }
                     created_at: { type: string, format: date-time }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
@@ -3825,9 +3846,9 @@ paths:
       tags: [Registry]
       summary: Read your own display preferences
       description: |
-        One row per person (`0188`, `0194`): the theme, sidebar layout and single-key shortcuts
-        the dashboard's Profile page and account menu set, so they follow the account rather than
-        the browser. RLS returns the
+        One row per person (`0188`, `0194`, `0264`): the theme, sidebar layout, single-key shortcuts
+        and desktop notifications the dashboard's Profile page and account menu set, so they follow
+        the account rather than the browser. RLS returns the
         caller's own row and nobody else's, an `Administrator` included; an empty array means
         this person has chosen nothing yet, and the defaults apply. `anon` and `service_role` hold
         nothing on the table.
@@ -3865,6 +3886,7 @@ paths:
                 theme: { type: string, enum: [dark, light] }
                 sidebar_mode: { type: string, enum: [hover, expanded, collapsed] }
                 single_key_shortcuts: { type: boolean }
+                desktop_notifications: { type: boolean }
       responses:
         '201': { description: 'Created or changed.' }
         '400': { description: 'A value outside the CHECK (`23514`).' }
@@ -6540,13 +6562,16 @@ paths:
         `sweep_notifications()` every minute from `pg_cron` while one is due.
 
         One pass takes each due row of `notification_deliveries`, oldest first, asks
-        `platform_alert_send_decision()` whether it still applies, and posts it to the webhook: a
-        CloudEvents 1.0 event in structured JSON mode, signed with the Standard Webhooks headers
-        `webhook-id`, `webhook-timestamp` and `webhook-signature` (`v1,` and the base64
-        HMAC-SHA256 of `id.timestamp.body`). An address whose host is not allowed is refused, a
-        redirect is a failure and is not followed, and a receiver has 10 seconds to answer. A
-        failure is retried after 30 seconds, doubling to an hour, and is dead after the tenth
-        attempt.
+        `platform_alert_send_decision()` whether it still applies, and sends it down its channel.
+        The webhook gets a CloudEvents 1.0 event in structured JSON mode, signed with the Standard
+        Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature` (`v1,` and the
+        base64 HMAC-SHA256 of `id.timestamp.body`). An address whose host is not allowed is refused,
+        a redirect is a failure and is not followed, and a receiver has 10 seconds to answer. Email
+        goes to the people `notification_email_recipients()` resolves as the row is sent, through
+        the relay the functions pod's `SMTP_*` variables name (the same `supabaseAuth.smtp` GoTrue
+        reads): one plain-text message in UTF-8 with the recipients in the envelope alone. A relay
+        refusing the message itself is final; a relay that is down is retried. A failure is retried
+        after 30 seconds, doubling to an hour, and is dead after the tenth attempt.
 
         Authorised by the dispatch secret in the `x-dispatch-secret` header, **not** by the
         publishable key. The database generated it and alone sends it. Every message comes from the
@@ -6577,7 +6602,7 @@ paths:
         '401':
           description: The secret is missing or wrong.
         '405':
-          description: Not a POST.
+          description: Neither a POST nor a GET.
         '500': { $ref: '#/components/responses/FunctionFailure' }
         '502':
           description: >-
@@ -6586,6 +6611,35 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not configured.
+    get:
+      tags: [Edge Functions]
+      summary: Whether this site can send email
+      description: |
+        For the Settings page. Answers whether the functions pod has a mail relay and a sender
+        address (`SMTP_HOST` and `SMTP_ADMIN_EMAIL`, from `supabaseAuth.smtp`), which the database
+        cannot see. Any signed-in person's token will do; it says nothing of the relay but whether
+        it is set, and, when it is not, which value to set.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The relay's state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email:
+                    type: object
+                    properties:
+                      available: { type: boolean }
+                      reason: { type: string, nullable: true, description: 'Why not, in words, when `available` is false.' }
+        '401':
+          description: No token, or one PostgREST does not accept.
+        '502':
+          description: The caller could not be checked.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
   /functions/v1/forge-signout:
     get:
       tags: [Edge Functions]
@@ -7720,6 +7774,10 @@ components:
           type: boolean
           default: true
           description: 'Whether the shortcuts that are one character with no modifier (`?`, `/`, `[` and `]`) act for this person (`0194`). Ctrl K and the arrow keys are not covered.'
+        desktop_notifications:
+          type: boolean
+          default: false
+          description: 'Whether a dashboard tab this person has open raises a browser notification when an alert starts firing (`0264`). The browser''s own permission to show one is granted per browser and is not stored.'
         updated_at: { type: string, format: date-time, readOnly: true }
 
     SystemSetting:
