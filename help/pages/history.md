@@ -221,7 +221,7 @@ Each resolution says how far back it has data, because raw readings are kept for
 - **An export holds at most 50,000 rows.** If there are more, the file stops at a whole minute, and the message and the file's first lines say where. Choose a shorter window, fewer devices or metrics, or a coarser resolution.
 - **At most 1,000 devices and 500 metrics.**
 
-If a second factor is required to change the platform, exporting asks for it too. Each export is recorded in the Audit Trail, in the **Readings** lane, with who exported which devices and metrics, over which window, at which resolution, and how many rows.
+If a second factor is required to change the platform, exporting asks for it too. Each export is recorded in the Audit Trail, in the **Readings** lane. The entry names who exported. It lists the devices and metrics, the window and the resolution. It also says how many rows left.
 
 ## The Cell tab: comparing the machines in a cell
 

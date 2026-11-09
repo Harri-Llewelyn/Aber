@@ -1728,8 +1728,8 @@ covers at most 14 days. The upgrade adds a setting and changes nothing else a si
 - **The longest window is a setting.** On **Settings**, on the new **History** tab,
   **Longest export (days)** is 14 unless you change it, from 1 to 366. A longer window is refused,
   with the limit named. Cold Storage's files hold older and longer ranges.
-- **Every export is in the Audit Trail**, in the **Readings** lane. It names who exported which
-  devices and metrics, over which window, at which resolution, and how many rows.
+- **Every export is in the Audit Trail**, in the **Readings** lane. The entry names who exported.
+  It lists the devices and metrics, the window and the resolution, and how many rows left.
 - **An export holds at most 50,000 rows, as before.** The database now holds that limit, and a file
   that reaches it stops at a whole minute and says where.
 
