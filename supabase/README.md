@@ -4646,7 +4646,8 @@ before it asks (`useSetting()`, with 14 where the row cannot be read).
   copy of the history, which Cold Storage's Parquet files are for.
 - **`telemetry_export_max_days()` answers it as the export reads it:** the setting, or 14 where the row
   is missing or outside the bounds, so a damaged setting never stops exports altogether and never
-  lifts the limit. A part day is taken as it is, as the other day settings take one. Mirror check 91
+  lifts the limit. A part day is taken as it is, as the other day settings take one. No browser role
+  may call it: the setting is readable, and `export_telemetry()` is its one caller. Mirror check 91
   holds the default, the bounds and the place the refusal names to the dashboard's copies.
 - **Lowering it changes nothing already exported.** Each export is held to the limit as it is asked
   for, and the Audit Trail row records what was exported.

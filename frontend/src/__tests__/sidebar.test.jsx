@@ -167,8 +167,9 @@ describe('the grouping', () => {
     for (const caption of ['Assets', 'Modelling', 'Administration']) {
       expect(screen.queryByText(caption), `the "${caption}" heading came back`).toBeNull()
     }
-    // History is a page as well as the name of the group the Audit Trail leads: only the page is drawn.
-    expect(screen.getAllByText('History').map(el => el.closest('a')?.getAttribute('href'))).toEqual(['/history'])
+    // History is a page as well as the name of the group the Audit Trail leads: only the page is drawn,
+    // and Settings' own History tab, in its tree.
+    expect(screen.getAllByText('History').map(el => el.closest('a')?.getAttribute('href'))).toEqual(['/history', '/settings/history'])
   })
 
   it('names every item even while the labels are invisible', () => {

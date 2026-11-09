@@ -471,6 +471,22 @@ the database, which proves itself with a secret it generated. **Revisit when** a
 reach named roles: email (#325 part 2) could carry a machine identity's alert to Administrators
 alone.
 
+## Readings that leave the site
+
+**The dashboard exports readings through one function, `export_telemetry()`, for an Administrator or
+a Shopfloor Manager** (`0278`, `0279`). It refuses anyone else, and a session without its second
+factor while [MFA is required](#mfa-required-to-change-the-platform), and a window longer than
+`history.export_max_days` (14 days unless an Administrator changes it), all before it reads a row. It
+returns at most 50,000 rows, and writes one `TELEMETRY_EXPORTED` row in the Audit Trail, in the asset
+lane, naming who exported which devices and metrics over which window. Nothing in the browser decides
+any of this: a call that skips the dashboard meets the same refusals.
+
+**This bounds the export, not access to the readings.** An Operator holds `telemetry:read` and reads
+whatever a chart reads, through the telemetry views and `telemetry_carried()`, and a person can
+page those at the API. The function stops the dashboard's bulk file, and records the ones it makes. It
+does not stop anyone reading the readings a row at a time. **Revisit when** a site needs readings kept
+from a role, which is a change to who may read them (RLS on the telemetry views), not to the export.
+
 **Known issues** — things that can be worked on — are tracked as
 [GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues). **Accepted risks are not**, and
 live below.

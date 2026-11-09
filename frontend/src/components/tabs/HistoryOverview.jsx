@@ -426,7 +426,8 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   const [exporting, setExporting] = useState(null)
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
-  const deviceByKey = useMemo(() => new Map(placed.map(d => [telemetryKey(d), d])), [placed])
+  // What each device reports, for Export's metrics: read once, not on every move of a box.
+  const metricsByKey = useMemo(() => new Map(placed.map(d => [telemetryKey(d), deviceMetrics(d, schemas)])), [placed, schemas])
 
   /** The width a track is drawn at: the axis track's, else the page's less the label column, else a default's. */
   const stripPx = () => {
@@ -606,7 +607,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   // ---- Export ------------------------------------------------------------------------------------
   /** The metrics Export takes for these devices, all they report, and why it cannot: none, too many, or a window too long. */
   const exportFor = (keysIn, startMs, endMs) => {
-    const metricNames = [...new Set(keysIn.flatMap(k => deviceMetrics(deviceByKey.get(k), schemas)))].sort((a, b) => a.localeCompare(b))
+    const metricNames = [...new Set(keysIn.flatMap(k => metricsByKey.get(k) ?? []))].sort((a, b) => a.localeCompare(b))
     const reason = metricNames.length === 0
       ? 'These devices have declared no metric, so there is nothing to export.'
       : exportSizeProblem(keysIn.length, metricNames.length) ?? exportWindowProblem(startMs, endMs, exportDays)
@@ -621,7 +622,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
       windowWords: windowWords(ofWindow, Date.now()),
     })
   }
-  const boxExport = shownBox && boxBounds
+  const boxExport = box && !dragged && shownBox && boxBounds
     ? { allowed: canExport, reason: exportFor(shownBox.keys, boxBounds.start.getTime(), boxBounds.end.getTime()).reason,
       onExport: () => { startExport(shownBox.keys, boxBounds, boxWindow); closeBox() } }
     : null

@@ -60,12 +60,12 @@ END
 $$;
 
 ALTER FUNCTION public.telemetry_export_max_days() OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.telemetry_export_max_days() FROM PUBLIC, anon, service_role;
-GRANT EXECUTE ON FUNCTION public.telemetry_export_max_days() TO authenticated;
+REVOKE ALL ON FUNCTION public.telemetry_export_max_days() FROM PUBLIC, anon, authenticated, service_role;
 
 COMMENT ON FUNCTION public.telemetry_export_max_days() IS
   'The most days one export of readings may span: history.export_max_days, or 14 where the row is '
-  'missing or outside 1 to 366. Read by export_telemetry(), and by anyone who may read the setting (0278).';
+  'missing or outside 1 to 366. Read by export_telemetry(), and by nothing else: the setting itself is '
+  'readable by every role (0278).';
 
 -- -------------------------------------------------------------------------------------------------
 -- What this file did, and nothing wider.
@@ -82,8 +82,9 @@ BEGIN
      OR v_row.min_value IS DISTINCT FROM 1 OR v_row.max_value IS DISTINCT FROM 366 THEN
     RAISE EXCEPTION '0278: history.export_max_days is not a number from 1 to 366 in the History category';
   END IF;
-  IF has_function_privilege('anon', 'public.telemetry_export_max_days()', 'EXECUTE') THEN
-    RAISE EXCEPTION '0278: anon may execute telemetry_export_max_days()';
+  IF has_function_privilege('anon', 'public.telemetry_export_max_days()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.telemetry_export_max_days()', 'EXECUTE') THEN
+    RAISE EXCEPTION '0278: a browser role may execute telemetry_export_max_days(), which export_telemetry() alone calls';
   END IF;
 END
 $check$;

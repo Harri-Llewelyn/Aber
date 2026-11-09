@@ -257,12 +257,19 @@ class TheSetting(ExportBase):
                                           (KEY,)), [(30,)], who)
 
     def test_a_missing_row_is_14_days_and_a_set_one_is_as_set(self):
-        read = "SELECT public.telemetry_export_max_days();"
-        self.assertEqual(self.as_role(self.person(OPERATOR_ID), read)[0][0], 14)
+        def reads():
+            self.cur.execute("SELECT public.telemetry_export_max_days();")
+            return self.cur.fetchone()[0]
+        self.assertEqual(reads(), 14)
         self.limit(3)
-        self.assertEqual(self.as_role(self.person(OPERATOR_ID), read)[0][0], 3)
+        self.assertEqual(reads(), 3)
         self.cur.execute("DELETE FROM public.system_settings WHERE key = %s;", (KEY,))
-        self.assertEqual(self.as_role(self.person(OPERATOR_ID), read)[0][0], 14)
+        self.assertEqual(reads(), 14)
+
+    def test_only_export_telemetry_calls_the_reader(self):
+        for role in ("anon", "authenticated", "service_role"):
+            self.cur.execute("SELECT has_function_privilege(%s, 'public.telemetry_export_max_days()', 'EXECUTE');", (role,))
+            self.assertFalse(self.cur.fetchone()[0], role)
 
 
 class Refusals(ExportBase):
