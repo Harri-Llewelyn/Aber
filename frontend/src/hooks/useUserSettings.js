@@ -2,15 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTheme, THEMES } from './useTheme'
 import { useSidebarMode, SIDEBAR_MODES } from './useSidebarMode'
 import { useSingleKeyShortcuts } from './useSingleKeyShortcuts'
+import { useDesktopNotifications } from './useDesktopNotifications'
 import { readUserSettings, seedUserSettings, saveUserSetting } from '../utils/userSettings'
 
 /**
- * The signed-in person's theme, sidebar layout and single-key shortcuts: their `user_settings` row,
- * with the browser's copy (useTheme, useSidebarMode, useSingleKeyShortcuts) as its cache.
+ * The signed-in person's theme, sidebar layout, single-key shortcuts and desktop notifications:
+ * their `user_settings` row, with the browser's copy (useTheme, useSidebarMode,
+ * useSingleKeyShortcuts, useDesktopNotifications) as its cache.
  *
  * The page paints from the cache, then the row arrives and wins, and the cache follows it. A person
  * with no row gets one seeded from the cache's theme and layout, so a choice made before rows
- * existed is kept; the shortcuts take the column's default, on. Each
+ * existed is kept; the shortcuts and the notifications take the columns' defaults, on and off. Each
  * change goes to the cache at once and to the row behind it; a choice made before the row arrived
  * is not overwritten by it.
  *
@@ -23,6 +25,7 @@ export function useUserSettings(userId) {
   const { theme, setTheme } = useTheme()
   const { mode: sidebarMode, setMode: setSidebarModeOnly } = useSidebarMode()
   const { on: singleKeyShortcuts, setOn: setSingleKeyOnly } = useSingleKeyShortcuts()
+  const { on: desktopNotifications, setOn: setDesktopOnly } = useDesktopNotifications()
   const [source, setSource] = useState(userId ? 'loading' : 'browser')
 
   // What the seed copies, and which choices were made since this person's read began.
@@ -47,6 +50,7 @@ export function useUserSettings(userId) {
           if (!chosen.current.has('theme')) setTheme(row.theme)
           if (!chosen.current.has('sidebar_mode')) setSidebarModeOnly(row.sidebar_mode)
           if (!chosen.current.has('single_key_shortcuts')) setSingleKeyOnly(row.single_key_shortcuts)
+          if (!chosen.current.has('desktop_notifications')) setDesktopOnly(row.desktop_notifications)
         }
         setSource(row ? 'account' : 'browser')
       } catch (err) {
@@ -56,7 +60,7 @@ export function useUserSettings(userId) {
       }
     })()
     return () => { alive = false }
-  }, [userId, setTheme, setSidebarModeOnly, setSingleKeyOnly])
+  }, [userId, setTheme, setSidebarModeOnly, setSingleKeyOnly, setDesktopOnly])
 
   const save = useCallback((column, value) => {
     chosen.current.add(column)
@@ -87,6 +91,12 @@ export function useUserSettings(userId) {
     save('single_key_shortcuts', next)
   }, [setSingleKeyOnly, save])
 
+  const chooseDesktopNotifications = useCallback((next) => {
+    if (typeof next !== 'boolean') return
+    setDesktopOnly(next)
+    save('desktop_notifications', next)
+  }, [setDesktopOnly, save])
+
   return {
     theme,
     setTheme: chooseTheme,
@@ -94,6 +104,8 @@ export function useUserSettings(userId) {
     setSidebarMode: chooseSidebarMode,
     singleKeyShortcuts,
     setSingleKeyShortcuts: chooseSingleKeyShortcuts,
+    desktopNotifications,
+    setDesktopNotifications: chooseDesktopNotifications,
     source,
   }
 }

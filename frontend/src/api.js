@@ -1919,6 +1919,49 @@ const apiMethods = {
     return data || [];
   },
 
+  /**
+   * What a firing device or gateway alert is about, for its desktop notification: `{ name, place }`,
+   * the asset's name and where it is ("Machine Shop › Cell 3", or the area alone for an area-wide
+   * asset; null for one with no place). Null for any other alert. A read that fails leaves its part
+   * out, so the notification still names the Sparkplug id; nothing here throws. The device's place
+   * is public.device_locations', so a replay lane or a simulated gateway's device has none.
+   */
+  readAlertSubject: async (alert) => {
+    const kind = alert?.entity_type || 'device';
+    if ((kind !== 'device' && kind !== 'gateway') || !isUuid(alert?.entity_id)) return null;
+    try {
+      let name = null;
+      let cellId = null;
+      let areaId = null;
+      if (kind === 'device') {
+        const [device, location] = await Promise.all([
+          supabase.from('devices').select('name').eq('id', alert.entity_id).maybeSingle(),
+          supabase.from('device_locations').select('effective_cell_id, effective_area_id').eq('device_id', alert.entity_id).maybeSingle()
+        ]);
+        name = device.data?.name ?? null;
+        cellId = location.data?.effective_cell_id ?? null;
+        areaId = location.data?.effective_area_id ?? null;
+      } else {
+        const { data } = await supabase.from('gateways').select('name, cell_id, area_id, location_scope').eq('id', alert.entity_id).maybeSingle();
+        const scope = normaliseScope(data?.location_scope);
+        name = data?.name ?? null;
+        cellId = scope === SCOPE_CELL ? data?.cell_id ?? null : null;
+        areaId = scope === SCOPE_AREA_WIDE ? data?.area_id ?? null : null;
+      }
+      let place = null;
+      if (cellId) {
+        const { data } = await supabase.from('cells').select('name, areas(name)').eq('id', cellId).maybeSingle();
+        place = [data?.areas?.name, data?.name].filter(Boolean).join(' › ') || null;
+      } else if (areaId) {
+        const { data } = await supabase.from('areas').select('name').eq('id', areaId).maybeSingle();
+        place = data?.name ?? null;
+      }
+      return { name, place };
+    } catch {
+      return null;
+    }
+  },
+
   // -------------------------------------------------------------------------------------------
   // Suppression windows (0240), from the drawer of the device, gateway or cell a window covers.
   // Each write is one Audit Trail row in that subject's lane. The database's refusals are
