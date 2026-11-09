@@ -129,6 +129,13 @@ export const AUDIT_TRAIL_ACTIONS = {
   SUPPRESSION_WINDOW_CHANGED:   'Suppression window changed',
   SUPPRESSION_WINDOW_ENDED:     'Suppression window ended',
   SUPPRESSION_WINDOW_CANCELLED: 'Suppression window cancelled',
+  // An automation created, changed, switched on or off, or deleted, by the Automations page or by
+  // the lifecycle that follows a device (0256, 0257): in the automation's own lane.
+  AUTOMATION_CREATED:           'Automation created',
+  AUTOMATION_CHANGED:           'Automation changed',
+  AUTOMATION_ENABLED:           'Automation enabled',
+  AUTOMATION_DISABLED:          'Automation disabled',
+  AUTOMATION_DELETED:           'Automation deleted',
   // An Administrator issuing or rotating the webhook's signing key on Settings › Notifications
   // (0248), in the webhook's lane. The key itself is never in the row.
   SIGNING_KEY_ISSUED:              'Signing key issued',
@@ -174,6 +181,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset', group: 'model' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset', group: 'model' },
+  // An automation's acts (0256), one lane per automation, in the asset lane: an Administrator or a
+  // Shopfloor Manager writes it and every role reads it.
+  { kind: 'AUTOMATION',       table: 'automations',        label: 'Automations',        domain: 'asset', group: 'model' },
   { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security', group: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset', group: 'model' },
@@ -218,6 +228,11 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
     label: 'Alerts',
     actions: ['ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN', 'SUPPRESSION_WINDOW_SCHEDULED',
       'SUPPRESSION_WINDOW_CHANGED', 'SUPPRESSION_WINDOW_ENDED', 'SUPPRESSION_WINDOW_CANCELLED'],
+  },
+  {
+    label: 'Automations',
+    actions: ['AUTOMATION_CREATED', 'AUTOMATION_CHANGED', 'AUTOMATION_ENABLED', 'AUTOMATION_DISABLED',
+      'AUTOMATION_DELETED'],
   },
   {
     label: 'Capture and playback',
@@ -327,6 +342,12 @@ export const AUDIT_TRAIL_ACTION_KINDS = [
   ['SUPPRESSION_WINDOW_CHANGED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
   ['SUPPRESSION_WINDOW_ENDED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
   ['SUPPRESSION_WINDOW_CANCELLED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  // An automation's acts, in its own lane.
+  ['AUTOMATION_CREATED', ['automations'], ['created']],
+  ['AUTOMATION_CHANGED', ['automations'], ['configuration']],
+  ['AUTOMATION_ENABLED', ['automations'], ['operational']],
+  ['AUTOMATION_DISABLED', ['automations'], ['operational']],
+  ['AUTOMATION_DELETED', ['automations'], ['lifecycle']],
   // The webhook's signing key, issued or rotated, in the webhook's lane.
   ['SIGNING_KEY_ISSUED', ['notification_channels'], ['configuration']],
 ];

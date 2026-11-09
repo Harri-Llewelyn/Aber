@@ -1,0 +1,17 @@
+{
+  "about": "What the lifecycle leaves when a device goes.",
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": [],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ],
+      "enabled": false
+    }
+  ]
+}

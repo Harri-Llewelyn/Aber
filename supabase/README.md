@@ -3143,6 +3143,19 @@ the refusals, the inheritance, the audit rows and who reads them.
 - **The map.** `audit_trail_action_kinds()` lists both actions on both kinds, `operational` only,
   and `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43).
 
+**An automation's acts are filed here too, edited in place (0256, 0257).** The five acts are not a
+migration of their own: this file and `0249` are unreleased, and their functions replay in file
+order on every boot, so a second declaration would be a second place to drift.
+
+- **The lane.** `audit_domain_for()` files `automations` in the asset lane. An Administrator or a
+  Shopfloor Manager performs the act, as for `metric_catalog`, and the asset lane's readers (those
+  two and an Auditor) read it.
+- **The classes.** `audit_event_class()` answers by the action: `AUTOMATION_CREATED` is created,
+  `AUTOMATION_CHANGED` configuration, `AUTOMATION_ENABLED` and `AUTOMATION_DISABLED` operational,
+  `AUTOMATION_DELETED` lifecycle. The arms come after the acknowledgements' and before the security
+  lane's rule, so the snapshots do not decide. The class indexes are not rebuilt: no row with these
+  actions exists before the arms do.
+
 Each function is redeclared whole, unchanged but for those lines: `0001`, `0168`, `0193`, `0228`
 and `0229` replay first on every boot, and the last declaration stands. For `audit_domain_for()` the
 moment between them files nothing wrongly that matters: a row stamped then lands in the security
@@ -3833,8 +3846,12 @@ backs. It needs one line in the map of kinds and nothing else:
   `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43). `0241` declares the map too, and replays
   first on every boot: the last declaration stands, so this one carries `0241`'s rows.
 
-The file's self-check asserts the lane, the class and the map's row, and that `0232`'s and `0241`'s
-rows are still there.
+**An automation's five acts are listed here too** (0256, 0257), on `automations`, before the signing key:
+`AUTOMATION_CREATED`, `AUTOMATION_CHANGED`, `AUTOMATION_ENABLED`, `AUTOMATION_DISABLED` and
+`AUTOMATION_DELETED`. Their lane and classes are `0232`'s.
+
+The file's self-check asserts the lane, the class and the map's row, the automations' lane, classes
+and rows, and that `0232`'s and `0241`'s rows are still there.
 
 ### A suppressed alert is held until its window ends (0250)
 
@@ -4013,6 +4030,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | :--- | :--- | :--- | :--- |
 | `acknowledge_alert()` | `0231` | no | An Operator's write as much as a manager's: acknowledging an alert changes no platform state. |
 | `app_approvals()` | `0217` | no | A read: who allows an app. |
+| `apply_automations()` | `0256` | yes | Applies a document of automations (a preview too: the same call) |
 | `approve_proposal()` | `0165` | yes | Applies a proposed change |
 | `audit_trail_backup_job_ids_matching()` | `0001` | no | A read: the Audit Trail's search. |
 | `audit_trail_user_ids_matching()` | `0203` | no | A read: the Audit Trail's search. |
@@ -4026,6 +4044,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `cold_archive_backlog()` | `0001` | no | A read: the Cold Storage page. |
 | `cold_storage_rows()` | `0001` | no | A read: the Cold Storage page. |
 | `create_machine_principal()` | `0001` | yes | Creates a machine identity |
+| `delete_automation()` | `0256` | yes | Deletes an automation |
 | `describe_machine_principal()` | `0001` | yes | Renames a machine identity |
 | `discard_schema_draft()` | `0165` | yes | Discards a schema draft (schema:manage) |
 | `display_names_for()` | `0213` | no | A read: the names the dashboard shows. |
@@ -4075,6 +4094,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `revoke_service_principal()` | `0001` | yes | Revokes a machine identity |
 | `revoke_service_token()` | `0001` | yes | Revokes a service token |
 | `schedule_alert_suppression_window()` | `0240` | yes | Schedules a suppression window, which keeps a machine's alerts quiet |
+| `set_automation_enabled()` | `0256` | yes | Turns an automation on or off |
 | `set_backup_offsite_destination()` | `0001` | yes | Sets the off-site backup destination |
 | `set_device_schemas()` | `0168` | yes | Changes a device's schemas |
 | `set_display_name()` | `0213` | yes | Names another person (your own name is yours at any assurance) |
@@ -4258,6 +4278,156 @@ as `authenticated`, over 10 days of the tutorial device's simulation (a flag and
 standing in for raw telemetry and the rollups. The file's self-check asserts one form, `STABLE`,
 `SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
 read, so it holds on a stack with no historian.
+
+### Automations are kept as rows (0255)
+
+An automation is a rule that watches a reading and raises an alert: when this device's metric is
+above 80 for five minutes, raise a warning. A person writes one as YAML on the Automations page
+([#1277](https://github.com/Harri-Llewelyn/Aber/issues/1277)), but **the rows are the record and the
+YAML is never stored**. That is why a rule is in the database at all
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)): it is bound to the devices it names,
+the Audit Trail knows who changed a threshold and when, row security decides who may write, and the
+backups hold it by construction. A Grafana rule binds to nothing: archive the device and it keeps
+evaluating. The file format is the reference in [`docs/automations.md`](../docs/automations.md).
+
+- **`automations`**, one row per automation. `key` is the `id:` a person writes: a slug of 1 to 64
+  lowercase letters, digits, hyphens and underscores, unique, and what a re-upload finds the row by.
+  `id` is the row's own uuid. The names (`automations`, `automation_triggers`, `automation_actions`)
+  leave the word *condition* with Home Assistant's meaning, a check made when a trigger fires.
+- **`automation_triggers`**, one row per trigger **and device**. A trigger that names a list of
+  devices is a row each, so each device is evaluated, and fires, on its own, the lifecycle can
+  archive one device's row, and a foreign key can keep the row from outliving its device.
+  `position` and `device_position` are the trigger's place in the `triggers` list and the device's
+  in its `device:` list, so a renderer can group the rows back into what a person wrote.
+- **`automation_actions`**, one row per action. `alert` is the one action, with a `severity`.
+- **`kind` is a column from the first release.** `threshold` is the one kind written today.
+  `entity_id` and `metric_name` are nullable, so a row with neither can be a site-wide rule, and
+  `comparison` and `threshold` are nullable for a kind with none. A kind's shape is its own CHECK
+  (`automation_triggers_threshold_shape`), not a list of every legal kind: a CHECK naming every
+  kind is wrong on the first boot after one is added. Only `threshold` is accepted by
+  `apply_automations()`. A per-device row that overrides a site-wide one needs no column: the
+  override is a row of the same kind for that device.
+- **The metric is a measured one.** `metric_name` is a foreign key to `metric_catalog(name)`, with
+  `ON DELETE RESTRICT`, so a metric a trigger uses cannot be deleted from under it. A derived metric
+  is a catalogue row too, and its refusal is added to `automations_parse()` when derived metrics
+  exist.
+- **Devices are named by id.** `entity_id` is a foreign key to `devices(id)` with `ON DELETE
+  CASCADE`, the second line behind 0257's trigger.
+- **Who reads and writes.** Every signed-in role reads all three tables. `anon` is revoked by name.
+  Nobody holds `INSERT`, `UPDATE` or `DELETE`: 0256's functions write as the owner. They are the
+  only door, for an Administrator and a Shopfloor Manager, which is #322's decision of 2026-10-28.
+- **The fingerprint** of an alert an automation raises is `condition:<trigger id>:<device
+  id>:<metric>`, composed by `automation_alert_fingerprint()` and nowhere else. The metric comes
+  last because a metric name may hold a slash, never a colon. With no device or no metric it
+  answers the prefix every fingerprint of that trigger starts with. `0247`'s
+  `platform_alert_confirmation_window()` already tells a `condition:` row from Grafana's.
+- **Where the evaluator goes.** Its state is per (trigger, device, metric): pending since, firing
+  since, last evaluated. That is a table the evaluator adds, keyed on `automation_triggers.id` with
+  `ON DELETE CASCADE`. These tables need no reshaping for it.
+
+The file's self-check asserts row security on all three, that `anon` holds nothing, that
+`authenticated` reads and writes nothing directly, and the fingerprint's form.
+`test_an_automation_is_a_set_of_rows_applied_from_one_document.py` holds the CHECKs and the keys.
+
+### A document of automations is checked and applied in one call (0256)
+
+The Automations page parses a person's YAML into JSON and calls one function. **The database is the
+authority**: the stack has no `pg_jsonschema`, so `apply_automations()` checks every field itself,
+and the JSON Schema the dashboard serves is a convenience that a test holds to it.
+
+- **`apply_automations(p_doc, p_dry_run)`** answers a list with one result per automation: `index`,
+  `key`, `status` (`new`, `changed`, `unchanged` or `refused`), `id`, `changes` and `reasons`. Each
+  reason is a `path` and a `message`; the path is a JSON path, such as `$[0].triggers[1].above`,
+  which the editor maps back to a line. Every field is checked and every reason reported, so a
+  file is fixed in one pass. **All or nothing:** with any refusal, or with `p_dry_run` true, nothing
+  is written, so the upload preview and the apply are one call. **It never deletes:** a file is a
+  batch of changes, not the whole set, as Home Assistant's `automations.yaml` is.
+- **The vocabulary is closed.** One trigger, `threshold`, with `device` (one id or a list),
+  `metric`, exactly one of `above` or `below`, and `for`. One action, `alert`, with a `severity`.
+  `conditions` only when absent or empty. A key it does not know is refused, never ignored: a file
+  that seemed to work and did half of what it said would be worse than a refusal. An automation
+  takes exactly one action, because the alert's fingerprint carries the trigger and not the
+  action, so two would raise one alert twice. An enabled automation needs a trigger.
+- **A file is bounded:** 500 automations, 100 triggers each, 500 devices a trigger and 10,000
+  devices in all. The first three are in the schema too (`maxItems`, held by mirror check 71); the
+  last is the function's alone, because a schema cannot count across items.
+- **A metric** must be in `metric_catalog` and a number (Sparkplug datatype 1 to 10): a threshold on
+  a string never breaches and never errors, which is the silence #322 refuses for derived
+  metrics. A **device** must exist and not be archived. Both checks are the database's alone; no
+  schema can make them.
+- **`for:`** is a whole number of at most three digits and `s`, `m` or `h`: 999 hours at most. The
+  limit is in the pattern, so the schema and the function cannot disagree about it. It is stored
+  in seconds and rendered as the largest unit that divides it, so `60s` comes back as `1m` and
+  still applies as unchanged.
+- **Found by key, changed by comparison.** A document and the stored automation are both rendered
+  by `automation_document_of()` and compared as JSON, so `unchanged` is exact and writes nothing,
+  not even an Audit Trail row. A changed automation keeps the trigger rows that still name the
+  same device and metric, so an alert already firing keeps its fingerprint and its row; only a
+  row whose device or metric goes is deleted, and its alert resolved (0257).
+- **`automations_document(p_keys)`** renders the rows back as `{automations, devices}`: the
+  automations in the document's shape, and each device they name with its name and place (cell and
+  area) for the comment the page writes beside the id. The YAML keeps no comments, so the page
+  writes them again on every render. Trigger rows archived with their device are left out.
+  `apply_automations()` of the `automations` list reports every one unchanged.
+- **`set_automation_enabled()` and `delete_automation()`** are the list's two acts. Enabling one with
+  no live trigger is refused.
+- **`automations_for_entity(p_entity_id)`** says which automations apply to a device and why, one
+  row per reason: `named` (a live trigger names it) and `site-wide` (a trigger that names no device
+  applies to every modelled device, one with a schema attached). The reasons a per-device override
+  and a place condition give are added with the rules that have them.
+- **Each writer** is `SECURITY DEFINER` with its path pinned, checks `has_role()` for an
+  Administrator or a Shopfloor Manager (42501 otherwise) and then calls `require_mfa()`, as every
+  gated writer does (0251). They are listed in 0251's table.
+- **The Audit Trail.** Each act writes one row per automation, by `file_automation_act()`, naming
+  the person, in the asset lane under `automations`, holding the automation before and after in the
+  document's shape with its `alias` as `name`: `AUTOMATION_CREATED`, `AUTOMATION_CHANGED`,
+  `AUTOMATION_ENABLED`, `AUTOMATION_DISABLED` and `AUTOMATION_DELETED`. A document that changes
+  only `enabled` is an enable or a disable, not a change. They are written by the
+  functions, not by an audit trigger on the tables, because one act on an automation is several
+  rows and the trail should read as one. Their lane and classes are `0232`'s and their place in
+  the map `0249`'s, both edited in place: see those sections.
+
+**The JSON Schema** is
+[`frontend/public/json-schema/automations.schema.json`](../frontend/public/json-schema/automations.schema.json),
+served by the dashboard at `/json-schema/automations.schema.json` (not under `/schemas`, which is
+the Schemas page's). It describes exactly this vocabulary with `additionalProperties: false`
+throughout and a description on every field, which the editor's hover help reads, and a person who
+prefers their own editor can point VS Code's YAML extension at it.
+`test_the_automations_schema_and_the_function_agree.py` runs every file in
+[`supabase/automations-fixtures/`](automations-fixtures) through the schema (`jsonschema`) and
+through `apply_automations(..., true)`, one document and one reason each, and fails if they
+disagree. A fixture marked `database` is what a schema cannot know (a device that is not there, a
+metric that is not in the catalogue, an id used twice): the schema must accept it and the function
+refuse it. Mirror check 71 holds the patterns and limits the fixtures cannot reach.
+
+The file's self-check asserts that each writer is `SECURITY DEFINER`, pinned, and asks for the second
+factor, that `anon` may run none of the functions and `authenticated` the five that are its, that the
+checker and the audit writer are no one's, and that the checker refuses what it should.
+
+### An automation follows the devices it names (0257)
+
+- **A device archived** archives the trigger rows that name it: they are kept and nothing evaluates
+  them. **Restoring** it brings them back and **enables nothing**: a rule coming back to life by
+  itself would surprise a person who had read that it was off. **A device deleted** removes them.
+- **An automation left with no live trigger is disabled,** and the Audit Trail records why. The row
+  is `AUTOMATION_DISABLED` with a `reason` such as "its last trigger watched the device Lathe 3,
+  which was archived", filed in the transaction of the person who archived the device, so it names
+  them. An automation that keeps another trigger is recorded as `AUTOMATION_CHANGED` with the same
+  reason. A purge by the timer has no person, and the row says so as every such row does.
+- **Its alerts end with it.** `platform_alerts` keeps the newest occurrence of a fingerprint for
+  ever (`prune_platform_alerts()`), so a firing row nothing resolved would stay in the counter. The
+  alerts of a trigger are resolved when it is deleted, archived or given another device or metric
+  (a different fingerprint), when its automation is turned off, and when the automation is deleted
+  (its triggers go with it). A resolve is the UPDATE that ends an occurrence, so a notification
+  already sent is followed by its "resolved". A new threshold resolves nothing: the trigger keeps
+  its identity and its alert, and the evaluator judges it against the new number.
+- **They are rules of the tables, not steps of the writers:** triggers on `devices` and on
+  `automation_triggers` and `automations`, so a row changed any other way keeps them. The alerts are
+  found by `automation_alert_fingerprint()`'s prefix, one definition for the lifecycle and the
+  evaluator.
+
+The file's self-check asserts that each function is no browser-facing role's, that the five triggers
+are in place and enabled, and that the cascade from devices is there.
 
 ### An Administrator registers an app that signs people in (0260)
 
@@ -4778,6 +4948,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `platform_alerts` | `authenticated`; a `service_identity` row `Administrator` only (`0204`) | none — `grafana-alert-webhook` writes the alert as `service_role`; `acknowledge_alert()` and `withdraw_alert_acknowledgement()` the acknowledgement (`0231`); the database the suppression stamp (`0240`) |
 | `alert_suppression_windows` | `authenticated` (`0240`) | none — `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and `end_alert_suppression_window()`, as `Administrator` / `Shopfloor_Manager` |
+| `automations`, `automation_triggers`, `automation_actions` | `authenticated` (`0255`) | none — `apply_automations()`, `set_automation_enabled()` and `delete_automation()`, as `Administrator` / `Shopfloor_Manager`; the lifecycle (`0257`) as the trigger of a device's change |
 | `service_token_last_use` | `Administrator`, `Auditor` (`0209`) | none — `record_service_token_use()`, which the i3X server calls as the token's own caller |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 

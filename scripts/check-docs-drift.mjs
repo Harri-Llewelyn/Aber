@@ -5177,6 +5177,165 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 290. docs/automations.md documents the automations JSON Schema as it is: every key of an
+// automation, of the threshold trigger and of the alert action, with whether it is required, and
+// no other; the limits the schema states; and the path the dashboard serves it at.
+// -------------------------------------------------------------------------------------------------
+{
+  const DOC = 'docs/automations.md';
+  const SCHEMA_FILE = 'frontend/public/json-schema/automations.schema.json';
+  const schema = JSON.parse(read(SCHEMA_FILE));
+  const doc = read(DOC);
+  const problems290 = [];
+  const { automation, thresholdTrigger, alertAction } = schema.$defs;
+  const sections = [
+    ['### An automation', automation],
+    ['### The `threshold` trigger', thresholdTrigger],
+    ['### The `alert` action', alertAction],
+  ];
+  let keys = 0;
+  for (const [heading, def] of sections) {
+    const at = doc.indexOf(`\n${heading}\n`);
+    if (at < 0) {
+      problems290.push(`${DOC} has no "${heading}" section`);
+      continue;
+    }
+    const rest = doc.slice(at + heading.length + 2);
+    const end = rest.search(/\n#{2,3} /);
+    const body = end < 0 ? rest : rest.slice(0, end);
+    const rows = [...body.matchAll(/^\| `([a-z]+)` \| ([^|]+) \|/gm)].map((m) => [m[1], m[2].trim()]);
+    const documented = rows.map(([key]) => key).sort().join(', ');
+    const declared = Object.keys(def.properties).sort().join(', ');
+    if (documented !== declared) {
+      problems290.push(`${DOC}: "${heading}" documents the keys ${documented}, the schema has ${declared}`);
+    }
+    const oneOf = new Set((def.oneOf ?? []).flatMap((branch) => branch.required ?? []));
+    for (const [key, says] of rows) {
+      const expected = (def.required ?? []).includes(key) ? 'Yes' : oneOf.has(key) ? 'One of the two' : 'No';
+      if (says !== expected) problems290.push(`${DOC}: "${heading}" says ${key} is "${says}", the schema makes it "${expected}"`);
+    }
+    keys += rows.length;
+  }
+  // The limits a reader plans a file by.
+  const comma = (n) => n.toLocaleString('en-US');
+  const props = automation.properties;
+  const hold = Number(thresholdTrigger.properties.for.pattern.match(/\{0,(\d)\}/)?.[1]) + 1;
+  const claims = [
+    [`1 to ${Number(props.id.pattern.match(/\{0,(\d+)\}/)?.[1]) + 1} lowercase letters`, 'the length of an id'],
+    [`1 to ${props.alias.maxLength} characters`, "an alias's length"],
+    [`up to ${comma(props.description.maxLength)} characters`, "a description's length"],
+    [`at most ${props.triggers.maxItems} triggers`, 'the triggers in an automation'],
+    [`a list of 1 to ${thresholdTrigger.properties.device.oneOf[1].maxItems}`, 'the devices in a trigger'],
+    [`up to ${10 ** hold - 1} of one unit`, 'the digits of a hold'],
+  ];
+  for (const [text, what] of claims) {
+    if (!doc.includes(text)) problems290.push(`${DOC} does not say ${what} as the schema holds it: "${text}"`);
+  }
+  if (!doc.includes('`/json-schema/automations.schema.json`')) problems290.push(`${DOC} does not name the path the dashboard serves the schema at`);
+  if (problems290.length) {
+    fail(`docs/automations.md does not document the JSON Schema as it is:\n${problems290.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`docs/automations.md documents the ${keys} keys of the automations JSON Schema, with whether each is required, and its limits`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 291. The API reference documents the automations as 0255 and 0256 declare them: the three tables
+// under their own paths, each function granted to authenticated under its own path with the
+// arguments it declares and no others, the result's schema and the five actions on AuditTrailEntry.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const TABLES = 'supabase/migrations/0255_automations_are_kept_as_rows.sql';
+  const FUNCTIONS = 'supabase/migrations/0256_a_document_of_automations_is_checked_and_applied_in_one_call.sql';
+  const spec = read(SPEC);
+  const sql = read(FUNCTIONS);
+  const problems291 = [];
+  // A path's block in the spec: from its key to the next path key, or the end of the paths.
+  const pathBlock = (name) => {
+    const start = spec.indexOf(`\n  ${name}:\n`);
+    if (start < 0) return undefined;
+    const rest = spec.slice(start + name.length + 5);
+    const end = rest.search(/\n {2}\/|\n[a-z]/);
+    return end < 0 ? rest : rest.slice(0, end);
+  };
+  for (const table of [...read(TABLES).matchAll(/CREATE TABLE IF NOT EXISTS public\.(\w+)/g)].map((m) => m[1])) {
+    if (!pathBlock(`/rest/v1/${table}`)) problems291.push(`${SPEC} has no /rest/v1/${table}`);
+  }
+  const granted = [...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)\(([^)]*)\) TO authenticated;/g)]
+    .map((m) => [m[1], m[2]]);
+  const callable = granted.filter(([name]) => !/^automation_(duration_text|document_of|stored_document)$/.test(name));
+  if (callable.length !== 5) problems291.push(`${FUNCTIONS}: expected five functions for the page and the API, found ${callable.map(([n]) => n).join(', ') || 'none'}`);
+  for (const [name] of callable) {
+    const block = pathBlock(`/rest/v1/rpc/${name}`);
+    if (!block) {
+      problems291.push(`${SPEC} has no /rest/v1/rpc/${name}`);
+      continue;
+    }
+    const head = `CREATE OR REPLACE FUNCTION public.${name}(`;
+    const from = sql.indexOf(head);
+    const args = from < 0 ? '' : sql.slice(from + head.length, sql.indexOf(')', from));
+    const declared = [...args.matchAll(/\b(p_\w+)\b/g)].map((m) => m[1]).sort().join(', ');
+    const properties = block.match(/\n {14}properties:\n([\s\S]*?)(?=\n {6}responses:)/)?.[1] ?? '';
+    const documented = [...properties.matchAll(/^ {16}(p_\w+):/gm)].map((m) => m[1]).sort().join(', ');
+    if (declared !== documented) problems291.push(`${SPEC}: /rest/v1/rpc/${name} documents the arguments "${documented}", ${FUNCTIONS} declares "${declared}"`);
+  }
+  for (const schema of ['Automation', 'AutomationTrigger', 'AutomationAction', 'AutomationResult']) {
+    if (!new RegExp(`^ {4}${schema}:`, 'm').test(spec)) problems291.push(`${SPEC} has no ${schema} schema`);
+  }
+  const entry = spec.match(/^ {4}AuditTrailEntry:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  const acts = [...new Set([...sql.matchAll(/'(AUTOMATION_[A-Z]+)'/g)].map((m) => m[1]))];
+  if (acts.length !== 5) problems291.push(`${FUNCTIONS}: expected five AUTOMATION_ actions, found ${acts.join(', ') || 'none'}`);
+  for (const act of acts) {
+    if (!entry.includes(act)) problems291.push(`${SPEC}: AuditTrailEntry does not list ${act}`);
+  }
+  if (!/entity_type:[\s\S]*?enum:[^\]]*\bautomations\b/.test(entry)) problems291.push(`${SPEC}: AuditTrailEntry's entity_type does not list automations`);
+  if (problems291.length) {
+    fail(`the API reference does not document the automations as 0255 and 0256 declare them:\n${problems291.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`docs/openapi.yaml documents the three automations tables, ${callable.map(([n]) => n).join(', ')} with their arguments, and the five AUTOMATION_ actions`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 292. The automations JSON Schema is one file, served at one path. The dashboard's static folder
+// holds it and nothing else holds a copy; the page that describes the format, the migrations'
+// README and the guard suite each name that path; and the folder the guard suite reads its
+// fixtures from exists and holds both kinds.
+// -------------------------------------------------------------------------------------------------
+{
+  const PATH = '/json-schema/automations.schema.json';
+  const FILE = `frontend/public${PATH}`;
+  const problems292 = [];
+  const copies = allFiles.filter((f) => /(^|\/)automations\.schema\.json$/.test(f));
+  if (copies.length !== 1 || copies[0] !== FILE) {
+    problems292.push(`expected one automations.schema.json, at ${FILE}; found ${copies.join(', ') || 'none'}`);
+  }
+  for (const doc of ['docs/automations.md', 'supabase/README.md']) {
+    if (!read(doc).includes(PATH)) problems292.push(`${doc} does not name ${PATH}`);
+  }
+  const suite = read('supabase/migrations/test_the_automations_schema_and_the_function_agree.py');
+  if (!suite.includes('"frontend" / "public" / "json-schema" / "automations.schema.json"')) {
+    problems292.push('the guard suite does not read the schema from frontend/public/json-schema/');
+  }
+  const fixtures = (kind) => allFiles.filter((f) => f.startsWith(`supabase/automations-fixtures/${kind}/`) && f.endsWith('.json'));
+  if (fixtures('valid').length === 0 || fixtures('invalid').length === 0) {
+    problems292.push('supabase/automations-fixtures/ holds no valid or no invalid fixture');
+  }
+  for (const f of fixtures('invalid')) {
+    const fixture = JSON.parse(read(f));
+    if (typeof fixture.about !== 'string' || !/^\$/.test(fixture.path ?? '') || typeof fixture.database !== 'boolean' || !('document' in fixture)) {
+      problems292.push(`${f} is not {about, path, database, document}`);
+    }
+  }
+  if (problems292.length) {
+    fail(`the automations JSON Schema is not one file served at ${PATH}:\n${problems292.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the automations JSON Schema is one file, served at ${PATH}, named by its page, the migrations' README and the guard suite, over ${fixtures('valid').length} valid and ${fixtures('invalid').length} invalid fixtures`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 275. DeviceAlert documents platform_alerts as the migrations declare it: each column of the table
 // is a property, and a property that is no column says it is on platform_alerts_active only. The
 // columns are 0001's CREATE TABLE and any later ADD COLUMN. A column left out is one an API client
