@@ -271,7 +271,7 @@ class EverySaveRefusalGivesItsReason(DerivedBase):
                 "INSERT INTO public.devices (id, name, gateway_id, last_birth_metrics, last_birth_metrics_at)"
                 " VALUES (%s, %s, %s, %s, now());",
                 (str(uuid.uuid4()), f"T267_Press_{n}", gateway, [self.name("PARTS_PER_HOUR")]))
-        message = self.refused("PARTS_PER_HOUR", counter(self.name("PART_COUNT")), "a name the device T267_Press_0 and 1 more declares")
+        message = self.refused("PARTS_PER_HOUR", counter(self.name("PART_COUNT")), "a name the device T267_Press_0 and 1 more declare,")
         self.assertIn(self.name("PARTS_PER_HOUR"), message)
         self.save("PARTS_PER_SHIFT", counter(self.name("PART_COUNT")))
 

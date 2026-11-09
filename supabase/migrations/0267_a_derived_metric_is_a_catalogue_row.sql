@@ -227,10 +227,10 @@ BEGIN
     FROM public.devices d
    WHERE NEW.name = ANY (d.last_birth_metrics);
   IF v_devices > 0 THEN
-    RAISE EXCEPTION '% is a name % declares, so a derived metric cannot take it: both would put readings in one series. Choose a name no device publishes.',
+    RAISE EXCEPTION '% is a name %, so a derived metric cannot take it: both would put readings in one series. Choose a name no device publishes.',
           NEW.name,
-          CASE WHEN v_devices = 1 THEN format('the device %s', v_device)
-               ELSE format('the device %s and %s more', v_device, v_devices - 1) END
+          CASE WHEN v_devices = 1 THEN format('the device %s declares', v_device)
+               ELSE format('the device %s and %s more declare', v_device, v_devices - 1) END
           USING ERRCODE = '23514';
   END IF;
 
