@@ -1920,11 +1920,9 @@ const apiMethods = {
   },
 
   /**
-   * What a firing device or gateway alert is about, for its desktop notification: `{ name, place }`,
-   * the asset's name and where it is ("Machine Shop › Cell 3", or the area alone for an area-wide
-   * asset; null for one with no place). Null for any other alert. A read that fails leaves its part
-   * out, so the notification still names the Sparkplug id; nothing here throws. The device's place
-   * is public.device_locations', so a replay lane or a simulated gateway's device has none.
+   * A device or gateway alert's subject for its desktop notification: `{ name, place }`, the place
+   * "Area › Cell", or the area alone for an area-wide asset, else null. Null for any other alert.
+   * A failed read leaves its part out; nothing here throws. A device's place is device_locations'.
    */
   readAlertSubject: async (alert) => {
     const kind = alert?.entity_type || 'device';
