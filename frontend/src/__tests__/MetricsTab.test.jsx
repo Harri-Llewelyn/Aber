@@ -165,7 +165,7 @@ beforeEach(() => {
   })
 })
 
-describe('Metrics page: one card with three tabs', () => {
+describe('Metrics page: one card with four tabs', () => {
   it('names the page in the card heading, with the rail icon and a one-sentence description', async () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
@@ -180,13 +180,13 @@ describe('Metrics page: one card with three tabs', () => {
     expect(description.split(' ').length).toBeLessThanOrEqual(28)
   })
 
-  it('puts the tabs directly in the card, catalog first and selected, Deprecated and Uncatalogued always present', async () => {
+  it('puts the tabs directly in the card, catalog first and selected, Derived, Deprecated and Uncatalogued always present', async () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
     expect(tabBar().parentElement).toHaveClass('card')
     await waitFor(() => expect(tabLinks().map(t => t.textContent))
-      .toEqual(['Metric Catalog', 'Deprecated Metrics', 'Uncatalogued (0)']))
+      .toEqual(['Metric Catalog', 'Derived', 'Deprecated Metrics', 'Uncatalogued (0)']))
     expect(tabLink('Metric Catalog').getAttribute('aria-current')).toBe('page')
   })
 
@@ -207,7 +207,7 @@ describe('Metrics page: one card with three tabs', () => {
 
     expect(document.querySelector('.card .section-count')).toBeNull()
     // Uncatalogued carries its count by design (metricsUncatalogued.test.jsx).
-    for (const name of ['Metric Catalog', 'Deprecated Metrics']) {
+    for (const name of ['Metric Catalog', 'Derived', 'Deprecated Metrics']) {
       expect(tabLink(name).textContent).not.toMatch(/\d/)
     }
   })
@@ -218,8 +218,9 @@ describe('Metrics page: one card with three tabs', () => {
 
     const tabs = tabLinks()
     expect(tabs[0]).toHaveAccessibleDescription(/schema authors build from/)
-    expect(tabs[1]).toHaveAccessibleDescription(/withheld from the schema builder/)
-    expect(tabs[2]).toHaveAccessibleDescription(/no catalog row describes/)
+    expect(tabs[1]).toHaveAccessibleDescription(/computes from others/)
+    expect(tabs[2]).toHaveAccessibleDescription(/withheld from the schema builder/)
+    expect(tabs[3]).toHaveAccessibleDescription(/no catalog row describes/)
     expect(document.querySelector('.card > .tab-strip').children).toHaveLength(1)
 
     deprecatedTableOf()

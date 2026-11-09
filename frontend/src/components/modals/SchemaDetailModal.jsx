@@ -16,9 +16,8 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { Modal } from '../common/Modal'
 import { SemanticIdField } from '../common/SemanticIdField'
-import {
-  MetricGroupHeading, PropertyRange, rangeProblems, PICKER_ROW, PICKER_ROW_LABEL
-} from './SchemaBuilderModal'
+import { MetricGroupHeading, PICKER_ROW, PICKER_ROW_LABEL } from '../common/MetricPicker'
+import { PropertyRange, rangeProblems } from './SchemaBuilderModal'
 import { boundText, catalogPropertyEntry, isNumericType, sameJson } from '../../utils/schemaProperty'
 import { Tooltip } from '../common/Tooltip'
 
@@ -73,7 +72,8 @@ export function SchemaDetailModal({
   // A refusal of a save or a publish, as the database worded it.
   const [error, setError] = useState(null)
 
-  const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
+  // A derived metric is not offered: nothing publishes it, so a schema cannot model it.
+  const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated && !m.derivation), [catalog])
 
   const lineage = useMemo(() => lineageOf(schemas, schema), [schemas, schema])
 

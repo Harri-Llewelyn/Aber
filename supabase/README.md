@@ -52,9 +52,9 @@ The third squash restarted live numbering at `0003`, a number the archive alread
 bare citation of an archived `0003`–`0032` quietly came to name a different, live file as the
 chain grew past it. The fourth archived its 28 files under `0135`–`0162`, after the archive's
 highest, with the old-to-new table in [`migrations/archive/README.md`](migrations/archive/README.md).
-**The next migration is `0163`**, and each later one takes the next number above the highest ever
-issued, so a number names one file for good, whichever squash later archives it. Check 9d of
-`scripts/check-docs-drift.mjs` refuses an applied migration whose number the archive holds.
+Each new migration takes the next number above the highest ever issued, so a number names one file
+for good, whichever squash later archives it. Check 9d of `scripts/check-docs-drift.mjs` refuses an
+applied migration whose number the archive holds.
 
 ### The five rules the next fold carries in
 
@@ -4627,6 +4627,81 @@ shared (so one read varied by up to 40%):
 standing in for the hourly rollup. The file's self-check asserts one form, `STABLE`,
 `SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
 read, so it holds on a stack with no historian.
+
+### A derived metric is a catalogue row (0267)
+
+A derived metric is a metric whose value Aber computes from other metrics, such as parts per hour
+from a part counter ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)). It is a
+`metric_catalog` row with its definition in the new `derivation` column, so the schema builder, the
+AAS exporter and the telemetry export still read one table. A row with no derivation is measured,
+as every row was before. This file keeps the definition and refuses a bad one. It computes nothing:
+`derived_series()` is a later migration, and nothing is stored for a derived metric.
+
+**`derivation` is one `jsonb` column, not a column for each part.** The three kinds hold different
+parts: one input, one input and its states, or a signed list of inputs. Separate columns would be
+null for most rows and would need parallel arrays for a sum's signs. One column keeps a measured
+row as it was (NULL) and a fourth kind needs no new column. `derivation_shape_problem()` says what is
+wrong with a definition's shape, and the CHECK `metric_catalog_derivation_shape` refuses any row
+for which it says something. The kinds, in `utils/derivedMetric.js` too (mirror check 80):
+
+| Kind | Definition | Value | Unit |
+| :--- | :--- | :--- | :--- |
+| `counter_rate` | `{"kind": "counter_rate", "input": name}` | the counter's increase per hour; a fall is a reset, and the new value counts as the increase | the input's unit followed by `/HOUR`, `COUNT/HOUR` for an input with none |
+| `time_in_state` | `{"kind": "time_in_state", "input": name, "states": [...]}` | the share of time the input is in those states, 0 to 1, resolved to the minute | none |
+| `sum` | `{"kind": "sum", "inputs": [{"metric": name, "sign": 1 or -1}, ...]}` | the signed sum of two to eight inputs | the unit the inputs share |
+
+**`enforce_derived_metric()` is the trigger that checks a save**, `BEFORE INSERT OR UPDATE`, so its
+reason is the one the dialog shows. Each refusal is a `check_violation` (`23514`) naming what is
+wrong:
+
+- **Every input is in the catalogue, measured and of the right kind.** A derived input is refused,
+  so a derived metric cannot be built on another. A rate and a sum read numbers (Sparkplug datatypes
+  1 to 10). A time in state reads a string or a boolean. A deprecated input is allowed: deprecating
+  a metric withholds it from new schemas, and its readings are still there.
+- **A sum's inputs share one unit, and the row takes it.** No unit counts as a unit: a metric in
+  kilowatts and one with none cannot be added. The trigger sets `units` from the inputs, and refuses
+  a `units` that is something else, so the row cannot disagree with its definition.
+- **A state is one the input can report.** A boolean reports `true` or `false`. A string with
+  `permitted_values` reports those. One without them takes any state, which the dialog says.
+- **The name is not one any device has declared.** Any row of `devices` counts, archived ones
+  included, by `last_birth_metrics`. The device could publish it, and both would put readings in one
+  series. The trigger is `SECURITY DEFINER` so it reads every device whatever the writer's policies
+  show. It writes nothing but the row's own unit.
+- **No semantic id, standard or permitted values, and the datatype is Double.** A derived metric is a
+  local extension (see [A local extension carries no minted id](#a-local-extension-carries-no-minted-id-archived-migration-0149)),
+  computed rather than reported.
+- **A measured metric cannot become derived, and a derived metric's definition and unit cannot
+  change.** Devices may already publish a measured name, and its history would mix two sources.
+  Nothing is stored for a derived one, so an edit would change every past value. A changed
+  definition is a new derived metric, and the old one is deprecated with `superseded_by` pointing at
+  it, as for any metric. A description, a deprecation and a restore are not edits of the definition.
+- **An input's unit cannot change while a rate or a sum is built on it.** Their units follow the
+  inputs and nothing is stored, so a changed input unit would leave the derived row stale and alter
+  its past values. A deprecated derived metric counts. The reason names one derived metric and how
+  many more. A time in state has no unit to follow, so a unit change and a permitted-values edit on
+  its input are allowed.
+
+**The writers are the table's own policies**, as for any catalogue row: Administrator only, and
+behind `require_mfa()` where the second factor is required. `trg_metric_catalog_audit_trail` files
+the save as it files any catalogue change, with the definition in `new_data`. No audit action kind
+is new. The shape function is granted to `authenticated` and `service_role` by name, because the
+CHECK runs as the writer. The trigger function is not granted to anyone.
+
+**What a derived metric is not yet.** No schema holds one: the schema builders leave it out, since
+nothing publishes it. The AAS export and ingestion are as they were. A device that declares a derived
+name after the row exists is not refused until ingestion drops it. The i3X service lists a catalogue
+type for it that no device carries.
+
+**How it will be read.** A counter rate and a sum's average read the 1-minute rollup
+(`telemetry_1m`, through `telemetry_carried()`) at every bucket width. Measured against raw on a
+private historian, the rollup that matches the bucket loses what was counted before a reset inside
+the bucket (up to 60% of an hour with one reset), and its average weighs a quiet input's few
+samples as if they were its time. A time in state is within a percentage point of raw at a day. Both
+the figures and the reads' cost are in [the issue's spike comment](https://github.com/Harri-Llewelyn/Aber/issues/324).
+
+`test_a_derived_metric_is_a_catalogue_row.py` holds all of the above. The file's self-check asserts
+the column, the CHECK, the trigger's timing, what the shape function says of a few definitions and
+the grants, and reads no row.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

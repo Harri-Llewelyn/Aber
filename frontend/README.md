@@ -373,6 +373,13 @@ whose list should take the leftover height passes `fill` and marks that child `m
 schema builder's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
 window and is not needed any more.
 
+**One metric list serves the schema builder and Add Derived Metric** (`common/MetricPicker.jsx`): the
+search, the standard filter and the grouped, tickable list. The list narrows what is shown, never
+what is chosen, because the dialog holds the choice. `single` makes the ticks radio buttons for a
+dialog that takes one metric. A caller that cannot show a long list at the window's height gives it
+one with `listStyle`. The schema editor for a draft keeps its own list, which shows each metric's
+stored keys.
+
 ### A dialog takes focus
 
 `Modal` renders a native `<dialog>` and opens it with `showModal()`, following the WAI-ARIA dialog
@@ -1218,7 +1225,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
 | Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
-| Metrics | `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Uncatalogued: `name`, `sort` |
+| Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |

@@ -13,9 +13,14 @@ export function RestoreMetricModal({ metric, replacement, onConfirm, onCancel })
       size="md"
       icon={<IconRefreshCw size={18} />}
       message={<>
-        This returns <strong>{metric.name}</strong> to the schema builder's picker — it will be
-        offered to schema authors for new schemas again. Schemas that already model it are
-        unchanged; deprecating never removed it from them. {metric.superseded_by ? (
+        {metric.derivation ? (
+          <>This returns <strong>{metric.name}</strong> to the Derived tab. Nothing about it changed
+            while it was deprecated: a derived metric is in no schema, and its definition is fixed.</>
+        ) : (
+          <>This returns <strong>{metric.name}</strong> to the schema builder's picker — it will be
+            offered to schema authors for new schemas again. Schemas that already model it are
+            unchanged; deprecating never removed it from them.</>
+        )} {metric.superseded_by ? (
           replacement ? (
             <>It is marked as superseded by <strong className="mono">{replacement.name}</strong>, and
               restoring clears that pointer: a current metric cannot also be replaced.</>

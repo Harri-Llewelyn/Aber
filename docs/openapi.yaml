@@ -2980,7 +2980,7 @@ paths:
             schema: { $ref: '#/components/schemas/MetricCatalogWrite' }
       responses:
         '201': { description: Created. }
-        '400': { description: 'Name format, group spelling, or `semantic_id_type` CHECK violation.' }
+        '400': { description: 'Name format, group spelling, `semantic_id_type` CHECK violation, or a derived metric the database refuses (an input missing, derived or of the wrong datatype, a sum of unlike units, a name a device declares): the message says which.' }
         '403': { $ref: '#/components/responses/Forbidden' }
     patch:
       tags: [Registry]
@@ -7558,6 +7558,17 @@ components:
             The values a discrete metric may report, as text; NULL is no closed set. Never an empty
             list (`metric_catalog_permitted_values_shape`). Not frozen. A schema built from the
             metric copies them into the property's `enum`, in its JSON type.
+        derivation:
+          type: object
+          nullable: true
+          example: { kind: counter_rate, input: Controller/PART_COUNT }
+          description: >-
+            NULL for a measured metric. A derived metric's definition, one of three kinds:
+            `{"kind": "counter_rate", "input": name}`,
+            `{"kind": "time_in_state", "input": name, "states": [...]}` or
+            `{"kind": "sum", "inputs": [{"metric": name, "sign": 1 | -1}, ...]}`. Set when the row is
+            created and never changed: a measured metric cannot become derived, and a different
+            definition is a new metric. The row's `units` follow its inputs. No device publishes it.
         created_at: { type: string, format: date-time, readOnly: true }
 
     MetricCatalogWrite:
@@ -7574,6 +7585,7 @@ components:
         semantic_id: { type: string, nullable: true }
         semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
         permitted_values: { type: array, nullable: true, items: { type: string, minLength: 1 }, minItems: 1 }
+        derivation: { type: object, nullable: true, description: 'A derived metric''s definition; see MetricCatalogEntry. Send no `units`: they follow the inputs.' }
 
     UncataloguedMetric:
       type: object

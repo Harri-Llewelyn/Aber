@@ -4676,6 +4676,130 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 311. The Derived tab's docs say how many inputs a sum takes as utils/derivedMetric.js holds it
+// (DERIVED_MAX_INPUTS, which mirror check 80 holds to 0267's shape function). A page saying another
+// limit sends a person to build a sum the dialog will not let them finish, or tells them they may
+// not.
+// -------------------------------------------------------------------------------------------------
+{
+  const max = Number(read('frontend/src/utils/derivedMetric.js').match(/^export const DERIVED_MAX_INPUTS = (\d+)/m)?.[1]);
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const problems311 = [];
+  if (!Number.isInteger(max) || !words[max]) problems311.push('could not read DERIVED_MAX_INPUTS out of frontend/src/utils/derivedMetric.js');
+  else {
+    const claims = [
+      ['help/pages/metrics.md', `adds or subtracts two to ${words[max]} numeric metrics`],
+      ['supabase/README.md', `the signed sum of two to ${words[max]} inputs`],
+    ];
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems311.push(`${file} does not say "${said}"`);
+  }
+  if (problems311.length) {
+    fail('the docs name the most inputs a sum takes otherwise than DERIVED_MAX_INPUTS holds it:\n' +
+      problems311.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Metrics help and the 0267 section say a sum takes two to ${words[max]} inputs, as DERIVED_MAX_INPUTS holds`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 312. The Metrics help names the page's tabs as navigation.jsx lists them (METRICS_TABS): how many
+// there are, and each by its label, in order. A tab the help leaves out is one nobody is told about;
+// a label it misspells is one nobody finds.
+// -------------------------------------------------------------------------------------------------
+{
+  const block = read('frontend/src/navigation.jsx').match(/^export const METRICS_TABS = \[([\s\S]*?)\n\]/m)?.[1] ?? '';
+  const labels = [...block.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const numbers = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const problems312 = [];
+  if (labels.length < 2) problems312.push('could not read METRICS_TABS out of frontend/src/navigation.jsx');
+  else {
+    const bold = labels.map((l) => `**${l}**`);
+    const said = `${bold.slice(0, -1).join(', ')} and ${bold[bold.length - 1]} are the ${numbers[labels.length]} tabs of the page's one card`;
+    if (!read('help/pages/metrics.md').includes(said)) problems312.push(`help/pages/metrics.md does not say "${said}"`);
+  }
+  if (problems312.length) {
+    fail('the Metrics help names the page\'s tabs otherwise than navigation.jsx lists them:\n' +
+      problems312.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Metrics help names the page's ${labels.length} tabs, ${labels.join(', ')}, as METRICS_TABS lists them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 313. The Metrics help and the 0267 section give a rate's unit as the dialog and the trigger make it:
+// the counter's unit followed by RATE_UNIT_SUFFIX, and UNITLESS_COUNTER with the suffix for a counter
+// with none (mirror check 81 holds both to enforce_derived_metric()). A page naming another unit
+// tells a person the wrong thing about a row they cannot edit.
+// -------------------------------------------------------------------------------------------------
+{
+  const js = read('frontend/src/utils/derivedMetric.js');
+  const suffix = js.match(/^export const RATE_UNIT_SUFFIX = '([^']+)'/m)?.[1];
+  const bare = js.match(/^export const UNITLESS_COUNTER = '([^']+)'/m)?.[1];
+  const problems313 = [];
+  if (!suffix || !bare) problems313.push('could not read RATE_UNIT_SUFFIX and UNITLESS_COUNTER out of frontend/src/utils/derivedMetric.js');
+  else {
+    const claims = [
+      ['help/pages/metrics.md', `or \`${bare}${suffix}\` for a counter with none`],
+      ['supabase/README.md', `\`${bare}${suffix}\` for an input with none`],
+    ];
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems313.push(`${file} does not say "${said}"`);
+  }
+  if (problems313.length) {
+    fail('the docs give a derived rate\'s unit otherwise than the dialog and the trigger make it:\n' +
+      problems313.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Metrics help and the 0267 section give a counter with no unit ${bare}${suffix}, as the dialog and enforce_derived_metric() do`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 314. Every kind of derived metric DERIVATION_KINDS offers is written out as its definition in the
+// 0267 section, the OpenAPI description of the column and the column's own comment. A kind named in
+// the dialog and in none of them is one an API caller cannot learn the shape of.
+// -------------------------------------------------------------------------------------------------
+{
+  const block = read('frontend/src/utils/derivedMetric.js').match(/^export const DERIVATION_KINDS = \[([\s\S]*?)\n\]/m)?.[1] ?? '';
+  const kinds = [...block.matchAll(/id: '([a-z_]+)'/g)].map((m) => m[1]);
+  const problems314 = [];
+  if (kinds.length < 3) problems314.push('could not read DERIVATION_KINDS out of frontend/src/utils/derivedMetric.js');
+  else {
+    const files = ['supabase/README.md', 'docs/openapi.yaml', 'supabase/migrations/0267_a_derived_metric_is_a_catalogue_row.sql'];
+    for (const file of files) {
+      const text = read(file);
+      for (const kind of kinds) if (!text.includes(`"kind": "${kind}"`)) problems314.push(`${file} does not write out {"kind": "${kind}", ...}`);
+    }
+  }
+  if (problems314.length) {
+    fail('a kind of derived metric is not written out where its shape is documented:\n' +
+      problems314.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the ${kinds.length} kinds of derived metric, ${kinds.join(', ')}, are written out in the 0267 section, the OpenAPI description and the column comment`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 315. docs/vocabularies.md's derived-series paragraph points at the 0267 section by its heading, and
+// no longer says nothing enforces the rule it states: the save refuses a semantic id and a standard on
+// a derived metric. A stale "no check enforces this" tells whoever registers one that the rule is
+// theirs to keep.
+// -------------------------------------------------------------------------------------------------
+{
+  const heading = 'A derived metric is a catalogue row (0267)';
+  const slug = heading.toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/ /g, '-');
+  const problems315 = [];
+  if (!read('supabase/README.md').includes(`\n### ${heading}\n`)) problems315.push(`supabase/README.md has no section "${heading}"`);
+  const vocab = read('docs/vocabularies.md').replace(/\s+/g, ' ');
+  if (!vocab.includes(`](../supabase/README.md#${slug})`)) problems315.push(`docs/vocabularies.md does not link to supabase/README.md#${slug}`);
+  if (/no check enforces this/i.test(vocab)) problems315.push('docs/vocabularies.md still says no check enforces the derived-series rule, which the save checks of 0267 now do');
+  if (problems315.length) {
+    fail('the derived-series paragraph is out of step with the save checks:\n' +
+      problems315.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`docs/vocabularies.md's derived-series paragraph links to the 0267 section (#${slug}) and says the save checks enforce its rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 14. The product does not call itself Factory+.
 //
 // Factory+ is a real external framework this stack implements, and every reference to it as a
