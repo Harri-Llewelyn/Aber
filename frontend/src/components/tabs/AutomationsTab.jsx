@@ -19,7 +19,7 @@ import { Tooltip } from '../common/Tooltip'
 import { IconDownload, IconPlus, IconUpload, IconX, IconZap } from '../common/Icons'
 import { ApplyAutomationsModal } from '../modals/ApplyAutomationsModal'
 import { AutomationDetail } from './AutomationDetail'
-import { renderAutomationsYaml } from '../../utils/automationYaml'
+import { AUTOMATION_FILE_MAX_BYTES, renderAutomationsYaml } from '../../utils/automationYaml'
 import { downloadBlob } from '../../utils/downloadBlob'
 import { formatDateTime, formatRelative, plural } from '../../utils/format'
 import { isUuid } from '../../utils/isUuid'
@@ -27,7 +27,6 @@ import { severityOf } from '../../utils/alertHistory'
 import {
   APPLIES_BECAUSE, AUTOMATIONS_FILE_NAME, AUTOMATION_WRITE_TITLE, automationEntries, mayWriteAutomations, reasonsByKey, worstSeverity,
 } from '../../utils/automations'
-import { AUTOMATION_FILE_MAX_BYTES } from '../../utils/automationYaml'
 
 /** The list's sortable columns; with none chosen, the automations are in name order. */
 const COLUMNS = {
