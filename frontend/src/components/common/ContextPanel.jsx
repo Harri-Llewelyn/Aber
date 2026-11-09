@@ -288,18 +288,20 @@ function AlertBanner({ alert, open }) {
             Alert history
           </RouteLink>
           {/* A real anchor with target=_blank, so middle-click and copy link address work. To the rule by its
-              uid, or by its name for an older row. See grafanaAlertUrl. */}
-          <Tooltip text="Open this rule in Grafana Alerting, where its thresholds and state history live">
-            <a
-              className="context-alert-link"
-              href={grafanaAlertUrl(alert)}
-              target="_blank"
-              rel="noopener noreferrer"
-              tabIndex={open ? 0 : -1}
-            >
-              View in Grafana <IconExternalLink size={11} />
-            </a>
-          </Tooltip>
+              uid, or by its name for an older row. See grafanaAlertUrl, which has none for an automation's. */}
+          {grafanaAlertUrl(alert) && (
+            <Tooltip text="Open this rule in Grafana Alerting, where its thresholds and state history live">
+              <a
+                className="context-alert-link"
+                href={grafanaAlertUrl(alert)}
+                target="_blank"
+                rel="noopener noreferrer"
+                tabIndex={open ? 0 : -1}
+              >
+                View in Grafana <IconExternalLink size={11} />
+              </a>
+            </Tooltip>
+          )}
         </span>
       </div>
     </div>
