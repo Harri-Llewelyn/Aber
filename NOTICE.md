@@ -46,7 +46,7 @@ one.
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.34.1` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
 | `aber/node-red` | `nodered/node-red:5.0.9` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
 | `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`) |
-| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit) and [the charts'](#the-dashboards-charts--uplot-mit) notices are in the bundle |
+| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit), [the charts'](#the-dashboards-charts--uplot-mit), [the editor's](#the-automations-pages-editor--codemirror-and-lezer-mit) and [the YAML parser's](#the-automations-pages-yaml-parser--yaml-isc) notices are in the bundle |
 | `aber/ingestion`, `aber/i3x-service`, `aber/test-runner` | `python:3.13-slim` (`test-runner` on `aber/ingestion`) | Python Software Foundation License | In the base: `/usr/local/lib/python3.13/LICENSE.txt` |
 
 **The packages a Dockerfile installs from a distribution** (pgBackRest, tini, gosu, Node.js, SQLite,
@@ -128,6 +128,49 @@ grep -l "Copyright (c) 2022 Leon Sorokin" frontend/dist/assets/*.js
 
 `legalComments.test.js` fails if that comment stops matching the licence the installed package
 ships.
+
+## The Automations page's editor — CodeMirror and Lezer (MIT)
+
+The Automations page edits YAML in [CodeMirror 6](https://codemirror.net) and its parser library
+[Lezer](https://lezer.codemirror.net), by Marijn Haverbeke and others, under the MIT licence. They are
+npm dependencies of `frontend/`. Its MIT licence asks for its notice in every copy. The page loads
+them only when it opens, and only these are named in `frontend/package.json`:
+
+| Package | Copyright |
+| :--- | :--- |
+| `@codemirror/state`, `view`, `language`, `commands`, `autocomplete`, `lint` | 2018-2021 Marijn Haverbeke and others |
+| `@codemirror/lang-yaml` | 2024 Marijn Haverbeke and others |
+| `@lezer/highlight` | 2018 Marijn Haverbeke and others |
+
+They bring eight packages of their own, all MIT and all by the same author, each with its notice in the
+file below: `@codemirror/streamparser`, `@lezer/common`, `@lezer/lr`, `@lezer/yaml`, `style-mod`,
+`w3c-keyname`, `crelt` and `@marijn/find-cluster-break`.
+
+Their own files carry no notice, which a build would drop in any case. So
+[`frontend/src/components/common/AutomationEditor.jsx`](frontend/src/components/common/AutomationEditor.jsx)
+opens with every one of those notices as a `/*!` legal comment, which the build keeps. To check a build:
+
+```
+grep -l "Copyright (C) 2018-2021 by Marijn Haverbeke" frontend/dist/assets/*.js
+```
+
+`legalComments.test.js` fails if that comment stops naming each package the installed tree holds, with
+the copyright line its licence states, or stops matching the licence text.
+
+## The Automations page's YAML parser — yaml (ISC)
+
+The page renders and reads YAML with [`yaml`](https://github.com/eemeli/yaml), copyright Eemeli Aro,
+under the ISC licence. It is an npm dependency of `frontend/` with no dependencies of its own. It
+keeps the position of every node, which is how a refusal points at its line. Its ISC licence asks for
+its notice in every copy, and its files carry none the build keeps. So
+[`frontend/src/utils/automationYaml.js`](frontend/src/utils/automationYaml.js) opens with that notice
+as a `/*!` legal comment. To check a build:
+
+```
+grep -l "Copyright Eemeli Aro" frontend/dist/assets/*.js
+```
+
+`legalComments.test.js` fails if that comment stops matching the licence the installed package ships.
 
 ## The ASHRAE 223P ontology — Apache License 2.0
 
