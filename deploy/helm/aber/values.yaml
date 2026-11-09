@@ -642,8 +642,11 @@ supabaseAuth:
   # The relay GoTrue sends "forgot your password" links and People-tab invitations through. Empty
   # host: a reset request fails and the sign-in card tells the user to ask an administrator, and
   # a person added from the People tab gets a password shown once instead of an invitation. The
-  # password is secrets.smtpPassword. Sign-up confirmation is off, so these are the only mails the
-  # stack sends.
+  # password is secrets.smtpPassword. Aber's dispatcher (supabaseFunctions) emails alerts through
+  # the same relay and sender, and nothing is configured twice: port 465 is TLS from the first
+  # byte, any other port upgrades with STARTTLS when the relay offers it, and a login is never
+  # sent without TLS. A NetworkPolicy that confines egress needs a rule to the relay for the
+  # functions pod as well as for the auth pod (networkPolicy.extraEgress).
   smtp:
     host: ""
     port: 587
@@ -712,6 +715,12 @@ supabaseFunctions:
   replicas: 1
   # Each function checks its own role claim, which is why the runtime does not.
   verifyJwt: false
+  # A PEM certificate (or several, one after another) for the mail relay named in supabaseAuth.smtp,
+  # when a private certificate authority signed the relay's certificate. The dispatcher trusts these
+  # on top of the public roots it carries; GoTrue reads its own trust store and cannot take them.
+  # A self-signed certificate works only if it is not marked as a certificate authority. Empty
+  # trusts the public roots alone.
+  smtpCaCert: ""
   # Remote gateway enrolment addresses (enroll-gateway, gateway-bundle): what an APPLIANCE
   # dials. SUPABASE_PUBLIC_URL is derived from global.publicBaseDomain; only the broker's
   # address needs stating, and only when it differs from `mqtt.<domain>`. Both functions answer

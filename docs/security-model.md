@@ -468,9 +468,20 @@ the list does not name. Each message is signed with an HMAC-SHA256 key Aber gene
 dispatcher runs as the service role, past RLS, so the database applies each row's visibility
 itself: **no alert about a machine identity's token ever leaves**, because only an Administrator may
 read one and a webhook is read by whoever the receiver lets in. The dispatcher itself answers only
-the database, which proves itself with a secret it generated. **Revisit when** a second channel can
-reach named roles: email (#325 part 2) could carry a machine identity's alert to Administrators
-alone.
+the database, which proves itself with a secret it generated.
+
+**Aber emails an alert to the people in the roles an Administrator names** (`0262`, `0263`), and to
+nobody until one does. The people are found when the message is sent, from `user_roles` and the
+address on their account (`auth.users.email`), so a person removed or banned after the message was
+queued is not told. A person with no address, a banned or removed account and a machine identity get
+nothing. **A machine identity's alert goes to Administrators alone,** and only when Administrator is
+among the roles told: email is read by the person it is sent to, so it carries what that person may
+read. The recipients are in the SMTP envelope and never in a header, so no person sees another's
+address, and the delivery log, which every role reads, keeps how many people a message went to and never
+who. The relay is the site's own, through the settings GoTrue reads. A password is never sent without
+TLS, and the certificate is checked against the public roots and the site's authority, never skipped.
+An alert's text reaches a header only as an encoded word with no line break, so an alert named by
+a person cannot add a header or a recipient.
 
 **Known issues** — things that can be worked on — are tracked as
 [GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues). **Accepted risks are not**, and

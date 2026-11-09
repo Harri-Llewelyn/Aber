@@ -11,13 +11,13 @@ import { navigate, pageUrl, useUrlState, useUrlTab, pathSlug } from '../../hooks
 import { SETTINGS_TABS } from '../../navigation'
 import { COLD_STORAGE_DIALOG_KEYS } from '../../utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from '../../utils/backupOffsite'
-import { NOTIFICATIONS_CATEGORY, SETTING_OPTIONS, WEBHOOK_DIALOG_KEYS } from '../../utils/notifications'
+import { EMAIL_DIALOG_KEYS, NOTIFICATIONS_CATEGORY, SETTING_OPTIONS, WEBHOOK_DIALOG_KEYS } from '../../utils/notifications'
 import { Tooltip } from '../common/Tooltip'
 import { NotificationsPanel } from './NotificationsPanel'
 
 // Settings a destination dialog edits, so each value has one editor: another page's, or the
-// webhook's on the Notifications tab.
-const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE_SETTING_KEYS, ...WEBHOOK_DIALOG_KEYS])
+// webhook's and email's on the Notifications tab.
+const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE_SETTING_KEYS, ...WEBHOOK_DIALOG_KEYS, ...EMAIL_DIALOG_KEYS])
 
 /**
  * Each category's tab tooltip, by the category's name, from navigation.jsx's list of categories. The
@@ -371,7 +371,7 @@ export function SettingsTab({ showToast, readOnly = false }) {
             />
 
             {/* The Notifications category has a panel of its own around its table: the webhook, its
-                signing key, a test and the delivery log, none of which a settings row holds. */}
+                signing key, email, a test of each and the delivery log, none of which a settings row holds. */}
             {activeGroup && (activeGroup.category === NOTIFICATIONS_CATEGORY ? (
               <NotificationsPanel key={activeGroup.category} showToast={showToast} readOnly={readOnly}>
                 {settingsTable}

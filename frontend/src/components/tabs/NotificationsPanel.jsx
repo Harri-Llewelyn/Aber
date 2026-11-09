@@ -3,14 +3,15 @@ import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
 import { notificationsUrl } from '../../routes'
 import { Badge } from '../common/Badge'
-import { IconAlertTriangle, IconGlobe, IconLock, IconZap } from '../common/Icons'
+import { IconAlertTriangle, IconGlobe, IconLock, IconMail, IconZap } from '../common/Icons'
 import { OverflowText } from '../common/OverflowText'
 import { Tooltip } from '../common/Tooltip'
+import { EmailModal } from '../modals/EmailModal'
 import { SigningKeyModal } from '../modals/SigningKeyModal'
 import { WebhookModal } from '../modals/WebhookModal'
 import { formatDateTime } from '../../utils/format'
 import {
-  ALLOWED_HOSTS_KEY, EVENT_LABELS, deliveryOutcome, deliverySubject
+  ALLOWED_HOSTS_KEY, CHANNEL_LABELS, EMAIL_ROLES_KEY, EVENT_LABELS, deliveryOutcome, deliverySubject, roleLabel
 } from '../../utils/notifications'
 
 /** The log is read again this often while the tab is open: a poll, as the Backups page polls. */
@@ -49,6 +50,59 @@ function WebhookButton({ webhook, onEdit }) {
   )
 }
 
+/**
+ * The email's toolbar button, as the webhook's: nothing told, or no relay to send through, is a
+ * warning that nothing is sent; set, it is filled and its tooltip says who is told.
+ */
+function EmailButton({ email, onEdit }) {
+  const descriptionId = useId()
+  const told = email.roles.length > 0
+  const unavailable = email.relay !== null && !email.relay.available
+  if (told && !unavailable) {
+    return (
+      <Tooltip text={`Emails the ${email.roles.map(roleLabel).join(', ')} role${email.roles.length === 1 ? '' : 's'}`}>
+        <button className="btn btn-primary btn-sm" onClick={onEdit}><IconMail size={14} /> Change email</button>
+      </Tooltip>
+    )
+  }
+  const message = unavailable ? 'Nothing is sent: this site has no mail relay yet.' : 'Nothing is emailed: no role is told.'
+  return (
+    <>
+      <Tooltip text={message} describe={false}>
+        <button className="btn btn-warning btn-sm" onClick={onEdit} aria-describedby={descriptionId}>
+          <IconAlertTriangle size={14} /> {told ? 'Change email' : 'Set up email'}
+        </button>
+      </Tooltip>
+      <span id={descriptionId} className="sr-only">{message}</span>
+    </>
+  )
+}
+
+/**
+ * Who is emailed, and whether this site can send at all, in words, for every role: the roles are not
+ * a secret, and a person told by email should be able to see why. The lowest severity is the row
+ * of the table below.
+ */
+function EmailStatus({ email }) {
+  const told = email.roles.length > 0
+  const unavailable = email.relay !== null && !email.relay.available
+  return (
+    <section className="notification-email" aria-label="Email" data-testid="email-status">
+      {unavailable && (
+        <div className="callout callout-warning">
+          <IconAlertTriangle size={14} className="callout-icon" />
+          <div>Email cannot be sent yet. {email.relay.reason}</div>
+        </div>
+      )}
+      <p className="notification-log-lead">
+        {told
+          ? `Alerts are emailed to people with the ${email.roles.map(roleLabel).join(', ')} role${email.roles.length === 1 ? '' : 's'} who have an email address on their account.`
+          : 'Nobody is emailed about alerts yet. An Administrator chooses the roles.'}
+      </p>
+    </section>
+  )
+}
+
 /** The newest messages, newest first, with what became of each. Every role reads it. */
 function DeliveryLog({ rows, error }) {
   return (
@@ -72,6 +126,7 @@ function DeliveryLog({ rows, error }) {
             <tr>
               <th scope="col" className="notification-col-time">Time</th>
               <th scope="col" className="notification-col-event">Event</th>
+              <th scope="col" className="notification-col-channel">Channel</th>
               <th scope="col">Alert</th>
               <th scope="col" className="notification-col-outcome">Outcome</th>
               <th scope="col" className="notification-col-attempts">Attempts</th>
@@ -86,6 +141,7 @@ function DeliveryLog({ rows, error }) {
                 <tr key={row.id} data-delivery={row.id}>
                   <td>{formatDateTime(row.created_at)}</td>
                   <td>{EVENT_LABELS[row.event] || row.event}</td>
+                  <td>{CHANNEL_LABELS[row.channel] || row.channel}</td>
                   <td>
                     <Tooltip text={subject}>
                       <span className="notification-log-cut"><OverflowText>{subject}</OverflowText></span>
@@ -111,13 +167,19 @@ function DeliveryLog({ rows, error }) {
 }
 
 /**
- * The Notifications category: the toolbar for the webhook, its signing key and a test; the
- * category's settings table (`children`), as every category has one; and the delivery log. The
- * toolbar is an Administrator's, as every change on Settings is; anyone else reads the log.
+ * The Notifications category: the toolbar for the webhook, its signing key and a test, and for
+ * email, who it tells and a test; who is emailed and whether the site can send, in words, for every
+ * role; the category's settings table (`children`), as every category has one; and the delivery
+ * log. The toolbar is an Administrator's, as every change on Settings is; anyone else reads the
+ * rest.
  */
 export function NotificationsPanel({ children, showToast, readOnly = false }) {
   const [webhook, setWebhook] = useState(null)
   const [webhookError, setWebhookError] = useState(null)
+  const [email, setEmail] = useState(null)
+  const [emailError, setEmailError] = useState(null)
+  const [editingEmail, setEditingEmail] = useState(false)
+  const [emailTesting, setEmailTesting] = useState(false)
   const [rows, setRows] = useState([])
   const [logError, setLogError] = useState(null)
   const [editing, setEditing] = useState(false)
@@ -139,6 +201,15 @@ export function NotificationsPanel({ children, showToast, readOnly = false }) {
     }
   }, [])
 
+  const loadEmail = useCallback(async () => {
+    try {
+      const e = await api.notificationEmail()
+      if (alive.current) { setEmail(e); setEmailError(null) }
+    } catch (err) {
+      if (alive.current) setEmailError(err.message)
+    }
+  }, [])
+
   const loadLog = useCallback(async () => {
     try {
       const data = await api.notificationDeliveries()
@@ -148,7 +219,7 @@ export function NotificationsPanel({ children, showToast, readOnly = false }) {
     }
   }, [])
 
-  useEffect(() => { loadWebhook(); loadLog() }, [loadWebhook, loadLog])
+  useEffect(() => { loadWebhook(); loadEmail(); loadLog() }, [loadWebhook, loadEmail, loadLog])
   usePolling(loadLog, LOG_POLL_MS, true)
 
   const onWebhookSaved = async () => {
@@ -166,10 +237,12 @@ export function NotificationsPanel({ children, showToast, readOnly = false }) {
   }
 
   // Through the queue, as every message: the row's outcome is the answer, read until it settles.
-  const sendTest = async () => {
-    setTesting(true)
+  // `channel` words the toast: the webhook's receiver answers, a mail relay accepts.
+  const runTest = async (channel, queue, setBusy) => {
+    const byEmail = channel === 'email'
+    setBusy(true)
     try {
-      const id = await api.sendTestNotification()
+      const id = await queue()
       await loadLog()
       const until = Date.now() + TEST_WAIT_MS
       let row = null
@@ -180,19 +253,31 @@ export function NotificationsPanel({ children, showToast, readOnly = false }) {
       }
       await loadLog()
       if (!row || row.state === 'pending') {
-        showToast('Test queued. The delivery log shows how it went once the dispatcher has sent it.', 'info', { to: notificationsUrl() })
+        showToast(`${byEmail ? 'Test email' : 'Test'} queued. The delivery log shows how it went once the dispatcher has sent it.`, 'info', { to: notificationsUrl() })
       } else if (row.state === 'sent') {
-        showToast(`Test sent: the receiver answered ${row.response_status ?? 'with success'}.`, 'success', { to: notificationsUrl() })
+        showToast(byEmail ? 'Test email sent: the mail relay accepted it for your address.' : `Test sent: the receiver answered ${row.response_status ?? 'with success'}.`,
+          'success', { to: notificationsUrl() })
       } else {
-        showToast(`Test failed: ${row.last_error || 'the receiver did not accept it.'}`, 'error', { to: notificationsUrl() })
+        showToast(`${byEmail ? 'Test email' : 'Test'} failed: ${row.last_error || (byEmail ? 'the mail relay did not accept it.' : 'the receiver did not accept it.')}`, 'error', { to: notificationsUrl() })
       }
     } catch (err) {
       showToast(err.message, 'error')
     } finally {
-      if (alive.current) setTesting(false)
+      if (alive.current) setBusy(false)
     }
   }
+  const sendTest = () => runTest('webhook', api.sendTestNotification, setTesting)
+  const sendTestEmail = () => runTest('email', api.sendTestEmailNotification, setEmailTesting)
 
+  const onEmailSaved = async (roles) => {
+    setEditingEmail(false)
+    showToast(roles.length
+      ? `Email saved. Alerts are emailed to the ${roles.map(roleLabel).join(', ')} role${roles.length === 1 ? '' : 's'}.`
+      : 'Email saved. Nobody is emailed about alerts now.', 'success', { to: notificationsUrl() })
+    await loadEmail()
+  }
+
+  const emailUnavailable = email?.relay != null && !email.relay.available
   const ready = webhook?.urlSet && webhook?.signingKeyIssuedAt
   const testBlocked = !webhook?.urlSet ? 'Set the webhook’s address first'
     : !webhook?.signingKeyIssuedAt ? 'Issue a signing key first: every message is signed' : null
@@ -203,7 +288,7 @@ export function NotificationsPanel({ children, showToast, readOnly = false }) {
       <div className="filter-bar">
         {readOnly || (webhook && !webhook.visible) ? (
           <span className="setting-fixed notification-admin-note">
-            Only an Administrator sees and changes the webhook. Every role reads the delivery log.
+            Only an Administrator sees and changes the webhook and who is emailed. Every role reads the delivery log.
           </span>
         ) : webhook && (
           <div className="filter-bar-actions">
@@ -224,18 +309,32 @@ export function NotificationsPanel({ children, showToast, readOnly = false }) {
               </button>
             </Tooltip>
             <WebhookButton webhook={webhook} onEdit={() => setEditing(true)} />
+            {email && <EmailButton email={email} onEdit={() => setEditingEmail(true)} />}
+            {email && (
+              <Tooltip text={emailUnavailable ? email.relay.reason : 'Email a test to your own address and show how it went'}>
+                <button
+                  className={`btn btn-primary btn-sm${emailUnavailable ? ' btn-disabled' : ''}${emailTesting ? ' btn-loading' : ''}`}
+                  onClick={sendTestEmail}
+                  disabled={emailUnavailable || emailTesting}
+                >
+                  <IconMail size={14} /> {emailTesting ? 'Sending…' : 'Email a test'}
+                </button>
+              </Tooltip>
+            )}
           </div>
         )}
       </div>
 
-      {webhookError && (
+      {(webhookError || emailError) && (
         <div className="card-body">
           <div className="callout callout-danger">
             <IconAlertTriangle size={14} className="callout-icon" />
-            <div>{webhookError}</div>
+            <div>{webhookError || emailError}</div>
           </div>
         </div>
       )}
+
+      {email && <EmailStatus email={email} />}
 
       <div className="table-wrap settings-wrap">
         {children}
@@ -250,6 +349,15 @@ export function NotificationsPanel({ children, showToast, readOnly = false }) {
           onSaved={onWebhookSaved}
           onRemove={onRemove}
           onClose={() => setEditing(false)}
+        />
+      )}
+      {editingEmail && email && (
+        <EmailModal
+          roles={email.roles}
+          relay={email.relay}
+          saveRoles={roles => api.patchSetting(EMAIL_ROLES_KEY, roles)}
+          onSaved={onEmailSaved}
+          onClose={() => setEditingEmail(false)}
         />
       )}
       {issuing && webhook && (

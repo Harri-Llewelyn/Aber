@@ -1332,6 +1332,17 @@ export const SUITES = {
       'Notifications settings, their rules and who writes them; the webhook\'s address, signing key ' +
       'and test by role; and that no machine identity\'s alert is ever selected for the webhook.',
   },
+  'supabase/migrations/test_aber_emails_the_people_an_alert_concerns.py': {
+    lanes: ['db'],
+    why:
+      '0262 and 0263 -- that email is a channel beside the webhook, off until a role is named, with ' +
+      "its own route and the roles told, each setting's rule and who writes it; that it is queued " +
+      'and reminded as the webhook is and decided by the same arms (acknowledgement, suppression, ' +
+      "the writer's confirmation); that a machine identity's alert is carried only when " +
+      'Administrators are told and goes to them alone; who a message is resolved to at send time ' +
+      '(by auth.users.email, never a person with no address, a banned or removed account or a ' +
+      "machine identity); that the log keeps counts and no address; and the Administrator's test.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1525,6 +1536,17 @@ export const SUITES = {
       'message, and an address whose host is not allowed is refused before anything is posted. ' +
       'Configures the webhook as the database owner and puts back what the stack held. Needs ' +
       'kubectl, the functions image with notification-dispatch, and NetworkPolicies off.',
+  },
+  'supabase/functions/notification-dispatch/test_notification_dispatch_email.py': {
+    lanes: ['stack'],
+    why:
+      "The dispatcher's email end to end (0262, 0263): a firing alert written with psql reaches a " +
+      'relay pod addressed to the roles told, with its facts and link, the envelope alone naming ' +
+      'the people; a resolve follows in the same thread, an acknowledgement before the reminder ' +
+      "stops it, an unacknowledged alert is reminded, a machine identity's alert goes to " +
+      'Administrators only, a test goes to the person who asked, and the log keeps counts and no ' +
+      'address. Needs the functions pod to send through aber-test-smtp (supabaseAuth.smtp.host), ' +
+      'kubectl and NetworkPolicies off; skips, saying so, on any other relay.',
   },
   'backup-service/test_backup_service.py': {
     lanes: ['stack'],
