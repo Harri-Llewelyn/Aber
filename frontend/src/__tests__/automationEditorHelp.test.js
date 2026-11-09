@@ -46,16 +46,18 @@ const catalog = [
 const facts = buildFacts({ devices, schemas, catalog })
 
 const HEAD = '- id: lathe\n  alias: Lathe\n  triggers:\n    - trigger: threshold\n'
+/** `text` without its one `|`, which marks where the cursor is. */
+const bare = (text) => text.split('|').join('')
 /** The completions at the `|` in `text`. */
 const at = (text) => {
   const pos = text.indexOf('|')
-  return completionsAt(text.replace('|', ''), pos, facts)
+  return completionsAt(bare(text), pos, facts)
 }
 const labels = (result) => result?.options.map(o => o.label) ?? []
 /** The hover at the `|` in `text`. */
 const over = (text) => {
   const pos = text.indexOf('|')
-  return hoverAt(text.replace('|', ''), pos, facts)
+  return hoverAt(bare(text), pos, facts)
 }
 
 describe('the vocabulary comes from the served JSON Schema', () => {
@@ -85,7 +87,7 @@ describe('completing a key', () => {
 
   it('narrows to what was typed, and replaces that word', () => {
     const text = '- id: lathe\n  alias: Lathe\n  act|'
-    const result = completionsAt(text.replace('|', ''), text.indexOf('|'), facts)
+    const result = completionsAt(bare(text), text.indexOf('|'), facts)
     expect(labels(result)).toEqual(['actions'])
     expect(result.from).toBe(text.indexOf('|') - 3)
     expect(result.to).toBe(text.indexOf('|'))
@@ -126,7 +128,7 @@ describe('completing a key', () => {
 
   it("does not add a second colon to a key that already has one", () => {
     const text = `${HEAD}      abo|:`
-    const result = completionsAt(text.replace('|', ''), text.indexOf('|'), facts)
+    const result = completionsAt(bare(text), text.indexOf('|'), facts)
     expect(result.options[0]).toMatchObject({ label: 'above', apply: 'above' })
   })
 
@@ -184,7 +186,7 @@ describe('completing a value', () => {
 
   it("completes a device's name to its id, with the comment the page writes beside an id", () => {
     const text = `${HEAD}      device: lat|`
-    const result = completionsAt(text.replace('|', ''), text.indexOf('|'), facts)
+    const result = completionsAt(bare(text), text.indexOf('|'), facts)
     expect(result.options).toHaveLength(1)
     expect(result.options[0]).toMatchObject({ label: 'Lathe 3', detail: 'Cell 2 · Machining', info: LATHE })
     expect(result.options[0].apply).toBe(`${LATHE} # Lathe 3 · Cell 2 · Machining`)
@@ -204,14 +206,14 @@ describe('completing a value', () => {
 
   it('does not write a comment where the line has one already', () => {
     const text = `${HEAD}      device: lat|  # old words`
-    const result = completionsAt(text.replace('|', ''), text.indexOf('|'), facts)
+    const result = completionsAt(bare(text), text.indexOf('|'), facts)
     expect(result.options[0].apply).toBe(LATHE)
     expect(result.to).toBe(text.indexOf('|'))
   })
 
   it('completes the items of a device list, and leaves out those already in it', () => {
     const text = `${HEAD}      device:\n        - ${LATHE}\n        - |\n`
-    const result = completionsAt(text.replace('|', ''), text.indexOf('|'), facts)
+    const result = completionsAt(bare(text), text.indexOf('|'), facts)
     expect(labels(result)).toEqual(['Mill 1'])
     expect(result.options[0].apply).toBe(`${MILL} # Mill 1 · Site-wide`)
   })
