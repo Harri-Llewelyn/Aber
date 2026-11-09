@@ -20,6 +20,8 @@ import { IconUpload, IconTrash } from '../common/Icons'
 import { PICTURE_TYPES, pictureFileProblem, shrinkPicture } from '../../utils/picture'
 import { AllowedAppsSection } from './AllowedAppsSection'
 import { tabUrl } from '../../routes'
+import { useNotificationPermission } from '../../hooks/useNotificationPermission'
+import { ALLOWED_WORDS, NOT_ASKED_WORDS, REFUSED_WORDS, SAVE_ASKS_WORDS, UNAVAILABLE_WORDS } from '../../utils/notificationPermission'
 
 /** The page's tabs (navigation.jsx). The ids are the page's anchors: the search bar opens one by id. */
 export const PROFILE_SECTIONS = PROFILE_TABS
@@ -320,6 +322,22 @@ function PictureRow({ pictureUrl, displayName, onSave, onRemove, isPerson }) {
   )
 }
 
+/** Said only when it is true: a quiet tab means the row was read and each change is saved to it. */
+function SourceNotice({ settingsSource }) {
+  if (settingsSource !== 'browser') return null
+  return (
+    <div className="card-body profile-source">
+      <div className="callout callout-warning" role="status">
+        <IconAlertTriangle size={14} className="callout-icon" />
+        <div>
+          Your choices could not be read from your account, so this browser&apos;s are shown.
+          A change you make now applies in this browser only.
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** The four columns, with their header row even for a tab of one row. */
 function ProfileTable({ children }) {
   return (
@@ -341,12 +359,15 @@ function ProfileTable({ children }) {
 
 /**
  * The signed-in person's own page: who they are signed in as, the token and key that call the API as
- * them, how the dashboard looks to them, where they are signed in (Sessions), their authenticators
- * (MFA) and the apps they let sign them in (Allowed Apps).
+ * them, how the dashboard looks to them, whether an alert raises a desktop notification
+ * (Notifications), where they are signed in (Sessions), their authenticators (MFA) and the apps
+ * they let sign them in (Allowed Apps).
  * Reached from the account menu at the foot of the sidebar, not from the page list. Appearance is
  * the person's `user_settings` row (useUserSettings.js), so it follows them to any browser.
  *
  * `singleKeyShortcuts` is whether `?`, `/`, `[` and `]` act (shortcuts.js), on unless turned off.
+ * `desktopNotifications` is whether the person asked for a desktop notification when an alert starts
+ * firing, off unless they did; `onChangeDesktopNotifications` saves it.
  * `settingsSource` is that hook's `source`; 'browser' means the row could not be read or written.
  * `passwordBlocked` is why Change Password is unavailable (a machine identity), or null.
  * `userRole` is undefined while it is still being read, and null for an account with no role.
@@ -361,7 +382,8 @@ export function ProfileTab({
   email, userRole, passwordBlocked = null, onChangePassword, displayName, onSaveDisplayName,
   pictureUrl = null, onSavePicture, onRemovePicture,
   theme, onChangeTheme, sidebarMode, onChangeSidebarMode,
-  singleKeyShortcuts = true, onChangeSingleKeyShortcuts, settingsSource = 'account', showToast,
+  singleKeyShortcuts = true, onChangeSingleKeyShortcuts,
+  desktopNotifications = false, onChangeDesktopNotifications, settingsSource = 'account', showToast,
 }) {
   const [section, setSection, sectionHref] = useUrlTab('profile', PROFILE_SECTIONS.map(s => s.id), PROFILE_SECTIONS[0].id)
 
@@ -375,6 +397,31 @@ export function ProfileTab({
   const [shortcutsDraft, setShortcutsDraft] = useState(null)
   const shownShortcuts = shortcutsDraft ?? singleKeyShortcuts
   const shortcutsDirty = shortcutsDraft !== null && shortcutsDraft !== singleKeyShortcuts
+  // Notifications holds the switch until Save too. Saving it on asks the browser for permission, in
+  // the click that is its gesture; a refusal leaves the choice on, for the person's other browsers.
+  const { support, permission, ask } = useNotificationPermission()
+  const [desktopDraft, setDesktopDraft] = useState(null)
+  const [asking, setAsking] = useState(false)
+  const shownDesktop = desktopDraft ?? desktopNotifications
+  const desktopDirty = desktopDraft !== null && desktopDraft !== desktopNotifications
+  // A browser that cannot raise one still lets the person turn an earlier choice off.
+  const desktopBlocked = !support.ok && !shownDesktop
+  const desktopCanAsk = support.ok && desktopNotifications && !desktopDirty && permission === 'default'
+  const desktopWords = !support.ok ? UNAVAILABLE_WORDS[support.reason]
+    : !shownDesktop ? null
+    : desktopDirty ? (permission === 'default' ? SAVE_ASKS_WORDS : null)
+    : permission === 'granted' ? ALLOWED_WORDS
+    : permission === 'denied' ? REFUSED_WORDS
+    : NOT_ASKED_WORDS
+  const saveDesktop = async () => {
+    const next = desktopDraft
+    setAsking(true)
+    // First, before any await: the prompt must start inside the click.
+    if (next && permission === 'default') await ask()
+    onChangeDesktopNotifications?.(next)
+    setDesktopDraft(null)
+    setAsking(false)
+  }
   // Nobody changes their own address or role, an Administrator included: another one does it on People.
   const whoChangesThis = userRole === 'Administrator'
     ? 'Another Administrator can change this, on Access Control › People'
@@ -453,19 +500,7 @@ export function ProfileTab({
           )}
 
           {section === 'appearance' && (<>
-            {/* Said only when it is true: a quiet page means the row was read and each change is
-                saved to it. */}
-            {settingsSource === 'browser' && (
-              <div className="card-body profile-source">
-                <div className="callout callout-warning" role="status">
-                  <IconAlertTriangle size={14} className="callout-icon" />
-                  <div>
-                    Your choices could not be read from your account, so this browser&apos;s are shown.
-                    A change you make now applies in this browser only.
-                  </div>
-                </div>
-              </div>
-            )}
+            <SourceNotice settingsSource={settingsSource} />
             <ProfileTable>
               <ProfileRow
                 id="theme"
@@ -530,6 +565,47 @@ export function ProfileTab({
                 actions={<SaveDiscard dirty={shortcutsDirty}
                   onSave={() => { onChangeSingleKeyShortcuts?.(shortcutsDraft); setShortcutsDraft(null) }}
                   onDiscard={() => setShortcutsDraft(null)} />}
+              />
+            </ProfileTable>
+          </>)}
+
+          {section === 'notifications' && (<>
+            <SourceNotice settingsSource={settingsSource} />
+            <ProfileTable>
+              <ProfileRow
+                id="desktop-notifications"
+                label="Desktop notifications"
+                description="Shows a notification on your desktop when an alert starts firing, so you see it from another window. It needs a dashboard tab open somewhere. Acknowledged and suppressed alerts raise nothing. Select a notification to open its device or gateway."
+                value={(<>
+                  <div className="profile-switch">
+                    {/* Named by the Setting cell's label; the word beside it is for the eye. */}
+                    <input
+                      id="profile-desktop-notifications"
+                      type="checkbox"
+                      role="switch"
+                      checked={shownDesktop}
+                      disabled={desktopBlocked || asking}
+                      onChange={e => setDesktopDraft(e.target.checked)}
+                      aria-describedby={desktopWords ? 'profile-desktop-detail' : undefined}
+                    />
+                    <span aria-hidden="true">{shownDesktop ? 'On' : 'Off'}</span>
+                  </div>
+                  {desktopWords && (
+                    <div id="profile-desktop-detail" className="setting-bounds profile-detail" role="status">{desktopWords}</div>
+                  )}
+                </>)}
+                actions={(<>
+                  <SaveDiscard dirty={desktopDirty} disabled={asking}
+                    onSave={saveDesktop}
+                    onDiscard={() => setDesktopDraft(null)} />
+                  {desktopCanAsk && (
+                    <div className="setting-actions">
+                      <button type="button" className="btn btn-ghost btn-sm" disabled={asking} onClick={ask}>
+                        Allow Notifications
+                      </button>
+                    </div>
+                  )}
+                </>)}
               />
             </ProfileTable>
           </>)}

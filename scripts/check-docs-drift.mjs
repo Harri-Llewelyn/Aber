@@ -1175,7 +1175,11 @@ function edgeFunctionNames() {
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71). 0226 adds a capture or playback job that failed in the last hour, one stuck past its own limits, and a playback worker silent while a playback waits, which the Grafana rules read (check 191)',
-    'public.platform_alert_send_decision': '0250 holds a firing message or a reminder while a suppression window (0240) covers its alert, in the place 0247 marked for it, so 0247 stands alone where 0240 is not applied',
+    'public.platform_alert_send_decision': '0250 holds a firing message or a reminder while a suppression window (0240) covers its alert, in the place 0247 marked for it, so 0247 stands alone where 0240 is not applied. 0262 asks notification_channel_reaches() whether the channel may carry the alert, where 0247 and 0250 named the webhook and a machine identity',
+    'public.notification_channel_is_configured': '0262 adds the email arm, which is configured once a role is told; 0247 declares the webhook alone, so it stands where email is not applied',
+    'public.queue_platform_alert_notifications': '0262 queues an email beside the webhook when the email route carries the alert; 0247 queues the webhook alone',
+    'public.queue_platform_alert_reminders': '0262 reminds only on a channel that still carries the alert, through notification_channel_reaches(), where 0247 named the webhook and a machine identity',
+    'public.notification_setting_guard': '0262 adds the two email settings, and makes the guard SECURITY DEFINER because no API role may run its helpers and Postgres checks EXECUTE on every function an expression names; 0248 declares the webhook settings alone',
     'public.refresh_directory_liveness': '0223 takes Prometheus\'s address from directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares first, so the baseline\'s copy never names it during a replay. It also counts content that is not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the baseline raised on such content without firing the next probe, and left every scraped service at its last ACTIVE when a probe failed',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
@@ -3864,6 +3868,163 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 300. The dispatcher's email reads the relay GoTrue reads, and one place says so. The functions
+// Deployment sets SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_ADMIN_EMAIL and SMTP_SENDER_NAME from
+// supabaseAuth.smtp's own values, SMTP_PASS from the same optional Secret key GoTrue's GOTRUE_SMTP_PASS
+// reads, and SMTP_CA_PEM from supabaseFunctions.smtpCaCert; main/index.ts forwards exactly those to
+// notification-dispatch and to no other function (a relay's password is nothing else's); and email.ts
+// reads exactly those. A name in one place and not another reads as a relay that is never set, on a
+// site that sends password-reset mail and is told that email cannot be sent.
+// -------------------------------------------------------------------------------------------------
+{
+  const fnChart = read('deploy/helm/aber/templates/supabase/functions.yaml');
+  const authChart = read('deploy/helm/aber/templates/supabase/auth.yaml');
+  const registry = read('supabase/functions/main/index.ts');
+  const email = read('supabase/functions/notification-dispatch/email.ts');
+  const problems300 = [];
+
+  const NAMES = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_ADMIN_EMAIL', 'SMTP_SENDER_NAME', 'SMTP_CA_PEM'];
+  const block = registry.match(/const FUNCTION_REGISTRY[^{]*\{([\s\S]*?)\n\};/)?.[1] ?? '';
+  const holders = [...block.matchAll(/^\s*"([a-z0-9-]+)"\s*:\s*\[([^\]]*)\]/gm)]
+    .filter((m) => NAMES.some((n) => m[2].includes(`"${n}"`))).map((m) => m[1]);
+  if (holders.join() !== 'notification-dispatch') {
+    problems300.push(`main/index.ts forwards the SMTP_ variables to ${holders.join(', ') || 'no function'}; notification-dispatch alone may hold them`);
+  }
+  const entry = block.match(/"notification-dispatch":\s*\[([\s\S]*?)\]/)?.[1] ?? '';
+  const forwarded = NAMES.filter((n) => entry.includes(`"${n}"`));
+  const read_ = new Set([...email.matchAll(/env\("(SMTP_[A-Z_]+)"\)/g)].map((m) => m[1]));
+  for (const name of NAMES) {
+    if (!forwarded.includes(name)) problems300.push(`main/index.ts does not forward ${name} to notification-dispatch`);
+    if (!read_.has(name)) problems300.push(`notification-dispatch/email.ts does not read ${name}`);
+    if (!new RegExp(`- name: ${name}\\n|"name" "${name}"`).test(fnChart)) problems300.push(`templates/supabase/functions.yaml does not set ${name}`);
+  }
+  for (const name of read_) if (!NAMES.includes(name)) problems300.push(`email.ts reads ${name}, which this check does not know and the chart may not set`);
+  // One configuration: each from the value or Secret key GoTrue reads, so the two cannot name different relays.
+  for (const [name, gotrue] of [['SMTP_HOST', 'host'], ['SMTP_PORT', 'port'], ['SMTP_USER', 'user'], ['SMTP_ADMIN_EMAIL', 'from'], ['SMTP_SENDER_NAME', 'senderName']]) {
+    const at = fnChart.match(new RegExp(`- name: ${name}\\n\\s+value: \\{\\{ \\.Values\\.supabaseAuth\\.smtp\\.(\\w+)`))?.[1];
+    if (at !== gotrue) problems300.push(`the functions Deployment sets ${name} from supabaseAuth.smtp.${at ?? '(not found)'}, not .${gotrue} as GoTrue reads it`);
+  }
+  const passKey = fnChart.match(/"name" "SMTP_PASS" "secretName" \$secretName "key" "(\w+)"/)?.[1];
+  const gotruePass = authChart.match(/- name: GOTRUE_SMTP_PASS\n\s+valueFrom:\n\s+secretKeyRef:\n\s+name: [^\n]+\n\s+key: (\w+)/)?.[1];
+  if (!passKey || passKey !== gotruePass) problems300.push(`SMTP_PASS reads the Secret key ${passKey ?? '(not found)'}, and GOTRUE_SMTP_PASS reads ${gotruePass ?? '(not found)'}`);
+  if (!/include "aber\.optionalSecretEnv" \(dict "name" "SMTP_PASS"/.test(fnChart)) {
+    problems300.push('SMTP_PASS is not read through aber.optionalSecretEnv, so an external Secret without the key would stop the functions pod');
+  }
+  if (!/with \.Values\.supabaseFunctions\.smtpCaCert \}\}\s+- name: SMTP_CA_PEM/.test(fnChart)) {
+    problems300.push('SMTP_CA_PEM is not set from supabaseFunctions.smtpCaCert, only when it is given');
+  }
+  if (!/^ {2}smtpCaCert: ""$/m.test(CHART_VALUES)) problems300.push('values.yaml has no supabaseFunctions.smtpCaCert, empty by default');
+  if (problems300.length) {
+    fail("the dispatcher's email does not read the relay GoTrue reads:\n" + problems300.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`notification-dispatch alone holds the ${NAMES.length} SMTP_ variables, set from supabaseAuth.smtp and GoTrue's own Secret key, and email.ts reads exactly those`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 301. The upgrade note for email says what a site must do, as the chart has it: the Settings tab
+// that sets it up, the values it reads and the NetworkPolicy the functions pod needs for the relay.
+// A note that names a value the chart does not have sends an administrator looking for it.
+// -------------------------------------------------------------------------------------------------
+{
+  const upgrading = read('help/site/upgrading.md');
+  const note = upgrading.match(/### From 1\.8\.0, alerts can be emailed\n([\s\S]*?)\n## /)?.[1] ?? '';
+  const problems301 = [];
+  if (!note) problems301.push("help/site/upgrading.md has no '### From 1.8.0, alerts can be emailed' section");
+  for (const said of ['Settings › Notifications', 'Set up email', 'Email a test', '`supabaseAuth.smtp`', '`secrets.smtpPassword`',
+    '`supabaseFunctions.smtpCaCert`', '`networkPolicy.extraEgress`', 'supabase-functions', 'Email starts off']) {
+    if (note && !note.includes(said)) problems301.push(`the email note does not say ${said}`);
+  }
+  for (const value of ['smtpCaCert', 'smtpPassword']) {
+    if (!CHART_VALUES.includes(`${value}:`)) problems301.push(`values.yaml has no ${value}, which the email note names`);
+  }
+  const labels = read('frontend/src/components/tabs/NotificationsPanel.jsx');
+  for (const button of ['Set up email', 'Email a test']) {
+    if (!labels.includes(button)) problems301.push(`the Notifications panel has no "${button}" button, which the email note names`);
+  }
+  if (problems301.length) {
+    fail("the email upgrade note and the chart or the page disagree:\n" + problems301.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass("the upgrade note for email names the tab, both buttons, the values it reads and the functions pod's NetworkPolicy, all of which exist");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 302. The 0263 section says what bounds the SMTP client as the code holds it: a step's time, the
+// whole exchange's, and the longest reply it reads. A reader sizing a relay's timeout, or a reviewer
+// checking the pass's budget, would act on a number that is not the code's.
+// -------------------------------------------------------------------------------------------------
+{
+  const smtp = read('supabase/functions/notification-dispatch/smtp.ts');
+  const section = read('supabase/README.md').match(/### An email goes to the people who hold the roles it names \(0263\)([\s\S]*?)\n### /)?.[1] ?? '';
+  const dispatch = read('supabase/functions/notification-dispatch/index.ts');
+  const email = read('supabase/functions/notification-dispatch/email.ts');
+  const problems302 = [];
+  const grab = (src, re, what) => {
+    const m = src.match(re);
+    if (!m) problems302.push(`could not read ${what}`);
+    return m ? m[1] : null;
+  };
+  const num = (v) => (v === null ? null : Number(v.replace(/_/g, '')));
+  const step = num(grab(email, /timeoutMs: ([\d_]+),/, "the step limit in email.ts's send"));
+  const total = num(grab(email, /totalMs: ([\d_]+),/, "the whole-exchange limit in email.ts's send"));
+  const line = num(grab(smtp, /const MAX_REPLY_LINE = ([\d_]+);/, 'MAX_REPLY_LINE in smtp.ts'));
+  const lines = num(grab(smtp, /const MAX_REPLY_LINES = ([\d_]+);/, 'MAX_REPLY_LINES in smtp.ts'));
+  const budget = num(grab(dispatch, /const PASS_BUDGET_MS = ([\d_]+);/, "the pass's budget in index.ts"));
+  const flat = section.replace(/\s+/g, ' ');
+  if (!section) problems302.push("supabase/README.md has no '### An email goes to the people who hold the roles it names (0263)' section");
+  else {
+    for (const [value, said] of [
+      [step, `A step has ${step === null ? '?' : step / 1000} seconds and the whole exchange ${total === null ? '?' : total / 1000}`],
+      [line, `A reply of more than ${line === null ? '?' : line.toLocaleString('en-US')} characters on a line`],
+      [lines, `or of more than ${lines} lines`],
+    ]) {
+      if (value !== null && !flat.includes(said)) problems302.push(`the 0263 section does not say "${said}"`);
+    }
+  }
+  if (step !== null && total !== null && budget !== null && (budget + total > 60_000 || total < step)) {
+    problems302.push(`the pass starts a row up to ${budget} ms in and a send takes up to ${total} ms, over the runtime's 60 s, or the whole is shorter than a step`);
+  }
+  if (problems302.length) {
+    fail("the 0263 section's bounds are not the SMTP client's:\n" + problems302.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the 0263 section holds the SMTP client's bounds: ${step / 1000} s a step, ${total / 1000} s in all, ${line.toLocaleString('en-US')}-character and ${lines}-line replies, inside the pass's ${budget / 1000} s budget`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 303. The email surface is named alike where it is declared and where it is called: the test
+// email's RPC in the migrations, api.js and the OpenAPI document, and the dispatcher's GET in
+// index.ts, api.js and the OpenAPI document. A rename in one place leaves a button that calls
+// nothing, or a page that cannot learn whether the site can send.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const openapi = read('docs/openapi.yaml');
+  const index = read('supabase/functions/notification-dispatch/index.ts');
+  const problems303 = [];
+  const migrations = readdirSync(join(REPO, 'supabase/migrations')).filter((n) => n.endsWith('.sql')).sort()
+    .map((n) => read(`supabase/migrations/${n}`)).join('\n');
+  const declared = (name) => migrations.includes(`CREATE OR REPLACE FUNCTION public.${name}(`);
+  for (const name of ['queue_test_email_notification', 'notification_email_recipients', 'record_notification_email_delivery']) {
+    if (!declared(name)) problems303.push(`no applied migration declares public.${name}()`);
+  }
+  if (!api.includes(`supabase.rpc('queue_test_email_notification')`)) problems303.push('api.js does not call queue_test_email_notification');
+  if (!openapi.includes('/rest/v1/rpc/queue_test_email_notification:')) problems303.push('docs/openapi.yaml does not describe /rest/v1/rpc/queue_test_email_notification');
+  if (!/req\.method === "GET"\) return await emailStatus\(req\)/.test(index)) problems303.push('notification-dispatch/index.ts does not answer a GET with the relay status');
+  if (!api.includes('/functions/v1/notification-dispatch`')) problems303.push('api.js does not read the dispatcher\'s relay status');
+  if (!/\/functions\/v1\/notification-dispatch:\n {4}post:[\s\S]*?\n {4}get:\n/.test(openapi)) problems303.push("docs/openapi.yaml does not describe the dispatcher's GET beside its POST");
+  for (const name of ['notification_email_recipients', 'record_notification_email_delivery']) {
+    if (!index.includes(`"${name}"`)) problems303.push(`notification-dispatch/index.ts does not call ${name}`);
+  }
+  if (problems303.length) {
+    fail("the email surface is named differently where it is declared and where it is called:\n" + problems303.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass("the test email's RPC, the dispatcher's two RPCs and its GET are declared, called and documented under one name each");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 193. Every list filter is the shared one, as frontend/README.md says. A `<select>` in a page's
 // toolbar (`.filter-bar`, the Filters panel inside it included) takes one value, which is what the
 // shared FilterChecklist replaced; System › Logs' Service and Level are the two left, each a value
@@ -4672,6 +4833,130 @@ const OPERATOR_PAIRS = [
   } else {
     pass(`all ${rules.length} alert rules are execErrState: Error, so an evaluation error reaches the webhook `
       + `renamed and is recorded as the rule not evaluated`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 311. The Derived tab's docs say how many inputs a sum takes as utils/derivedMetric.js holds it
+// (DERIVED_MAX_INPUTS, which mirror check 80 holds to 0267's shape function). A page saying another
+// limit sends a person to build a sum the dialog will not let them finish, or tells them they may
+// not.
+// -------------------------------------------------------------------------------------------------
+{
+  const max = Number(read('frontend/src/utils/derivedMetric.js').match(/^export const DERIVED_MAX_INPUTS = (\d+)/m)?.[1]);
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const problems311 = [];
+  if (!Number.isInteger(max) || !words[max]) problems311.push('could not read DERIVED_MAX_INPUTS out of frontend/src/utils/derivedMetric.js');
+  else {
+    const claims = [
+      ['help/pages/metrics.md', `adds or subtracts two to ${words[max]} numeric metrics`],
+      ['supabase/README.md', `the signed sum of two to ${words[max]} inputs`],
+    ];
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems311.push(`${file} does not say "${said}"`);
+  }
+  if (problems311.length) {
+    fail('the docs name the most inputs a sum takes otherwise than DERIVED_MAX_INPUTS holds it:\n' +
+      problems311.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Metrics help and the 0267 section say a sum takes two to ${words[max]} inputs, as DERIVED_MAX_INPUTS holds`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 312. The Metrics help names the page's tabs as navigation.jsx lists them (METRICS_TABS): how many
+// there are, and each by its label, in order. A tab the help leaves out is one nobody is told about;
+// a label it misspells is one nobody finds.
+// -------------------------------------------------------------------------------------------------
+{
+  const block = read('frontend/src/navigation.jsx').match(/^export const METRICS_TABS = \[([\s\S]*?)\n\]/m)?.[1] ?? '';
+  const labels = [...block.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const numbers = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const problems312 = [];
+  if (labels.length < 2) problems312.push('could not read METRICS_TABS out of frontend/src/navigation.jsx');
+  else {
+    const bold = labels.map((l) => `**${l}**`);
+    const said = `${bold.slice(0, -1).join(', ')} and ${bold[bold.length - 1]} are the ${numbers[labels.length]} tabs of the page's one card`;
+    if (!read('help/pages/metrics.md').includes(said)) problems312.push(`help/pages/metrics.md does not say "${said}"`);
+  }
+  if (problems312.length) {
+    fail('the Metrics help names the page\'s tabs otherwise than navigation.jsx lists them:\n' +
+      problems312.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Metrics help names the page's ${labels.length} tabs, ${labels.join(', ')}, as METRICS_TABS lists them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 313. The Metrics help and the 0267 section give a rate's unit as the dialog and the trigger make it:
+// the counter's unit followed by RATE_UNIT_SUFFIX, and UNITLESS_COUNTER with the suffix for a counter
+// with none (mirror check 81 holds both to enforce_derived_metric()). A page naming another unit
+// tells a person the wrong thing about a row they cannot edit.
+// -------------------------------------------------------------------------------------------------
+{
+  const js = read('frontend/src/utils/derivedMetric.js');
+  const suffix = js.match(/^export const RATE_UNIT_SUFFIX = '([^']+)'/m)?.[1];
+  const bare = js.match(/^export const UNITLESS_COUNTER = '([^']+)'/m)?.[1];
+  const problems313 = [];
+  if (!suffix || !bare) problems313.push('could not read RATE_UNIT_SUFFIX and UNITLESS_COUNTER out of frontend/src/utils/derivedMetric.js');
+  else {
+    const claims = [
+      ['help/pages/metrics.md', `or \`${bare}${suffix}\` for a counter with none`],
+      ['supabase/README.md', `\`${bare}${suffix}\` for an input with none`],
+    ];
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems313.push(`${file} does not say "${said}"`);
+  }
+  if (problems313.length) {
+    fail('the docs give a derived rate\'s unit otherwise than the dialog and the trigger make it:\n' +
+      problems313.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Metrics help and the 0267 section give a counter with no unit ${bare}${suffix}, as the dialog and enforce_derived_metric() do`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 314. Every kind of derived metric DERIVATION_KINDS offers is written out as its definition in the
+// 0267 section, the OpenAPI description of the column and the column's own comment. A kind named in
+// the dialog and in none of them is one an API caller cannot learn the shape of.
+// -------------------------------------------------------------------------------------------------
+{
+  const block = read('frontend/src/utils/derivedMetric.js').match(/^export const DERIVATION_KINDS = \[([\s\S]*?)\n\]/m)?.[1] ?? '';
+  const kinds = [...block.matchAll(/id: '([a-z_]+)'/g)].map((m) => m[1]);
+  const problems314 = [];
+  if (kinds.length < 3) problems314.push('could not read DERIVATION_KINDS out of frontend/src/utils/derivedMetric.js');
+  else {
+    const files = ['supabase/README.md', 'docs/openapi.yaml', 'supabase/migrations/0267_a_derived_metric_is_a_catalogue_row.sql'];
+    for (const file of files) {
+      const text = read(file);
+      for (const kind of kinds) if (!text.includes(`"kind": "${kind}"`)) problems314.push(`${file} does not write out {"kind": "${kind}", ...}`);
+    }
+  }
+  if (problems314.length) {
+    fail('a kind of derived metric is not written out where its shape is documented:\n' +
+      problems314.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the ${kinds.length} kinds of derived metric, ${kinds.join(', ')}, are written out in the 0267 section, the OpenAPI description and the column comment`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 315. docs/vocabularies.md's derived-series paragraph points at the 0267 section by its heading, and
+// no longer says nothing enforces the rule it states: the save refuses a semantic id and a standard on
+// a derived metric. A stale "no check enforces this" tells whoever registers one that the rule is
+// theirs to keep.
+// -------------------------------------------------------------------------------------------------
+{
+  const heading = 'A derived metric is a catalogue row (0267)';
+  const slug = heading.toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/ /g, '-');
+  const problems315 = [];
+  if (!read('supabase/README.md').includes(`\n### ${heading}\n`)) problems315.push(`supabase/README.md has no section "${heading}"`);
+  const vocab = read('docs/vocabularies.md').replace(/\s+/g, ' ');
+  if (!vocab.includes(`](../supabase/README.md#${slug})`)) problems315.push(`docs/vocabularies.md does not link to supabase/README.md#${slug}`);
+  if (/no check enforces this/i.test(vocab)) problems315.push('docs/vocabularies.md still says no check enforces the derived-series rule, which the save checks of 0267 now do');
+  if (problems315.length) {
+    fail('the derived-series paragraph is out of step with the save checks:\n' +
+      problems315.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`docs/vocabularies.md's derived-series paragraph links to the 0267 section (#${slug}) and says the save checks enforce its rule`);
   }
 }
 
@@ -8241,6 +8526,44 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 304. The Notifications tab on Profile is named as the page draws it. navigation.jsx lists it right
+// after Appearance with its description, the search offers it, and ProfileTab.jsx labels its one row
+// "Desktop notifications" with an "Allow Notifications" button. The Profile help names the tab, the
+// row and the button, and the alert counter's help links to the section that explains them. A tab
+// renamed, or a button relabelled, leaves a help page that tells a person to select what is not there.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems304 = [];
+  const nav = read('frontend/src/navigation.jsx');
+  const tabs = nav.slice(nav.indexOf('export const PROFILE_TABS'), nav.indexOf(']', nav.indexOf('export const PROFILE_TABS')));
+  const ids = [...tabs.matchAll(/\{ id: '([a-z-]+)', label: '([^']+)', description: '[^']+'/g)].map((m) => m[1]);
+  if (ids.join() !== 'account,appearance,notifications,sessions,mfa,allowed-apps') {
+    problems304.push(`navigation.jsx's PROFILE_TABS are ${ids.join(', ') || 'unreadable'}, and the Notifications tab follows Appearance`);
+  }
+  if (!/\{ id: 'notifications', label: 'Notifications'/.test(tabs)) problems304.push("navigation.jsx's PROFILE_TABS has no Notifications tab");
+  if (!/tabCard\('profile', 'notifications'\)/.test(read('frontend/src/searchIndex.js'))) {
+    problems304.push("searchIndex.js has no card for Profile's Notifications tab");
+  }
+  const page = read('frontend/src/components/tabs/ProfileTab.jsx');
+  const row = /label="(Desktop notifications)"/.exec(page)?.[1];
+  const button = /\n\s+(Allow Notifications)\n\s+<\/button>/.exec(page)?.[1];
+  if (!row) problems304.push('ProfileTab.jsx has no Desktop notifications row');
+  if (!button) problems304.push('ProfileTab.jsx has no Allow Notifications button');
+  const help = read('help/pages/profile.md');
+  for (const phrase of ['**Notifications** tab', row && `**${row}**`, button && `**${button}**`, '## Desktop notifications'].filter(Boolean)) {
+    if (!help.includes(phrase)) problems304.push(`help/pages/profile.md does not say "${phrase}"`);
+  }
+  if (!read('help/pages/site-map.md').includes('(profile.md#desktop-notifications)')) {
+    problems304.push("help/pages/site-map.md's alert counter does not link to profile.md#desktop-notifications");
+  }
+  if (problems304.length) {
+    for (const m of problems304) fail(`check 304: ${m}.`);
+  } else {
+    pass(`Profile's Notifications tab follows Appearance, and the help names its "${row}" row and "${button}" button and links to them from the alert counter`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 20. The release workflow names every image the chart resolves from `appVersion`, and no other.
 //
 // The chart marks an image it builds here with an empty tag and resolves it to `Chart.AppVersion`
@@ -8505,6 +8828,61 @@ const OPERATOR_PAIRS = [
   for (const o of offences) fail(o);
   if (!offences.length) {
     pass(`the ${columns.length} user_settings columns admit exactly what the dashboard offers, with the same defaults`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 305. How long a desktop notification waits to name its subject. The notification names the device
+// or gateway and where it is, which takes a read; frontend/README.md says it waits at most that many
+// seconds before the Sparkplug id stands in, and SUBJECT_WAIT_MS holds the number. A README that says
+// two while the code waits ten is a notification that arrives late and a page that says it cannot.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('frontend/src/utils/desktopNotifications.js');
+  const wait = /export const SUBJECT_WAIT_MS = (\d+)/.exec(code)?.[1];
+  const said = /for at most (one|two|three|four|five|six|seven|eight|nine|ten) seconds?, and the\s+Sparkplug id stands in/.exec(read('frontend/README.md'))?.[1];
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  if (!wait || !said) {
+    fail('check 305: could not read how long a desktop notification waits for its subject from utils/desktopNotifications.js (SUBJECT_WAIT_MS) and frontend/README.md ("for at most N seconds, and the Sparkplug id stands in")');
+  } else if (words[Number(wait) / 1000] !== said) {
+    fail(`check 305: frontend/README.md says a desktop notification waits at most ${said} seconds for its subject, and SUBJECT_WAIT_MS is ${wait} ms`);
+  } else {
+    pass(`frontend/README.md says a desktop notification waits at most ${said} seconds for its subject, as SUBJECT_WAIT_MS holds it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 306. The desktop-notification setting is named the same everywhere it is written. user_settings.desktop_notifications
+// is off by default (0264); docs/openapi.yaml says so, and says the column name a client writes. The
+// browser keeps a copy under one localStorage key, which supabase/README.md and frontend/README.md
+// name as the hook holds it: a key renamed in the hook leaves a README that sends a reader looking for
+// the wrong one, and a copy that no longer follows the row.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems306 = [];
+  const chain = readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort()
+    .map((f) => read(`supabase/migrations/${f}`)).join('\n');
+  const declared = [...chain.matchAll(/ADD COLUMN IF NOT EXISTS desktop_notifications boolean DEFAULT (true|false) NOT NULL/g)].at(-1)?.[1];
+  const openapi = read('docs/openapi.yaml');
+  const schema = /\n {4}UserSettings:\n[\s\S]*?\n {4}SystemSetting:/.exec(openapi)?.[0] ?? '';
+  const documented = /\n {8}desktop_notifications:\n {10}type: boolean\n {10}default: (true|false)\n/.exec(schema)?.[1];
+  const key = /export const DESKTOP_NOTIFICATIONS_KEY = '([a-z_]+)'/.exec(read('frontend/src/hooks/useDesktopNotifications.js'))?.[1];
+  if (!declared) problems306.push('no migration adds user_settings.desktop_notifications with a default');
+  if (!documented) problems306.push("docs/openapi.yaml's UserSettings schema has no boolean desktop_notifications with a default");
+  if (declared && documented && declared !== documented) {
+    problems306.push(`docs/openapi.yaml says desktop_notifications defaults to ${documented}, and the migrations to ${declared}`);
+  }
+  if (!/desktop_notifications: \{ type: boolean \}/.test(openapi)) {
+    problems306.push("docs/openapi.yaml's /rest/v1/user_settings POST body does not offer desktop_notifications");
+  }
+  if (!key) problems306.push('could not read DESKTOP_NOTIFICATIONS_KEY from frontend/src/hooks/useDesktopNotifications.js');
+  for (const file of ['supabase/README.md', 'frontend/README.md']) {
+    if (key && !read(file).includes(`\`${key}\``)) problems306.push(`${file} does not name the browser copy, ${key}`);
+  }
+  if (problems306.length) {
+    for (const m of problems306) fail(`check 306: ${m}.`);
+  } else {
+    pass(`user_settings.desktop_notifications is off by default as docs/openapi.yaml says, and both READMEs name its browser copy, ${key}`);
   }
 }
 

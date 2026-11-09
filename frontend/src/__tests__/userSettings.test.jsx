@@ -12,6 +12,7 @@ import { useUserSettings } from '../hooks/useUserSettings'
 import { THEME_KEY } from '../hooks/useTheme'
 import { SIDEBAR_MODE_KEY } from '../hooks/useSidebarMode'
 import { SINGLE_KEY_SHORTCUTS_KEY } from '../hooks/useSingleKeyShortcuts'
+import { DESKTOP_NOTIFICATIONS_KEY } from '../hooks/useDesktopNotifications'
 import { readUserSettings, seedUserSettings, saveUserSetting } from '../utils/userSettings'
 
 vi.mock('../utils/userSettings', () => ({
@@ -201,5 +202,72 @@ describe('single-key shortcuts', () => {
     const { result } = renderHook(() => useUserSettings(ALICE))
     await settle(result)
     expect(result.current.singleKeyShortcuts).toBe(false)
+  })
+})
+
+describe('desktop notifications', () => {
+  it('are off for a person who has never chosen, and on a browser with no copy', async () => {
+    readUserSettings.mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover', single_key_shortcuts: true, desktop_notifications: false })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    expect(result.current.desktopNotifications).toBe(false)
+    await settle(result)
+    expect(result.current.desktopNotifications).toBe(false)
+  })
+
+  it('follow the row over the browser copy, so a shared PC does not carry the last person\'s choice', async () => {
+    localStorage.setItem(DESKTOP_NOTIFICATIONS_KEY, 'on')
+    readUserSettings.mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover', desktop_notifications: false })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    expect(result.current.desktopNotifications).toBe(true)
+    await settle(result)
+    expect(result.current.desktopNotifications).toBe(false)
+    expect(localStorage.getItem(DESKTOP_NOTIFICATIONS_KEY)).toBe('off')
+  })
+
+  it('come from the row on any PC the person signs in on', async () => {
+    readUserSettings.mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover', desktop_notifications: true })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    await settle(result)
+    expect(result.current.desktopNotifications).toBe(true)
+    expect(localStorage.getItem(DESKTOP_NOTIFICATIONS_KEY)).toBe('on')
+  })
+
+  it('are saved to the row as one column and to the browser copy, and the seed leaves them to the default', async () => {
+    readUserSettings.mockResolvedValueOnce(null).mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover', desktop_notifications: false })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    await settle(result)
+    expect(seedUserSettings.mock.calls[0][1]).not.toHaveProperty('desktop_notifications')
+
+    act(() => result.current.setDesktopNotifications(true))
+    expect(result.current.desktopNotifications).toBe(true)
+    expect(localStorage.getItem(DESKTOP_NOTIFICATIONS_KEY)).toBe('on')
+    expect(saveUserSetting).toHaveBeenCalledWith(ALICE, 'desktop_notifications', true)
+  })
+
+  it('are not changed by anything but a boolean', async () => {
+    readUserSettings.mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover', desktop_notifications: false })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    await settle(result)
+    act(() => result.current.setDesktopNotifications('yes'))
+    expect(result.current.desktopNotifications).toBe(false)
+    expect(saveUserSetting).not.toHaveBeenCalled()
+  })
+
+  it('are not undone by a slow read, when the person chose while it was in flight', async () => {
+    let answer
+    readUserSettings.mockReturnValue(new Promise(resolve => { answer = resolve }))
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    act(() => result.current.setDesktopNotifications(true))
+    await act(async () => { answer({ theme: 'dark', sidebar_mode: 'hover', desktop_notifications: false }) })
+    await settle(result)
+    expect(result.current.desktopNotifications).toBe(true)
+  })
+
+  it('keep the browser copy when a row from before the column has none', async () => {
+    localStorage.setItem(DESKTOP_NOTIFICATIONS_KEY, 'on')
+    readUserSettings.mockResolvedValue({ theme: 'dark', sidebar_mode: 'hover' })
+    const { result } = renderHook(() => useUserSettings(ALICE))
+    await settle(result)
+    expect(result.current.desktopNotifications).toBe(true)
   })
 })

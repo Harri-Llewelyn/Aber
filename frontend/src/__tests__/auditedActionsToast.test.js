@@ -488,6 +488,11 @@ const TOASTED_BY = [
     by: { file: 'components/tabs/NotificationsPanel.jsx', piece: 'const onWebhookSaved = async () => {' },
     why: 'the webhook dialog saves the hosts and then the address, and the panel toasts once for both',
   },
+  {
+    file: 'components/tabs/NotificationsPanel.jsx', piece: 'api.patchSetting(EMAIL_ROLES_KEY',
+    by: { file: 'components/tabs/NotificationsPanel.jsx', piece: 'const onEmailSaved = async (roles) => {' },
+    why: 'the email dialog saves the roles told, and the panel toasts for the save',
+  },
 ]
 
 /** Audited calls with no success toast, by file and a piece of the call, each with its reason. */

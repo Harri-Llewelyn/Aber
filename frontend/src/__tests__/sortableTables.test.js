@@ -56,7 +56,7 @@ const TABLES = {
   'components/tabs/GatewaysTab.jsx': { sortable: 1 },
   'components/tabs/HistoryAlerts.jsx': { sortable: 1 },
   'components/tabs/HistoryTab.jsx': { sortable: 4 },
-  'components/tabs/MetricsTab.jsx': { sortable: 3 },
+  'components/tabs/MetricsTab.jsx': { sortable: 4 },
   'components/tabs/NotificationsPanel.jsx': {
     sortable: 0,
     fixed: ['The delivery log: the newest 50 messages, newest first, as the server returns them up to a limit: a sort in the browser would sort only the rows on screen.']

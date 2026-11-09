@@ -52,9 +52,9 @@ The third squash restarted live numbering at `0003`, a number the archive alread
 bare citation of an archived `0003`–`0032` quietly came to name a different, live file as the
 chain grew past it. The fourth archived its 28 files under `0135`–`0162`, after the archive's
 highest, with the old-to-new table in [`migrations/archive/README.md`](migrations/archive/README.md).
-**The next migration is `0163`**, and each later one takes the next number above the highest ever
-issued, so a number names one file for good, whichever squash later archives it. Check 9d of
-`scripts/check-docs-drift.mjs` refuses an applied migration whose number the archive holds.
+Each new migration takes the next number above the highest ever issued, so a number names one file
+for good, whichever squash later archives it. Check 9d of `scripts/check-docs-drift.mjs` refuses an
+applied migration whose number the archive holds.
 
 ### The five rules the next fold carries in
 
@@ -3630,7 +3630,7 @@ added later is sent without changing.
 
 **`notification_deliveries` is the queue and the delivery log.** One row is one message to one
 channel: the occurrence (`alert_id`, NULL for a test), the `event` (`firing`, `resolved`, `reminder`
-or `test`), the `channel` (`webhook` today), `attempts`, `next_attempt_at`, the `state` and the
+or `test`), the `channel` (`webhook` or `email`, `0262`), `attempts`, `next_attempt_at`, the `state` and the
 `last_error`. A row is `pending` until it leaves the queue: `sent` (the receiver answered 2xx),
 `dropped` (the send decision said it no longer applies) or `dead` (every attempt failed). The
 partial unique index `notification_deliveries_once_per_occurrence` allows one firing and one resolve
@@ -3644,7 +3644,7 @@ occurrence starts firing or resolves. The `last_confirmed_at` stamp is not a sta
 queues nothing either.
 
 - **A firing message** is queued for each channel that carries the alert: one that is configured
-  (`notification_channel_is_configured()`: the webhook needs its address and its signing key),
+  (`notification_channel_is_configured()`: the webhook needs its address and its signing key, email a role to tell),
   whose route admits its severity (`notification_severity_carried()`), and that may carry it. The
   webhook carries only what every signed-in role may read, so it is never queued a
   `service_identity` alert.
@@ -3661,7 +3661,7 @@ sent**, so whatever changed since the row was queued counts. It answers `send`, 
 | Event | When | Answer |
 | :--- | :--- | :--- |
 | Any | The occurrence is gone (pruned) | drop |
-| Any | The channel is the webhook and the alert is about a machine identity | drop |
+| Any | The channel may not carry the alert: the webhook and a machine identity's alert, or email and one while Administrators are not told (`0262`) | drop |
 | `resolved` | Its channel's firing message was sent | send |
 | `resolved` | That message is still pending | hold |
 | `resolved` | That message was dropped or died, or there is none | drop |
@@ -3730,7 +3730,8 @@ Nothing a caller sends chooses what is sent, since every message comes from the 
 
 **Visibility.** The dispatcher runs as the service role, past RLS, so the database applies each
 row's visibility itself. No `service_identity` alert is ever sent to the webhook: the trigger does not
-queue one, `notification_deliveries_due()` does not select one, and the decision drops one. Every
+queue one, `notification_deliveries_due()` does not select one, and the decision drops one. Email
+carries one only when Administrators are told, and tells them alone (`0262`, `0263`). Every
 signed-in role reads the delivery log, as the Settings page shows it to every role. Its select policy
 calls `notification_delivery_is_readable(alert_id)`, a `SECURITY INVOKER` lookup of the alert under
 the reader's own policy on `platform_alerts`, so a row about an alert a role may not read is not
@@ -3748,7 +3749,7 @@ the allow-list, a redirect not followed, the backoff to a dead letter and a hold
 
 The one channel `0247` sends to today is a generic outbound webhook: any URL whose host an
 Administrator has allowed. No product is named. A site that wants a chat channel points the webhook
-at it, or at a receiver on its own network. Email is the second channel (#325 part 2); it adds its own
+at it, or at a receiver on its own network. Email is the second channel (`0262`); it adds its own
 keys and changes none of these.
 
 **The address is a foreign credential.** A webhook URL is a bearer secret its receiver issued, so
@@ -3772,7 +3773,7 @@ webhook is changed only from a session that gave its code (`0251`).
 | `notifications.reminder_hours` | A whole number of hours, 1 to 168 (seeded 12) | Every role |
 
 Only an Administrator writes them, by `system_settings_update_admin`, and the audit trigger records
-each change as for any setting. A channel's route is its own keys, named
+each change as for any setting. `0262` redeclares the guard with email's two arms. A channel's route is its own keys, named
 `notifications.<channel>_*`, so email adds `notifications.email_min_severity` and the roles it tells
 beside these without a migration of the webhook's.
 
@@ -4078,6 +4079,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `playback_delivery_targets()` | `0183` | no | A read the playback dialog makes. |
 | `playback_stale_credentials()` | `0184` | no | A read the playback dialog makes. |
 | `publish_schema_version()` | `0165` | yes | Publishes a schema (schema:manage) |
+| `queue_test_email_notification()` | `0263` | yes | Sends a test email to the Administrator who asks |
 | `queue_test_notification()` | `0248` | yes | Sends a test to the webhook |
 | `raw_telemetry_window()` | `0001` | no | A read: the Cold Storage page. |
 | `record_broker_account_created()` | `0218` | yes | Records a read-only broker account |
@@ -4568,6 +4570,180 @@ the second factor, every refusal, the names and the one audit row. The stack lan
 `test_an_app_registered_by_an_administrator_signs_people_in.py` completes the code flow for a public
 and a confidential app against the running stack.
 
+### An alert reaches the roles its email route names (0262)
+
+`0247`'s queue carried one channel, the webhook. Email is the second (#325 part 2), and it is the
+same queue: the same trigger, the same send decision, the same reminders, the same lease and the same
+retries. This file states what makes it a channel. Who the people are is `0263`.
+
+- **`notification_deliveries.channel` admits `email`.** `0247` declares the table and its first
+  CHECK, and a table that exists keeps the CHECK it has, so this file drops the constraint and adds
+  it again with both channels. A replay replaces it with itself.
+- **A route is two settings, read by every role and written by an Administrator alone**, each checked
+  by `notification_setting_guard()` (`23514`):
+
+  | Key | Holds | Seeded |
+  | :--- | :--- | :--- |
+  | `notifications.email_min_severity` | `info`, `warning` or `critical`: the lowest severity emailed | `warning` |
+  | `notifications.email_roles` | A list of role names from `public.roles`, each once: the roles whose people are told | `[]` |
+
+  **Email starts off.** No role is named, so nothing is queued, and a site that already sends
+  password-reset mail through `supabaseAuth.smtp` is not emailed alerts by an upgrade. An Administrator
+  chooses the roles on Settings › Notifications. A route matches on severity alone, as the webhook's
+  does (#1170 turns routes into rules in 1.12). The roles are checked against the roles table when
+  they are written, so a role added later is accepted.
+- **`notification_channel_reaches(channel, entity_type)` is the one rule for which alerts a channel may
+  carry.** The webhook never carries a `service_identity` alert, as before. Email carries one only
+  when `Administrator` is among the roles told, since only an Administrator may read it (`0204`), and
+  `0263` then tells Administrators alone. Any other alert is carried by either channel. The queue
+  trigger, `queue_platform_alert_reminders()` and `platform_alert_send_decision()` each ask it, so
+  the three cannot disagree about a machine identity's alert.
+- **`notification_channel_is_configured('email')` is true once a role is told.** Whether the site has
+  a mail relay is not the database's to know, since the relay is the functions pod's environment: the
+  dispatcher says so in the delivery log, and the Settings page asks it.
+- **The trigger queues an email beside the webhook's** when an occurrence starts firing and the email
+  route carries its severity. A resolve follows each channel's own firing message, whatever its
+  route says now, so it needed no change. A reminder is queued per channel on its own clock.
+- **The send decision has no email arm.** Acknowledgement, a suppression window and the writer's
+  confirmation window are decided for any channel, so an acknowledged alert sends no email and a
+  suppressed one is held until its window ends. The only change is the machine identity rule above.
+
+The trigger function, the reminders, the decision, `notification_channel_is_configured()` and
+`notification_setting_guard()` are redeclared whole from `0247`, `0250` and `0248`, each unchanged but
+for what is said here: those files replay first on every boot, and the last declaration stands
+(`INTENDED_REDECLARATIONS` in `check-docs-drift.mjs` records the reasons).
+
+**`notification_setting_guard()` becomes `SECURITY DEFINER`.** It was an invoker's function that called
+`notification_allowed_hosts_problem()`, which no API role may run. Postgres checks `EXECUTE` on every
+function an expression names when it first evaluates the expression in a transaction, whichever arm
+is taken, so an Administrator's first change of any Notifications setting in a transaction was
+refused with `42501`. `0248`'s suite did not see it, because its setup changed a setting as the owner
+first, in the same transaction. The guard uses nothing of the caller's, so it runs as its owner; no
+API role may run it directly.
+
+The file's self-check asserts that the channel list admits `email` and refuses another channel, that
+both settings are declared as a string and a list with the category and no `sensitive` mark, the
+roles' rule and the guard's arms, that `notification_channel_reaches()` keeps `0247`'s answers for the
+webhook and admits what email may carry, that the trigger, the reminders and the decision ask it, that
+`0250`'s arms are still there in its order, and that no API role runs the new functions.
+`test_aber_emails_the_people_an_alert_concerns.py` holds the route, the queue, the decision and the
+reminders for email.
+
+### An email goes to the people who hold the roles it names (0263)
+
+The people are found when the message is sent, as the dispatcher asks, so a role changed, a person
+removed or an address corrected after the row was queued counts.
+
+- **An address is `auth.users.email`.** `notification_email_address(user)` returns it, trimmed and
+  lower-cased, for a person who can sign in, and nothing for a machine identity (no way to sign in),
+  for access that was removed or that GoTrue bans (`person_access_is_removed()`, which `0166`
+  declares), or for an account with no address. A person with no address is told nothing, and the
+  delivery log says only how many people the relay took the message for.
+- **`notification_email_recipients(holder, delivery)` resolves one message.** For a test it is the
+  person who asked. For an alert it is the people in `user_roles` whose role `notifications.email_roles`
+  names now, each address once and in order. A machine identity's alert is told to Administrators
+  alone, whatever else is named. The dispatcher runs as the service role, past RLS, so the database
+  applies each alert's visibility itself. Only the pass holding the lease may ask (`55P03`).
+- **The log keeps counts, never addresses.** Every signed-in role reads `notification_deliveries`, and an
+  address is not theirs to read. `recipients` is how many people the relay took the message for and
+  `refused` how many addresses it refused while taking the others; both are NULL for the webhook and
+  until a send. The file's self-check refuses a column of that table that is not an integer and
+  could hold an address. A relay's words are kept with their addresses replaced, so `last_error` holds
+  none either.
+- **`record_notification_email_delivery()` records an email's outcome.** It calls
+  `record_notification_delivery()` and then writes the counts, and, for a send the relay part refused,
+  the relay's note in `last_error`. A new name beside the old one, since a changed signature would
+  have left `0247`'s behind on every database that has run it.
+- **A test goes to the Administrator who asks.** `queue_test_email_notification()` queues an email
+  `test` row for the caller's own address, so it checks the whole path: the relay, the sender and the
+  message. It is the Administrator's alone (`42501`), asks `require_mfa()` after its role check, as the
+  webhook's test does (`0251`), and is refused with `55000` when the account has no address. It keeps
+  the newest 20 finished email tests. Like the webhook's, it writes no Audit Trail row: the log row
+  names who asked.
+
+**The relay is the one GoTrue reads.** The dispatcher sends through `supabaseAuth.smtp` and the same
+optional `SMTP_PASSWORD` key, which the functions Deployment now reads too (`SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASS`, `SMTP_ADMIN_EMAIL`, `SMTP_SENDER_NAME`), and `main/index.ts` forwards to
+`notification-dispatch` alone. `supabaseFunctions.smtpCaCert` is an optional PEM, `SMTP_CA_PEM`, for a
+relay whose certificate a private authority signed; GoTrue cannot take one. A site configures the
+relay once. With no host or no sender address, email is unavailable, and the delivery log and the
+Settings page say which value to set. The functions pod needs an egress rule for the relay under
+`networkPolicy.enabled`, as it does for a webhook
+([`help/site/upgrading.md`](../help/site/upgrading.md#from-180-alerts-can-be-emailed)).
+
+**There is no mail library: the client is `notification-dispatch/smtp.ts`, about 400 lines.** A spike on
+the pinned runtime (`supabase/edge-runtime` v1.77.4, Deno 2.1.4) found that `Deno.connect`,
+`Deno.connectTls` and `Deno.startTls` open sockets to a relay on the site's network with no outbound
+filter of their own, where Supabase documents that its hosted functions refuse ports 25 and 587.
+It was measured against a stdlib Python receiver on 465 (implicit TLS) and 587 (STARTTLS) with AUTH
+PLAIN and LOGIN, a site CA, an untrusted issuer, a wrong host name, an expired certificate and a
+self-signed one. Every case behaved as written below, so no library is vendored, `deno.json` and
+`deno.lock` are unchanged and the image gains nothing to fetch.
+
+- **The port decides the security, as GoTrue's does.** 465 is TLS from the first byte. Any other port
+  upgrades with STARTTLS when the relay offers it, and asks for its capabilities again afterwards
+  (RFC 3207). A login is never sent without TLS: a relay that offers AUTH but no TLS gets the
+  message refused with that said, and a relay that offers neither gets the message in the clear.
+- **A certificate is checked against Deno's public roots plus `SMTP_CA_PEM`.** A certificate marked as
+  a certificate authority cannot be its own server's, whatever is trusted (`CaUsedAsEndEntity`): a
+  site with a self-signed relay certificate must issue a leaf from an authority. The runtime's
+  errors are turned into sentences (`not issued by an authority this platform trusts`, `not valid for
+  the relay's host name`, `has expired`).
+- **A refusal is final only when it is about the message.** A 5xx at the sender, a recipient, DATA or
+  after the final dot is dead at once. A relay that is down, a refused login or a certificate problem
+  is retried on the webhook's backoff, since a site can fix them. A relay that takes some addresses
+  and refuses others has sent the message: the refusals are counted and noted, because sending again
+  would repeat it to the people it reached.
+- **The message is built from fields.** Subject: `[Aber] <severity>: <alert> - <subject> (<event>)`.
+  A plain-text body: what fired, where, when, the values and labels the rule carried, the link the
+  alert counter opens, and why the person is told. English only (#446 translates it in 1.14). Headers
+  with non-ASCII text are RFC 2047 encoded words that never split a character, the body is
+  quoted-printable UTF-8, `To` is `undisclosed-recipients:;` with every address in the envelope
+  alone, and `Auto-Submitted: auto-generated` keeps an out-of-office reply from answering an alert. A
+  firing message is the thread's root, and a resolve or a reminder follows it in `References`.
+- **Bounds.** A step has 10 seconds and the whole exchange 15, inside the pass's 40-second budget
+  and the runtime's 60-second limit. A reply of more than 2,048 characters on a line, or of more than
+  100 lines, is refused. An address with a space, a bracket, a quote or a control character is refused
+  before any connection, and a header value cannot carry a line break.
+- **A GET answers the Settings page** whether the site has a relay and a sender (`SMTP_HOST` and
+  `SMTP_ADMIN_EMAIL`), for any signed-in person, since the database cannot see the functions' environment.
+
+The file's self-check asserts the two columns, that no column of the log could hold an address, the
+dispatcher's grants and pins, the Administrator's alone for the test, that the lookup is nobody's to
+call, and that a request with no person behind it, an id that is no account and a pass that holds no
+lease are refused. `test_aber_emails_the_people_an_alert_concerns.py` holds who is told and who is
+left out, the log, and the test by role. `notification-dispatch/smtp_test.ts`, `mail_test.ts` and
+`email_test.ts` hold the protocol against an in-memory relay (465 and 587, both AUTH methods, a
+refusal at each step, dot-stuffing, UTF-8, multi-line and byte-at-a-time replies, a stalled relay,
+hostile addresses), the encoding against decoders written apart from it, and the dispatcher's
+decisions. `test_notification_dispatch_email.py` is the stack suite.
+
+### A person can ask for a desktop notification when an alert starts firing (0264)
+
+While a dashboard tab is open somewhere, a firing alert can also raise a browser notification, so
+someone working in another window sees it. It is a person's own choice, off until they turn it on,
+and it follows them to any PC they sign in on.
+
+- **`user_settings.desktop_notifications`**, `boolean NOT NULL DEFAULT false`. Profile › Notifications
+  writes it, as a one-column upsert like the shortcuts' (`0194`). A row written before `0264` reads off.
+- **No new grant or policy.** `0188` grants on the table and its policies match rows, so both cover
+  the new column, and a person still reads and writes their own row only. The file's self-check
+  asserts that `anon` holds nothing on it.
+- **The database sends nothing.** The notification is raised by the dashboard tab, from the alerts
+  it already reads (`platform_alerts_active`, so it has the visibility the alert counter has: RLS
+  withholds a machine identity's alert from anyone but an Administrator). It queues nothing in
+  `notification_deliveries`, and the dispatcher (`0247`) does not see it. With no dashboard tab
+  open nothing arrives: reaching people away from the dashboard is what email and the webhook are for.
+- **The browser's permission is not stored.** A browser grants it per browser, so turning the setting
+  on, or signing in on a new PC with it on, brings up that browser's prompt. The column holds only
+  the person's wish.
+- **No site-wide switch.** A site that wants desktop notifications blocked does it through browser
+  policy, so there is no `system_settings` key for it.
+
+The dashboard keeps a copy in `aber_desktop_notifications` and reads and writes the column through
+`useUserSettings.js`; `useDesktopAlerts.js` raises and closes the notifications. `test_user_settings.py`
+holds the default, the one-column save and that nobody else's row is reachable.
+
 ### History averages a metric by the hour of the day (0265)
 
 The Cell tab's heatmap colours each machine's mean at each hour of the day, 00 to 23, across the
@@ -4627,6 +4803,81 @@ shared (so one read varied by up to 40%):
 standing in for the hourly rollup. The file's self-check asserts one form, `STABLE`,
 `SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
 read, so it holds on a stack with no historian.
+
+### A derived metric is a catalogue row (0267)
+
+A derived metric is a metric whose value Aber computes from other metrics, such as parts per hour
+from a part counter ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)). It is a
+`metric_catalog` row with its definition in the new `derivation` column, so the schema builder, the
+AAS exporter and the telemetry export still read one table. A row with no derivation is measured,
+as every row was before. This file keeps the definition and refuses a bad one. It computes nothing:
+`derived_series()` is a later migration, and nothing is stored for a derived metric.
+
+**`derivation` is one `jsonb` column, not a column for each part.** The three kinds hold different
+parts: one input, one input and its states, or a signed list of inputs. Separate columns would be
+null for most rows and would need parallel arrays for a sum's signs. One column keeps a measured
+row as it was (NULL) and a fourth kind needs no new column. `derivation_shape_problem()` says what is
+wrong with a definition's shape, and the CHECK `metric_catalog_derivation_shape` refuses any row
+for which it says something. The kinds, in `utils/derivedMetric.js` too (mirror check 80):
+
+| Kind | Definition | Value | Unit |
+| :--- | :--- | :--- | :--- |
+| `counter_rate` | `{"kind": "counter_rate", "input": name}` | the counter's increase per hour; a fall is a reset, and the new value counts as the increase | the input's unit followed by `/HOUR`, `COUNT/HOUR` for an input with none |
+| `time_in_state` | `{"kind": "time_in_state", "input": name, "states": [...]}` | the share of time the input is in those states, 0 to 1, resolved to the minute | none |
+| `sum` | `{"kind": "sum", "inputs": [{"metric": name, "sign": 1 or -1}, ...]}` | the signed sum of two to eight inputs | the unit the inputs share |
+
+**`enforce_derived_metric()` is the trigger that checks a save**, `BEFORE INSERT OR UPDATE`, so its
+reason is the one the dialog shows. Each refusal is a `check_violation` (`23514`) naming what is
+wrong:
+
+- **Every input is in the catalogue, measured and of the right kind.** A derived input is refused,
+  so a derived metric cannot be built on another. A rate and a sum read numbers (Sparkplug datatypes
+  1 to 10). A time in state reads a string or a boolean. A deprecated input is allowed: deprecating
+  a metric withholds it from new schemas, and its readings are still there.
+- **A sum's inputs share one unit, and the row takes it.** No unit counts as a unit: a metric in
+  kilowatts and one with none cannot be added. The trigger sets `units` from the inputs, and refuses
+  a `units` that is something else, so the row cannot disagree with its definition.
+- **A state is one the input can report.** A boolean reports `true` or `false`. A string with
+  `permitted_values` reports those. One without them takes any state, which the dialog says.
+- **The name is not one any device has declared.** Any row of `devices` counts, archived ones
+  included, by `last_birth_metrics`. The device could publish it, and both would put readings in one
+  series. The trigger is `SECURITY DEFINER` so it reads every device whatever the writer's policies
+  show. It writes nothing but the row's own unit.
+- **No semantic id, standard or permitted values, and the datatype is Double.** A derived metric is a
+  local extension (see [A local extension carries no minted id](#a-local-extension-carries-no-minted-id-archived-migration-0149)),
+  computed rather than reported.
+- **A measured metric cannot become derived, and a derived metric's definition and unit cannot
+  change.** Devices may already publish a measured name, and its history would mix two sources.
+  Nothing is stored for a derived one, so an edit would change every past value. A changed
+  definition is a new derived metric, and the old one is deprecated with `superseded_by` pointing at
+  it, as for any metric. A description, a deprecation and a restore are not edits of the definition.
+- **An input's unit cannot change while a rate or a sum is built on it.** Their units follow the
+  inputs and nothing is stored, so a changed input unit would leave the derived row stale and alter
+  its past values. A deprecated derived metric counts. The reason names one derived metric and how
+  many more. A time in state has no unit to follow, so a unit change and a permitted-values edit on
+  its input are allowed.
+
+**The writers are the table's own policies**, as for any catalogue row: Administrator only, and
+behind `require_mfa()` where the second factor is required. `trg_metric_catalog_audit_trail` files
+the save as it files any catalogue change, with the definition in `new_data`. No audit action kind
+is new. The shape function is granted to `authenticated` and `service_role` by name, because the
+CHECK runs as the writer. The trigger function is not granted to anyone.
+
+**What a derived metric is not yet.** No schema holds one: the schema builders leave it out, since
+nothing publishes it. The AAS export and ingestion are as they were. A device that declares a derived
+name after the row exists is not refused until ingestion drops it. The i3X service lists a catalogue
+type for it that no device carries.
+
+**How it will be read.** A counter rate and a sum's average read the 1-minute rollup
+(`telemetry_1m`, through `telemetry_carried()`) at every bucket width. Measured against raw on a
+private historian, the rollup that matches the bucket loses what was counted before a reset inside
+the bucket (up to 60% of an hour with one reset), and its average weighs a quiet input's few
+samples as if they were its time. A time in state is within a percentage point of raw at a day. Both
+the figures and the reads' cost are in [the issue's spike comment](https://github.com/Harri-Llewelyn/Aber/issues/324).
+
+`test_a_derived_metric_is_a_catalogue_row.py` holds all of the above. The file's self-check asserts
+the column, the CHECK, the trigger's timing, what the shape function says of a few definitions and
+the grants, and reads no row.
 
 ### History folds one metric across the devices of each group (0276)
 
@@ -9497,6 +9748,7 @@ person's.
 | `theme` | `dark` (the default) or `light`, by CHECK |
 | `sidebar_mode` | `hover` (the default), `expanded` or `collapsed`, by CHECK |
 | `single_key_shortcuts` | `true` (the default) or `false`: whether `?`, `/`, `[` and `]` act (`0194`) |
+| `desktop_notifications` | `false` (the default) or `true`: whether a dashboard tab they have open raises a browser notification when an alert starts firing (`0264`) |
 | `updated_at` | Stamped by `user_settings_stamp()` on every write; the caller cannot supply it |
 
 - **Typed columns, not key/value rows.** The database refuses a value the dashboard does not know,
@@ -9508,7 +9760,7 @@ person's.
   `service_role` hold nothing.
 - **Not audited.** A display choice is not platform state, so the table has no audit trigger.
 - **The browser keeps a copy** in localStorage (`aber_theme`, `aber_sidebar_mode`,
-  `aber_single_key_shortcuts`), so the page
+  `aber_single_key_shortcuts`, `aber_desktop_notifications`), so the page
   paints in the right theme before the row arrives, and the sign-in screen, which has no account
   yet, shows the theme last used on that PC. Once the row loads it wins, and the copy follows it.
 - **A first row keeps the browser's choice.** A person with no row gets one seeded from the
