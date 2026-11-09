@@ -263,8 +263,9 @@ people's accounts in GoTrue, and it is narrow by construction.
 - **Machine identities are never people.** `list_people()` leaves them out, every function refuses
   them, and `refuse_role_for_machine_principal()` still refuses a role at the table.
 - **A person's own preferences are theirs alone.** `user_settings` (`0188`) holds each person's
-  theme, sidebar layout and whether single-key shortcuts are on (`0194`). RLS admits the row's own person and nobody else, an Administrator
-  included; `anon` and `service_role` hold nothing on it, and deleting the account deletes the row.
+  theme, sidebar layout, whether single-key shortcuts are on (`0194`) and whether a firing alert
+  raises a desktop notification (`0264`). RLS admits the row's own person and nobody else, an
+  Administrator included; `anon` and `service_role` hold nothing on it, and deleting the account deletes the row.
   It is not audited: a display choice is not platform state.
 - **Every role reads the site's settings.** The Settings page is shown to every signed-in account,
   read-only for anyone but an Administrator, because `system_settings_select_authenticated` already

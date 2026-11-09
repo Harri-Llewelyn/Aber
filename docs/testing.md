@@ -617,11 +617,11 @@ python supabase/migrations/test_reading_a_service_s_logs_is_recorded.py
 # in order and at most 169 hours apart; one six-argument form, its ends defaulting to NULL, after
 # 0225 and 0230 replay over the four-argument one. Every test rolls back.
 python supabase/migrations/test_a_logs_read_names_a_range_or_a_fixed_window.py
-# A person's own preferences (0188, 0194). Each person reads, creates and changes their own
+# A person's own preferences (0188, 0194, 0264). Each person reads, creates and changes their own
 # user_settings row and nobody else's, an Administrator included; anon and service_role hold
 # nothing; the CHECKs refuse an unknown theme or sidebar mode; single-key shortcuts start on and
-# are never null; the first sign-in's seed never overwrites a row; and deleting the account
-# deletes the row, with nothing in the Audit Trail.
+# desktop notifications off, and neither is ever null; the first sign-in's seed never overwrites a
+# row; and deleting the account deletes the row, with nothing in the Audit Trail.
 python supabase/migrations/test_user_settings.py
 # A person can have a display name (0203). A person sets only their own and an Administrator
 # anyone's, never a machine identity's; the CHECKs refuse 81 characters and a control character,
