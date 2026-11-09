@@ -2,26 +2,16 @@ import React, { useState, useMemo } from 'react'
 import { IconAlertTriangle, IconFileCode } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction } from '../../hooks/usePendingAction'
-import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
+import { datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { catalogPropertyEntry, isNumericType, rangeError } from '../../utils/schemaProperty'
-import { groupCatalog } from '../../utils/metricGroup'
-import { STANDARD_OPTIONS, LOCAL_EXTENSION_LABEL } from '../../utils/standards'
+import { MetricPicker } from '../common/MetricPicker'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { SemanticIdField } from '../common/SemanticIdField'
 import { Tooltip } from '../common/Tooltip'
 
-/** Sentinel for the standard filter's default. Not a `standard` value -- '' means local extension. */
-const ANY_STANDARD = '__any__'
-
 /** Border treatment for a field a save attempt found empty, or a range that cannot be saved. */
 const INVALID_FIELD = { borderColor: 'var(--danger)' }
-
-/** A metric picker's row, shared with a draft's editor: the label with its tick, then any range. */
-export const PICKER_ROW = { display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)' }
-export const PICKER_ROW_LABEL = {
-  display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 auto', minWidth: 0, padding: '8px 12px', cursor: 'pointer'
-}
 
 /** What the asterisk means on this form's labels. */
 const REQUIRED = 'Required: the schema cannot be saved without it'
@@ -32,23 +22,6 @@ function FieldError({ children }) {
     <div role="alert" className="form-hint hint-danger">
       <IconAlertTriangle size={12} /> {children}
     </div>
-  )
-}
-
-/**
- * A group's band in a metric picker: the group's name, and how many of its listed metrics are
- * ticked once any are. Pinned to the top of the list while its metrics are in view.
- */
-export function MetricGroupHeading({ group, picked, title }) {
-  return (
-    <Tooltip text={title}>
-      <div className="metric-picker-group">
-        <span className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}>
-          {group.label}
-        </span>
-        {picked > 0 && <span className="metric-picker-group-selected">{picked} selected</span>}
-      </div>
-    </Tooltip>
   )
 }
 
@@ -103,8 +76,6 @@ export const rangeProblems = (entries) =>
 export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
   const [schemaName, setSchemaName] = useState('')
   const [description, setDescription] = useState('')
-  const [search, setSearch] = useState('')
-  const [standard, setStandard] = useState(ANY_STANDARD)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [semanticId, setSemanticId] = useState('')
   const [semanticIdType, setSemanticIdType] = useState('')
@@ -117,18 +88,8 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
   // A refusal of the save, as the database worded it. The builder stays open with what was chosen.
   const [error, setError] = useState(null)
 
-  const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
-
-  // The standard filter narrows what is listed, never what is selected: a schema legitimately mixes
-  // standards, such as ISO KPIs beside the MTConnect observations they are computed from.
-  const filteredCatalog = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return activeCatalog.filter(m => {
-      if (standard !== ANY_STANDARD && (m.standard || '') !== standard) return false
-      if (!q) return true
-      return m.name.toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q)
-    })
-  }, [activeCatalog, search, standard])
+  // A derived metric is not offered: nothing publishes it, so a schema cannot model it.
+  const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated && !m.derivation), [catalog])
 
   const toggleMetric = (id) => {
     setSelectedIds(prev => {
@@ -260,78 +221,20 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
         </label>
         {metricsMissing && <FieldError>Tick at least one metric. A schema with none constrains nothing.</FieldError>}
         {showRequired && badRanges.length > 0 && <FieldError>Fix the range of {badRanges.join(' ')}</FieldError>}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-          <input
-            className="form-control"
-            style={{ flex: '1 1 auto' }}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search catalog metrics…"
-          />
-          {/* Filters the list only; selections survive a change here. */}
-          <Tooltip text="Metrics already selected stay selected.">
-            <select
-              className="form-control"
-              style={{ flex: '0 0 165px' }}
-              value={standard}
-              onChange={e => setStandard(e.target.value)}
-              aria-label="Standard"
-            >
-              <option value={ANY_STANDARD}>All standards</option>
-              {STANDARD_OPTIONS.map(o => (
-                <option key={o.label} value={o.value}>
-                  {o.value === '' ? LOCAL_EXTENSION_LABEL : o.label}
-                </option>
-              ))}
-            </select>
-          </Tooltip>
-        </div>
-        {/* Takes the height the fields above leave, and scrolls inside itself. */}
-        <div style={{ flex: '1 1 auto', minHeight: '160px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-          {filteredCatalog.length === 0 ? (
-            <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>No matching catalog metrics.</div>
-          ) : (
-            // Grouped as on the Metrics page, and applied to the search results so a filtered list
-            // stays navigable.
-            groupCatalog(filteredCatalog).map(group => (
-              <div key={group.label}>
-                <MetricGroupHeading
-                  group={group}
-                  picked={group.metrics.filter(m => selectedIds.has(m.metric_uuid)).length}
-                  title={group.isUngrouped ? 'Metric names carrying no "Group/Metric" prefix' : `Metrics named "${group.label}/…"`}
-                />
-                {group.metrics.map(m => {
-                  const ticked = selectedIds.has(m.metric_uuid)
-                  return (
-                    // The range sits outside the label, so typing in it never toggles the tick.
-                    <div key={m.metric_uuid} style={{ ...PICKER_ROW, paddingRight: ticked && takesRange(m) ? '12px' : 0 }}>
-                      <label style={PICKER_ROW_LABEL}>
-                        <input type="checkbox" checked={ticked} onChange={() => toggleMetric(m.metric_uuid)} />
-                        <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
-                        {/* Which standard a metric came from is what makes a mixed-standard schema
-                            legible; the tick marks the ones carrying an AAS semantic id. */}
-                        <Tooltip text={m.semantic_id ? `Semantic id ${m.semantic_id}` : null}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
-                            {m.standard || LOCAL_EXTENSION_LABEL}{m.semantic_id ? ' ✓' : ''}
-                          </span>
-                        </Tooltip>
-                        {m.description && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>{m.description}</span>}
-                      </label>
-                      {ticked && takesRange(m) && (
-                        <PropertyRange
-                          name={m.name}
-                          range={rangeOf(m.name)}
-                          onChange={range => setRanges(prev => ({ ...prev, [m.name]: range }))}
-                        />
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            ))
+        {/* The search and the standard filter narrow what is listed, never what is selected. */}
+        <MetricPicker
+          metrics={activeCatalog}
+          isPicked={m => selectedIds.has(m.metric_uuid)}
+          onPick={m => toggleMetric(m.metric_uuid)}
+          // The range sits beside the row, outside its label, so typing in it never toggles the tick.
+          renderExtra={(m, ticked) => ticked && takesRange(m) && (
+            <PropertyRange
+              name={m.name}
+              range={rangeOf(m.name)}
+              onChange={range => setRanges(prev => ({ ...prev, [m.name]: range }))}
+            />
           )}
-        </div>
+        />
       </div>
     </Modal>
   )

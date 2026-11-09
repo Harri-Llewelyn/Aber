@@ -1524,6 +1524,19 @@ of System, with its sort order and other settings.
 Nothing else is renamed. The database and the API keep their names, such as `directory_services`.
 So does the Factory+ Directory, at `/ping` and `/v1/`.
 
+### From 1.8.0, the metric catalog can hold derived metrics
+
+The **Metrics** page has a new **Derived** tab. A derived metric is one Aber computes from others,
+such as parts per hour from a part counter. It is a row of `metric_catalog` with a new `derivation`
+column, which is `null` for every metric you have. The upgrade adds the column and changes no row.
+
+Check any client that reads the catalog from `/rest/v1/metric_catalog`:
+
+- **A response has a new `derivation` key.** It is `null` for a measured metric.
+- **Skip a row whose `derivation` is not null** when you build a schema or a device's list of
+  metrics. No device publishes a derived metric, and it has no semantic id. The dashboard's schema
+  builder already leaves them out.
+
 ### From 1.8.0, `cells.grafana_url` is removed
 
 1.7.0 deprecated a cell's `grafana_url` (see
