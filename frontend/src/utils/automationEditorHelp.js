@@ -140,7 +140,8 @@ export function rangeWords(range, unit) {
 
 /** One line as a cursor sees it: its indent, whether it opens a list item, and the key it carries. */
 function parseLine(raw) {
-  const m = /^( *)((?:- +|-$)?)(.*)$/.exec(raw)
+  // `[^\n]`, not `.`: a line that keeps a carriage return (text pasted from a file) is still a line.
+  const m = /^( *)((?:- +|-$)?)([^\n]*)$/.exec(raw)
   const indent = m[1].length
   const dash = m[2] !== ''
   const rest = m[3]

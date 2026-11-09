@@ -140,6 +140,12 @@ describe('completing a key', () => {
     expect(at('- id: a\n  actions:\n    |').options[0].apply).toBe('- action: alert\n      severity: warning')
   })
 
+  it('reads a line that keeps its carriage return, as text pasted from a file does', () => {
+    const text = '- id: lathe\r\n  alias: Lathe\r\n  act'
+    expect(labels(completionsAt(text, text.length, facts))).toEqual(['actions'])
+    expect(() => hoverAt('- id: lathe\r\n  alias: Lathe\r\n', 15, facts)).not.toThrow()
+  })
+
   it('offers nothing in a comment, in a place it cannot place, or past the keys it knows', () => {
     expect(at('- id: a\n  # alias|')).toBeNull()
     expect(at('- id: a # a|')).toBeNull()
