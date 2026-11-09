@@ -275,7 +275,7 @@ describe('Save', () => {
     expect(d.getByText('`above` is a number.')).toBeInTheDocument()
     expect(d.getByText('Line 7')).toBeInTheDocument()
     // Why it cannot go ahead, said above the buttons; the confirm looks refused.
-    expect(document.querySelector('.modal-problem')).toHaveTextContent('1 automation refused. Fix the lines named below, then try again.')
+    expect(document.querySelector('.modal-problem')).toHaveTextContent('1 automation refused. Fix the lines named above, then try again.')
     const confirm = d.getByRole('button', { name: 'Save 0 Automations' })
     expect(confirm).toBeDisabled()
     expect(confirm).toHaveClass('btn-disabled')

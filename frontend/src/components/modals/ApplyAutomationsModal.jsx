@@ -58,7 +58,7 @@ export function ApplyAutomationsModal({ text, source = null, verb = 'Apply', sho
 
   const problem = unread
     ? (parsed.empty ? 'The file is empty. Write at least one automation.' : 'The file is not YAML the page can read. Fix the lines below first.')
-    : refused > 0 ? `${plural(refused, 'automation')} refused. Fix the lines named below, then try again.` : null
+    : refused > 0 ? `${plural(refused, 'automation')} refused. Fix the lines named above, then try again.` : null
 
   const confirm = async () => {
     setApplyError(null)
