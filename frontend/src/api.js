@@ -256,6 +256,13 @@ export const COVERAGE_LARGE_MAX_HOURS = 169;
 export const COVERAGE_ROLLUP_MINUTES = Object.freeze([5, 60]);
 
 /**
+ * History's hour-of-day read, telemetry_hour_of_day() (0265): it reads one hourly bucket for each
+ * hour of the window for each device, and refuses more than HOUR_OF_DAY_MAX_ROWS of them, as
+ * telemetry_carried() does. The page checks the same arithmetic before it asks.
+ */
+export const HOUR_OF_DAY_MAX_ROWS = 50000;
+
+/**
  * The lower time bound applied when a caller supplies none.
  *
  * `public.telemetry` is a postgres_fdw projection whose LIMIT is often applied here, not on the
@@ -1415,6 +1422,30 @@ const apiMethods = {
     if (signal) call = call.abortSignal(signal);
     const { data, error } = await call;
     if (error) throw new Error(error.message || 'Could not read where readings arrived');
+    return data || [];
+  },
+
+  /**
+   * History's hour-of-day read (0265): for each device of `assetIds`, the mean of the numeric
+   * metric `metricName` at each hour of the day in `timeZone` (an IANA name), across the days of
+   * [from, to). One row per device per hour that has a value, `days` being how many local dates the
+   * mean spans. A text or a flag metric has no row. `assetIds` are device UUIDs or Sparkplug ids, as
+   * the telemetry routes take them. Throws on a refusal (an unknown time zone, more than
+   * HOUR_OF_DAY_MAX_ROWS hourly buckets) or a historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ asset_id: string, hour_of_day: number, mean_value: number, days: number }>>}
+   */
+  readHourOfDay: async ({ from, to, assetIds, metricName, timeZone }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_hour_of_day', {
+      from_ts: from,
+      to_ts: to,
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_name: metricName,
+      tz: timeZone
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the readings by the hour of the day');
     return data || [];
   },
 

@@ -18,15 +18,16 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
+import { AlertKey } from '../common/AlertKey'
 import { IconChartLine, IconCpu, IconDownload } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
-import { useBandDrag } from '../../hooks/useBandDrag'
+import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBands } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import { deviceIds } from '../../utils/sparkplugId'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
-import { bandWindow, bandWords, holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
+import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY,
   HISTORY_SPANS, TOO_MANY_BUCKETS, bucketOptions, bucketStarts, changeSeries, chartSeries, chartSummary, datatypeKind,
@@ -114,12 +115,6 @@ function BucketChoice({ value, options, onChange }) {
 /** A unit for each metric, from the catalog, by name. */
 const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, m.units ?? null]))
 
-/**
- * The charts' band drag (hooks/useBandDrag.js): a press on a chart's plot area or a state's strip,
- * each the window's width.
- */
-const CHART_BAND = { track: '.u-over, .chart-box-states' }
-
 /** Which groups this browser's viewer closed, by datatype. Not in the address: a link opens them all. */
 export const CLOSED_GROUPS_KEY = 'aber_history_closed_groups'
 
@@ -158,22 +153,6 @@ function metaWords({ names, total, groups, refused, reads, stateLine, textRead }
   const parts = reads > groups.length ? `, read in ${reads} parts` : ''
   const states = stateLine ? `; ${stateLine.line}` : ''
   return `${count}, in ${main.resolution.words}${why}${text ? `; text in ${text.resolution.words}` : ''}${parts}${states}`
-}
-
-/**
- * The key to the alert shading, beside the status line: its swatch named in words, and how many
- * alerts fired in the window, a link to them on the Alerts tab.
- */
-function AlertKey({ count, to }) {
-  return (
-    <p className="history-alert-key">
-      <span className="history-alert-swatch" aria-hidden="true" />
-      Shaded while an alert was firing:{' '}
-      <RouteLink to={to} className="count-link" title="List them on the Alerts tab">
-        {count} {count === 1 ? 'alert' : 'alerts'} in this window
-      </RouteLink>
-    </p>
-  )
 }
 
 /** How long a change of width settles before the text charts' buckets are picked again. */
@@ -390,17 +369,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
 
   // A drag across a chart: its fractions are of the window the charts draw, the read's.
   const drawnSpan = reading?.byMetric ? { start: reading.start, ms: reading.end - reading.start } : null
-  const atFraction = (f) => drawnSpan.start + drawnSpan.ms * f
-  const { band, onPointerDown: startBand } = useBandDrag((a, b) => {
-    if (drawnSpan) setWin(bandWindow(atFraction(a), atFraction(b), drawnSpan.ms), { replace: false })
-  }, CHART_BAND)
-  /** The band as drawn: its ends as fractions, and the window a release sets, in words. */
-  const shownBand = band && drawnSpan ? (() => {
-    const lo = Math.min(band.a, band.b)
-    const hi = Math.max(band.a, band.b)
-    const { start, end } = windowBounds(bandWindow(atFraction(lo), atFraction(hi), drawnSpan.ms))
-    return { lo, hi, mid: (lo + hi) / 2, words: bandWords(start, end, now) }
-  })() : null
+  const { band: shownBand, onPointerDown: startBand } = useChartBand({ span: drawnSpan, setWin, now })
 
   return (
     <>

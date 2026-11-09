@@ -1,0 +1,26 @@
+{
+  "about": "Units are not written.",
+  "path": "$[0].triggers[0].below",
+  "database": false,
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "for": "5m",
+          "below": "80 C"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ]
+    }
+  ]
+}

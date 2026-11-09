@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { areaUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
+import { areaUrl, cellHistoryUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -28,6 +28,7 @@ import { RestoreEntityModal } from '../modals/RestoreEntityModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
   IconLayoutDashboard,
+  IconChartLine,
   IconPlus,
   IconPencil,
   IconArchive,
@@ -762,6 +763,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 : !canManage && !canPropose
                   ? requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)
                   : 'Edit cell configuration'
+          },
+          {
+            // Ungated, as the History page is: the machines of this cell compared over time, one
+            // metric on one scale, and their hours of the day.
+            label: 'View History', icon: <IconChartLine size={13} />,
+            to: cellHistoryUrl(selectedCell.cell_id),
+            title: "Compare this cell's machines over time on the History page"
           },
           /* Withheld from a reader who may not open the page: the nav hides Audit Trail without
              `audit_trail:read`. `.filter(Boolean)` drops it. */

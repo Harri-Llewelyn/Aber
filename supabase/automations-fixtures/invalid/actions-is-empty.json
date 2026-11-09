@@ -1,0 +1,21 @@
+{
+  "about": "An automation takes one action.",
+  "path": "$[0].actions",
+  "database": false,
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m"
+        }
+      ],
+      "actions": []
+    }
+  ]
+}

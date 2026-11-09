@@ -132,6 +132,7 @@ export const SETTINGS_TABS = [
 export const HISTORY_TABS = [
   { id: 'overview', label: 'Overview', description: 'Where readings arrived over the window: a lane for each device, darker where more arrived, grouped by area and cell.' },
   { id: 'device', label: 'Device', description: "One device's metrics over the window you choose, a chart each, on one time axis." },
+  { id: 'cell', label: 'Cell', description: "One metric across every machine in a cell, a chart each on one scale so the odd one stands out, and its mean at each hour of the day." },
   { id: 'alerts', label: 'Alerts', description: 'Every alert that fired over the window you choose, with who acknowledged it and why.' },
 ]
 

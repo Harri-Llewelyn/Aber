@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aber automations",
+  "description": "A list of automations. An automation watches a reading and raises an alert: when a device's metric is above or below a number, held for as long as `for` says. This file describes exactly what Aber accepts. Anything else is refused, not ignored. The database is the authority: it also checks that each device and metric exists, and that no `id` is used twice in the file.",
+  "type": "array",
+  "maxItems": 500,
+  "items": { "$ref": "#/$defs/automation" },
+  "$defs": {
+    "automation": {
+      "title": "Automation",
+      "description": "One automation. Its `id` is its fixed name: uploading a file with the same `id` updates that automation instead of adding a copy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "alias", "triggers", "actions"],
+      "properties": {
+        "id": {
+          "description": "The automation's fixed name: 1 to 64 lowercase letters, digits, hyphens or underscores, starting with a letter or a digit. A re-upload with the same id updates this automation.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "examples": ["lathe-3-spindle-hot"]
+        },
+        "alias": {
+          "description": "The name the list shows: 1 to 120 characters, with no space at either end.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^\\S(.*\\S)?$",
+          "examples": ["Lathe 3 spindle bearing hot"]
+        },
+        "description": {
+          "description": "What the automation is for, in your words, up to 1,000 characters. The file keeps no comments, so this is where words go. Optional; empty when left out.",
+          "type": "string",
+          "maxLength": 1000
+        },
+        "enabled": {
+          "description": "Whether the automation is evaluated. Optional: true when left out, so a file without it turns a disabled automation back on. An enabled automation needs at least one trigger.",
+          "type": "boolean",
+          "default": true
+        },
+        "triggers": {
+          "description": "What starts the automation. Any one of them fires it. Each device a trigger names is evaluated on its own. At least one unless `enabled` is false.",
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/thresholdTrigger" }
+        },
+        "conditions": {
+          "description": "Checks made when a trigger fires. This release has no condition types, so leave this out or empty.",
+          "type": "array",
+          "maxItems": 0
+        },
+        "actions": {
+          "description": "What the automation does when a trigger fires. This release takes exactly one action, an `alert`.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/$defs/alertAction" }
+        }
+      },
+      "if": {
+        "required": ["enabled"],
+        "properties": { "enabled": { "const": false } }
+      },
+      "then": {},
+      "else": {
+        "properties": { "triggers": { "minItems": 1 } }
+      }
+    },
+    "deviceId": {
+      "description": "A device's id, a lowercase uuid as the Devices page shows it. Devices are named by id because device names are not unique. The device must exist and not be archived.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "thresholdTrigger": {
+      "title": "threshold",
+      "description": "Fires when the latest value of a metric on a device is above, or below, a number, and has stayed so for `for`. A reading that does not arrive neither starts nor clears it: it compares the last value known.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger", "device", "metric"],
+      "properties": {
+        "trigger": {
+          "description": "The trigger's type. `threshold` is the one this release has.",
+          "const": "threshold"
+        },
+        "device": {
+          "description": "The device to watch: one id, or a list of ids. Each device in a list is evaluated, and fires, on its own.",
+          "oneOf": [
+            { "$ref": "#/$defs/deviceId" },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 500,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/deviceId" }
+            }
+          ]
+        },
+        "metric": {
+          "description": "The catalogue name of the metric, such as Spindle/BEARING_TEMPERATURE. It must be in the metric catalogue and a number.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$"
+        },
+        "above": {
+          "description": "Fires while the value is greater than this number. Give `above` or `below`, not both. In the metric's catalogue unit: never write a unit.",
+          "type": "number"
+        },
+        "below": {
+          "description": "Fires while the value is less than this number. Give `above` or `below`, not both. In the metric's catalogue unit: never write a unit.",
+          "type": "number"
+        },
+        "for": {
+          "description": "How long the breach must hold before the trigger fires: a whole number and s, m or h, such as 30s, 5m or 1h, up to 999 of one unit. 0s, the default, fires on the first breach.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,2})[smh]$",
+          "default": "0s"
+        }
+      },
+      "oneOf": [
+        { "required": ["above"] },
+        { "required": ["below"] }
+      ]
+    },
+    "alertAction": {
+      "title": "alert",
+      "description": "Raises an alert on the Alerts page, in History and in the counter, for the device and metric that breached. It resolves when the breach ends, or when the automation is disabled or deleted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "severity"],
+      "properties": {
+        "action": {
+          "description": "The action's type. `alert` is the one this release has.",
+          "const": "alert"
+        },
+        "severity": {
+          "description": "How serious the alert is: critical, warning or info.",
+          "enum": ["critical", "warning", "info"]
+        }
+      }
+    }
+  }
+}

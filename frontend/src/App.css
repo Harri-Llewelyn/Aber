@@ -6246,6 +6246,68 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-bucket-choices { display: flex; flex-direction: column; gap: 6px; }
 .history-bucket-choices .btn { justify-content: flex-start; }
 
+/* ===== History: Cell ===== */
+/* A device's status dot with its tooltip, in Overview's lanes, the machines' charts and the
+   heatmap's rows. */
+.device-status-dot { display: inline-flex; flex-shrink: 0; }
+/* The machines' charts, the Device tab's stack of charts, each titled by its machine, under one
+   line that says they share a scale (SmallMultiples). */
+.multiples { display: flex; flex-direction: column; gap: var(--stack); min-width: 0; }
+.multiples-scale { margin: 0; font-size: 12px; color: var(--text-muted); }
+.multiple-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(100%, 24rem);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.multiple-link { min-width: 0; color: var(--accent-text); text-decoration: none; }
+.multiple-link:hover .multiple-name-text,
+.multiple-link:focus-visible .multiple-name-text { text-decoration: underline; }
+/* A machine that does not report the metric: a line in words where its chart would be. */
+.multiple-absent { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--text-muted); }
+/* A section's body under its heading, and the words that open it. */
+.cell-section { min-width: 0; padding: 12px var(--inset) var(--inset); }
+.cell-section[hidden] { display: none; }
+.cell-note { margin: 0 0 10px; font-size: 12px; color: var(--text-muted); }
+/* The hour-of-day heatmap: a column of machine names, then 24 columns that share the rest of the
+   width, so nothing scrolls sideways. A cell takes its shade from .heatmap-step-N, Overview's
+   ramp; one with no value is the card with an edge, as Overview's block with no readings is. */
+.heatmap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.heatmap-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.heatmap-key-item { display: inline-flex; align-items: center; gap: 6px; }
+.heatmap-swatch { display: inline-block; flex-shrink: 0; width: 14px; height: 10px; border-radius: 2px; }
+.heatmap-grid { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.heatmap-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 11rem) repeat(24, minmax(0, 1fr));
+  align-items: center;
+  gap: 2px;
+}
+.heatmap-label { display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: 6px; font-size: 12px; color: var(--text-primary); }
+.heatmap-name { min-width: 0; font-weight: 600; }
+.heatmap-hour { overflow: visible; font-size: 11px; line-height: 1; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.heatmap-cell { height: 22px; min-width: 0; border-radius: 2px; cursor: default; }
+.heatmap-cell:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
+.heatmap-step-1 { background: var(--coverage-1); }
+.heatmap-step-2 { background: var(--coverage-2); }
+.heatmap-step-3 { background: var(--coverage-3); }
+.heatmap-step-4 { background: var(--coverage-4); }
+.heatmap-cell-none { background: var(--bg-card); box-shadow: inset 0 0 0 1px var(--border-hover); }
+.heatmap-absent { grid-column: 2 / -1; font-size: 12px; color: var(--text-muted); }
+/* What the cell under the pointer or focus is, in words, under the grid; the line keeps its height
+   so the grid does not move as the words change. */
+.heatmap-readout { min-height: 1.5em; margin: 0; font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); overflow-wrap: anywhere; }
+
 /* ===== History: Overview ===== */
 /* Overview is the Audit Trail's lane grid (.trail-swimlanes, .trail-lane, .trail-section,
    .trail-axis): a label column, then a track a row, under the same axis, at the same widths and
@@ -6263,12 +6325,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .overview-lane-deep .trail-lane-label { padding-left: calc(var(--trail-name-indent) + 18px); }
 /* A lane's label: tick box, status dot, name, then the metric count as the qualifier. */
 .overview-pick { flex-shrink: 0; margin: 0; }
-.overview-status { display: inline-flex; flex-shrink: 0; }
 .overview-lane-name { min-width: 0; text-decoration: none; }
 .overview-lane-name .trail-lane-name { display: block; color: var(--accent-text); }
 .overview-lane-name:hover .trail-lane-name,
 .overview-lane-name:focus-visible .trail-lane-name { text-decoration: underline; }
-.overview-lane-offline { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+.device-offline-word { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
 /* A track's blocks: a run of one shade a box, between the row's rules, on the track's own colour. */
 .overview-track { cursor: crosshair; user-select: none; }
 .overview-run { position: absolute; top: 7px; bottom: 7px; }

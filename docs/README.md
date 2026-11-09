@@ -8,3 +8,6 @@ guide, the tutorial, the glossary and the dashboard's help.
 
 The [architecture overview](architecture.md#repository-map) lists every folder in the repository
 and what each covers. Each component's own README sits beside its code.
+
+The [automations reference](automations.md) is the format of the file a person writes or uploads to
+raise an alert: its keys, what the database does with it, and what happens when a device goes.

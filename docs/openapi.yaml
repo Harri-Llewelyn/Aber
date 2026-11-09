@@ -883,6 +883,44 @@ paths:
         '401': { description: 'Not authenticated; `anon` may not call it.' }
         '503': { description: 'The historian could not be reached.' }
 
+  /rest/v1/rpc/telemetry_hour_of_day:
+    post:
+      tags: [Telemetry]
+      summary: Average one numeric metric by the hour of the day
+      description: |
+        What the History page's Cell tab reads for its heatmap (`0265`). For each device asked for,
+        the mean of one metric at each hour of the day, 0 to 23, in the time zone given, across the
+        days of the window. It reads `/rest/v1/rpc/telemetry_carried` at one hour, so a quiet hour
+        counts as the value carried into it, and every hour weighs the same however many readings it
+        held. One row per device per hour that has a value: a text or a flag metric has no row, and
+        a device with nothing to carry has none before its first value.
+
+        The hour is the one an hourly bucket starts in, so in a time zone offset by part of an hour
+        a bucket is filed under the hour it begins in. `days` is how many local dates the mean
+        spans. `SECURITY INVOKER`, so it reads what the caller may read through the telemetry
+        views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, asset_ids, metric_name, tz]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id). Hours times devices is at most 50,000.' }
+                metric_name: { type: string, example: Spindle/LOAD, description: 'One metric.' }
+                tz: { type: string, example: Europe/London, description: 'The time zone the hours are in: an IANA name.' }
+      responses:
+        '200':
+          description: One row per device per hour of the day, ordered by device and hour.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryHourOfDayRow' } }
+        '400': { description: 'Bounds out of order, a list or the metric missing, a time zone Postgres does not know, or more than 50,000 hours times devices, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   /rest/v1/rpc/telemetry_coverage:
     post:
       tags: [Telemetry]
@@ -2306,6 +2344,171 @@ paths:
         '400': { description: 'The window has already ended (`23514`).' }
         '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
         '404': { description: 'No such window.' }
+
+  /rest/v1/rpc/apply_automations:
+    post:
+      tags: [Registry]
+      summary: Check a document of automations, and apply it
+      description: |
+        The one call that validates and applies an Automations file (`0256`). The browser parses the
+        YAML into JSON and sends the list; the database checks every field, resolves every device and
+        metric, and checks the caller's right. The file format is in
+        [`docs/automations.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/docs/automations.md),
+        and the dashboard serves its JSON Schema at `/json-schema/automations.schema.json`.
+
+        It answers one result per automation: its `status` (`new`, `changed`, `unchanged` or
+        `refused`) and, for a refusal, `reasons`, each with a JSON `path` such as
+        `$[0].triggers[1].above`. All or nothing: with any refusal nothing is written, and with
+        `p_dry_run` true nothing is written either, so a preview and an apply are the same call. It
+        never deletes: an automation the document leaves out is left alone. An automation is found
+        by its `id`; a re-upload updates it. A change writes one `AUTOMATION_CREATED`,
+        `AUTOMATION_CHANGED`, `AUTOMATION_ENABLED` or `AUTOMATION_DISABLED` row in the Audit Trail;
+        an unchanged automation writes none.
+
+        A Shopfloor Manager or an Administrator may call it, and with the second-factor switch on
+        their session must have given its code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_doc, p_dry_run]
+              properties:
+                p_doc: { type: array, items: { type: object }, description: 'The automations, as the JSON Schema describes them. At most 500.' }
+                p_dry_run: { type: boolean, description: 'True to preview and write nothing; false to apply.' }
+      responses:
+        '200':
+          description: One result per automation, in the document's order. A document that is not a list answers one refused result with the path `$`.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AutomationResult' }
+        '400': { description: '`p_dry_run` missing (`22023`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator, or the second factor is required (`42501`).' }
+
+  /rest/v1/rpc/automations_document:
+    post:
+      tags: [Registry]
+      summary: Read the automations in the document's shape
+      description: |
+        The rows rendered back to the shape `apply_automations` takes (`0256`): `automations`, all of
+        them or the keys asked for, ordered by key; and `devices`, for each device they name its
+        current `name` and `place`, for the page to write as a comment beside the id. Trigger rows
+        archived with their device are left out. `apply_automations` of the `automations` list
+        reports every one `unchanged`. Every signed-in role may call it.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                p_keys: { type: array, nullable: true, items: { type: string }, description: 'The automation ids to render. Null renders all of them.' }
+      responses:
+        '200':
+          description: The automations and the devices they name.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  automations: { type: array, items: { type: object } }
+                  devices:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        place: { type: string, nullable: true, example: 'Cell 2 · Machining' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+
+  /rest/v1/rpc/set_automation_enabled:
+    post:
+      tags: [Registry]
+      summary: Turn an automation on or off
+      description: |
+        The list's switch (`0256`). Turning one off resolves its open alerts. Enabling one with no
+        live trigger is refused: its triggers are archived or gone. Writes one `AUTOMATION_ENABLED`
+        or `AUTOMATION_DISABLED` row in the Audit Trail, or nothing when it is already so. A Shopfloor
+        Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_key, p_enabled]
+              properties:
+                p_key: { type: string, description: 'The automation''s `id` in the file.' }
+                p_enabled: { type: boolean }
+      responses:
+        '200':
+          description: The automation, as it is now.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Automation' }
+        '400': { description: '`p_enabled` missing (`22023`), or an automation with no live trigger enabled (`23514`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator, or the second factor is required (`42501`).' }
+        '404': { description: 'No such automation.' }
+
+  /rest/v1/rpc/delete_automation:
+    post:
+      tags: [Registry]
+      summary: Delete an automation
+      description: |
+        Deletes the automation with its triggers and actions, and resolves its open alerts (`0256`).
+        Writes one `AUTOMATION_DELETED` row in the Audit Trail holding the automation as it was. A
+        Shopfloor Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_key]
+              properties:
+                p_key: { type: string, description: 'The automation''s `id` in the file.' }
+      responses:
+        '204': { description: Deleted. }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator, or the second factor is required (`42501`).' }
+        '404': { description: 'No such automation.' }
+
+  /rest/v1/rpc/automations_for_entity:
+    post:
+      tags: [Registry]
+      summary: Which automations apply to a device, and why
+      description: |
+        One row per reason an automation applies to the device (`0256`): `named` when a live trigger
+        names it, `site-wide` when a trigger that names no device applies to every modelled device,
+        one with a schema attached. A disabled automation is listed, with `enabled` false. Every
+        signed-in role may call it. An id that is no device answers no rows.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_entity_id]
+              properties:
+                p_entity_id: { type: string, format: uuid, description: 'The device''s `id`.' }
+      responses:
+        '200':
+          description: The automations and their reasons, named first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    automation_id: { type: string, format: uuid }
+                    key: { type: string }
+                    alias: { type: string }
+                    enabled: { type: boolean }
+                    reason: { type: string, enum: [named, site-wide] }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
 
   /rest/v1/rpc/alert_occurrences:
     post:
@@ -3747,6 +3950,67 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/AlertSuppressionWindow' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/automations:
+    get:
+      tags: [Registry]
+      summary: Read the automations
+      description: |
+        One row per automation (`0255`). The YAML is rendered from the rows and parsed back on save;
+        it is never stored. Every signed-in role reads every automation. Nobody writes the table
+        here: use `/rest/v1/rpc/apply_automations`, `/rest/v1/rpc/set_automation_enabled` and
+        `/rest/v1/rpc/delete_automation`. `/rest/v1/rpc/automations_document` reads them in the file's
+        shape.
+      parameters:
+        - { name: key, in: query, schema: { type: string }, description: 'e.g. `eq.lathe-3-spindle-hot`' }
+        - { name: enabled, in: query, schema: { type: string }, description: 'e.g. `eq.true`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching automations.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Automation' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/automation_triggers:
+    get:
+      tags: [Registry]
+      summary: Read the triggers of the automations
+      description: |
+        One row per trigger and device (`0255`): a trigger that names several devices is one row
+        each, so each is evaluated, and fires, on its own. A row archived with its device has
+        `is_archived` true. Every signed-in role reads them. Nobody writes the table here.
+      parameters:
+        - { name: automation_id, in: query, schema: { type: string, format: uuid }, description: 'e.g. `eq.<uuid>`' }
+        - { name: entity_id, in: query, schema: { type: string, format: uuid }, description: 'The device. e.g. `eq.<uuid>`' }
+        - { name: is_archived, in: query, schema: { type: string }, description: 'e.g. `eq.false`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching triggers.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AutomationTrigger' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/automation_actions:
+    get:
+      tags: [Registry]
+      summary: Read the actions of the automations
+      description: |
+        One row per action (`0255`). `alert` is the one action in this release. Every signed-in role
+        reads them. Nobody writes the table here.
+      parameters:
+        - { name: automation_id, in: query, schema: { type: string, format: uuid }, description: 'e.g. `eq.<uuid>`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching actions.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AutomationAction' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/device_nameplate:
@@ -7028,6 +7292,16 @@ components:
         marked_values: { type: array, nullable: true, items: { type: integer }, description: 'How many values each of `marked_ts` held.' }
         raw_from: { type: string, format: date-time, nullable: true, description: 'The oldest raw reading the historian holds.' }
 
+    TelemetryHourOfDayRow:
+      type: object
+      description: |
+        One device's mean at one hour of the day, from `/rest/v1/rpc/telemetry_hour_of_day`.
+      properties:
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        hour_of_day: { type: integer, minimum: 0, maximum: 23, description: 'The hour in the time zone asked for: 14 is 14:00 to 15:00.' }
+        mean_value: { type: number, format: double, description: 'The mean of that hour across the window''s days.' }
+        days: { type: integer, description: 'How many local dates the mean spans.' }
+
     TelemetryCoverageRow:
       type: object
       description: |
@@ -7065,7 +7339,7 @@ components:
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
                  backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts,
-                 notification_channels]
+                 notification_channels, automations]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -7083,7 +7357,8 @@ components:
                  APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED,
                  SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN,
                  SUPPRESSION_WINDOW_SCHEDULED, SUPPRESSION_WINDOW_CHANGED, SUPPRESSION_WINDOW_ENDED,
-                 SUPPRESSION_WINDOW_CANCELLED, SIGNING_KEY_ISSUED]
+                 SUPPRESSION_WINDOW_CANCELLED, AUTOMATION_CREATED, AUTOMATION_CHANGED, AUTOMATION_ENABLED,
+                 AUTOMATION_DISABLED, AUTOMATION_DELETED, SIGNING_KEY_ISSUED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -7113,7 +7388,10 @@ components:
             alert about its token. The `SUPPRESSION_WINDOW_` actions (0240) are written by
             `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and
             `end_alert_suppression_window()`, in the lane of the device, gateway or cell the window
-            covers. `SIGNING_KEY_ISSUED` (0248) is an Administrator issuing or rotating the webhook's
+            covers. The `AUTOMATION_` actions (0256, 0257) are written by `apply_automations()`,
+            `set_automation_enabled()`, `delete_automation()` and the lifecycle that follows a device,
+            one row per automation, in its `automations` lane in the asset lane. A lifecycle row
+            carries its `reason`. `SIGNING_KEY_ISSUED` (0248) is an Administrator issuing or rotating the webhook's
             signing key, in the webhook's `notification_channels` lane, written by
             `issue_notification_signing_key()`; the key is never in the row.
         old_data: { type: object, nullable: true }
@@ -7951,6 +8229,74 @@ components:
         created_at: { type: string, format: date-time }
         ended_by: { type: string, format: uuid, nullable: true, description: 'Who ended it early, or null.' }
         ended_by_email: { type: string, nullable: true }
+
+    Automation:
+      type: object
+      description: |
+        A rule that watches readings and raises an alert (0255). `key` is the `id` a person writes in
+        the YAML; `id` is the row's own uuid.
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string, pattern: '^[a-z0-9][a-z0-9_-]{0,63}$', example: lathe-3-spindle-hot }
+        alias: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 1000 }
+        enabled: { type: boolean, description: 'Whether its triggers are evaluated. Turned off by a person, or by the lifecycle when the last trigger that could fire is gone.' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AutomationTrigger:
+      type: object
+      description: |
+        What starts an automation, one row per trigger and device (0255). A `threshold` row compares
+        the latest value of `metric_name` on the device `entity_id` with `threshold`, held for
+        `hold_seconds`.
+      properties:
+        id: { type: string, format: uuid }
+        automation_id: { type: string, format: uuid }
+        position: { type: integer, description: 'The trigger''s place in the automation''s `triggers` list.' }
+        device_position: { type: integer, description: 'The device''s place in the trigger''s `device` list.' }
+        kind: { type: string, example: threshold }
+        entity_id: { type: string, format: uuid, nullable: true, description: 'The device. Null for a kind that applies to every modelled device.' }
+        metric_name: { type: string, nullable: true }
+        comparison: { type: string, nullable: true, enum: [above, below] }
+        threshold: { type: number, nullable: true, description: 'In the metric''s catalogue unit.' }
+        hold_seconds: { type: integer, minimum: 0, maximum: 3596400 }
+        is_archived: { type: boolean, description: 'True while the device is archived.' }
+        archived_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    AutomationAction:
+      type: object
+      description: What a firing trigger does (0255).
+      properties:
+        id: { type: string, format: uuid }
+        automation_id: { type: string, format: uuid }
+        position: { type: integer }
+        kind: { type: string, example: alert }
+        severity: { type: string, nullable: true, enum: [critical, warning, info] }
+        created_at: { type: string, format: date-time }
+
+    AutomationResult:
+      type: object
+      description: |
+        What `apply_automations` made of one automation of the document (0256).
+      properties:
+        index: { type: integer, nullable: true, description: 'Its place in the document. Null for a refusal of the document as a whole.' }
+        key: { type: string, nullable: true, description: 'Its `id`, or null where the id is itself refused.' }
+        status: { type: string, enum: [new, changed, unchanged, refused] }
+        id: { type: string, format: uuid, nullable: true, description: 'The row''s id, for a new automation once applied and for one that exists.' }
+        changes:
+          type: array
+          items: { type: string }
+          description: 'For a changed automation, the keys that differ: alias, description, enabled, triggers, actions.'
+        reasons:
+          type: array
+          description: 'For a refusal, each reason with the JSON path it is at.'
+          items:
+            type: object
+            properties:
+              path: { type: string, example: '$[0].triggers[1].above' }
+              message: { type: string }
 
     DeviceNameplate:
       type: object

@@ -8,7 +8,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { useArrivalSelection } from '../hooks/useArrivalSelection'
 import { api } from '../api'
-import { cellUrl, deviceUrl, gatewayUrl, schemaUrl } from '../routes'
+import { cellHistoryUrl, cellUrl, deviceUrl, gatewayUrl, schemaUrl } from '../routes'
 
 /**
  * Cross-drawer navigation: the hops between the pages' context drawers. Two halves have to work and
@@ -163,6 +163,18 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
     expect(action).toHaveAttribute('href', '/history/device/dev-1')
     fireEvent.click(action)
     expect(window.location.pathname).toBe('/history/device/dev-1')
+  })
+
+  it("cell drawer -> View History opens the History page's Cell tab on that cell, as the device drawer's does", async () => {
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
+      onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
+    await openRow('Assembly Line 1')
+
+    const action = within(panel()).getByRole('link', { name: /View History/ })
+    expect(action).toHaveAttribute('href', '/history/cell/cell-1')
+    expect(cellHistoryUrl('cell-1')).toBe('/history/cell/cell-1')
+    fireEvent.click(action)
+    expect(window.location.pathname).toBe('/history/cell/cell-1')
   })
 
   it('schema drawer -> device chip hands over the device id', async () => {

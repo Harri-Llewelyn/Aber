@@ -1165,6 +1165,36 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 79. History's hour-of-day read, one rule in two places. telemetry_hour_of_day() (0265) refuses
+// more hours times devices than telemetry_carried() takes, which it reads at one hour, and api.js
+// states the same bound for the Cell tab, which checks it before it asks and says the longest window
+// it allows. It returns the columns the page's hourGrid() reads, and takes the arguments
+// readHourOfDay() sends. A bound the page holds and the function does not is a heatmap the page
+// offers and the function refuses; a column or an argument one side names is a heatmap that draws
+// nothing.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_hour_of_day(', '$fn$;', 'telemetry_hour_of_day()');
+  const carried = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_carried(', '$fn$;', 'telemetry_carried()');
+  const api = read('frontend/src/api.js');
+  const bound = need(api, /^export const HOUR_OF_DAY_MAX_ROWS = (\d+);$/m, 'HOUR_OF_DAY_MAX_ROWS in frontend/src/api.js');
+  const call = need(api, /supabase\.rpc\('telemetry_hour_of_day', \{([^}]*)\}\)/, "readHourOfDay()'s rpc call in frontend/src/api.js");
+  const doc = need(api, /@returns \{Promise<Array<\{([^}]*)\}>>\}\s*\*\/\s*readHourOfDay: async/, "readHourOfDay()'s @returns in frontend/src/api.js");
+  if (def && carried && bound && call && doc) {
+    const sqlBound = need(def.body, /c_max_rows CONSTANT bigint := (\d+);/, `the row bound in ${def.file}`);
+    const carriedBound = need(carried.body, /c_max_rows CONSTANT bigint := (\d+);/, `the row bound in ${carried.file}`);
+    const args = need(def.body, /telemetry_hour_of_day\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${def.file}`);
+    if (sqlBound && carriedBound && args) {
+      compare('hourOfDayRead', 'the rows one read may take, in api.js and telemetry_hour_of_day()', bound[1], sqlBound[1]);
+      compare('hourOfDayRead', 'the rows telemetry_hour_of_day() takes and telemetry_carried(), which it reads, takes', sqlBound[1], carriedBound[1]);
+      const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+      compare('hourOfDayRead', 'the arguments readHourOfDay() sends and telemetry_hour_of_day() takes',
+        names(call[1], /^\s*(\w+):/gm), names(args[1], /^\s*(\w+) [a-z]/gm));
+      compare('hourOfDayRead', 'the columns readHourOfDay() documents and telemetry_hour_of_day() returns',
+        names(doc[1], /(\w+): /g), names(args[2], /^\s*(\w+) [a-z]/gm));
+    }
+  }
+}
+
 // 56. History's Overview read, one rule in two places. telemetry_coverage() (0245) caps a read's
 // devices, lets only a small selection sum a block, reads a larger one at the device rollups' own
 // widths, and bounds the buckets it reads; api.js states the same for the page, which reads in parts
@@ -1418,6 +1448,74 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     'SUPPRESSION_REASON_MAX in utils/alertSuppression.js');
   if (check && js) compare('suppressionReasonMax', "the reason's limit in the CHECK and the dialog", js[1], check[1]);
   if (refused && js) compare('suppressionReasonMax', `the reason's limit schedule_alert_suppression_window() refuses past (${fn.file}) and the dialog`, js[1], refused[1]);
+}
+
+// 71. The automations vocabulary, one set of patterns, names and limits in four places (0255, 0256):
+// the JSON Schema the dashboard serves, automations_parse()'s constants and lists, and the CHECKs on
+// the tables. A pattern the schema accepts and the function refuses is an editor that offers a file
+// the database turns back; the reverse is one that refuses what the database would apply. The guard
+// suite holds the two over fixtures; this holds the words and numbers that no fixture reaches.
+{
+  const schema = JSON.parse(read('frontend/public/json-schema/automations.schema.json'));
+  const parse = lastDefinition('CREATE OR REPLACE FUNCTION public.automations_parse(', '$$;', 'automations_parse()');
+  const key = need(SCHEMA, /CONSTRAINT automations_key_format CHECK \(\(key ~ '([^']+)'::text\)\)/, 'automations_key_format in the migrations');
+  const hold = need(SCHEMA, /CONSTRAINT automation_triggers_hold_valid CHECK \(\(\(hold_seconds >= 0\) AND \(hold_seconds <= (\d+)\)\)\)/,
+    'automation_triggers_hold_valid in the migrations');
+  const severity = need(SCHEMA, /CONSTRAINT automation_actions_alert_shape\s+CHECK \(\(\(kind <> 'alert'::text\) OR \(severity = ANY \(ARRAY\[([^\]]*)\]\)\)\)\)/,
+    'automation_actions_alert_shape in the migrations');
+  const platform = need(SCHEMA, /ADD CONSTRAINT platform_alerts_severity_valid CHECK \(\(severity = ANY \(ARRAY\[([^\]]*)\]\)\)\)/,
+    'platform_alerts_severity_valid in the migrations');
+  const constant = (name) => parse && need(parse.body.split('\n').find((line) => line.trim().startsWith(`${name} `)) ?? '',
+    /CONSTANT (?:text|integer) := '?([^';]+)'?;/, `${name} in automations_parse() (${parse.file})`);
+  const words = (list) => [...list.matchAll(/'([a-z]+)'/g)].map((m) => m[1]).join(', ');
+  const { automation, thresholdTrigger, alertAction, deviceId } = schema.$defs;
+  const id = constant('c_id');
+  const forPattern = constant('c_for');
+  const uuid = constant('c_uuid');
+  const limits = ['c_max_automations', 'c_max_triggers', 'c_max_devices'].map(constant);
+  if (id && key) {
+    compare('automationsVocabulary', `the id pattern in the schema and in automations_parse() (${parse.file})`,
+      automation.properties.id.pattern, id[1]);
+    compare('automationsVocabulary', 'the id pattern in the schema and in the table CHECK',
+      automation.properties.id.pattern, key[1]);
+  }
+  if (forPattern && hold) {
+    compare('automationsVocabulary', `the pattern of for in the schema and in automations_parse() (${parse.file})`,
+      thresholdTrigger.properties.for.pattern, forPattern[1]);
+    // Three digits of an hour at most, and the table holds that many seconds.
+    const digits = Number(thresholdTrigger.properties.for.pattern.match(/\{0,(\d)\}/)?.[1]) + 1;
+    compare('automationsVocabulary', 'the longest hold in hours the for pattern allows and the table CHECK holds',
+      10 ** digits - 1, Number(hold[1]) / 3600);
+  }
+  if (uuid) {
+    compare('automationsVocabulary', 'the device id pattern in the schema and in automations_parse()', deviceId.pattern, uuid[1]);
+  }
+  if (limits.every(Boolean)) {
+    compare('automationsVocabulary', "the most automations in a file, triggers in an automation and devices in a trigger, in the schema and in automations_parse()",
+      [schema.maxItems, automation.properties.triggers.maxItems, thresholdTrigger.properties.device.oneOf[1].maxItems].join(', '),
+      limits.map((m) => m[1]).join(', '));
+  }
+  if (severity && platform) {
+    compare('automationsVocabulary', 'the severities of the schema and the actions table',
+      alertAction.properties.severity.enum.join(', '), words(severity[1]));
+    compare('automationsVocabulary', 'the severities of the actions table and platform_alerts', words(severity[1]), words(platform[1]));
+  }
+  if (parse) {
+    const listed = need(parse.body, /NOT \(v_val #>> '\{\}'\) = ANY \(ARRAY\[([^\]]*)\]\)/, `automations_parse()'s severities (${parse.file})`);
+    if (listed) {
+      compare('automationsVocabulary', `the severities automations_parse() admits (${parse.file}) and the schema`,
+        words(listed[1]), alertAction.properties.severity.enum.join(', '));
+    }
+    compare('automationsVocabulary', `the trigger and action types automations_parse() admits (${parse.file}) and the schema`,
+      [...parse.body.matchAll(/\(v_val #>> '\{\}'\) <> '([a-z]+)'/g)].map((m) => m[1]).join(', '),
+      [thresholdTrigger.properties.trigger.const, alertAction.properties.action.const].join(', '));
+    // The keys each level admits, in the order the function checks them: automation, trigger, action.
+    const admitted = [...parse.body.matchAll(/NOT v_key = ANY \(ARRAY\[([^\]]*)\]\)/g)]
+      .map((m) => [...m[1].matchAll(/'([a-z]+)'/g)].map((k) => k[1]).sort().join(', '));
+    compare('automationsVocabulary', `the keys automations_parse() admits on an automation, a trigger and an action (${parse.file}) and the schema's properties`,
+      admitted.join(' | '),
+      [automation, thresholdTrigger, alertAction].map((d) => Object.keys(d.properties).sort().join(', ')).join(' | '));
+  }
 }
 
 // 62. The longest suppression window, one default and one range in three places: 0002's seed and

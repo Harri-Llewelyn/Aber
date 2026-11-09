@@ -11,6 +11,7 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
+import { DeviceStatusDot } from '../common/DeviceStatusDot'
 import { ARROW_INSET, Tooltip, tooltipHost } from '../common/Tooltip'
 import { IconChartLine, IconCpu, IconX, IconZoomIn } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
@@ -19,7 +20,7 @@ import { useBandDrag } from '../../hooks/useBandDrag'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
-import { DEVICE_STATUS, deviceDotStyle, deviceLifecycleStatus, deviceStatusTitle } from '../../utils/deviceStatus'
+import { DEVICE_STATUS, deviceLifecycleStatus } from '../../utils/deviceStatus'
 import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds } from '../../utils/timeWindow'
 import {
   CHART_SEVERAL_REASON, COVERAGE_KEY, COVERAGE_PER_READ, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW,
@@ -188,17 +189,12 @@ function Lane({ device, laneKey, counts, reading, metrics, ticked, onTick, win, 
           onChange={e => onTick(laneKey, e.target.checked)}
           aria-label={`Pick ${device.asset_name}`}
         />
-        <Tooltip text={deviceStatusTitle(status)}>
-          <span className="overview-status" tabIndex={0}>
-            <span className="badge-dot" style={deviceDotStyle(device)} aria-hidden="true" />
-            {/* Never colour alone: an offline device says so in words, as the Site Map's chip does. */}
-            {!offline && <span className="sr-only">Online</span>}
-          </span>
-        </Tooltip>
+        {/* Never colour alone: an offline device says so in words, as the Site Map's chip does. */}
+        <DeviceStatusDot device={device} />
         <RouteLink to={pickedAddress(device.asset_id, win)} className="overview-lane-name" title={`Chart ${device.asset_name}'s readings over this window`}>
           <OverflowText className="trail-lane-name">{device.asset_name}</OverflowText>
         </RouteLink>
-        {offline && <span className="overview-lane-offline">Offline</span>}
+        {offline && <span className="device-offline-word">Offline</span>}
         <span className="trail-lane-qualifier">{plural(metrics, 'metric', 'metrics')}</span>
       </div>
       <div
