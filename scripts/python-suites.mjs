@@ -1321,6 +1321,19 @@ export const SUITES = {
       'Notifications settings, their rules and who writes them; the webhook\'s address, signing key ' +
       'and test by role; and that no machine identity\'s alert is ever selected for the webhook.',
   },
+  'supabase/migrations/test_a_threshold_automation_raises_its_alert_from_the_database.py': {
+    lanes: ['db'],
+    why:
+      '0270 and 0271 -- the read (the breaching pairs in the shape of platform_health_rows(), no reading is ' +
+      'no breach, NaN and a flag are no reading, only a live pair is read); the hold (fires after ' +
+      '`for` and not before, rounds up to the next run, a stopped breach never fires, a changed ' +
+      'threshold starts it again); the alert (one occurrence with its fingerprint, labels, values and ' +
+      'no rule, confirmed by every run, resolved with its ends_at, never two open rows); silence ' +
+      '(a pair with no value is left as it was); the lifecycle (a disabled automation, an archived ' +
+      'trigger, a changed device or metric); a historian outage (one platform alert and nothing else ' +
+      'written, resolved at the first run that reads); the state table by role; and the job, scheduled ' +
+      'once. Reads a real historian too when ABER_TEST_HISTORIAN names one.',
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1783,6 +1796,17 @@ export const SUITES = {
       "Grafana's sign-in passes at aal1, gateway-bundle refuses aal1 before it reads a gateway, and " +
       "turning the switch on ends its Node-RED session while its Grafana session refreshes. The " +
       'switch goes back to what it was and the person is deleted.',
+  },
+  'supabase/test_a_threshold_automation_fires_and_resolves.py': {
+    lanes: ['stack'],
+    why:
+      'A threshold automation fires and resolves (0270, 0271), which only the running stack shows ' +
+      "end to end: pg_cron's evaluator in the platform database, its postgres_fdw read of the " +
+      'historian and the Row Level Security PostgREST applies. A seeded Shopfloor Manager applies an ' +
+      'automation on a device the suite makes, a breaching reading is written into the historian, ' +
+      'and the suite waits for the alert (its fingerprint, name, labels, values and no Grafana rule), ' +
+      'for a later run to confirm it, and for the run that resolves it after a normal reading. ' +
+      'Removes everything it made.',
   },
   'supabase/test_no_service_accepts_the_shared_secret.py': {
     lanes: ['stack'],

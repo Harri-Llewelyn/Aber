@@ -308,8 +308,10 @@ class TheSendDecision(DispatchBase):
         stale = self.upsert(fingerprint="fp-0247-stale", confirmed=self.cur.fetchone()[0])
         never = self.upsert(fingerprint="fp-0247-never", confirmed=None)
         condition = self.upsert(fingerprint="condition:press-4-overheat")
-        self.assertEqual([self.decide(a, "reminder") for a in (fresh, stale_but_inside, stale, never, condition)],
-                         ["send", "send", "drop", "drop", "drop"])
+        self.cur.execute("SELECT now() - interval '6 minutes';")
+        condition_stale = self.upsert(fingerprint="condition:press-4-late", confirmed=self.cur.fetchone()[0])
+        self.assertEqual([self.decide(a, "reminder") for a in (fresh, stale_but_inside, stale, never, condition, condition_stale)],
+                         ["send", "send", "drop", "drop", "send", "drop"])
         self.assertEqual(self.decide(stale, "firing"), "send", "the firing message does not need the stamp")
 
     def test_a_resolve_follows_its_firing_message(self):
