@@ -452,6 +452,15 @@ describe('the hour-of-day heatmap', () => {
     fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
     expect(document.activeElement).toBe(document.querySelector('[data-cell="2-23"]'))
     expect(document.querySelectorAll('.heatmap-cell[tabindex="0"]')).toHaveLength(1)
+    // Up and Home within a row, then Ctrl with Home or End for the grid's first and last cells.
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(document.querySelector('[data-cell="1-23"]'))
+    fireEvent.keyDown(document.activeElement, { key: 'Home' })
+    expect(document.activeElement).toBe(document.querySelector('[data-cell="1-0"]'))
+    fireEvent.keyDown(document.activeElement, { key: 'End', ctrlKey: true })
+    expect(document.activeElement).toBe(document.querySelector('[data-cell="2-23"]'))
+    fireEvent.keyDown(document.activeElement, { key: 'Home', ctrlKey: true })
+    expect(document.activeElement).toBe(document.querySelector('[data-cell="0-0"]'))
   })
 
   it('says a text or a flag metric needs a number, and reads none', async () => {

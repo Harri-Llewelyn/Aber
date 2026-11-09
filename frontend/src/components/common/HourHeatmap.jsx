@@ -28,8 +28,10 @@ export function HourHeatmap({ rows, grid, metric, unit }) {
   const [active, setActive] = useState(null)
   const [point, setPoint] = useState(null)
   const bands = useMemo(() => heatBands(grid.low, grid.high), [grid.low, grid.high])
-  const first = rows.findIndex(r => grid.cells.has(r.key) && !r.absent)
-  const [row0, col0] = active ?? [first, 0]
+  const heated = (i) => Boolean(rows[i]) && grid.cells.has(rows[i].key) && !rows[i].absent
+  const first = rows.findIndex((_, i) => heated(i))
+  // The tab stop is the cell last focused, or the first cell where its row has gone with a new read.
+  const [row0, col0] = active && heated(active[0]) ? active : [first, 0]
 
   const cellWords = (r, hour) => heatCellWords(r.name, hour, grid.cells.get(r.key)?.[hour] ?? null, unit)
   const pointed = point ? rows[point[0]] : null
@@ -40,15 +42,15 @@ export function HourHeatmap({ rows, grid, metric, unit }) {
     body.current?.querySelector(`[data-cell="${r}-${c}"]`)?.focus()
   }
   const move = (e, r, c) => {
-    const heated = rows.map((m, i) => (grid.cells.has(m.key) && !m.absent ? i : -1)).filter(i => i >= 0)
-    const at = heated.indexOf(r)
+    const lines = rows.map((_, i) => i).filter(heated)
+    const at = lines.indexOf(r)
     const target = {
       ArrowRight: [r, Math.min(23, c + 1)],
       ArrowLeft: [r, Math.max(0, c - 1)],
-      ArrowDown: [heated[Math.min(heated.length - 1, at + 1)], c],
-      ArrowUp: [heated[Math.max(0, at - 1)], c],
-      Home: e.ctrlKey ? [heated[0], 0] : [r, 0],
-      End: e.ctrlKey ? [heated[heated.length - 1], 23] : [r, 23],
+      ArrowDown: [lines[Math.min(lines.length - 1, at + 1)], c],
+      ArrowUp: [lines[Math.max(0, at - 1)], c],
+      Home: e.ctrlKey ? [lines[0], 0] : [r, 0],
+      End: e.ctrlKey ? [lines[lines.length - 1], 23] : [r, 23],
     }[e.key]
     if (!target) return
     e.preventDefault()
