@@ -42,7 +42,7 @@ DECLARE
   v_kind   text;
   v_keys   text[];
   v_item   jsonb;
-  v_names  text[] := '{}';
+  v_names  text[] := ARRAY[]::text[];
   v_name   text;
 BEGIN
   IF jsonb_typeof(p_derivation) IS DISTINCT FROM 'object' THEN
@@ -58,8 +58,9 @@ BEGIN
   IF v_kind IN ('counter_rate', 'time_in_state') THEN
     IF v_keys IS DISTINCT FROM (CASE v_kind WHEN 'counter_rate' THEN ARRAY['input', 'kind']
                                             ELSE ARRAY['input', 'kind', 'states'] END) THEN
-      RETURN format('a %s has %s, and nothing else', v_kind,
-                    CASE v_kind WHEN 'counter_rate' THEN 'a kind and an input' ELSE 'a kind, an input and states' END);
+      RETURN 'a ' || v_kind || ' has '
+             || (CASE v_kind WHEN 'counter_rate' THEN 'a kind and an input' ELSE 'a kind, an input and states' END)
+             || ', and nothing else';
     END IF;
     IF jsonb_typeof(p_derivation -> 'input') IS DISTINCT FROM 'string' OR (p_derivation ->> 'input') !~ c_name THEN
       RETURN 'its input is a metric name';
@@ -88,7 +89,7 @@ BEGIN
   END IF;
   IF jsonb_typeof(p_derivation -> 'inputs') IS DISTINCT FROM 'array'
      OR jsonb_array_length(p_derivation -> 'inputs') NOT BETWEEN 2 AND c_max_inputs THEN
-    RETURN format('a sum has two to %s inputs', c_max_inputs);
+    RETURN 'a sum has two to ' || c_max_inputs::text || ' inputs';
   END IF;
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_derivation -> 'inputs') LOOP
     IF jsonb_typeof(v_item) IS DISTINCT FROM 'object'
