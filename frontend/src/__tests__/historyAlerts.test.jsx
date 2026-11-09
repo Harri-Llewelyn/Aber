@@ -118,9 +118,10 @@ describe('the Alerts tab', () => {
   it('is the last tab, with an address of its own, and opens on Last 24 hours', async () => {
     await visit('/history/alerts')
     const tabs = within(screen.getByRole('navigation', { name: 'History' })).getAllByRole('link')
-    expect(tabs.map(t => t.textContent)).toEqual(['Overview', 'Device', 'Alerts'])
-    expect(tabs[2]).toHaveAttribute('aria-current', 'page')
-    expect(tabs[2]).toHaveAttribute('href', '/history/alerts')
+    expect(tabs.map(t => t.textContent)).toEqual(['Overview', 'Device', 'Cell', 'Alerts'])
+    expect(tabs[3]).toHaveAttribute('aria-current', 'page')
+    expect(tabs[3]).toHaveAttribute('href', '/history/alerts')
+    expect(tabs[2]).toHaveAttribute('href', '/history/cell')
     expect(tabs[1]).toHaveAttribute('href', '/history/device')
     expect(tabs[0]).toHaveAttribute('href', '/history/overview')
     await table()

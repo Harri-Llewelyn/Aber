@@ -9982,6 +9982,136 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 307. The Cell tab's heatmap names the window it allows as api.js holds the bound. The read refuses
+// more than HOUR_OF_DAY_MAX_ROWS hours times devices (mirror check 79), so a cell of 20 machines
+// reads at most that many hours over 20, in days. History's help says the figure, frontend/README.md
+// names the constant and the figure, and the 0265 section says the bound; a page naming another
+// tells a reader which windows the heatmap draws, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const max = Number(read('frontend/src/api.js').match(/^export const HOUR_OF_DAY_MAX_ROWS = (\d+);$/m)?.[1]);
+  const problems307 = [];
+  if (!Number.isInteger(max)) problems307.push('could not read HOUR_OF_DAY_MAX_ROWS out of frontend/src/api.js');
+  const days = Math.floor(max / 20 / 24);
+  const words = max.toLocaleString('en-GB');
+  if (!problems307.length) {
+    const claims = [
+      ['help/pages/history.md', `at most ${words} in all. For a cell of 20 machines, that is at most ${days} days`],
+      ['frontend/README.md', `\`HOUR_OF_DAY_MAX_ROWS\` (${words})`],
+      ['frontend/README.md', `for 20 machines it covers at most ${days} days`],
+      ['supabase/README.md', `more than ${words} hours times devices`],
+    ];
+    // Read as one line, so a rewrapped paragraph still says it.
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems307.push(`${file} does not say "${said}"`);
+  }
+  if (problems307.length) {
+    fail('The Cell tab\'s docs name the heatmap\'s bound otherwise than api.js holds it:\n' +
+      problems307.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and both READMEs say the heatmap reads at most ${words} hours times machines, ${days} days for a cell of 20, as api.js holds it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 308. The heatmap's shades are Overview's. App.css draws .heatmap-step-N from --coverage-N for each
+// of Overview's COVERAGE_STEPS steps and no other, and the page steps through that many
+// (HEAT_STEPS), so the ramp themeContrast.test.js holds to the ordered-ramp rule in both themes is
+// the one the heatmap is coloured with. A step the CSS lacks is a cell with no colour; a ramp of its
+// own is one nobody has checked.
+// -------------------------------------------------------------------------------------------------
+{
+  const css = read('frontend/src/App.css');
+  const history = read('frontend/src/utils/history.js');
+  const steps = Number(history.match(/^export const COVERAGE_STEPS = (\d+)$/m)?.[1]);
+  const heat = history.match(/^export const HEAT_STEPS = (\w+)$/m)?.[1];
+  const drawn = [...css.matchAll(/^\.heatmap-step-(\d+) \{ background: var\(--coverage-(\d+)\); \}$/gm)].map((m) => [Number(m[1]), Number(m[2])]);
+  const problems308 = [];
+  if (!Number.isInteger(steps)) problems308.push('could not read COVERAGE_STEPS out of frontend/src/utils/history.js');
+  if (heat !== 'COVERAGE_STEPS') problems308.push(`HEAT_STEPS is ${heat ?? 'not declared'} in frontend/src/utils/history.js, not COVERAGE_STEPS`);
+  for (let i = 1; i <= steps; i++) {
+    if (!drawn.some(([step, token]) => step === i && token === i)) problems308.push(`frontend/src/App.css has no ".heatmap-step-${i} { background: var(--coverage-${i}); }"`);
+  }
+  if (Number.isInteger(steps) && drawn.length !== steps) problems308.push(`frontend/src/App.css draws ${drawn.length} heatmap steps, Overview has ${steps}`);
+  if (problems308.length) {
+    fail('The heatmap is coloured otherwise than Overview\'s ramp:\n' + problems308.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the heatmap's ${steps} shades are Overview's --coverage-1 to --coverage-${steps}, which themeContrast.test.js holds in both themes`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 309. The Cell tab is named and reached as the Device tab is. The Cells drawer's History action has
+// the Devices drawer's label and icon, and each goes to its own tab's path; History's tabs list
+// Cell right after Device with a description of its own; the search index offers it; and the help
+// page names it. A drawer that says another word for the same act is two names for one thing.
+// -------------------------------------------------------------------------------------------------
+{
+  const action = (file) => read(file).match(/label: '(View History)', icon: <(\w+) size=\{13\} \/>,\s*to: (\w+)\(/);
+  const devices = action('frontend/src/components/tabs/DevicesTab.jsx');
+  const cells = action('frontend/src/components/tabs/CellsTab.jsx');
+  const routes = read('frontend/src/routes.js');
+  const history = read('frontend/src/utils/history.js');
+  const tabs = read('frontend/src/navigation.jsx').match(/export const HISTORY_TABS = \[([\s\S]*?)\n\]/)?.[1] ?? '';
+  const ids = [...tabs.matchAll(/\{ id: '([a-z]+)', label: '([^']+)', description: ["'`]([^"'`]+)/g)];
+  const problems309 = [];
+  if (!devices) problems309.push('could not read the Devices drawer\'s View History action out of DevicesTab.jsx');
+  if (!cells) problems309.push('the Cells drawer has no View History action like the Devices drawer\'s in CellsTab.jsx (label, icon, to)');
+  if (devices && cells) {
+    if (devices[2] !== cells[2]) problems309.push(`the Cells drawer's History action draws ${cells[2]}, the Devices drawer's ${devices[2]}`);
+    if (devices[3] !== 'deviceHistoryUrl' || cells[3] !== 'cellHistoryUrl') problems309.push(`the drawers' History actions go to ${devices[3]} and ${cells[3]}, not deviceHistoryUrl and cellHistoryUrl`);
+  }
+  const cellPath = history.match(/^export const CELL_PATH = '([^']+)'$/m)?.[1];
+  if (!cellPath) problems309.push('could not read CELL_PATH out of frontend/src/utils/history.js');
+  else if (!routes.includes(`export const cellHistoryUrl = (id) => \`${cellPath}/\${encodeURIComponent(id)}\``)) {
+    problems309.push(`frontend/src/routes.js's cellHistoryUrl does not build ${cellPath}/<id>`);
+  }
+  const order = ids.map((m) => m[1]);
+  if (order.indexOf('cell') < 0 || order.indexOf('cell') !== order.indexOf('device') + 1) problems309.push(`HISTORY_TABS lists ${order.join(', ')}; Cell goes right after Device`);
+  if (!ids.find((m) => m[1] === 'cell')?.[3]) problems309.push('HISTORY_TABS gives the Cell tab no description');
+  if (!read('frontend/src/searchIndex.js').includes("...tabCard('history', 'cell')")) problems309.push('frontend/src/searchIndex.js has no card for the Cell tab');
+  const help = read('help/pages/history.md');
+  if (!help.includes('\n## The Cell tab: comparing the machines in a cell\n')) problems309.push('help/pages/history.md has no "The Cell tab" section');
+  if (!help.includes('open the cell on the Cells page and select **View History**')) problems309.push('help/pages/history.md does not say View History opens a cell from the Cells page');
+  if (problems309.length) {
+    fail('The Cell tab is named or reached otherwise than the Device tab is:\n' + problems309.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the Cells drawer says View History as the Devices drawer does, to /history/cell, and History lists, searches and documents the Cell tab after Device');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 310. The API reference describes telemetry_hour_of_day() as 0265 declares it: the arguments the
+// body requires are the function's, and a row has the columns it returns. A reader building on the
+// reference sends an argument the function does not take, or looks for a column it does not return.
+// -------------------------------------------------------------------------------------------------
+{
+  const sql = read('supabase/migrations/0265_history_averages_a_metric_by_the_hour_of_day.sql')
+    .match(/telemetry_hour_of_day\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/telemetry_hour_of_day:\n[\s\S]*?required: \[([^\]]*)\]/)?.[1];
+  const row = spec.match(/\n {4}TelemetryHourOfDayRow:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const problems310 = [];
+  if (!sql) problems310.push('could not read telemetry_hour_of_day() out of 0265');
+  if (!path) problems310.push('docs/openapi.yaml has no /rest/v1/rpc/telemetry_hour_of_day with its required arguments');
+  if (!row) problems310.push('docs/openapi.yaml has no TelemetryHourOfDayRow');
+  if (!problems310.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    const args = names(sql[1], /^\s*(\w+) [a-z]/gm);
+    const columns = names(sql[2], /^\s*(\w+) [a-z]/gm);
+    const required = names(path, /(\w+)/g);
+    const described = names(row, /^ {8}(\w+):/gm);
+    if (required !== args) problems310.push(`docs/openapi.yaml requires ${required}; telemetry_hour_of_day() takes ${args}`);
+    if (described !== columns) problems310.push(`docs/openapi.yaml's TelemetryHourOfDayRow has ${described}; the function returns ${columns}`);
+  }
+  if (problems310.length) {
+    fail('The API reference describes telemetry_hour_of_day() otherwise than 0265 declares it:\n' +
+      problems310.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments and the columns of telemetry_hour_of_day() as 0265 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 199. A change to the Audit Trail's classes rebuilds the indexes built on them (0228). Each class's
 // partial index keeps the class audit_event_class() gave a row when the index was built, and CREATE
 // OR REPLACE FUNCTION does not rebuild it. So a file after 0228 that redeclares the function also

@@ -607,6 +607,14 @@ python supabase/migrations/test_history_reads_each_series_carried_forward.py
 # dropped is still read from raw. Bad bounds and more than 50 series are refused before any read;
 # anon may not call it, and it reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_reads_every_change_of_a_text_or_a_flag.py
+# History averages a metric by the hour of the day (0265). A local table stands in for the
+# historian's hourly rollup. One row per device per hour of the day in the time zone given: the mean
+# of that hour across the window's days, a quiet hour counted as the value carried into it and every
+# hour weighed alike. The hour moves with the zone, with a clock change inside the window, and, in a
+# zone offset by part of an hour, files a bucket under the hour it starts in; a text or a flag has no
+# row. An unknown zone, bad bounds and more than 50,000 hours times devices are refused before any
+# read; anon may not call it, and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_averages_a_metric_by_the_hour_of_day.py
 # History counts where readings arrived (0245). Local tables stand in for the historian's device
 # rollups and the coverage view. One row per device asked for, its counts an array,
 # oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider

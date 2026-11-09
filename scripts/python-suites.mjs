@@ -673,6 +673,16 @@ export const SUITES = {
       'it says so and marks each bucket that held more than one value, a window whose raw readings ' +
       'were dropped says so, bad bounds are refused before any read, and it reads as the caller.',
   },
+  'supabase/migrations/test_history_averages_a_metric_by_the_hour_of_day.py': {
+    lanes: ['db'],
+    why:
+      "0265's telemetry_hour_of_day(), over local tables standing in for the historian's hourly " +
+      "rollup: each device's mean at each hour of the day in the zone asked for, across the " +
+      'window\'s days, a quiet hour counted as the value carried into it, every hour weighed alike, ' +
+      'the hour moving with the zone and with a clock change, no row for a text or a flag, an ' +
+      'unknown zone, bad bounds and more than 50,000 hours times devices refused before any read, ' +
+      'and it reads as the caller.',
+  },
   'supabase/migrations/test_history_counts_where_readings_arrived.py': {
     lanes: ['db'],
     why:
