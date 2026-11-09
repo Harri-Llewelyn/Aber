@@ -5794,7 +5794,8 @@ const OPERATOR_PAIRS = [
   }
   if (!guide.includes('(security-model.md#an-apps-token-reaches-only-its-own-routes)')) problems299.push('the guide does not link to the security model section on an app\'s token');
   const PRODUCTS = ['Keycloak', 'Okta', 'Auth0', 'Entra', 'Azure', 'Google', 'GitHub', 'Passport', 'NextAuth', 'Authlib', 'curl', 'Postman', 'Supabase', 'GoTrue', 'Grafana', 'Node-RED', 'Gitea'];
-  const named = PRODUCTS.filter((p) => new RegExp(`\\b${p}\\b`, 'i').test(guide));
+  const words = guide.toLowerCase().match(/[a-z0-9-]+/g) ?? [];
+  const named = PRODUCTS.filter((p) => words.includes(p.toLowerCase()));
   if (named.length) problems299.push(`the guide names ${named.join(', ')}; it names no product`);
   if (problems299.length) {
     for (const p of problems299) fail(`the app author's guide: ${p}`);
