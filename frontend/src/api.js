@@ -13,7 +13,7 @@ import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
-import { ALLOWED_HOSTS_KEY, DELIVERY_LOG_LIMIT } from './utils/notifications';
+import { ALLOWED_HOSTS_KEY, DELIVERY_LOG_LIMIT, EMAIL_MIN_SEVERITY_KEY, EMAIL_ROLES_KEY } from './utils/notifications';
 import { factorError, normaliseCode } from './utils/secondFactor';
 import {
   MODEL_3D_EXTENSIONS,
@@ -2266,6 +2266,43 @@ const apiMethods = {
   },
 
   /**
+   * Email as every role may read it: the roles told and the lowest severity (settings rows), and
+   * whether this site has a relay and a sender at all, which only the functions' environment knows.
+   * `relay` is `{ available, reason }`, or null when the dispatcher could not be asked, in which
+   * case the page says nothing of it rather than guess.
+   */
+  notificationEmail: async () => {
+    const { data: session } = await supabase.auth.getSession();
+    const [rows, relay] = await Promise.all([
+      supabase.from('system_settings').select('key,value').in('key', [EMAIL_ROLES_KEY, EMAIL_MIN_SEVERITY_KEY]),
+      fetch(`${SUPABASE_URL}/functions/v1/notification-dispatch`, {
+        headers: {
+          apikey: SUPABASE_GATEWAY_KEY,
+          Authorization: `Bearer ${session?.session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        },
+      }).then(async (res) => {
+        const body = res.ok ? await res.json().catch(() => null) : null;
+        const email = body?.email;
+        return email && typeof email.available === 'boolean' ? { available: email.available, reason: email.reason || null } : null;
+      }).catch(() => null)
+    ]);
+    if (rows.error) throw new Error(rows.error.message || 'Could not read the email settings');
+    const value = (key) => (rows.data || []).find(r => r.key === key)?.value;
+    return {
+      roles: Array.isArray(value(EMAIL_ROLES_KEY)) ? value(EMAIL_ROLES_KEY) : [],
+      minSeverity: typeof value(EMAIL_MIN_SEVERITY_KEY) === 'string' ? value(EMAIL_MIN_SEVERITY_KEY) : 'warning',
+      relay
+    };
+  },
+
+  /** Queue a test email to the signed-in Administrator's own address, and return its delivery log row's id. */
+  sendTestEmailNotification: async () => {
+    const { data, error } = await supabase.rpc('queue_test_email_notification');
+    if (error) throw new Error(error.message || 'Could not send a test email');
+    return data;
+  },
+
+  /**
    * The delivery log, newest first, each with the alert it is about. The alert is read through its
    * own policy, so a row about one the reader may not see is not returned at all.
    */
@@ -2273,7 +2310,7 @@ const apiMethods = {
     let query = supabase
       .from('notification_deliveries')
       .select('id,event,channel,state,attempts,next_attempt_at,last_attempt_at,finished_at,response_status,'
-        + 'last_error,created_at,platform_alerts(alert_name,severity,entity_type,sparkplug_id)')
+        + 'last_error,recipients,refused,created_at,platform_alerts(alert_name,severity,entity_type,sparkplug_id)')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .limit(limit);

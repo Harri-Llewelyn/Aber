@@ -849,6 +849,20 @@ Administrator's, as every change on Settings is; anyone else is told whose it is
   and a long subject or error is cut and slides on hover (`OverflowText`).
 - **`notifications.webhook_min_severity`** is a choice in its row, from `SETTING_OPTIONS`
   (`utils/notifications.js`), which mirror check 58 holds to the database's guard.
+- **Email has the webhook's layout.** The toolbar adds **Set up email** (a warning while no role is
+  told or the site has no relay, **Change email** after) and **Email a test**. **`EmailModal`** ticks
+  the roles told, in the dashboard's order (`PERSON_ROLES`), and saves
+  `notifications.email_roles`, which is left out of the table (`EMAIL_DIALOG_KEYS`) as the hosts are.
+  Its Save is greyed until a role changes. `notifications.email_min_severity` is a choice in its row.
+  **Email a test** queues `queue_test_email_notification()` and toasts how it went, in the
+  dispatcher's words.
+- **Every role reads who is emailed.** A line under the toolbar names the roles told, or says nobody is
+  yet, and a warning above it says in words when the site cannot send: the relay and the sender are
+  the functions pod's environment, so the page asks the dispatcher (`GET
+  /functions/v1/notification-dispatch`, `api.notificationEmail()`). If it cannot be asked the page
+  says nothing about the relay rather than guess.
+- **The delivery log has a Channel column**, and an email row's badge says how many people the relay
+  took it for. The log never holds an address.
 
 ### Why a reload waits for the auth server
 
