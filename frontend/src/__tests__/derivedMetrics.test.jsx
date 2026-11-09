@@ -30,6 +30,7 @@ const CATALOG = [
   measured('m3', 'Power/PHASE_A', 10, { units: 'KILOWATT' }),
   measured('m4', 'Power/PHASE_B', 10, { units: 'KILOWATT' }),
   measured('m5', 'Power/CURRENT', 10, { units: 'AMPERE' }),
+  measured('m6', 'Power/OLD_METER', 10, { units: 'KILOWATT', deprecated: true }),
   measured('d1', 'Controller/PARTS_PER_HOUR', 10, {
     units: 'COUNT/HOUR', description: 'Parts an hour',
     derivation: { kind: 'counter_rate', input: 'Controller/PART_COUNT' }
@@ -105,10 +106,12 @@ describe('the Derived tab', () => {
     expect(names(derived)).not.toContain('Power/IMBALANCE')
 
     const deprecated = await openTab('Deprecated Metrics')
-    expect(names(deprecated)).toEqual(['Power/IMBALANCE'])
+    expect(names(deprecated).sort()).toEqual(['Power/IMBALANCE', 'Power/OLD_METER'])
     expect(deprecated.textContent).toContain('Power/TOTAL')
-    // Deprecated lists both kinds, so a derived metric says so beside its name.
-    expect(within(deprecated.querySelector('tbody tr')).getByText('Derived')).toBeTruthy()
+    // Deprecated lists both kinds, so a derived metric says so beside its name and a measured one does not.
+    const rowOf = (name) => [...deprecated.querySelectorAll('tbody tr')].find(tr => tr.querySelector('.mono').textContent === name)
+    expect(within(rowOf('Power/IMBALANCE')).getByText('Derived')).toBeTruthy()
+    expect(within(rowOf('Power/OLD_METER')).queryByText('Derived')).toBeNull()
   })
 
   it('shows each row’s name, kind, definition in words and unit', async () => {
@@ -180,6 +183,20 @@ describe('Add Derived Metric', () => {
   const choose = (dialog, label, value) => fireEvent.change(within(dialog).getByLabelText(label), { target: { value } })
   const confirm = (dialog) => within(dialog).getByRole('button', { name: 'Add Derived Metric' })
   const said = (dialog) => [...dialog.querySelectorAll('.hint-danger')].map(el => el.textContent.trim()).join(' ').trim()
+  // The picker's rows, found by the metric's name in the row, so a row is never matched by its
+  // description or by a name that merely contains another.
+  const rows = (dialog) => [...dialog.querySelectorAll('label')]
+    .filter(label => label.querySelector('input[type="checkbox"], input[type="radio"]') && label.querySelector('.mono'))
+    .filter(label => !label.closest('[role="group"][aria-labelledby="derived-states-label"]'))
+  const listed = (dialog) => rows(dialog).map(label => label.querySelector('.mono').textContent)
+  const control = (dialog, name) => rows(dialog).find(label => label.querySelector('.mono').textContent === name)?.querySelector('input') ?? null
+  const pick = (dialog, name) => fireEvent.click(control(dialog, name))
+  // The Chosen list's metric names, in order: the rows of its list, each with the name in mono.
+  const chosen = (dialog) => [...dialog.querySelectorAll('[role="listitem"]')]
+    .map(item => item.querySelector('.mono').textContent)
+  const facts = (dialog) => dialog.querySelector('.metric-edit-facts')
+  const typeName = (dialog, value) => fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value } })
+  const count = (dialog) => dialog.querySelector('.section-count').textContent
 
   it('opens held, and says nothing until something is edited', async () => {
     const { dialog } = await open()
@@ -191,28 +208,197 @@ describe('Add Derived Metric', () => {
     const { dialog } = await open()
     choose(dialog, /Group/, 'Controller')
     expect(said(dialog)).toBe('Give the metric a name')
-    fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value: 'PARTS_PER_SHIFT' } })
+    typeName(dialog, 'PARTS_PER_SHIFT')
     expect(said(dialog)).toBe('Choose the counter')
     expect(confirm(dialog).textContent).toBe('Add Derived Metric')
     expect(confirm(dialog)).toHaveClass('btn-disabled')
-    choose(dialog, /Counter/, 'Controller/PART_COUNT')
+    pick(dialog, 'Controller/PART_COUNT')
     expect(said(dialog)).toBe('')
     expect(confirm(dialog)).not.toHaveClass('btn-disabled')
   })
 
-  it('offers only measured metrics of the right kind as inputs', async () => {
+  it('is laid out as the schema builder is: its search, its standard filter and its grouped list', async () => {
     const { dialog } = await open()
-    const options = (label) => [...within(dialog).getByLabelText(label).querySelectorAll('option')].map(o => o.value).filter(Boolean)
-    expect(options(/Counter/)).toEqual(['Controller/PART_COUNT', 'Power/CURRENT', 'Power/PHASE_A', 'Power/PHASE_B'])
-    choose(dialog, /Kind/, 'time_in_state')
-    expect(options(/State Metric/)).toEqual(['Controller/EXECUTION'])
+    expect(within(dialog).getByLabelText('Search catalog metrics')).toBeTruthy()
+    expect(within(dialog).getByLabelText('Standard')).toBeTruthy()
+    expect(dialog.querySelectorAll('.metric-picker-group')).toHaveLength(2)
+  })
+
+  describe('what the list offers', () => {
+    it('is measured metrics that are not deprecated, of a datatype the kind reads', async () => {
+      const { dialog } = await open()
+      expect(listed(dialog)).toEqual(['Controller/PART_COUNT', 'Power/CURRENT', 'Power/PHASE_A', 'Power/PHASE_B'])
+      choose(dialog, /Kind/, 'time_in_state')
+      expect(listed(dialog)).toEqual(['Controller/EXECUTION'])
+      choose(dialog, /Kind/, 'sum')
+      expect(listed(dialog)).toEqual(['Controller/PART_COUNT', 'Power/CURRENT', 'Power/PHASE_A', 'Power/PHASE_B'])
+    })
+
+    it('leaves out a derived metric and a deprecated one, as the schema builder leaves deprecated ones out', async () => {
+      const { dialog } = await open()
+      expect(listed(dialog)).not.toContain('Controller/PARTS_PER_HOUR')
+      expect(listed(dialog)).not.toContain('Power/OLD_METER')
+    })
+
+    it('shows each metric’s datatype, unit and standard, as the builder does', async () => {
+      const { dialog } = await open()
+      const row = rows(dialog).find(label => label.querySelector('.mono').textContent === 'Power/PHASE_A')
+      expect(row.textContent).toContain('Double')
+      expect(row.textContent).toContain('KILOWATT')
+      expect(row.textContent).toContain('Local extension')
+    })
+
+    it('narrows to a search and a standard, and says when nothing matches', async () => {
+      const { dialog } = await open()
+      fireEvent.change(within(dialog).getByLabelText('Search catalog metrics'), { target: { value: 'phase' } })
+      expect(listed(dialog)).toEqual(['Power/PHASE_A', 'Power/PHASE_B'])
+      fireEvent.change(within(dialog).getByLabelText('Standard'), { target: { value: 'MTConnect' } })
+      expect(within(dialog).getByText('No matching catalog metrics.')).toBeTruthy()
+    })
+
+    it('says so when no metric in the catalog can be an input of the kind', async () => {
+      routes['/api/v1/metric-catalog'] = CATALOG.filter(m => m.datatype !== 12)
+      try {
+        const { dialog } = await open()
+        choose(dialog, /Kind/, 'time_in_state')
+        expect(within(dialog).getByText('No measured metric in the catalog can be an input of this kind.')).toBeTruthy()
+      } finally {
+        routes['/api/v1/metric-catalog'] = CATALOG
+      }
+    })
+  })
+
+  describe('choosing one input', () => {
+    it('takes a counter by radio, and choosing another replaces it', async () => {
+      const { dialog } = await open()
+      pick(dialog, 'Controller/PART_COUNT')
+      expect(control(dialog, 'Controller/PART_COUNT').type).toBe('radio')
+      expect(chosen(dialog)).toEqual(['Controller/PART_COUNT'])
+      pick(dialog, 'Power/PHASE_A')
+      expect(chosen(dialog)).toEqual(['Power/PHASE_A'])
+      expect(control(dialog, 'Controller/PART_COUNT').checked).toBe(false)
+      expect(control(dialog, 'Power/PHASE_A').checked).toBe(true)
+      expect(count(dialog)).toBe('1 selected')
+    })
+
+    it('lets the choice be taken back, which a radio cannot do', async () => {
+      const { dialog } = await open()
+      pick(dialog, 'Controller/PART_COUNT')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Controller/PART_COUNT' }))
+      expect(chosen(dialog)).toEqual([])
+      expect(within(dialog).getByText('Nothing chosen yet.')).toBeTruthy()
+      expect(count(dialog)).toBe('0 selected')
+    })
+
+    it('takes a state metric by radio too, and starts again with nothing when the kind changes', async () => {
+      const { dialog } = await open()
+      pick(dialog, 'Controller/PART_COUNT')
+      choose(dialog, /Kind/, 'time_in_state')
+      expect(chosen(dialog)).toEqual([])
+      pick(dialog, 'Controller/EXECUTION')
+      expect(control(dialog, 'Controller/EXECUTION').type).toBe('radio')
+      expect(chosen(dialog)).toEqual(['Controller/EXECUTION'])
+    })
+
+    it('keeps what is chosen when a search or a filter hides it', async () => {
+      const { dialog } = await open()
+      typeName(dialog, 'PARTS_PER_SHIFT')
+      pick(dialog, 'Controller/PART_COUNT')
+      fireEvent.change(within(dialog).getByLabelText('Search catalog metrics'), { target: { value: 'phase' } })
+      expect(control(dialog, 'Controller/PART_COUNT')).toBeNull()
+      expect(chosen(dialog)).toEqual(['Controller/PART_COUNT'])
+      expect(count(dialog)).toBe('1 selected')
+      expect(said(dialog)).toBe('')
+    })
+  })
+
+  describe('choosing a sum’s inputs', () => {
+    const asSum = async () => {
+      const opened = await open()
+      choose(opened.dialog, /Kind/, 'sum')
+      typeName(opened.dialog, 'MIXED')
+      return opened
+    }
+    const pressed = (dialog, label) => within(dialog).getByRole('button', { name: label }).getAttribute('aria-pressed')
+
+    it('ticks any number of metrics and lists them in the order they were picked', async () => {
+      const { dialog } = await asSum()
+      expect(control(dialog, 'Power/PHASE_B').type).toBe('checkbox')
+      pick(dialog, 'Power/PHASE_B')
+      pick(dialog, 'Power/PHASE_A')
+      expect(chosen(dialog)).toEqual(['Power/PHASE_B', 'Power/PHASE_A'])
+      expect(count(dialog)).toBe('2 selected')
+      pick(dialog, 'Power/PHASE_B')
+      expect(chosen(dialog)).toEqual(['Power/PHASE_A'])
+    })
+
+    it('adds each metric until a minus is pressed beside it, and says so', async () => {
+      const { dialog } = await asSum()
+      expect(dialog.textContent).toContain('Each is added unless you press − beside it.')
+      pick(dialog, 'Power/PHASE_A')
+      pick(dialog, 'Power/PHASE_B')
+      expect(pressed(dialog, 'Add Power/PHASE_A')).toBe('true')
+      expect(pressed(dialog, 'Subtract Power/PHASE_A')).toBe('false')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Subtract Power/PHASE_B' }))
+      expect(pressed(dialog, 'Subtract Power/PHASE_B')).toBe('true')
+      expect(pressed(dialog, 'Add Power/PHASE_B')).toBe('false')
+      expect(pressed(dialog, 'Add Power/PHASE_A')).toBe('true')
+      expect(dialog.textContent).toContain('Power/PHASE_A − Power/PHASE_B')
+      expect(said(dialog)).toBe('')
+    })
+
+    it('wants two inputs, and refuses unlike units naming both', async () => {
+      const { dialog } = await asSum()
+      expect(said(dialog)).toBe('Choose at least two inputs')
+      pick(dialog, 'Power/PHASE_A')
+      expect(said(dialog)).toBe('Choose at least two inputs')
+      pick(dialog, 'Power/CURRENT')
+      expect(said(dialog)).toBe('The inputs of a sum must share one unit: Power/PHASE_A is in KILOWATT and Power/CURRENT is in AMPERE.')
+      pick(dialog, 'Power/CURRENT')
+      pick(dialog, 'Power/PHASE_B')
+      expect(said(dialog)).toBe('')
+    })
+
+    it('removes an input from the chosen list, and keeps the others’ signs', async () => {
+      const { dialog } = await asSum()
+      pick(dialog, 'Power/PHASE_A')
+      pick(dialog, 'Power/PHASE_B')
+      pick(dialog, 'Controller/PART_COUNT')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Subtract Power/PHASE_B' }))
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Power/PHASE_A' }))
+      expect(chosen(dialog)).toEqual(['Power/PHASE_B', 'Controller/PART_COUNT'])
+      expect(control(dialog, 'Power/PHASE_A').checked).toBe(false)
+      expect(pressed(dialog, 'Subtract Power/PHASE_B')).toBe('true')
+    })
+
+    it('takes at most eight, then holds the rest of the list until one is taken out', async () => {
+      // A derived row too, so the Derived tab has a table to open.
+      routes['/api/v1/metric-catalog'] = [
+        ...Array.from({ length: 9 }, (_, i) => measured(`n${i}`, `Power/IN_${i}`, 10, { units: 'KILOWATT' })),
+        CATALOG.find(m => m.metric_uuid === 'd3')
+      ]
+      try {
+        const { dialog } = await asSum()
+        for (let i = 0; i < 8; i++) pick(dialog, `Power/IN_${i}`)
+        expect(chosen(dialog)).toHaveLength(8)
+        expect(control(dialog, 'Power/IN_8').disabled).toBe(true)
+        expect(control(dialog, 'Power/IN_0').disabled).toBe(false)
+        expect(dialog.textContent).toContain('A sum takes at most 8 inputs.')
+        pick(dialog, 'Power/IN_0')
+        expect(control(dialog, 'Power/IN_8').disabled).toBe(false)
+        pick(dialog, 'Power/IN_8')
+        expect(chosen(dialog)).toHaveLength(8)
+      } finally {
+        routes['/api/v1/metric-catalog'] = CATALOG
+      }
+    })
   })
 
   it('says a name a device declares cannot be taken, under the name and not above the buttons', async () => {
     const { dialog } = await open()
     choose(dialog, /Group/, 'Controller')
-    fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value: 'UPTIME_SHIFT' } })
-    choose(dialog, /Counter/, 'Controller/PART_COUNT')
+    typeName(dialog, 'UPTIME_SHIFT')
+    pick(dialog, 'Controller/PART_COUNT')
     const hint = within(dialog).getByLabelText(/Metric Name/).closest('.form-group').querySelector('.hint-danger')
     expect(hint.textContent).toMatch(/A device declares Controller\/UPTIME_SHIFT/)
     expect(said(dialog)).toBe(hint.textContent.trim())
@@ -222,55 +408,62 @@ describe('Add Derived Metric', () => {
   it('refuses a name the catalog holds, and a name the format refuses', async () => {
     const { dialog } = await open()
     choose(dialog, /Group/, 'Controller')
-    fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value: 'PART_COUNT' } })
+    typeName(dialog, 'PART_COUNT')
     expect(dialog.textContent).toContain('Controller/PART_COUNT is already in the catalog.')
-    fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value: 'PARTS PER HOUR' } })
+    typeName(dialog, 'PARTS PER HOUR')
     expect(dialog.textContent).toMatch(/Remove: space/)
   })
 
-  it('shows the unit it will take, and the definition in words', async () => {
+  describe('the facts nobody chooses', () => {
+    it('shows Units and Sparkplug Datatype as static labels, in the style Edit Metric uses, not as inputs', async () => {
+      const { dialog } = await open()
+      const box = facts(dialog)
+      expect(box).toBeTruthy()
+      expect([...box.querySelectorAll('.form-label')].map(el => el.textContent)).toEqual(['Units', 'Sparkplug Datatype'])
+      expect(box.querySelectorAll('input, select, textarea')).toHaveLength(0)
+      expect(within(dialog).queryByLabelText('Units')).toBeNull()
+      expect(within(dialog).queryByLabelText('Sparkplug Datatype')).toBeNull()
+      expect(box.textContent).toContain('Double')
+    })
+
+    it('says what a rate’s unit will follow, then the unit itself with its reason', async () => {
+      const { dialog } = await open()
+      expect(facts(dialog).textContent).toContain("The counter's unit per hour")
+      pick(dialog, 'Controller/PART_COUNT')
+      expect(facts(dialog).textContent).toContain("COUNT/HOUR, the counter's unit per hour")
+      pick(dialog, 'Power/PHASE_A')
+      expect(facts(dialog).textContent).toContain("KILOWATT/HOUR, the counter's unit per hour")
+    })
+
+    it('says a share of time has none, and a sum takes the one its inputs share', async () => {
+      const { dialog } = await open()
+      choose(dialog, /Kind/, 'time_in_state')
+      expect(facts(dialog).textContent).toContain('None: a share of time has no unit')
+      choose(dialog, /Kind/, 'sum')
+      expect(facts(dialog).textContent).toContain('The unit the inputs share')
+      pick(dialog, 'Power/PHASE_A')
+      pick(dialog, 'Power/PHASE_B')
+      expect(facts(dialog).textContent).toContain('KILOWATT, the unit the inputs share')
+      pick(dialog, 'Power/CURRENT')
+      expect(facts(dialog).textContent).toContain('None yet: the inputs do not share a unit')
+    })
+  })
+
+  it('shows the definition in words', async () => {
     const { dialog } = await open()
-    choose(dialog, /Counter/, 'Controller/PART_COUNT')
-    expect(within(dialog).getByLabelText('Units').value).toBe('COUNT/HOUR')
+    pick(dialog, 'Controller/PART_COUNT')
     expect(dialog.textContent).toContain('rate of Controller/PART_COUNT, per hour')
   })
 
   it('wants at least one state, from the input’s permitted values', async () => {
     const { dialog } = await open()
-    fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value: 'UPTIME_2' } })
+    typeName(dialog, 'UPTIME_2')
     choose(dialog, /Kind/, 'time_in_state')
-    choose(dialog, /State Metric/, 'Controller/EXECUTION')
+    pick(dialog, 'Controller/EXECUTION')
     expect(said(dialog)).toBe('Choose at least one state')
     fireEvent.click(within(dialog).getByRole('checkbox', { name: 'ACTIVE' }))
     expect(dialog.textContent).toContain('share of time Controller/EXECUTION is ACTIVE')
-    expect(within(dialog).getByLabelText('Units').value).toBe('None')
-  })
-
-  it('refuses a sum whose inputs differ in unit, naming both, and wants two inputs', async () => {
-    const { dialog } = await open()
-    choose(dialog, /Kind/, 'sum')
-    fireEvent.change(within(dialog).getByLabelText('Metric Name', { exact: false }), { target: { value: 'MIXED' } })
-    expect(said(dialog)).toBe('Choose at least two inputs')
-    fireEvent.change(within(dialog).getByLabelText('Metric of input 1'), { target: { value: 'Power/PHASE_A' } })
-    fireEvent.change(within(dialog).getByLabelText('Metric of input 2'), { target: { value: 'Power/CURRENT' } })
-    expect(said(dialog)).toBe('The inputs of a sum must share one unit: Power/PHASE_A is in KILOWATT and Power/CURRENT is in AMPERE.')
-    fireEvent.change(within(dialog).getByLabelText('Metric of input 2'), { target: { value: 'Power/PHASE_B' } })
-    fireEvent.change(within(dialog).getByLabelText('Sign of input 2'), { target: { value: '-1' } })
     expect(said(dialog)).toBe('')
-    expect(dialog.textContent).toContain('Power/PHASE_A − Power/PHASE_B')
-    expect(within(dialog).getByLabelText('Units').value).toBe('KILOWATT')
-  })
-
-  it('adds and removes a sum’s inputs between two and eight', async () => {
-    const { dialog } = await open()
-    choose(dialog, /Kind/, 'sum')
-    const remove = (n) => within(dialog).getByRole('button', { name: `Remove input ${n}` })
-    expect(remove(1).disabled).toBe(true)
-    for (let i = 0; i < 6; i++) fireEvent.click(within(dialog).getByRole('button', { name: /Add input/ }))
-    expect(within(dialog).getAllByLabelText(/Metric of input/)).toHaveLength(8)
-    expect(within(dialog).getByRole('button', { name: /Add input/ }).disabled).toBe(true)
-    fireEvent.click(remove(8))
-    expect(within(dialog).getAllByLabelText(/Metric of input/)).toHaveLength(7)
   })
 
   it('posts the definition, registers a new group first, and ends with a toast that links to the row', async () => {
@@ -278,8 +471,8 @@ describe('Add Derived Metric', () => {
     const { dialog, showToast } = await open()
     choose(dialog, /Group/, '__new__')
     fireEvent.change(within(dialog).getByLabelText(/New Group Name/), { target: { value: 'Production' } })
-    fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value: 'PARTS_PER_SHIFT' } })
-    choose(dialog, /Counter/, 'Controller/PART_COUNT')
+    typeName(dialog, 'PARTS_PER_SHIFT')
+    pick(dialog, 'Controller/PART_COUNT')
     fireEvent.change(within(dialog).getByLabelText('Description'), { target: { value: 'Parts a shift' } })
     fireEvent.click(confirm(dialog))
 
@@ -296,17 +489,36 @@ describe('Add Derived Metric', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('shows the database’s refusal in the dialog, which stays open with what was typed', async () => {
+  it('posts a sum with its signs in the order picked', async () => {
+    api.post.mockImplementation((path) => Promise.resolve(path === '/api/v1/metric-catalog' ? { metric_uuid: 'new-2' } : {}))
+    const { dialog } = await open()
+    choose(dialog, /Kind/, 'sum')
+    choose(dialog, /Group/, 'Power')
+    typeName(dialog, 'IMBALANCE_2')
+    pick(dialog, 'Power/PHASE_B')
+    pick(dialog, 'Power/PHASE_A')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Subtract Power/PHASE_A' }))
+    fireEvent.click(confirm(dialog))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', {
+      name: 'Power/IMBALANCE_2',
+      datatype: 10,
+      description: '',
+      derivation: { kind: 'sum', inputs: [{ metric: 'Power/PHASE_B', sign: 1 }, { metric: 'Power/PHASE_A', sign: -1 }] }
+    }))
+  })
+
+  it('shows the database’s refusal in the dialog, which stays open with what was typed and chosen', async () => {
     api.post.mockRejectedValueOnce(new Error('Controller/PART_COUNT is itself a derived metric. A derived metric cannot be built on another.'))
     const { dialog, showToast } = await open()
     choose(dialog, /Group/, 'Controller')
-    fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value: 'PARTS_PER_SHIFT' } })
-    choose(dialog, /Counter/, 'Controller/PART_COUNT')
+    typeName(dialog, 'PARTS_PER_SHIFT')
+    pick(dialog, 'Controller/PART_COUNT')
     fireEvent.click(confirm(dialog))
 
     await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toMatch(/cannot be built on another/))
     expect(screen.getByRole('dialog', { name: 'Add Derived Metric' })).toBeTruthy()
     expect(within(dialog).getByLabelText(/Metric Name/).value).toBe('PARTS_PER_SHIFT')
+    expect(chosen(dialog)).toEqual(['Controller/PART_COUNT'])
     expect(showToast).not.toHaveBeenCalled()
   })
 })

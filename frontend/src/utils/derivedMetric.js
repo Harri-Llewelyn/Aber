@@ -103,12 +103,13 @@ export const matchesDerivedSearch = (metric, query) => {
 }
 
 /**
- * The measured metrics a kind can take as an input, by name: not derived, and of a datatype the kind
- * reads. Deprecated ones stay: their readings are still there.
+ * The measured metrics a kind can take as an input, by name: not derived, not deprecated, and of a
+ * datatype the kind reads. The list leaves deprecated ones out as the schema builder's does; the
+ * database still accepts one by the API, since its readings are still there.
  */
 export function eligibleInputs(catalog, kind) {
   const fits = kind === 'time_in_state' ? isStateType : isNumberType
-  return (catalog || []).filter(m => !isDerived(m) && fits(m.datatype))
+  return (catalog || []).filter(m => !isDerived(m) && !m.deprecated && fits(m.datatype))
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
 }
 
@@ -133,6 +134,27 @@ export function derivedUnit(kind, inputRows) {
     }
   }
   return { units: first.units || null, problem: null }
+}
+
+/**
+ * The unit a derived metric will take, in words with its reason, for the dialog's fixed Units line:
+ * "COUNT/HOUR, the counter's unit per hour", "None: a share of time has no unit". Before the inputs
+ * are chosen it says what the unit will follow.
+ */
+export function describeUnit(kind, inputRows) {
+  if (kind === 'time_in_state') return 'None: a share of time has no unit'
+  if (kind === 'counter_rate') {
+    const row = inputRows[0]
+    if (!row) return "The counter's unit per hour"
+    const { units } = derivedUnit(kind, inputRows)
+    return row.units
+      ? `${units}, the counter's unit per hour`
+      : `${units}, per hour: a counter with no unit counts occurrences`
+  }
+  if (inputRows.length === 0) return 'The unit the inputs share'
+  const { units, problem } = derivedUnit(kind, inputRows)
+  if (problem) return 'None yet: the inputs do not share a unit'
+  return units ? `${units}, the unit the inputs share` : 'None: the inputs have no unit'
 }
 
 /** A definition from the form's fields, as the database holds it. */

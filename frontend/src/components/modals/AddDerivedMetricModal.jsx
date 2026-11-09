@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { IconAlertTriangle, IconPlus, IconX } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
+import { MetricPicker } from '../common/MetricPicker'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { Tooltip } from '../common/Tooltip'
@@ -9,7 +10,7 @@ import {
   canonicaliseGroup, composeMetricName, groupOptionsByStandard, knownGroupNames, metricNameError
 } from '../../utils/metricGroup'
 import {
-  DERIVATION_KINDS, DERIVED_MAX_INPUTS, buildDerivation, derivationProblem, derivationText, derivedUnit,
+  DERIVATION_KINDS, DERIVED_MAX_INPUTS, buildDerivation, derivationProblem, derivationText, describeUnit,
   eligibleInputs, nameProblem, stateOptions
 } from '../../utils/derivedMetric'
 
@@ -20,8 +21,16 @@ const BLANK = {
   group: '', newGroup: '', instance: '', leaf: '',
   kind: DERIVATION_KINDS[0].id,
   input: '', states: [], statesText: '',
-  inputs: [{ metric: '', sign: 1 }, { metric: '', sign: 1 }],
+  inputs: [],
   description: ''
+}
+
+/** What the picker's section is called, and what is asked of it, for each kind. */
+const INPUT_LABELS = { counter_rate: 'Counter', time_in_state: 'State Metric', sum: 'Inputs' }
+const INPUT_ASKS = {
+  counter_rate: 'A numeric metric that counts up and resets to a lower value. Choosing another replaces it.',
+  time_in_state: 'A string or boolean metric. Choosing another replaces it.',
+  sum: `Two to ${DERIVED_MAX_INPUTS} numeric metrics, in the order you choose them. Each is added unless you press − beside it.`
 }
 
 /** The states a free-text field holds: comma separated, trimmed, none empty, each once. */
@@ -29,11 +38,13 @@ const parseStates = (text) => [...new Set(text.split(',').map(s => s.trim()).fil
 
 /**
  * Add Derived Metric: a catalog row whose value Aber computes from other metrics, in the layout of
- * Add Metric. The name is composed from a group, an optional instance and a name, and is as fixed as
- * any metric's; so is the definition. The unit is not asked for: it follows the inputs. `onConfirm`
- * receives `{ name, group, isNewGroup, description, derivation }` and throws the database's refusal,
- * which the dialog shows as it was worded. `declared` is the set of names devices declare that no
- * catalog row has, which the name may not be.
+ * Add Metric. The inputs are chosen from the schema builder's metric list (common/MetricPicker), which
+ * offers only what the kind can read. The name is composed from a group, an optional instance and a
+ * name, and is as fixed as any metric's; so is the definition. The unit and the datatype are not
+ * asked for, and are shown as the facts they are: the unit follows the inputs. `onConfirm` receives
+ * `{ name, group, isNewGroup, description, derivation }` and throws the database's refusal, which the
+ * dialog shows as it was worded. `declared` is the set of names devices declare that no catalog row
+ * has, which the name may not be.
  */
 export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, onCancel }) {
   const [form, setForm] = useState(BLANK)
@@ -48,15 +59,14 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
   const caseCollision = form.group === NEW_GROUP && form.newGroup.trim() !== '' && group !== form.newGroup.trim()
 
   const byName = new Map(catalog.map(m => [m.name, m]))
+  const isSum = form.kind === 'sum'
   const inputOptions = eligibleInputs(catalog, form.kind)
+  const chosenNames = isSum ? form.inputs.map(i => i.metric) : (form.input ? [form.input] : [])
   const chosenInput = byName.get(form.input)
   const options = form.kind === 'time_in_state' ? stateOptions(chosenInput) : null
   const states = options ? form.states : parseStates(form.statesText)
   const definition = buildDerivation({ ...form, states })
-  const inputRows = (form.kind === 'sum' ? form.inputs.map(i => i.metric) : [form.input])
-    .map(n => byName.get(n)).filter(Boolean)
-  const unit = inputRows.length > 0 && (form.kind !== 'sum' || inputRows.length === form.inputs.length)
-    ? derivedUnit(form.kind, inputRows) : { units: null, problem: null }
+  const inputRows = chosenNames.map(n => byName.get(n)).filter(Boolean)
 
   const nameError = form.leaf.trim() !== '' ? metricNameError(name) : null
   const nameHeld = nameError ? null : nameProblem(name, catalog, declared)
@@ -78,16 +88,35 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
     }
   })
 
-  const changeKind = (kind) => set({ kind, input: '', states: [], statesText: '' })
-  const setInputRow = (index, patch) =>
-    set({ inputs: form.inputs.map((row, i) => (i === index ? { ...row, ...patch } : row)) })
-  const optionLabel = (m) => `${m.name}${m.units ? ` (${m.units})` : ''}${m.deprecated ? ' — deprecated' : ''}`
+  // What each kind has chosen differs in kind, so a new kind starts with nothing chosen.
+  const changeKind = (kind) => set({ kind, input: '', states: [], statesText: '', inputs: [] })
+
+  // One input replaces the last; a sum's are added in the order chosen, each starting as a plus.
+  const pick = (m) => {
+    if (!isSum) {
+      if (form.input !== m.name) set({ input: m.name, states: [], statesText: '' })
+      return
+    }
+    set({
+      inputs: chosenNames.includes(m.name)
+        ? form.inputs.filter(i => i.metric !== m.name)
+        : [...form.inputs, { metric: m.name, sign: 1 }]
+    })
+  }
+  const drop = (metric) => {
+    if (isSum) set({ inputs: form.inputs.filter(i => i.metric !== metric) })
+    else set({ input: '', states: [], statesText: '' })
+  }
+  const setSign = (metric, sign) =>
+    set({ inputs: form.inputs.map(i => (i.metric === metric ? { ...i, sign } : i)) })
+
+  const atLimit = isSum && form.inputs.length >= DERIVED_MAX_INPUTS
 
   return (
     <Modal
       title="Add Derived Metric"
       icon={<IconPlus size={18} />}
-      size="xl"
+      size="wide"
       onClose={adding ? () => {} : onCancel}
       problem={problem}
       error={error}
@@ -187,137 +216,148 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
             </select>
           </Tooltip>
         </div>
+      </div>
 
-        {form.kind !== 'sum' && (
-          <div className="form-group" style={{ flex: '1 1 260px' }}>
-            <label className="form-label" htmlFor="derived-input">
-              {form.kind === 'counter_rate' ? 'Counter' : 'State Metric'} <RequiredMark />
-            </label>
-            <Tooltip text={form.kind === 'counter_rate'
-              ? 'A numeric metric that counts up and resets to a lower value. Only measured metrics are offered: a derived one cannot be an input.'
-              : 'A string or boolean metric. Only measured metrics are offered: a derived one cannot be an input.'}>
-              <select
-                id="derived-input"
+      {/* The schema builder's metric list, offering only what this kind can read: measured metrics,
+          not derived and not deprecated, of the right datatype. The search and the filter narrow
+          what is listed, never what is chosen. */}
+      <div className="form-group" role="group" aria-labelledby="derived-inputs-label">
+        <span className="form-label" id="derived-inputs-label">
+          {INPUT_LABELS[form.kind]} <RequiredMark />
+          <span className="section-count">{chosenNames.length} selected</span>
+        </span>
+        <p className="form-hint" style={{ marginTop: 0 }}>{INPUT_ASKS[form.kind]}</p>
+        <MetricPicker
+          key={form.kind}
+          metrics={inputOptions}
+          single={!isSum}
+          isPicked={m => chosenNames.includes(m.name)}
+          isDisabled={() => atLimit}
+          onPick={pick}
+          showUnits
+          listStyle={{ flex: 'none', height: '220px' }}
+          emptyText="No measured metric in the catalog can be an input of this kind."
+        />
+        {atLimit && <p className="form-hint">A sum takes at most {DERIVED_MAX_INPUTS} inputs.</p>}
+      </div>
+
+      <div className="form-group">
+        <span className="form-label" id="derived-chosen-label">Chosen{isSum ? ', in the order picked' : ''}</span>
+        {chosenNames.length === 0 ? (
+          <p className="form-hint" style={{ marginTop: 0 }}>Nothing chosen yet.</p>
+        ) : (
+          <div role="list" aria-labelledby="derived-chosen-label" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+            {chosenNames.map(metric => {
+              const row = byName.get(metric)
+              const sign = isSum ? form.inputs.find(i => i.metric === metric)?.sign : null
+              return (
+                <div
+                  key={metric}
+                  role="listitem"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderBottom: '1px solid var(--border)' }}
+                >
+                  {isSum && (
+                    <span role="group" aria-label={`Sign of ${metric}`} style={{ display: 'inline-flex', gap: '2px' }}>
+                      <Tooltip text="Add its value to the total">
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${sign === 1 ? 'btn-primary' : 'btn-ghost'}`}
+                          aria-pressed={sign === 1}
+                          aria-label={`Add ${metric}`}
+                          onClick={() => setSign(metric, 1)}
+                        >
+                          +
+                        </button>
+                      </Tooltip>
+                      <Tooltip text="Subtract its value from the total">
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${sign === -1 ? 'btn-primary' : 'btn-ghost'}`}
+                          aria-pressed={sign === -1}
+                          aria-label={`Subtract ${metric}`}
+                          onClick={() => setSign(metric, -1)}
+                        >
+                          {'−'}
+                        </button>
+                      </Tooltip>
+                    </span>
+                  )}
+                  <span className="mono" style={{ fontSize: '12px' }}>{metric}</span>
+                  {row?.units && <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{row.units}</span>}
+                  <Tooltip text="Remove it from the choice">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ marginLeft: 'auto' }}
+                      aria-label={`Remove ${metric}`}
+                      onClick={() => drop(metric)}
+                    >
+                      <IconX size={12} />
+                    </button>
+                  </Tooltip>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {form.kind === 'time_in_state' && form.input && (
+        <div className="form-group">
+          <span className="form-label" id="derived-states-label">States That Count <RequiredMark /></span>
+          {options ? (
+            <div role="group" aria-labelledby="derived-states-label" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+              {options.map(state => (
+                <label key={state} style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.states.includes(state)}
+                    onChange={e => set({
+                      states: e.target.checked ? [...form.states, state] : form.states.filter(s => s !== state)
+                    })}
+                  />
+                  <span className="mono">{state}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <Tooltip text="The values that count as being in the state, separated by commas. This metric lists no permitted values, so a misspelling is not caught.">
+              <input
+                id="derived-states"
+                aria-labelledby="derived-states-label"
                 aria-required="true"
                 className="form-control"
-                value={form.input}
-                onChange={e => set({ input: e.target.value, states: [], statesText: '' })}
-              >
-                <option value="">— Choose a metric —</option>
-                {inputOptions.map(m => <option key={m.metric_uuid} value={m.name}>{optionLabel(m)}</option>)}
-              </select>
+                value={form.statesText}
+                onChange={e => set({ statesText: e.target.value })}
+                placeholder="e.g. ACTIVE, READY"
+              />
             </Tooltip>
-          </div>
-        )}
-
-        {form.kind === 'time_in_state' && form.input && (
-          <div className="form-group" style={{ flex: '1 1 100%' }}>
-            <span className="form-label" id="derived-states-label">States That Count <RequiredMark /></span>
-            {options ? (
-              <div role="group" aria-labelledby="derived-states-label" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
-                {options.map(state => (
-                  <label key={state} style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px' }}>
-                    <input
-                      type="checkbox"
-                      checked={form.states.includes(state)}
-                      onChange={e => set({
-                        states: e.target.checked ? [...form.states, state] : form.states.filter(s => s !== state)
-                      })}
-                    />
-                    <span className="mono">{state}</span>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <Tooltip text="The values that count as being in the state, separated by commas. This metric lists no permitted values, so a misspelling is not caught.">
-                <input
-                  id="derived-states"
-                  aria-labelledby="derived-states-label"
-                  aria-required="true"
-                  className="form-control"
-                  value={form.statesText}
-                  onChange={e => set({ statesText: e.target.value })}
-                  placeholder="e.g. ACTIVE, READY"
-                />
-              </Tooltip>
-            )}
-          </div>
-        )}
-
-        {form.kind === 'sum' && (
-          <div className="form-group" style={{ flex: '1 1 100%' }}>
-            <span className="form-label" id="derived-inputs-label">Inputs <RequiredMark /></span>
-            {form.inputs.map((row, i) => (
-              <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
-                <select
-                  aria-label={`Sign of input ${i + 1}`}
-                  className="form-control"
-                  style={{ flex: '0 0 64px' }}
-                  value={row.sign}
-                  onChange={e => setInputRow(i, { sign: Number(e.target.value) })}
-                >
-                  <option value={1}>+</option>
-                  <option value={-1}>{'−'}</option>
-                </select>
-                <select
-                  aria-label={`Metric of input ${i + 1}`}
-                  aria-required="true"
-                  className="form-control"
-                  style={{ flex: '1 1 auto' }}
-                  value={row.metric}
-                  onChange={e => setInputRow(i, { metric: e.target.value })}
-                >
-                  <option value="">— Choose a metric —</option>
-                  {inputOptions.map(m => <option key={m.metric_uuid} value={m.name}>{optionLabel(m)}</option>)}
-                </select>
-                <Tooltip text="Remove this input">
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    aria-label={`Remove input ${i + 1}`}
-                    disabled={form.inputs.length <= 2}
-                    onClick={() => set({ inputs: form.inputs.filter((_, j) => j !== i) })}
-                  >
-                    <IconX size={12} />
-                  </button>
-                </Tooltip>
-              </div>
-            ))}
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              disabled={form.inputs.length >= DERIVED_MAX_INPUTS}
-              onClick={() => set({ inputs: [...form.inputs, { metric: '', sign: 1 }] })}
-            >
-              <IconPlus size={12} /> Add input
-            </button>
-          </div>
-        )}
-
-        <div className="form-group" style={{ flex: '0 1 170px' }}>
-          <label className="form-label" htmlFor="derived-units">Units</label>
-          <Tooltip text="Not chosen: a rate is its counter's unit per hour, a ratio has none, and a sum takes the unit its inputs share.">
-            <input id="derived-units" className="form-control" readOnly value={unit.units || 'None'} />
-          </Tooltip>
+          )}
         </div>
+      )}
 
-        <div className="form-group" style={{ flex: '0 1 140px' }}>
-          <label className="form-label" htmlFor="derived-datatype">Sparkplug Datatype</label>
-          <Tooltip text="A derived value is computed as a number. Nothing publishes it, so no device encodes it.">
-            <input id="derived-datatype" className="form-control" readOnly value="Double" />
-          </Tooltip>
+      {/* Facts nobody chooses, as Edit Metric shows a name and a datatype it cannot change: the
+          unit follows the inputs, and a derived value is a Double. */}
+      <div className="form-group metric-edit-facts">
+        <div>
+          <div className="form-label">Units</div>
+          <div>{describeUnit(form.kind, inputRows)}</div>
         </div>
+        <div>
+          <div className="form-label">Sparkplug Datatype</div>
+          <div>Double</div>
+        </div>
+      </div>
 
-        <div className="form-group" style={{ flex: '2 1 200px' }}>
-          <label className="form-label" htmlFor="derived-description">Description</label>
-          <input
-            id="derived-description"
-            className="form-control"
-            value={form.description}
-            onChange={e => set({ description: e.target.value })}
-            placeholder="What this metric represents"
-          />
-        </div>
+      <div className="form-group">
+        <label className="form-label" htmlFor="derived-description">Description</label>
+        <input
+          id="derived-description"
+          className="form-control"
+          value={form.description}
+          onChange={e => set({ description: e.target.value })}
+          placeholder="What this metric represents"
+        />
       </div>
 
       {/* The name is as fixed as any metric's, and so is the definition: a change is a new metric. */}

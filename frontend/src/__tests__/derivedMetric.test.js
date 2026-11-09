@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DERIVATION_KINDS, DERIVED_MAX_INPUTS, buildDerivation, derivationInputs, derivationProblem, derivationText,
-  derivedUnit, describeDerivation, eligibleInputs, isDerived, kindLabel, matchesDerivedSearch, nameProblem,
+  derivedUnit, describeDerivation, describeUnit, eligibleInputs, isDerived, kindLabel, matchesDerivedSearch, nameProblem,
   stateOptions
 } from '../utils/derivedMetric'
 
@@ -91,9 +91,9 @@ describe('the inputs a kind offers', () => {
     }
   })
 
-  it('offers a deprecated metric: its readings are still there', () => {
-    const deprecated = [m('A/OLD', 10, { deprecated: true })]
-    expect(eligibleInputs(deprecated, 'counter_rate')).toHaveLength(1)
+  it('leaves a deprecated metric out, as the schema builder does; the database still accepts one', () => {
+    const deprecated = [m('A/OLD', 10, { deprecated: true }), m('A/NEW', 10)]
+    expect(eligibleInputs(deprecated, 'counter_rate').map(x => x.name)).toEqual(['A/NEW'])
   })
 
   it('lists a state metric’s permitted values, or true and false, or nothing for free text', () => {
@@ -123,6 +123,30 @@ describe('the unit follows the inputs', () => {
     expect(mixed.units).toBeNull()
     expect(mixed.problem).toBe('The inputs of a sum must share one unit: Power/PHASE_A is in KILOWATT and Power/CURRENT is in AMPERE.')
     expect(derivedUnit('sum', [row('Power/PHASE_A'), row('Power/BARE')]).problem).toMatch(/Power\/BARE is in no unit/)
+  })
+})
+
+describe('the unit in words, with its reason', () => {
+  const row = (name) => CATALOG.find(x => x.name === name)
+
+  it('says what a rate follows, then the unit with its reason', () => {
+    expect(describeUnit('counter_rate', [])).toBe("The counter's unit per hour")
+    expect(describeUnit('counter_rate', [row('Controller/PART_COUNT')])).toBe("COUNT/HOUR, the counter's unit per hour")
+    expect(describeUnit('counter_rate', [row('Power/PHASE_A')])).toBe("KILOWATT/HOUR, the counter's unit per hour")
+    expect(describeUnit('counter_rate', [row('Power/BARE')])).toBe('COUNT/HOUR, per hour: a counter with no unit counts occurrences')
+  })
+
+  it('says a share of time has none', () => {
+    expect(describeUnit('time_in_state', [])).toBe('None: a share of time has no unit')
+    expect(describeUnit('time_in_state', [row('Controller/EXECUTION')])).toBe('None: a share of time has no unit')
+  })
+
+  it('says what a sum takes, from the unit its inputs share', () => {
+    expect(describeUnit('sum', [])).toBe('The unit the inputs share')
+    expect(describeUnit('sum', [row('Power/PHASE_A')])).toBe('KILOWATT, the unit the inputs share')
+    expect(describeUnit('sum', [row('Power/PHASE_A'), row('Power/PHASE_B')])).toBe('KILOWATT, the unit the inputs share')
+    expect(describeUnit('sum', [row('Power/BARE'), row('Power/BARE')])).toBe('None: the inputs have no unit')
+    expect(describeUnit('sum', [row('Power/PHASE_A'), row('Power/CURRENT')])).toBe('None yet: the inputs do not share a unit')
   })
 })
 
