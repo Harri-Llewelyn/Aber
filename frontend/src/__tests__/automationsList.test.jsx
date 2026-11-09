@@ -186,8 +186,8 @@ describe('the search', () => {
 
 describe('from a device to its automations', () => {
   const rows = [
-    { automation_id: 'a', key: 'lathe-3-spindle-hot', alias: 'Lathe 3 spindle bearing hot', enabled: true, reason: 'named' },
-    { automation_id: 'a', key: 'lathe-3-spindle-hot', alias: 'Lathe 3 spindle bearing hot', enabled: true, reason: 'site-wide' },
+    { automation_id: 'a', key: hot.id, alias: hot.alias, enabled: true, reason: 'named' },
+    { automation_id: 'a', key: hot.id, alias: hot.alias, enabled: true, reason: 'site-wide' },
   ]
 
   it('narrows the list to the automations that apply, names the device in a chip, and says why each applies', async () => {
@@ -342,7 +342,7 @@ describe('New Automation', () => {
 
 describe('an alert opens its automation', () => {
   it('finds the automation by the trigger the alert names, and opens it in place of the redirect', async () => {
-    api.automationOfTrigger.mockResolvedValue({ key: 'lathe-3-spindle-hot' })
+    api.automationOfTrigger.mockResolvedValue({ key: hot.id })
     await show({ url: `/automations?trigger=${TRIGGER_A}` })
     await waitFor(() => expect(window.location.pathname).toBe('/automations/lathe-3-spindle-hot'))
     expect(api.automationOfTrigger).toHaveBeenCalledWith(TRIGGER_A)

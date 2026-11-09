@@ -341,7 +341,7 @@ describe('Save', () => {
   })
 
   it('saves a new automation, and opens it', async () => {
-    api.applyAutomations.mockResolvedValue([{ index: 0, key: 'lathe-3-spindle-hot', status: 'new', id: 'row-1', changes: [], reasons: [] }])
+    api.applyAutomations.mockResolvedValue([{ index: 0, key: stored.id, status: 'new', id: 'row-1', changes: [], reasons: [] }])
     const toast = await show({ url: '/automations/new' })
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save/ })) })
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Save 1 Automation' })) })
