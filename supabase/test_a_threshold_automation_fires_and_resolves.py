@@ -96,19 +96,24 @@ class ThresholdAutomation(unittest.TestCase):
             historian_sql("SELECT 1;")
         except (RuntimeError, OSError) as err:
             raise unittest.SkipTest(f"the platform database or the historian cannot be reached with kubectl: {err}")
-        suffix = uuid.uuid4().hex[:8]
-        cls.metric = f"Test_0271_Stack/Spindle_{suffix}"
-        cls.device_id = str(uuid.uuid4())
-        cls.automation_key = f"probe{suffix}"
-        cls.alias = f"Stack probe {suffix}"
-        cls.created["metric"] = cls.metric
-        platform_sql(f"INSERT INTO public.metric_catalog (name, datatype) VALUES ('{cls.metric}', 10);")
-        cls.created["device"] = cls.device_id
-        cls.sparkplug_id = platform_sql(
-            f"INSERT INTO public.devices (id, name) VALUES ('{cls.device_id}', 'Stack probe {suffix}') RETURNING sparkplug_id;"
-        ).splitlines()[0].strip()
-        cls.created["asset"] = cls.sparkplug_id
-        historian_sql(f"INSERT INTO assets (asset_id, asset_name) VALUES ('{cls.sparkplug_id}', 'Stack probe') ON CONFLICT DO NOTHING;")
+        # tearDownClass does not run when this raises, so what was made is removed here.
+        try:
+            suffix = uuid.uuid4().hex[:8]
+            cls.metric = f"Test_0271_Stack/Spindle_{suffix}"
+            cls.device_id = str(uuid.uuid4())
+            cls.automation_key = f"probe{suffix}"
+            cls.alias = f"Stack probe {suffix}"
+            cls.created["metric"] = cls.metric
+            platform_sql(f"INSERT INTO public.metric_catalog (name, datatype) VALUES ('{cls.metric}', 10);")
+            cls.created["device"] = cls.device_id
+            cls.sparkplug_id = platform_sql(
+                f"INSERT INTO public.devices (id, name) VALUES ('{cls.device_id}', 'Stack probe {suffix}') RETURNING sparkplug_id;"
+            ).splitlines()[0].strip()
+            cls.created["asset"] = cls.sparkplug_id
+            historian_sql(f"INSERT INTO assets (asset_id, asset_name) VALUES ('{cls.sparkplug_id}', 'Stack probe') ON CONFLICT DO NOTHING;")
+        except BaseException:
+            cls.tearDownClass()
+            raise
 
     @classmethod
     def tearDownClass(cls):
