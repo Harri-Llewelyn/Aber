@@ -1488,6 +1488,17 @@ export const SUITES = {
       'Configures the webhook as the database owner and puts back what the stack held. Needs ' +
       'kubectl, the functions image with notification-dispatch, and NetworkPolicies off.',
   },
+  'supabase/functions/notification-dispatch/test_notification_dispatch_email.py': {
+    lanes: ['stack'],
+    why:
+      "The dispatcher's email end to end (0262, 0263): a firing alert written with psql reaches a " +
+      'relay pod addressed to the roles told, with its facts and link, the envelope alone naming ' +
+      'the people; a resolve follows in the same thread, an acknowledgement before the reminder ' +
+      "stops it, an unacknowledged alert is reminded, a machine identity's alert goes to " +
+      'Administrators only, a test goes to the person who asked, and the log keeps counts and no ' +
+      'address. Needs the functions pod to send through aber-test-smtp (supabaseAuth.smtp.host), ' +
+      'kubectl and NetworkPolicies off; skips, saying so, on any other relay.',
+  },
   'backup-service/test_backup_service.py': {
     lanes: ['stack'],
     why:

@@ -1769,6 +1769,50 @@ networkPolicy:
 
 A site without NetworkPolicies has nothing to do.
 
+### From 1.8.0, alerts can be emailed
+
+Aber can now email an alert to the people in the roles you choose. It sends when the alert starts
+firing, as a reminder while it fires unacknowledged, and when it resolves. Acknowledging the alert
+stops the reminders.
+
+Email starts off. Nothing is sent until an Administrator opens Settings › Notifications, chooses
+**Set up email**, and ticks the roles to tell. The upgrade changes nothing a site must act on.
+
+**Email uses the mail relay you already set for password resets.** It reads `supabaseAuth.smtp`
+(`host`, `port`, `user`, `from`, `senderName`) and `secrets.smtpPassword`. There is nothing to
+configure twice. With no `host`, the Notifications tab says that email cannot be sent yet.
+
+- **Port 465** is encrypted from the first byte. **Any other port** upgrades to TLS if the relay
+  offers it. Aber never sends a password without TLS.
+- **A relay whose certificate a private authority signed** needs that authority's certificate in
+  `supabaseFunctions.smtpCaCert`, as a PEM. The password-reset mail does not read it.
+- **A self-signed certificate** works only if it is not marked as a certificate authority.
+  `openssl req -x509` marks it as one by default. Issue the relay's certificate from an authority
+  and give Aber the authority's certificate instead.
+
+**The functions pod opens the connection to the relay.** A site with `networkPolicy.enabled` must
+let it reach the relay, or every email fails and the delivery log says the relay could not be
+reached. If your `networkPolicy.extraEgress` already has a rule for the auth pod's relay, its
+`podSelector` picks the auth pod alone. Widen it to the functions pod too:
+
+```yaml
+networkPolicy:
+  extraEgress:
+    podSelector:
+      matchExpressions:
+        - { key: app.kubernetes.io/component, operator: In, values: [supabase-auth, supabase-functions] }
+    policyTypes: [Egress]
+    egress:
+      - to: [{ ipBlock: { cidr: 203.0.113.25/32 } }]
+        ports: [{ protocol: TCP, port: 587 }]
+```
+
+The same widening lets the functions pod reach a webhook's host, as the section above says. The
+chart writes no egress rule for the relay itself.
+
+Use **Email a test** on the same tab to check the whole path. It sends one message to your own
+address and shows how it went. A site without NetworkPolicies has nothing else to do.
+
 ## Backups
 
 `backup.enabled=true` turns backups on, in one of two ways depending on a second setting. Both write
