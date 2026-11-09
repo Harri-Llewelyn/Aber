@@ -1717,6 +1717,18 @@ export const SUITES = {
       "other function, while the person's dashboard token reaches them all. Only GoTrue can issue " +
       'a token that names an app, and only the gateway decides on it.',
   },
+  'supabase/test_an_app_registered_by_an_administrator_signs_people_in.py': {
+    lanes: ['stack'],
+    why:
+      'An app an Administrator registers signs people in (0260): the seeded Administrator registers a ' +
+      'confidential and a public app with register_app(), and a seeded Shopfloor Manager completes ' +
+      "each one's authorization-code flow with PKCE. Discovery names an absolute issuer, the access and " +
+      'ID tokens carry it, and the ID token verifies against the key set. The access token reaches ' +
+      "user-info, GET /auth/v1/user, its refresh and its own local logout and is refused with the " +
+      'gateway\'s 403 on PUT /auth/v1/user, the factor routes, the approvals, PostgREST, Storage and ' +
+      'every function; revoking the approval ends its session; and a removed app cannot start a ' +
+      'sign-in. Only GoTrue issues these tokens and only the gateway refuses them.',
+  },
   'supabase/test_a_token_s_use_is_recorded.py': {
     lanes: ['stack'],
     why:

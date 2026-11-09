@@ -118,6 +118,18 @@ python supabase/test_revoking_an_app_ends_its_refresh_token.py
 # person's dashboard token reaches all of them, and an app's ID token is not served as the person.
 # An app whose client is not registered (Studio's when Studio is off) is skipped, with the reason.
 python supabase/test_each_app_s_token_reaches_only_its_own_routes.py
+# An app an Administrator registers signs people in (0260). Needs the stack up, and
+# security.require_mfa_for_managers off: the suite signs in by password, so with it on the Administrator's
+# registration is refused for want of a code and the suite skips, saying so. The seeded Administrator
+# registers a confidential and a public app with register_app(), and the seeded Shopfloor Manager
+# completes each one's code flow with PKCE. Discovery names an absolute issuer, the access and ID
+# tokens carry it as `iss`, and the ID token verifies against the key set (with the `cryptography`
+# package installed). The access token reaches user-info and GET /auth/v1/user, refreshes and signs
+# out its own session, and is refused with the gateway's 403 on PUT /auth/v1/user, the factor routes,
+# the approvals, PostgREST, Storage and every function. Revoking the approval ends its session, a
+# removed app cannot start a sign-in, and the Audit Trail names the Administrator. Every app it
+# registers is removed at the end.
+python supabase/test_an_app_registered_by_an_administrator_signs_people_in.py
 # A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
 # the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
 # request with it, and reads its row back: the identity and the current UTC hour. A second request

@@ -210,6 +210,57 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 74. An app's redirect addresses, one rule in two places (0260). app_redirect_problem() decides in
+// the database and redirectAddressProblem() says it before the dialog asks. Both are held to
+// test-harness/fixtures/app-redirect-addresses.json by their own tests, which must still read it, and
+// the file must keep a case for each way an address is allowed and each way it is refused: a case
+// removed leaves a rule only one side was ever tested on.
+{
+  const FIXTURE = 'test-harness/fixtures/app-redirect-addresses.json';
+  const readers = [
+    ['the database suite', 'supabase/migrations/test_an_administrator_registers_an_app_that_signs_people_in.py'],
+    ["the dashboard's tests", 'frontend/src/__tests__/registerApp.test.jsx'],
+  ];
+  const cases = JSON.parse(read(FIXTURE)).cases ?? [];
+  const rules = new Set(cases.map((c) => c.rule));
+  const ALLOWED = [
+    'https goes anywhere', 'http: localhost', 'http: .localhost names', 'http: loopback', 'http: private addresses',
+    "http: the site's domain",
+  ];
+  const REFUSED = [
+    'http elsewhere is refused', "the site's domain is a whole name", 'localhost is a whole name',
+    'an address that is not one', 'no fragment', 'no wildcard', 'no comma', 'no user name', 'no space', 'no backslash',
+    'https and http alone', 'not empty',
+  ];
+  const before74 = problems.length;
+  for (const [who, file] of readers) {
+    if (!read(file).includes('app-redirect-addresses.json')) problems.push(`redirectAddresses: ${who} (${file}) no longer reads ${FIXTURE}, so one side of the rule is untested against it`);
+  }
+  for (const rule of ALLOWED) {
+    if (!cases.some((c) => c.rule === rule && c.ok === true)) problems.push(`redirectAddresses: ${FIXTURE} has no allowed case for "${rule}"`);
+  }
+  for (const rule of REFUSED) {
+    if (!cases.some((c) => c.rule === rule && c.ok === false)) problems.push(`redirectAddresses: ${FIXTURE} has no refused case for "${rule}"`);
+  }
+  if (problems.length === before74) ok.push(`redirectAddresses: ${cases.length} cases across ${rules.size} rules, read by the database suite and the dashboard's tests`);
+}
+
+// 75. How much an app may be given, three places each (0260). register_app() takes 1 to c_max_uris
+// redirect addresses, GoTrue refuses a client with more than ten, and the dialog's redirectAddressesProblem()
+// stops at APP_REDIRECT_MAX; the name is 1 to c_max_name characters, and appNameProblem() stops at APP_NAME_MAX.
+{
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.register_app(', '$$;', 'register_app() in the applied chain');
+  const js = read('frontend/src/utils/apps.js');
+  const sqlUris = fn && need(fn.body, /c_max_uris\s+CONSTANT integer := (\d+);/, 'c_max_uris in register_app()');
+  const sqlName = fn && need(fn.body, /c_max_name\s+CONSTANT integer := (\d+);/, 'c_max_name in register_app()');
+  const jsUris = need(js, /export const APP_REDIRECT_MAX = (\d+)/, 'APP_REDIRECT_MAX in utils/apps.js');
+  const jsName = need(js, /export const APP_NAME_MAX = (\d+)/, 'APP_NAME_MAX in utils/apps.js');
+  if (sqlUris && jsUris) compare('appLimits', `most redirect addresses register_app() (${fn.file}) and the dialog take`, jsUris[1], sqlUris[1]);
+  if (sqlName && jsName) compare('appLimits', `longest app name register_app() (${fn.file}) and the dialog take`, jsName[1], sqlName[1]);
+  // GoTrue's own limit (v2.197.0 validateRedirectURIList): a client with more is refused by its router.
+  if (sqlUris && Number(sqlUris[1]) > 10) problems.push(`appLimits: register_app() takes ${sqlUris[1]} redirect addresses, and GoTrue (v2.197.0) refuses a client with more than 10`);
+}
+
 // 26. A person's picture. The dashboard uploads to, downloads from and deletes `<id>/avatar` in the
 // avatars bucket; manage-people's Remove Access deletes the same object; storage-init.mjs creates
 // the bucket with its types and limit; and 0213's CHECK and is_own_avatar_object() name the object.

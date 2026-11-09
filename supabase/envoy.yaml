@@ -834,8 +834,8 @@ static_resources:
                             sds_config:
                               path_config_source: { path: /etc/envoy/studio-hmac-secret.yaml }
                   # 2. THE TOKEN: verifies what GoTrue signed, ES256 by kid, against the JWKS the initContainer
-                  # renders (it refuses an `oct` key). No issuer check, because GoTrue's OAuth access token
-                  # carries no iss. Forwarded after verification for step 4; step 5 strips it, so
+                  # renders (it refuses an `oct` key). No issuer check, because a token GoTrue signed before
+                  # its issuer was set carries no iss. Forwarded after verification for step 4; step 5 strips it, so
                   # Studio never sees a Supabase JWT.
                   - name: envoy.filters.http.jwt_authn
                     typed_config:
