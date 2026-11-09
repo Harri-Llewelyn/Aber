@@ -304,7 +304,11 @@ export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice,
   const cell = useMemo(() => (cellId ? cells.find(c => c.cell_id === cellId) || null : null), [cellId, cells])
   const areas = useMemo(() => historyAreas(loaded?.areas, cells), [loaded, cells])
   const area = useMemo(() => (areaId ? areas.find(a => a.area_id === areaId) || null : null), [areaId, areas])
-  const metrics = useMemo(() => (loaded ? historyMetrics(loaded.devices, loaded.schemas, loaded.catalog) : []), [loaded])
+  // Worked out only for the Metric tab: it reads every device's schemas.
+  const metrics = useMemo(
+    () => (loaded && tab === METRIC_TAB ? historyMetrics(loaded.devices, loaded.schemas, loaded.catalog) : []),
+    [loaded, tab]
+  )
 
   // A tab click starts the tab afresh, as the tab bars elsewhere do: at its own window, the Device
   // tab at its picker.
