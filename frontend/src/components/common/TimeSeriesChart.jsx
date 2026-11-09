@@ -104,9 +104,10 @@ export const PLOT_RIGHT_PX = 28
 
 /**
  * uPlot's options for one chart. Its own drag selection is off: the page's window is the only zoom.
- * `plugins` are the page's own uPlot plugins, such as the alert bands (alertBands.js).
+ * `plugins` are the page's own uPlot plugins, such as the alert bands (alertBands.js). `yRange` fixes
+ * a number chart's value scale to [low, high], so several charts can share one.
  */
-function plotOptions({ width, height, series, start, end, validRange, palette, syncKey, onHover, plugins }) {
+function plotOptions({ width, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins }) {
   const flag = series.kind === 'flag'
   // A flag's bucket that held both values is a band from false to true (markBuckets()).
   const banded = !flag || (series.marked || []).some(n => n > 1)
@@ -123,7 +124,7 @@ function plotOptions({ width, height, series, start, end, validRange, palette, s
     select: { show: false },
     scales: {
       x: { time: true, range: [start / 1000, end / 1000] },
-      y: flag ? { range: [-0.2, 1.2] } : {},
+      y: flag ? { range: [-0.2, 1.2] } : yRange ? { range: yRange } : {},
     },
     axes: [
       { ...axis, values: timeLabels((end - start) / 1000) },
@@ -279,7 +280,11 @@ function StateKey({ stateKey: key, carried, mixed }) {
  * page shades on every chart; uPlot's own drag selection stays off. `plugins` are uPlot plugins
  * the page adds to a number or flag chart, such as the periods an alert was firing; a state strip
  * is not drawn by uPlot and takes none. Pass the same array while they are the same: a new one
- * draws the chart again.
+ * draws the chart again. `yRange` is a number chart's value scale, `[low, high]`, the same across
+ * charts that share one (sharedScale()); it too is the same array while it is the same. `label`
+ * names the chart in place of its metric and unit, and `head` is what the title line shows in place
+ * of that name (a link, a status dot), so a machine's chart is named by the machine: the figure
+ * keeps `label` as its name.
  *
  * Colours and the axis font are the theme's tokens, read again on a theme switch. The figure is
  * named by its title, and `summary` (chartSummary(), utils/history.js) is its text for a screen
@@ -290,7 +295,7 @@ function StateKey({ stateKey: key, carried, mixed }) {
  */
 export function TimeSeriesChart({
   metric, unit, starts, series, start, end, now, minutes, validRange = null, summary, syncKey, band = null, height = 140,
-  plugins = NO_PLUGINS, note = null,
+  plugins = NO_PLUGINS, note = null, yRange = null, label = null, head = null,
 }) {
   const id = useId()
   const boxRef = useRef(null)
@@ -321,7 +326,7 @@ export function TimeSeriesChart({
     let plot
     try {
       plot = new uPlot(
-        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, palette, syncKey, onHover, plugins }),
+        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins }),
         [starts, series.max, series.min, read, held],
         box,
       )
@@ -340,7 +345,7 @@ export function TimeSeriesChart({
       plot.destroy()
       setOver(null)
     }
-  }, [drawn, starts, series, start, end, height, validRange, palette, syncKey, plugins])
+  }, [drawn, starts, series, start, end, height, validRange, yRange, palette, syncKey, plugins])
 
   const fraction = nowFraction(start, end, now)
   const range = validRangeWords(validRange, unit)
@@ -370,15 +375,18 @@ export function TimeSeriesChart({
     setRunHover(mark ? null : runNear(runs, t, HOVER_SLACK_PX * msPerPx))
   }
 
+  const title = label ?? chartTitle(metric, unit)
+  // A head of the page's own cannot be the name: the figure and its image are named by `label`.
+  const named = head ? { 'aria-label': title } : { 'aria-labelledby': `${id}-title` }
   return (
-    <figure className="history-chart" aria-labelledby={`${id}-title`}>
+    <figure className="history-chart" {...named}>
       <figcaption className="history-chart-head">
-        <span className="history-chart-title" id={`${id}-title`}>{chartTitle(metric, unit)}</span>
+        {head ?? <span className="history-chart-title" id={`${id}-title`}>{title}</span>}
         {range && <span className="history-chart-range">{range}</span>}
         {note && <span className="history-chart-read">{note}</span>}
         <span className="history-chart-hover" aria-hidden="true">{headWords}</span>
       </figcaption>
-      <div className="chart-frame" role="img" aria-labelledby={`${id}-title`} aria-describedby={`${id}-summary`}>
+      <div className="chart-frame" role="img" {...named} aria-describedby={`${id}-summary`}>
         {drawn && <div ref={boxRef} className="chart-box" style={{ height }} hidden={failed} />}
         {isState && (
           <div
