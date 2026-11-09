@@ -135,7 +135,7 @@ describe('the Apps tab', () => {
     expect(within(grafana).getByText('Confidential')).toBeInTheDocument()
     expect(within(grafana).getByText('2')).toBeInTheDocument()
     const reports = await row('Shift Reports')
-    expect(within(reports).getByText('Added by hand')).toBeInTheDocument()
+    expect(within(reports).getByText('Added by an Administrator')).toBeInTheDocument()
     expect(within(reports).getByText('https://reports.test/cb2')).toBeInTheDocument()
   })
 
