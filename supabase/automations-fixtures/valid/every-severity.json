@@ -1,0 +1,62 @@
+{
+  "about": "Critical, warning and info.",
+  "document": [
+    {
+      "id": "severity-critical",
+      "alias": "Severity critical",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "critical"
+        }
+      ]
+    },
+    {
+      "id": "severity-warning",
+      "alias": "Severity warning",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ]
+    },
+    {
+      "id": "severity-info",
+      "alias": "Severity info",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "info"
+        }
+      ]
+    }
+  ]
+}

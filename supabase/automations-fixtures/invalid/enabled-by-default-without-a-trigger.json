@@ -1,0 +1,18 @@
+{
+  "about": "`enabled` left out is true, so it needs a trigger.",
+  "path": "$[0].triggers",
+  "database": false,
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": [],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ]
+    }
+  ]
+}
