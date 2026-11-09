@@ -5744,7 +5744,7 @@ const OPERATOR_PAIRS = [
     ['docs/security-model.md', `reaches ${count} sign-in\nrequests`],
     ['supabase/README.md', `any other app's on ${count} requests`],
   ]) {
-    if (admitted.length && !read(file).includes(needle)) problems297.push(`${file} does not say "${needle.replace('\n', ' ')}", the ${admitted.length} requests the gateway admits`);
+    if (admitted.length && !read(file).includes(needle)) problems297.push(`${file} does not say "${needle.split('\n').join(' ')}", the ${admitted.length} requests the gateway admits`);
   }
   if (problems297.length) {
     for (const p of problems297) fail(`an outside app's token: ${p}`);
