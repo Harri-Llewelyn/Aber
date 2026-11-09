@@ -4300,7 +4300,7 @@ leaves the database:
 **Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression
 policies; 20 devices of 10 metrics, a reading every 5 minutes for 35 days, and the cell's metric
 hourly for the 75 days before that, 2.1 million raw rows), through `postgres_fdw` into
-`supabase/postgres` 17.6.1.175, warm, as `authenticated`, median of 5 on a laptop eight helpers
+`supabase/postgres` 17.6.1.175, warm, as `authenticated`, median of 5 on a laptop six helpers
 shared (so one read varied by up to 40%):
 
 | A cell of 20 devices | `telemetry_hour_of_day()` | rows | JSON | `telemetry_carried()` at 1 h | rows | JSON |
