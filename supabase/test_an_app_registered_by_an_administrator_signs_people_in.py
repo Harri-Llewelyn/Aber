@@ -8,6 +8,7 @@ only GoTrue and the gateway together can show:
 
   * the secret is in the registration's answer and nowhere after it, a name cannot be registered
     twice, and the Audit Trail names the Administrator;
+  * the consent page shows the app's own name the first time it asks;
   * discovery names an absolute issuer and endpoints built from it, the access token and the ID token
     carry that issuer as `iss`, and the ID token verifies against the key set;
   * a public app signs in with PKCE alone, and a secret from it, a secret sent the wrong way or a wrong
@@ -295,7 +296,6 @@ class RegisteredApps(unittest.TestCase):
         app = self.apps["confidential"]
         flow = Flow(app, self.person_token)
         tokens = flow.tokens()
-        self.assertEqual(flow.consent_page["client"]["name"], app["name"], "the consent page shows the app's own name")
         issuer = self.discovery["issuer"]
 
         access = stack.claims_of(tokens["access_token"])
@@ -313,6 +313,19 @@ class RegisteredApps(unittest.TestCase):
         if ec is None:
             self.skipTest("the `cryptography` package is not installed: the ID token's signature was not checked")
         self.assertTrue(verify_es256(tokens["id_token"], self.jwks))
+
+    def test_the_consent_page_shows_the_app_s_own_name_the_first_time_it_asks(self):
+        # An app of its own, so no earlier test has approved it: once a person has allowed an app, GoTrue
+        # answers the details call with the finished redirect and no client.
+        fresh = self.register(f"Run Test Consent {self.suffix}", CONFIDENTIAL_REDIRECT, "confidential")
+        try:
+            flow = Flow(fresh, self.person_token)
+            flow.code()
+            self.assertIsNone(flow.consent_page.get("redirect_url"), "the person had not allowed it yet")
+            self.assertEqual(flow.consent_page["client"]["name"], fresh["name"], "the consent page shows the app's own name")
+        finally:
+            stack.request("/rest/v1/rpc/remove_app", method="POST", token=self.admin_token, body={"p_client_id": fresh["id"]})
+            self.ids.remove(fresh["id"])
 
     def test_a_public_app_signs_in_with_pkce_alone_and_a_wrong_step_is_refused(self):
         app = self.apps["public"]
