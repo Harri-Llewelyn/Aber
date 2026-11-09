@@ -374,7 +374,8 @@ describe('the hour-of-day heatmap', () => {
     expect(within(rows[0]).getAllByRole('columnheader')).toHaveLength(25)
     expect(within(rows[0]).getByRole('columnheader', { name: '00:00–01:00' })).toBeInTheDocument()
     expect(within(rows[0]).getByRole('columnheader', { name: '23:00–00:00' })).toBeInTheDocument()
-    expect(rows.slice(1).map(r => within(r).getByRole('rowheader').textContent.replace(/Online|Offline/g, ''))).toEqual(
+    // Each row header's name is its own element, apart from the status dot's words.
+    expect(rows.slice(1).map(r => within(r).getByRole('rowheader').querySelector('.heatmap-name').textContent)).toEqual(
       ['Lathe 3', 'Lathe 4', 'Mill 2', 'Press 1', 'Robot 5']
     )
     for (const r of rows.slice(1, 4)) expect(within(r).getAllByRole('gridcell')).toHaveLength(24)
