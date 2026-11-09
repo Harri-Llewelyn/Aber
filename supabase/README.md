@@ -52,9 +52,9 @@ The third squash restarted live numbering at `0003`, a number the archive alread
 bare citation of an archived `0003`–`0032` quietly came to name a different, live file as the
 chain grew past it. The fourth archived its 28 files under `0135`–`0162`, after the archive's
 highest, with the old-to-new table in [`migrations/archive/README.md`](migrations/archive/README.md).
-**The next migration is `0163`**, and each later one takes the next number above the highest ever
-issued, so a number names one file for good, whichever squash later archives it. Check 9d of
-`scripts/check-docs-drift.mjs` refuses an applied migration whose number the archive holds.
+Each new migration takes the next number above the highest ever issued, so a number names one file
+for good, whichever squash later archives it. Check 9d of `scripts/check-docs-drift.mjs` refuses an
+applied migration whose number the archive holds.
 
 ### The five rules the next fold carries in
 
@@ -4302,6 +4302,11 @@ wrong:
   Nothing is stored for a derived one, so an edit would change every past value. A changed
   definition is a new derived metric, and the old one is deprecated with `superseded_by` pointing at
   it, as for any metric. A description, a deprecation and a restore are not edits of the definition.
+- **An input's unit cannot change while a rate or a sum is built on it.** Their units follow the
+  inputs and nothing is stored, so a changed input unit would leave the derived row stale and alter
+  its past values. A deprecated derived metric counts. The reason names one derived metric and how
+  many more. A time in state has no unit to follow, so a unit change and a permitted-values edit on
+  its input are allowed.
 
 **The writers are the table's own policies**, as for any catalogue row: Administrator only, and
 behind `require_mfa()` where the second factor is required. `trg_metric_catalog_audit_trail` files

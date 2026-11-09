@@ -12,8 +12,9 @@
 --   * enforce_derived_metric() runs BEFORE INSERT OR UPDATE and refuses, with a reason the dialog
 --     shows: an input that is missing, derived, or of the wrong datatype; the inputs of a sum
 --     disagreeing on a unit; a state its input cannot report; a name any device has declared; a
---     semantic id, standard or permitted values; a measured metric made derived; and a derived
---     metric's definition or unit changed. The unit is the trigger's to set, from the inputs.
+--     semantic id, standard or permitted values; a measured metric made derived; a derived
+--     metric's definition or unit changed; and a unit changed on a metric that a counter rate or a
+--     sum, deprecated ones included, is built on. The unit is the trigger's to set, from the inputs.
 --   * The writers are the table's own policies, Administrator only behind require_mfa(), as for any
 --     catalogue row. The audit trigger files the change as it files any catalogue change.
 --
@@ -155,6 +156,8 @@ DECLARE
   v_state   text;
   v_devices bigint;
   v_device  text;
+  v_dependants bigint;
+  v_dependant  text;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
     IF OLD.derivation IS NULL AND NEW.derivation IS NOT NULL THEN
@@ -168,6 +171,24 @@ BEGIN
     IF NEW.derivation IS NOT NULL AND NEW.units IS DISTINCT FROM OLD.units THEN
       RAISE EXCEPTION 'A derived metric''s unit follows its inputs and cannot be changed.'
             USING ERRCODE = '23514';
+    END IF;
+    -- A rate's unit and a sum's shared unit follow their inputs, and nothing is stored, so a changed
+    -- input unit would leave every derived row that names it stale and change its past values. A
+    -- deprecated derived metric counts. A time in state has no unit to follow. Name and datatype are
+    -- frozen already, and a permitted-values edit is allowed.
+    IF NEW.derivation IS NULL AND NEW.units IS DISTINCT FROM OLD.units THEN
+      SELECT count(*), min(d.name) INTO v_dependants, v_dependant
+        FROM public.metric_catalog d
+       WHERE (d.derivation ->> 'kind' = 'counter_rate' AND d.derivation ->> 'input' = NEW.name)
+          OR (d.derivation ->> 'kind' = 'sum'
+              AND d.derivation -> 'inputs' @> jsonb_build_array(jsonb_build_object('metric', NEW.name)));
+      IF v_dependants > 0 THEN
+        RAISE EXCEPTION '% is an input of the derived metric % so its unit cannot change: a derived metric''s unit follows its inputs, and nothing is stored, so a change would alter every past value. Add a metric with the new unit under a new name, and a new derived metric on it.',
+              NEW.name,
+              CASE WHEN v_dependants = 1 THEN v_dependant || ','
+                   ELSE v_dependant || ' and ' || (v_dependants - 1)::text || ' more,' END
+              USING ERRCODE = '23514';
+      END IF;
     END IF;
   END IF;
 
@@ -289,7 +310,7 @@ $$;
 ALTER FUNCTION public.enforce_derived_metric() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.enforce_derived_metric() FROM PUBLIC, anon, authenticated;
 
-COMMENT ON FUNCTION public.enforce_derived_metric() IS 'Trigger function on metric_catalog: refuses a derived metric whose input is missing, derived or of the wrong datatype, whose sum mixes units, whose state its input cannot report, whose name a device has declared, or that carries a semantic id, standard or permitted values; sets its unit from its inputs; and refuses to make a measured metric derived or to change a derived metric''s definition or unit (0267).';
+COMMENT ON FUNCTION public.enforce_derived_metric() IS 'Trigger function on metric_catalog: refuses a derived metric whose input is missing, derived or of the wrong datatype, whose sum mixes units, whose state its input cannot report, whose name a device has declared, or that carries a semantic id, standard or permitted values; sets its unit from its inputs; and refuses to make a measured metric derived, to change a derived metric''s definition or unit, or to change the unit of a metric a counter rate or a sum is built on (0267).';
 
 SELECT public.replay_trigger('public.metric_catalog', 'trg_metric_catalog_derivation', $ddl$
 CREATE TRIGGER trg_metric_catalog_derivation BEFORE INSERT OR UPDATE ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.enforce_derived_metric();

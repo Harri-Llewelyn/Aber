@@ -16,7 +16,9 @@ What is held here:
     too;
   * fixed once saved: a measured metric cannot become derived, a derived metric's definition and
     unit cannot change, its description and its deprecation can, and a changed definition is a new
-    metric the old one names as its replacement;
+    metric the old one names as its replacement; and the unit of a metric a counter rate or a sum is
+    built on, a deprecated one included, cannot change, while a metric no derived metric uses, and a
+    time in state's input, still can;
   * who writes: an Administrator, with the second factor when it is required; a Shopfloor Manager,
     an Operator, an Auditor and anon are refused, and every signed-in role reads;
   * the Audit Trail files the save as it files any catalogue change.
@@ -408,6 +410,79 @@ class FixedOnceSaved(DerivedBase):
         self.cur.execute("UPDATE public.metric_catalog SET semantic_id = 'https://example.org/x', semantic_id_type = 'IRI',"
                          " units = 'KILOWATT', deprecated = true WHERE id = %s RETURNING derivation;", (measured,))
         self.assertIsNone(self.cur.fetchone()[0])
+
+
+class AnInputKeepsItsUnit(DerivedBase):
+    CHANGE = "UPDATE public.metric_catalog SET units = %s WHERE name = %s;"
+
+    def test_the_unit_of_a_counter_rate_s_input_cannot_change(self):
+        self.fixtures()
+        self.save("PARTS_PER_HOUR", counter(self.name("PART_COUNT")))
+        self.update_refused(self.CHANGE, ("UNIT", self.name("PART_COUNT")),
+                            f"{self.name('PART_COUNT')} is an input of the derived metric {self.name('PARTS_PER_HOUR')},"
+                            " so its unit cannot change")
+
+    def test_the_unit_of_a_sum_s_input_cannot_change_whichever_input_it_is(self):
+        self.fixtures()
+        self.save("TOTAL", total((self.name("PHASE_A"), 1), (self.name("PHASE_B"), -1)))
+        for leaf in ("PHASE_A", "PHASE_B"):
+            with self.subTest(input=leaf):
+                self.update_refused(self.CHANGE, ("WATT", self.name(leaf)),
+                                    f"is an input of the derived metric {self.name('TOTAL')}, so its unit cannot change")
+
+    def test_a_deprecated_derived_metric_still_holds_its_inputs_unit(self):
+        self.fixtures()
+        self.save("TOTAL", total((self.name("PHASE_A"), 1), (self.name("PHASE_B"), 1)), deprecated=True)
+        self.update_refused(self.CHANGE, ("WATT", self.name("PHASE_A")), "so its unit cannot change")
+
+    def test_the_reason_names_one_derived_metric_and_how_many_more(self):
+        self.fixtures()
+        self.save("ALPHA_RATE", counter(self.name("PHASE_A")))
+        self.save("BETA_TOTAL", total((self.name("PHASE_A"), 1), (self.name("PHASE_B"), 1)))
+        self.save("GAMMA_IMBALANCE", total((self.name("PHASE_A"), 1), (self.name("PHASE_C"), -1)))
+        self.cur.execute("SAVEPOINT refused;")
+        with self.assertRaises(psycopg2.Error) as caught:
+            self.cur.execute(self.CHANGE, ("WATT", self.name("PHASE_A")))
+        self.cur.execute("ROLLBACK TO SAVEPOINT refused;")
+        self.assertEqual(caught.exception.pgcode, CHECK_VIOLATION)
+        message = caught.exception.diag.message_primary
+        self.assertIn(f"the derived metric {self.name('ALPHA_RATE')} and 2 more, so its unit cannot change", message)
+        self.assertIn("nothing is stored", message)
+
+    def test_a_refused_change_leaves_the_unit_and_the_derived_row_as_they_were(self):
+        self.fixtures()
+        self.save("TOTAL", total((self.name("PHASE_A"), 1), (self.name("PHASE_B"), 1)))
+        self.update_refused(self.CHANGE, ("WATT", self.name("PHASE_A")), "so its unit cannot change")
+        self.cur.execute("SELECT units FROM public.metric_catalog WHERE name = %s;", (self.name("PHASE_A"),))
+        self.assertEqual(self.cur.fetchone()[0], "KILOWATT")
+
+    def test_a_measured_metric_no_derived_metric_uses_still_changes_its_unit(self):
+        self.fixtures()
+        self.save("PARTS_PER_HOUR", counter(self.name("PART_COUNT")))
+        for units in ("WATT", None, "AMPERE"):
+            with self.subTest(units=units):
+                self.cur.execute(self.CHANGE, (units, self.name("CURRENT")))
+                self.assertEqual(self.cur.rowcount, 1)
+        self.cur.execute("SELECT units FROM public.metric_catalog WHERE name = %s;", (self.name("CURRENT"),))
+        self.assertEqual(self.cur.fetchone()[0], "AMPERE")
+
+    def test_an_input_still_takes_every_other_edit_and_a_unit_it_already_has(self):
+        self.fixtures()
+        self.save("TOTAL", total((self.name("PHASE_A"), 1), (self.name("PHASE_B"), 1)))
+        self.cur.execute("UPDATE public.metric_catalog SET description = 'Phase A', units = 'KILOWATT',"
+                         " semantic_id = 'https://example.org/phase-a', semantic_id_type = 'IRI', deprecated = true"
+                         " WHERE name = %s;", (self.name("PHASE_A"),))
+        self.assertEqual(self.cur.rowcount, 1)
+
+    def test_a_time_in_state_input_still_takes_a_permitted_values_edit_and_a_unit(self):
+        """A time in state has no unit to follow, and the states it counts are not held to the list."""
+        self.fixtures()
+        self.save("UPTIME", in_state(self.name("EXECUTION"), "ACTIVE"))
+        self.cur.execute("UPDATE public.metric_catalog SET permitted_values = %s WHERE name = %s;",
+                         (["READY", "ACTIVE", "STOPPED", "FEED_HOLD"], self.name("EXECUTION")))
+        self.assertEqual(self.cur.rowcount, 1)
+        self.cur.execute(self.CHANGE, ("COUNT", self.name("EXECUTION")))
+        self.assertEqual(self.cur.rowcount, 1)
 
 
 class WhoWrites(DerivedBase):

@@ -807,7 +807,8 @@ python supabase/migrations/test_metric_catalog_seed.py
 # that is missing, derived or of the wrong datatype, a sum of unlike units, a state the input cannot
 # report, a name a device has declared, a semantic id, a standard or permitted values, a malformed
 # definition (the CHECK holds that too). A measured metric cannot become derived, and a derived
-# metric's definition and unit cannot change, though its description and deprecation can. Only an
+# metric's definition and unit cannot change, though its description and deprecation can, and nor can
+# the unit of a metric a counter rate or a sum is built on, deprecated ones included. Only an
 # Administrator writes, behind the second factor; every signed-in role reads. The Audit Trail files
 # the save as it files any catalogue change. Every test rolls back.
 python supabase/migrations/test_a_derived_metric_is_a_catalogue_row.py
