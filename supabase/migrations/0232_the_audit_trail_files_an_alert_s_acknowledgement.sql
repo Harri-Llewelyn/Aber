@@ -17,6 +17,9 @@
 --     classed by their action: a creation is created, a change configuration, enabling or
 --     disabling operational, a deletion lifecycle. They are rules for a table every role reads and
 --     an Administrator or a Shopfloor Manager writes, as `metric_catalog` is.
+--   * An export of readings (0279) is filed in the asset lane under `telemetry`, and is a read: it
+--     records access and changes nothing, as a capture's download link does. An Administrator or a
+--     Shopfloor Manager exports, and the asset lane's readers are those two roles and an Auditor.
 --
 -- Each function is redeclared whole, unchanged but for these lines: 0001, 0168, 0193, 0228 and
 -- 0229 replay first on every boot, and the last declaration stands.
@@ -27,7 +30,7 @@
 -- -------------------------------------------------------------------------------------------------
 -- 1. The lane
 -- -------------------------------------------------------------------------------------------------
--- Unchanged from 0193 but for `platform_alerts` and `automations` in the asset list.
+-- Unchanged from 0193 but for `platform_alerts`, `automations` and `telemetry` in the asset list.
 CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action text) RETURNS text
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'public'
@@ -43,12 +46,13 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
     -- `metric_catalog` are Administrator-only writes to tables every authenticated user reads.
     -- The capture and playback acts are a Manager's, on tables the same three roles read. An
     -- alert's acknowledgement is an Operator's, a Manager's or an Administrator's. An automation is
-    -- written by a Manager or an Administrator, and read by every role.
+    -- written by a Manager or an Administrator, and read by every role. An export of readings is a
+    -- Manager's or an Administrator's, and an Auditor reads it with them.
     WHEN p_entity_type IN ('areas', 'cells', 'devices', 'gateways', 'links',
                            'schemas', 'device_nameplate', 'device_submodels', 'change_proposals',
                            'cell_links', 'gateway_links', 'device_links',
                            'metric_catalog', 'captures', 'capture_jobs', 'playback_jobs',
-                           'platform_alerts', 'automations')
+                           'platform_alerts', 'automations', 'telemetry')
       THEN 'asset'
 
     -- Fail-closed: a new entity_type nobody classified is restricted rather than exposed.
@@ -61,14 +65,16 @@ ALTER FUNCTION public.audit_domain_for(p_entity_type text, p_action text) OWNER 
 -- -------------------------------------------------------------------------------------------------
 -- 2. The class
 -- -------------------------------------------------------------------------------------------------
--- Unchanged from 0228 but for the acknowledgements' rule and the automations' four, after the reads
--- and before the security lane's. IMMUTABLE and with no SET clause, as the class indexes need: see 0228.
+-- Unchanged from 0228 but for an export of readings among the reads, the acknowledgements' rule and
+-- the automations' four, after the reads and before the security lane's. IMMUTABLE and with no SET
+-- clause, as the class indexes need: see 0228.
 CREATE OR REPLACE FUNCTION public.audit_event_class(p_action text, p_entity_type text, p_audit_domain text,
                                                     p_old_data jsonb, p_new_data jsonb) RETURNS text
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
     AS $$
   SELECT CASE
-    WHEN p_action IN ('SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED')
+    WHEN p_action IN ('SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED',
+                      'TELEMETRY_EXPORTED')
       THEN 'read'
     -- An alert acknowledged or its acknowledgement withdrawn, in either lane.
     WHEN p_action IN ('ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN')
@@ -281,6 +287,14 @@ BEGIN
       RAISE EXCEPTION '0232: idx_audit_trail_class_% is missing or invalid', v_name;
     END IF;
   END LOOP;
+  -- An export of readings (0279): the asset lane, and a read.
+  IF public.audit_domain_for('telemetry', 'TELEMETRY_EXPORTED') <> 'asset' THEN
+    RAISE EXCEPTION '0232: audit_domain_for() files telemetry exports in the % lane; it must be asset',
+      public.audit_domain_for('telemetry', 'TELEMETRY_EXPORTED');
+  END IF;
+  IF public.audit_event_class('TELEMETRY_EXPORTED', 'telemetry', 'asset', NULL, '{"name": "Readings"}') <> 'read' THEN
+    RAISE EXCEPTION '0232: audit_event_class() does not answer read for TELEMETRY_EXPORTED';
+  END IF;
   -- The rules before still answer as they did.
   IF public.audit_event_class('UPDATE', 'system_settings', 'security', '{}', '{}') <> 'configuration'
      OR public.audit_event_class('SERVICE_LOGS_READ', 'service_logs', 'security', NULL, '{"name": "x"}') <> 'read'

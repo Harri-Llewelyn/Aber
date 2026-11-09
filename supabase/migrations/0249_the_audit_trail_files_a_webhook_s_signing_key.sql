@@ -9,16 +9,17 @@
 --   * The class needs no rule either: audit_event_class() answers configuration for the security
 --     lane, so the class indexes are unchanged and nothing is rebuilt.
 --   * audit_trail_action_kinds() lists the action on its kind, redeclared whole from 0232, unchanged
---     but for that line, 0241's four suppression window rows and the five automation rows (0256, 0257):
---     0229, 0232 and 0241 replay first on every boot, and the last declaration stands.
+--     but for that line, 0241's four suppression window rows, the five automation rows (0256, 0257)
+--     and an export of readings (0279), a read on `telemetry`: 0229, 0232 and 0241 replay first on
+--     every boot, and the last declaration stands.
 --
 -- Reasoning: supabase/README.md, "The Audit Trail files a webhook's signing key (0249)". Idempotent.
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The map of kinds
 -- -------------------------------------------------------------------------------------------------
--- Unchanged from 0232 but for 0241's suppression window rows, the automation rows and the signing
--- key, after the alerts.
+-- Unchanged from 0232 but for 0241's suppression window rows, the automation rows, the signing key
+-- and an export of readings, which stands beside the other exports.
 CREATE OR REPLACE FUNCTION public.audit_trail_action_kinds()
 RETURNS TABLE (action text, entity_type text, classes text[])
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
@@ -43,6 +44,8 @@ RETURNS TABLE (action text, entity_type text, classes text[])
                            ARRAY['operational', 'configuration', 'lifecycle']),
       ('PROPOSAL_EXPIRED', ARRAY['change_proposals'], ARRAY['operational', 'configuration', 'lifecycle']),
       ('EXPORTED', ARRAY['devices'], ARRAY['read']),
+      -- Readings exported from History (0279): one row an export, in the one lane for readings.
+      ('TELEMETRY_EXPORTED', ARRAY['telemetry'], ARRAY['read']),
       ('FLOW_DEPLOYED', ARRAY['gateways'], ARRAY['operational', 'configuration', 'lifecycle']),
       ('CREDENTIAL_ISSUED', ARRAY['gateways'], ARRAY['operational', 'configuration', 'lifecycle']),
       ('CREDENTIAL_SHOWN', ARRAY['gateways'], ARRAY['read']),
@@ -143,6 +146,12 @@ BEGIN
   IF (SELECT count(*) FROM public.audit_trail_action_kinds() m
        WHERE m.entity_type = 'automations' AND starts_with(m.action, 'AUTOMATION_')) < 5 THEN
     RAISE EXCEPTION '0249: audit_trail_action_kinds() does not list the five automation acts';
+  END IF;
+  -- An export of readings is a read on telemetry.
+  IF NOT EXISTS (SELECT 1 FROM public.audit_trail_action_kinds() m
+                  WHERE m.action = 'TELEMETRY_EXPORTED' AND m.entity_type = 'telemetry'
+                    AND m.classes = ARRAY['read']) THEN
+    RAISE EXCEPTION '0249: audit_trail_action_kinds() does not list TELEMETRY_EXPORTED on telemetry as a read';
   END IF;
   -- 0232's rows are all still there.
   IF NOT EXISTS (SELECT 1 FROM public.audit_trail_action_kinds() m

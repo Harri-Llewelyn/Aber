@@ -683,6 +683,18 @@ export const SUITES = {
       'unknown zone, bad bounds and more than 50,000 hours times devices refused before any read, ' +
       'and it reads as the caller.',
   },
+  'supabase/migrations/test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py': {
+    lanes: ['db'],
+    why:
+      "0278's history.export_max_days and 0279's export_telemetry(), over local tables standing in for " +
+      "the historian's relations: each refusal comes before any read (an Operator, an Auditor, a " +
+      'machine identity, anon, a manager without the second factor, a window over the limit, an ' +
+      'unknown resolution, none or too many devices and metrics), a window of exactly the limit is ' +
+      'allowed, a row is one reading with its unit, raw is the default and a rollup is never read in ' +
+      "its place, the rows stop at 50,000 on a minute and say where, raw is read from where it " +
+      'begins, and one TELEMETRY_EXPORTED row in the asset lane names who exported what, and none ' +
+      'for a refusal or an export with no rows.',
+  },
   'supabase/migrations/test_history_counts_where_readings_arrived.py': {
     lanes: ['db'],
     why:
