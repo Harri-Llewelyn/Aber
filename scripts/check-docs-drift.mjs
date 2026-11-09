@@ -5336,6 +5336,186 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 316. docs/automations.md says how an automation is evaluated as 0271 and 0247 declare it: that the
+// job runs every minute, how long a run's confirmation holds, the platform alert a run that cannot
+// read the historian raises by its name and its fingerprint, and the labels and values an alert holds
+// as the evaluator writes them. A number that moved in the migration and not here is a reader
+// planning around a minute that is now two.
+// -------------------------------------------------------------------------------------------------
+{
+  const DOC = 'docs/automations.md';
+  const EVALUATOR = 'supabase/migrations/0271_a_threshold_automation_raises_its_alert_from_the_database.sql';
+  const doc = read(DOC);
+  const sql = read(EVALUATOR);
+  const window = read('supabase/migrations/0247_an_alert_is_queued_for_each_channel_that_carries_it.sql');
+  const problems316 = [];
+  // The quoted keys of a jsonb_build_object( call that starts with `start`: its even arguments.
+  const keysOf = (text, start) => {
+    const at = text.indexOf(start);
+    if (at < 0) return [];
+    const args = [];
+    let depth = 0;
+    let from = at + 'jsonb_build_object('.length;
+    for (let i = from; i < text.length; i++) {
+      const c = text[i];
+      if (c === '(') depth += 1;
+      else if (c === ')') {
+        if (depth === 0) { args.push(text.slice(from, i)); break; }
+        depth -= 1;
+      } else if (c === ',' && depth === 0) { args.push(text.slice(from, i)); from = i + 1; }
+    }
+    return args.filter((_, n) => n % 2 === 0).map((a) => a.trim().replace(/^'|'$/g, ''));
+  };
+  const words = { 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine', 10: 'ten' };
+  const section = doc.match(/\n## How an automation is evaluated\n([\s\S]*?)(?=\n## )/)?.[1];
+  if (!section) {
+    problems316.push(`${DOC} has no "How an automation is evaluated" section`);
+  } else {
+    const schedule = sql.match(/'evaluate_automations',\s*'([^']+)'/)?.[1];
+    if (schedule !== '* * * * *') problems316.push(`${EVALUATOR} schedules evaluate_automations as "${schedule}", and this check reads only every minute`);
+    if (!section.includes('once a minute')) problems316.push(`${DOC} does not say the database evaluates once a minute, as ${EVALUATOR} schedules it`);
+    const minutes = window.match(/WHEN starts_with\(p_fingerprint, 'condition:'\) THEN interval '(\d+) minutes'/)?.[1];
+    if (!minutes) problems316.push('0247 gives no condition: window in minutes');
+    else if (!section.includes(`within the past ${words[minutes] ?? minutes} minutes`)) {
+      problems316.push(`${DOC} does not say a reminder needs the last run's confirmation within the past ${words[minutes] ?? minutes} minutes, as 0247 allows`);
+    }
+    const fingerprint = sql.match(/c_not_evaluated CONSTANT text := '([^']+)'/)?.[1];
+    const name = sql.match(/SELECT c_not_evaluated, 'platform', '([^']+)'/)?.[1];
+    if (!fingerprint || !name) problems316.push(`${EVALUATOR}: could not read the alert a run that cannot read the historian raises`);
+    else {
+      if (!section.includes(`**${name}**`)) problems316.push(`${DOC} does not name the alert **${name}**, which ${EVALUATOR} raises`);
+      if (!section.includes(`\`${fingerprint}\``)) problems316.push(`${DOC} does not give that alert's fingerprint \`${fingerprint}\``);
+    }
+    const holds = doc.match(/\n### What an alert holds\n([\s\S]*?)(?=\n## )/)?.[1] ?? '';
+    const labels = keysOf(sql, "jsonb_build_object('severity', act.severity");
+    const values = keysOf(sql, "jsonb_build_object('value', d.last_value");
+    if (labels.length < 5 || values.length < 2) problems316.push(`${EVALUATOR}: could not read the labels and values of an alert (${labels.length} and ${values.length} keys)`);
+    for (const key of [...labels, ...values]) {
+      if (!holds.includes(`\`${key}\``)) problems316.push(`${DOC}: "What an alert holds" does not name \`${key}\`, which ${EVALUATOR} writes`);
+    }
+  }
+  if (problems316.length) {
+    fail(`docs/automations.md does not say how an automation is evaluated as the migrations declare it:\n${problems316.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass('docs/automations.md says the evaluator runs once a minute, a confirmation holds five minutes, and names the alert for an unreadable historian and the labels and values of an alert');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 317. The migrations' README names, in the sections for 0270 and 0271, each function and table those
+// files create, the job, and the alert a run that cannot read raises. The sections are the only place
+// the reasoning is written, and one that forgets an object leaves it with none.
+// -------------------------------------------------------------------------------------------------
+{
+  const README = 'supabase/README.md';
+  const readme = read(README);
+  const problems317 = [];
+  const at = readme.indexOf('\n### A threshold automation is read against the historian (0270)\n');
+  const end = readme.indexOf('\n### ', readme.indexOf('\n### A threshold automation raises its alert from the database (0271)\n') + 5);
+  const text = at < 0 || end < 0 ? '' : readme.slice(at, end);
+  if (!text) problems317.push(`${README} has no sections for 0270 and 0271, in that order`);
+  const created = [];
+  for (const file of ['0270_a_threshold_automation_is_read_against_the_historian.sql', '0271_a_threshold_automation_raises_its_alert_from_the_database.sql']) {
+    const sql = read(`supabase/migrations/${file}`);
+    for (const m of sql.matchAll(/^CREATE OR REPLACE FUNCTION public\.(\w+)\(/gm)) created.push(m[1]);
+    for (const m of sql.matchAll(/^CREATE TABLE IF NOT EXISTS public\.(\w+) \(/gm)) created.push(m[1]);
+    for (const m of sql.matchAll(/ensure_cron_job\(\s*'(\w+)'/g)) created.push(m[1]);
+    for (const m of sql.matchAll(/c_not_evaluated CONSTANT text := '([^']+)'/g)) created.push(m[1]);
+  }
+  if (created.length < 6) problems317.push(`found ${created.length} objects in 0270 and 0271, so the files were not parsed`);
+  for (const name of created) {
+    if (text && !text.includes(`\`${name}`)) problems317.push(`${README}: the 0270 and 0271 sections do not name ${name}`);
+  }
+  if (problems317.length) {
+    fail(`the migrations' README does not name what 0270 and 0271 create:\n${problems317.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the migrations' README names the ${created.length} functions, table, job and alert that 0270 and 0271 create`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 318. The API reference documents the evaluator's state table as 0270 declares it: each column is a
+// property of AutomationTriggerState and each property is a column. A column left out is one a client
+// never learns of; one documented after it is dropped is one it asks for and is refused.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const spec = read(SPEC);
+  const sql = read('supabase/migrations/0270_a_threshold_automation_is_read_against_the_historian.sql');
+  const problems318 = [];
+  const table = sql.match(/^CREATE TABLE IF NOT EXISTS public\.automation_trigger_states \(\n([\s\S]*?)\n\)/m)?.[1] ?? '';
+  const columns = new Set();
+  for (const line of table.split('\n')) {
+    const name = /^ {4}([a-z][a-z0-9_]*) [a-z]/.exec(line)?.[1];
+    if (name) columns.add(name);
+  }
+  if (columns.size < 8) problems318.push(`0270: found ${columns.size} columns of automation_trigger_states, so the table was not parsed`);
+  const schema = spec.match(/^ {4}AutomationTriggerState:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  const properties = new Set([...schema.matchAll(/^ {8}(\w+):/gm)].map((m) => m[1]));
+  for (const c of columns) {
+    if (!properties.has(c)) problems318.push(`${SPEC}: AutomationTriggerState does not document automation_trigger_states.${c}`);
+  }
+  for (const p of properties) {
+    if (!columns.has(p)) problems318.push(`${SPEC}: AutomationTriggerState documents ${p}, which automation_trigger_states has no column for`);
+  }
+  if (!/^ {2}\/rest\/v1\/automation_trigger_states:\n/m.test(spec)) problems318.push(`${SPEC} has no /rest/v1/automation_trigger_states`);
+  if (/^ {2}\/rest\/v1\/rpc\/(evaluate_automations|machine_condition_(rows|readings)):/m.test(spec)) {
+    problems318.push(`${SPEC} documents a function of 0270 or 0271 that no API role may execute`);
+  }
+  if (problems318.length) {
+    fail(`the API reference does not document the automations' state table as 0270 declares it:\n${problems318.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`docs/openapi.yaml documents the ${columns.size} columns of automation_trigger_states, and none of the functions no API role may execute`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 319. The upgrade notes for 1.8.0 say what the evaluator does to a running site, by the job's name,
+// its interval and the platform alert it can raise, as 0271 declares them.
+// -------------------------------------------------------------------------------------------------
+{
+  const DOC = 'help/site/upgrading.md';
+  const upgrading = read(DOC);
+  const sql = read('supabase/migrations/0271_a_threshold_automation_raises_its_alert_from_the_database.sql');
+  const problems319 = [];
+  const section = upgrading.match(/\n### From 1\.8\.0, the database evaluates automations\n([\s\S]*?)(?=\n### |\n---\n)/)?.[1];
+  const job = sql.match(/ensure_cron_job\(\s*'(\w+)',\s*'([^']+)'/);
+  const name = sql.match(/SELECT c_not_evaluated, 'platform', '([^']+)'/)?.[1];
+  if (!section) problems319.push(`${DOC} has no "From 1.8.0, the database evaluates automations" section`);
+  if (!job || job[2] !== '* * * * *' || !name) problems319.push('0271: could not read the job, its schedule or the alert it raises');
+  if (section && job && name) {
+    if (!section.includes(`\`${job[1]}\``)) problems319.push(`${DOC} does not name the job \`${job[1]}\``);
+    if (!section.includes('every minute')) problems319.push(`${DOC} does not say the job runs every minute, as 0271 schedules it`);
+    if (!section.includes(`**${name}**`)) problems319.push(`${DOC} does not name the alert **${name}**`);
+  }
+  if (problems319.length) {
+    fail(`the 1.8.0 upgrade notes do not say what the evaluator does as 0271 declares it:\n${problems319.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass('the 1.8.0 upgrade notes name the evaluator\'s job, its minute, and the alert for an unreadable historian');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 320. The evaluator's suite reads a real historian when ABER_TEST_HISTORIAN names one, and the
+// testing document and the migrations' README say how to name it. A variable nobody documents is a
+// test nobody runs.
+// -------------------------------------------------------------------------------------------------
+{
+  const VARIABLE = 'ABER_TEST_HISTORIAN';
+  const suite = read('supabase/migrations/test_a_threshold_automation_raises_its_alert_from_the_database.py');
+  const problems320 = [];
+  if (!suite.includes(`os.getenv("${VARIABLE}"`)) problems320.push(`the evaluator's suite does not read ${VARIABLE}`);
+  for (const doc of ['docs/testing.md', 'supabase/README.md']) {
+    if (!read(doc).includes(VARIABLE)) problems320.push(`${doc} does not name ${VARIABLE}`);
+  }
+  if (problems320.length) {
+    fail(`the evaluator's historian variable is not documented where it is read:\n${problems320.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`${VARIABLE} is read by the evaluator's suite and named by the testing document and the migrations' README`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 275. DeviceAlert documents platform_alerts as the migrations declare it: each column of the table
 // is a property, and a property that is no column says it is on platform_alerts_active only. The
 // columns are 0001's CREATE TABLE and any later ADD COLUMN. A column left out is one an API client
