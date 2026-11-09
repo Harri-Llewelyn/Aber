@@ -8526,6 +8526,44 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 304. The Notifications tab on Profile is named as the page draws it. navigation.jsx lists it right
+// after Appearance with its description, the search offers it, and ProfileTab.jsx labels its one row
+// "Desktop notifications" with an "Allow Notifications" button. The Profile help names the tab, the
+// row and the button, and the alert counter's help links to the section that explains them. A tab
+// renamed, or a button relabelled, leaves a help page that tells a person to select what is not there.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems304 = [];
+  const nav = read('frontend/src/navigation.jsx');
+  const tabs = nav.slice(nav.indexOf('export const PROFILE_TABS'), nav.indexOf(']', nav.indexOf('export const PROFILE_TABS')));
+  const ids = [...tabs.matchAll(/\{ id: '([a-z-]+)', label: '([^']+)', description: '[^']+'/g)].map((m) => m[1]);
+  if (ids.join() !== 'account,appearance,notifications,sessions,mfa,allowed-apps') {
+    problems304.push(`navigation.jsx's PROFILE_TABS are ${ids.join(', ') || 'unreadable'}, and the Notifications tab follows Appearance`);
+  }
+  if (!/\{ id: 'notifications', label: 'Notifications'/.test(tabs)) problems304.push("navigation.jsx's PROFILE_TABS has no Notifications tab");
+  if (!/tabCard\('profile', 'notifications'\)/.test(read('frontend/src/searchIndex.js'))) {
+    problems304.push("searchIndex.js has no card for Profile's Notifications tab");
+  }
+  const page = read('frontend/src/components/tabs/ProfileTab.jsx');
+  const row = /label="(Desktop notifications)"/.exec(page)?.[1];
+  const button = /\n\s+(Allow Notifications)\n\s+<\/button>/.exec(page)?.[1];
+  if (!row) problems304.push('ProfileTab.jsx has no Desktop notifications row');
+  if (!button) problems304.push('ProfileTab.jsx has no Allow Notifications button');
+  const help = read('help/pages/profile.md');
+  for (const phrase of ['**Notifications** tab', row && `**${row}**`, button && `**${button}**`, '## Desktop notifications'].filter(Boolean)) {
+    if (!help.includes(phrase)) problems304.push(`help/pages/profile.md does not say "${phrase}"`);
+  }
+  if (!read('help/pages/site-map.md').includes('(profile.md#desktop-notifications)')) {
+    problems304.push("help/pages/site-map.md's alert counter does not link to profile.md#desktop-notifications");
+  }
+  if (problems304.length) {
+    for (const m of problems304) fail(`check 304: ${m}.`);
+  } else {
+    pass(`Profile's Notifications tab follows Appearance, and the help names its "${row}" row and "${button}" button and links to them from the alert counter`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 20. The release workflow names every image the chart resolves from `appVersion`, and no other.
 //
 // The chart marks an image it builds here with an empty tag and resolves it to `Chart.AppVersion`
@@ -8790,6 +8828,61 @@ const OPERATOR_PAIRS = [
   for (const o of offences) fail(o);
   if (!offences.length) {
     pass(`the ${columns.length} user_settings columns admit exactly what the dashboard offers, with the same defaults`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 305. How long a desktop notification waits to name its subject. The notification names the device
+// or gateway and where it is, which takes a read; frontend/README.md says it waits at most that many
+// seconds before the Sparkplug id stands in, and SUBJECT_WAIT_MS holds the number. A README that says
+// two while the code waits ten is a notification that arrives late and a page that says it cannot.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('frontend/src/utils/desktopNotifications.js');
+  const wait = /export const SUBJECT_WAIT_MS = (\d+)/.exec(code)?.[1];
+  const said = /for at most (one|two|three|four|five|six|seven|eight|nine|ten) seconds?, and the\s+Sparkplug id stands in/.exec(read('frontend/README.md'))?.[1];
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  if (!wait || !said) {
+    fail('check 305: could not read how long a desktop notification waits for its subject from utils/desktopNotifications.js (SUBJECT_WAIT_MS) and frontend/README.md ("for at most N seconds, and the Sparkplug id stands in")');
+  } else if (words[Number(wait) / 1000] !== said) {
+    fail(`check 305: frontend/README.md says a desktop notification waits at most ${said} seconds for its subject, and SUBJECT_WAIT_MS is ${wait} ms`);
+  } else {
+    pass(`frontend/README.md says a desktop notification waits at most ${said} seconds for its subject, as SUBJECT_WAIT_MS holds it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 306. The desktop-notification setting is named the same everywhere it is written. user_settings.desktop_notifications
+// is off by default (0264); docs/openapi.yaml says so, and says the column name a client writes. The
+// browser keeps a copy under one localStorage key, which supabase/README.md and frontend/README.md
+// name as the hook holds it: a key renamed in the hook leaves a README that sends a reader looking for
+// the wrong one, and a copy that no longer follows the row.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems306 = [];
+  const chain = readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort()
+    .map((f) => read(`supabase/migrations/${f}`)).join('\n');
+  const declared = [...chain.matchAll(/ADD COLUMN IF NOT EXISTS desktop_notifications boolean DEFAULT (true|false) NOT NULL/g)].at(-1)?.[1];
+  const openapi = read('docs/openapi.yaml');
+  const schema = /\n {4}UserSettings:\n[\s\S]*?\n {4}SystemSetting:/.exec(openapi)?.[0] ?? '';
+  const documented = /\n {8}desktop_notifications:\n {10}type: boolean\n {10}default: (true|false)\n/.exec(schema)?.[1];
+  const key = /export const DESKTOP_NOTIFICATIONS_KEY = '([a-z_]+)'/.exec(read('frontend/src/hooks/useDesktopNotifications.js'))?.[1];
+  if (!declared) problems306.push('no migration adds user_settings.desktop_notifications with a default');
+  if (!documented) problems306.push("docs/openapi.yaml's UserSettings schema has no boolean desktop_notifications with a default");
+  if (declared && documented && declared !== documented) {
+    problems306.push(`docs/openapi.yaml says desktop_notifications defaults to ${documented}, and the migrations to ${declared}`);
+  }
+  if (!/desktop_notifications: \{ type: boolean \}/.test(openapi)) {
+    problems306.push("docs/openapi.yaml's /rest/v1/user_settings POST body does not offer desktop_notifications");
+  }
+  if (!key) problems306.push('could not read DESKTOP_NOTIFICATIONS_KEY from frontend/src/hooks/useDesktopNotifications.js');
+  for (const file of ['supabase/README.md', 'frontend/README.md']) {
+    if (key && !read(file).includes(`\`${key}\``)) problems306.push(`${file} does not name the browser copy, ${key}`);
+  }
+  if (problems306.length) {
+    for (const m of problems306) fail(`check 306: ${m}.`);
+  } else {
+    pass(`user_settings.desktop_notifications is off by default as docs/openapi.yaml says, and both READMEs name its browser copy, ${key}`);
   }
 }
 

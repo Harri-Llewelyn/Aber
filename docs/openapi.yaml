@@ -3846,9 +3846,9 @@ paths:
       tags: [Registry]
       summary: Read your own display preferences
       description: |
-        One row per person (`0188`, `0194`): the theme, sidebar layout and single-key shortcuts
-        the dashboard's Profile page and account menu set, so they follow the account rather than
-        the browser. RLS returns the
+        One row per person (`0188`, `0194`, `0264`): the theme, sidebar layout, single-key shortcuts
+        and desktop notifications the dashboard's Profile page and account menu set, so they follow
+        the account rather than the browser. RLS returns the
         caller's own row and nobody else's, an `Administrator` included; an empty array means
         this person has chosen nothing yet, and the defaults apply. `anon` and `service_role` hold
         nothing on the table.
@@ -3886,6 +3886,7 @@ paths:
                 theme: { type: string, enum: [dark, light] }
                 sidebar_mode: { type: string, enum: [hover, expanded, collapsed] }
                 single_key_shortcuts: { type: boolean }
+                desktop_notifications: { type: boolean }
       responses:
         '201': { description: 'Created or changed.' }
         '400': { description: 'A value outside the CHECK (`23514`).' }
@@ -7773,6 +7774,10 @@ components:
           type: boolean
           default: true
           description: 'Whether the shortcuts that are one character with no modifier (`?`, `/`, `[` and `]`) act for this person (`0194`). Ctrl K and the arrow keys are not covered.'
+        desktop_notifications:
+          type: boolean
+          default: false
+          description: 'Whether a dashboard tab this person has open raises a browser notification when an alert starts firing (`0264`). The browser''s own permission to show one is granted per browser and is not stored.'
         updated_at: { type: string, format: date-time, readOnly: true }
 
     SystemSetting:

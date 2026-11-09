@@ -1642,9 +1642,9 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   const check = declared.length ? declared[declared.length - 1] : null;
   if (!check) problems.push('notificationChannels: found no notification_deliveries_channel_valid in the migrations -- the shape this check reads has changed');
   const labels = need(notifications, /export const CHANNEL_LABELS = \{([^}]*)\}/, 'CHANNEL_LABELS in utils/notifications.js');
-  const configured = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_channel_is_configured(', '$$;',
+  const configured = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_channel_is_configured(', '$;',
     'notification_channel_is_configured()');
-  const reaches = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_channel_reaches(', '$$;',
+  const reaches = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_channel_reaches(', '$;',
     'notification_channel_reaches()');
   const words = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).join(', ');
   if (check && labels) {
@@ -1667,7 +1667,7 @@ const compare = (mirror, label, jsValue, sqlValue) => {
 // takes any value an Administrator types, which the dispatcher then reads as it can.
 {
   const notifications = read('frontend/src/utils/notifications.js');
-  const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_setting_guard(', '$$;', 'notification_setting_guard()');
+  const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_setting_guard(', '$;', 'notification_setting_guard()');
   const named = [...notifications.matchAll(/^export const [A-Z_]+_KEY = '(notifications\.[a-z_]+)'$/gm)].map((m) => m[1]).sort();
   const seeded = [...SCHEMA.matchAll(/seed_setting\(\s*'(notifications\.[a-z_]+)'/g)].map((m) => m[1]).sort();
   if (!named.length) {
@@ -1679,6 +1679,24 @@ const compare = (mirror, label, jsValue, sqlValue) => {
       compare('notificationKeys', `the Notifications keys the page names and the guard checks (${guard.file})`, named.join(', '), guarded.join(', '));
     }
   }
+}
+
+// 78. The desktop-notification choice, one column in two places (0264). user_settings.desktop_notifications
+// is off by default, and the browser's copy of it (useDesktopNotifications.js) starts off too, so a
+// first paint and a row never written agree. The dashboard reads and writes the column by name,
+// utils/userSettings.js selecting it and useUserSettings.js saving to it: a name that differs reads
+// back as nothing and saves as an error, which the page turns into a choice held in one browser.
+{
+  const declared = [...SCHEMA.matchAll(/ADD COLUMN IF NOT EXISTS (desktop_notifications) boolean DEFAULT (true|false) NOT NULL/g)].at(-1);
+  if (!declared) problems.push('could not find user_settings.desktop_notifications in any applied migration -- the file\'s shape changed, so this check is no longer checking anything');
+  const hook = need(read('frontend/src/hooks/useDesktopNotifications.js'), /^const DEFAULT_ON = (true|false)$/m,
+    'DEFAULT_ON in frontend/src/hooks/useDesktopNotifications.js');
+  const selected = need(read('frontend/src/utils/userSettings.js'), /\.select\('([^']*)'\)/, "the columns readUserSettings() selects in frontend/src/utils/userSettings.js");
+  const saved = need(read('frontend/src/hooks/useUserSettings.js'), /save\('(desktop_notifications)', next\)/,
+    'the column the desktop notifications choice is saved to in frontend/src/hooks/useUserSettings.js');
+  if (declared && hook) compare('desktopNotifications', 'the default, in the migrations and the browser copy', hook[1], declared[2]);
+  if (declared && selected) compare('desktopNotifications', "whether the dashboard reads the column the migrations add", selected[1].split(',').includes(declared[1]), true);
+  if (declared && saved) compare('desktopNotifications', 'the column the dashboard saves and the one the migrations add', saved[1], declared[1]);
 }
 
 // -------------------------------------------------------------------------------------------------

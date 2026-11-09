@@ -112,6 +112,7 @@ export const CARDS = [
 
   { id: 'profile-account',      ...tabCard('profile', 'account'), keywords: ['picture', 'photo', 'avatar', 'email', 'role', 'password', 'change password', 'my role'] },
   { id: 'profile-appearance',   ...tabCard('profile', 'appearance'), keywords: ['theme', 'dark mode', 'light mode', 'dark', 'light', 'sidebar layout', 'collapse sidebar', 'expand sidebar', 'keyboard shortcuts', 'single-key shortcuts', 'speech input'] },
+  { id: 'profile-notifications', ...tabCard('profile', 'notifications'), keywords: ['desktop notifications', 'browser notifications', 'alert notification', 'pop-up', 'popup', 'permission', 'allow notifications', 'blocked notifications'] },
   { id: 'profile-sessions',     ...tabCard('profile', 'sessions'), keywords: ['security', 'signed in', 'sign out everywhere', 'sign out other sessions', 'other browsers', 'end session', 'lost laptop'] },
   { id: 'profile-mfa',          ...tabCard('profile', 'mfa'), keywords: ['security', 'multi-factor authentication', 'second factor', 'two-factor', '2fa', 'authenticator', 'totp'] },
   { id: 'profile-allowed-apps', ...tabCard('profile', 'allowed-apps'), keywords: ['security', 'apps you have allowed', 'authorized apps', 'connected apps', 'revoke app'] }

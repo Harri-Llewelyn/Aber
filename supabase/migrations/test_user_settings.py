@@ -1,5 +1,5 @@
 """
-A person's own preferences (0188, 0194): `user_settings`, one row per person, read and written by
+A person's own preferences (0188, 0194, 0264): `user_settings`, one row per person, read and written by
 that person alone.
 
 What would fail quietly without these:
@@ -9,7 +9,7 @@ What would fail quietly without these:
 - An Administrator reads nobody else's row either: nothing in it is anyone else's business.
 - `anon` and `service_role` hold nothing on the table.
 - The CHECKs refuse a value the dashboard does not know, and a row with no choice made carries
-  the dashboard's defaults, single-key shortcuts on among them.
+  the dashboard's defaults: single-key shortcuts on, desktop notifications off.
 - The dashboard's first-sign-in seed (INSERT ... ON CONFLICT DO NOTHING) never overwrites a row
   another tab created, and its one-column save (PostgREST's upsert) leaves the other column alone.
 - Deleting the account deletes the row; a person cannot delete it themselves.
@@ -191,6 +191,55 @@ class TestTheValues(UserSettingsBase):
         self.assertEqual(self.rows(), [(ALICE, "dark", "hover")])
         with self.assertRaises(psycopg2.errors.NotNullViolation):
             self.cur.execute(save, (ALICE, None))
+
+    def test_desktop_notifications_are_off_until_turned_on(self):
+        """0264: a row with no choice made asks for none, and a one-column save turns it on and off."""
+        self.as_person(ALICE)
+        self.cur.execute("INSERT INTO public.user_settings (user_id) VALUES (%s)", (ALICE,))
+        read = "SELECT desktop_notifications FROM public.user_settings WHERE user_id = %s"
+        self.cur.execute(read, (ALICE,))
+        self.assertIs(self.cur.fetchone()[0], False)
+        save = ("INSERT INTO public.user_settings (user_id, desktop_notifications) VALUES (%s, %s)"
+                " ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id,"
+                " desktop_notifications = EXCLUDED.desktop_notifications")
+        for value in (True, False):
+            self.cur.execute(save, (ALICE, value))
+            self.cur.execute(read, (ALICE,))
+            self.assertIs(self.cur.fetchone()[0], value)
+        # The other choices are as they were: the save names its own column alone.
+        self.assertEqual(self.rows(), [(ALICE, "dark", "hover")])
+        with self.assertRaises(psycopg2.errors.NotNullViolation):
+            self.cur.execute(save, (ALICE, None))
+
+    def test_a_person_cannot_turn_on_someone_elses_desktop_notifications(self):
+        self.seed(BOB)
+        self.as_person(ALICE)
+        self.cur.execute(
+            "UPDATE public.user_settings SET desktop_notifications = true WHERE user_id = %s", (BOB,)
+        )
+        self.assertEqual(self.cur.rowcount, 0)
+        self.as_owner()
+        self.cur.execute("SELECT desktop_notifications FROM public.user_settings WHERE user_id = %s", (BOB,))
+        self.assertIs(self.cur.fetchone()[0], False)
+
+    def test_a_save_cannot_turn_on_someone_elses_desktop_notifications_through_the_conflict(self):
+        self.seed(BOB)
+        self.as_person(ALICE)
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.cur.execute(
+                "INSERT INTO public.user_settings (user_id, desktop_notifications) VALUES (%s, true)"
+                " ON CONFLICT (user_id) DO UPDATE SET desktop_notifications = EXCLUDED.desktop_notifications",
+                (BOB,),
+            )
+
+    def test_nobody_but_a_signed_in_person_holds_the_column(self):
+        for role, held in (("anon", False), ("service_role", False), ("authenticated", True)):
+            for privilege in ("SELECT", "INSERT", "UPDATE"):
+                self.cur.execute(
+                    "SELECT has_column_privilege(%s, 'public.user_settings', 'desktop_notifications', %s)",
+                    (role, privilege),
+                )
+                self.assertIs(self.cur.fetchone()[0], held, f"{role} {privilege}")
 
     def test_an_unknown_theme_is_refused(self):
         self.as_person(ALICE)

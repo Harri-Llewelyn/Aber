@@ -4718,6 +4718,32 @@ refusal at each step, dot-stuffing, UTF-8, multi-line and byte-at-a-time replies
 hostile addresses), the encoding against decoders written apart from it, and the dispatcher's
 decisions. `test_notification_dispatch_email.py` is the stack suite.
 
+### A person can ask for a desktop notification when an alert starts firing (0264)
+
+While a dashboard tab is open somewhere, a firing alert can also raise a browser notification, so
+someone working in another window sees it. It is a person's own choice, off until they turn it on,
+and it follows them to any PC they sign in on.
+
+- **`user_settings.desktop_notifications`**, `boolean NOT NULL DEFAULT false`. Profile › Notifications
+  writes it, as a one-column upsert like the shortcuts' (`0194`). A row written before `0264` reads off.
+- **No new grant or policy.** `0188` grants on the table and its policies match rows, so both cover
+  the new column, and a person still reads and writes their own row only. The file's self-check
+  asserts that `anon` holds nothing on it.
+- **The database sends nothing.** The notification is raised by the dashboard tab, from the alerts
+  it already reads (`platform_alerts_active`, so it has the visibility the alert counter has: RLS
+  withholds a machine identity's alert from anyone but an Administrator). It queues nothing in
+  `notification_deliveries`, and the dispatcher (`0247`) does not see it. With no dashboard tab
+  open nothing arrives: reaching people away from the dashboard is what email and the webhook are for.
+- **The browser's permission is not stored.** A browser grants it per browser, so turning the setting
+  on, or signing in on a new PC with it on, brings up that browser's prompt. The column holds only
+  the person's wish.
+- **No site-wide switch.** A site that wants desktop notifications blocked does it through browser
+  policy, so there is no `system_settings` key for it.
+
+The dashboard keeps a copy in `aber_desktop_notifications` and reads and writes the column through
+`useUserSettings.js`; `useDesktopAlerts.js` raises and closes the notifications. `test_user_settings.py`
+holds the default, the one-column save and that nobody else's row is reachable.
+
 ### History averages a metric by the hour of the day (0265)
 
 The Cell tab's heatmap colours each machine's mean at each hour of the day, 00 to 23, across the
@@ -9651,6 +9677,7 @@ person's.
 | `theme` | `dark` (the default) or `light`, by CHECK |
 | `sidebar_mode` | `hover` (the default), `expanded` or `collapsed`, by CHECK |
 | `single_key_shortcuts` | `true` (the default) or `false`: whether `?`, `/`, `[` and `]` act (`0194`) |
+| `desktop_notifications` | `false` (the default) or `true`: whether a dashboard tab they have open raises a browser notification when an alert starts firing (`0264`) |
 | `updated_at` | Stamped by `user_settings_stamp()` on every write; the caller cannot supply it |
 
 - **Typed columns, not key/value rows.** The database refuses a value the dashboard does not know,
@@ -9662,7 +9689,7 @@ person's.
   `service_role` hold nothing.
 - **Not audited.** A display choice is not platform state, so the table has no audit trigger.
 - **The browser keeps a copy** in localStorage (`aber_theme`, `aber_sidebar_mode`,
-  `aber_single_key_shortcuts`), so the page
+  `aber_single_key_shortcuts`, `aber_desktop_notifications`), so the page
   paints in the right theme before the row arrives, and the sign-in screen, which has no account
   yet, shows the theme last used on that PC. Once the row loads it wins, and the copy follows it.
 - **A first row keeps the browser's choice.** A person with no row gets one seeded from the
