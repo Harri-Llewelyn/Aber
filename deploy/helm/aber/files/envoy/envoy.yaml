@@ -622,10 +622,14 @@ static_resources:
                       rules:
                         - match: { prefix: "/" }
                           requires: { allow_missing_or_failed: {} }
-                  # The decision, on the verified client_id: a token without one passes everywhere; one with it
-                  # passes on /auth/v1/ and on the functions its own app calls, and is 403 everywhere else. The
-                  # Studio and forge doors call theirs from their own listeners, so they have none here. Plain
-                  # paths, matched as the routes match them. Mirror check 48 holds the ids to stack_app_ids().
+                  # The decision, on the verified client_id: a token without one passes everywhere. One of the
+                  # stack's four apps passes on /auth/v1/ and on the functions its own app calls. A token issued
+                  # to any other app, one an Administrator registered, passes on the sign-in endpoints alone: the
+                  # two token endpoints, userinfo, GET /user, a local logout, discovery and the key set. Neither
+                  # reaches anything else, so an outside app cannot change the person's password, email or
+                  # second factors, or approve a sign-in. The Studio and forge doors call theirs from their own
+                  # listeners, so they have none here. Plain paths, matched as the routes match them; an
+                  # unlisted spelling is a 403, never a pass. Mirror check 48 holds the ids to stack_app_ids().
                   - name: envoy.filters.http.rbac
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
@@ -642,8 +646,45 @@ static_resources:
                                       filter: envoy.filters.http.jwt_authn
                                       path: [{ key: jwt_payload }, { key: client_id }]
                                       value: { string_match: { safe_regex: { regex: "(?s).+" } } }
-                          every-app-signs-in:
+                          stack-apps-sign-in:
                             permissions: [{ url_path: { path: { prefix: "/auth/v1/" } } }]
+                            principals:
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path: [{ key: jwt_payload }, { key: client_id }]
+                                    value: { string_match: { exact: c0ffee00-0000-4000-8000-000000000001 } }
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path: [{ key: jwt_payload }, { key: client_id }]
+                                    value: { string_match: { exact: c0ffee00-0000-4000-8000-000000000002 } }
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path: [{ key: jwt_payload }, { key: client_id }]
+                                    value: { string_match: { exact: c0ffee00-0000-4000-8000-000000000003 } }
+                              - sourced_metadata:
+                                  metadata_source: DYNAMIC
+                                  metadata_matcher:
+                                    filter: envoy.filters.http.jwt_authn
+                                    path: [{ key: jwt_payload }, { key: client_id }]
+                                    value: { string_match: { exact: c0ffee00-0000-4000-8000-000000000004 } }
+                          # Any app's token, and only these. GoTrue's logout ends every session of the person
+                          # unless the scope is local, so that is the one spelling admitted.
+                          outside-apps-sign-in:
+                            permissions:
+                              - and_rules: { rules: [{ header: { name: ":method", string_match: { exact: POST } } }, { url_path: { path: { exact: "/auth/v1/token" } } }] }
+                              - and_rules: { rules: [{ header: { name: ":method", string_match: { exact: POST } } }, { url_path: { path: { exact: "/auth/v1/oauth/token" } } }] }
+                              - and_rules: { rules: [{ header: { name: ":method", string_match: { exact: GET } } }, { url_path: { path: { exact: "/auth/v1/oauth/userinfo" } } }] }
+                              - and_rules: { rules: [{ header: { name: ":method", string_match: { exact: GET } } }, { url_path: { path: { exact: "/auth/v1/user" } } }] }
+                              - and_rules: { rules: [{ header: { name: ":method", string_match: { exact: POST } } }, { header: { name: ":path", string_match: { exact: "/auth/v1/logout?scope=local" } } }] }
+                              - and_rules: { rules: [{ header: { name: ":method", string_match: { exact: GET } } }, { url_path: { path: { exact: "/auth/v1/.well-known/openid-configuration" } } }] }
+                              - and_rules: { rules: [{ header: { name: ":method", string_match: { exact: GET } } }, { url_path: { path: { exact: "/auth/v1/.well-known/oauth-authorization-server" } } }] }
+                              - and_rules: { rules: [{ header: { name: ":method", string_match: { exact: GET } } }, { url_path: { path: { exact: "/auth/v1/.well-known/jwks.json" } } }] }
                             principals: [{ any: true }]
                           grafana-userinfo:
                             permissions: [{ url_path: { path: { exact: "/functions/v1/grafana-userinfo" } } }]

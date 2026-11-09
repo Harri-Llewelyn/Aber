@@ -349,10 +349,12 @@ const compare = (mirror, label, jsValue, sqlValue) => {
 }
 
 // 48. What an app's token reaches at the gateway. The API listener's app check (supabase/envoy.yaml)
-// admits a token GoTrue issued to an app on the functions that app calls, by client id, and each
-// door listener signs in as a client of its own. An id stack_app_ids() does not list is an app the
-// stack does not register, given a route; a function with no directory, or one the edge runtime's
-// allow-list (functions/main/index.ts) does not name, is a route to nothing.
+// admits a token GoTrue issued to one of the stack's apps on all of /auth/v1/, and on the functions
+// that app calls, by client id; each door listener signs in as a client of its own. An id
+// stack_app_ids() does not list is an app the stack does not register, given a route; an id it lists
+// that the stack-apps-sign-in policy lacks is an app of the stack held to the sign-in endpoints an
+// outside app has; a function with no directory, or one the edge runtime's allow-list
+// (functions/main/index.ts) does not name, is a route to nothing.
 {
   const before = problems.length;
   const envoy = read('supabase/envoy.yaml').replace(/\r\n/g, '\n');
@@ -387,6 +389,9 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   } else {
     for (const id of [...Object.keys(routes), ...doors].filter((x) => !listed.includes(x))) {
       problems.push(`appRoutes: supabase/envoy.yaml names the client ${id}, which stack_app_ids() (${ids?.file}) does not list: an app the stack does not register is given a route`);
+    }
+    for (const id of listed.filter((x) => !(x in routes))) {
+      problems.push(`appRoutes: stack_app_ids() (${ids?.file}) lists the client ${id}, which the gateway's stack-apps-sign-in policy does not name: its token reaches the sign-in endpoints an outside app's does, and not the rest of /auth/v1/`);
     }
     for (const fn of Object.values(routes).flat()) {
       if (!existsSync(join(ROOT, 'supabase/functions', fn, 'index.ts'))) {

@@ -88,6 +88,13 @@ spec:
             # Followed by the BROWSER, so the ingress address rather than the in-cluster one.
             - name: API_EXTERNAL_URL
               value: {{ include "aber.supabaseUrl" . | quote }}
+            # The site's public auth address: the `iss` of every token, and the issuer of the discovery
+            # document, whose endpoints GoTrue builds from it. Unset, discovery names no issuer and
+            # relative paths, which a standard sign-in library refuses. Nothing on the stack checks `iss`.
+            {{- with include "aber.supabaseUrl" . }}
+            - name: GOTRUE_JWT_ISSUER
+              value: {{ printf "%s/auth/v1" . | quote }}
+            {{- end }}
             # Required by GoTrue, and inert: with GOTRUE_JWT_KEYS set it builds its keys and the
             # algorithms it accepts from that set, which holds no `oct` key, so no HS256 token verifies.
             {{- include "aber.secretEnv" (dict "name" "GOTRUE_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
