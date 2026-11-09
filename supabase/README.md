@@ -4255,6 +4255,66 @@ standing in for raw telemetry and the rollups. The file's self-check asserts one
 `SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
 read, so it holds on a stack with no historian.
 
+### History averages a metric by the hour of the day (0265)
+
+The Cell tab's heatmap colours each machine's mean at each hour of the day, 00 to 23, across the
+window's days ([#319](https://github.com/Harri-Llewelyn/Aber/issues/319)). The hourly read it is
+built on, `telemetry_carried()` at one hour, returns one row per hour of the window: 14,400 rows for
+a cell of 20 over a Month. **`telemetry_hour_of_day(from_ts, to_ts, asset_ids, metric_name, tz)`**
+folds them where the read is made, so what crosses is devices times 24 rows.
+
+- **One row per device per hour of the day that has a value**, in device and hour order:
+  `asset_id`, `hour_of_day` (0 to 23 in `tz`), `mean_value` and `days`, how many local dates the
+  mean spans, so the heatmap can say "the mean of 7 days".
+- **It reads `telemetry_carried()` at one hour**, so it takes that read's rules. A quiet hour carries
+  the last value forward and counts as that value, which under report-by-exception is what held. A
+  series has no row before its first value. A text or a flag metric has no `avg_double`, and so no row.
+- **Every hour weighs the same.** The mean is of the hourly averages, so an hour of 1,000 readings
+  and an hour of one count alike. A reading-weighted mean would let a chatty hour outweigh a quiet one.
+- **The hour is the one in the time zone given**: `bucket_ts AT TIME ZONE tz`, per bucket, so across
+  a clock change the same UTC hour lands in another local hour, and the session's own `timezone`
+  setting does not matter. The browser sends its IANA name (`Intl`). An hourly bucket starts on a
+  UTC hour, so in a zone offset by part of an hour (Kolkata, UTC+5:30) it begins at :30 and is filed
+  under the hour it starts in.
+- **The window's first bucket is the one holding `from_ts`**, as in `telemetry_carried()`, and
+  nothing is read past now.
+- **Its bounds** are `telemetry_carried()`'s own, said in terms of the window: it refuses more than
+  50,000 hours times devices, a time zone Postgres does not know, a blank one, and the usual bad
+  bounds and missing lists (`22023`), all before anything is read. The 50,000 is `c_max_rows`,
+  stated again here so the refusal names hours and devices rather than a bucket, and
+  `HOUR_OF_DAY_MAX_ROWS` in `api.js` is the page's copy (mirror check 79). **For a cell of 20 that is
+  2,500 hours, 104 days**: a Week and a Month read, a Year does not. Five devices read a Year
+  (43,800 hours), six do not (347 days). The page checks the same arithmetic first
+  (`hourOfDayPlan()`) and says the longest window in words. It does not read the devices in parts:
+  the window is the thing to shorten, and the charts above the heatmap are unaffected.
+
+It runs as the caller, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`, as `telemetry_carried()` is. No audit classifier changes: it
+reads.
+
+**Why not fold in the browser.** The browser's row cap is 5,000 (`TELEMETRY_MAX_ROWS`), so a Month of
+20 devices at one hour, 14,400 rows, would be read in three parts and folded there. Done here it is
+one call and 480 rows. The function's own cost is the read it wraps, so the saving is in what
+leaves the database:
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression
+policies; 20 devices of 10 metrics, a reading every 5 minutes for 35 days, and the cell's metric
+hourly for the 75 days before that, 2.1 million raw rows), through `postgres_fdw` into
+`supabase/postgres` 17.6.1.175, warm, as `authenticated`, median of 5 on a laptop eight helpers
+shared (so one read varied by up to 40%):
+
+| A cell of 20 devices | `telemetry_hour_of_day()` | rows | JSON | `telemetry_carried()` at 1 h | rows | JSON |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Day | 40 ms | 480 | | 48 ms | 500 | |
+| Week | 135 ms | 480 | 47 KB | 90 ms | 3,380 | 979 KB |
+| Month | 337 ms | 480 | 48 KB | 454 ms | 14,420 | 4.2 MB |
+| 104 days, the most 20 may read | 1,409 ms | 480 | | 1,535 ms | 49,940 | |
+
+`test_history_averages_a_metric_by_the_hour_of_day.py` holds every rule above with a local table
+standing in for the hourly rollup. The file's self-check asserts one form, `STABLE`,
+`SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
+read, so it holds on a stack with no historian.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
