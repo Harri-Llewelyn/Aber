@@ -40,8 +40,8 @@ USER node-red
 #
 # passport-oauth2, NOT passport-openidconnect. The latter always requests the `openid` scope, and
 # under HS256 signing GoTrue refuses to mint the id_token ("HS256 is not supported for ID token
-# signing"); and it reads GoTrue's discovery document, which reports issuer "" with relative paths
-# under ES256 too, and fails issuer validation. settings.js asks for `openid` itself only with
+# signing"); and it reads GoTrue's discovery document at start, which the editor's sign-in does not
+# need: its endpoints are configured. settings.js asks for `openid` itself only with
 # ES256 signing, and the role comes from the nodered-userinfo edge function either way
 # (node-red/README.md).
 #

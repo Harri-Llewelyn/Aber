@@ -758,6 +758,16 @@ as a person's. The drawer reads `app_approvals()` when it opens and draws the pe
 `revoke_app_approval()` and Remove App `remove_app()`, each after a dialog that says what ends.
 Remove App is disabled for Aber's own apps, which db-init registers again on every boot.
 
+**Register App** (`components/modals/RegisterAppModal.jsx`) adds an app that signs people in:
+`register_app()` (`0260`) takes a name, public or confidential, and one to ten addresses the app
+sends a person back to. The dialog says before it asks what the database would refuse, with
+`redirectAddressProblem()` in `utils/apps.js`, one fixture
+(`test-harness/fixtures/app-redirect-addresses.json`) with the database's rule, and the site's domain
+read from the API address as `site_domain()` reads the Directory's. A confidential app's secret
+is shown once, in the dialog's state until it closes, beside the client ID and the discovery address
+(`<API address>/auth/v1/.well-known/openid-configuration`); a public app has none. The success toast
+links to the app's row, and the drawer says an app that is not Aber's own is sign-in only.
+
 **Change Password**, the Password row's action on Profile's Account tab, opens `ChangePasswordModal`.
 `utils/passwords.js` sends the current password with the new one in one
 `supabase.auth.updateUser()`, and GoTrue checks the current one before it sets anything
