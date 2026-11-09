@@ -6997,7 +6997,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* Settings › Notifications: under the category's table, the delivery log, a table of its own with
-   its own header row. Time, Event, Outcome and Attempts are fixed, so the rows line up; the alert
+   its own header row. Time, Event, Channel, Outcome and Attempts are fixed, so the rows line up; the alert
    and the error take the rest, cut with an ellipsis and slid on hover (OverflowText). */
 .notification-admin-note { min-height: 0; }
 
@@ -7024,10 +7024,16 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .notification-log-table { table-layout: fixed; width: 100%; }
 .notification-col-time { width: 170px; }
 .notification-col-event { width: 96px; }
+.notification-col-channel { width: 88px; }
 .notification-col-outcome { width: 104px; }
 .notification-col-attempts { width: 80px; }
 
 .notification-log-cut { display: block; min-width: 0; max-width: 100%; }
+
+/* Who is emailed and whether the site can send, between the toolbar and the table. Every role reads it. */
+.notification-email { padding: 12px var(--inset) 0; }
+.notification-email .callout { margin-bottom: 8px; }
+.notification-email .notification-log-lead { margin-bottom: 0; }
 .notification-log-none { color: var(--text-dim); }
 
 /* ===== Profile ============================================================================== */
@@ -7708,6 +7714,10 @@ ol.gateway-steps {
 /* The chip keeps the id's last 24 characters (CopyableId truncate="start") at this width. */
 .metric-col-semantic-id { width: 252px; }
 .metric-col-superseded { width: 220px; }
+/* Derived: Definition takes what is left, which is why it is the one column with no width. */
+.metric-table-derived { min-width: 900px; }
+.metric-col-kind { width: 140px; }
+.metric-col-description { width: 240px; }
 /* Uncatalogued: Declared By takes what is left, and its chips wrap within it. */
 .metric-table-uncatalogued { min-width: 860px; }
 .metric-col-count { width: 80px; }

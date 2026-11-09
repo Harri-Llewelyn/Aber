@@ -73,17 +73,22 @@ export const alertToastUrl = (row) =>
  * A suppressed alert toasts nothing, firing or resolved. When its window ends while it still fires
  * it toasts as if it had just fired. Whether an alert is suppressed changes at a window's start and
  * end with nothing written, so the hook reads again at the nearest one it knows of.
+ *
+ * `onRead(rows)`, when given, is called with every successful read, after the toasts: it is how a
+ * desktop notification (useDesktopAlerts) follows the same set the counter shows.
  */
-export function usePlatformAlerts(showToast) {
+export function usePlatformAlerts(showToast, onRead) {
   const [active, setActive] = useState([])
   const knownRef = useRef(new Map())
   const primedRef = useRef(false)
   const showToastRef = useRef(showToast)
+  const onReadRef = useRef(onRead)
   // The re-read at the next window start or end, and whether the hook is still mounted to make it.
   const changeTimerRef = useRef(null)
   const liveRef = useRef(false)
 
   useEffect(() => { showToastRef.current = showToast }, [showToast])
+  useEffect(() => { onReadRef.current = onRead }, [onRead])
 
   /**
    * Re-read the active view and announce the difference. Diffs two snapshots rather than trusting
@@ -133,6 +138,7 @@ export function usePlatformAlerts(showToast) {
     knownRef.current = next
     primedRef.current = true
     setActive(rows)
+    onReadRef.current?.(rows)
 
     const at = nextSuppressionChange(rows, await upcomingWindowStarts())
     clearTimeout(changeTimerRef.current)

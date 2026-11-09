@@ -1680,6 +1680,75 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 76. The channels a message may go down, one closed set in each place it is written (0247, 0262):
+// the queue's CHECK admits them, the delivery log names each, notification_channel_is_configured()
+// has an arm for each, and notification_channel_reaches() says which alerts each may carry. A
+// channel the log cannot name shows as its raw word; one the configured test lacks is queued
+// for never or always, and its messages wait or fail with no sentence.
+{
+  const notifications = read('frontend/src/utils/notifications.js');
+  // The last declaration stands: 0247 creates the table with one channel and 0262 replaces the CHECK.
+  const declared = [...SCHEMA.matchAll(/CONSTRAINT notification_deliveries_channel_valid\s+CHECK \(\(channel = ANY \(ARRAY\[([^\]]*)\]\)\)\)/g)];
+  const check = declared.length ? declared[declared.length - 1] : null;
+  if (!check) problems.push('notificationChannels: found no notification_deliveries_channel_valid in the migrations -- the shape this check reads has changed');
+  const labels = need(notifications, /export const CHANNEL_LABELS = \{([^}]*)\}/, 'CHANNEL_LABELS in utils/notifications.js');
+  const configured = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_channel_is_configured(', '$;',
+    'notification_channel_is_configured()');
+  const reaches = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_channel_reaches(', '$;',
+    'notification_channel_reaches()');
+  const words = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).join(', ');
+  if (check && labels) {
+    const sql = words(check[1].replace(/::text/g, ''));
+    compare('notificationChannels', 'the channels the delivery log labels and the queue admits',
+      [...labels[1].matchAll(/([a-z]+):/g)].map((m) => m[1]).join(', '), sql);
+    if (configured) {
+      compare('notificationChannels', `the channels the queue admits and notification_channel_is_configured() has an arm for (${configured.file})`,
+        sql, [...configured.body.matchAll(/WHEN '([a-z]+)' THEN/g)].map((m) => m[1]).join(', '));
+    }
+    if (reaches) {
+      compare('notificationChannels', `the channels the queue admits and notification_channel_reaches() rules on (${reaches.file})`,
+        sql, [...reaches.body.matchAll(/WHEN '([a-z]+)' THEN/g)].map((m) => m[1]).join(', '));
+    }
+  }
+}
+
+// 77. The Notifications keys the page names are the keys the migrations seed, and the guard checks
+// each: a key the page reads that nothing seeds is an empty read, and one the guard does not name
+// takes any value an Administrator types, which the dispatcher then reads as it can.
+{
+  const notifications = read('frontend/src/utils/notifications.js');
+  const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_setting_guard(', '$;', 'notification_setting_guard()');
+  const named = [...notifications.matchAll(/^export const [A-Z_]+_KEY = '(notifications\.[a-z_]+)'$/gm)].map((m) => m[1]).sort();
+  const seeded = [...SCHEMA.matchAll(/seed_setting\(\s*'(notifications\.[a-z_]+)'/g)].map((m) => m[1]).sort();
+  if (!named.length) {
+    problems.push('notificationKeys: found no notifications.* key in utils/notifications.js -- the shape this check reads has changed');
+  } else {
+    compare('notificationKeys', 'the Notifications keys the page names and the migrations seed', named.join(', '), seeded.join(', '));
+    if (guard) {
+      const guarded = [...guard.body.matchAll(/WHEN '(notifications\.[a-z_]+)' THEN/g)].map((m) => m[1]).sort();
+      compare('notificationKeys', `the Notifications keys the page names and the guard checks (${guard.file})`, named.join(', '), guarded.join(', '));
+    }
+  }
+}
+
+// 78. The desktop-notification choice, one column in two places (0264). user_settings.desktop_notifications
+// is off by default, and the browser's copy of it (useDesktopNotifications.js) starts off too, so a
+// first paint and a row never written agree. The dashboard reads and writes the column by name,
+// utils/userSettings.js selecting it and useUserSettings.js saving to it: a name that differs reads
+// back as nothing and saves as an error, which the page turns into a choice held in one browser.
+{
+  const declared = [...SCHEMA.matchAll(/ADD COLUMN IF NOT EXISTS (desktop_notifications) boolean DEFAULT (true|false) NOT NULL/g)].at(-1);
+  if (!declared) problems.push('could not find user_settings.desktop_notifications in any applied migration -- the file\'s shape changed, so this check is no longer checking anything');
+  const hook = need(read('frontend/src/hooks/useDesktopNotifications.js'), /^const DEFAULT_ON = (true|false)$/m,
+    'DEFAULT_ON in frontend/src/hooks/useDesktopNotifications.js');
+  const selected = need(read('frontend/src/utils/userSettings.js'), /\.select\('([^']*)'\)/, "the columns readUserSettings() selects in frontend/src/utils/userSettings.js");
+  const saved = need(read('frontend/src/hooks/useUserSettings.js'), /save\('(desktop_notifications)', next\)/,
+    'the column the desktop notifications choice is saved to in frontend/src/hooks/useUserSettings.js');
+  if (declared && hook) compare('desktopNotifications', 'the default, in the migrations and the browser copy', hook[1], declared[2]);
+  if (declared && selected) compare('desktopNotifications', "whether the dashboard reads the column the migrations add", selected[1].split(',').includes(declared[1]), true);
+  if (declared && saved) compare('desktopNotifications', 'the column the dashboard saves and the one the migrations add', saved[1], declared[1]);
+}
+
 // -------------------------------------------------------------------------------------------------
 // 7. The MTConnect semantic id the Add Metric form derives is the id `mtconnect_vocabulary` seeds
 // for that data item type, and the id every MTConnect row of the example metrics carries (#457):
@@ -1741,6 +1810,57 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     if (strays.length) {
       problems.push(`ashrae223Group: example 223P metrics file under ${JSON.stringify(strays)}, not the registered '${registered[0]}'`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 80. A derived metric's kinds and the most inputs a sum takes, SQL and JavaScript (0267). The shape
+// function refuses any kind it does not list and a sum of more inputs than its limit; the Add Derived
+// Metric dialog offers DERIVATION_KINDS and stops adding at DERIVED_MAX_INPUTS. A kind the dialog
+// offers and the database refuses fails every save; a kind the database admits and the dialog lacks
+// can never be added. Compared in order, so the dialog lists them as the function does.
+// -------------------------------------------------------------------------------------------------
+{
+  const shape = lastDefinition('CREATE OR REPLACE FUNCTION public.derivation_shape_problem(', '$$;', 'derivation_shape_problem()');
+  const js = read('frontend/src/utils/derivedMetric.js');
+  const kindsJs = need(js, /export const DERIVATION_KINDS = \[([\s\S]*?)\n\]/, 'DERIVATION_KINDS in utils/derivedMetric.js');
+  const maxJs = need(js, /export const DERIVED_MAX_INPUTS = (\d+)/, 'DERIVED_MAX_INPUTS in utils/derivedMetric.js');
+  const kindsSql = shape && need(shape.body, /NOT IN \(('counter_rate'[^)]*)\)/, `derivation_shape_problem()'s kinds (${shape.file})`);
+  const maxSql = shape && need(shape.body, /c_max_inputs CONSTANT integer := (\d+)/, `derivation_shape_problem()'s input limit (${shape.file})`);
+  if (kindsJs && maxJs && kindsSql && maxSql) {
+    compare('derivedKinds', `the kinds the dialog offers and the shape function admits (${shape.file})`,
+      [...kindsJs[1].matchAll(/id: '([a-z_]+)'/g)].map((m) => m[1]).join(', '),
+      [...kindsSql[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).join(', '));
+    compare('derivedKinds', `the most inputs a sum takes in the dialog and in the shape function (${shape.file})`, maxJs[1], maxSql[1]);
+  }
+}
+
+// 81. How a derived metric's unit and datatypes follow its inputs, SQL and JavaScript (0267).
+// enforce_derived_metric() sets the unit (an input's unit followed by '/HOUR' for a rate, COUNT for a
+// counter with none), reads numbers in a range of Sparkplug codes and states in three, and takes only a
+// Double. The dialog shows the unit it will take and offers inputs by the same codes. A unit the dialog
+// shows and the database does not set contradicts the row it creates; an input it offers and the
+// database refuses fails the save.
+{
+  const trigger = lastDefinition('CREATE OR REPLACE FUNCTION public.enforce_derived_metric(', '$$;', 'enforce_derived_metric()');
+  const js = read('frontend/src/utils/derivedMetric.js');
+  const suffixJs = need(js, /export const RATE_UNIT_SUFFIX = '([^']+)'/, 'RATE_UNIT_SUFFIX in utils/derivedMetric.js');
+  const bareJs = need(js, /export const UNITLESS_COUNTER = '([^']+)'/, 'UNITLESS_COUNTER in utils/derivedMetric.js');
+  const typeJs = need(js, /export const DERIVED_DATATYPE = (\d+)/, 'DERIVED_DATATYPE in utils/derivedMetric.js');
+  const rangeJs = need(js, /export const NUMBER_DATATYPE_RANGE = \[(\d+), (\d+)\]/, 'NUMBER_DATATYPE_RANGE in utils/derivedMetric.js');
+  const statesJs = need(js, /export const STATE_DATATYPES = \[([\d, ]+)\]/, 'STATE_DATATYPES in utils/derivedMetric.js');
+  const suffixSql = trigger && need(trigger.body, /c_hour_suffix CONSTANT text := '([^']+)'/, `enforce_derived_metric()'s rate suffix (${trigger.file})`);
+  const bareSql = trigger && need(trigger.body, /coalesce\(v_unit, '([^']+)'\) \|\| c_hour_suffix/, `enforce_derived_metric()'s unit for a counter with none (${trigger.file})`);
+  const typeSql = trigger && need(trigger.body, /IF NEW\.datatype <> (\d+) THEN/, `enforce_derived_metric()'s datatype (${trigger.file})`);
+  const rangeSql = trigger && need(trigger.body, /v_in\.datatype NOT BETWEEN (\d+) AND (\d+) THEN/, `enforce_derived_metric()'s numbers (${trigger.file})`);
+  const statesSql = trigger && need(trigger.body, /v_in\.datatype NOT IN \(([\d, ]+)\) THEN/, `enforce_derived_metric()'s states (${trigger.file})`);
+  if (suffixJs && bareJs && typeJs && rangeJs && statesJs && suffixSql && bareSql && typeSql && rangeSql && statesSql) {
+    compare('derivedUnit', `what follows a rate's unit (${trigger.file})`, suffixJs[1], suffixSql[1]);
+    compare('derivedUnit', `the unit of a counter that has none (${trigger.file})`, bareJs[1], bareSql[1]);
+    compare('derivedDatatypes', `a derived metric's datatype (${trigger.file})`, typeJs[1], typeSql[1]);
+    compare('derivedDatatypes', `the numbers a rate and a sum read (${trigger.file})`, `${rangeJs[1]}-${rangeJs[2]}`, `${rangeSql[1]}-${rangeSql[2]}`);
+    compare('derivedDatatypes', `what a time in state reads (${trigger.file})`,
+      statesJs[1].replace(/\s/g, ''), statesSql[1].replace(/\s/g, ''));
   }
 }
 

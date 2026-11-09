@@ -1,6 +1,6 @@
 ## What this page is for
 
-This page is yours. It shows the account you are signed in with, how the dashboard looks to you, where you are signed in, your MFA and the apps you have allowed. What you choose here applies to you, on any browser you sign in on. It does not change anything for anyone else.
+This page is yours. It shows the account you are signed in with, how the dashboard looks to you, whether an alert raises a notification on your desktop, where you are signed in, your MFA and the apps you have allowed. What you choose here applies to you, on any browser you sign in on. It does not change anything for anyone else.
 
 To open it, select your avatar at the foot of the sidebar, then select **Profile**.
 
@@ -18,6 +18,7 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Sidebar layout** has three choices. **Expand on hover** shows the page names while the pointer is over the sidebar. **Expanded** always shows them, and the page makes room. **Collapsed** shows icons only.
 - **Single-key shortcuts** are keys that act on one press. `?` opens the list of shortcuts. `/` goes to the page's search box. `[` and `]` move to the previous and next tab. They are on unless you turn them off. Turn them off if you use speech input, which can type them by mistake. Ctrl K and the arrow keys still work. The **Keyboard shortcuts** button in the top bar still opens the list.
 - **The Theme and Sidebar layout switches in the account menu** change the same settings as this page. They apply at once, with nothing to save. Use whichever is nearest. In the account menu, select **Light** or **Dark** for the theme. For the sidebar, select **Hover** (Expand on hover), **Expanded** or **Collapsed**.
+- **Desktop notifications**, on the **Notifications** tab, is off until you turn it on. Turn on the switch, then select **Save**. Your browser asks whether to allow notifications. **Desktop notifications**, below, says what you get, and what to do if it does not work.
 - **Sessions** lists every place you are signed in: each browser, each program and each service. **Your sessions**, below, says what it shows.
 - **End**, on a row of the **Sessions** tab, signs that session out. A dialog asks first. It names the session and says when it was last active. Select **End Session** to end it. The session you are using has no **End**: use **Sign Out** for it.
 - **Sign Out of All Other Sessions**, on the **Sessions** tab, signs out every session but the one you are using. A dialog says what it ends before anything happens. Select **Sign Out of All Other Sessions** in the dialog to end them.
@@ -85,6 +86,34 @@ Your picture shows at a glance whose session is open. That helps on a shared PC,
 - **Nothing outside the site is asked for a picture.** Aber does not use Gravatar or any similar service.
 - **Older backups keep a picture you replaced or removed** until they are deleted in turn. The site's backups copy every stored file.
 - **If an Administrator removes your access,** your picture is deleted. If your access is restored, you come back with no picture.
+
+## Desktop notifications
+
+When an alert starts firing, your browser can show a notification on your desktop. You see it from another window, with the dashboard behind it. It is off until you turn it on. The choice is yours alone.
+
+To turn it on:
+
+1. On the **Notifications** tab, turn on **Desktop notifications**.
+2. Select **Save**. Your browser asks whether to allow notifications from this site.
+3. Choose **Allow** in the browser's prompt.
+
+What you get:
+
+- **One notification when an alert starts firing.** It names the alert and its severity. It names the device or gateway the alert is about, and where it is. It shows no readings: the alert counter has those.
+- **It needs a dashboard tab open somewhere.** With none open, nothing arrives. The **Notifications** tab of the **Settings** page sets up other ways to tell people.
+- **It is not repeated.** An alert that is still firing does not raise another notification each time it repeats.
+- **It closes by itself** when the alert resolves, or when someone acknowledges it.
+- **An acknowledged alert raises nothing.** Nor does an alert in a suppression window. When the window ends and the alert is still firing, you get the notification then.
+- **Select it** to open the dashboard on the device or gateway the alert is about.
+
+If it does not work:
+
+- **The switch is off and says the address is not secure.** A browser allows notifications only on an HTTPS address, or on localhost. Ask your Administrator for the site's HTTPS address.
+- **The tab says the browser has blocked notifications.** Open the site's settings in your browser, usually from the icon at the left of the address bar. Set **Notifications** to **Allow**, then reload the page.
+- **The tab says the browser has not been asked yet.** Select **Allow Notifications**. Signing in on a new PC with the switch on asks too, at your first click or key press.
+- **The switch is off and says the browser does not support them.** Use another browser.
+
+Your choice follows you to any PC you sign in on. Each browser asks for its own permission. A site cannot turn notifications on for you. A site that does not want them blocks them in its browsers' policy.
 
 ## Your sessions
 

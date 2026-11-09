@@ -6,14 +6,20 @@ import { Tooltip } from '../common/Tooltip'
 export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, onCancel }) {
   const [supersededBy, setSupersededBy] = useState('')
 
-  const replacementCandidates = (catalog || []).filter(m => !m.deprecated && m.metric_uuid !== metric.metric_uuid)
+  // A derived metric is replaced by another derived one: a changed definition is a new metric.
+  const replacementCandidates = (catalog || []).filter(m =>
+    !m.deprecated && m.metric_uuid !== metric.metric_uuid && (!metric.derivation || m.derivation))
 
   return (
     <ConfirmModal
       title={<>Deprecate metric <span className="mono">{metric.name}</span></>}
       size="md"
       icon={<IconAlertTriangle size={18} />}
-      message={<>
+      message={metric.derivation ? <>
+        This moves <strong>{metric.name}</strong> from the Derived tab to the Deprecated Metrics tab. It is
+        not in any schema, so none is affected. Its definition can never be changed, so a different one
+        is a new derived metric: add it first, then name it below as this one's replacement.
+      </> : <>
         This retires <strong>{metric.name}</strong> from the schema builder's picker — it will no
         longer be offered for new schemas. {usageCount > 0 ? (
           <>It is currently referenced by <strong>{usageCount}</strong> existing schema{usageCount === 1 ? '' : 's'}, which will be left unchanged and keep working exactly as before.</>
@@ -30,7 +36,7 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
     >
       <div className="form-group">
         <label className="form-label" htmlFor="deprecate-superseded-by">Superseded By (optional)</label>
-        <Tooltip text="Point future schema authors at a replacement metric">
+        <Tooltip text={metric.derivation ? 'The derived metric that takes its place' : 'Point future schema authors at a replacement metric'}>
           <select
             id="deprecate-superseded-by"
             className="form-control"

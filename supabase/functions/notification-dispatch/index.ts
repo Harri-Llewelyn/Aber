@@ -1,12 +1,23 @@
+import { createClient } from "@supabase/supabase-js";
+import { checkCaller } from "../_shared/callerCheck.ts";
+import { corsHeaders } from "../_shared/cors.ts";
+import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { serverError } from "../_shared/failure.ts";
-import { type Decision, deliver, type Destination, type Due, type Outcome } from "./dispatch.ts";
+import { type Decision, deliver, type Destination, type Due, type Outcome, type Recorded } from "./dispatch.ts";
+import { emailSettingsFrom, relayStatus } from "./email.ts";
+import { sendMessage } from "./smtp.ts";
 
 /**
  * Aber's dispatcher: drains public.notification_deliveries, the queue 0247's trigger fills as an
- * alert starts firing or resolves and as a reminder comes due, and posts each message to the
- * webhook 0248 configures. The database asks for a pass through pg_net as it queues a row, and
- * pg_cron's sweep asks every minute while a row is due (sweep_forge()'s shape).
+ * alert starts firing or resolves and as a reminder comes due, and sends each message down its
+ * channel: a post to the webhook 0248 configures, or an email to the people 0263 resolves through
+ * the relay GoTrue's own SMTP settings name. The database asks for a pass through pg_net as it
+ * queues a row, and pg_cron's sweep asks every minute while a row is due (sweep_forge()'s shape).
+ *
+ * A GET answers the Settings page whether this site can send email at all (the relay and the sender
+ * are this pod's environment, which the database cannot see). It takes any signed-in person's token
+ * and says nothing about the relay but whether it is set.
  *
  * Authorised by the dispatch secret in `x-dispatch-secret`, which the database generated and alone
  * sends: the gateway's key check proves only that the caller holds a key every browser has, and
@@ -24,6 +35,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 /** The dashboard's address: the CloudEvents source, and the root of each message's link. */
 const DASHBOARD = (Deno.env.get("FRONTEND_PUBLIC_URL") ?? "").replace(/\/+$/, "");
+/** The mail relay and the sender, as GoTrue's SMTP settings state them (main/index.ts forwards them). */
+const EMAIL = emailSettingsFrom((name) => Deno.env.get(name), DASHBOARD || null);
 
 /** The lease is renewed before every row, so it need outlast only one post. */
 const LEASE_SECONDS = 60;
@@ -31,8 +44,8 @@ const LEASE_SECONDS = 60;
 const PASS_BUDGET_MS = 40_000;
 const BATCH = 20;
 
-function json(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...headers, "Content-Type": "application/json" } });
 }
 
 type Admin = ReturnType<typeof serviceRoleClient>;
@@ -56,7 +69,24 @@ async function release(admin: Admin, holder: string, again: boolean): Promise<vo
   }
 }
 
+/** The Settings page's question, for any signed-in person. */
+async function emailStatus(req: Request): Promise<Response> {
+  const authorization = req.headers.get("Authorization");
+  if (!authorization) return json({ error: "Missing Authorization header" }, 401, corsHeaders);
+  if (!SUPABASE_URL) return json({ error: "SUPABASE_URL is not configured" }, 503, corsHeaders);
+  const caller = await checkCaller(createClient(SUPABASE_URL, gatewayKey(), {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: authorization } },
+  }));
+  if (!caller.accepted) {
+    if (caller.refused) return json({ error: caller.reason }, 401, corsHeaders);
+    return serverError(req, "notification-dispatch", new Error(caller.reason), { status: 502, error: "Could not check the caller" });
+  }
+  return json({ email: relayStatus(EMAIL) }, 200, { ...corsHeaders, "Cache-Control": "no-store" });
+}
+
 export default async function handler(req: Request): Promise<Response> {
+  if (req.method === "GET") return await emailStatus(req);
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
     return json({ error: "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not configured" }, 503);
@@ -93,17 +123,33 @@ export default async function handler(req: Request): Promise<Response> {
     const deps = {
       decide: (alertId: string, event: string, channel: string) =>
         rpc<Decision>(admin, "platform_alert_send_decision", { p_alert_id: alertId, p_event: event, p_channel: channel }),
-      record: async (id: string, r: { outcome: Outcome; retrySeconds?: number; status?: number | null; error?: string | null }) => {
-        await rpc<string | null>(admin, "record_notification_delivery", {
+      record: async (id: string, r: Recorded) => {
+        const args = {
           p_holder: lease, p_id: id, p_outcome: r.outcome, p_retry_seconds: r.retrySeconds ?? null,
           p_status: r.status ?? null, p_error: r.error ?? null,
-        });
+        };
+        // An email that was sent keeps how many people it went to, and never which.
+        if (r.recipients === undefined) {
+          await rpc<string | null>(admin, "record_notification_delivery", args);
+        } else {
+          await rpc<string | null>(admin, "record_notification_email_delivery", {
+            ...args, p_recipients: r.recipients, p_refused: r.refused ?? 0,
+          });
+        }
       },
       destination: { ...destination, allowed_hosts: Array.isArray(destination?.allowed_hosts) ? destination.allowed_hosts : [] },
       fetch,
       now: () => new Date(),
       source: DASHBOARD || "urn:aber",
       dashboard: DASHBOARD || null,
+      email: {
+        settings: EMAIL,
+        recipients: async (deliveryId: string) => {
+          const people = await rpc<unknown>(admin, "notification_email_recipients", { p_holder: lease, p_delivery_id: deliveryId });
+          return Array.isArray(people) ? people.filter((a): a is string => typeof a === "string") : [];
+        },
+        send: sendMessage,
+      },
     };
 
     pass: while (true) {
