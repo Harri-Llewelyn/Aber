@@ -1283,6 +1283,17 @@ export const SUITES = {
       'Notifications settings, their rules and who writes them; the webhook\'s address, signing key ' +
       'and test by role; and that no machine identity\'s alert is ever selected for the webhook.',
   },
+  'supabase/migrations/test_aber_emails_the_people_an_alert_concerns.py': {
+    lanes: ['db'],
+    why:
+      '0262 and 0263 -- that email is a channel beside the webhook, off until a role is named, with ' +
+      "its own route and the roles told, each setting's rule and who writes it; that it is queued " +
+      'and reminded as the webhook is and decided by the same arms (acknowledgement, suppression, ' +
+      "the writer's confirmation); that a machine identity's alert is carried only when " +
+      'Administrators are told and goes to them alone; who a message is resolved to at send time ' +
+      '(by auth.users.email, never a person with no address, a banned or removed account or a ' +
+      "machine identity); that the log keeps counts and no address; and the Administrator's test.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
