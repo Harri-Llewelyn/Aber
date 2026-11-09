@@ -1769,6 +1769,24 @@ networkPolicy:
 
 A site without NetworkPolicies has nothing to do.
 
+### From 1.8.0, an app that signs people in reaches the sign-in endpoints only
+
+An Administrator can now register an app that signs people in, on **Access Control**, **Apps**, with
+**Register App**. The app learns who the person is, and nothing more. The upgrade changes nothing a
+site must act on.
+
+- **An app you added by hand with the secret key keeps signing people in.** Its token now reaches the
+  sign-in endpoints only: the two token endpoints, user-info, `GET /auth/v1/user`, a local logout,
+  discovery and the key set. It no longer reaches the rest of `/auth/v1/`, such as a person's
+  password, email or second factors. Aber's own apps are not changed.
+- **The sign-in service now names its issuer.** Discovery holds an absolute `issuer`, which is
+  `https://api.<your domain>/auth/v1`, and every token carries it as `iss`. Nothing in Aber checks
+  it. A token signed before the upgrade has none, and goes on working.
+- **A browser app on another origin** needs its origin in `global.corsExtraOrigins` before the page can
+  call the token endpoint. An app that runs on a server does not.
+
+The [app author's guide](../../docs/sign-in-with-aber.md) says how an app signs people in.
+
 ## Backups
 
 `backup.enabled=true` turns backups on, in one of two ways depending on a second setting. Both write

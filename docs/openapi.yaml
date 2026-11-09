@@ -1889,6 +1889,58 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: 'No such person, or no approval of that app by them in force (`P0002`).' }
 
+  /rest/v1/rpc/register_app:
+    post:
+      tags: [Auth]
+      summary: Register an app that signs people in
+      description: |
+        Register App on Access Control's Apps tab (`0260`). Adds one client the way `0002` adds
+        Aber's own: `registration_type` `manual`, the code and refresh grants, and for a confidential
+        app a secret that is returned here once and kept only as its SHA-256 hash. A public app has
+        none and uses PKCE alone. The app is sign-in only: its token reaches GoTrue's sign-in
+        endpoints and nothing else (`docs/security-model.md`). An `APP_REGISTERED` row in the app's
+        lane names you. Administrator only, and with Settings requiring a second factor, only from a
+        session that gave its code (`403`, `mfa_required`). Dynamic registration stays off.
+
+        Plain `http` addresses are allowed only on the site's own network: `localhost`, `.localhost`
+        names, loopback and private IPv4 addresses, `::1`, and the site's domain with every name
+        under it. `https` goes anywhere. No fragment, wildcard, comma, user name or space.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_name, p_redirect_uris, p_client_type]
+              properties:
+                p_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                  description: A name no app not removed holds, whatever its case and with or without a leading `Aber `.
+                p_redirect_uris:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items: { type: string }
+                p_client_type: { type: string, enum: [public, confidential] }
+      responses:
+        '200':
+          description: The app. The secret is in this answer alone.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:            { type: string, format: uuid, description: The `client_id`. }
+                  name:          { type: string }
+                  client_type:   { type: string, enum: [public, confidential] }
+                  redirect_uris: { type: array, items: { type: string } }
+                  client_secret: { type: string, nullable: true, description: Null for a public app. }
+        '400': { description: 'A bad name, type or address, in a message that names it (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`), or a second factor is required and the session gave none (`mfa_required`).' }
+        '409': { description: 'An app not removed holds the name (`23505`).' }
+
   /rest/v1/rpc/remove_app:
     post:
       tags: [Auth]

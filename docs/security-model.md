@@ -388,14 +388,20 @@ GoTrue and its own app's functions, and nothing else. The person's role does not
 (`0235`). A token with no `client_id` is the dashboard's, a script's or a machine identity's, and
 is unchanged.
 
-| Surface | A token GoTrue issued to an app |
-| :--- | :--- |
-| GoTrue (`/auth/v1/`) | Reached, as the person's own session reaches it: every app's functions check the session at `/auth/v1/user`, and the forge's sign-out ends it at `/auth/v1/logout` |
-| Its own app's functions | Reached, on the API listener: `grafana-userinfo` for Grafana, `nodered-userinfo` for Node-RED |
-| Every other function, gated or exempt | 403 at the gateway |
-| PostgREST, directly or relayed by i3X, `aas-api` or the Directory | 403 at the gateway. `auth_pre_request()` refuses it too, before every other check, since the gateway cannot tell a relayed request from a direct one |
-| Storage | 403 at the gateway. `has_role()` and `has_authority()` answer false for it, so a row a role gates is closed even to a request that reached Storage another way |
-| Realtime | 403 at the gateway when the token is in the handshake. Inside the join message the gateway cannot see it: a row a role gates is still closed, and a row any signed-in account reads is delivered, [an accepted risk](#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account) |
+An Administrator can register an app of their own on Access Control › Apps (`0260`, the
+[app author's guide](sign-in-with-aber.md)). **An outside app is sign-in only.** It learns who the
+person is, and the gateway lets its token reach the sign-in endpoints and nothing else. The stack's
+four apps keep all of GoTrue.
+
+| Surface | A token GoTrue issued to one of the stack's four apps | A token issued to any other app |
+| :--- | :--- | :--- |
+| GoTrue's sign-in endpoints: the token endpoints, `GET /auth/v1/user` and the user-info endpoint, a local logout, discovery and the key set | Reached: every app's functions check the session at `/auth/v1/user`, and the forge's sign-out ends it at `/auth/v1/logout` | Reached |
+| The rest of `/auth/v1/`: the person's password and email (`PUT /user`), their second factors, their other approvals, the consent calls, the admin routes | Reached, as the person's own session reaches it | 403 at the gateway |
+| Its own app's functions | Reached, on the API listener: `grafana-userinfo` for Grafana, `nodered-userinfo` for Node-RED | 403 at the gateway |
+| Every other function, gated or exempt | 403 at the gateway | 403 at the gateway |
+| PostgREST, directly or relayed by i3X, `aas-api` or the Directory | 403 at the gateway. `auth_pre_request()` refuses it too, before every other check, since the gateway cannot tell a relayed request from a direct one | The same |
+| Storage | 403 at the gateway. `has_role()` and `has_authority()` answer false for it, so a row a role gates is closed even to a request that reached Storage another way | The same |
+| Realtime | 403 at the gateway when the token is in the handshake. Inside the join message the gateway cannot see it: a row a role gates is still closed, and a row any signed-in account reads is delivered, [an accepted risk](#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account) | The same |
 
 The refusal is decided on a token the gateway has verified. A token that does not verify, has
 expired or carries no `client_id` goes on as before, and its upstream answers it.
@@ -411,12 +417,42 @@ exchanges and refreshes its token with its own client secret, not with the token
 | Studio's door | `c0ffee00-0000-4000-8000-000000000003` | `studio-admission`, on every request, which asks GoTrue for `/auth/v1/user` | from its own listener, straight to the edge runtime; the function reaches GoTrue through the API listener |
 | The forge's door | `c0ffee00-0000-4000-8000-000000000004` | `forge-membership` on every request, which asks GoTrue for `/auth/v1/user`, and `forge-signout` at Gitea's Sign Out, which ends the session at `/auth/v1/logout` | from its own listener, straight to the edge runtime; the functions reach GoTrue through the API listener |
 
-So the doors reach `/auth/v1/` alone on the API listener. An app an Administrator registers that is
-not one of these four reaches `/auth/v1/` alone too: GoTrue's endpoints for the person's own
-account, and none of Aber's data or functions.
+So the doors reach `/auth/v1/` alone on the API listener.
+
+**An app an Administrator registers is sign-in only** (`0260`). Its token reaches eight sign-in
+requests: the OAuth token endpoint and GoTrue's own, `GET` of the user-info endpoint and of
+`/auth/v1/user`, a logout of the local scope, and `GET` of the discovery document, its RFC 8414 twin and the key set.
+The rest of `/auth/v1/` is closed to it, so it cannot do what the person's own session can: change
+their password or email, add or remove a second factor, list or revoke their approvals, or approve
+another app's sign-in. Nothing it holds reaches Aber's data or functions, by the rows above. What it
+learns is the person's identity: their account id, and with the scopes it asked for and the person
+allowed, their email address and name. It never learns their role.
+
+- **The person allows each app once**, on Aber's consent page, which shows the app's name and the
+  scopes. While Settings requires a second factor, an Administrator or Shopfloor Manager gives a code
+  first, as for every app but Grafana ([MFA required to change the platform](#mfa-required-to-change-the-platform)).
+- **An Administrator registers it, never the app,** and the registration is an Audit Trail row that
+  names them. The secret of a confidential app is shown once and kept only as a hash. Dynamic
+  registration stays off. Addresses are `https`, or plain `http` on the site's own network alone.
+- **The person or an Administrator takes an approval back,** and the app's sessions for that person
+  end. An Administrator removes the app, and every approval and session of it ends.
+- **An app's session is always `aal1`.** It ends whenever the person gives a second-factor code in
+  any browser, which ends every other `aal1` session they hold. The app is told by a refused refresh.
+- **The logout is the local scope alone.** GoTrue's default scope ends every session the person
+  holds, the dashboard's among them, and an app is not given that.
+
+**GoTrue's issuer is the site's public auth address** (`GOTRUE_JWT_ISSUER`, from 1.8.0). Every token
+carries it as `iss` and the discovery document names it, so a standard sign-in library accepts it.
+Nothing on the stack checks `iss`: the gateway's `jwt_authn` names no issuer, so a token signed before
+the issuer was set still verifies, and PostgREST, Realtime, Storage and the edge functions' calls to
+`getUser()` check the signature and the expiry, and GoTrue and `auth_pre_request()` the session as well.
+A site changes nothing.
+
 The routes are fixed in the gateway's configuration (`supabase/envoy.yaml`, the API listener's
-`rbac` filter). `scripts/check-gateway-surface.mjs` holds them as `APP_ROUTES`, and mirror check 48
-holds their client ids to the apps the stack registers and their functions to the ones that exist.
+`rbac` filter). `scripts/check-gateway-surface.mjs` holds them as `APP_ROUTES` and `OUTSIDE_SIGN_IN`,
+and mirror check 48 holds their client ids to the apps the stack registers and their functions to the
+ones that exist. The [app author's guide](sign-in-with-aber.md) says what an app is given and how
+to use it.
 
 **Revisit when** an app that is not Aber's is given more than a sign-in. What such an app may reach
 is then a grant an Administrator chooses for that app, designed once with the MCP clients' sign-in.
