@@ -1208,7 +1208,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
 | Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
-| Metrics | `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Uncatalogued: `name`, `sort` |
+| Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |

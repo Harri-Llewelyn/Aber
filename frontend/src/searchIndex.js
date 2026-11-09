@@ -44,7 +44,7 @@ export const PAGE_KEYWORDS = {
   'schemas':        ['contract', 'registry', 'model', 'version', 'draft', 'create version', 'fork', 'publish'],
   // Keeps catalog/catalogue: the catalogue was part of the Schemas page and is searched for by
   // that name as often as by its own.
-  'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate'],
+  'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate', 'derived', 'computed', 'rate'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
   // 'directory' is the page's old name, which habits keep, as with 'archives' above.
   'system':         ['directory', 'services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness', 'image versions'],

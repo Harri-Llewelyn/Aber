@@ -81,7 +81,7 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
   const changeKind = (kind) => set({ kind, input: '', states: [], statesText: '' })
   const setInputRow = (index, patch) =>
     set({ inputs: form.inputs.map((row, i) => (i === index ? { ...row, ...patch } : row)) })
-  const optionLabel = (m) => (m.units ? `${m.name} (${m.units})` : m.name)
+  const optionLabel = (m) => `${m.name}${m.units ? ` (${m.units})` : ''}${m.deprecated ? ' — deprecated' : ''}`
 
   return (
     <Modal
