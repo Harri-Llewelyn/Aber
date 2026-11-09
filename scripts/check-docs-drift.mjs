@@ -4013,7 +4013,7 @@ const OPERATOR_PAIRS = [
   if (!openapi.includes('/rest/v1/rpc/queue_test_email_notification:')) problems303.push('docs/openapi.yaml does not describe /rest/v1/rpc/queue_test_email_notification');
   if (!/req\.method === "GET"\) return await emailStatus\(req\)/.test(index)) problems303.push('notification-dispatch/index.ts does not answer a GET with the relay status');
   if (!api.includes('/functions/v1/notification-dispatch`')) problems303.push('api.js does not read the dispatcher\'s relay status');
-  if (!/\/functions\/v1\/notification-dispatch:\n    post:[\s\S]*?\n    get:\n/.test(openapi)) problems303.push("docs/openapi.yaml does not describe the dispatcher's GET beside its POST");
+  if (!/\/functions\/v1\/notification-dispatch:\n {4}post:[\s\S]*?\n {4}get:\n/.test(openapi)) problems303.push("docs/openapi.yaml does not describe the dispatcher's GET beside its POST");
   for (const name of ['notification_email_recipients', 'record_notification_email_delivery']) {
     if (!index.includes(`"${name}"`)) problems303.push(`notification-dispatch/index.ts does not call ${name}`);
   }
