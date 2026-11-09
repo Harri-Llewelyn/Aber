@@ -181,9 +181,10 @@ export const TELEMETRY_PAGE_SIZE = 500;
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
- * Ceiling on a single CSV export, across all selected metrics. Higher than TELEMETRY_MAX_ROWS
- * because an export is a deliberate act with a progress bar, but still bounded. On reaching it the
- * export downloads the most recent rows and says it was truncated.
+ * Ceiling on a single CSV export, across every device and metric in it: export_telemetry()'s
+ * c_max_rows (0279), which returns the readings up to the minute it is reached and says it was
+ * truncated (mirror check 92). Higher than TELEMETRY_MAX_ROWS because an export is a deliberate act,
+ * and one call that is bounded in the database.
  */
 export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
 
@@ -1447,6 +1448,29 @@ const apiMethods = {
     const { data, error } = await call;
     if (error) throw new Error(error.message || 'Could not read the readings by the hour of the day');
     return data || [];
+  },
+
+  /**
+   * History's export (0279): the readings of `assetIds` (device UUIDs or Sparkplug ids) times
+   * `metricNames` over [from, to) as one document, at `resolution` (raw, 1m, 5m or 1h, never one in
+   * another's place). Only an Administrator or a Shopfloor Manager, for a window no longer than
+   * history.export_max_days; the database refuses otherwise, in a sentence that is shown as it came.
+   * An export that returns rows is recorded in the Audit Trail, and `audit_id` is that row's id.
+   *
+   * @returns {Promise<{ audit_id: ?number, resolution: string, columns: string[],
+   *   rows: Array<[string, string, string, (number|string|boolean|null), ?string]>, row_count: number,
+   *   max_rows: number, truncated: boolean, read_from: string, read_to: string, raw_from: ?string }>}
+   */
+  exportTelemetry: async ({ from, to, assetIds, metricNames, resolution = 'raw' }) => {
+    const { data, error } = await supabase.rpc('export_telemetry', {
+      from_ts: from,
+      to_ts: to,
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_names: metricNames,
+      resolution
+    });
+    if (error) throw new Error(error.message || 'Could not export the readings');
+    return data;
   },
 
   /**

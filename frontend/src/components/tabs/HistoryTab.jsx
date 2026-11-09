@@ -138,15 +138,17 @@ function CellPicker({ cells, search, win }) {
  * The History page: a site's readings over time. Overview, its first tab and its default, shows
  * where readings arrived across every device; Device charts each metric of one device. Both take
  * the window the time control sets. Ungated, as the Site Map is: what it shows is what the
- * telemetry views let the viewer read; the Device tab's Export CSV needs `telemetry:read`. The
+ * telemetry views let the viewer read; Export CSV, on the Device, Overview and Cell tabs, is for an
+ * Administrator or a Shopfloor Manager. The
  * address names the tab, the device and the window: `/history` and `/history/overview` are the
  * Overview, `/history/device` picks a device, and `/history/device/<id>?range=24h` charts one.
  * The Cell tab compares one metric across the machines of a cell, `/history/cell` picks the cell and
  * `/history/cell/<id>?metric=…` compares them. The Alerts tab (`/history/alerts`) lists the alerts that fired over the same window; a row's
  * subject opens through `onSelectDevice` and `onSelectGateway`, and `userRole` lets its empty state
- * say what the viewer may not see.
+ * say what the viewer may not see. `userRole` also decides who may Export (an Administrator or a
+ * Shopfloor Manager), and `showToast` is what an export reports to.
  */
-export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice, onSelectGateway }) {
+export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGateway }) {
   const url = useUrl()
   const segments = pathSegments(url)
   const { tab: pathTab, deviceId } = historyPath(segments)
@@ -212,6 +214,8 @@ export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice,
               setWin={setWin}
               every={every}
               setEvery={setEvery}
+              userRole={userRole}
+              showToast={showToast}
             />
           ) : tab === CELL_TAB ? (
             cellId ? (
@@ -226,6 +230,8 @@ export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice,
                   setWin={setWin}
                   every={every}
                   setEvery={setEvery}
+                  userRole={userRole}
+                  showToast={showToast}
                 />
               ) : (
                 <EmptyState icon={<IconLayoutDashboard size={36} />} message="No cell answers to this address. It may have been deleted.">
@@ -264,7 +270,7 @@ export function HistoryTab({ hasPermission, showToast, userRole, onSelectDevice,
                 setWin={setWin}
                 every={every}
                 setEvery={setEvery}
-                hasPermission={hasPermission}
+                userRole={userRole}
                 showToast={showToast}
               />
             ) : (

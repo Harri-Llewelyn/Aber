@@ -1717,6 +1717,22 @@ that tab, in place of Grafana's alert history.
 The table grows with the alerts that fire, not with the readings, so 90 days takes little space. An
 alert that is still firing is never removed, however old it is.
 
+### From 1.8.0, Operators no longer export readings, and an export covers 14 days at most
+
+From 1.8.0, only an **Administrator** or a **Shopfloor Manager** can export readings, and one export
+covers at most 14 days. The upgrade adds a setting and changes nothing else a site must act on.
+
+- **An Operator can still read the charts.** **Export CSV** on the History page is greyed for an
+  Operator, and says who can use it. It was open to every role that could read telemetry. If an
+  Operator needs a file, ask a Shopfloor Manager or an Administrator to export it.
+- **The longest window is a setting.** On **Settings**, on the new **History** tab,
+  **Longest export (days)** is 14 unless you change it, from 1 to 366. A longer window is refused,
+  with the limit named. Cold Storage's files hold older and longer ranges.
+- **Every export is in the Audit Trail**, in the **Readings** lane. It names who exported which
+  devices and metrics, over which window, at which resolution, and how many rows.
+- **An export holds at most 50,000 rows, as before.** The database now holds that limit, and a file
+  that reaches it stops at a whole minute and says where.
+
 ### From 1.8.0, the database keeps automations
 
 From 1.8.0, the platform database keeps automations: rules that raise an alert when a device's

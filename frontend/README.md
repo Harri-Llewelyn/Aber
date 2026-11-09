@@ -1272,7 +1272,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
-| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read`. Cell compares one metric across a cell's machines on one scale, with an hour-of-day heatmap (`HistoryCell`, [History's Cell tab](#historys-cell-tab)) |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Export CSV, on the Device, Overview and Cell tabs, is the readings export ([History's Export](#historys-export)). Cell compares one metric across a cell's machines on one scale, with an hour-of-day heatmap (`HistoryCell`, [History's Cell tab](#historys-cell-tab)) |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
@@ -1572,13 +1572,9 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   flight keeps the charts on screen, and only the newest read lands.
 - **Export CSV** (`filter-bar-actions`, after Clear filters and before Refresh, as the Audit
   Trail places its own) opens `TelemetryExportModal` with what the page shows: the device, the
-  metrics chosen and the window, resolved to ISO bounds as it opens and named in its first line
-  (`exportWords()`). The dialog has no range of its own. It pages `/api/v1/telemetry` per metric
-  up to `TELEMETRY_EXPORT_MAX_ROWS` (50,000) across them, raw by default and never a rollup in
-  its place: it labels each resolution with its horizon and warns, with the finest that covers
-  it, when the window starts before the one chosen. The file's first line names the resolution.
-  An `ActionButton` gated on `telemetry:read`, as the device drawer's View Telemetry was, which
-  History replaced.
+  metrics chosen and the window, resolved to ISO bounds as it opens. It is for an Administrator or
+  a Shopfloor Manager, and for a window within `history.export_max_days`; every rule is in
+  [History's Export](#historys-export).
 - **Zoom** is the time control's `zoom` and a drag across any chart (`useChartBand`, shared with the Cell
   tab, over `useBandDrag` on each `.u-over` and state strip, which are the window's width). The page holds the band and every chart
   shades it (`band`, `.chart-band` with the trail's look) with `bandWords()`; a release calls
@@ -1654,7 +1650,8 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   its first action, whose tooltip would cover the box; Tab reaches the actions and stays inside it. Escape, Clear, a press outside, a scroll and a resize close it and clear the
   box, and focus goes back to the box's first lane. The tick boxes (`?device=`, telemetry keys) are
   the other way: the toolbar's **Chart**, on for exactly one, charts it at the control's window.
-  Export CSV is the Device tab's alone. `.history-header` holds Collapse all, the status line and
+  **Export CSV** is in the popover, after Zoom, and in the toolbar beside Chart for the devices
+  ticked ([History's Export](#historys-export)). `.history-header` holds Collapse all, the status line and
   the key, with `.trail-header`'s room above and below, on Overview and the Device tab alike.
 - **The address** is `/history/overview` with the window's keys and `device`; bare `/history` opens
   Overview too (`historyPath()`, `overviewAddress()`), and `/history/device` is the picker.
@@ -1771,6 +1768,59 @@ Metric tabs reuse: `common/SmallMultiples.jsx`, `common/HourHeatmap.jsx`, `commo
   104 days", while the charts go on. A text or flag metric has no mean: the heatmap says it needs a number and reads nothing.
   The charts and the heatmap are two reads that refresh together and fail apart.
 - **The address** is `/history/cell/<id>` with the window's keys and `metric` (`cellAddress()`); `/history/cell` is the picker.
+
+### History's Export
+
+Export downloads the readings a view shows, as a CSV, from three places. One dialog
+(`modals/TelemetryExportModal.jsx`) and one database call (`export_telemetry()`, `0279`;
+[supabase/README.md](../supabase/README.md#an-export-of-readings-is-checked-bounded-and-recorded-0279))
+serve them all, so there is one set of rules.
+
+- **The Device tab:** this device, the metrics chosen and the window. **Overview:** the devices
+  picked and every metric they report, over the box's window from the popover's **Export CSV**, or
+  over the time control's window from the toolbar's, which is on for any devices ticked: the box is a
+  shortcut, never the only way. **The Cell tab:** the machines that report the metric, the metric
+  and the window. Each opens the dialog with `devices` (`[{ id, name }]`, the Sparkplug ids readings
+  are keyed by), `metricNames`, the window as ISO bounds fixed as it opens, and `windowWords`. The
+  Area and Metric tabs' Export comes with those tabs.
+- **The dialog picks the resolution, and raw is the default.** A bucket average is never
+  substituted silently: the dialog labels each resolution with its horizon (`telemetry_horizons`),
+  warns, with the finest that covers it, when the window starts before the one chosen, and the
+  file's first line names the resolution (`provenanceRow()`). The call takes `raw` or one rollup and
+  the database reads that one alone.
+- **Only an Administrator or a Shopfloor Manager exports** (`TELEMETRY_EXPORT_ROLES`,
+  `mayExportReadings()`, held to `export_telemetry()` by mirror check 90). Anyone else sees the
+  button greyed, with "Requires Administrator or Shopfloor Manager" (`EXPORT_DENIED_TITLE`), and the
+  charts stay. The Operator holds `telemetry:read` and so reads whatever a chart reads: this
+  bounds the export, not access to the readings. The role comes from `userRole`, which `HistoryTab`
+  passes to each tab; the old gate on `telemetry:read` is gone. The Overview's popover buttons
+  keep their Tab stop (`aria-disabled`), as Chart does, so the reason reaches a keyboard.
+- **The longest window is a setting, 14 days** (`history.export_max_days`, History on Settings),
+  read with `useSetting()` and held to the database's reading by `exportMaxDays()` (mirror check 91).
+  Each entry point says so **before** the dialog: the button is greyed with `exportWindowProblem()`
+  as its tooltip, the database's own sentence ("An export can cover at most 14 days, set on
+  Settings › History. This window is 20 days."), and Overview's box adds "over the 14-day export
+  limit" to its words as it is drawn, for a role that may export. The dialog says it again as its
+  `problem` and holds its confirm. It passes `touched` from the start: the person cannot change the
+  window here, so there is nothing to edit first. A window of exactly the limit is allowed.
+  More than 1,000 devices or 500 metrics, which the database refuses too, is said the same way
+  (`exportSizeProblem()`).
+- **One call, `api.exportTelemetry()`, returns the rows.** The database refuses, bounds, reads and
+  records, so the dialog pages nothing: it writes one CSV of `time, device, metric, value, unit`, a
+  row to a reading, the device by the name the dashboard shows. The file's comment rows come first:
+  the resolution, then where it stops short (`noticeRows()`: raw begins later than the window, or
+  the rows end at the 50,000-row cap, `TELEMETRY_EXPORT_MAX_ROWS`, mirror check 92). A refusal the
+  database makes anyway is shown in the dialog's error slot as it came, and the dialog stays open.
+- **The toast links to the Audit Trail row** (`auditEventUrl(audit_id)`, `/audit-trail?event=…`),
+  and is a warning when the file stops at the cap. An export with no rows writes no file, no row and
+  no toast, and says why in the dialog. The row is in the **Readings** lane (`READINGS`, `telemetry`),
+  its action **Readings exported** (`TELEMETRY_EXPORTED`), a Read. The drawer names its devices and
+  shows its window in local time, as a service-logs read's is.
+- **Settings gains a History tab** (`SETTINGS_TABS`), with the one setting.
+- `telemetryExport.test.js`, `telemetryExportModal.test.jsx`, `historyPage.test.jsx`,
+  `historyOverview.test.jsx`, `historyCellPage.test.jsx` and `auditTrailReadingsExported.test.jsx`
+  hold the gate, the words over the limit, the three entry points, the toast's link, raw by default
+  and the CSV's columns.
 
 ### History's Alerts tab
 

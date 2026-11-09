@@ -10112,6 +10112,173 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 330. The longest export is named as 0278 declares it: its label, its tab, its default and its
+// range, in History's help, the Settings page's help, the upgrade guide and supabase/README.md's
+// 0278 section. A page naming another default sends a reader looking for a limit that is not there,
+// or trusting an export to cover a window the database refuses.
+// -------------------------------------------------------------------------------------------------
+{
+  const SEED = 'supabase/migrations/0278_the_longest_export_is_a_setting.sql';
+  const seed = read(SEED);
+  const declared = seed.match(/seed_setting\(\s*'history\.export_max_days',\s*to_jsonb\((\d+)\),\s*'number',\s*'([^']+)',\s*'([^']+)'/);
+  const bounds = seed.match(/SET min_value = (\d+), max_value = (\d+)\s+WHERE key = 'history\.export_max_days'/);
+  const problems330 = [];
+  if (!declared || !bounds) {
+    problems330.push(`${SEED}: could not read history.export_max_days' seed_setting() call or its bounds`);
+  } else {
+    const [, days, category, label] = declared;
+    const [, min, max] = bounds;
+    const says = (file, needles) => {
+      const text = read(file);
+      for (const needle of needles) if (!text.includes(needle)) problems330.push(`${file} does not say "${needle}"`);
+    };
+    says('help/pages/history.md', [`**A window of at most ${days} days.**`, `**over the ${days}-day export limit**`, `on the **${category}** tab`]);
+    says('help/pages/settings.md', [`**${category}** holds **${label}**`, `${days} unless you change it, from ${min} to ${max}`]);
+    says('help/site/upgrading.md', [`**${label}**`, `is ${days} unless you change it, from ${min} to ${max}`, `covers at most ${days} days`]);
+    const readme = read('supabase/README.md');
+    const zone = readme.slice(readme.indexOf('### The longest export is a setting (0278)'), readme.indexOf('### An export of readings is checked, bounded and recorded (0279)'));
+    if (!zone.includes(`in the ${category} category: ${days} days, from ${min} to ${max}`)) {
+      problems330.push(`supabase/README.md's 0278 section does not say "in the ${category} category: ${days} days, from ${min} to ${max}"`);
+    }
+  }
+  if (problems330.length) {
+    fail('the help and the README name the longest export otherwise than 0278 declares it:\n' +
+      problems330.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help and supabase/README.md name ${declared[3]} as 0278 declares it: ${declared[1]} days, ${bounds[1]} to ${bounds[2]}, on ${declared[2]}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 331. History's help and the upgrade guide say who may export as the dashboard holds it:
+// TELEMETRY_EXPORT_ROLES' two roles in words (utils/telemetryExport.js), and the greyed button's
+// title, EXPORT_DENIED_TITLE. A help page naming another role sends a person to someone who cannot
+// export, or tells them they cannot when they can.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('frontend/src/utils/telemetryExport.js');
+  const roles = code.match(/export const TELEMETRY_EXPORT_ROLES = \[([^\]]*)\]/)?.[1];
+  const problems331 = [];
+  if (!roles) {
+    problems331.push('could not read TELEMETRY_EXPORT_ROLES out of frontend/src/utils/telemetryExport.js');
+  } else {
+    const words = [...roles.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1].replace(/_/g, ' '));
+    if (words.length !== 2) problems331.push(`TELEMETRY_EXPORT_ROLES names ${words.length} roles, and the help says two`);
+    else {
+      const [first, second] = words;
+      const history = read('help/pages/history.md');
+      if (!history.includes(`Only an **${first}** or a **${second}** can export.`)) problems331.push(`help/pages/history.md does not say "Only an **${first}** or a **${second}** can export."`);
+      if (!history.includes(`**Requires ${first} or ${second}**`)) problems331.push(`help/pages/history.md does not say "**Requires ${first} or ${second}**"`);
+      const upgrading = read('help/site/upgrading.md');
+      if (!upgrading.includes(`only an **${first}** or a **${second}** can export readings`)) problems331.push(`help/site/upgrading.md does not say "only an **${first}** or a **${second}** can export readings"`);
+      const readme = read('frontend/README.md');
+      if (!readme.includes(`"Requires ${first} or ${second}"`)) problems331.push(`frontend/README.md does not say "Requires ${first} or ${second}"`);
+    }
+  }
+  if (problems331.length) {
+    fail('the help states who may export otherwise than the dashboard holds it:\n' + problems331.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('History\'s help, the upgrade guide and frontend/README.md name the roles that may export, and the greyed button\'s title, as the dashboard holds them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 332. History's help names the export file's columns and what one export may name as the code holds
+// them: EXPORT_COLUMNS (utils/telemetryExport.js) in order, EXPORT_MAX_DEVICES and EXPORT_MAX_METRICS.
+// A reader parsing the file looks for a column that is not there, or builds a selection the dialog
+// refuses.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('frontend/src/utils/telemetryExport.js');
+  const columns = code.match(/export const EXPORT_COLUMNS = \[([^\]]*)\]/)?.[1];
+  const devices = Number(code.match(/^export const EXPORT_MAX_DEVICES = (\d+)$/m)?.[1]);
+  const metrics = Number(code.match(/^export const EXPORT_MAX_METRICS = (\d+)$/m)?.[1]);
+  const help = read('help/pages/history.md');
+  const problems332 = [];
+  if (!columns || !Number.isFinite(devices) || !Number.isFinite(metrics)) {
+    problems332.push('could not read EXPORT_COLUMNS, EXPORT_MAX_DEVICES or EXPORT_MAX_METRICS out of frontend/src/utils/telemetryExport.js');
+  } else {
+    const names = [...columns.matchAll(/'([a-z_]+)'/g)].map((m) => `**${m[1]}**`);
+    const list = `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    if (!help.includes(`its ${list}.`)) problems332.push(`help/pages/history.md does not say "its ${list}."`);
+    const most = `**At most ${devices.toLocaleString('en-GB')} devices and ${metrics.toLocaleString('en-GB')} metrics.**`;
+    if (!help.includes(most)) problems332.push(`help/pages/history.md does not say "${most}"`);
+  }
+  if (problems332.length) {
+    fail('History\'s help states the export file otherwise than the code holds it:\n' + problems332.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help names the export file's ${columns.split(',').length} columns in order and its ${devices.toLocaleString('en-GB')}-device, ${metrics}-metric limit as the code holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 333. An export's Audit Trail row is named as the dashboard files it: the lane (READINGS in
+// constants.js, "Readings"), the action's label ("Readings exported"), and History's help and the
+// upgrade guide naming the lane. The lane's name is what a person looks for after the toast's link.
+// -------------------------------------------------------------------------------------------------
+{
+  const constants = read('frontend/src/constants.js');
+  const lane = constants.match(/\{ kind: 'READINGS',\s+table: 'telemetry',\s+label: '([^']+)'/)?.[1];
+  const action = constants.match(/TELEMETRY_EXPORTED:\s+'([^']+)'/)?.[1];
+  const problems333 = [];
+  if (!lane || !action) {
+    problems333.push("could not read the Readings lane or TELEMETRY_EXPORTED's label out of frontend/src/constants.js");
+  } else {
+    if (!read('help/pages/history.md').includes(`in the **${lane}** lane`)) problems333.push(`help/pages/history.md does not say "in the **${lane}** lane"`);
+    if (!read('help/site/upgrading.md').includes(`in the **${lane}** lane`)) problems333.push(`help/site/upgrading.md does not say "in the **${lane}** lane"`);
+    const readme = read('frontend/README.md');
+    if (!readme.includes(`**${lane}** lane`) || !readme.includes(`**${action}** (\`TELEMETRY_EXPORTED\`)`)) {
+      problems333.push(`frontend/README.md does not name the **${lane}** lane and the action **${action}** (\`TELEMETRY_EXPORTED\`)`);
+    }
+  }
+  if (problems333.length) {
+    fail('the docs name an export\'s Audit Trail row otherwise than the dashboard files it:\n' + problems333.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the docs name an export's Audit Trail row as the dashboard files it: the ${lane} lane, the action ${action}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 334. The API reference describes export_telemetry() as 0279 declares it: the arguments the body
+// requires are the function's own, the resolution's choices are the ones it admits, and the document
+// has the keys it returns. A reader building on the reference sends an argument the function does not
+// take, or looks for a key it does not return.
+// -------------------------------------------------------------------------------------------------
+{
+  const migration = read('supabase/migrations/0279_an_export_of_readings_is_bounded_and_recorded_in_the_database.sql');
+  const sql = migration.match(/FUNCTION public\.export_telemetry\(([\s\S]*?)\) RETURNS jsonb/);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/export_telemetry:\n[\s\S]*?required: \[([^\]]*)\][\s\S]*?resolution: \{ type: string, enum: \[([^\]]*)\]/);
+  const document = spec.match(/\n {4}TelemetryExport:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const keys = migration.match(/RETURN jsonb_build_object\(([\s\S]*?)\);\nEND;/)?.[1];
+  const problems334 = [];
+  if (!sql) problems334.push('could not read export_telemetry() out of 0279');
+  if (!path) problems334.push('docs/openapi.yaml has no /rest/v1/rpc/export_telemetry with its required arguments and resolutions');
+  if (!document) problems334.push('docs/openapi.yaml has no TelemetryExport');
+  if (!keys) problems334.push('could not read the keys export_telemetry() returns out of 0279');
+  if (!problems334.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    // The arguments with no default are the required ones; resolution has one.
+    const args = names(sql[1].replace(/DEFAULT\s+'[^']*'/g, '').split('\n').filter((l) => !/resolution text/.test(l)).join('\n'), /^\s*(\w+) [a-z]/gm);
+    const required = names(path[1], /(\w+)/g);
+    const admitted = [...migration.matchAll(/NOT v_res = ANY \(ARRAY\[([^\]]*)\]\)/g)].map((m) => names(m[1], /'([^']+)'/g))[0];
+    const offered = names(path[2], /(\w+)/g);
+    const returned = names(keys, /^\s*'(\w+)',/gm);
+    const described = names(document, /^ {8}(\w+):/gm);
+    if (required !== args) problems334.push(`docs/openapi.yaml requires ${required}; export_telemetry() requires ${args}`);
+    if (offered !== admitted) problems334.push(`docs/openapi.yaml offers the resolutions ${offered}; export_telemetry() admits ${admitted}`);
+    if (described !== returned) problems334.push(`docs/openapi.yaml's TelemetryExport has ${described}; the function returns ${returned}`);
+  }
+  if (problems334.length) {
+    fail('The API reference describes export_telemetry() otherwise than 0279 declares it:\n' +
+      problems334.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments, the resolutions and the document of export_telemetry() as 0279 declares them');
+  }
+}
+
+
+// -------------------------------------------------------------------------------------------------
 // 199. A change to the Audit Trail's classes rebuilds the indexes built on them (0228). Each class's
 // partial index keeps the class audit_event_class() gave a row when the index was built, and CREATE
 // OR REPLACE FUNCTION does not rebuild it. So a file after 0228 that redeclares the function also

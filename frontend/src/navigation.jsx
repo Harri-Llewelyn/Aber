@@ -122,6 +122,7 @@ export const SETTINGS_TABS = [
   { id: 'approvals', label: 'Approvals', description: 'How many proposals one person may hold open, when an open one expires, and how long decided ones are kept.' },
   { id: 'audit-trail', label: 'Audit Trail', description: 'How often the Audit Trail page reads the audit log again while it is open.' },
   { id: 'cold-storage', label: 'Cold Storage', description: "When readings move out to the cold archive, and the key that names this site's archive." },
+  { id: 'history', label: 'History', description: 'The longest window one export of readings may cover, which History holds every export to.' },
   { id: 'notifications', label: 'Notifications', description: 'Where Aber sends each alert: the webhook, the lowest severity it carries, how often it reminds, and what was sent.' },
   { id: 'retention', label: 'Retention', description: 'How long Aber keeps records, such as resolved alerts, before the nightly prune removes them.' },
   { id: 'security', label: 'Security', description: 'Whether managers and Administrators need MFA to change the platform and to sign in to its apps.' },
