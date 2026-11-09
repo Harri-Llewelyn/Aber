@@ -176,7 +176,8 @@ COMMENT ON FUNCTION public.automation_stored_document(uuid) IS
 -- -------------------------------------------------------------------------------------------------
 -- 3. Checking a document
 -- -------------------------------------------------------------------------------------------------
--- Reads the catalogue and the devices and writes nothing. For each automation of the document, in
+-- Reads the catalogue and the devices and writes nothing. A file is bounded: 500 automations, 100
+-- triggers each, 500 devices a trigger and 10,000 devices in all. For each automation, in
 -- order: {index, key, reasons, canon}. `canon` is the automation as it would be stored, with every
 -- value typed and every default made explicit, and null when there is any reason to refuse it. It
 -- is checked field by field and every reason is collected, so a person fixes a file in one pass.
@@ -191,6 +192,7 @@ DECLARE
   c_max_automations CONSTANT integer := 500;
   c_max_triggers    CONSTANT integer := 100;
   c_max_devices     CONSTANT integer := 500;
+  c_max_rows        CONSTANT integer := 10000;
   v_out      jsonb := '[]'::jsonb;
   v_seen     jsonb := '{}'::jsonb;
   v_auto     jsonb;
@@ -212,6 +214,7 @@ DECLARE
   v_dev_id   text;
   v_dev_ids  text[];
   v_dev_count integer;
+  v_visited  integer := 0;
   v_metric   text;
   v_metric_ok boolean;
   v_cmp      text;
@@ -221,12 +224,7 @@ DECLARE
   v_hold     integer;
   v_for      text;
   v_act      jsonb;
-  v_sev      text;
   v_ok       boolean;
-  n integer;
-  i integer;
-  j integer;
-  k integer;
 BEGIN
   IF jsonb_typeof(p_doc) IS DISTINCT FROM 'array' THEN
     RETURN jsonb_build_array(jsonb_build_object('index', NULL, 'key', NULL, 'reasons', jsonb_build_array(
@@ -440,6 +438,13 @@ BEGIN
         IF v_devs IS NOT NULL THEN
           v_dev_ids := ARRAY[]::text[];
           FOR k IN 0 .. jsonb_array_length(v_devs) - 1 LOOP
+            -- Every device of every trigger is a row to check, so the whole file is bounded.
+            v_visited := v_visited + 1;
+            IF v_visited > c_max_rows THEN
+              RETURN jsonb_build_array(jsonb_build_object('index', NULL, 'key', NULL, 'reasons', jsonb_build_array(
+                public.automation_reason('$', format('A file holds at most %s devices across its triggers. Split it.', c_max_rows))),
+                'canon', NULL));
+            END IF;
             v_dev := v_devs -> k;
             IF jsonb_typeof(v_val) = 'array' THEN v_dpath := format('%s.device[%s]', v_tpath, k); END IF;
             v_dev_id := NULL;
