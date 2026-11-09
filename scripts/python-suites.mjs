@@ -1265,6 +1265,23 @@ export const SUITES = {
       'during and after it and keeps its columns; that an occurrence records the window that first ' +
       "covered it and nothing clears it; and the audit rows in the subject's lane.",
   },
+  'supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py': {
+    lanes: ['db'],
+    why:
+      '0255, 0256 and 0257 -- the three tables (every role reads, nobody writes directly, anon touches ' +
+      'nothing, the CHECKs); who writes (a Shopfloor Manager and an Administrator, the second factor); ' +
+      'apply_automations() (a dry run and a refusal write nothing, new, changed and unchanged, a re-upload ' +
+      'keeps the rows that fit, a document never deletes, the round trip); the audit rows; a device ' +
+      'archived, restored or deleted and the alerts that end with a trigger; and automations_for_entity().',
+  },
+  'supabase/migrations/test_the_automations_schema_and_the_function_agree.py': {
+    lanes: ['db'],
+    why:
+      '0256 -- every fixture in supabase/automations-fixtures/ through the JSON Schema the dashboard ' +
+      "serves (jsonschema) and through apply_automations(..., true): both accept each valid one, both " +
+      'refuse each invalid one, or the schema accepts what only the database can know. Every field of the ' +
+      'schema is described and every object closed.',
+  },
   'supabase/migrations/test_history_lists_the_alerts_that_fired.py': {
     lanes: ['db'],
     why:
