@@ -95,8 +95,8 @@ export interface Sent {
   refused: Refusal[];
 }
 
-export const DEFAULT_TIMEOUT_MS = 15_000;
-export const DEFAULT_TOTAL_MS = 30_000;
+export const DEFAULT_TIMEOUT_MS = 10_000;
+export const DEFAULT_TOTAL_MS = 15_000;
 /** A longer reply line than this is not SMTP (RFC 5321 allows 512). */
 const MAX_REPLY_LINE = 2048;
 const MAX_REPLY_LINES = 100;
