@@ -7,18 +7,22 @@ import { ClearFilters } from '../common/ClearFilters'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
-import { IconGlobe, IconHistory, IconShieldAlert, IconTrash } from '../common/Icons'
+import { IconGlobe, IconHistory, IconPlus, IconShieldAlert, IconTrash } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
 import { PersonName } from '../common/PersonName'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { ConfirmModal } from '../modals/ConfirmModal'
+import { RegisterAppModal } from '../modals/RegisterAppModal'
+import { SUPABASE_URL } from '../../config'
 import { useUrlState } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { appUrl, tabUrl, trailUrl } from '../../routes'
 import { formatDateTime, plural } from '../../utils/format'
-import { appLabel, appRegistration, clientTypeLabel, removeQuestion, revokeQuestion } from '../../utils/apps'
+import {
+  OUTSIDE_APP_REACH, appLabel, appRegistration, clientTypeLabel, removeQuestion, revokeQuestion, siteDomainOf,
+} from '../../utils/apps'
 
 /** The Apps table's sortable columns. Aber's own sort before the rest under Registered. */
 const APP_SORT = {
@@ -40,12 +44,15 @@ const personOf = (r) => r.display_name || r.email || r.user_id
  * back to, its client type and how many people allow it. A click or Enter opens its drawer
  * (`?app=<id>`), which lists the people who allowed it (`app_approvals()`) with Revoke for each
  * (`revoke_app_approval()`), and offers Remove App (`remove_app()`). Aber's own apps are marked
- * and cannot be removed: they are registered again each time Aber starts.
+ * and cannot be removed: they are registered again each time Aber starts. Register App adds an
+ * outside app (`register_app()`, RegisterAppModal), which signs people in and reaches nothing else.
  *
  * `drawerHost` is the element the drawer is drawn into, beside the page's card. `canReadTrail` offers
  * View Audit Trail, the app's own lane.
  */
 export function AppsSection({ showToast, drawerHost = null, canReadTrail = false }) {
+  // True while the Register App dialog is open.
+  const [registering, setRegistering] = useState(false)
   const [apps, setApps] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -138,6 +145,7 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
             full: true,
           },
           { label: 'Client type', value: type.label, help: type.detail || undefined },
+          ...(a.part_of_stack ? [] : [OUTSIDE_APP_REACH]),
           {
             label: 'People allowing',
             value: String(a.people_allowing ?? 0),
@@ -219,8 +227,13 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
             <ClearFilters count={query ? 1 : 0} onClear={() => setSearch('')} />
             <HelpTip
               label="About apps"
-              text="An app signs people in with their Aber account, and each person allows it once. Aber's own are Grafana, Node-RED and the forge, and Studio where the site runs it. Revoke one person's approval in an app's drawer, or remove an app that is not Aber's own."
+              text="An app signs people in with their Aber account, and each person allows it once. Aber's own are Grafana, Node-RED and the forge, and Studio where the site runs it. Register App adds another that reaches nothing but the sign-in. Revoke one person's approval in an app's drawer, or remove an app that is not Aber's own."
             />
+            <Tooltip text="Add an app that signs people in with their Aber account and reaches nothing else.">
+              <button className="btn btn-primary btn-sm" onClick={() => setRegistering(true)}>
+                <IconPlus size={13} /> Register App
+              </button>
+            </Tooltip>
           </div>
         </div>
       )}
@@ -299,6 +312,16 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
       ))}
 
       {drawerHost ? createPortal(drawer, drawerHost) : drawer}
+
+      {registering && (
+        <RegisterAppModal
+          onClose={() => setRegistering(false)}
+          onRegistered={load}
+          showToast={showToast}
+          siteDomain={siteDomainOf(SUPABASE_URL)}
+          authUrl={`${SUPABASE_URL}/auth/v1`}
+        />
+      )}
 
       {confirming?.act === 'revoke' && (
         <ConfirmModal

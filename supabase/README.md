@@ -2289,7 +2289,7 @@ is one row of `auth.oauth_clients`; a person's approval of it, given once on the
 Dynamic registration has been off since `0197` (measured on 2026-10-27: `POST
 /auth/v1/oauth/clients/register` answers 403 `oauth_dynamic_client_registration_disabled`, with the
 publishable key or none), so an app is added only through GoTrue's admin API, with the secret key,
-or by SQL.
+or by SQL. From `0260` an Administrator registers one on the Apps tab ([`register_app()`](#an-administrator-registers-an-app-that-signs-people-in-0260)).
 
 - **Reading.** `list_apps()` returns every app not removed (`deleted_at` null), Aber's four first:
   its name, `registration_type`, `part_of_stack`, `client_type`, `redirect_uris` as an array (GoTrue
@@ -3258,9 +3258,12 @@ an Administrator register, could then change anything the person who allowed it 
   verify the token themselves and never run the hook, so this is what closes the rows a role gates
   there. `has_authority()`'s machine arm is behind the same test, though GoTrue never issues a
   machine identity's token.
-- **The gateway admits it only on `/auth/v1/` and its own app's functions**, and answers 403
-  everywhere else ([`docs/gateway.md`](../docs/gateway.md#an-apps-token)). The functions each app
-  calls are recorded in [`docs/security-model.md`](../docs/security-model.md#an-apps-token-reaches-only-its-own-routes).
+- **The gateway admits one of the stack's four apps only on `/auth/v1/` and its own app's
+  functions**, and any other app's token only on the sign-in endpoints
+  ([An Administrator registers an app that signs people in](#an-administrator-registers-an-app-that-signs-people-in-0260)).
+  It answers 403 everywhere else ([`docs/gateway.md`](../docs/gateway.md#an-apps-token)). The
+  functions each app calls are recorded in
+  [`docs/security-model.md`](../docs/security-model.md#an-apps-token-reaches-only-its-own-routes).
 
 **What still passes.** A token with no `client_id`, or an empty or null one: the dashboard's
 sessions, scripts, machine identities, the i3X and MCP clients' tokens, and the publishable and
@@ -4064,6 +4067,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `record_broker_account_deleted()` | `0218` | yes | Records its deletion |
 | `record_gateway_credential_issued()` | `0001` | yes | Records an issued gateway credential |
 | `record_service_logs_read()` | `0225` | no | Records a read of a service's logs: reading is never refused. |
+| `register_app()` | `0260` | yes | Registers an app that signs people in |
 | `reinstate_service_principal()` | `0001` | yes | Reinstates a machine identity |
 | `reject_proposal()` | `0165` | yes | Decides a proposal |
 | `release_backup()` | `0001` | yes | Releases a kept backup |
@@ -4256,6 +4260,145 @@ as `authenticated`, over 10 days of the tutorial device's simulation (a flag and
 standing in for raw telemetry and the rollups. The file's self-check asserts one form, `STABLE`,
 `SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
 read, so it holds on a stack with no historian.
+
+### An Administrator registers an app that signs people in (0260)
+
+An app someone built, such as an AAS viewer, can sign people in with their Aber account without a
+second login ([#1036](https://github.com/Harri-Llewelyn/Aber/issues/1036)). An Administrator
+registers it on Access Control › Apps with **Register App**: a name, public or confidential, and
+one to ten addresses the app sends a person back to. What the app then holds is sign-in only. The
+author's side is [`docs/sign-in-with-aber.md`](../docs/sign-in-with-aber.md).
+
+**`register_app(p_name, p_redirect_uris, p_client_type)` is SQL, as `remove_app()` is.** It inserts
+one `auth.oauth_clients` row the way `0002` inserts the stack's four: `registration_type` `manual`,
+`authorization_code,refresh_token`, `client_secret_basic` for a confidential app and `none` for a
+public one. A confidential app's secret is 32 random bytes in base64url, returned in the answer and
+kept as `base64url(sha256(secret))`, the hash GoTrue compares (`ValidateClientSecret`, v2.197.0).
+A public app's secret hash is `''` and not NULL: GoTrue scans the column into a Go string
+(`OAuthServerClient`, v2.197.0, which also wants `''` there), so a NULL fails the app's lookup and
+every authorize answers 500. Its other plain columns are all given; `client_uri`, `logo_uri` and
+`deleted_at` are pointers there and stay NULL. The id is the `client_id`. The issue first named GoTrue's admin API. Two things in v2.197.0 decided
+against it:
+
+- **The admin API cannot take the addresses a shopfloor needs.** `POST /admin/oauth/clients` runs
+  `validateRedirectURI`, which allows plain `http` only for `localhost`, `127.0.0.1` and `::1`.
+  Aber has no ACME on a shopfloor network, so an app there is at a private address or under the
+  site's own domain over `http`. `PUT /admin/oauth/clients/{id}` validates the same way, so there is
+  no second step that gets round it. GoTrue's authorize endpoint then compares the address as a string
+  and checks no scheme, so a row that holds such an address works.
+- **A row the admin API inserts names nobody.** GoTrue writes with its own role and no token, so
+  `0217`'s trigger records `APP_REGISTERED` with `actor_source = 'service'` and no person. Here
+  `auth.uid()` is the Administrator, and the same trigger records them (`actor_source = 'user'`).
+  The row's `new_data` is `app_facts()`: never the secret, never its hash.
+
+**Who and when.** `has_role(ARRAY['Administrator'])`, then `PERFORM public.require_mfa()`: with
+`security.require_mfa_for_managers` on, a session that gave no code is refused with `mfa_required`,
+before anything is checked or written. Nothing exempts it, so `mfa-exemptions.json` is unchanged.
+Dynamic registration stays off (`0197`): an app is added only by an Administrator, and
+`check-docs-drift` check 115 now says which insert in a migration is expected.
+
+**The address rule** is `app_redirect_problem(address, site_domain)`, which returns NULL or the
+words that follow the address. `frontend/src/utils/apps.js` says the same before the dialog asks.
+`test-harness/fixtures/app-redirect-addresses.json` holds both to the same 57 cases, and mirror check
+74 holds the two tests to the file.
+
+- `https` goes anywhere. Plain `http` goes only to `localhost` and any `.localhost` name, `127.0.0.0/8`,
+  `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `::1`, and the site's own domain with every name
+  under it. The check is of the whole name: `notplant.example` is not under `plant.example`.
+- No fragment (RFC 6749 §3.1.2 forbids one), wildcard, comma (GoTrue keeps the list as one
+  comma-separated string), user name, space, control character or backslash. No scheme but those two,
+  a port in 1 to 65535, at most 2,048 characters, and no address twice.
+- **The site's domain** is `site_domain()`: the host of the Directory's API row (`f1111111-…-0007`,
+  which db-init sets from `SUPABASE_PUBLIC_URL` on every boot) with its first label dropped when it
+  has three or more, so `api.plant.example` gives `plant.example`. An IP address or a name with no dot
+  gives NULL and no domain arm. The dashboard computes the same from its own API address. The two
+  agree where the chart builds its addresses as `<sub>.<publicBaseDomain>`. A site that sets
+  `publicUrls.supabase` to an unrelated host has that host's domain, and the dialog names the domain
+  it uses in its hint.
+- **Ten addresses and 80 characters** (`c_max_uris` and `c_max_name`; mirror check 75). Ten is GoTrue's
+  own limit. The name's limit is `person_profiles`' display-name length.
+
+**Names are unique among apps not removed**, whatever the case and with or without a leading `Aber `.
+The consent page and the Apps tab say "Grafana" for "Aber Grafana", so an app called `Grafana` would
+otherwise ask a person to sign it in under the name of one they trust. An advisory lock serialises
+registrations, so two cannot both pass the check. A removed app's name is free again.
+
+**The consent flow is the existing one.** The app's name is `client_name`, which GoTrue returns to
+`OAuthConsent.jsx` as `client.name`. `consent-gate` asks only whether the authorization's client is
+Grafana's, so a registered app is covered by `#184`'s step as Node-RED is: while Settings requires a
+second factor, an Administrator or Shopfloor Manager gives a code before they can allow it. A person
+sees the app under Profile › Allowed Apps (`list_my_app_approvals()` lists any app not removed) and
+revokes it there. The Apps tab lists it with the stack's four as **Added by an Administrator**
+(`part_of_stack` false), and **Remove App** works on it (`remove_app()`).
+
+**An outside app's token reaches the sign-in endpoints and nothing else** (decided 2026-11-09). The
+gateway's `rbac` filter admits a token whose `client_id` is one of `stack_app_ids()` on all of
+`/auth/v1/`, as before. It admits any other app's on eight requests: `POST /auth/v1/token` and
+`/auth/v1/oauth/token`, `GET /auth/v1/oauth/userinfo` and `/auth/v1/user`, `POST
+/auth/v1/logout?scope=local`, and `GET` of `/auth/v1/.well-known/openid-configuration`,
+`oauth-authorization-server` and `jwks.json`. Every other route in GoTrue's router is closed to it:
+`PUT /user`, `/factors…`, `/user/oauth/grants`, `/reauthenticate`, the consent calls under
+`/oauth/authorizations/` and `/admin/…`.
+
+- **Matching is on the path as sent.** The API listener does not normalise, so a trailing slash, a
+  doubled slash or another case is a 403 and never a pass.
+- **The logout is the local scope alone,** because GoTrue's default (`global`) deletes every session
+  of the person, the dashboard's among them. Matching it takes the `:path` header, query included, so
+  `?scope=local` must be the whole query.
+- **The token endpoints answer a caller with no token as well.** They are listed so an app that sends
+  a stale bearer to one is not refused.
+- **It was run, not only read.** The rendered gateway ran in Envoy 1.39.2 with tokens signed ES256
+  against the template's JWKS, and 46 requests answered as this section says, with an `iss`, with
+  none and with a foreign one. `check-gateway-surface.mjs` holds the two policies as `APP_ROUTES` and
+  `OUTSIDE_SIGN_IN`; mirror check 48 holds the stack policy's ids to `stack_app_ids()`.
+
+**An outside app's token reaches no data API** (`0235`, unchanged). The gateway answers 403 on
+PostgREST, Storage and every function, `auth_pre_request()` refuses it in the database, and
+`has_role()` and `has_authority()` answer false. Realtime's join message is the accepted gap in
+[`docs/security-model.md`](../docs/security-model.md#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account).
+
+**GoTrue's issuer is the site's public auth address.** The chart sets `GOTRUE_JWT_ISSUER` to
+`<API address>/auth/v1` (`aber.supabaseUrl`, which `API_EXTERNAL_URL` uses). GoTrue builds the
+discovery document from it: `issuer` as given, and the authorization, token, user-info and key-set
+addresses from it with any trailing slash trimmed. Every access token and ID token carries it as
+`iss` (`internal/tokens/service.go`; `JWT.Issuer` is read nowhere else). Unset, discovery named no
+issuer and relative paths, which a standard sign-in library refuses. **Every reader of a token was
+looked at for an `iss` check:**
+
+| Reader | Checks `iss`? | How it was found |
+| :--- | :--- | :--- |
+| GoTrue | No: `jwt.NewParser(jwt.WithValidMethods(...))` | v2.197.0 `internal/api/auth.go` |
+| The gateway's `jwt_authn`, on all four listeners | No: no provider names an `issuer`, so Envoy does not check one | The template; Envoy 1.39.2 verified tokens with and without `iss` and with a foreign one |
+| PostgREST | No: it holds the key set and checks signature and expiry, and `aud` only if `PGRST_JWT_AUD` is set, which the chart does not | The chart's environment; the service is stock |
+| Realtime, Storage | Not by the chart: neither is given an issuer or a claim validator | The chart's environment only: check live after the upgrade |
+| The edge functions | No: `VERIFY_JWT` is false and each calls `auth.getUser()`, which is GoTrue's check | `functions.yaml`, `main/index.ts` |
+| i3X | No: it decodes the payload unverified and forwards the bearer to PostgREST | `i3x_service.py` |
+| Node-RED's sign-in | No: `verifyGotrueToken()` checks ES256 by `kid`, expiry and audience | `node-red-init.mjs` |
+| Grafana's sign-in | No: `[auth.generic_oauth]` sets no issuer, expected claims or discovery | `grafana.ini` |
+| Studio's and the forge's doors | No: Envoy's `oauth2` filter holds the endpoints and a session, and `jwt_authn` names no issuer | The template |
+| The dashboard | No: supabase-js reads the session, and the dashboard calls no `getClaims()` | `frontend/src` |
+
+A token signed before the upgrade carries no `iss` and goes on working everywhere, for the same
+reason. A site does nothing at the upgrade beyond `helm upgrade`, which restarts GoTrue and the
+gateway.
+
+**What a browser app has to know.** The gateway echoes only the origins the chart lists
+(`global.corsExtraOrigins` adds more), so a browser app on another origin cannot call the token
+endpoint or user-info from the page until its origin is listed. A server-side app is unaffected. The
+author's guide says so.
+
+**Not here.** A lost secret is not regenerated: the Administrator removes the app and registers it
+again. What an outside app may reach beyond a sign-in is a grant per app, designed with the MCP
+clients' sign-in ([#1193](https://github.com/Harri-Llewelyn/Aber/issues/1193)).
+
+The file's self-check asserts the three functions' pinned `search_path`, that `anon` and
+`service_role` run none of them and `authenticated` only `register_app()`, one case in each arm of
+the address rule, and that a request with no identity is refused. It registers nothing, so a replay
+writes no app. `test_an_administrator_registers_an_app_that_signs_people_in.py` holds the rest: the 57
+cases, the site domain, the row as `0002` writes the stack's, the secret and its hash, who may call,
+the second factor, every refusal, the names and the one audit row. The stack lane's
+`test_an_app_registered_by_an_administrator_signs_people_in.py` completes the code flow for a public
+and a confidential app against the running stack.
 
 ### An alert reaches the roles its email route names (0262)
 
@@ -6960,11 +7103,15 @@ Two findings decided rows of that table:
   `JWT_SECRET`, no database or role setting holds one, and the only vault secret named for a JWT is
   `nodered_webhook_jwt_secret`. So the variable is not passed.
 
-**The forge and discovery do not change.** GoTrue's `/.well-known/openid-configuration` is built
-from `GOTRUE_JWT_ISSUER`, which the chart leaves unset, so the issuer stays empty and the endpoints
-relative; `id_token_signing_alg_values_supported` is a fixed list. `jwks_uri`
-(`/.well-known/jwks.json`) serves the public key. Setting the issuer changes every token's `iss`, so
-the forge stays on reverse-proxy headers
+**GoTrue's issuer is the site's public auth address** (decided 2026-11-09). The chart sets
+`GOTRUE_JWT_ISSUER` to `<API address>/auth/v1`, the address `API_EXTERNAL_URL` and the Directory
+name with `/auth/v1` after it. GoTrue builds `/.well-known/openid-configuration` from it and takes
+`iss` for every token it signs from it, access and ID tokens alike. Unset, the issuer was empty and the
+endpoints relative, which a standard sign-in library refuses
+([An Administrator registers an app that signs people in](#an-administrator-registers-an-app-that-signs-people-in-0260)).
+`id_token_signing_alg_values_supported` is a fixed list, and `jwks_uri` (`/.well-known/jwks.json`)
+serves the public key. Nothing here checks `iss`: the table in that section goes service by service.
+The forge stays on reverse-proxy headers
 ([the forge's door](#the-forges-door-and-the-room-behind-it-archived-migration-0094)).
 
 **`NODERED_WEBHOOK_JWT_SECRET` stays a separate symmetric secret** (decided 2026-10-28). It is not
@@ -8076,7 +8223,7 @@ what it lacks:
 | Filter | What it does | The thing worth knowing |
 | :--- | :--- | :--- |
 | `oauth2` | Runs the authorization-code flow against this stack's GoTrue and holds the session cookie | Needs **Envoy ≥ 1.34**: GoTrue requires PKCE and the filter could not send it before that release |
-| `jwt_authn` | Verifies the access token GoTrue signed, and forwards it for `ext_authz` | The **JWKS** the initContainer renders: the public key, ES256 by `kid`, and no `oct` key, which the initContainer refuses ([Signing with ES256](#signing-with-es256)). **No issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
+| `jwt_authn` | Verifies the access token GoTrue signed, and forwards it for `ext_authz` | The **JWKS** the initContainer renders: the public key, ES256 by `kid`, and no `oct` key, which the initContainer refuses ([Signing with ES256](#signing-with-es256)). **No issuer check**, because a token GoTrue signed before its issuer was set carries no `iss` claim, and the client and the role decide here |
 | `rbac` | Requires `app_metadata.role == Administrator` | Reads the claim out of the verified payload; every persona can complete the flow, and only one gets through this |
 | `ext_authz` | Asks [`studio-admission`](functions/studio-admission) whether the caller is an Administrator **now** | GoTrue for the session, then `user_roles`, on every request. `failure_mode_allow`: a 5xx admits on the claim `rbac` checked; a 403 and a 302 to `/oauth2/signout` are honoured |
 | `header_mutation` | Removes `Authorization` before the request reaches Studio | Studio runs as the owner and needs no Supabase JWT, so it never sees one |
@@ -8200,13 +8347,14 @@ against the JWKS Studio's also uses, and a role check admitting `Administrator` 
 `Operator` and `Auditor` complete the login and meet a 403. `0094` registers the OAuth client and
 puts the forge in the Directory.
 
-**Gitea is not an OIDC client of GoTrue, and cannot be.** Three things were measured against
-`gitea/gitea:1.27.3`: GoTrue's discovery document carries an empty `issuer` and relative endpoint
-paths, so Gitea resolves `/oauth/authorize` against itself; its request carries `scope=openid`,
-which GoTrue refused under HS256 (`HS256 is not supported for ID token signing`); and whether it
-sends the `code_challenge` GoTrue requires is unmeasured behind the first two. ES256 signing removed
-the second and not the first: discovery is built from `GOTRUE_JWT_ISSUER`, unset here, so the paths
-stay relative ([Signing with ES256](#signing-with-es256)).
+**Gitea is not an OIDC client of GoTrue.** Three things were measured against
+`gitea/gitea:1.27.3`, before 1.8.0: GoTrue's discovery document carried an empty `issuer` and
+relative endpoint paths, so Gitea resolved `/oauth/authorize` against itself; its request carries
+`scope=openid`, which GoTrue refused under HS256 (`HS256 is not supported for ID token signing`); and
+whether it sends the `code_challenge` GoTrue requires was unmeasured behind the first two. ES256
+signing removed the second, and the issuer the chart sets from 1.8.0 removes the first
+([Signing with ES256](#signing-with-es256)). Whether Gitea now completes the flow is unmeasured, so
+the door stays as built.
 
 **Identity enters Gitea as headers**, through `ENABLE_REVERSE_PROXY_AUTHENTICATION` with
 auto-registration. The username is the token's `sub` (Gitea refuses `@` in a name), the email rides
