@@ -1,0 +1,8 @@
+{
+  "about": "An item of the list is not a mapping.",
+  "path": "$[0]",
+  "database": false,
+  "document": [
+    "lathe"
+  ]
+}

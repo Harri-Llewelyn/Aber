@@ -673,6 +673,16 @@ export const SUITES = {
       'it says so and marks each bucket that held more than one value, a window whose raw readings ' +
       'were dropped says so, bad bounds are refused before any read, and it reads as the caller.',
   },
+  'supabase/migrations/test_history_averages_a_metric_by_the_hour_of_day.py': {
+    lanes: ['db'],
+    why:
+      "0265's telemetry_hour_of_day(), over local tables standing in for the historian's hourly " +
+      "rollup: each device's mean at each hour of the day in the zone asked for, across the " +
+      'window\'s days, a quiet hour counted as the value carried into it, every hour weighed alike, ' +
+      'the hour moving with the zone and with a clock change, no row for a text or a flag, an ' +
+      'unknown zone, bad bounds and more than 50,000 hours times devices refused before any read, ' +
+      'and it reads as the caller.',
+  },
   'supabase/migrations/test_history_counts_where_readings_arrived.py': {
     lanes: ['db'],
     why:
@@ -1275,6 +1285,23 @@ export const SUITES = {
       'a platform or machine identity alert; that platform_alerts_active says suppressed before, ' +
       'during and after it and keeps its columns; that an occurrence records the window that first ' +
       "covered it and nothing clears it; and the audit rows in the subject's lane.",
+  },
+  'supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py': {
+    lanes: ['db'],
+    why:
+      '0255, 0256 and 0257 -- the three tables (every role reads, nobody writes directly, anon touches ' +
+      'nothing, the CHECKs); who writes (a Shopfloor Manager and an Administrator, the second factor); ' +
+      'apply_automations() (a dry run and a refusal write nothing, new, changed and unchanged, a re-upload ' +
+      'keeps the rows that fit, a document never deletes, the round trip); the audit rows; a device ' +
+      'archived, restored or deleted and the alerts that end with a trigger; and automations_for_entity().',
+  },
+  'supabase/migrations/test_the_automations_schema_and_the_function_agree.py': {
+    lanes: ['db'],
+    why:
+      '0256 -- every fixture in supabase/automations-fixtures/ through the JSON Schema the dashboard ' +
+      "serves (jsonschema) and through apply_automations(..., true): both accept each valid one, both " +
+      'refuse each invalid one, or the schema accepts what only the database can know. Every field of the ' +
+      'schema is described and every object closed.',
   },
   'supabase/migrations/test_history_lists_the_alerts_that_fired.py': {
     lanes: ['db'],

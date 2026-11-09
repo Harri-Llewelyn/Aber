@@ -1,0 +1,59 @@
+{
+  "about": "Seconds, minutes and hours, up to three digits.",
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "0s"
+        },
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "30s"
+        },
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m"
+        },
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "1h"
+        },
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "999h"
+        },
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "999s"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ]
+    }
+  ]
+}

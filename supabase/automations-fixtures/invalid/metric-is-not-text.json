@@ -1,0 +1,26 @@
+{
+  "about": "A metric is a catalogue name.",
+  "path": "$[0].triggers[0].metric",
+  "database": false,
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": 5,
+          "above": 80,
+          "for": "5m"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ]
+    }
+  ]
+}

@@ -5,7 +5,7 @@
  */
 import {
   COVERAGE_LARGE_MAX_HOURS, COVERAGE_MAX_DEVICES, COVERAGE_ROLLUP_MINUTES, COVERAGE_SMALL_SELECTION, HISTORY_CHANGE_READINGS,
-  HISTORY_MAX_CHANGES, HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS,
+  HISTORY_MAX_CHANGES, HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS, HOUR_OF_DAY_MAX_ROWS,
 } from '../api'
 import { encodeList } from '../hooks/useUrlState'
 import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
@@ -1109,4 +1109,183 @@ export function axisTicks(win, startMs, endMs) {
     ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : span <= DAY ? clockWords(d) : momentWords(d.getTime(), span <= 3 * DAY ? 1 : 1440))
   return [0, 0.25, 0.5, 0.75, 1].map(f => ({ f, label: label(new Date(startMs + span * f)) }))
+}
+
+// ------------------------------------------------------------------------------------------------
+// The Cell tab: one metric across a cell's machines, on one scale, and by the hour of the day
+// ------------------------------------------------------------------------------------------------
+
+/** The Cell tab's id among History's tabs, and its path: `/history/cell` picks a cell. */
+export const CELL_TAB = 'cell'
+export const CELL_PATH = '/history/cell'
+
+/** The path of one cell's tab, the picker's when `cellId` is empty. */
+export const cellHistoryPath = (cellId) => (cellId ? `${CELL_PATH}/${encodeURIComponent(cellId)}` : CELL_PATH)
+
+/** The cell a path's segments name, `/history/cell/<id>`; empty for the picker and for any other path. */
+export function cellIdFrom(segments) {
+  const [, tab, id] = segments
+  if (tab !== CELL_TAB || !id) return ''
+  try { return decodeURIComponent(id) } catch { return '' }
+}
+
+/** The address of a cell's tab at window `win`, with the metric chosen when there is one. */
+export function cellAddress(cellId, win, { metric = '' } = {}) {
+  const query = new URLSearchParams()
+  for (const [k, v] of Object.entries(windowToQuery(win, DEFAULT_HISTORY_WINDOW))) if (v) query.set(k, v)
+  if (metric) query.set('metric', metric)
+  const q = query.toString()
+  return `${cellHistoryPath(cellId)}${q ? `?${q}` : ''}`
+}
+
+/**
+ * The cells the Cell tab offers, archived ones too as the device picker offers archived devices, each as
+ * `{ cell_id, name, area_name, is_archived, machines }`, `machines` being its devices in service, in name order.
+ */
+export function historyCells(cells, devices, areas = []) {
+  const byCell = groupDevicesByCell(inServiceDevices(devices))
+  const areaName = new Map(areas.map(a => [a.area_id ?? a.id, a.area_name ?? a.name]))
+  return (cells || [])
+    .map(c => {
+      const id = c.cell_id ?? c.id
+      return {
+        cell_id: id, name: String(c.cell_name ?? c.name ?? ''), area_name: areaName.get(c.area_id) ?? null,
+        is_archived: Boolean(c.is_archived), machines: byCell.get(id) || [],
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * Each metric the cell's machines report, as `{ name, count }`, `count` being how many do, in name
+ * order. A machine reports a metric when its last birth declared it or a schema of it models it
+ * (deviceMetrics()).
+ */
+export function cellMetrics(machines, schemas) {
+  const counts = new Map()
+  for (const d of machines) for (const m of deviceMetrics(d, schemas)) counts.set(m, (counts.get(m) || 0) + 1)
+  return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** The metric the tab opens on: the one most machines report, the first by name among equals. */
+export function defaultCellMetric(metrics) {
+  return metrics.reduce((best, m) => (!best || m.count > best.count ? m : best), null)?.name ?? ''
+}
+
+/** What a shared scale adds above and below the data, as a fraction of its span. */
+const SCALE_PAD = 0.08
+
+/**
+ * One y scale for every number series in `list`: the lowest minimum to the highest maximum across
+ * all of them, padded so a line does not run along an edge. Null when none holds a number, and uPlot
+ * then scales a chart by itself. A flat metric is padded by a tenth of its value, or 1.
+ */
+export function sharedScale(list) {
+  let low = Infinity
+  let high = -Infinity
+  for (const s of list) {
+    if (s?.kind !== 'number') continue
+    for (const v of s.min) if (isValue(v) && v < low) low = v
+    for (const v of s.max) if (isValue(v) && v > high) high = v
+  }
+  if (!(low <= high)) return null
+  const pad = high > low ? (high - low) * SCALE_PAD : Math.max(Math.abs(high) * 0.1, 1)
+  return [low - pad, high + pad]
+}
+
+/** The words for a machine that does not report the metric chosen. */
+export const silentWords = (name, metric) => `${name} does not report ${metric}.`
+
+/**
+ * The status line of the machines' charts: how many are charted, in which buckets, how many do not
+ * report the metric, how many parts the read took, and what the text and flag charts show.
+ */
+export function multiplesWords({ shown, silent, resolution, reads = 1, stateLine = null }) {
+  const count = `${shown} ${shown === 1 ? 'machine' : 'machines'}`
+  const apart = silent ? `, ${silent} ${silent === 1 ? 'does' : 'do'} not report it` : ''
+  const parts = reads > 1 ? `, read in ${reads} parts` : ''
+  return `${count}, in ${resolution.words}${apart}${parts}${stateLine ? `; ${stateLine}` : ''}`
+}
+
+// ------------------------------------------------------------------------------------------------
+// The hour-of-day heatmap: a row a machine, a column an hour, coloured by the mean at that hour
+// ------------------------------------------------------------------------------------------------
+
+/** The hours of the day, the heatmap's columns. */
+export const HOURS_OF_DAY = Object.freeze(Array.from({ length: 24 }, (_, h) => h))
+
+/** The browser's time zone, an IANA name, which the hours are read in; UTC where it cannot say. */
+export function browserTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' }
+}
+
+/**
+ * Whether telemetry_hour_of_day() will read `machines` over [start, end): one hourly bucket for each
+ * hour for each machine, at most HOUR_OF_DAY_MAX_ROWS. Otherwise `problem`, in words, naming the
+ * longest window those machines allow.
+ */
+export function hourOfDayPlan(startMs, endMs, machines) {
+  const hours = bucketCount(startMs, endMs, 60)
+  if (machines < 1 || hours * machines <= HOUR_OF_DAY_MAX_ROWS) return { hours }
+  const longest = Math.floor(HOUR_OF_DAY_MAX_ROWS / machines / 24)
+  const problem = longest >= 1
+    ? `The heatmap reads every hour of the window for each machine, so for ${machines} machines it covers at most ${longest} ${longest === 1 ? 'day' : 'days'}. Choose a shorter window.`
+    : `${machines} machines are too many for the heatmap. It reads every hour of the window for each machine.`
+  return { hours, problem }
+}
+
+/** An hour as the heatmap names it: "14:00–15:00", the day's last "23:00–00:00". */
+export const hourWords = (hour) => `${String(hour).padStart(2, '0')}:00–${String((hour + 1) % 24).padStart(2, '0')}:00`
+
+/** How many shades the heatmap steps through: Overview's ramp, lightest to darkest. */
+export const HEAT_STEPS = COVERAGE_STEPS
+
+/**
+ * The rows of telemetry_hour_of_day() laid on the machines asked for: a Map of each key in `keys`
+ * to its 24 hours, each `{ value, days }` or null where the hour has no value, and the lowest and
+ * highest value across every machine, null with none. One scale across all of them, so an outlier
+ * shows against the others.
+ */
+export function hourGrid(rows, keys) {
+  const cells = new Map(keys.map(k => [k, new Array(24).fill(null)]))
+  let low = Infinity
+  let high = -Infinity
+  for (const r of rows) {
+    const row = cells.get(r.asset_id)
+    const hour = Number(r.hour_of_day)
+    const value = Number(r.mean_value)
+    if (!row || !Number.isInteger(hour) || hour < 0 || hour > 23 || !isValue(r.mean_value) || !Number.isFinite(value)) continue
+    row[hour] = { value, days: Number(r.days) || 0 }
+    low = Math.min(low, value)
+    high = Math.max(high, value)
+  }
+  return { cells, low: low === Infinity ? null : low, high: high === -Infinity ? null : high }
+}
+
+/** The shade of `value` between `low` and `high`: 1 to `steps`, in equal widths; the first when they are level. */
+export function heatStep(value, low, high, steps = HEAT_STEPS) {
+  if (!(high > low)) return 1
+  return Math.min(steps, 1 + Math.floor(((value - low) / (high - low)) * steps))
+}
+
+/** The values each shade stands for, lowest first: `{ step, from, to }`; one band when they are level. */
+export function heatBands(low, high, steps = HEAT_STEPS) {
+  if (low === null || high === null) return []
+  if (!(high > low)) return [{ step: 1, from: low, to: high }]
+  const width = (high - low) / steps
+  return Array.from({ length: steps }, (_, i) => ({ step: i + 1, from: low + width * i, to: i + 1 === steps ? high : low + width * (i + 1) }))
+}
+
+/** A band in words: "21.3 to 28.1 kW", or its one value when the band is level. */
+export const bandRangeWords = (band, unit) =>
+  (band.from === band.to ? readingWords(band.from, unit) : `${readingWords(band.from)} to ${readingWords(band.to, unit)}`)
+
+/**
+ * A cell of the heatmap in words: "Lathe 3 · 14:00–15:00 · 21.3 kW, the mean of 7 days". An hour
+ * with no value says so.
+ */
+export function heatCellWords(name, hour, cell, unit) {
+  const head = `${name} · ${hourWords(hour)}`
+  if (!cell) return `${head} · No value in this window`
+  return `${head} · ${readingWords(cell.value, unit)}, the mean of ${cell.days} ${cell.days === 1 ? 'day' : 'days'}`
 }

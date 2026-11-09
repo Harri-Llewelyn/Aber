@@ -1,0 +1,25 @@
+{
+  "about": "No alias.",
+  "path": "$[0].alias",
+  "database": false,
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ]
+    }
+  ]
+}

@@ -1281,7 +1281,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
-| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read` |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Its Export CSV is the readings export (`modals/TelemetryExportModal.jsx`), for `telemetry:read`. Cell compares one metric across a cell's machines on one scale, with an hour-of-day heatmap (`HistoryCell`, [History's Cell tab](#historys-cell-tab)) |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
@@ -1588,8 +1588,8 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   it, when the window starts before the one chosen. The file's first line names the resolution.
   An `ActionButton` gated on `telemetry:read`, as the device drawer's View Telemetry was, which
   History replaced.
-- **Zoom** is the time control's `zoom` and a drag across any chart (`useBandDrag` over each
-  `.u-over` and state strip, which are the window's width). The page holds the band and every chart
+- **Zoom** is the time control's `zoom` and a drag across any chart (`useChartBand`, shared with the Cell
+  tab, over `useBandDrag` on each `.u-over` and state strip, which are the window's width). The page holds the band and every chart
   shades it (`band`, `.chart-band` with the trail's look) with `bandWords()`; a release calls
   `setWin(bandWindow(start, end, axisMs), { replace: false })`, so Back undoes it, keeping the
   metrics and the buckets. uPlot's own selection stays off: one band covers the number charts and
@@ -1714,6 +1714,8 @@ flag steps between false and true, and a state is a strip of its runs in text.
 | `syncKey` | Charts sharing it share the cursor, so every chart of a device shows the same moment |
 | `band` | A drag's band, `{ lo, hi, mid, words }` (fractions of the window, and `bandWords()`), shaded over the plot or the strip, or null |
 | `height` | The plot's height in pixels, 140 by default |
+| `yRange` | A number chart's value scale, `[low, high]`, or null for uPlot's own: charts that compare share one (`sharedScale()`). Pass the same array while it is the same: a new one draws the chart again |
+| `label`, `head` | `label` names the chart in place of the metric and unit. `head` is what the title line shows in place of that name, such as a status dot and a link: the figure keeps `label` as its name |
 | `plugins` | uPlot plugins for a number or flag chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state strip takes none |
 | `note` | Which read the chart shows, in the head, when the status line says another (`readWords()`), or null |
 
@@ -1727,6 +1729,57 @@ flag steps between false and true, and a state is a strip of its runs in text.
   carries uPlot's MIT notice, because the build drops uPlot's own (NOTICE.md).
 - A browser that cannot draw on a canvas gets the summary and a line saying the chart could not be
   drawn.
+
+### History's Cell tab
+
+**History's Cell tab compares one metric across the machines of a cell** (`tabs/HistoryCell.jsx`,
+`/history/cell/<id>?metric=…`). Its arithmetic is `utils/history.js`, `__tests__/historyCell.test.js`
+holds each rule and `historyCellPage.test.jsx` the page. It is the first tab built on the shared parts the Area and
+Metric tabs reuse: `common/SmallMultiples.jsx`, `common/HourHeatmap.jsx`, `common/DeviceStatusDot.jsx`,
+`common/AlertKey.jsx`, `hooks/useChartBand.js` and `useAlertBandsFor()`.
+
+- **The cell** is picked from a table at `/history/cell` (`CellPicker`, searchable and sortable
+  as the device picker is), by the toolbar's cell name (a `ToolbarPopover` of the others, keeping the window and the
+  metric), or from the Cells drawer's **View History** (`cellHistoryUrl()`, worded and drawn as the
+  Devices drawer's). Its machines are its devices in service (`historyCells()`, from
+  `groupDevicesByCell()` and `inServiceDevices()`, as the Site Map and Overview place them). An archived cell is listed, with a badge, so the
+  action is never a dead end; it has no machine in service. The tab lists no device status: that is the Cells page.
+- **The metric** is one of those the machines report (`cellMetrics()`: the last birth's and the schemas', as
+  `deviceMetrics()`), with how many report it. `?metric=` holds it; with none, the tab opens on the metric
+  most machines report (`defaultCellMetric()`), and an address naming one the cell does not report is tidied
+  away. A machine that does not report it is named in words (`silentWords()`), never given an empty chart.
+- **One read, at the finest resolution the row cap allows.** `pickResolution()`, as the Device tab has it, with the
+  reporting machines as the series: the finest of `HISTORY_RESOLUTIONS` whose buckets times machines fit
+  `HISTORY_MAX_ROWS`, the status line saying which (`multiplesWords()`, "20 machines, in 5-minute buckets"). One
+  `telemetry_carried()` call carries every machine; only past the cap at the coarsest resolution does it read in
+  parts of `perRead` machines, and says so. A text or flag metric takes `telemetry_changes()` too, in parts of
+  `HISTORY_CHANGE_SERIES`, and draws every change per machine as the Device tab does.
+- **`SmallMultiples` draws one chart a member on one scale.** `sharedScale()` is the lowest minimum to the highest
+  maximum across every number series, padded by 8%, and is each chart's `yRange`; the line above the charts says it
+  in words. A flag's scale is its own. The time axis, the cursor (`syncKey`) and the zoom band are shared, as on the Device
+  tab: `useChartBand()` holds the drag, which both tabs use. A member's title line is its status dot
+  (`DeviceStatusDot`, as the Site Map draws it, with "Offline" in words), its name as an `OverflowText` link to its
+  charts on the Device tab, and the alert shading from one `alert_occurrences()` read for every machine
+  (`useAlertBandsFor()`, applied apart from the series, so the alerts arriving does not draw a chart again).
+  A member is `{ key, name, device?, to?, series?, starts?, validRange?, read?, plugins?, absent? }`; one without `series`
+  says `absent`.
+- **The heatmap is `HourHeatmap`, a plain HTML grid** (no second library): a row a machine, 24 columns `00` to `23`
+  that share the width after a column of names, so nothing scrolls sideways. A cell is coloured by `heatStep()`: the
+  Overview's four shades (`--coverage-1` to `--coverage-4`, `.heatmap-step-N`, held by `themeContrast.test.js` and
+  drift check 308), in equal widths between the lowest and the highest mean across every machine, so one scale holds
+  them all. Never colour alone: the key names each shade's values in words (`heatBands()`, "20 to 40.75 kW") and an
+  hour with no value, a cell is read in words under the grid on the pointer and on keyboard focus (`heatCellWords()`,
+  "Lathe 3 · 14:00–15:00 · 54 kW, the mean of 7 days"), and its `aria-label` says the same. It is an ARIA grid with one
+  cell in the tab order; the arrow keys, Home and End (with Ctrl, the first or last row) move between cells. A machine
+  that does not report the metric is a row of words.
+- **The hours are in the browser's time zone** (`browserTimeZone()`, `Intl`; UTC where it cannot say), read by
+  `api.readHourOfDay()`, the RPC `telemetry_hour_of_day()` (`0265`), which folds `telemetry_carried()` at one hour into
+  machines times 24 rows where the read is made. So a cell of 20 over a Month brings 480 rows to the browser, not 14,400.
+  It refuses more than `HOUR_OF_DAY_MAX_ROWS` (50,000) hours times machines, as `telemetry_carried()` does, so the page checks first
+  (`hourOfDayPlan()`) and says the longest window those machines allow in words, "for 20 machines it covers at most
+  104 days", while the charts go on. A text or flag metric has no mean: the heatmap says it needs a number and reads nothing.
+  The charts and the heatmap are two reads that refresh together and fail apart.
+- **The address** is `/history/cell/<id>` with the window's keys and `metric` (`cellAddress()`); `/history/cell` is the picker.
 
 ### History's Alerts tab
 
