@@ -21,7 +21,8 @@ import {
   IconInbox,
   IconTag,
   IconUser,
-  IconChartLine
+  IconChartLine,
+  IconZap
 } from './components/common/Icons'
 
 /*
@@ -151,7 +152,8 @@ export const PROFILE_TABS = [
  *   Work           -- what is waiting for me? Approvals.
  *   Assets         -- what is out there? The physical estate.
  *   Modelling      -- what does it mean? Read down: the contract, the catalogue it is built from,
- *                     the standards the catalogue draws on. Most-worked to most-reference.
+ *                     the rules that watch what it models, the standards the catalogue draws on.
+ *                     Most-worked to most-reference.
  *   History        -- what happened? Both pages are a record of the past.
  *   Retention      -- what is kept, and how is it got back? Every page here runs a retention
  *                     timer over something and offers a way to restore from it.
@@ -202,7 +204,11 @@ export const TABS = [
   // IconTag, not IconGauge (which already means a metrology cell) and not IconActivity (which
   // means live telemetry): this page is the definitions, never the readings.
   { id: 'metrics',        label: 'Metrics',        group: 'model',   icon: <IconTag size={16} />, pageTabs: METRICS_TABS },
-  // Reference you read, where the two above are state you edit.
+  // Ungated, as Settings is: every role reads an automation (RLS), and writing one is for
+  // Administrators and Shopfloor Managers, so anyone else sees no write controls. IconZap: when this
+  // happens, do that. No tabs yet; the Blueprints and Built-in tabs are later additions.
+  { id: 'automations',    label: 'Automations',    group: 'model',   icon: <IconZap size={16} /> },
+  // Reference you read, where the three above are state you edit.
   { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} />, pageTabs: VOCABULARY_TABS },
 
   /* Gated on the permission, not on role names: the `audit_trail` SELECT policies resolve

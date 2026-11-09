@@ -103,6 +103,7 @@ const AuditTrailTab = lazy(() => import('./components/tabs/AuditTrailTab').then(
 const OAuthConsent     = lazy(() => import('./pages/OAuthConsent').then(m => ({ default: m.OAuthConsent })))
 const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(m => ({ default: m.SchemasTab })))
 const MetricsTab       = lazy(() => import('./components/tabs/MetricsTab').then(m => ({ default: m.MetricsTab })))
+const AutomationsTab   = lazy(() => import('./components/tabs/AutomationsTab').then(m => ({ default: m.AutomationsTab })))
 const VocabularyTab    = lazy(() => import('./components/tabs/VocabularyTab').then(m => ({ default: m.VocabularyTab })))
 const SystemTab        = lazy(() => import('./components/tabs/SystemTab').then(m => ({ default: m.SystemTab })))
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
@@ -775,6 +776,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             )}
             {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} />}
             {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
+            {/* Ungated: every role reads. `userRole` decides which write controls the page offers, so it
+                waits for the role, as Settings does; the database refuses a write from anyone else. */}
+            {tab === 'automations'    && !loadingPerms && <AutomationsTab showToast={showToast} userRole={userRole} hasPermission={hasPermission} />}
             {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
             {tab === 'system'         && <SystemTab showToast={showToast} userRole={userRole} rolePending={loadingPerms} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the

@@ -74,7 +74,7 @@ export const triggerDevices = (trigger) => {
 export function triggerWords(trigger, devices = {}) {
   if (!trigger) return ''
   if (trigger.trigger !== 'threshold') return String(trigger.trigger || 'trigger')
-  const direction = 'above' in trigger ? `above ${trigger.above}` : 'below' in trigger ? `below ${trigger.below}` : ''
+  const direction = trigger.above != null ? `above ${trigger.above}` : trigger.below != null ? `below ${trigger.below}` : ''
   const hold = holdSeconds(trigger.for)
   const held = hold ? ` for ${spanWords(hold * 1000)}` : ''
   const ids = triggerDevices(trigger)
@@ -116,7 +116,7 @@ export function fingerprintParts(fingerprint) {
 }
 
 /**
- * Each occurrence of the automations' alerts with how it ended: `endedAt` is its `ends_at`, or for
+ * Each occurrence of the automations' alerts with how it ended: `ended_at` is its `ends_at`, or for
  * a firing one that a later occurrence replaced (both writers open a new one without resolving the
  * old), that one's start. `firing` is still firing: nothing replaced it. The rows are newest first,
  * as the page reads them; alert_occurrences() (0243) makes the same rule.
@@ -127,7 +127,7 @@ export function occurrencesWithEnds(rows) {
     const next = newer.get(row.fingerprint)
     newer.set(row.fingerprint, row.starts_at)
     const open = row.status === 'firing' && !row.ends_at
-    return { ...row, endedAt: row.ends_at ?? next ?? null, replaced: open && next !== undefined, firing: open && next === undefined }
+    return { ...row, ended_at: row.ends_at ?? next ?? null, replaced: open && next !== undefined, firing: open && next === undefined }
   })
 }
 
@@ -218,6 +218,18 @@ export const writtenCount = (results) => (results || []).filter(r => r.status ==
 
 /** How many the database refused. */
 export const refusedCount = (results) => (results || []).filter(r => r.status === 'refused').length
+
+/**
+ * What an apply says in its toast: the one automation by its id and what became of it, or how many were
+ * written and how, from `source` (a file's name) when there is one.
+ */
+export function appliedWords(results, source = null) {
+  const written = (results || []).filter(r => r.status === 'new' || r.status === 'changed')
+  const from = source ? ` from ${source}` : ''
+  if (written.length === 1) return `Automation '${written[0].key}' ${written[0].status === 'new' ? 'created' : 'changed'}${from}`
+  const created = written.filter(r => r.status === 'new').length
+  return `Applied ${plural(written.length, 'automation')}${from} (${created} new, ${written.length - created} changed)`
+}
 
 /** The keys a changed automation differs in, as a result's `changes` lists them. */
 export const changeWords = (changes) => (changes || []).join(', ')

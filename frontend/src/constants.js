@@ -384,7 +384,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  * here renders and does nothing when clicked. `appRouting.test.jsx` asserts the two match.
  */
 export const VALID_TABS = [
-  'site-map', 'history', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'vocabulary', 'system',
+  'site-map', 'history', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'automations', 'vocabulary', 'system',
   'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings',
   'profile'
 ];
