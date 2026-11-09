@@ -102,7 +102,7 @@ export const ACCESS_CONTROL_PEOPLE_TAB = {
 export const ACCESS_CONTROL_APPS_TAB = {
   id: 'apps',
   label: 'Apps',
-  description: 'The apps that sign people in with Aber, such as Grafana, and who has allowed each one. Register an app of your own here.',
+  description: 'Apps that sign people in with Aber, such as Grafana, and who allows each. Register one of your own here.',
 }
 
 export const ACCESS_CONTROL_TABS = [
