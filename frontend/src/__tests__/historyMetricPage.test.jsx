@@ -360,18 +360,37 @@ describe('paging past what the row cap carries', () => {
 })
 
 describe('a text metric', () => {
-  it('draws every change of each device as a strip, from telemetry_changes()', async () => {
-    const robots = [
-      { asset_id: ROBOT, asset_name: 'Robot 5', last_birth_metrics: ['Controller/EXECUTION'], ...inCell('c2') },
-      { asset_id: LATHE3, asset_name: 'Lathe 3', last_birth_metrics: ['Controller/EXECUTION'], ...inCell('c1') },
-    ]
+  const change = (asset) => ({
+    asset_id: asset, metric_name: 'Controller/EXECUTION', read: 'changes',
+    change_ts: ['2026-11-02T10:00:00Z', '2026-11-02T10:30:00Z'], val_string: ['ACTIVE', 'READY'], val_bool: null,
+    carried_string: null, carried_bool: null, n_changes: 2, marked_ts: null, marked_values: null, raw_from: null,
+  })
+  const robots = [
+    { asset_id: ROBOT, asset_name: 'Robot 5', last_birth_metrics: ['Controller/EXECUTION'], ...inCell('c2') },
+    { asset_id: LATHE3, asset_name: 'Lathe 3', last_birth_metrics: ['Controller/EXECUTION'], ...inCell('c1') },
+  ]
+
+  it('takes the change read for every device that reports it, and draws a strip each, not lines', async () => {
     api.readCarriedTelemetry.mockResolvedValue([])
-    api.readTelemetryChanges.mockResolvedValue([])
-    await visit('/history/metric/Controller%2FEXECUTION', robots)
+    api.readTelemetryChanges.mockImplementation(({ assetIds }) => Promise.resolve(assetIds.map(change)))
+    await visit('/history/metric/Controller%2FEXECUTION?from=2026-11-02T09:00&to=2026-11-02T12:00', robots)
     await waitFor(() => expect(api.readTelemetryChanges).toHaveBeenCalledTimes(1))
-    expect(api.readTelemetryChanges.mock.calls[0][0]).toMatchObject({ metricNames: ['Controller/EXECUTION'] })
-    expect(api.readTelemetryChanges.mock.calls[0][0].assetIds).toHaveLength(2)
-    expect(await screen.findByText(/2 devices, in 1-minute buckets/)).toBeInTheDocument()
+    const [args] = api.readTelemetryChanges.mock.calls[0]
+    expect(args).toMatchObject({ metricNames: ['Controller/EXECUTION'] })
+    expect([...args.assetIds].sort()).toEqual([ROBOT, LATHE3].map(d => telemetryKey({ asset_id: d })).sort())
+    expect(await screen.findByText('2 devices, in 1-minute buckets; text shows every change')).toBeInTheDocument()
+    // Each device's states in its own strip.
+    for (const name of ['Robot 5', 'Lathe 3']) {
+      const figure = within(screen.getByRole('figure', { name }))
+      expect((await figure.findAllByText('ACTIVE')).length).toBeGreaterThan(0)
+      expect(figure.getAllByText('READY').length).toBeGreaterThan(0)
+    }
     expect(plots).toHaveLength(0)
+  })
+
+  it('reads no change for a number metric', async () => {
+    await visit('/history/metric/Spindle%2FLOAD')
+    await waitFor(() => expect(plots).toHaveLength(4))
+    expect(api.readTelemetryChanges).not.toHaveBeenCalled()
   })
 })
