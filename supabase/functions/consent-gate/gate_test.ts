@@ -12,6 +12,8 @@ const assert = {
 const BASE = "http://gateway.test";
 const USER_ID = "aaaaaaaa-0000-4000-8000-000000000001";
 const NODE_RED = "c0ffee00-0000-4000-8000-000000000002";
+// An app an Administrator registered (0260): not one of the four, so covered as Node-RED is.
+const OUTSIDE = "a0d17070-0000-4000-8000-0000000260e1";
 const AUTHORIZATION = "abc123DEF";
 
 const base64url = (value: unknown) =>
@@ -93,6 +95,9 @@ Deno.test("the decision table", async () => {
     ["Shopfloor Manager, aal1, switch on, Node-RED", facts("Shopfloor_Manager", { aal: "aal1" }, true, NODE_RED), false],
     ["Administrator, aal1, switch on, an unknown authorization", facts("Administrator", { aal: "aal1" }, true, null), false],
     ["Administrator, aal1, switch on, Grafana", facts("Administrator", { aal: "aal1" }, true, GRAFANA_CLIENT_ID), true],
+    ["Administrator, aal1, switch on, an app an Administrator registered", facts("Administrator", { aal: "aal1" }, true, OUTSIDE), false],
+    ["Shopfloor Manager, aal1, switch on, an app an Administrator registered", facts("Shopfloor_Manager", { aal: "aal1" }, true, OUTSIDE), false],
+    ["Administrator, aal2, switch on, an app an Administrator registered", facts("Administrator", { aal: "aal2" }, true, OUTSIDE), true],
     ["Administrator, aal2, switch on, Node-RED", facts("Administrator", { aal: "aal2" }, true, NODE_RED), true],
     ["Administrator, federated, switch on, Node-RED", facts("Administrator", { aal: "aal1", amr: [{ method: "sso/saml" }] }, true, NODE_RED), true],
     ["Administrator, aal1, switch off, Node-RED", facts("Administrator", { aal: "aal1" }, false, NODE_RED), true],

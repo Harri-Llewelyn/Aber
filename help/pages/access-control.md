@@ -76,12 +76,25 @@ There is no Refresh button. Every change you make here reads the list again. To 
 An app such as Grafana can sign a person in with their Aber account. The first time it does, it asks the person to allow it. They answer once, and it remembers. **Apps** lists every app that can do this, and who has allowed each.
 
 - **App** is the app's name. The name it was registered with is shown under it.
-- **Registered** says how the app was added, and when. **Part of Aber** marks Aber's own apps: Grafana, Node-RED and the forge, and Studio where your site runs it. **Added by hand** is an app added through the sign-in service's admin API.
+- **Registered** says how the app was added, and when. **Part of Aber** marks Aber's own apps: Grafana, Node-RED and the forge, and Studio where your site runs it. **Added by an Administrator** is an app registered on this page.
 - **Sends people back to** lists the addresses the sign-in service may send a person to after they sign in. It refuses any other.
 - **Type** is **Confidential** for an app that holds a secret, on a server. A **Public** app holds none.
 - **People** is how many people allow the app now.
 - The **search** box matches an app's name and the addresses it sends people back to. **Clear filters** empties it.
-- No app can register itself, because Aber keeps that turned off. Only someone holding the secret key can add one.
+- No app can register itself, because Aber keeps that turned off. An Administrator registers it, with **Register App**.
+
+**Register App** adds an app that someone built, so people sign in to it with their Aber account.
+
+- A dialog asks for a **Name**, which a person sees when the app asks to sign them in. No other app may have the same name.
+- **Type** is **Confidential** for an app that runs on a server, which can keep a secret. It is **Public** for a browser or desktop app, which cannot.
+- **Addresses it sends people back to** are one to ten, one to a line. The app must ask for one of them exactly.
+- `https` addresses are allowed anywhere. Plain `http` is allowed only on this site's own network: `localhost`, a private address such as `10.x.x.x` or `192.168.x.x`, or a name under the site's own domain. The dialog says which address breaks a rule, and why.
+- Select **Register App** in the dialog to add it. The dialog shows the app's **client ID** and its **discovery address**.
+- **A confidential app's client secret is shown once.** Copy it before you close the dialog. Aber keeps only a hash of it. If it is lost, remove the app and register it again. A public app has no secret.
+- Give the client ID, the secret and the discovery address to the person who builds the app. The [app author's guide](../../docs/sign-in-with-aber.md) tells them what to do with them.
+- **An app you register can sign people in, and nothing more.** It learns who the person is. It cannot read Aber's data or change anything in Aber.
+- The app asks each person to allow it the first time they sign in to it. While Settings requires a second factor, an Administrator or Shopfloor Manager gives a code first.
+- The registration is recorded in the Audit Trail, and names you.
 
 **Click an app's row**, or press Enter on it, to open its drawer. It lists the people who allowed the app, when, and what it may read.
 

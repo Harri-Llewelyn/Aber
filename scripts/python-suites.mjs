@@ -1148,6 +1148,17 @@ export const SUITES = {
       'unknown person, a machine identity and a missing count are refused with no row, while a ' +
       "removed person's factors may be reset and no session ends.",
   },
+  'supabase/migrations/test_an_administrator_registers_an_app_that_signs_people_in.py': {
+    lanes: ['db'],
+    why:
+      '0260 -- that an Administrator registers an app the way 0002 registers the stack\'s own (manual, ' +
+      "the code and refresh grants, the secret kept as GoTrue's SHA-256 hash) and gets a confidential " +
+      "app's secret once and a public app none; that nobody else may, and a second factor is asked " +
+      'first while Settings requires one; that a bad name, type or address is refused in words that ' +
+      "name it, an address by the fixture the dialog's rule shares, and a name already held whatever " +
+      'its case or "Aber " prefix; and that the registration is one row naming the Administrator ' +
+      'with neither the secret nor its hash.',
+  },
   'supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py': {
     lanes: ['db'],
     why:
@@ -1722,6 +1733,18 @@ export const SUITES = {
       "userinfo function and is refused with the gateway's 403 on PostgREST, Storage and every " +
       "other function, while the person's dashboard token reaches them all. Only GoTrue can issue " +
       'a token that names an app, and only the gateway decides on it.',
+  },
+  'supabase/test_an_app_registered_by_an_administrator_signs_people_in.py': {
+    lanes: ['stack'],
+    why:
+      'An app an Administrator registers signs people in (0260): the seeded Administrator registers a ' +
+      'confidential and a public app with register_app(), and a seeded Shopfloor Manager completes ' +
+      "each one's authorization-code flow with PKCE. Discovery names an absolute issuer, the access and " +
+      'ID tokens carry it, and the ID token verifies against the key set. The access token reaches ' +
+      "user-info, GET /auth/v1/user, its refresh and its own local logout and is refused with the " +
+      'gateway\'s 403 on PUT /auth/v1/user, the factor routes, the approvals, PostgREST, Storage and ' +
+      'every function; revoking the approval ends its session; and a removed app cannot start a ' +
+      'sign-in. Only GoTrue issues these tokens and only the gateway refuses them.',
   },
   'supabase/test_a_token_s_use_is_recorded.py': {
     lanes: ['stack'],

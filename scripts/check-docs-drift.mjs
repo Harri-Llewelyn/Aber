@@ -5784,9 +5784,12 @@ const OPERATOR_PAIRS = [
 // -------------------------------------------------------------------------------------------------
 // 115. GoTrue registers no OAuth client itself. auth.yaml sets
 // GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION to "false" and no other chart file names it, and
-// every client a migration writes into auth.oauth_clients is 'manual'. A token issued to any client
-// carries its person's whole role, so a client anyone could register is a consent page away from
-// one (0197). check-gateway-surface --authenticated asserts the same of a live stack.
+// every client a migration writes into auth.oauth_clients is 'manual'. A client anyone could register
+// is a consent page away from a person's approval (0197). The inserts are of two kinds and no other:
+// a seed, which pins one of the stack's four ids (c0ffee00-...0001 to 0004), and register_app() (0260),
+// the one place an Administrator adds an app, which asks for the role and a second factor first. A
+// seed of any other id fails, as does a second place that adds a client. check-gateway-surface
+// --authenticated asserts the same of a live stack.
 // -------------------------------------------------------------------------------------------------
 {
   const FLAG = 'GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION';
@@ -5799,25 +5802,164 @@ const OPERATOR_PAIRS = [
 
   const dir = 'supabase/migrations';
   const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const STACK_CLIENT_IDS = ['1', '2', '3', '4'].map((n) => `c0ffee00-0000-4000-8000-00000000000${n}`);
   const inserts = files.flatMap((f) => {
     const text = read(`${dir}/${f}`);
     const found = [];
     for (let at = text.indexOf('INSERT INTO auth.oauth_clients'); at >= 0;
       at = text.indexOf('INSERT INTO auth.oauth_clients', at + 1)) {
-      found.push({ file: f, statement: text.slice(at, text.indexOf(';', at)) });
+      // Inside a function body when the nearest CREATE OR REPLACE FUNCTION before it has no $$; between.
+      const fn = text.lastIndexOf('CREATE OR REPLACE FUNCTION public.', at);
+      const inFunction = fn >= 0 && !text.slice(fn, at).includes('\n$$;')
+        ? text.slice(fn).match(/^CREATE OR REPLACE FUNCTION public\.(\w+)/)?.[1] ?? null
+        : null;
+      const body = inFunction ? text.slice(fn, text.indexOf('\n$$;', at)) : '';
+      // A seed names its client in the DO block it sits in.
+      const pinned = text.slice(Math.max(text.lastIndexOf('DO $', at), 0), at).match(/v_client_id CONSTANT UUID := '([0-9a-f-]{36})'/)?.[1] ?? null;
+      found.push({ file: f, statement: text.slice(at, text.indexOf(';', at)), inFunction, body, pinned });
     }
     return found;
   });
   const notManual = inserts.filter((i) => !i.statement.includes("'manual'") || i.statement.includes("'dynamic'"));
+  const registrars = inserts.filter((i) => i.inFunction !== null);
+  const seeds = inserts.filter((i) => i.inFunction === null);
+  const strangers = seeds.filter((i) => !STACK_CLIENT_IDS.includes(i.pinned));
+  const registrarFaults = registrars.length !== 1 ? [`${registrars.length} functions add a client, not the one register_app()`]
+    : [registrars[0].inFunction !== 'register_app' ? `${registrars[0].file}'s ${registrars[0].inFunction}() adds a client, and only register_app() may` : null,
+      !registrars[0].body.includes("has_role(ARRAY['Administrator'])") ? 'register_app() does not ask for the Administrator role' : null,
+      !registrars[0].body.includes('PERFORM public.require_mfa();') ? 'register_app() does not ask for a second factor' : null].filter(Boolean);
 
   if (value !== '"false"') {
     fail(`${authYaml} sets ${FLAG} to ${value ?? 'nothing'}, not "false": anyone holding the publishable key can register an OAuth client and ask a person to approve it (0197)`);
   } else if (elsewhere.length) {
     fail(`${elsewhere.join(', ')} name(s) ${FLAG}: auth.yaml holds it "false", and nothing else in the chart may set it (0197)`);
-  } else if (!inserts.length || notManual.length) {
+  } else if (!seeds.length || notManual.length) {
     fail(`${notManual.length ? `${notManual.map((i) => i.file).join(', ')} write(s) an OAuth client that is not registration_type 'manual'` : 'no migration seeds an OAuth client, so this check reads nothing'}: the stack's clients are the ones its migrations seed (0197)`);
+  } else if (strangers.length) {
+    fail(`${strangers.map((i) => `${i.file} seeds ${i.pinned ?? 'a client with no pinned id'}`).join(', ')}, which is none of the stack's four (${STACK_CLIENT_IDS.map((id) => id.slice(-4)).join(', ')}): an app an Administrator adds is register_app()'s, and no migration seeds another (0260)`);
+  } else if (registrarFaults.length) {
+    fail(`an Administrator registers an app in exactly one place, register_app(), which asks for the role and a second factor first: ${registrarFaults.join('; ')} (0260)`);
   } else {
-    pass(`GoTrue registers no OAuth client itself: ${FLAG} is "false" in auth.yaml alone, and the ${inserts.length} client(s) the migrations seed are all 'manual'`);
+    pass(`GoTrue registers no OAuth client itself: ${FLAG} is "false" in auth.yaml alone, the ${seeds.length} client(s) the migrations seed are the stack's own and 'manual', and an Administrator adds one only through register_app(), which asks for the role and a second factor`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 296. GoTrue's issuer is the site's public auth address (0260). auth.yaml sets GOTRUE_JWT_ISSUER to
+// the API address with /auth/v1 after it, from the helper API_EXTERNAL_URL uses, so discovery names an
+// absolute issuer and every token carries it. No jwt_authn provider on the gateway names an issuer: a
+// token signed before the issuer was set has none, and nothing else here checks it. The author's guide
+// and the security model say so.
+// -------------------------------------------------------------------------------------------------
+{
+  const authYaml = read('deploy/helm/aber/templates/supabase/auth.yaml');
+  const envoy = read('supabase/envoy.yaml');
+  const problems296 = [];
+  const issuer = authYaml.match(/- name: GOTRUE_JWT_ISSUER\s*\n\s*value: \{\{ printf "%s\/auth\/v1" \. \| quote \}\}/);
+  const external = authYaml.match(/- name: API_EXTERNAL_URL\s*\n\s*value: \{\{ include "aber\.supabaseUrl" \. \| quote \}\}/);
+  if (!external) problems296.push('auth.yaml no longer sets API_EXTERNAL_URL from aber.supabaseUrl, which the issuer is built beside');
+  if (!issuer || !authYaml.includes('{{- with include "aber.supabaseUrl" . }}')) {
+    problems296.push('auth.yaml does not set GOTRUE_JWT_ISSUER to the aber.supabaseUrl address and /auth/v1');
+  }
+  const named = envoy.split('\n').filter((l) => !l.trim().startsWith('#') && /^\s*issuer:/.test(l));
+  if (named.length) problems296.push(`supabase/envoy.yaml names an issuer for a jwt_authn provider (${named.length}), which hides every token signed before GoTrue's issuer was set`);
+  for (const [file, pieces] of [
+    ['docs/sign-in-with-aber.md', ['/.well-known/openid-configuration', 'carries it as `iss`']],
+    ['docs/security-model.md', ['GOTRUE_JWT_ISSUER', 'Nothing on the stack checks `iss`']],
+  ]) {
+    const text = read(file);
+    for (const piece of pieces) if (!text.includes(piece)) problems296.push(`${file} does not say "${piece}"`);
+  }
+  if (problems296.length) {
+    for (const p of problems296) fail(`GoTrue's issuer: ${p}`);
+  } else {
+    pass("GoTrue's issuer is the API address and /auth/v1 (auth.yaml, beside API_EXTERNAL_URL); no jwt_authn provider names one, and the author's guide and the security model say what that means");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 297. What an outside app's token reaches (0260). The gateway's outside-apps-sign-in policy admits a
+// list of method and path pairs; the author's guide's table names each in full, and docs/gateway.md,
+// docs/security-model.md and the 0260 section count them in words. A request the gateway admits that
+// no page says, or one a page says it does not, is an app author told something false.
+// -------------------------------------------------------------------------------------------------
+{
+  const envoy = read('supabase/envoy.yaml');
+  const at = envoy.indexOf('outside-apps-sign-in:');
+  const policy = at < 0 ? '' : envoy.slice(at, envoy.indexOf('principals:', at));
+  const admitted = [...policy.matchAll(/exact: (GET|POST) \} \} \}, \{ (?:url_path: \{ path: \{ exact: "([^"]+)" \} \}|header: \{ name: ":path", string_match: \{ exact: "([^"]+)" \} \})/g)]
+    .map((m) => `${m[1]} ${m[2] ?? m[3]}`);
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  const problems297 = [];
+  if (!admitted.length) problems297.push('supabase/envoy.yaml has no outside-apps-sign-in policy this check can read');
+  const guide = read('docs/sign-in-with-aber.md');
+  const table = guide.slice(guide.indexOf('## What the app\'s token can reach'));
+  const listed = [...table.matchAll(/^\| `((?:GET|POST) \/auth\/v1\/[^`]+)` \|/gm)].map((m) => m[1]);
+  for (const r of admitted.filter((x) => !listed.includes(x))) problems297.push(`docs/sign-in-with-aber.md's table does not list ${r}, which the gateway admits`);
+  for (const r of listed.filter((x) => !admitted.includes(x))) problems297.push(`docs/sign-in-with-aber.md's table lists ${r}, which the gateway does not admit`);
+  const count = WORDS[admitted.length];
+  for (const [file, needle] of [
+    ['docs/gateway.md', `passes on ${count} sign-in requests alone`],
+    ['docs/security-model.md', `reaches ${count} sign-in\nrequests`],
+    ['supabase/README.md', `any other app's on ${count} requests`],
+  ]) {
+    if (admitted.length && !read(file).includes(needle)) problems297.push(`${file} does not say "${needle.split('\n').join(' ')}", the ${admitted.length} requests the gateway admits`);
+  }
+  if (problems297.length) {
+    for (const p of problems297) fail(`an outside app's token: ${p}`);
+  } else {
+    pass(`an outside app's token reaches ${admitted.length} requests (${admitted.map((r) => r.replace('/auth/v1', '')).join(', ')}), each in the author's guide's table, counted in words in the gateway page, the security model and the 0260 section`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 298. How many addresses an app may be registered with (0260). register_app() takes 1 to c_max_uris
+// of them; the help page, the author's guide and the dialog's hint say how many, in words.
+// -------------------------------------------------------------------------------------------------
+{
+  const migrations = readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const owner = migrations.filter((f) => read(`supabase/migrations/${f}`).includes('FUNCTION public.register_app(')).pop();
+  const max = owner ? Number(read(`supabase/migrations/${owner}`).match(/c_max_uris\s+CONSTANT integer := (\d+);/)?.[1]) : NaN;
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  const problems298 = [];
+  if (!max) problems298.push('no migration declares register_app() with c_max_uris, so this check reads nothing');
+  for (const [file, needle] of [
+    ['help/pages/access-control.md', `are one to ${WORDS[max]}, one to a line`],
+    ['docs/sign-in-with-aber.md', `One to ${WORDS[max]}, one to a line`],
+  ]) {
+    if (max && !read(file).includes(needle)) problems298.push(`${file} does not say "${needle}", the ${max} addresses register_app() takes`);
+  }
+  if (problems298.length) {
+    for (const p of problems298) fail(`app registration limits: ${p}`);
+  } else {
+    pass(`the help page and the author's guide say an app takes one to ${WORDS[max]} redirect addresses, as register_app() (${owner}) does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 299. The author's guide is where an app's author is sent, and it names no product (0260). The
+// security model and the Access Control help page link to it, and it links back to the security
+// model. It names no identity provider, sign-in library or tool: an author reads a guide that
+// belongs to Aber, whichever they build with.
+// -------------------------------------------------------------------------------------------------
+{
+  const guide = read('docs/sign-in-with-aber.md');
+  const problems299 = [];
+  for (const [file, link] of [
+    ['docs/security-model.md', /\]\(sign-in-with-aber\.md\)/],
+    ['help/pages/access-control.md', /\]\([./]*docs\/sign-in-with-aber\.md\)/],
+  ]) {
+    if (!link.test(read(file))) problems299.push(`${file} does not link to the author's guide`);
+  }
+  if (!guide.includes('(security-model.md#an-apps-token-reaches-only-its-own-routes)')) problems299.push('the guide does not link to the security model section on an app\'s token');
+  const PRODUCTS = ['Keycloak', 'Okta', 'Auth0', 'Entra', 'Azure', 'Google', 'GitHub', 'Passport', 'NextAuth', 'Authlib', 'curl', 'Postman', 'Supabase', 'GoTrue', 'Grafana', 'Node-RED', 'Gitea'];
+  const words = guide.toLowerCase().match(/[a-z0-9-]+/g) ?? [];
+  const named = PRODUCTS.filter((p) => words.includes(p.toLowerCase()));
+  if (named.length) problems299.push(`the guide names ${named.join(', ')}; it names no product`);
+  if (problems299.length) {
+    for (const p of problems299) fail(`the app author's guide: ${p}`);
+  } else {
+    pass("the app author's guide is linked from the security model and the Access Control help, links back to the security model, and names no product");
   }
 }
 
