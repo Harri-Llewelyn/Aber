@@ -36,7 +36,7 @@ Nothing on this page changes anything. Equipment is filed on the Devices, Gatewa
 
 ## The alert counter
 
-The alert counter is the shield or warning sign in the top bar, on every page. Its number is how many alerts are firing that nobody has acknowledged. A suppressed alert is not counted either. The browser tab's title and its icon count the same. Select the counter to list every firing alert.
+The alert counter is the shield or warning sign in the top bar, on every page. Its number is how many alerts are firing that nobody has acknowledged. A suppressed alert is not counted either. The browser tab's title and its icon count the same. Select the counter to list every firing alert. To see an alert start while you work in another window, turn on desktop notifications: see [Desktop notifications](profile.md#desktop-notifications).
 
 To acknowledge an alert:
 

@@ -357,6 +357,17 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=..
 # NetworkPolicies off; skips without the keys.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/notification-dispatch/test_notification_dispatch.py
+# The dispatcher's email, end to end (0262, 0263). A relay pod of the ingestion image takes each
+# message and prints it; a Service named aber-test-smtp in front of it is the host the functions
+# pod must already send through, so deploy with supabaseAuth.smtp.host=aber-test-smtp, port 25 and a
+# from address, and no user. A firing alert written with psql is emailed to the roles told with its
+# subject, facts and link, the envelope alone naming the people; a resolve follows in the same
+# thread; an acknowledgement before the reminder stops it; an unacknowledged alert is reminded; a
+# machine identity's alert goes to Administrators only; and a test goes to the person who asked.
+# The log keeps counts and no address. Skips, saying so, on any other relay, with NetworkPolicies
+# on, or without the keys. TLS, AUTH, UTF-8 and the relay's refusals are held by the Deno tests.
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/notification-dispatch/test_notification_dispatch_email.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
 # service's gates; a requested backup is taken -- both dumps, the storage objects, the forge and,
@@ -637,11 +648,11 @@ python supabase/migrations/test_reading_a_service_s_logs_is_recorded.py
 # in order and at most 169 hours apart; one six-argument form, its ends defaulting to NULL, after
 # 0225 and 0230 replay over the four-argument one. Every test rolls back.
 python supabase/migrations/test_a_logs_read_names_a_range_or_a_fixed_window.py
-# A person's own preferences (0188, 0194). Each person reads, creates and changes their own
+# A person's own preferences (0188, 0194, 0264). Each person reads, creates and changes their own
 # user_settings row and nobody else's, an Administrator included; anon and service_role hold
 # nothing; the CHECKs refuse an unknown theme or sidebar mode; single-key shortcuts start on and
-# are never null; the first sign-in's seed never overwrites a row; and deleting the account
-# deletes the row, with nothing in the Audit Trail.
+# desktop notifications off, and neither is ever null; the first sign-in's seed never overwrites a
+# row; and deleting the account deletes the row, with nothing in the Audit Trail.
 python supabase/migrations/test_user_settings.py
 # A person can have a display name (0203). A person sets only their own and an Administrator
 # anyone's, never a machine identity's; the CHECKs refuse 81 characters and a control character,
@@ -821,6 +832,17 @@ python supabase/migrations/test_a_failed_or_stuck_job_is_a_platform_condition.py
 # is_shadow column it tests.
 python supabase/migrations/test_a_shadow_gateway_holds_no_health.py
 python supabase/migrations/test_metric_catalog_seed.py
+# A derived metric is a catalogue row (0267). Each of the three kinds, a counter rate, a time in state
+# and a sum, saves with its unit taken from its inputs: a rate is the input's unit per hour, a ratio
+# has none, a sum takes the one its inputs share. Every refusal of the save gives its reason: an input
+# that is missing, derived or of the wrong datatype, a sum of unlike units, a state the input cannot
+# report, a name a device has declared, a semantic id, a standard or permitted values, a malformed
+# definition (the CHECK holds that too). A measured metric cannot become derived, and a derived
+# metric's definition and unit cannot change, though its description and deprecation can, and nor can
+# the unit of a metric a counter rate or a sum is built on, deprecated ones included. Only an
+# Administrator writes, behind the second factor; every signed-in role reads. The Audit Trail files
+# the save as it files any catalogue change. Every test rolls back.
+python supabase/migrations/test_a_derived_metric_is_a_catalogue_row.py
 # The metric names devices declare that no catalog row describes (0189), which the Metrics page's
 # Uncatalogued tab lists. A deprecated row counts as catalogued, and a name matches exactly; archived
 # devices, replay lanes and Sparkplug control metrics are left out. The view runs as its caller, so
@@ -1107,6 +1129,16 @@ python supabase/migrations/test_history_lists_the_alerts_that_fired.py
 # rotated, a SIGNING_KEY_ISSUED row) and the test by role; the lease, the dispatch secret and each
 # recorded outcome. Every test rolls back.
 python supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py
+# Aber emails the people whose roles an alert's email route names (0262, 0263). Email is a channel
+# of the same queue, off until a role is named, with its own route (the lowest severity and the
+# roles told), each setting's rule and who reads and writes it. It is queued, reminded and decided
+# as the webhook is: acknowledgement drops it, a suppression window holds it, a reminder needs its
+# writer's confirmation, and a machine identity's alert is carried only when Administrators are
+# told and goes to them alone. The people are resolved at send time by auth.users.email: a person
+# with no address, a banned or removed account and a machine identity are never told, an address is
+# listed once, and a pass without the lease is refused. The log holds counts and no address, and the
+# Administrator's test goes to their own address. Every test rolls back.
+python supabase/migrations/test_aber_emails_the_people_an_alert_concerns.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

@@ -85,6 +85,8 @@ import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
 import { useHelpExpanded } from './hooks/useHelpExpanded'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
+import { useDesktopAlerts } from './hooks/useDesktopAlerts'
+import { alertOpener } from './utils/desktopNotifications'
 import { countedAlerts } from './utils/alertSuppression'
 import { useNavSignals } from './hooks/useNavSignals'
 import { BugReportModal } from './components/modals/BugReportModal'
@@ -528,7 +530,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // One source for both: the person's user_settings row, cached in this browser. The account menu's
   // two switches and the Profile page all write through it.
   const {
-    theme, setTheme, sidebarMode, setSidebarMode, singleKeyShortcuts, setSingleKeyShortcuts, source: settingsSource,
+    theme, setTheme, sidebarMode, setSidebarMode, singleKeyShortcuts, setSingleKeyShortcuts,
+    desktopNotifications, setDesktopNotifications, source: settingsSource,
   } = useUserSettings(session?.user?.id)
   const { toasts, showToast, expireToast, dismissToast, history, markRead, clearHistory } = useToast()
 
@@ -573,7 +576,14 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // visible whichever page is open. Each toast links where alertToastUrl() says. The counter, the
   // title and the favicon count the ones nobody has acknowledged and no window suppresses; the
   // pages and the counter's list are handed them all.
-  const firingAlerts = usePlatformAlerts(showToast)
+  // A desktop notification follows the same read: one per occurrence as it starts firing, for a
+  // person who turned them on. A click opens the alert as the counter's row does.
+  const syncDesktopAlerts = useDesktopAlerts({
+    enabled: desktopNotifications && settingsSource !== 'loading',
+    userId: session?.user?.id,
+    onOpen: alertOpener({ showDevice, showGateway, navigate }),
+  })
+  const firingAlerts = usePlatformAlerts(showToast, syncDesktopAlerts)
   const countedCount = countedAlerts(firingAlerts).length
 
   // Whether the page is still refreshing, from every poll and Realtime channel. Read by the strip
@@ -824,6 +834,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 onChangeSidebarMode={setSidebarMode}
                 singleKeyShortcuts={singleKeyShortcuts}
                 onChangeSingleKeyShortcuts={setSingleKeyShortcuts}
+                desktopNotifications={desktopNotifications}
+                onChangeDesktopNotifications={setDesktopNotifications}
                 settingsSource={settingsSource}
                 showToast={showToast}
               />

@@ -760,8 +760,8 @@ export const SUITES = {
       "0188's per-person preferences, which the Profile page and the account menu write. A person " +
       "reads, creates and changes their own row and nobody else's, an Administrator included, and " +
       'cannot hand it to someone else; anon and service_role hold nothing; the CHECKs refuse a ' +
-      'value the dashboard does not know, and single-key shortcuts (0194) start on and are never ' +
-      "null; the first sign-in's seed never overwrites a row another " +
+      'value the dashboard does not know, and single-key shortcuts (0194) start on and desktop ' +
+      "notifications (0264) off, neither ever null; the first sign-in's seed never overwrites a row another " +
       "tab created, and a one-column save leaves the other column alone; and the row goes with the " +
       'account, unaudited.',
   },
@@ -885,6 +885,17 @@ export const SUITES = {
       "The example metrics' PROVENANCE, and that db-init replaying them changes nothing. A metric " +
       'registered with a missing or wrong semantic id breaks nothing at runtime -- it asserts an ' +
       'interoperability claim that is simply untrue, which no other check would notice.',
+  },
+  'supabase/migrations/test_a_derived_metric_is_a_catalogue_row.py': {
+    lanes: ['db'],
+    why:
+      "0267 -- a derived metric is a catalogue row: each of the three kinds saves and takes its unit " +
+      "from its inputs; every refusal of the save gives its reason (an input missing, derived or of " +
+      "the wrong datatype, a sum of unlike units, a state the input cannot report, a name a device " +
+      "declares, a semantic id, a standard or permitted values, a malformed definition); a measured " +
+      "metric cannot become derived, a definition or unit cannot change, nor the unit of a metric a " +
+      "rate or a sum is built on; only an Administrator " +
+      "writes, behind the second factor; and the Audit Trail files the save.",
   },
   'supabase/migrations/test_uncatalogued_metrics.py': {
     lanes: ['db'],
@@ -1321,6 +1332,17 @@ export const SUITES = {
       'Notifications settings, their rules and who writes them; the webhook\'s address, signing key ' +
       'and test by role; and that no machine identity\'s alert is ever selected for the webhook.',
   },
+  'supabase/migrations/test_aber_emails_the_people_an_alert_concerns.py': {
+    lanes: ['db'],
+    why:
+      '0262 and 0263 -- that email is a channel beside the webhook, off until a role is named, with ' +
+      "its own route and the roles told, each setting's rule and who writes it; that it is queued " +
+      'and reminded as the webhook is and decided by the same arms (acknowledgement, suppression, ' +
+      "the writer's confirmation); that a machine identity's alert is carried only when " +
+      'Administrators are told and goes to them alone; who a message is resolved to at send time ' +
+      '(by auth.users.email, never a person with no address, a banned or removed account or a ' +
+      "machine identity); that the log keeps counts and no address; and the Administrator's test.",
+  },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
     why: '0074 -- that a token can finally be taken back.',
@@ -1514,6 +1536,17 @@ export const SUITES = {
       'message, and an address whose host is not allowed is refused before anything is posted. ' +
       'Configures the webhook as the database owner and puts back what the stack held. Needs ' +
       'kubectl, the functions image with notification-dispatch, and NetworkPolicies off.',
+  },
+  'supabase/functions/notification-dispatch/test_notification_dispatch_email.py': {
+    lanes: ['stack'],
+    why:
+      "The dispatcher's email end to end (0262, 0263): a firing alert written with psql reaches a " +
+      'relay pod addressed to the roles told, with its facts and link, the envelope alone naming ' +
+      'the people; a resolve follows in the same thread, an acknowledgement before the reminder ' +
+      "stops it, an unacknowledged alert is reminded, a machine identity's alert goes to " +
+      'Administrators only, a test goes to the person who asked, and the log keeps counts and no ' +
+      'address. Needs the functions pod to send through aber-test-smtp (supabaseAuth.smtp.host), ' +
+      'kubectl and NetworkPolicies off; skips, saying so, on any other relay.',
   },
   'backup-service/test_backup_service.py': {
     lanes: ['stack'],

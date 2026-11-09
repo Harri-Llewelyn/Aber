@@ -6,6 +6,7 @@ import { usePendingAction } from '../../hooks/usePendingAction'
 import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
 import { RestoreMetricModal } from '../modals/RestoreMetricModal'
 import { EditMetricSemanticIdModal } from '../modals/EditMetricSemanticIdModal'
+import { AddDerivedMetricModal } from '../modals/AddDerivedMetricModal'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
 import {
   groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup, isValidMetricName,
@@ -24,6 +25,9 @@ import {
   mtconnectSuggestion, vocabularySuggestion, suggestionForMetric, semanticIdCandidates
 } from '../../utils/semanticIdSources'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
+import {
+  DERIVED_DATATYPE, describeDerivation, isDerived, kindLabel, matchesDerivedSearch, derivationText
+} from '../../utils/derivedMetric'
 import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
 import {
   conceptByName, ashrae223Prefill, ashrae223Sections, metricConcepts
@@ -128,7 +132,7 @@ const BLANK_METRIC = {
 const keepTypedSemanticId = (own) => (own && own.semanticId.trim() !== '' ? own : null)
 
 /**
- * The three tabs, in order (navigation.jsx). The description is the tab's tooltip; the help page has
+ * The four tabs, in order (navigation.jsx). The description is the tab's tooltip; the help page has
  * the rest. Uncatalogued's label gains its count once the list loads.
  */
 export const VIEWS = METRICS_TABS
@@ -147,6 +151,26 @@ const CATALOG_SORT = {
   semantic_id: { type: 'text', value: m => m.semantic_id },
   description: { type: 'text', value: m => m.description }
 }
+
+/** The Derived tab's sortable columns, each on what its cell shows. */
+const DERIVED_SORT = {
+  name: { type: 'text', value: m => m.name },
+  kind: { type: 'text', value: m => kindLabel(m.derivation?.kind) },
+  definition: { type: 'text', value: m => derivationText(m.derivation) },
+  units: { type: 'text', value: m => m.units },
+  description: { type: 'text', value: m => m.description }
+}
+
+/** A definition in words, its metric names and states in mono. */
+const Definition = ({ derivation }) => (
+  <>
+    {describeDerivation(derivation).map((part, i) => (
+      part.text !== undefined
+        ? <React.Fragment key={i}>{part.text}</React.Fragment>
+        : <span key={i} className="mono">{part.name ?? part.state}</span>
+    ))}
+  </>
+)
 
 /** The Uncatalogued table's sortable columns. Declared By is a list of devices; Devices counts it. */
 const UNCATALOGUED_SORT = {
@@ -197,6 +221,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // True after the first read, so a reload keeps the rows on screen.
   const [loaded, setLoaded]           = useState(false)
   const [showAddMetric, setShowAddMetric] = useState(false)
+  const [showAddDerived, setShowAddDerived] = useState(false)
   const [addError, setAddError]       = useState(null)
   const [adding, runAdd]              = usePendingAction()
   const [selectedId, setSelectedId]   = useUrlState('metric', '', { allowed: loaded ? catalog.map(m => m.metric_uuid) : null })
@@ -227,6 +252,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     allowed: [...FILTER_STANDARDS.map(o => o.value), LOCAL_STANDARD_FILTER]
   })
   const [unmappedOnly, setUnmappedOnly] = useUrlState('unmapped', false)
+  // The Derived tab's own search, by name or definition; the catalog's belongs to the catalog tab.
+  const [derivedSearch, setDerivedSearch] = useUrlState('derived-search')
   const catalogFilterCount = (catalogSearch ? 1 : 0) + (standardFilter.length ? 1 : 0) + (unmappedOnly ? 1 : 0)
   const clearCatalogFilters = () => {
     setCatalogSearch(''); setStandardFilter([]); setUnmappedOnly(false)
@@ -524,6 +551,21 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     }
   }
 
+  /**
+   * Add Derived Metric's confirm, run from its dialog: the group is registered first when it is new,
+   * and a refusal of the save (an input that is derived, a name a device declares) is thrown for the
+   * dialog to show as the database worded it.
+   */
+  const handleAddDerived = async ({ name, group, isNewGroup, description, derivation }) => {
+    if (isNewGroup) await api.post('/api/v1/metric-groups', { name: group, standard: '' })
+    const added = await api.post('/api/v1/metric-catalog', {
+      name, datatype: DERIVED_DATATYPE, description, derivation
+    })
+    setShowAddDerived(false)
+    load()
+    showToast(`Derived metric '${name}' added to the catalog`, 'success', { to: metricUrl(added?.metric_uuid, false, true) })
+  }
+
   // Counts schemas that model the metric at all, not only those marking it `required`: this is the
   // impact warning on a destructive confirmation. Uses the same modelledMetrics() the device tags
   // read.
@@ -543,7 +585,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     await api.post(`/api/v1/metric-catalog/${restoreTarget.metric_uuid}/restore`)
     setRestoreTarget(null)
     load()
-    showToast(`Metric '${restoreTarget.name}' restored to the schema builder`, 'success', { to: metricUrl(restoreTarget.metric_uuid) })
+    showToast(
+      isDerived(restoreTarget)
+        ? `Derived metric '${restoreTarget.name}' restored to the Derived tab`
+        : `Metric '${restoreTarget.name}' restored to the schema builder`,
+      'success',
+      { to: metricUrl(restoreTarget.metric_uuid, false, isDerived(restoreTarget)) }
+    )
   }
 
   /** Edit's save: `change` holds only what changed, the semantic id pair, the permitted values or both. */
@@ -590,7 +638,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     return !q || (m.name || '').toLowerCase().includes(q) || String(m.metric_uuid || '').toLowerCase().includes(q)
   }
 
-  const currentCatalog = catalog.filter(m => !m.deprecated)
+  // A derived metric has a tab of its own, so the catalog lists the measured ones. Deprecated holds
+  // both kinds.
+  const currentCatalog = catalog.filter(m => !m.deprecated && !isDerived(m))
+  const derivedCatalog = catalog.filter(m => !m.deprecated && isDerived(m))
+  const shownDerived = derivedCatalog.filter(m => matchesDerivedSearch(m, derivedSearch))
   // Standard is any of its values. Its counts are over what the search and Unmapped let through, as
   // every list filter's are; Unmapped's own count is over the whole active catalog.
   const { rows: activeCatalog, counts: facetCounts } = applyFacets(currentCatalog, [
@@ -622,6 +674,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   }, [catalog])
   const [deprecatedRows, deprecatedSort] = useSortableRows(deprecatedCatalog, deprecatedSortColumns, { active: view === 'deprecated' })
   const [uncataloguedRows, uncataloguedSort] = useSortableRows(shownUncatalogued, UNCATALOGUED_SORT, { active: view === 'uncatalogued' })
+  const [derivedRows, derivedSort] = useSortableRows(shownDerived, DERIVED_SORT, { active: view === 'derived' })
+  // The names devices declare that no row has: a derived metric may not take one.
+  const declaredNames = useMemo(() => new Set((uncatalogued || []).map(u => u.metric_name)), [uncatalogued])
 
   // The vocabulary the picker offers: the curated registry (MTConnect's component types) plus
   // anything already in use.
@@ -762,7 +817,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
    * The one primary is Restore on a deprecated metric and Edit otherwise; the panel lists it first.
    */
   const metricActions = (m) => [
-    {
+    // A derived metric has no semantic id or permitted values to correct, and its definition is fixed.
+    !isDerived(m) && {
       label: 'Edit', icon: <IconPencil size={13} />,
       onClick: () => setEditTarget(m),
       primary: !m.deprecated,
@@ -779,7 +835,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         disabled: !canDeprecateMetric,
         title: !canDeprecateMetric
           ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
-          : 'Offer this metric to schema authors again'
+          : isDerived(m) ? 'List this metric on the Derived tab again' : 'Offer this metric to schema authors again'
       }
       : {
         label: 'Deprecate', icon: <IconArchive size={13} />,
@@ -788,7 +844,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         danger: true,
         title: !canDeprecateMetric
           ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
-          : 'Retire this metric from the schema builder'
+          : isDerived(m) ? 'Retire this metric from the Derived tab' : 'Retire this metric from the schema builder'
       },
     // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
     canReadTrail && {
@@ -801,7 +857,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   /** The cells both tabs share, so a metric reads the same in each. */
   const metricCells = (m) => (
     <>
-      <td><span className="mono">{m.name}</span></td>
+      {/* The catalog lists measured metrics only; Deprecated lists both, so a derived one says so. */}
+      <td>
+        <span className="mono">{m.name}</span>
+        {isDerived(m) && <> <Badge tone="neutral" size="sm" title="Aber computes this metric from others. Its drawer has the definition.">Derived</Badge></>}
+      </td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
       <td className="cell-meta">{m.standard || LOCAL_EXTENSION_LABEL}</td>
       <td className="cell-meta">{m.category || '—'}</td>
@@ -877,7 +937,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           <CardHeading
             icon={<IconTag size={15} />}
             title="Metrics"
-            description="The catalog of metrics that schemas are built from, the ones since deprecated, and the names devices declare that it lacks."
+            description="The catalog of metrics that schemas are built from, the ones Aber computes from them, the ones since deprecated, and the names devices declare that it lacks."
           />
 
           {/* Every tab is always there, so a deprecation has a known place to be undone. Uncatalogued
@@ -991,6 +1051,71 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                         </tbody>
                       )
                     })}
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {view === 'derived' && (
+            <>
+              <div className="filter-bar">
+                <SearchInput
+                  value={derivedSearch}
+                  onChange={setDerivedSearch}
+                  placeholder="Search name, definition or UUID…"
+                  ariaLabel="Search the derived metrics"
+                />
+                <div className="filter-bar-actions">
+                  <ClearFilters count={derivedSearch ? 1 : 0} onClear={() => setDerivedSearch('')} />
+                  <ActionButton
+                    className="btn btn-primary btn-sm"
+                    permitted={canManageSchema}
+                    deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+                    onClick={() => setShowAddDerived(true)}
+                  >
+                    <IconPlus size={13} /> Add Derived Metric
+                  </ActionButton>
+                </div>
+              </div>
+
+              {!loaded ? <LoadingState label="catalog" /> : shownDerived.length === 0 ? (
+                <EmptyState
+                  icon={<IconTag size={36} />}
+                  filtered={derivedCatalog.length > 0}
+                  message="No derived metric yet. Add one to compute a rate, a share of time or a total from metrics the catalog already holds."
+                  filteredMessage={<>No derived metric matches <strong>{derivedSearch}</strong>.</>}
+                />
+              ) : (
+                <div className="table-wrap">
+                  <table className="metric-table metric-table-derived">
+                    <colgroup>
+                      <col className="metric-col-name" />
+                      <col className="metric-col-kind" />
+                      <col />
+                      <col className="metric-col-units" />
+                      <col className="metric-col-description" />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <SortHeader sort={derivedSort} column="name">Name</SortHeader>
+                        <SortHeader sort={derivedSort} column="kind" title="How the value is computed">Kind</SortHeader>
+                        <SortHeader sort={derivedSort} column="definition" title="The metrics it is computed from, and how. A definition cannot change once saved.">Definition</SortHeader>
+                        <SortHeader sort={derivedSort} column="units" title="Follows the inputs: a rate is the counter's unit per hour, a share of time has none">Units</SortHeader>
+                        <SortHeader sort={derivedSort} column="description">Description</SortHeader>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {derivedRows.map(m => (
+                        <tr key={m.metric_uuid} {...rowProps(m)}>
+                          <td><span className="mono">{m.name}</span></td>
+                          <td className="cell-meta">{kindLabel(m.derivation.kind)}</td>
+                          <td><Definition derivation={m.derivation} /></td>
+                          <td className="cell-meta">{m.units || '—'}</td>
+                          <td className="cell-meta">{m.description || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
                   </table>
                 </div>
               )}
@@ -1163,14 +1288,23 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         fields={selected ? [
           { label: 'Name', value: selected.name, mono: true, copyable: true },
           { label: 'Metric UUID', value: selected.metric_uuid, mono: true, copyable: true },
-          { label: 'Standard', value: selected.standard || LOCAL_EXTENSION_LABEL },
-          { label: 'Category', value: selected.category || null },
+          // A derived metric is a local extension that no device publishes: what it is, and how its
+          // value is made, take the place of the standard, the semantic id and the permitted values.
+          isDerived(selected) && { label: 'Kind', value: kindLabel(selected.derivation.kind) },
+          isDerived(selected) && {
+            label: 'Definition',
+            value: <Definition derivation={selected.derivation} />,
+            full: true,
+            help: 'How Aber computes it from other metrics. It cannot be changed: a different definition is a new derived metric.'
+          },
+          !isDerived(selected) && { label: 'Standard', value: selected.standard || LOCAL_EXTENSION_LABEL },
+          !isDerived(selected) && { label: 'Category', value: selected.category || null },
           { label: 'Units', value: selected.units || null },
           { label: 'Datatype', value: datatypeLabel(selected.datatype) },
-          { label: 'Semantic ID', value: selected.semantic_id || null, mono: true, copyable: true, full: true },
-          { label: 'Reference Type', value: selected.semantic_id ? selected.semantic_id_type || null : null },
+          !isDerived(selected) && { label: 'Semantic ID', value: selected.semantic_id || null, mono: true, copyable: true, full: true },
+          !isDerived(selected) && { label: 'Reference Type', value: selected.semantic_id ? selected.semantic_id_type || null : null },
           { label: 'Description', value: selected.description || null, full: true },
-          {
+          !isDerived(selected) && {
             label: 'Permitted Values',
             value: permittedValuesText(selected.permitted_values) || null,
             full: true,
@@ -1182,7 +1316,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             mono: true,
             help: selectedReplacement ? undefined : 'No replacement was named'
           },
-          {
+          !isDerived(selected) && {
             label: 'Schemas',
             value: selectedUsage === 0 ? 'None model it' : `${selectedUsage} model${selectedUsage === 1 ? 's' : ''} it`
           }
@@ -1562,6 +1696,16 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             </div>
           )}
         </Modal>
+      )}
+
+      {showAddDerived && (
+        <AddDerivedMetricModal
+          catalog={catalog}
+          groups={groups}
+          declared={declaredNames}
+          onConfirm={handleAddDerived}
+          onCancel={() => setShowAddDerived(false)}
+        />
       )}
 
       {deprecateTarget && (

@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabaseClient'
 
 /*
- * The signed-in person's `user_settings` row (0188, 0194): RLS admits their own row and no other, so
+ * The signed-in person's `user_settings` row (0188, 0194, 0264): RLS admits their own row and no other, so
  * every call names the id only to say which row it means. Each throws on a refusal or a network
  * failure; useUserSettings.js decides what the page does then. Not through `api`: these run in the
  * background and do not light the top bar's activity line.
@@ -11,7 +11,7 @@ import { supabase } from '../lib/supabaseClient'
 export async function readUserSettings(userId) {
   const { data, error } = await supabase
     .from('user_settings')
-    .select('theme,sidebar_mode,single_key_shortcuts')
+    .select('theme,sidebar_mode,single_key_shortcuts,desktop_notifications')
     .eq('user_id', userId)
     .maybeSingle()
   if (error) throw error

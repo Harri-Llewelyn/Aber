@@ -49,6 +49,7 @@ export const APPROVALS_TABS = [
 
 export const METRICS_TABS = [
   { id: 'catalog', label: 'Metric Catalog', description: "The metrics schema authors build from, grouped by their name's first segment. A name cannot change once created." },
+  { id: 'derived', label: 'Derived', description: 'Metrics Aber computes from others, such as a rate or a total. Each shows its definition, which cannot change.' },
   { id: 'deprecated', label: 'Deprecated Metrics', description: 'Metrics withheld from the schema builder, and what replaced each. Schemas that model one keep it, with its readings.' },
   { id: 'uncatalogued', label: 'Uncatalogued', description: 'Metric names devices declare that no catalog row describes. Their readings are stored, but carry no unit or meaning.' },
 ]
@@ -123,7 +124,7 @@ export const SETTINGS_TABS = [
   { id: 'approvals', label: 'Approvals', description: 'How many proposals one person may hold open, when an open one expires, and how long decided ones are kept.' },
   { id: 'audit-trail', label: 'Audit Trail', description: 'How often the Audit Trail page reads the audit log again while it is open.' },
   { id: 'cold-storage', label: 'Cold Storage', description: "When readings move out to the cold archive, and the key that names this site's archive." },
-  { id: 'notifications', label: 'Notifications', description: 'Where Aber sends each alert: the webhook, the lowest severity it carries, how often it reminds, and what was sent.' },
+  { id: 'notifications', label: 'Notifications', description: 'Where Aber sends alerts: the webhook and email, their lowest severity, reminders, and what was sent.' },
   { id: 'retention', label: 'Retention', description: 'How long Aber keeps records, such as resolved alerts, before the nightly prune removes them.' },
   { id: 'security', label: 'Security', description: 'Whether managers and Administrators need MFA to change the platform and to sign in to its apps.' },
   { id: 'site', label: 'Site', description: "The site's name, the Sparkplug group its gateways publish under, and how close cells may sit on a plan." },
@@ -141,6 +142,7 @@ export const HISTORY_TABS = [
 export const PROFILE_TABS = [
   { id: 'account', label: 'Account', description: 'Your picture, the address you sign in with, your role, and your password.' },
   { id: 'appearance', label: 'Appearance', description: 'How the dashboard looks and behaves for you: theme, sidebar layout and single-key shortcuts.' },
+  { id: 'notifications', label: 'Notifications', description: 'Whether a firing alert raises a notification on your desktop. Your choice follows you to any PC.' },
   { id: 'sessions', label: 'Sessions', description: 'Every browser and service you are signed in to, and ending them. Ending one stops its access at once.' },
   { id: 'mfa', label: 'MFA', description: 'Multi-factor authentication: apps that give a code after your password. Settings can require one of managers and Administrators.' },
   { id: 'allowed-apps', label: 'Allowed Apps', description: 'The apps you have let sign you in, and what each may read about you. Revoking one signs it out.' },
