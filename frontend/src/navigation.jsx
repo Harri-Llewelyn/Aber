@@ -48,7 +48,7 @@ export const APPROVALS_TABS = [
 
 export const METRICS_TABS = [
   { id: 'catalog', label: 'Metric Catalog', description: "The metrics schema authors build from, grouped by their name's first segment. A name cannot change once created." },
-  { id: 'derived', label: 'Derived', description: 'Metrics Aber computes from others, such as a rate or a total. Each shows its definition. No device publishes one, no schema holds one, and a definition cannot change.' },
+  { id: 'derived', label: 'Derived', description: 'Metrics Aber computes from others, such as a rate or a total. Each shows its definition, which cannot change.' },
   { id: 'deprecated', label: 'Deprecated Metrics', description: 'Metrics withheld from the schema builder, and what replaced each. Schemas that model one keep it, with its readings.' },
   { id: 'uncatalogued', label: 'Uncatalogued', description: 'Metric names devices declare that no catalog row describes. Their readings are stored, but carry no unit or meaning.' },
 ]
