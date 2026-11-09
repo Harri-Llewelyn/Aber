@@ -44,7 +44,7 @@ function heloFor(dashboard: string | null, from: string): string {
   try {
     if (dashboard) {
       const host = new URL(dashboard).hostname;
-      if (host) return host.includes(":") && !host.startsWith("[") ? `[IPv6:${host}]` : host;
+      if (host) return /:/.test(host) && !host.startsWith("[") ? `[IPv6:${host}]` : host;
     }
   } catch {
     // Falls through to the sender's domain.

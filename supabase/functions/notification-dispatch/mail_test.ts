@@ -78,8 +78,9 @@ Deno.test("a mailbox quotes a plain name and encodes a Welsh one", () => {
   assert.equal(mailbox({ address: "aber@example.net" }), "<aber@example.net>");
   assert.equal(mailbox({ address: "aber@example.net", name: 'Aber "Alerts"' }), '"Aber \\"Alerts\\"" <aber@example.net>');
   const welsh = mailbox({ address: "aber@example.net", name: "Aber ŵ" });
-  assert.ok(welsh.endsWith(" <aber@example.net>"));
-  assert.equal(decodeWords(welsh.replace(" <aber@example.net>", "")), "Aber ŵ");
+  const at = welsh.lastIndexOf(" ");
+  assert.equal(welsh.slice(at + 1), "<aber@example.net>");
+  assert.equal(decodeWords(welsh.slice(0, at)), "Aber ŵ");
 });
 
 Deno.test("the date is RFC 5322's, in UTC", () => {

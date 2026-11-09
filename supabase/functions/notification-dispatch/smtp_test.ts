@@ -376,7 +376,7 @@ Deno.test("an unusable address is refused before any connection, so none can car
   const sent = await sendMessage(plain(), { from: "aber@example.net", to: [bad, "alice@example.net"] }, DATA, run.transport);
   assert.equal(sent.accepted, ["alice@example.net"]);
   assert.equal(sent.refused.map((r) => r.address), [bad]);
-  assert.ok(!run.commands.some((c) => c.includes("evil")));
+  assert.ok(!run.commands.some((c) => /evil/.test(c)));
   assert.equal((await failure(sendMessage(plain(), { from: "no at sign", to: ["a@b.c"] }, DATA, run.transport))).stage, "address");
 });
 
@@ -503,7 +503,7 @@ Deno.test("a name that does not resolve is a failure to connect, and says nothin
   };
   const err = await failure(sendMessage(plain(), ENVELOPE, DATA, transport));
   assert.equal(err.stage, "connect");
-  assert.ok(!err.message.includes("relay.example.net"));
+  assert.equal(err.message, "The relay could not be reached: the connection or the name lookup failed.", "the sentence names no host");
 });
 
 Deno.test("the password appears in nothing the client reports", async () => {

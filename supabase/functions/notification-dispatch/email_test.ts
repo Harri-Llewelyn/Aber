@@ -146,7 +146,7 @@ Deno.test("with no dashboard address there is no link, and a test says it is a t
   assert.equal(test.subject, "[Aber] A test email");
   assert.ok(test.body.includes("Nothing is firing."));
   assert.ok(test.body.includes(`${DASHBOARD}/settings/notifications`));
-  assert.ok(!content(due({ event: "test", alert: null }), null).body.includes("http"));
+  assert.ok(!/https?:/.test(content(due({ event: "test", alert: null }), null).body));
 });
 
 Deno.test("text an alert carries cannot add a line, a header or a control character to the message", () => {
@@ -188,6 +188,12 @@ function relay(answer: (envelope: Envelope) => Sent | Error = (e) => ({ accepted
 const NOW = new Date("2026-11-09T09:00:10Z");
 const PEOPLE = ["alice@example.net", "bob@example.net"];
 
+/** A message's header lines by name, lower-cased, from the text a relay is handed (folded lines joined). */
+function headersOf(data: string): Map<string, string> {
+  const head = data.slice(0, data.indexOf("\r\n\r\n")).replace(/\r\n[ \t]+/g, " ");
+  return new Map(head.split("\r\n").map((line) => [line.slice(0, line.indexOf(":")).toLowerCase(), line.slice(line.indexOf(":") + 2)]));
+}
+
 Deno.test("one email is one send to every address, with a message the thread can follow", async () => {
   const sends = relay();
   const firing = await sendEmail(SETTINGS, due(), PEOPLE, content(due()), sends.send, NOW);
@@ -195,13 +201,15 @@ Deno.test("one email is one send to every address, with a message the thread can
   assert.equal(sends.envelopes[0], { from: "aber@example.net", to: PEOPLE });
   assert.equal([sends.configs[0].host, sends.configs[0].port, sends.configs[0].user, sends.configs[0].helo, sends.configs[0].timeoutMs, sends.configs[0].totalMs],
     ["relay.example.net", 587, "aber", "aber.example.net", 10_000, 15_000]);
-  assert.ok(sends.data[0].includes(`Message-ID: <alert-${ALERT.id}.firing@example.net>`));
-  assert.ok(!sends.data[0].includes("In-Reply-To"));
-  assert.ok(sends.data[0].includes("To: undisclosed-recipients:;"), "no recipient sees another's address");
-  assert.ok(!sends.data[0].includes("alice@example.net"), "the addresses are the envelope's alone");
+  const root = headersOf(sends.data[0]);
+  assert.equal(root.get("message-id"), `<alert-${ALERT.id}.firing@example.net>`);
+  assert.equal(root.has("in-reply-to"), false);
+  assert.equal(root.get("to"), "undisclosed-recipients:;", "no recipient sees another's address");
+  assert.ok(!/alice@/.test(sends.data[0]), "the addresses are the envelope's alone");
   await sendEmail(SETTINGS, due({ event: "resolved" }), PEOPLE, content(due({ event: "resolved" })), sends.send, NOW);
-  assert.ok(sends.data[1].includes(`References: <alert-${ALERT.id}.firing@example.net>`));
-  assert.ok(sends.data[1].includes(`In-Reply-To: <alert-${ALERT.id}.firing@example.net>`));
+  const follow = headersOf(sends.data[1]);
+  assert.equal(follow.get("references"), `<alert-${ALERT.id}.firing@example.net>`);
+  assert.equal(follow.get("in-reply-to"), `<alert-${ALERT.id}.firing@example.net>`);
 });
 
 Deno.test("an address the relay refused is counted and noted without the address, and the message still counts as sent", async () => {
@@ -289,7 +297,7 @@ Deno.test("a queued email is decided on its own channel, sent to the people foun
   assert.equal(r.asked, [due().id]);
   assert.equal(r.sends.envelopes[0].to, PEOPLE);
   assert.equal(r.recorded, [{ id: due().id, outcome: "sent", status: 250, error: null, recipients: 2, refused: 0 }]);
-  assert.ok(JSON.stringify(r.recorded).indexOf("example.net") === -1, "no address reaches the log");
+  assert.ok(!/@/.test(JSON.stringify(r.recorded)), "no address reaches the log");
 });
 
 Deno.test("an email that no longer applies is dropped and never resolves its people or touches the relay", async () => {
