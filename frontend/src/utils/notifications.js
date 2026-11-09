@@ -1,7 +1,8 @@
 /**
- * The Notifications settings and the delivery log, as the database states them (0247, 0248). The
- * webhook's allowed hosts are edited in the webhook's dialog, beside its address, so the Settings
- * table leaves them out, as it leaves out the Cold Storage and Backups destinations.
+ * The Notifications settings and the delivery log, as the database states them (0247, 0248, 0262,
+ * 0263). The webhook's allowed hosts are edited in the webhook's dialog, beside its address, and the
+ * roles email goes to in the email dialog, so the Settings table leaves them out, as it leaves out
+ * the Cold Storage and Backups destinations.
  */
 
 /** The category the Settings page draws its own panel for. */
@@ -10,9 +11,13 @@ export const NOTIFICATIONS_CATEGORY = 'Notifications'
 export const ALLOWED_HOSTS_KEY = 'notifications.webhook_allowed_hosts'
 export const MIN_SEVERITY_KEY = 'notifications.webhook_min_severity'
 export const REMINDER_HOURS_KEY = 'notifications.reminder_hours'
+export const EMAIL_MIN_SEVERITY_KEY = 'notifications.email_min_severity'
+export const EMAIL_ROLES_KEY = 'notifications.email_roles'
 
 /** Edited by the webhook's dialog, not by a row of the table. */
 export const WEBHOOK_DIALOG_KEYS = [ALLOWED_HOSTS_KEY]
+/** Edited by the email dialog, not by a row of the table: a list of roles, ticked. */
+export const EMAIL_DIALOG_KEYS = [EMAIL_ROLES_KEY]
 
 /** notification_setting_guard()'s set, lowest first; mirror check 58 holds the two together. */
 export const SEVERITIES = [
@@ -22,7 +27,20 @@ export const SEVERITIES = [
 ]
 
 /** A string setting with a closed set is a choice, not a text field. */
-export const SETTING_OPTIONS = { [MIN_SEVERITY_KEY]: SEVERITIES }
+export const SETTING_OPTIONS = { [MIN_SEVERITY_KEY]: SEVERITIES, [EMAIL_MIN_SEVERITY_KEY]: SEVERITIES }
+
+/** Each channel as the log names it; mirror check 76 holds the set against the queue's CHECK. */
+export const CHANNEL_LABELS = { webhook: 'Webhook', email: 'Email' }
+
+/** A role as a sentence names it: "Shopfloor_Manager" is the Shopfloor Manager. */
+export function roleLabel(role) {
+  return String(role).replace(/_/g, ' ')
+}
+
+/** The people an email goes to, in words: "3 people", "1 person". */
+export function peopleCount(n) {
+  return `${n} ${n === 1 ? 'person' : 'people'}`
+}
 
 /** How many messages the delivery log lists, newest first. */
 export const DELIVERY_LOG_LIMIT = 50
@@ -63,13 +81,17 @@ export const EVENT_LABELS = { firing: 'Firing', resolved: 'Resolved', reminder: 
  */
 export function deliveryOutcome(row) {
   if (row.state === 'sent') {
+    if (row.channel === 'email') {
+      const refused = row.refused ? ` The relay refused ${row.refused} address${row.refused === 1 ? '' : 'es'}.` : ''
+      return { label: 'Sent', tone: 'success', detail: `The mail relay took it for ${peopleCount(row.recipients ?? 0)}.${refused}` }
+    }
     return { label: 'Sent', tone: 'success', detail: row.response_status ? `The receiver answered ${row.response_status}.` : 'The receiver accepted it.' }
   }
   if (row.state === 'dropped') {
     return {
       label: 'Not sent',
       tone: 'neutral',
-      detail: 'It no longer applied when it was due: the alert had resolved, been replaced or been acknowledged, or the webhook was removed.'
+      detail: 'It no longer applied when it was due: the alert had resolved, been replaced or been acknowledged, the webhook was removed, or nobody was left to email.'
     }
   }
   if (row.state === 'dead') {

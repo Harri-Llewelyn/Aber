@@ -1,8 +1,10 @@
 /**
  * What notification-dispatch does with one queued message, kept free of the database client so the
  * tests can drive it: the send decision, the allow-list, the CloudEvents envelope, the Standard
- * Webhooks signature, the post itself and the backoff. index.ts holds the pass around it.
+ * Webhooks signature, the post itself, the email channel's send (email.ts) and the backoff. index.ts
+ * holds the pass around it.
  */
+import { type EmailSettings, emailContent, relayProblem, type SendMessage, sendEmail } from "./email.ts";
 
 /** Posts per message before it is dead, and the backoff between them (supabase/README.md, 0247). */
 export const MAX_ATTEMPTS = 10;
@@ -55,6 +57,17 @@ export interface Recorded {
   retrySeconds?: number;
   status?: number | null;
   error?: string | null;
+  /** An email's counts, kept in place of its people: how many the relay took it for, and refused. */
+  recipients?: number;
+  refused?: number;
+}
+
+/** What the email channel needs beyond the webhook's. Absent where email is not wired, as in a test of the webhook. */
+export interface EmailDeps {
+  settings: EmailSettings;
+  /** notification_email_recipients(): the addresses one queued message goes to, resolved now. */
+  recipients(deliveryId: string): Promise<string[]>;
+  send: SendMessage;
 }
 
 export interface Deps {
@@ -70,6 +83,7 @@ export interface Deps {
   /** The dashboard's address, for each message's link; null leaves the link out. */
   dashboard: string | null;
   timeoutMs?: number;
+  email?: EmailDeps;
 }
 
 /** The wait after a message's `attempt`-th failed post: 30 s, doubling, at most an hour. */
@@ -261,6 +275,40 @@ export function destinationProblem(destination: Destination): string | null {
 }
 
 /**
+ * One email, after its decision: the relay and the people are found, the message is sent, and the
+ * row records the counts and never the addresses. No relay is a final answer in the log's words
+ * rather than ten retries; a relay that is down or slow is retried as the webhook is, and one that
+ * refuses the message itself is not.
+ */
+async function deliverEmail(due: Due, deps: Deps): Promise<Outcome> {
+  const email = deps.email;
+  const fail = async (error: string, status: number | null, final: boolean): Promise<Outcome> => {
+    const next = final ? { outcome: "dead" as const } : afterFailure(due.event, due.attempts);
+    await deps.record(due.id, { ...next, status, error });
+    return next.outcome;
+  };
+  const problem = email ? relayProblem(email.settings) : "Email is not wired in this dispatcher.";
+  if (problem || !email) return await fail(problem ?? "", null, true);
+
+  const people = await email.recipients(due.id);
+  if (!people.length) {
+    // A test has one person, the one who asked, and a pass with none says why. Anything else has no
+    // one left to tell, which is the send no longer applying.
+    if (due.event === "test") return await fail("There is no address to send the test to: the account that asked has none.", null, true);
+    await deps.record(due.id, { outcome: "dropped" });
+    return "dropped";
+  }
+
+  const content = emailContent(due, deps.dashboard, subjectPath, NOTIFICATIONS_PATH);
+  const sent = await sendEmail(email.settings, due, people, content, email.send, deps.now());
+  if (sent.ok) {
+    await deps.record(due.id, { outcome: "sent", status: sent.status, error: sent.error, recipients: sent.accepted, refused: sent.refused });
+    return "sent";
+  }
+  return await fail(sent.error ?? "The message could not be sent.", sent.status, sent.final);
+}
+
+/**
  * One message: decided, then sent, then recorded. A test is not decided, since it is about no
  * alert. A hold leaves the row pending and pushes it out; it is decided again when it comes due,
  * which is how a message held while its alert is suppressed is sent when the hold lifts.
@@ -281,6 +329,8 @@ export async function deliver(due: Due, deps: Deps): Promise<Outcome> {
       return "held";
     }
   }
+
+  if (due.channel === "email") return await deliverEmail(due, deps);
 
   const problem = destinationProblem(deps.destination);
   const posted: Posted = problem

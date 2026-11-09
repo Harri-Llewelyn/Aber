@@ -79,7 +79,8 @@ export const entityUrl = (type, id) => {
 export const proposalUrl = (id, decided = false) => pageUrl('approvals', { proposal: id }, decided ? 'decided' : '')
 
 /** One metric with its drawer open, in the catalog or on the Deprecated Metrics tab. */
-export const metricUrl = (uuid, deprecated = false) => pageUrl('metrics', { metric: uuid }, deprecated ? 'deprecated' : '')
+export const metricUrl = (uuid, deprecated = false, derived = false) =>
+  pageUrl('metrics', { metric: uuid }, deprecated ? 'deprecated' : derived ? 'derived' : '')
 
 /** A gateway or a device on the Capture page, with its captures open. */
 export const captureSubjectUrl = (kind, id) => pageUrl('capture', { subject: id }, kind === 'device' ? 'device' : '')
