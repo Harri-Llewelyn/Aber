@@ -373,6 +373,13 @@ whose list should take the leftover height passes `fill` and marks that child `m
 schema builder's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
 window and is not needed any more.
 
+**One metric list serves the schema builder and Add Derived Metric** (`common/MetricPicker.jsx`): the
+search, the standard filter and the grouped, tickable list. The list narrows what is shown, never
+what is chosen, because the dialog holds the choice. `single` makes the ticks radio buttons for a
+dialog that takes one metric. A caller that cannot show a long list at the window's height gives it
+one with `listStyle`. The schema editor for a draft keeps its own list, which shows each metric's
+stored keys.
+
 ### A dialog takes focus
 
 `Modal` renders a native `<dialog>` and opens it with `showModal()`, following the WAI-ARIA dialog

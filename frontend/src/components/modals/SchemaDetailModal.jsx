@@ -16,9 +16,8 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { Modal } from '../common/Modal'
 import { SemanticIdField } from '../common/SemanticIdField'
-import {
-  MetricGroupHeading, PropertyRange, rangeProblems, PICKER_ROW, PICKER_ROW_LABEL
-} from './SchemaBuilderModal'
+import { MetricGroupHeading, PICKER_ROW, PICKER_ROW_LABEL } from '../common/MetricPicker'
+import { PropertyRange, rangeProblems } from './SchemaBuilderModal'
 import { boundText, catalogPropertyEntry, isNumericType, sameJson } from '../../utils/schemaProperty'
 import { Tooltip } from '../common/Tooltip'
 
