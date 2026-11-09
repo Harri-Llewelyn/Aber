@@ -615,6 +615,15 @@ python supabase/migrations/test_history_reads_every_change_of_a_text_or_a_flag.p
 # row. An unknown zone, bad bounds and more than 50,000 hours times devices are refused before any
 # read; anon may not call it, and it reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_averages_a_metric_by_the_hour_of_day.py
+# History folds one metric across the devices of each group (0276). Local tables stand in for the
+# historian's hourly rollup. One row per group per bucket: the mean across the group's devices that
+# have a value, carried or measured, and the total, which is there only where every device of the
+# group has one; a device that never reports keeps its group from ever having a total. It says how
+# many devices the group has, how many had a value and how many had a reading rather than a carried
+# one; a text or a flag has no row. Bad bounds, lists of different lengths, a missing list or metric
+# and more than 50,000 devices times buckets are refused before any read; anon may not call it,
+# and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_folds_one_metric_across_the_devices_of_each_group.py
 # History counts where readings arrived (0245). Local tables stand in for the historian's device
 # rollups and the coverage view. One row per device asked for, its counts an array,
 # oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider

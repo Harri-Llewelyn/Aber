@@ -4628,6 +4628,77 @@ standing in for the hourly rollup. The file's self-check asserts one form, `STAB
 `SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
 read, so it holds on a stack with no historian.
 
+### History folds one metric across the devices of each group (0276)
+
+The Area tab compares the cells of an area: one chart a cell, each the cell's mean or total of one
+metric in every bucket ([#319](https://github.com/Harri-Llewelyn/Aber/issues/319)). The read it is
+built on, `telemetry_carried()`, returns one row per device per bucket, and the browser's row cap is
+5,000 (`TELEMETRY_MAX_ROWS`). **`telemetry_carried_by_group(from_ts, to_ts, bucket, asset_ids,
+group_keys, metric_name)`** folds those rows where the read is made, so what crosses is cells times
+buckets. `asset_ids[i]` is in the group `group_keys[i]`: the browser names each machine's cell, so the
+function knows nothing of the location model.
+
+- **One row per group per bucket that has a value**, in group and bucket order: `group_key`,
+  `bucket_ts`, `mean_double`, `total_double`, `members`, `with_value` and `measured`. Both figures are
+  in the row, so the tab's mean-or-total control re-draws without a read.
+- **The mean is of the devices that have a value in the bucket**, carried or measured, as
+  `telemetry_carried()` gives them: under report-by-exception a quiet bucket holds the value it
+  last had. `with_value` says how many that was.
+- **The total is there only where EVERY device of the group has a value**, and is null otherwise: a
+  partial sum reads as a real one. `members` is the group's devices as they were asked for, so
+  `with_value = members` is exactly when the total is there. A device with nothing to carry yet has
+  no value, so the total waits for it; a device that never reports the metric keeps its group from ever
+  having one, so the caller names only the devices that report it.
+- **`measured` is how many of those devices had a reading in the bucket**, not a carried value, so
+  the page can draw a bucket nobody reported in as carried (dashed), as the other charts do.
+- **A text or a flag metric has no `avg_double`**, so it has no row. The page says a mean or total
+  needs a number and offers each cell's own tab.
+- **A device named under two groups counts in each.** The page never does that: a device is in one cell.
+- **Its bounds** are `telemetry_carried()`'s own: it refuses more than 50,000 devices times buckets
+  (`HISTORY_GROUP_READ_ROWS` in `api.js` is the page's copy, mirror check 88), bad bounds and buckets, a
+  missing list or metric, and two lists of different lengths (`22023`), all before anything is read.
+  The page also keeps the rows returned, cells times buckets, under `HISTORY_MAX_ROWS`, and picks the
+  finest resolution that satisfies both (`pickGroupResolution()`).
+
+It runs as the caller, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`, as `telemetry_carried()` is. No audit classifier changes: it reads.
+
+**Why a function, and not the browser.** The browser can fold one `telemetry_carried()` read into
+cells. It is held to the row cap, though, with every device a series, so an area of 20 machines is read
+at 1-hour buckets for a Day and a Week and 1-day buckets for a Month. The function is held to cells
+times buckets for what it returns and devices times buckets for what it reads, so the same area is
+drawn at 5-minute, 1-hour and 1-hour buckets. At the same resolution it returns one row for each group
+where the browser reads one for each device: a fifth of the rows for cells of five.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression
+policies; 20 devices of 2 metrics, a reading a minute for 36 days, 2.1 million raw rows), through
+`postgres_fdw` into `supabase/postgres` 17.6.1.175, warm, as `authenticated`, median of 5, on a
+laptop shared with five other helpers (so one read varied by up to 40%). An area of 4 cells of 5
+devices:
+
+| An area of 4 cells of 5 devices | Read | Bucket | Rows | JSON | Warm |
+| :--- | :--- | :--- | ---: | ---: | ---: |
+| Day | browser: one `telemetry_carried()` | 1 hour | 500 | 144 KB | 27 ms |
+| Day | **`telemetry_carried_by_group()`** | 5 minutes | 1,156 | 185 KB | 107 ms |
+| Day | browser, at 5 minutes, in 2 parts | 5 minutes | 5,780 | 1.7 MB | 123 ms |
+| Week | browser: one `telemetry_carried()` | 1 hour | 3,380 | 975 KB | 55 ms |
+| Week | **`telemetry_carried_by_group()`** | 1 hour | 676 | 108 KB | 72 ms |
+| Month (30 days) | browser: one `telemetry_carried()` | 1 day | 620 | 180 KB | 43 ms |
+| Month (30 days) | **`telemetry_carried_by_group()`** | 1 hour | 2,884 | 461 KB | 249 ms |
+| Month (30 days) | browser, at 1 hour, in 3 parts | 1 hour | 14,420 | 4.2 MB | 240 ms |
+| Day, at the browser's resolution | `telemetry_carried_by_group()` | 1 hour | 100 | 16 KB | 31 ms |
+| Month, at the browser's resolution | `telemetry_carried_by_group()` | 1 day | 124 | 20 KB | 61 ms |
+
+The fold costs what its read does: at the same bucket it is a few milliseconds over
+`telemetry_carried()`, and a fifth of the rows leave. What the function buys is the finer bucket,
+for at most about a quarter of a second at the measured scale. A Month at 1 hour reads 14,420 rows on
+the historian, which is what `telemetry_carried()` takes there in three parts.
+
+`test_history_folds_one_metric_across_the_devices_of_each_group.py` holds every rule above with local
+tables standing in for the rollups. The file's self-check asserts one form, `STABLE`, `SECURITY
+INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any read, so it
+holds on a stack with no historian.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

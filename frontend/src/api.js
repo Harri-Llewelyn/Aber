@@ -263,6 +263,14 @@ export const COVERAGE_ROLLUP_MINUTES = Object.freeze([5, 60]);
 export const HOUR_OF_DAY_MAX_ROWS = 50000;
 
 /**
+ * History's group read, telemetry_carried_by_group() (0276): it reads every device's series through
+ * telemetry_carried(), which refuses more than HISTORY_GROUP_READ_ROWS buckets times devices, and
+ * returns one row per group per bucket, so the row cap (HISTORY_MAX_ROWS) holds what is returned.
+ * The page checks both before it asks.
+ */
+export const HISTORY_GROUP_READ_ROWS = 50000;
+
+/**
  * The lower time bound applied when a caller supplies none.
  *
  * `public.telemetry` is a postgres_fdw projection whose LIMIT is often applied here, not on the
@@ -1446,6 +1454,34 @@ const apiMethods = {
     if (signal) call = call.abortSignal(signal);
     const { data, error } = await call;
     if (error) throw new Error(error.message || 'Could not read the readings by the hour of the day');
+    return data || [];
+  },
+
+  /**
+   * History's Area read (0276): one numeric metric `metricName` over [from, to), one row per group
+   * per bucket of `bucketMinutes`. `assetIds[i]` is in the group `groupKeys[i]`. A row has the mean
+   * across the group's devices that have a value, and their total only where every device of the
+   * group does (null otherwise); `members` is the group's devices and `with_value` how many had
+   * one, `measured` how many had a reading rather than a carried value. A text or a flag metric has
+   * no row. `assetIds` are device UUIDs or Sparkplug ids, as the telemetry routes take them. Throws
+   * on a refusal (HISTORY_GROUP_READ_ROWS buckets times devices, two lists of another length) or a
+   * historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ group_key: string, bucket_ts: string, mean_double: number,
+   *   total_double: ?number, members: number, with_value: number, measured: number }>>}
+   */
+  readCarriedByGroup: async ({ from, to, bucketMinutes, assetIds, groupKeys, metricName }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_carried_by_group', {
+      from_ts: from,
+      to_ts: to,
+      bucket: `${bucketMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey),
+      group_keys: groupKeys,
+      metric_name: metricName
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the readings by group');
     return data || [];
   },
 
