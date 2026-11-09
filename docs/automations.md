@@ -9,6 +9,9 @@ automation when a device goes.
 The rows in the platform database are the record. The YAML is how a person sees and moves them: it
 is rendered from the rows and parsed back on save, and it is never stored.
 
+To write one, open the Automations page and read [its help](../help/pages/automations.md). The page
+and its editor are described in [`frontend/README.md`](../frontend/README.md#automations-and-its-editor).
+
 ## An example
 
 ```yaml

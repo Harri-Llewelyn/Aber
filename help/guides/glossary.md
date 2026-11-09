@@ -96,6 +96,12 @@ the historian.
 A capture records the traffic the broker carried. Playback sends it again later through the
 Playback gateway.
 
+### Automation
+
+A rule that watches a device's readings and raises an alert. An example: when a spindle's
+temperature is above 80 for five minutes, raise a warning. You write one as YAML on the
+[Automations](../pages/automations.md) page.
+
 ### Audit Trail
 
 The record of every change: what changed, who changed it, and what it looked like before. It can

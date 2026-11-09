@@ -1735,6 +1735,21 @@ site must act on. A Shopfloor Manager or an Administrator writes them on the Aut
 
 Grafana's own alert rules are untouched.
 
+### From 1.8.0, automations are written on the Automations page
+
+From 1.8.0 the dashboard has an **Automations** page, in the sidebar under **Metrics**. Everyone who
+signs in can read it. An Administrator or a Shopfloor Manager writes. There is nothing to run when
+you upgrade.
+
+- **An automation is written as YAML**, in the page's editor or in a file you upload. The page shows
+  what a file would change before it changes anything. An upload never deletes.
+- **Export** downloads one automation, some or all as `automations.yaml`. A file moved to another
+  site needs its device ids changed first, because each site's devices have ids of their own.
+- **The editor loads only when the page opens.** No other page gets heavier.
+- **A proxy with its own Content-Security-Policy needs no new `style-src`.** The editor draws its
+  styles in a shadow root, which the dashboard's policy already allows. Allowing `'unsafe-inline'`
+  styles is not needed.
+
 ### From 1.8.0, the historian counts its older readings for History's Overview
 
 History's Overview, new in 1.8.0, shows where readings arrived. It reads two new rollups on the
