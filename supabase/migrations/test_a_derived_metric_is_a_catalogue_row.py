@@ -135,10 +135,11 @@ class DerivedBase(unittest.TestCase):
         self.assertIn(fragment, message)
         return message
 
-    def update_refused(self, metric_id, sql_set, args, fragment):
+    def update_refused(self, statement, args, fragment):
+        """The UPDATE `statement` (its last placeholder the row's id) is refused with a reason holding `fragment`."""
         self.cur.execute("SAVEPOINT refused;")
         with self.assertRaises(psycopg2.Error) as caught:
-            self.cur.execute(f"UPDATE public.metric_catalog SET {sql_set} WHERE id = %s;", (*args, metric_id))
+            self.cur.execute(statement, args)
         self.cur.execute("ROLLBACK TO SAVEPOINT refused;")
         self.assertEqual(caught.exception.pgcode, CHECK_VIOLATION, caught.exception.pgerror)
         self.assertIn(fragment, caught.exception.diag.message_primary)
@@ -344,28 +345,34 @@ class FixedOnceSaved(DerivedBase):
     def test_a_measured_metric_cannot_become_derived(self):
         self.fixtures()
         measured = self.measured("LATER")
-        self.update_refused(measured, "derivation = %s", (json.dumps(counter(self.name("PART_COUNT"))),),
+        self.update_refused("UPDATE public.metric_catalog SET derivation = %s WHERE id = %s;",
+                            (json.dumps(counter(self.name("PART_COUNT"))), measured),
                             "A measured metric cannot become a derived one")
 
     def test_a_derived_definition_cannot_be_changed_or_removed(self):
         self.fixtures()
         derived, _, _ = self.save("UPTIME", in_state(self.name("EXECUTION"), "ACTIVE"))
-        self.update_refused(derived, "derivation = %s", (json.dumps(in_state(self.name("EXECUTION"), "READY")),),
+        change = "UPDATE public.metric_catalog SET derivation = %s WHERE id = %s;"
+        self.update_refused(change, (json.dumps(in_state(self.name("EXECUTION"), "READY")), derived),
                             "definition cannot be changed")
-        self.update_refused(derived, "derivation = NULL", (), "definition cannot be changed")
-        self.update_refused(derived, "derivation = %s", (json.dumps(counter(self.name("PART_COUNT"))),),
+        self.update_refused("UPDATE public.metric_catalog SET derivation = NULL WHERE id = %s;", (derived,),
+                            "definition cannot be changed")
+        self.update_refused(change, (json.dumps(counter(self.name("PART_COUNT"))), derived),
                             "deprecate this one with the new one as its replacement")
 
     def test_a_derived_unit_follows_its_inputs(self):
         self.fixtures()
         derived, _, _ = self.save("PARTS_PER_HOUR", counter(self.name("PART_COUNT")))
-        self.update_refused(derived, "units = 'PERCENT'", (), "unit follows its inputs and cannot be changed")
-        self.update_refused(derived, "units = NULL", (), "unit follows its inputs")
+        self.update_refused("UPDATE public.metric_catalog SET units = 'PERCENT' WHERE id = %s;", (derived,),
+                            "unit follows its inputs and cannot be changed")
+        self.update_refused("UPDATE public.metric_catalog SET units = NULL WHERE id = %s;", (derived,),
+                            "unit follows its inputs")
 
     def test_a_derived_metric_still_takes_no_semantic_id_afterwards(self):
         self.fixtures()
         derived, _, _ = self.save("PARTS_PER_HOUR", counter(self.name("PART_COUNT")))
-        self.update_refused(derived, "semantic_id = 'https://example.org/x', semantic_id_type = 'IRI'", (), "carries no semantic id")
+        self.update_refused("UPDATE public.metric_catalog SET semantic_id = 'https://example.org/x',"
+                            " semantic_id_type = 'IRI' WHERE id = %s;", (derived,), "carries no semantic id")
 
     def test_its_name_and_datatype_stay_frozen_as_for_every_metric(self):
         self.fixtures()
@@ -428,7 +435,7 @@ class WhoWrites(DerivedBase):
         self.cur.execute("RESET ROLE;")
         claims = {"sub": user_id, "role": role, "aal": aal}
         self.cur.execute("SELECT set_config('request.jwt.claims', %s, true);", (json.dumps(claims),))
-        self.cur.execute(f"SET LOCAL ROLE {role};")
+        self.cur.execute("SELECT set_config('role', %s, true);", (role,))
 
     def insert_as(self, leaf, user_id, **who):
         self.as_person(user_id, **who)
