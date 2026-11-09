@@ -71,7 +71,7 @@ const rendered = [
 ].join('\n')
 
 const firings = {
-  active: [],
+  active: [{ id: 'f2', fingerprint: `condition:${TRIGGER}:${LATHE}:Spindle/BEARING_TEMPERATURE`, severity: 'warning', starts_at: '2026-11-09T11:00:00Z' }],
   history: [
     {
       id: 'f2', fingerprint: `condition:${TRIGGER}:${LATHE}:Spindle/BEARING_TEMPERATURE`, status: 'firing', ends_at: null,

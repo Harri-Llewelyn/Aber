@@ -3,7 +3,7 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS, refreshInterval } from '../../constants'
 import { navigate } from '../../hooks/useUrlState'
 import { usePolling } from '../../hooks/usePolling'
-import { automationUrl, automationsUrl, deviceUrl, trailUrl } from '../../routes'
+import { automationUrl, automationsUrl, deviceUrl, trailUrl, triggerIdOfFingerprint } from '../../routes'
 import { ActionButton } from '../common/ActionButton'
 import CopyableId from '../common/CopyableId'
 import { EmptyState } from '../common/EmptyState'
@@ -128,7 +128,11 @@ export function AutomationDetail({ automationKey, showToast, canWrite, hasPermis
     ? { triggerIds: new Set((base.row.automation_triggers || []).map(t => t.id)) }
     : null), [base])
   const firings = useMemo(() => (entry ? recentFirings(entry, alerts.history, FIRINGS_SHOWN) : []), [entry, alerts])
-  const firingNow = useMemo(() => firings.filter(f => f.firing), [firings])
+  // From the alerts firing now, not from the recent list: a long-lived alert may be older than it.
+  const firingNow = useMemo(
+    () => (entry ? alerts.active.filter(a => entry.triggerIds.has(triggerIdOfFingerprint(a.fingerprint))) : []),
+    [entry, alerts]
+  )
 
   const toggle = async () => {
     setToggling(true)
