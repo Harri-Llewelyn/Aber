@@ -209,16 +209,20 @@ class AutomationsBase(unittest.TestCase):
 class Access(AutomationsBase):
     def test_every_signed_in_role_reads_and_anon_does_not(self):
         self.apply([automation()])
+        counts = {
+            "automations": "SELECT count(*) FROM public.automations;",
+            "automation_triggers": "SELECT count(*) FROM public.automation_triggers;",
+            "automation_actions": "SELECT count(*) FROM public.automation_actions;",
+        }
         for user_id in (OPERATOR_ID, MANAGER_ID, ADMIN_ID, AUDITOR_ID, MACHINE_ID):
-            for table in ("automations", "automation_triggers", "automation_actions"):
+            for table, statement in counts.items():
                 with self.subTest(user=user_id, table=table):
-                    rows = self.as_person(user_id, f"SELECT count(*) FROM public.{table};")
-                    self.assertEqual(rows, [(1,)])
-        for table in ("automations", "automation_triggers", "automation_actions"):
+                    self.assertEqual(self.as_person(user_id, statement), [(1,)])
+        for statement in counts.values():
             self.cur.execute("SAVEPOINT anon_read;")
             self.cur.execute("SET LOCAL ROLE anon;")
             with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
-                self.cur.execute(f"SELECT count(*) FROM public.{table};")
+                self.cur.execute(statement)
             self.cur.execute("ROLLBACK TO SAVEPOINT anon_read;")
 
     def test_nobody_writes_a_table_directly(self):

@@ -5251,8 +5251,14 @@ const OPERATOR_PAIRS = [
   const spec = read(SPEC);
   const sql = read(FUNCTIONS);
   const problems291 = [];
-  const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pathBlock = (name) => spec.match(new RegExp(`\\n  ${escaped(name)}:\\n([\\s\\S]*?)(?=\\n  \\/|\\n[a-z])`))?.[1];
+  // A path's block in the spec: from its key to the next path key, or the end of the paths.
+  const pathBlock = (name) => {
+    const start = spec.indexOf(`\n  ${name}:\n`);
+    if (start < 0) return undefined;
+    const rest = spec.slice(start + name.length + 5);
+    const end = rest.search(/\n {2}\/|\n[a-z]/);
+    return end < 0 ? rest : rest.slice(0, end);
+  };
   for (const table of [...read(TABLES).matchAll(/CREATE TABLE IF NOT EXISTS public\.(\w+)/g)].map((m) => m[1])) {
     if (!pathBlock(`/rest/v1/${table}`)) problems291.push(`${SPEC} has no /rest/v1/${table}`);
   }
@@ -5266,8 +5272,10 @@ const OPERATOR_PAIRS = [
       problems291.push(`${SPEC} has no /rest/v1/rpc/${name}`);
       continue;
     }
-    const declared = [...(sql.match(new RegExp(`CREATE OR REPLACE FUNCTION public\\.${escaped(name)}\\(([^)]*)\\)`))?.[1] ?? '')
-      .matchAll(/\b(p_\w+)\b/g)].map((m) => m[1]).sort().join(', ');
+    const head = `CREATE OR REPLACE FUNCTION public.${name}(`;
+    const from = sql.indexOf(head);
+    const args = from < 0 ? '' : sql.slice(from + head.length, sql.indexOf(')', from));
+    const declared = [...args.matchAll(/\b(p_\w+)\b/g)].map((m) => m[1]).sort().join(', ');
     const properties = block.match(/\n {14}properties:\n([\s\S]*?)(?=\n {6}responses:)/)?.[1] ?? '';
     const documented = [...properties.matchAll(/^ {16}(p_\w+):/gm)].map((m) => m[1]).sort().join(', ');
     if (declared !== documented) problems291.push(`${SPEC}: /rest/v1/rpc/${name} documents the arguments "${documented}", ${FUNCTIONS} declares "${declared}"`);
