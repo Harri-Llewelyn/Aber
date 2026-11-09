@@ -1379,7 +1379,8 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     'automation_actions_alert_shape in the migrations');
   const platform = need(SCHEMA, /ADD CONSTRAINT platform_alerts_severity_valid CHECK \(\(severity = ANY \(ARRAY\[([^\]]*)\]\)\)\)/,
     'platform_alerts_severity_valid in the migrations');
-  const constant = (name) => parse && need(parse.body, new RegExp(`${name}\\s+CONSTANT (?:text|integer) := '?([^';]+)'?;`),
+  const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const constant = (name) => parse && need(parse.body, new RegExp(`${escaped(name)}\\s+CONSTANT (?:text|integer) := '?([^';]+)'?;`),
     `${name} in automations_parse() (${parse.file})`);
   const words = (list) => [...list.matchAll(/'([a-z]+)'/g)].map((m) => m[1]).join(', ');
   const { automation, thresholdTrigger, alertAction, deviceId } = schema.$defs;
