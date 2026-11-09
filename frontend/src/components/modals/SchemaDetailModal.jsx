@@ -73,7 +73,8 @@ export function SchemaDetailModal({
   // A refusal of a save or a publish, as the database worded it.
   const [error, setError] = useState(null)
 
-  const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
+  // A derived metric is not offered: nothing publishes it, so a schema cannot model it.
+  const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated && !m.derivation), [catalog])
 
   const lineage = useMemo(() => lineageOf(schemas, schema), [schemas, schema])
 

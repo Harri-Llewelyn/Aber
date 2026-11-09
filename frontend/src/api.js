@@ -3256,6 +3256,8 @@ const apiMethods = {
         // The values a discrete metric may report, as text; NULL is no closed set. The schema
         // builders copy them into `enum`, and the Devices page's Out of vocabulary tag reads them.
         permitted_values: m.permitted_values ?? null,
+        // NULL for a measured metric; a derived one's definition (0267), fixed once saved.
+        derivation: m.derivation ?? null,
         description: m.description,
         deprecated: m.deprecated,
         superseded_by: m.superseded_by,
@@ -3682,6 +3684,8 @@ const apiMethods = {
         standard: emptyToNull(body.standard),
         ...semanticIdPair(body),
         permitted_values: permittedValuesColumn(body.permitted_values),
+        // Only a derived metric sends one; the database sets its unit from the inputs.
+        ...(body.derivation && { derivation: body.derivation }),
         description: body.description || null
       }).select();
       if (error) throw error;

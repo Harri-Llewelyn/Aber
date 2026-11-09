@@ -117,7 +117,8 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
   // A refusal of the save, as the database worded it. The builder stays open with what was chosen.
   const [error, setError] = useState(null)
 
-  const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
+  // A derived metric is not offered: nothing publishes it, so a schema cannot model it.
+  const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated && !m.derivation), [catalog])
 
   // The standard filter narrows what is listed, never what is selected: a schema legitimately mixes
   // standards, such as ISO KPIs beside the MTConnect observations they are computed from.
