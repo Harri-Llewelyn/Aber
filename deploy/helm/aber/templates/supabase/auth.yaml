@@ -177,10 +177,10 @@ spec:
             # /oauth/authorize, /oauth/token and /oauth/userinfo real.
             - name: GOTRUE_OAUTH_SERVER_ENABLED
               value: "true"
-            # Off, and not a value: every client the stack uses is seeded by 0002, and a token
-            # issued to any client carries its person's whole role (has_role() reads auth.uid(),
-            # not the client). check-docs-drift check 115 and check-gateway-surface --authenticated
-            # hold it off.
+            # Off, and not a value: every client the stack uses is seeded by 0002, and an app an
+            # Administrator adds is registered by register_app() (0260). Left on, anyone holding the
+            # publishable key could register a client and ask a person to approve it.
+            # check-docs-drift check 115 and check-gateway-surface --authenticated hold it off.
             - name: GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION
               value: "false"
             # GoTrue SHIPS NO CONSENT UI. On /oauth/authorize it redirects the browser to

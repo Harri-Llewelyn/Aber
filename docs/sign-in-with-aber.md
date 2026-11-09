@@ -40,9 +40,11 @@ If it is lost, the Administrator removes the app and registers it again.
 ### Which addresses are allowed
 
 - **`https` goes anywhere.**
-- **Plain `http` goes only on the site's own network:** `localhost` and any name ending `.localhost`,
-  loopback and private addresses (`127.x.x.x`, `10.x.x.x`, `172.16.x.x` to `172.31.x.x`,
-  `192.168.x.x`), `[::1]`, and the site's own domain and every name under it.
+- **Plain `http` goes only on the site's own network.** That means:
+  - `localhost`, and any name ending `.localhost`.
+  - Loopback and private addresses: `127.x.x.x`, `10.x.x.x`, `172.16.x.x` to `172.31.x.x`,
+    `192.168.x.x` and `[::1]`.
+  - The site's own domain, and every name under it.
 - **Nothing else is accepted.** No wildcard, fragment (`#`), comma, space, user name or password, and
   no scheme but `http` and `https`.
 
@@ -163,9 +165,14 @@ Authorization: Bearer <access token>
 | Refresh token | Until the session ends. The session ends after the site's inactivity timeout with no refresh (seven days by default), or sooner for the reasons below. |
 | Authorization code | Single-use, and good only for a short time. |
 
-The session ends sooner when the person takes back their approval on their **Profile** page, when an
-Administrator revokes it or removes the app, when the person's access is removed, and when they
-change their password. Your next refresh is then refused. Send the person through sign-in again.
+The session ends sooner in four cases:
+
+- The person takes back their approval on their **Profile** page.
+- An Administrator revokes the approval, or removes the app.
+- The person's access to Aber is removed.
+- The person changes their password.
+
+Your next refresh is then refused. Send the person through sign-in again.
 
 ## A second factor ends the app's session
 
