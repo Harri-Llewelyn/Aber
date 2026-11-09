@@ -4694,8 +4694,8 @@ and `audit_id`. The browser writes the CSV from it.
 - **One call, not slices the browser calls one after another.** The first call has to be the one that
   refuses and records, and a second call that skips it would read for nothing in the Audit Trail. One
   call also has one honest row count, and either everything is read and recorded or nothing is. The
-  document is at most 50,000 rows, about 3 MB as JSON, and `export_telemetry()` takes 0.3 s for it
-  locally; the historian's share is in the live checks.
+  document is at most 50,000 rows, about 4 MB as JSON, in one response well inside the gateway's
+  15 s and the `authenticated` role's 8 s statement timeout (Measured, below).
 - **It records the export:** one `TELEMETRY_EXPORTED` row in the Audit Trail for an export that returns
   rows, naming who exported (`changed_by`, and their email as the token carried it), the devices (id
   and name), the metrics, the window and the resolution, how many rows left, whether they were cut,
@@ -4725,6 +4725,24 @@ declaration of each.
 [`frontend/README.md`](../frontend/README.md#historys-export). The Area and Metric tabs' Export comes with
 those tabs. The function takes ids of devices the platform keys readings by; the dashboard sends each
 device's issued Sparkplug id.
+
+**Measured** through `postgres_fdw` on a private historian (TimescaleDB 2.31, built as the maintenance
+Job builds it, 2.07 million raw rows with their rollups refreshed), into `supabase/postgres`
+17.6.1.175, as an Administrator with `statement_timeout` at the `authenticated` role's 8 s, on a laptop
+three other sessions shared (so one read varied by up to 30%). Three runs each, in seconds:
+
+| Export | Rows | Seconds |
+| :--- | ---: | ---: |
+| One device of 15 metrics at 1 Hz, an hour or a day, raw (cut at 10:55, the first hour holds 54,000) | 49,500 | 0.6 to 0.8 |
+| The same, an hour at 1 minute | 900 | 0.02 |
+| 20 devices of 5 metrics, a reading a minute for 14 days, raw (2 million rows) | 50,000 | 2.3 to 3.0 |
+| The same at 1 minute | 50,000 | 2.3 to 2.9 |
+| The same at 1 hour | 33,600 | 0.5 to 0.7 |
+| The same devices, one day, raw | 50,000 | 0.7 to 0.9 |
+
+The cost is the hour count over the window, one remote aggregate (`EXPLAIN VERBOSE` shows the
+`Foreign Scan` with `Relations: Aggregate on (timescale.telemetry_1m t)` and the `GROUP BY` in its
+remote SQL), so a long window of many series costs most there, not in the 50,000 rows it reads.
 
 `test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py` holds every rule above, with
 local tables standing in for the historian's relations: each refusal before any read, a window of

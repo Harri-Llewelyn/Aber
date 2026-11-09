@@ -258,7 +258,7 @@ export function TelemetryExportModal({ devices, metricNames, from, to, windowWor
       {busy && (
         <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div className="spinner" style={{ width: 14, height: 14 }} />
-          <span>Reading the readings…</span>
+          <span>Collecting the readings…</span>
         </div>
       )}
 

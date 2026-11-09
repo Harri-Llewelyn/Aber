@@ -55,7 +55,7 @@ PEOPLE = ((OPERATOR_ID, "Operator"), (MANAGER_ID, "Shopfloor_Manager"), (ADMIN_I
           (AUDITOR_ID, "Auditor"))
 
 KEY = "history.export_max_days"
-MFA_KEY = "security.require_mfa_for_managers"
+SWITCH_KEY = "security.require_mfa_for_managers"
 TEMP = "Test_0279/Temperature"
 STATE = "Test_0279/State"
 RUN = "Test_0279/Running"
@@ -179,7 +179,7 @@ class ExportBase(unittest.TestCase):
 
     def mfa(self, on):
         self.cur.execute("UPDATE public.system_settings SET value = %s::jsonb WHERE key = %s;",
-                         ("true" if on else "false", MFA_KEY))
+                         ("true" if on else "false", SWITCH_KEY))
 
     def audit_rows(self):
         self.cur.execute(
