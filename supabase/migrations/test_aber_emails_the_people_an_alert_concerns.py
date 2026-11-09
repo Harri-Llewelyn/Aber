@@ -182,8 +182,10 @@ class EmailBase(unittest.TestCase):
         return self.cur.fetchone()[0]
 
     def recipients(self, delivery_id):
+        """The addresses the database resolves, of this suite's own people: a database that has been used
+        holds other suites' committed administrators, who are told too, as they should be."""
         self.cur.execute("SELECT public.notification_email_recipients(%s, %s);", (self.holder, delivery_id))
-        return self.cur.fetchone()[0]
+        return [a for a in self.cur.fetchone()[0] if a.endswith("@email.test")]
 
     def told(self, alert_id, event="firing"):
         return self.recipients(self.delivery_id(alert_id, event))
