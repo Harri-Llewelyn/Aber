@@ -88,6 +88,13 @@ spec:
             # Followed by the BROWSER, so the ingress address rather than the in-cluster one.
             - name: API_EXTERNAL_URL
               value: {{ include "aber.supabaseUrl" . | quote }}
+            # The site's public auth address: the `iss` of every token, and the issuer of the discovery
+            # document, whose endpoints GoTrue builds from it. Unset, discovery names no issuer and
+            # relative paths, which a standard sign-in library refuses. Nothing on the stack checks `iss`.
+            {{- with include "aber.supabaseUrl" . }}
+            - name: GOTRUE_JWT_ISSUER
+              value: {{ printf "%s/auth/v1" . | quote }}
+            {{- end }}
             # Required by GoTrue, and inert: with GOTRUE_JWT_KEYS set it builds its keys and the
             # algorithms it accepts from that set, which holds no `oct` key, so no HS256 token verifies.
             {{- include "aber.secretEnv" (dict "name" "GOTRUE_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
@@ -170,10 +177,10 @@ spec:
             # /oauth/authorize, /oauth/token and /oauth/userinfo real.
             - name: GOTRUE_OAUTH_SERVER_ENABLED
               value: "true"
-            # Off, and not a value: every client the stack uses is seeded by 0002, and a token
-            # issued to any client carries its person's whole role (has_role() reads auth.uid(),
-            # not the client). check-docs-drift check 115 and check-gateway-surface --authenticated
-            # hold it off.
+            # Off, and not a value: every client the stack uses is seeded by 0002, and an app an
+            # Administrator adds is registered by register_app() (0260). Left on, anyone holding the
+            # publishable key could register a client and ask a person to approve it.
+            # check-docs-drift check 115 and check-gateway-surface --authenticated hold it off.
             - name: GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION
               value: "false"
             # GoTrue SHIPS NO CONSENT UI. On /oauth/authorize it redirects the browser to

@@ -111,8 +111,8 @@ still have to be reachable. It is empty by default, and the database keeps no co
   `passport.authenticate(['bearer','tokens','anon'])`; with no default the `anon` arm has nothing
   to return. Setting it reopens the hole wholesale, so `settingsAreCorrect()` treats its presence
   as a broken file rather than a preference to preserve.
-- **`passport-openidconnect` cannot be used.** It reads GoTrue's discovery document, which reports
-  `issuer: ""` with relative paths.
+- **`passport-openidconnect` is not used.** It reads GoTrue's discovery document, which the editor's
+  sign-in does not need: its endpoints are configured, and the strategy verifies the ID token itself.
 - **The client is registered `client_secret_post`**, unlike Grafana's `client_secret_basic` — that
   is what `passport-oauth2` sends by default, and GoTrue enforces whichever is registered exactly.
   `publicUrls.nodered` (by default `<scheme>://nodered.<domain>`) feeds both the `redirect_uris`

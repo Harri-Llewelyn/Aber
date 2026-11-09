@@ -180,11 +180,11 @@ const MULTIPART_CASES = [
 ];
 
 /**
- * What a token GoTrue's OAuth server issued to an app reaches on the API listener, by the app's
- * client id: /auth/v1/, which every app's does, and these functions. Grafana and Node-RED call their
- * userinfo function here. The Studio and forge doors call theirs from their own listeners, straight
- * to the edge runtime, so they reach /auth/v1/ alone, as an app not listed does. Mirror check 48
- * holds the ids to stack_app_ids() and the functions to the ones that exist.
+ * What a token GoTrue's OAuth server issued to one of the stack's four apps reaches on the API
+ * listener, by the app's client id: all of /auth/v1/, and these functions. Grafana and Node-RED call
+ * their userinfo function here. The Studio and forge doors call theirs from their own listeners,
+ * straight to the edge runtime, so they reach /auth/v1/ alone. Mirror check 48 holds the ids to
+ * stack_app_ids() and the functions to the ones that exist.
  */
 const APP_ROUTES = {
   'c0ffee00-0000-4000-8000-000000000001': { app: 'Grafana', functions: ['grafana-userinfo'] },
@@ -192,6 +192,23 @@ const APP_ROUTES = {
   'c0ffee00-0000-4000-8000-000000000003': { app: "Studio's door", functions: [] },
   'c0ffee00-0000-4000-8000-000000000004': { app: "the forge's door", functions: [] },
 };
+
+/**
+ * What a token issued to any other app, one an Administrator registered, reaches: the sign-in
+ * endpoints and nothing else on /auth/v1/. A method and a path. The logout is the local scope alone,
+ * because GoTrue's default scope ends every session the person holds. The token endpoints answer a
+ * caller with no token too, so an app that sends a stale bearer to one is not refused.
+ */
+const OUTSIDE_SIGN_IN = [
+  'POST /auth/v1/token',
+  'POST /auth/v1/oauth/token',
+  'GET /auth/v1/oauth/userinfo',
+  'GET /auth/v1/user',
+  'POST /auth/v1/logout?scope=local',
+  'GET /auth/v1/.well-known/openid-configuration',
+  'GET /auth/v1/.well-known/oauth-authorization-server',
+  'GET /auth/v1/.well-known/jwks.json',
+];
 
 /** The gateway's answer to an app's token off its own routes; clients and this script read it. */
 const APP_REFUSAL = '{"message":"This token was issued to an app, and reaches only that app\'s own routes"}';
@@ -1221,7 +1238,8 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
 
 // ---- 7. An app's token reaches only its own routes. ---------------------------------------------
 // jwt_authn verifies the bearer and records its claims without refusing anything; rbac then admits a
-// token with no client_id anywhere, every app's on /auth/v1/, and each app's on APP_ROUTES' functions.
+// token with no client_id anywhere, one of the stack's four on all of /auth/v1/ and on APP_ROUTES'
+// functions, and a token issued to any other app on OUTSIDE_SIGN_IN alone.
 {
   const before = problems.length;
   const need = (text, fragment, what) => {
@@ -1240,7 +1258,7 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
   for (const [fragment, what] of [
     ['provider_name', 'a provider requirement would refuse every request without a valid token'],
     ['audiences:', 'an audience would hide the client_id of a token with another audience'],
-    ['issuer:', 'an issuer would hide the client_id of a token GoTrue issued without one'],
+    ['issuer:', 'an issuer would hide the client_id of a token GoTrue issued before it set one'],
     ['from_params', 'no upstream reads a bearer from the query string'],
   ]) {
     if (claims.includes(fragment)) fail(`${ENVOY_TEMPLATE}: the API listener's jwt_authn names ${fragment} -- ${what}.`);
@@ -1265,15 +1283,36 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
   }
   const clientIds = (text) => [...text.matchAll(/string_match: \{ exact: ([0-9a-f-]{36}) \}/g)].map((m) => m[1]);
   const paths = (text) => [...text.matchAll(/url_path: \{ path: \{ (exact|prefix): "([^"]+)" \} \}/g)].map((m) => `${m[1]} ${m[2]}`);
+  // One permission of the outside-apps policy: a method, and a path (or the path with its query).
+  const outsideRules = (text) => [...text.matchAll(
+    /and_rules: \{ rules: \[\{ header: \{ name: ":method", string_match: \{ exact: (\w+) \} \} \}, \{ (?:url_path: \{ path: \{ exact: "([^"]+)" \} \}|header: \{ name: ":path", string_match: \{ exact: "([^"]+)" \} \}) \}\] \}/g,
+  )].map((m) => `${m[1]} ${m[2] ?? m[3]}`);
   const noApp = policies.filter((p) => p.text.includes('not_id:'));
-  const signIn = policies.filter((p) => paths(p.text).join() === 'prefix /auth/v1/' && p.text.includes('principals: [{ any: true }]'));
-  const perApp = policies.filter((p) => !noApp.includes(p) && !signIn.includes(p));
+  const stackIn = policies.filter((p) => p.name === 'stack-apps-sign-in');
+  const outsideIn = policies.filter((p) => p.name === 'outside-apps-sign-in');
+  const perApp = policies.filter((p) => !noApp.includes(p) && !stackIn.includes(p) && !outsideIn.includes(p));
   if (noApp.length !== 1 || !noApp[0].text.includes('permissions: [{ any: true }]')
     || !noApp[0].text.includes('path: [{ key: jwt_payload }, { key: client_id }]')
     || !noApp[0].text.includes('safe_regex: { regex: "(?s).+" }')) {
     fail(`${ENVOY_TEMPLATE}: the app check has no single policy admitting, on every route, a token whose verified claims carry no non-empty client_id.`);
   }
-  if (signIn.length !== 1) fail(`${ENVOY_TEMPLATE}: the app check has no single policy admitting every token on /auth/v1/, where every app checks its session.`);
+  const stackIds = stackIn.length === 1 ? clientIds(stackIn[0].text).sort() : [];
+  if (stackIn.length !== 1 || paths(stackIn[0].text).join() !== 'prefix /auth/v1/' || stackIn[0].text.includes('any: true')
+    || stackIds.join() !== Object.keys(APP_ROUTES).sort().join()) {
+    fail(
+      `${ENVOY_TEMPLATE}: the app check has no single policy stack-apps-sign-in admitting all of /auth/v1/ to the stack's `
+      + `${Object.keys(APP_ROUTES).length} apps (the client ids of APP_ROUTES) and to no other token.`
+    );
+  }
+  const outside = outsideIn.length === 1 ? outsideRules(outsideIn[0].text) : [];
+  if (outsideIn.length !== 1 || !outsideIn[0].text.includes('principals: [{ any: true }]')
+    || outside.length !== (outsideIn[0].text.match(/and_rules:/g) || []).length
+    || [...outside].sort().join() !== [...OUTSIDE_SIGN_IN].sort().join()) {
+    fail(
+      `${ENVOY_TEMPLATE}: the app check has no single policy outside-apps-sign-in admitting a token issued to any app on `
+      + `OUTSIDE_SIGN_IN alone (${OUTSIDE_SIGN_IN.join(', ')}); it admits [${outside.join(', ')}].`
+    );
+  }
   const found = {};
   for (const p of perApp) {
     const ids = clientIds(p.text);
@@ -1305,8 +1344,9 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
 
   if (problems.length === before) {
     pass(
-      `an app's token reaches /auth/v1/ and its own functions alone (${Object.keys(wanted).length} app(s) with functions, `
-      + `${Object.keys(APP_ROUTES).length - Object.keys(wanted).length} with none), decided on the verified client_id`
+      `the stack's apps reach /auth/v1/ and their own functions alone (${Object.keys(wanted).length} app(s) with functions, `
+      + `${Object.keys(APP_ROUTES).length - Object.keys(wanted).length} with none), any other app's token reaches the `
+      + `${OUTSIDE_SIGN_IN.length} sign-in endpoints alone, decided on the verified client_id`
     );
   }
 }

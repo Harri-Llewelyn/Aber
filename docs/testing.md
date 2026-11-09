@@ -118,6 +118,18 @@ python supabase/test_revoking_an_app_ends_its_refresh_token.py
 # person's dashboard token reaches all of them, and an app's ID token is not served as the person.
 # An app whose client is not registered (Studio's when Studio is off) is skipped, with the reason.
 python supabase/test_each_app_s_token_reaches_only_its_own_routes.py
+# An app an Administrator registers signs people in (0260). Needs the stack up, and
+# security.require_mfa_for_managers off: the suite signs in by password, so with it on the Administrator's
+# registration is refused for want of a code and the suite skips, saying so. The seeded Administrator
+# registers a confidential and a public app with register_app(), and the seeded Shopfloor Manager
+# completes each one's code flow with PKCE. Discovery names an absolute issuer, the access and ID
+# tokens carry it as `iss`, and the ID token verifies against the key set (with the `cryptography`
+# package installed). The access token reaches user-info and GET /auth/v1/user, refreshes and signs
+# out its own session, and is refused with the gateway's 403 on PUT /auth/v1/user, the factor routes,
+# the approvals, PostgREST, Storage and every function. Revoking the approval ends its session, a
+# removed app cannot start a sign-in, and the Audit Trail names the Administrator. Every app it
+# registers is removed at the end.
+python supabase/test_an_app_registered_by_an_administrator_signs_people_in.py
 # A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
 # the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
 # request with it, and reads its row back: the identity and the current UTC hour. A second request
@@ -955,6 +967,15 @@ python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor
 # whether a dashboard call or GoTrue's own role wrote the table, and 0002's re-seed of a stack app
 # writes none. Every test rolls back.
 python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py
+# An Administrator registers an app that signs people in (0260). register_app() adds one client as
+# 0002 adds the stack's four: manual, the code and refresh grants, a confidential app's secret
+# returned once and kept as the SHA-256 hash GoTrue compares, a public app's none. Only an
+# Administrator may, and with Settings requiring a second factor only from a session that gave its
+# code. A bad name, type or address is refused in words that name it: app_redirect_problem() answers
+# every case in test-harness/fixtures/app-redirect-addresses.json, which the dialog's rule shares. A
+# name already held is refused whatever its case and with or without "Aber ". The registration is one
+# Audit Trail row naming the Administrator, with neither the secret nor its hash. Every test rolls back.
+python supabase/migrations/test_an_administrator_registers_an_app_that_signs_people_in.py
 # With Studio off, db-init says so without a warning (0002). Studio's client block runs as db-init's
 # psql runs it, with studio_enabled false, true and unset. False is a NOTICE, never a WARNING. A
 # client an earlier boot registered is removed, its approvals revoked and its sessions ended, with

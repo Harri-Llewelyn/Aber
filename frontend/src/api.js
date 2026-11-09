@@ -2057,6 +2057,20 @@ const apiMethods = {
   },
 
   /**
+   * Register an app that signs people in (`register_app()`). `clientType` is `public` or
+   * `confidential`. Resolves to `{ id, name, client_type, redirect_uris, client_secret }`: the
+   * secret is null for a public app, and for a confidential one it is in this answer alone.
+   * Administrator only, with a second factor while Settings requires one.
+   */
+  registerApp: async (name, redirectUris, clientType) => {
+    const { data, error } = await supabase.rpc('register_app', {
+      p_name: name, p_redirect_uris: redirectUris, p_client_type: clientType,
+    });
+    if (error) throw new Error(error.message || 'Could not register the app');
+    return data;
+  },
+
+  /**
    * Remove an app (`remove_app()`): every approval of it and every session it holds end with it.
    * Resolves to `{ name, approvals_ended, sessions_ended }`. Aber's own apps are refused.
    */
