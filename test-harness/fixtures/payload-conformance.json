@@ -560,6 +560,21 @@
       ]
     },
     {
+      "name": "a reading under a derived metric's name is dropped under either policy, though a schema models it",
+      "schema_definitions": [
+        {"type": "object", "properties": {"Controller/PART_COUNT": {"type": "number"}, "Controller/PARTS_PER_HOUR": {"type": "number"}}}
+      ],
+      "observed": [
+        ["Controller/PART_COUNT", "double", 40.0]
+      ],
+      "dropped": [
+        ["Controller/PARTS_PER_HOUR", "derived_name", "this name belongs to a metric Aber computes; the device should publish under another name"]
+      ],
+      "expected": [
+        {"metric": "Controller/PARTS_PER_HOUR", "code": "derived_name", "detail": "this name belongs to a metric Aber computes; the device should publish under another name", "dropped": true, "enforced": false}
+      ]
+    },
+    {
       "name": "a required that is a number cannot be read, and ingestion judges nothing",
       "schema_definitions": [
         {"properties": {"M": {}}, "required": 5}

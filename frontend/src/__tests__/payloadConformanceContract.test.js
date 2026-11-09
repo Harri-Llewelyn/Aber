@@ -85,6 +85,43 @@ describe('judgePayload', () => {
     }])
   })
 
+  describe("a derived metric's name", () => {
+    const derived = 'Controller/PARTS_PER_HOUR'
+    const modelsIt = { properties: { [derived]: { type: 'number' }, 'Controller/PART_COUNT': { type: 'number' } } }
+    // The words the contract fixture holds ingestion to, so the dialog says what ingestion records.
+    const fixtureDetail = fixture.cases.flatMap(c => c.dropped || []).find(([, code]) => code === 'derived_name')[2]
+
+    it('is reported as a reading ingestion drops under either policy, though a schema models it', () => {
+      const result = judgePayload(modelsIt, { [derived]: 12, 'Controller/PART_COUNT': 40 }, [derived])
+      expect(result.findings).toEqual([{
+        metric: derived, code: 'derived_name', detail: fixtureDetail, dropped: true, enforced: false
+      }])
+    })
+
+    it('says what ingestion records, word for word', () => {
+      expect(fixtureDetail).toMatch(/Aber computes/)
+      expect(judgePayload(modelsIt, { [derived]: 'ACTIVE' }, [derived]).findings[0].detail).toBe(fixtureDetail)
+    })
+
+    it('is judged before its value is read, so no kind of value saves it', () => {
+      const result = judgePayload(modelsIt, { [derived]: null }, [derived])
+      expect(result.findings.map(f => f.code)).toEqual(['derived_name'])
+    })
+
+    it('leaves the rest of the payload as it was, and a measured name of the same group alone', () => {
+      const result = judgePayload(modelsIt, { [derived]: 12, 'Controller/PART_COUNT': 'many' }, [derived])
+      expect(result.findings.map(f => [f.metric, f.code])).toEqual([
+        [derived, 'derived_name'], ['Controller/PART_COUNT', 'type_mismatch']
+      ])
+    })
+
+    it('is compared exactly, and judges as before when the catalogue has none', () => {
+      expect(judgePayload(modelsIt, { [derived.toLowerCase()]: 12 }, [derived]).findings.map(f => f.code))
+        .toEqual(['unmodelled_metric'])
+      expect(judgePayload(modelsIt, { [derived]: 12 }).findings).toEqual([])
+    })
+  })
+
   it('keeps a pattern it cannot check apart from the findings', () => {
     const result = judgePayload(definition, { 'Controller/MODE': 'AUTO' })
     expect(result.findings).toEqual([])
