@@ -256,7 +256,7 @@ class AnAlertIsEmailed(unittest.TestCase):
         expected = self.people("Shopfloor_Manager")
         self.assertTrue(expected, "the stack has a Shopfloor Manager with an address (manager@aber.local)")
         alert_id = self.fire("firing")
-        got = self.wait_for("Email dispatch test (firing)")[-1]
+        got = self.wait_for("Email dispatch test - the platform (firing)")[-1]
         self.assertEqual(sorted(got["to"]), expected, "the envelope names the roles' people and nobody else")
         self.assertEqual(got["from"], self.sender)
         message = got["message"]
@@ -342,7 +342,7 @@ class AnAlertIsEmailed(unittest.TestCase):
         self.assertTrue(admin, "the stack has an Administrator with an address")
         address = psql(f"SELECT lower(btrim(email)) FROM auth.users WHERE id = {literal(admin)}")
         row = psql("INSERT INTO public.notification_deliveries (event, channel, requested_by)"
-                   f" VALUES ('test', 'email', {literal(admin)}) RETURNING id")
+                   f" VALUES ('test', 'email', {literal(admin)}) RETURNING id").splitlines()[0]
         got = self.wait_for("[Aber] A test email")[-1]
         self.assertEqual(got["to"], [address])
         self.assertIn("Nothing is firing.", got["body"])
