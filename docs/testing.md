@@ -801,6 +801,16 @@ python supabase/migrations/test_a_failed_or_stuck_job_is_a_platform_condition.py
 # is_shadow column it tests.
 python supabase/migrations/test_a_shadow_gateway_holds_no_health.py
 python supabase/migrations/test_metric_catalog_seed.py
+# A derived metric is a catalogue row (0267). Each of the three kinds, a counter rate, a time in state
+# and a sum, saves with its unit taken from its inputs: a rate is the input's unit per hour, a ratio
+# has none, a sum takes the one its inputs share. Every refusal of the save gives its reason: an input
+# that is missing, derived or of the wrong datatype, a sum of unlike units, a state the input cannot
+# report, a name a device has declared, a semantic id, a standard or permitted values, a malformed
+# definition (the CHECK holds that too). A measured metric cannot become derived, and a derived
+# metric's definition and unit cannot change, though its description and deprecation can. Only an
+# Administrator writes, behind the second factor; every signed-in role reads. The Audit Trail files
+# the save as it files any catalogue change. Every test rolls back.
+python supabase/migrations/test_a_derived_metric_is_a_catalogue_row.py
 # The metric names devices declare that no catalog row describes (0189), which the Metrics page's
 # Uncatalogued tab lists. A deprecated row counts as catalogued, and a name matches exactly; archived
 # devices, replay lanes and Sparkplug control metrics are left out. The view runs as its caller, so

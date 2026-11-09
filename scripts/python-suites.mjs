@@ -876,6 +876,16 @@ export const SUITES = {
       'registered with a missing or wrong semantic id breaks nothing at runtime -- it asserts an ' +
       'interoperability claim that is simply untrue, which no other check would notice.',
   },
+  'supabase/migrations/test_a_derived_metric_is_a_catalogue_row.py': {
+    lanes: ['db'],
+    why:
+      "0267 -- a derived metric is a catalogue row: each of the three kinds saves and takes its unit " +
+      "from its inputs; every refusal of the save gives its reason (an input missing, derived or of " +
+      "the wrong datatype, a sum of unlike units, a state the input cannot report, a name a device " +
+      "declares, a semantic id, a standard or permitted values, a malformed definition); a measured " +
+      "metric cannot become derived and a definition or unit cannot change; only an Administrator " +
+      "writes, behind the second factor; and the Audit Trail files the save.",
+  },
   'supabase/migrations/test_uncatalogued_metrics.py': {
     lanes: ['db'],
     why:
