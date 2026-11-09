@@ -21,14 +21,13 @@ a metric in the catalogue, a reading in the historian and an automation, and rem
 end, however it ends. The Audit Trail keeps its rows: the automation's creation and deletion, and the
 device's.
 """
+import http.client
 import json
 import os
 import sys
 import time
 import unittest
-import urllib.error
 import urllib.parse
-import urllib.request
 import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test-harness"))
@@ -55,13 +54,15 @@ def request(path, method="GET", token=None, body=None):
     if token:
         headers["Authorization"] = f"Bearer {token}"
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(f"{SUPABASE_URL}{path}", method=method, data=data, headers=headers)
+    gateway = urllib.parse.urlsplit(SUPABASE_URL)
+    connect = http.client.HTTPSConnection if gateway.scheme == "https" else http.client.HTTPConnection
+    connection = connect(gateway.hostname, gateway.port, timeout=20)
     try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            status, text = response.status, response.read().decode()
-    except urllib.error.HTTPError as err:
-        with err:
-            status, text = err.code, err.read().decode()
+        connection.request(method, path, body=data, headers=headers)
+        response = connection.getresponse()
+        status, text = response.status, response.read().decode()
+    finally:
+        connection.close()
     try:
         return status, json.loads(text) if text else None
     except ValueError:
