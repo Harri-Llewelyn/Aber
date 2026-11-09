@@ -263,7 +263,7 @@ export async function sendEmail(
     return { ok: true, status: 250, error: note, final: false, accepted: sent.accepted.length, refused };
   } catch (err) {
     if (!(err instanceof SmtpError)) {
-      console.error(`notification-dispatch: an email could not be sent: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`notification-dispatch: an email could not be sent: ${withoutAddresses(err instanceof Error ? err.message : String(err))}`);
       return { ok: false, status: null, error: "The message could not be sent to the relay.", final: false, accepted: 0, refused: 0 };
     }
     return {
