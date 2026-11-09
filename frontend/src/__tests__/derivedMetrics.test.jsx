@@ -70,7 +70,7 @@ const openTab = async (name) => {
   return document.querySelector('.card table')
 }
 
-const names = (table) => [...table.querySelectorAll('tbody tr:not(.table-group-row) td:first-child')].map(td => td.textContent)
+const names = (table) => [...table.querySelectorAll('tbody tr:not(.table-group-row) td:first-child .mono')].map(el => el.textContent)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -107,6 +107,8 @@ describe('the Derived tab', () => {
     const deprecated = await openTab('Deprecated Metrics')
     expect(names(deprecated)).toEqual(['Power/IMBALANCE'])
     expect(deprecated.textContent).toContain('Power/TOTAL')
+    // Deprecated lists both kinds, so a derived metric says so beside its name.
+    expect(within(deprecated.querySelector('tbody tr')).getByText('Derived')).toBeTruthy()
   })
 
   it('shows each row’s name, kind, definition in words and unit', async () => {

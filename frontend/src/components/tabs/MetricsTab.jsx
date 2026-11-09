@@ -857,7 +857,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   /** The cells both tabs share, so a metric reads the same in each. */
   const metricCells = (m) => (
     <>
-      <td><span className="mono">{m.name}</span></td>
+      {/* The catalog lists measured metrics only; Deprecated lists both, so a derived one says so. */}
+      <td>
+        <span className="mono">{m.name}</span>
+        {isDerived(m) && <> <Badge tone="neutral" size="sm" title="Aber computes this metric from others. Its drawer has the definition.">Derived</Badge></>}
+      </td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
       <td className="cell-meta">{m.standard || LOCAL_EXTENSION_LABEL}</td>
       <td className="cell-meta">{m.category || '—'}</td>
