@@ -339,16 +339,60 @@ describe('the permission prompt', () => {
     document.body.click()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
     expect(requestPermission).toHaveBeenCalledTimes(1)
-    expect(sessionStorage.getItem(ASKED_KEY)).toBe('u1')
+    expect(sessionStorage.getItem(ASKED_KEY)).toBe('asked')
   })
 
-  it('is not asked again in a session that already asked, even after the person dismissed it', async () => {
+  it('writes nothing of the person to storage: the tab remembers that it asked, not whom', async () => {
+    browser('default', 'default')
+    await mount({ userId: 'u1-person-id' })
+    document.body.click()
+    expect(requestPermission).toHaveBeenCalledTimes(1)
+    for (const store of [sessionStorage, localStorage]) {
+      for (let i = 0; i < store.length; i += 1) {
+        const key = store.key(i)
+        expect(`${key}=${store.getItem(key)}`).not.toContain('u1-person-id')
+      }
+    }
+  })
+
+  it('is not asked again after a reload of a session that already asked, even if the person dismissed it', async () => {
     browser('default', 'default')
     const { hook } = await mount()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
     expect(requestPermission).toHaveBeenCalledTimes(1)
+    // A reload runs no cleanup, so the tab's marker stays: put back what unmounting clears.
     hook.unmount()
+    sessionStorage.setItem(ASKED_KEY, 'asked')
     await mount()
+    document.body.click()
+    expect(requestPermission).toHaveBeenCalledTimes(1)
+  })
+
+  it('is asked again when the next person signs in, after a sign-out or a different id', async () => {
+    browser('default', 'default')
+    const { hook } = await mount({ userId: 'u1' })
+    document.body.click()
+    expect(requestPermission).toHaveBeenCalledTimes(1)
+    // The first prompt has been answered: one still showing would be asked once, not twice.
+    await settle()
+    // Another person's id arrives in the same tab.
+    hook.rerender({ enabled: true, userId: 'u2', onOpen: vi.fn() })
+    document.body.click()
+    expect(requestPermission).toHaveBeenCalledTimes(2)
+    await settle()
+    // Signing out unmounts the dashboard.
+    hook.unmount()
+    expect(sessionStorage.getItem(ASKED_KEY)).toBeNull()
+    await mount({ userId: 'u3' })
+    document.body.click()
+    expect(requestPermission).toHaveBeenCalledTimes(3)
+  })
+
+  it('is not asked again for the same person when the dashboard renders again', async () => {
+    browser('default', 'default')
+    const { hook } = await mount({ userId: 'u1' })
+    document.body.click()
+    hook.rerender({ enabled: true, userId: 'u1', onOpen: vi.fn() })
     document.body.click()
     expect(requestPermission).toHaveBeenCalledTimes(1)
   })

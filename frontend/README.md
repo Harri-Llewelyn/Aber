@@ -2308,6 +2308,10 @@ so a notification has the visibility the alert counter has and follows the same 
 - **The browser asks once per session.** A person with it on, in a browser that has not been asked,
   is asked at the first click or key press, the gesture Firefox and Safari require; the tab keeps an
   Allow Notifications button for when they dismiss it. Nothing is asked where the browser cannot raise one.
+  The tab remembers that it asked, with a constant in session storage and nothing of the person: who
+  is signed in is held in memory only, so a reload keeps the answer, while signing out or another
+  person's id clears it and the next person is asked. Nothing derived from the session (an id, an
+  email, a token) is written to browser storage.
 
 ---
 

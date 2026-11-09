@@ -7,14 +7,20 @@ import { SUBJECT_WAIT_MS, alertNotificationText } from '../utils/desktopNotifica
 import { notificationPermission, notificationSupport } from '../utils/notificationPermission'
 import { useNotificationPermission } from './useNotificationPermission'
 
-/** The session storage key that remembers this tab has already asked, and for whom. */
+/**
+ * The session storage key that remembers this tab has asked. It holds a constant, never anything of
+ * the person's: who is signed in is kept in memory only, and a change of person clears it.
+ */
 export const ASKED_KEY = 'aber_desktop_notifications_asked'
 
-const askedFor = () => {
-  try { return sessionStorage.getItem(ASKED_KEY) } catch { return null }
+const wasAsked = () => {
+  try { return sessionStorage.getItem(ASKED_KEY) === 'asked' } catch { return false }
 }
-const markAsked = (userId) => {
-  try { sessionStorage.setItem(ASKED_KEY, userId ?? '') } catch { /* storage unavailable */ }
+const markAsked = () => {
+  try { sessionStorage.setItem(ASKED_KEY, 'asked') } catch { /* storage unavailable */ }
+}
+const forgetAsked = () => {
+  try { sessionStorage.removeItem(ASKED_KEY) } catch { /* storage unavailable */ }
 }
 
 /** The name and place of an alert's subject, or null once SUBJECT_WAIT_MS has gone. */
@@ -111,14 +117,22 @@ export function useDesktopAlerts({ enabled, userId = null, onOpen }) {
   useEffect(() => { if (!enabled) closeAll() }, [enabled, closeAll])
   useEffect(() => closeAll, [closeAll])
 
+  // The tab remembers that it asked, not whom: signing out (the dashboard unmounts) or another
+  // person's id arriving clears it, so the next person is asked. A reload keeps it.
+  const personRef = useRef(userId)
+  useEffect(() => {
+    if (personRef.current !== userId) { forgetAsked(); personRef.current = userId }
+  }, [userId])
+  useEffect(() => forgetAsked, [])
+
   // The prompt, once per session, at the first gesture.
   useEffect(() => {
-    if (!enabled || !notificationSupport().ok || permission !== 'default' || askedFor() === (userId ?? '')) return undefined
+    if (!enabled || !notificationSupport().ok || permission !== 'default' || wasAsked()) return undefined
     function stop() {
       document.removeEventListener('click', onGesture, true)
       document.removeEventListener('keydown', onGesture, true)
     }
-    function onGesture() { stop(); markAsked(userId); ask() }
+    function onGesture() { stop(); markAsked(); ask() }
     document.addEventListener('click', onGesture, true)
     document.addEventListener('keydown', onGesture, true)
     return stop
