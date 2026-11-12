@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { REALTIME_ENABLED, grafanaAlertUrl } from '../constants'
 import { classifyRefreshError, FAILURE_SESSION } from '../lib/connectionState'
-import { alertPage } from '../routes'
+import { alertPage, deviceUrl } from '../routes'
 import { isSuppressed, nextSuppressionChange } from '../utils/alertSuppression'
 
 /**
@@ -52,9 +52,11 @@ async function upcomingWindowStarts() {
 /**
  * Where an alert's toast leads: the page in the dashboard that alertPage() names, such as a machine
  * identity on Access Control or a job on the Capture page; for any other alert, its rule in Grafana
- * Alerting, where its thresholds are set.
+ * Alerting, where its thresholds are set. An automation's alert has no rule there: it leads to its
+ * device, or nowhere when it names none.
  */
-export const alertToastUrl = (row) => alertPage(row)?.to ?? grafanaAlertUrl(row)
+export const alertToastUrl = (row) =>
+  alertPage(row)?.to ?? grafanaAlertUrl(row) ?? (row?.sparkplug_id ? deviceUrl(row.sparkplug_id) : undefined)
 
 /**
  * The live set of firing alerts, machine and platform alike, with a toast on each transition. It

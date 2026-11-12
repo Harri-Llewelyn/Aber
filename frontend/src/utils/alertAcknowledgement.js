@@ -48,7 +48,8 @@ export const mayWithdraw = (alert, role, userId) => isAcknowledged(alert) && (
 
 /**
  * Where a message about an alert leads: the device or gateway it is about, as its row in the
- * counter does, or the page alertPage() names, or else its rule in Grafana.
+ * counter does, or the page alertPage() names, or else its rule in Grafana (none for an automation's
+ * alert, so null).
  */
 export function alertSubjectUrl(alert) {
   const kind = alert?.entity_type || 'device'

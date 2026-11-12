@@ -1594,6 +1594,56 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 82. How long an automation's alert confirmation holds (0247, 0271). evaluate_automations() stamps
+// last_confirmed_at on every run, and pg_cron runs it on the schedule 0271 gives. The window
+// platform_alert_confirmation_window() allows a condition: fingerprint must be longer than that
+// interval: a window no longer than the run interval stops the reminders of every automation alert
+// still firing, and a far longer one keeps reminding about an alert nothing has confirmed for hours.
+{
+  const job = need(SCHEMA, /ensure_cron_job\(\s*'evaluate_automations',\s*'([^']+)'/, 'the evaluate_automations job in the migrations');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.platform_alert_confirmation_window(', '$$;',
+    'platform_alert_confirmation_window()');
+  const arm = fn && need(fn.body, /WHEN starts_with\(p_fingerprint, 'condition:'\) THEN interval '(\d+) minutes'/,
+    `platform_alert_confirmation_window()'s condition: arm (${fn.file})`);
+  if (job && arm) {
+    // `* * * * *` is every minute and `*/N * * * *` every N; anything else is not read.
+    const every = /^\* \* \* \* \*$/.test(job[1]) ? 1 : Number(job[1].match(/^\*\/(\d+) \* \* \* \*$/)?.[1]);
+    if (!Number.isInteger(every) || every < 1) {
+      problems.push(`alertConfirmationWindow: the evaluate_automations schedule "${job[1]}" is neither every minute nor every N minutes, so the window cannot be held to it`);
+    } else if (Number(arm[1]) <= every) {
+      problems.push(`alertConfirmationWindow: the evaluator runs every ${every} minute(s) and its confirmation holds ${arm[1]}, which stops the reminders of every automation alert still firing (${fn.file})`);
+    } else {
+      ok.push(`alertConfirmationWindow: an automation alert's confirmation (${arm[1]} minutes) outlasts the evaluator's interval (${every} minute${every === 1 ? '' : 's'})`);
+    }
+  }
+}
+
+// 83. What marks an alert as an automation's, one prefix in four places (0255, 0271): the dashboard's
+// isAutomationAlert() reads it, automation_alert_fingerprint() composes every trigger's fingerprint
+// with it, evaluate_automations() names its own alert with it, and platform_alert_confirmation_window()
+// gives it its window. A prefix one of them spells differently is an automation's alert opening
+// Grafana, or a reminder that is never sent.
+{
+  const js = need(read('frontend/src/constants.js'), /isAutomationAlert = \(alert\) => String\(alert\?\.fingerprint \?\? ''\)\.startsWith\('([^']+)'\)/,
+    'isAutomationAlert() in constants.js');
+  const compose = lastDefinition('CREATE OR REPLACE FUNCTION public.automation_alert_fingerprint(', '$$;', 'automation_alert_fingerprint()');
+  const composed = compose && need(compose.body, /WHEN p_entity_id IS NULL OR p_metric_name IS NULL THEN '([^']+)' \|\|/,
+    `automation_alert_fingerprint()'s prefix (${compose.file})`);
+  const evaluator = lastDefinition('CREATE OR REPLACE FUNCTION public.evaluate_automations(', '$$;', 'evaluate_automations()');
+  const own = evaluator && need(evaluator.body, /c_not_evaluated CONSTANT text := '([^']+)'/,
+    `evaluate_automations()'s own fingerprint (${evaluator.file})`);
+  const window = lastDefinition('CREATE OR REPLACE FUNCTION public.platform_alert_confirmation_window(', '$$;',
+    'platform_alert_confirmation_window()');
+  const windowed = window && need(window.body, /WHEN starts_with\(p_fingerprint, '([^']+)'\)/,
+    `platform_alert_confirmation_window()'s condition: arm (${window.file})`);
+  if (js && composed && own && windowed) {
+    compare('automationAlertPrefix', `the dashboard's prefix and the one automation_alert_fingerprint() composes (${compose.file})`, js[1], composed[1]);
+    compare('automationAlertPrefix', `the dashboard's prefix and the one the evaluator's own alert starts with (${evaluator.file})`,
+      js[1], own[1].slice(0, js[1].length));
+    compare('automationAlertPrefix', `the dashboard's prefix and the one the confirmation window answers for (${window.file})`, js[1], windowed[1]);
+  }
+}
+
 // 58. The Notifications vocabulary, one closed set in each place it is written (0247, 0248): the
 // severities a route may name, as notification_setting_guard() admits them, notification_severity_carried()
 // ranks them and the Settings page offers them; and the events a message may be, as the queue's CHECK
