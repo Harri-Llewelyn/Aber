@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useSetting } from '../../hooks/useSettings'
 import { ToolbarPopover, FiltersPopover } from '../common/FiltersPopover'
 import { FilterList } from '../common/FilterChecklist'
 import { SearchInput } from '../common/SearchInput'
@@ -14,19 +15,24 @@ import { AlertKey } from '../common/AlertKey'
 import { DerivedTag } from '../common/DerivedTag'
 import { SmallMultiples } from '../common/SmallMultiples'
 import { ActionButton } from '../common/ActionButton'
-import { IconChartLine, IconChevronLeft, IconChevronRight, IconCpu } from '../common/Icons'
+import { TelemetryExportModal } from '../modals/TelemetryExportModal'
+import { IconChartLine, IconChevronLeft, IconChevronRight, IconCpu, IconDownload } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
 import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
+import {
+  DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportSizeProblem, exportWindowProblem,
+  exportableMetrics, mayExportReadings, metricExportNote, metricExportScope,
+} from '../../utils/telemetryExport'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import { readDeviceSeries } from '../../utils/historyReads'
 import {
   DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, bucketStarts,
-  changeSeries, chartSeries, derivedReadProblem, markBuckets, metricAddress, metricDevices, metricPages, multiplesWords,
-  pageFrom, pagingWords, pickedAddress, readWords, stateReadLine, telemetryKey, validRanges,
+  METRIC_PAGE_SIZE, changeSeries, chartSeries, derivedReadProblem, markBuckets, metricAddress, metricDevices, metricPages,
+  multiplesWords, pageFrom, pagingWords, pickedAddress, readWords, stateReadLine, telemetryKey, validRanges,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -113,9 +119,12 @@ function Pager({ plan, onPage }) {
  *   telemetry_changes() too and draws every change, as the Cell tab does.
  *
  * A read is made again when the metric, the filters, the page or the window changes, on Refresh, and on
- * the refresh timer while the window reaches now. The window zooms as the Device tab's does.
+ * the refresh timer while the window reaches now. The window zooms as the Device tab's does. Export CSV
+ * downloads the metric of every device the tab lists under its filters, all pages and not only the one
+ * shown, in the Device tab's dialog, for an Administrator or a Shopfloor Manager and for a window no
+ * longer than history.export_max_days.
  */
-export function HistoryMetric({ metric, devices, schemas, catalog = null, metrics, areas, cells, win, setWin, every, setEvery }) {
+export function HistoryMetric({ metric, devices, schemas, catalog = null, metrics, areas, cells, win, setWin, every, setEvery, userRole, showToast }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const info = metrics.find(m => m.name === metric) ?? null
@@ -156,6 +165,7 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
 
   const [reading, setReading] = useState(null)
   const [open, setOpen] = useState(true)
+  const [exporting, setExporting] = useState(null)
   const sectionId = useId()
   // Each read's number: only the newest may land, so a slow read never draws over a later one.
   const latestRead = useRef(0)
@@ -259,6 +269,28 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
   const plan = reading?.plan ?? null
   const heading = unit ? `${reading?.metric ?? metric} (${unit})` : (reading?.metric ?? metric)
 
+  const canExport = mayExportReadings(userRole)
+  const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
+  const { start: shownStart, end: shownEnd } = windowBounds(win, now)
+  // A derived metric is computed when drawn and holds no reading to export.
+  const exportable = exportableMetrics([metric], catalog)
+  const exportBlocked = exportable.left.length ? DERIVED_EXPORT_NOTE
+    : !info ? `No device in service reports ${metric}, so there is nothing to export.`
+    : allKeys.length === 0 ? `No device that reports ${metric} is in the area, cell or devices chosen, so there is nothing to export.`
+      : exportSizeProblem(allKeys.length, 1) ?? exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
+  /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
+  const openExport = () => {
+    const at = Date.now()
+    const { start, end } = windowBounds(win, at)
+    const paged = metricPages(start.getTime(), end.getTime(), allKeys.length, page).paged
+    setExporting({
+      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: exportable.names,
+      scope: metricExportScope(reporters.length, everyReporter.length),
+      note: paged ? metricExportNote(reporters.length, METRIC_PAGE_SIZE) : null,
+      from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
+    })
+  }
+
   return (
     <>
       <div className="filter-bar">
@@ -271,6 +303,16 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
         </FiltersPopover>
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            permitted={canExport}
+            deniedTitle={EXPORT_DENIED_TITLE}
+            disabled={Boolean(exportBlocked)}
+            title={exportBlocked ?? `Download ${metric} for every device listed, on every page, over this window, as CSV`}
+            onClick={openExport}
+          >
+            <IconDownload size={13} aria-hidden="true" /> Export CSV
+          </ActionButton>
           <RefreshButton
             onRefresh={() => read().catch(() => {})}
             busy={busy}
@@ -349,6 +391,20 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
           </>
         )}
       </div>
+
+      {exporting && (
+        <TelemetryExportModal
+          devices={exporting.devices}
+          metricNames={exporting.names}
+          scope={exporting.scope}
+          note={exporting.note}
+          from={exporting.from}
+          to={exporting.to}
+          windowWords={exporting.windowWords}
+          onClose={() => setExporting(null)}
+          showToast={showToast}
+        />
+      )}
     </>
   )
 }

@@ -45,7 +45,7 @@ import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
-import { deviceUrl, metricUrl, trailUrl } from '../../routes'
+import { deviceUrl, metricHistoryUrl, metricUrl, trailUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -56,7 +56,7 @@ import {
 } from '../../utils/schemaProperty'
 import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
-  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory
+  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory, IconChartLine
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
@@ -852,6 +852,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
           : isDerived(m) ? 'Retire this metric from the Derived tab' : 'Retire this metric from the schema builder'
       },
+    {
+      // Ungated, as the History page is: this metric across every device that reports it, on one scale.
+      label: 'View History', icon: <IconChartLine size={13} />,
+      to: metricHistoryUrl(m.name),
+      title: 'Compare this metric across the devices that report it on the History page'
+    },
     // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
     canReadTrail && {
       label: 'View Audit Trail', icon: <IconHistory size={13} />,

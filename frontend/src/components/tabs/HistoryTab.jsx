@@ -256,8 +256,8 @@ function AreaPicker({ areas, search, win }) {
  * The History page: a site's readings over time. Overview, its first tab and its default, shows
  * where readings arrived across every device; Device charts each metric of one device. Both take
  * the window the time control sets. Ungated, as the Site Map is: what it shows is what the
- * telemetry views let the viewer read; Export CSV, on the Device, Overview and Cell tabs, is for an
- * Administrator or a Shopfloor Manager. The
+ * telemetry views let the viewer read; Export CSV, on the Device, Overview, Metric, Cell and Area tabs, is
+ * for an Administrator or a Shopfloor Manager. The
  * address names the tab, the device and the window: `/history` and `/history/overview` are the
  * Overview, `/history/device` picks a device, and `/history/device/<id>?range=24h` charts one.
  * The Metric tab compares one metric across every device that reports it, `/history/metric` picks the
@@ -393,6 +393,8 @@ export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGatewa
                 setWin={setWin}
                 every={every}
                 setEvery={setEvery}
+                userRole={userRole}
+                showToast={showToast}
               />
             ) : (
               <>
@@ -417,6 +419,8 @@ export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGatewa
                   setWin={setWin}
                   every={every}
                   setEvery={setEvery}
+                  userRole={userRole}
+                  showToast={showToast}
                 />
               ) : (
                 <EmptyState icon={<IconFactory size={36} />} message="No area answers to this address. It may have been deleted.">

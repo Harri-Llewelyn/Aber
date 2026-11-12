@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   EXPORT_COLUMNS, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DEVICES, EXPORT_MAX_METRICS, EXPORT_RESOLUTIONS,
-  TELEMETRY_EXPORT_ROLES, bestResolutionFor, commentRow, coversRange, exportMaxDays, exportRows, exportSizeProblem,
-  exportWindowProblem, mayExportReadings, noticeRows, overExportLimit, overLimitShort, provenanceRow, resolutionByKey
+  TELEMETRY_EXPORT_ROLES, areaExportNote, areaExportScope, bestResolutionFor, commentRow, coversRange, exportMaxDays, exportRows,
+  exportSizeProblem, exportWindowProblem, mayExportReadings, metricExportNote, metricExportScope, noticeRows, overExportLimit,
+  overLimitShort, provenanceRow, resolutionByKey
 } from '../utils/telemetryExport'
 import { TELEMETRY_RESOLUTION_RELATIONS } from '../api'
 
@@ -151,6 +152,27 @@ describe('who may export, and for how long', () => {
     expect(exportSizeProblem(1000, 500)).toBeNull()
     expect(exportSizeProblem(1001, 3)).toBe('An export names at most 1,000 devices, and this selection has 1,001.')
     expect(exportSizeProblem(3, 501)).toBe('An export names at most 500 metrics, and these devices report 501.')
+  })
+})
+
+describe("what the Area and Metric tabs' dialogs say", () => {
+  it("names the area, the machines behind the charts and the cells they are in, and says the cells' figures are not in the file", () => {
+    expect(areaExportScope('Boardroom', [5, 6, 3])).toBe('Boardroom · 14 machines in 3 cells')
+    expect(areaExportScope('Hall C', [1])).toBe('Hall C · 1 machine in 1 cell')
+    expect(areaExportNote()).toBe("The cells' means and totals are not in the file. It holds each machine's own readings.")
+  })
+
+  it('adds the Area-Wide devices, which are in no cell and so in no chart, in words that agree with their number', () => {
+    expect(areaExportNote(1)).toMatch(/ 1 Area-Wide device is in no cell, so it is not in the file\.$/)
+    expect(areaExportNote(2)).toMatch(/ 2 Area-Wide devices are in no cell, so they are not in the file\.$/)
+  })
+
+  it('names the devices a Metric tab lists, and how many of those that report the metric where a filter narrows them', () => {
+    expect(metricExportScope(23, 23)).toBe('23 devices')
+    expect(metricExportScope(1, 1)).toBe('1 device')
+    expect(metricExportScope(23, 40)).toBe('23 of 40 devices')
+    expect(metricExportScope(1, 1000)).toBe('1 of 1,000 devices')
+    expect(metricExportNote(250, 12)).toBe('The file holds all 250 devices the tab lists, not only the 12 on this page.')
   })
 })
 
