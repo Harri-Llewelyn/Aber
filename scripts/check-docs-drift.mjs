@@ -11570,7 +11570,14 @@ const EXPORT_ENTRY_TABS = EXPORT_ENTRY_FILES.map((f) => f.match(/^frontend\/src\
 // -------------------------------------------------------------------------------------------------
 {
   const css = read('frontend/src/App.css').replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
-  const ruleBody = (selector) => css.match(new RegExp(`\\n${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))?.[1];
+  // The body of the rule that starts a line with `selector`, found as text, not as a built pattern.
+  const ruleBody = (selector) => {
+    const head = `\n${selector} {`;
+    const at = css.indexOf(head);
+    if (at === -1) return undefined;
+    const end = css.indexOf('}', at + head.length);
+    return end === -1 ? undefined : css.slice(at + head.length, end);
+  };
   const problems345 = [];
   const title = ruleBody('.modal-header-row .modal-title');
   const controls = ruleBody('.modal-header-controls');
