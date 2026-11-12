@@ -430,7 +430,8 @@ describe('AlertPill', () => {
 
     /**
      * The capture and playback rules (0226). Each summary sends the reader to the Capture page, so
-     * the row does too, on the tab of the job's kind, which the `job` label names.
+     * the row does too, on the tab of the job's kind narrowed to that job, both of which the `job`
+     * label names.
      */
     describe('a capture or playback alert', () => {
       const jobAlert = (ruleUid, job) => platformAlert({
@@ -440,10 +441,10 @@ describe('AlertPill', () => {
       const rowLink = () => document.querySelector('a.alert-pill-item-link')
 
       it.each([
-        ['aber-job-failed', 'capture job 7d2c0000-0000-4000-8000-000000000001', '/capture/captures', 'capture'],
-        ['aber-job-failed', 'playback job 7d2c0000-0000-4000-8000-000000000002', '/capture/playbacks', 'playback'],
-        ['aber-job-stuck', 'capture job 7d2c0000-0000-4000-8000-000000000003', '/capture/captures', 'capture'],
-        ['aber-job-stuck', 'playback job 7d2c0000-0000-4000-8000-000000000004', '/capture/playbacks', 'playback'],
+        ['aber-job-failed', 'capture job 7d2c0000-0000-4000-8000-000000000001', '/capture/captures?job=7d2c0000-0000-4000-8000-000000000001', 'capture'],
+        ['aber-job-failed', 'playback job 7d2c0000-0000-4000-8000-000000000002', '/capture/playbacks?job=7d2c0000-0000-4000-8000-000000000002', 'playback'],
+        ['aber-job-stuck', 'capture job 7d2c0000-0000-4000-8000-000000000003', '/capture/captures?job=7d2c0000-0000-4000-8000-000000000003', 'capture'],
+        ['aber-job-stuck', 'playback job 7d2c0000-0000-4000-8000-000000000004', '/capture/playbacks?job=7d2c0000-0000-4000-8000-000000000004', 'playback'],
       ])('opens %s for a %s on the Capture page, in this tab', (ruleUid, job, href, kind) => {
         render(<AlertPill alerts={[jobAlert(ruleUid, job)]} />)
         fireEvent.click(pill())

@@ -1208,8 +1208,9 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
   good value is not tidied away first.
 - **A tab change drops the query**, so each tab opens on its own defaults. `keep` names the filters a
   page shares across its tabs: the Vocabulary search, and Capture's stored filter and search. A
-  function `keep(tab)` names them for the tab being opened: Capture keeps its two only between
-  Gateways and Devices, as Captures and Playbacks have no filters.
+  function `keep(tab)` names them for the tab being opened: Capture keeps the search between
+  Gateways and Devices, and between Captures and Playbacks, and the stored filter between the first
+  two only. A `job` never crosses a tab.
 - **`useUrlState` returns `[value, setValue]`**, as `useState` does. A setter reads the address when
   it runs, so several setters called in one handler compose.
 - **A new tab needs only an entry in its page's list**, in `navigation.jsx` (`DEVICES_TABS` and the
@@ -1252,12 +1253,34 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new`, for an automation whose id is `new` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
-| Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |
+| Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
 | Archives | `retired` | `sort` |
 | System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)) |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
 | Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
+
+### The Captures and Playbacks tabs: a search, and one job
+
+The two tabs (`components/tabs/CaptureHistory.jsx`) list the finished jobs of one kind, newest first,
+read a page at a time (`api.jobHistory()`).
+
+- **The search is the toolbar's first control**, as on every list page, and `/` focuses it. It writes
+  `?search=`. `jobSearchText()` is what it matches, one field to a line: the capture's note, the file's
+  name, the subject's name and Sparkplug ID, who started the job (their name, and their id), the status
+  as the database and the tab say it, the failure a row shows, and the job's id. The search reads on
+  through the older pages, `SEARCH_STEP` rows at a time up to `SEARCH_ROWS`, so a job past the first
+  page is found and not reported missing. Past the cap the foot says how many it did not search.
+- **`?job=<id>` lists that one job**, by `captureJobUrl(kind, id)` in `routes.js`, with a line above
+  the table saying so and Show all to leave it. It reads the job alone (`jobHistory(kind, { job })`), so
+  a job past the first page is there. A job still in progress, or an id that is no job's, is not listed:
+  the empty state says so, and the strip above the table shows the one in progress. Typing a search
+  leaves the job, and Clear filters counts it.
+- **A notification opens its job.** The toast for a recording or its stop opens Captures, one for a
+  playback or its stop opens Playbacks, each narrowed to the job (`start_capture_job()` and
+  `start_playback_job()` return its id), and a job's alert does the same from the `job` label
+  (`alertPage()`). A download and an upload make no job, so they open the subject whose capture it is.
+  The toast for a deleted capture is in `NO_LINK` (`notificationLinks.test.js`): its record is gone.
 
 ---
 

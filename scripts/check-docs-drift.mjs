@@ -6545,6 +6545,71 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 376. The Captures and Playbacks search is stated as CaptureHistory.jsx holds it. The search reads
+// on through the older jobs, SEARCH_ROWS at most, and the help page's section on those tabs says that
+// number; it names each thing the search matches, as jobSearchText() lists them, and says the search
+// lives in the address and that `/` reaches it.
+// -------------------------------------------------------------------------------------------------
+{
+  const history = read('frontend/src/components/tabs/CaptureHistory.jsx');
+  const limit = Number(history.match(/^export const SEARCH_ROWS = (\d+)$/m)?.[1]);
+  const section = read('help/pages/capture.md').match(/^## The Captures and Playbacks tabs\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? '';
+  const problems376 = [];
+  if (!limit) problems376.push('CaptureHistory.jsx declares no SEARCH_ROWS');
+  if (!section) problems376.push('help/pages/capture.md has no "## The Captures and Playbacks tabs" section');
+  const flat = section.replace(/\s+/g, ' ');
+  if (limit && !flat.includes(`up to the newest ${limit.toLocaleString('en-GB')}`)) {
+    problems376.push(`help/pages/capture.md's Captures and Playbacks section does not say "up to the newest ${limit.toLocaleString('en-GB')}"`);
+  }
+  for (const piece of ['the note or the file name', "the subject's name and Sparkplug ID", 'who started the job', 'why it failed', "the job's ID", 'The address keeps the search', 'Press **/**']) {
+    if (section && !flat.includes(piece)) problems376.push(`help/pages/capture.md's Captures and Playbacks section does not say "${piece}"`);
+  }
+  // What jobSearchText() reads, field by field: the help's list is that list.
+  const text = history.match(/export function jobSearchText[\s\S]*?\n}\n/)?.[0] ?? '';
+  for (const field of ['note', 'storage_path', 'subject_sparkplug_id', 'requested_by', 'status', 'error', 'job.id']) {
+    if (text && !text.includes(field)) problems376.push(`jobSearchText() no longer reads ${field}, which the help says the search matches`);
+  }
+  if (!text) problems376.push('CaptureHistory.jsx declares no jobSearchText()');
+  if (problems376.length) {
+    for (const p of problems376) fail(`capture job search: ${p}`);
+  } else {
+    pass(`the Captures and Playbacks search reads on through the newest ${limit.toLocaleString('en-GB')} jobs and matches the fields its help names`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 377. A capture or playback job has one address, captureJobUrl() in routes.js, and the page reads
+// the parameter it writes. alertPage() links a job's alert by it, the Capture page's toasts do, the
+// tab reads `job` from the address and passes it to api.jobHistory(), and frontend/README.md's routing
+// table lists `job` for Capture.
+// -------------------------------------------------------------------------------------------------
+{
+  const routes = read('frontend/src/routes.js');
+  const tab = read('frontend/src/components/tabs/CaptureTab.jsx');
+  const api = read('frontend/src/api.js');
+  const history = read('frontend/src/components/tabs/CaptureHistory.jsx');
+  const problems377 = [];
+  const param = routes.match(/export const captureJobUrl = \(kind, id\) => pageUrl\('capture', \{ (\w+): id \}, `\$\{kind\}s`\)/)?.[1];
+  if (!param) problems377.push('routes.js declares no captureJobUrl(kind, id) in the shape this check reads');
+  if (param && !tab.includes(`useUrlState('${param}'`)) problems377.push(`CaptureTab.jsx does not read the "${param}" captureJobUrl() writes`);
+  if (param && !/\bjob = null\b/.test(api) && !api.includes(`${param} = null`)) problems377.push(`api.jobHistory() takes no "${param}"`);
+  if (param && !history.includes(`jobHistory(kind, { ${param}: jobId`)) problems377.push(`CaptureHistory.jsx does not read the one job through jobHistory(kind, { ${param} })`);
+  const alertPage = routes.match(/export const alertPage = [\s\S]*?\n}\n/)?.[0] ?? '';
+  if (!alertPage.includes('captureJobUrl(')) problems377.push('alertPage() does not link a job alert by captureJobUrl()');
+  if (/tabUrl\('capture', `\$\{kind\}s`\)/.test(alertPage)) problems377.push('alertPage() still opens the whole tab for a job alert');
+  const row = read('frontend/README.md').split('\n').find((l) => l.startsWith('| Capture |')) ?? '';
+  if (param && !row.includes(`\`${param}\``)) problems377.push(`frontend/README.md's routing table does not list \`${param}\` for Capture`);
+  for (const piece of ["captureJobUrl('capture'", "captureJobUrl('playback'"]) {
+    if (!tab.includes(piece)) problems377.push(`CaptureTab.jsx no longer links a toast by ${piece}`);
+  }
+  if (problems377.length) {
+    for (const p of problems377) fail(`capture job address: ${p}`);
+  } else {
+    pass(`a capture or playback job has one address, captureJobUrl(), written by the alert and the toasts and read as ?${param}= by the tab`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 115. GoTrue registers no OAuth client itself. auth.yaml sets
 // GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION to "false" and no other chart file names it, and
 // every client a migration writes into auth.oauth_clients is 'manual'. A client anyone could register
