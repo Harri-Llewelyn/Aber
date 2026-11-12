@@ -11572,11 +11572,11 @@ const EXPORT_ENTRY_TABS = EXPORT_ENTRY_FILES.map((f) => f.match(/^frontend\/src\
 {
   const problems357 = [];
   const suite = read('supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py').replace(/\r\n/g, '\n');
-  const vacuum = suite.match(/    def make_the_pages_visible\(self\):[\s\S]*?(?=\n    def )/)?.[0] ?? '';
+  const vacuum = suite.match(/ {4}def make_the_pages_visible\(self\):[\s\S]*?(?=\n {4}def )/)?.[0] ?? '';
   if (!vacuum.includes('conn.autocommit = True') || !vacuum.includes('VACUUM (ANALYZE) public.audit_trail;')) {
     problems357.push('the suite has no make_the_pages_visible() that runs VACUUM (ANALYZE) public.audit_trail on an autocommit connection');
   }
-  const test = suite.match(/    def test_each_class_has_a_valid_index_that_a_query_naming_it_uses\(self\):[\s\S]*?(?=\n    def )/)?.[0] ?? '';
+  const test = suite.match(/ {4}def test_each_class_has_a_valid_index_that_a_query_naming_it_uses\(self\):[\s\S]*?(?=\n {4}def )/)?.[0] ?? '';
   if (!test) problems357.push('the suite has no test_each_class_has_a_valid_index_that_a_query_naming_it_uses');
   else {
     const at = (needle) => test.indexOf(needle);
@@ -11586,7 +11586,7 @@ const EXPORT_ENTRY_TABS = EXPORT_ENTRY_FILES.map((f) => f.match(/^frontend\/src\
     if (!/assertRegex\(plan, r"Index Only Scan using \\S\+", why\)/.test(test)) problems357.push('its Index Only Scan assertion does not carry the planner state');
     if (!/assertNotIn\("CASE", plan, .*\+ why\)/.test(test)) problems357.push('its no-CASE assertion does not carry the planner state');
   }
-  const state = suite.match(/    def partition_state\(self\):[\s\S]*?(?=\n    def )/)?.[0] ?? '';
+  const state = suite.match(/ {4}def partition_state\(self\):[\s\S]*?(?=\n {4}def )/)?.[0] ?? '';
   for (const piece of ['last_autovacuum', 'last_vacuum', 'relallvisible', 'relpages']) {
     if (!state.includes(piece)) problems357.push(`partition_state() does not report ${piece}`);
   }
