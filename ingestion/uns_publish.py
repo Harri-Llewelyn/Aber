@@ -52,8 +52,9 @@ UNS_MQTT_ENABLED = os.getenv("UNS_MQTT_ENABLED", "").strip().lower() in ("1", "t
 # per gateway.
 UNS_MQTT_TOPIC_ROOT = os.getenv("UNS_MQTT_TOPIC_ROOT", "uns").strip().strip("/") or "uns"
 
-# How long a device's path and the metric catalog's units are believed before being re-read. A
-# relocation or a rename on the dashboard therefore moves a device's topic within this window.
+# How long a device's path, the metric catalog's units and its derived metrics' names are believed
+# before being re-read. A relocation or a rename on the dashboard therefore moves a device's topic
+# within this window, and a derived metric added there is dropped under within it.
 UNS_CONTEXT_TTL_SECONDS = int(os.getenv("UNS_CONTEXT_TTL_SECONDS", "60"))
 
 # One row per device: its path below the root, or the reason it has none.
@@ -112,8 +113,11 @@ _context = _TtlCache(UNS_CONTEXT_TTL_SECONDS)
 
 
 def reset_cache():
-    """For tests, and for a future operator control: forget every cached path and the units."""
+    """For tests, and for a future operator control: forget every cached path, the units and the
+    derived names, the last read of them included."""
+    global _derived_last
     _context.clear()
+    _derived_last = frozenset()
 
 
 # -------------------------------------------------------------------------------------------------
@@ -145,6 +149,34 @@ def units_of(supabase):
         rows = _rows(supabase.table("metric_catalog").select("name,units"))
         return {r["name"]: r.get("units") for r in rows if r.get("name")}
     return _context.get(("units",), load)
+
+
+# The names last read, for a read that fails. Empty until one succeeds: nothing is dropped on a
+# name the daemon has not yet been told is derived.
+_derived_last = frozenset()
+
+
+def derived_names_of(supabase):
+    """
+    The names of the catalog's derived metrics, as a frozenset. One read per TTL, as units_of(), so
+    a metric added on the dashboard is dropped under within `UNS_CONTEXT_TTL_SECONDS`.
+
+    A failed read is logged and answers the names last read, held for the TTL like a good answer
+    and retried after it: an outage costs no read per message and does not forget the set.
+    """
+    def load():
+        global _derived_last
+        try:
+            rows = _rows(supabase.table("metric_catalog").select("name").not_.is_("derivation", "null"))
+        except Exception as exc:  # noqa: BLE001 - the drop must never stop ingestion
+            logger.warning(
+                "Could not read the derived metrics (%s); judging readings against the %d names "
+                "last read until the next attempt.", exc, len(_derived_last),
+            )
+            return _derived_last
+        _derived_last = frozenset(r["name"] for r in rows if r.get("name"))
+        return _derived_last
+    return _context.get(("derived",), load)
 
 
 def topic_for(enterprise, row, root=None):

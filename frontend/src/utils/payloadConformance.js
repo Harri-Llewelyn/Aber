@@ -29,6 +29,13 @@ export const PATTERN_NOT_CHECKED = 'pattern_not_checked'
 
 const NO_VALUE = ['no_value', 'metric carries no recognised Sparkplug value field']
 
+/**
+ * A reading under a derived metric's name, which ingestion drops under either policy: the name is
+ * Aber's, not the device's. conformance.py's DERIVED_NAME_CODE and DERIVED_NAME_DETAIL say it first
+ * (mirror check 93). The names come from the catalogue, so the caller passes them to judgePayload().
+ */
+const DERIVED_NAME = ['derived_name', 'this name belongs to a metric Aber computes; the device should publish under another name']
+
 const isDict = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const isScalar = (value) => ['string', 'number', 'boolean'].includes(typeof value)
 
@@ -512,9 +519,10 @@ function valueKindOf(value) {
 /**
  * `{ findings, notChecked, absent }` for a `{ metric: value }` payload against one definition, or
  * `{ error }`. Each finding carries `enforced`. `absent` lists modelled metrics the payload leaves
- * out, which is no fault: a DDATA carries only what changed.
+ * out, which is no fault: a DDATA carries only what changed. `derivedNames` are the catalogue's
+ * derived metrics; a payload naming one has that reading reported as dropped, as ingestion drops it.
  */
-export function judgePayload(definition, payload) {
+export function judgePayload(definition, payload, derivedNames = []) {
   if (!isDict(payload)) {
     return { error: 'A payload is one JSON object of metric names and their values.' }
   }
@@ -527,7 +535,13 @@ export function judgePayload(definition, payload) {
 
   const observed = []
   const dropped = []
+  const derived = new Set(derivedNames)
   for (const [name, value] of Object.entries(payload)) {
+    // Before the value is read, as ingestion's loop does.
+    if (derived.has(name)) {
+      dropped.push([name, ...DERIVED_NAME])
+      continue
+    }
     const kind = valueKindOf(value)
     if (kind) observed.push([name, kind, value])
     else dropped.push([name, ...NO_VALUE])

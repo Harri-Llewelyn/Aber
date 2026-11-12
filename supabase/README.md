@@ -4866,9 +4866,18 @@ is new. The shape function is granted to `authenticated` and `service_role` by n
 CHECK runs as the writer. The trigger function is not granted to anyone.
 
 **What a derived metric is not yet.** No schema holds one: the schema builders leave it out, since
-nothing publishes it. The AAS export and ingestion are as they were. A device that declares a derived
-name after the row exists is not refused until ingestion drops it. The i3X service lists a catalogue
-type for it that no device carries.
+nothing publishes it. The AAS export is as it was. The i3X service lists a catalogue type for it that
+no device carries.
+
+**Ingestion enforces the other direction.** The save refuses a name a device has declared. A device
+that declares or publishes the name after the row exists has the reading dropped under either
+`conformance_policy`, with a `derived_name` finding in the Audit Trail and a count of its own,
+`aber_ingestion_derived_name_dropped_total`. The daemon reads the names from `metric_catalog`
+(`derivation IS NOT NULL`) through the UNS bridge's cache, so a metric added here is dropped under
+within `UNS_CONTEXT_TTL_SECONDS`, 60 seconds by default. A birth's value under the name is left out of
+the device's parameters. No function or migration is new: the findings go through
+`record_ingestion_rejection()`, which holds no list of codes. The rules are in
+[ingestion's README](../ingestion/README.md#a-reading-under-a-derived-metrics-name-is-dropped-under-either-policy).
 
 **How it will be read.** A counter rate and a sum's average read the 1-minute rollup
 (`telemetry_1m`, through `telemetry_carried()`) at every bucket width. Measured against raw on a

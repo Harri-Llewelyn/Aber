@@ -22,7 +22,7 @@ from registry import (
 )
 from conformance import (
     MetricConstraint, ModelledSchema,  # noqa: F401 -- re-exported; test_payload_conformance reads them
-    constraint_violations, enforceable_violation,
+    constraint_violations, derived_name_drop, enforceable_violation,
     modelled_constraints, payload_violations, violation_signature,
 )
 # capture.py owns the capture file format, so the daemon and the CLI cannot diverge. It also holds
@@ -1644,11 +1644,17 @@ def store_birth_parameters(sparkplug_id: str, payload):
     if not supabase_client:
         return
 
+    derived = derived_metric_names()
     rows = []
     for metric in payload.metrics:
         # Asset_ID and Asset_Name carry identity, not configuration -- identity lives in the
         # topic and in `devices`, so storing them as parameters would just be a stale copy.
         if not metric.name or metric.name in IDENTITY_METRICS:
+            continue
+
+        # A derived metric's name is Aber's: its value is not kept as the device's parameter.
+        # record_derived_birth_names() files the finding.
+        if metric.name in derived:
             continue
 
         # No `asset_id` and no `updated_at`: the gate pins both. It takes the asset once as an
@@ -1692,6 +1698,20 @@ def store_birth_parameters(sparkplug_id: str, payload):
         logger.info("DBIRTH: Stored %d birth parameters for device '%s'", len(rows), sparkplug_id)
     except Exception as e:
         logger.error("Error storing DBIRTH parameters for '%s': %s", sparkplug_id, e, exc_info=True)
+
+def record_derived_birth_names(device: dict, payload):
+    """
+    The finding for a birth declaring the name of a derived metric, whose value
+    store_birth_parameters() leaves out. Counted and recorded as a DDATA's is, under a memo of its
+    own, so that a reading with no fault does not make every rebirth file the same row again.
+    """
+    derived = derived_metric_names()
+    names = sorted({m.name for m in payload.metrics if m.name in derived})
+    count("metrics_dropped_derived_name", len(names))
+    record_payload_violations(
+        device, payload_violations([], [derived_name_drop(n) for n in names], None),
+        datetime.now(timezone.utc), memo="birth",
+    )
 
 def is_control_metric(name):
     """bdSeq or a Node Control/Device Control metric: Sparkplug plumbing, which no schema models."""
@@ -1944,6 +1964,7 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         # stays gated.
         store_birth_parameters(device["sparkplug_id"], payload)
         record_declared_metrics(device, payload)
+        record_derived_birth_names(device, payload)
 
         # A birth is evidence of life, quarantined or not, so the watchdog counts it.
         mark_device_seen(device, group_id, gateway_wire_id)
@@ -2664,6 +2685,10 @@ def record_observed_group(gateway, group_id, edge_node_id):
 # `dropped: true`, since those are genuinely lost.
 # See ingestion/README.md -> "Schema Conformance".
 
+# A device publishing a derived name does so on every message; the log says so once in a while.
+_derived_name_warned = {}
+DERIVED_NAME_WARN_INTERVAL_SECONDS = 300
+
 # device_uuid -> ModelledSchema (or None -- see device_modelled_constraints). Keyed on a resolved
 # uuid, so it is bounded by the fleet; it gets the same container as the other caches anyway.
 _schema_cache = TTLCache(MAX_ENTITIES_PER_CACHE, SCHEMA_CACHE_TTL_SECONDS, "schema")
@@ -2710,18 +2735,30 @@ def device_modelled_constraints(device_uuid: str):
     _schema_cache.set(device_uuid, result)
     return result
 
+def derived_metric_names():
+    """
+    The names of the catalog's derived metrics, which Aber computes. A reading a device publishes
+    under one is dropped under either conformance policy, since two sources would share one series.
+    Cached as the UNS bridge's catalog reads are, so an addition takes effect within
+    UNS_CONTEXT_TTL_SECONDS; empty when there is no database client.
+    """
+    if not supabase_client:
+        return frozenset()
+    return uns_publish.derived_names_of(supabase_client)
+
 # {device_uuid: signature}. In-memory, so a daemon restart re-reports each distinct fault once --
 # which is the right trade: an operator who restarts ingestion to clear a fault wants to know
 # whether it came back.
 _last_violation_signature = {}
 
-def record_payload_violations(device: dict, violations, observed_at):
+def record_payload_violations(device: dict, violations, observed_at, memo=None):
     """
     Write one SCHEMA_REJECTION row to the audit trail, only when the fault is new.
 
     DDATA arrives continuously and the table is append-only with no application role able to
     prune it, so a row per non-conforming message would fill the disk. Written when the set of
-    (metric, code) pairs changes, never otherwise.
+    (metric, code) pairs changes, never otherwise. `memo` keeps a second stream's signature apart
+    from the device's DDATA: a birth's findings must not be cleared by a clean reading.
     """
     if not AUDIT_PAYLOAD_REJECTIONS or not supabase_client or not device:
         return
@@ -2730,14 +2767,15 @@ def record_payload_violations(device: dict, violations, observed_at):
     if not device_id:
         return
 
+    memo_key = (device_id, memo) if memo else device_id
     signature = violation_signature(violations)
 
     if not violations:
         # Recovery clears the memo, so a fault that returns after being fixed is recorded again.
-        _last_violation_signature.pop(device_id, None)
+        _last_violation_signature.pop(memo_key, None)
         return
 
-    if _last_violation_signature.get(device_id) == signature:
+    if _last_violation_signature.get(memo_key) == signature:
         count("payload_violations_suppressed", len(violations))
         return
 
@@ -2751,7 +2789,7 @@ def record_payload_violations(device: dict, violations, observed_at):
         # Recorded only after the write SUCCEEDS. Marking it first would mean a transient PostgREST
         # failure silently swallowed the fault until its signature happened to change -- the same
         # trap test_audit_write_dedup.py already covers on the DBIRTH path.
-        _last_violation_signature[device_id] = signature
+        _last_violation_signature[memo_key] = signature
         count("payload_violations_recorded", len(violations))
 
         logger.warning(
@@ -3208,6 +3246,9 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     # "nothing is bound" or "the directory blinked", and neither is grounds for discarding a reading.
     enforcing = enforcing and modelled is not None
     rejected_schema = 0
+    # Read for every message, whatever the policy: the drop below holds under both.
+    derived = derived_metric_names()
+    derived_dropped = []
 
     # Every metric decided here; nothing is written here. Failure granularity is per message:
     # the writer's transaction rolls a message back whole.
@@ -3239,6 +3280,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
             continue
 
         if metric_name in IDENTITY_METRICS:
+            continue
+
+        # The name belongs to a metric Aber computes, so the reading would share its series. Dropped
+        # before its value is read, under audit as well as enforce; the rest of the message is kept.
+        if metric_name in derived:
+            dropped.append(derived_name_drop(metric_name))
+            derived_dropped.append(metric_name)
             continue
 
         if metric.HasField('timestamp') and metric.timestamp > 0:
@@ -3372,6 +3420,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     )
     count("metrics_unresolved_alias", unresolved_aliases)
     count("metrics_rejected_schema", rejected_schema)
+    count("metrics_dropped_derived_name", len(derived_dropped))
 
     if unresolved_aliases:
         # Skip the undecodable metrics, keep the rest, and ask the node to re-birth. On a cold start
@@ -3396,6 +3445,14 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
             ", ".join("%s %d" % item for item in sorted(rejected_timestamps.items())),
             TELEMETRY_MAX_AGE_SECONDS, TELEMETRY_MAX_HISTORICAL_AGE_SECONDS,
             TELEMETRY_MAX_FUTURE_SECONDS,
+        )
+
+    if derived_dropped and _throttled(
+            _derived_name_warned, wire_id, DERIVED_NAME_WARN_INTERVAL_SECONDS):
+        logger.warning(
+            "Dropped %d metric(s) for asset '%s' published under the name of a derived metric: %s. "
+            "Aber computes those; the device should publish under another name.",
+            len(derived_dropped), asset_id, ", ".join(sorted(set(derived_dropped))[:5]),
         )
 
     if rejected_schema:

@@ -44,7 +44,7 @@ function Summary({ result }) {
       <span>
         <strong>{plural(findings.length, 'Finding')}:</strong> ingestion records each one in the Audit Trail.
         {drops > 0 && <> A device set to Enforce drops {plural(drops, 'reading')}.</>}
-        {lost > 0 && <> {plural(lost, 'metric')} with no value {lost === 1 ? 'is' : 'are'} never stored.</>}
+        {lost > 0 && <> {plural(lost, 'metric')} {lost === 1 ? 'is' : 'are'} never stored, under either policy.</>}
         {!drops && !lost && <> The readings are stored under either policy.</>}
       </span>
     </div>

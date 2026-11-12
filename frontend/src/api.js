@@ -3992,7 +3992,13 @@ const apiMethods = {
       if (error || !data || data.length === 0) {
         return { error: 'Target schema definition not found' };
       }
-      return judgePayload(data[0].schema_definition, payload);
+      // A reading under a derived metric's name is dropped whatever the schema says, so the names
+      // are read too; judging without them would pass a payload ingestion refuses.
+      const derived = await supabase.from('metric_catalog').select('name').not('derivation', 'is', null);
+      if (derived.error) {
+        return { error: 'The metric catalog could not be read, so a derived metric\'s name cannot be checked.' };
+      }
+      return judgePayload(data[0].schema_definition, payload, (derived.data || []).map((row) => row.name));
     }
 
     // Both are RPCs rather than table writes: `version` is computed from the parent and `publish`

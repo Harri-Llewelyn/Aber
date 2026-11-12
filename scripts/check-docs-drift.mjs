@@ -4961,6 +4961,94 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 335. The count of readings dropped under a derived name is one series, named as the daemon exports
+// it. metrics.py maps the flat counter ingestion.py raises to a series and gives it a help text; the
+// ingestion README and the 0267 section name that series. A README naming another is a query that
+// returns nothing, and a counter with no help is one a scraper cannot read the meaning of.
+// -------------------------------------------------------------------------------------------------
+{
+  const metrics = read('ingestion/metrics.py');
+  const flat = 'metrics_dropped_derived_name';
+  const series = metrics.match(new RegExp(`"${flat}": \\("([a-z_]+)", \\{\\}\\)`))?.[1];
+  const problems335 = [];
+  if (!series) problems335.push(`could not read the series of ${flat} out of ingestion/metrics.py`);
+  else {
+    if (!metrics.includes(`"${series}":\n`)) problems335.push(`ingestion/metrics.py gives ${series} no help text`);
+    if (!/count\("metrics_dropped_derived_name"/.test(read('ingestion/ingestion.py'))) problems335.push(`ingestion/ingestion.py never counts ${flat}`);
+    for (const file of ['ingestion/README.md', 'supabase/README.md']) {
+      if (!read(file).includes(`\`${series}\``)) problems335.push(`${file} does not name \`${series}\``);
+    }
+  }
+  if (problems335.length) {
+    fail('the docs and the exporter name the derived-name drop\'s counter otherwise than metrics.py:\n' +
+      problems335.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`${series} is mapped, helped, counted and named in the ingestion README and the 0267 section`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 336. How soon a derived metric added on the Metrics page is dropped under. Ingestion reads the
+// names through the UNS bridge's cache, so the answer is that cache's freshness: UNS_CONTEXT_TTL_SECONDS,
+// which uns_publish.py defaults and the chart sets (ingestion.unsContextTtlSeconds). The ingestion
+// README and the 0267 section say the figure, and the README's variable table too; a page naming
+// another tells an operator how long readings under a new name are still stored, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const inCode = read('ingestion/uns_publish.py').match(/^UNS_CONTEXT_TTL_SECONDS = int\(os\.getenv\("UNS_CONTEXT_TTL_SECONDS", "(\d+)"\)\)$/m)?.[1];
+  const inChart = read('deploy/helm/aber/values.yaml').match(/^ {2}unsContextTtlSeconds: (\d+)$/m)?.[1];
+  const problems336 = [];
+  if (!inCode || !inChart) problems336.push('could not read the default out of ingestion/uns_publish.py and the chart\'s unsContextTtlSeconds');
+  else {
+    if (inCode !== inChart) problems336.push(`uns_publish.py defaults UNS_CONTEXT_TTL_SECONDS to ${inCode} and the chart to ${inChart}`);
+    const claims = [
+      ['ingestion/README.md', `**within \`UNS_CONTEXT_TTL_SECONDS\`**, ${inCode} seconds by default`],
+      ['ingestion/README.md', `| \`UNS_CONTEXT_TTL_SECONDS\` | \`${inCode}\` |`],
+      ['supabase/README.md', `within \`UNS_CONTEXT_TTL_SECONDS\`, ${inCode} seconds by default`],
+    ];
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems336.push(`${file} does not say "${said}"`);
+  }
+  if (problems336.length) {
+    fail('the docs say how soon a new derived metric is dropped under otherwise than the cache\'s freshness:\n' +
+      problems336.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the ingestion README and the 0267 section say a new derived metric is dropped under within ${inCode} seconds, as UNS_CONTEXT_TTL_SECONDS defaults`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 337. The finding for a derived name is written up as conformance.py codes it, and the pages that
+// said nobody publishes a derived metric say what happens when one does. The code is named in the
+// ingestion README and the 0267 section; the Devices and Metrics help each say the reading is
+// dropped; and the 0267 section no longer says ingestion is as it was.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('ingestion/conformance.py').match(/^DERIVED_NAME_CODE = "([a-z_]+)"$/m)?.[1];
+  const problems337 = [];
+  if (!code) problems337.push('could not read DERIVED_NAME_CODE out of ingestion/conformance.py');
+  else {
+    for (const file of ['ingestion/README.md', 'supabase/README.md']) {
+      if (!read(file).includes(`\`${code}\``)) problems337.push(`${file} does not name the finding's code \`${code}\``);
+    }
+  }
+  const claims = [
+    ['help/pages/devices.md', 'a reading published under the name of a derived metric is dropped'],
+    ['help/pages/metrics.md', 'A reading a device publishes under its name is dropped'],
+    ['supabase/README.md', '**Ingestion enforces the other direction.**'],
+  ];
+  for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems337.push(`${file} does not say "${said}"`);
+  if (/The AAS export and ingestion are as they were/.test(read('supabase/README.md').replace(/\s+/g, ' '))) {
+    problems337.push('supabase/README.md still says ingestion is as it was, which the derived-name drop changed');
+  }
+  if (problems337.length) {
+    fail('the docs say what a derived name\'s reading meets otherwise than ingestion does:\n' +
+      problems337.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the finding \`${code}\` is named in the ingestion README and the 0267 section, and the Devices and Metrics help say the reading is dropped`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 14. The product does not call itself Factory+.
 //
 // Factory+ is a real external framework this stack implements, and every reference to it as a

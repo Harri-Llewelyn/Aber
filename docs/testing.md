@@ -62,6 +62,13 @@ python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_stale_node_death.py  # an earlier session's NDEATH (bdSeq) changes nothing
 python ingestion/test_payload_conformance.py
+# A reading under a derived metric's name (a metric Aber computes) is dropped under audit as well as
+# enforce, files a `derived_name` finding and is counted in a series of its own, not the schema
+# counter that only an enforcing device raises. The names come from the catalogue through the UNS
+# bridge's TTL cache: one read per freshness, an addition takes effect when it ends, a failed read
+# keeps the names last read, and before any read nothing is dropped. A birth's value under the name
+# is left out of the device's parameters. A fake catalogue; no broker, no database.
+python ingestion/test_a_derived_name_is_dropped.py
 # What the dashboard's schema builders write (enum, minimum, maximum), read by conformance.py:
 # test-harness/fixtures/schema-builder-output.json, whose other half is schemaBuilderContract.test.jsx.
 python ingestion/test_schema_builder_contract.py
@@ -276,6 +283,16 @@ python ingestion/test_playback_replay.py
 # read without that call, nor a minute after it. Same needs and environment as the suite above, whose
 # helpers it reuses; kubectl removes the fixture's broker account afterwards and reads the cgroups.
 python ingestion/test_recorded_capture_replay.py
+# A DERIVED NAME IS DROPPED THROUGH THE REAL CHAIN. test_a_derived_name_is_dropped.py holds the rule
+# with a fake catalogue; this adds a derived metric (a counter rate and the counter it is built on)
+# as the database's owner, then has a fixture Host gateway's edge node,
+# with the credential the Gateways page issues, declare and publish the derived name beside the
+# measured counter. The counter must reach the historian twice and the derived name not at all, nor
+# the device's parameters, and the Audit Trail must hold a `derived_name` finding for the birth and
+# one for the readings, not one for each message. The daemon reads the catalogue once per
+# UNS_CONTEXT_TTL_SECONDS, so the suite waits that long after adding the row. Needs the stack up and
+# the environment test_playback_replay.py reads, plus SUPABASE_DB_*; removes what it made.
+python ingestion/test_a_derived_name_is_dropped_stack.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
 # Deliberately narrow: the export path needs a historian, object storage and a chunk to mean

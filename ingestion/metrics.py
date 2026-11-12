@@ -107,6 +107,9 @@ COUNTER_MAP = {
     # EXPORTED_LABELLED_INSTEAD below is where that is recorded.
     "metrics_unresolved_alias": ("aber_ingestion_alias_unresolved_total", {}),
     "metrics_rejected_schema": ("aber_ingestion_schema_rejected_total", {}),
+    # Its own series, not a label on the one above: that one is non-zero only for a device set to
+    # enforce, and this drop holds under both policies, so summing them would blur what each says.
+    "metrics_dropped_derived_name": ("aber_ingestion_derived_name_dropped_total", {}),
     "metrics_integer_datatype_unknown": ("aber_ingestion_integer_datatype_unknown_total", {}),
     # The historian write path.
     "write_failures": ("aber_ingestion_write_failures_total", {}),
@@ -246,6 +249,13 @@ HELP = {
         "them is recorded as a large positive number. The node's next birth supplies the datatypes.",
     "aber_ingestion_schema_rejected_total":
         "Metrics DROPPED for contradicting their device's bound schema. Non-zero only for a device set to conformance_policy=enforce (0050); this telemetry was not written and cannot be recovered.",
+    "aber_ingestion_derived_name_dropped_total":
+        "Metrics DROPPED because a device published them under the name of a derived metric, one "
+        "Aber computes from others. Dropped under either conformance policy, audit or enforce: this "
+        "telemetry was not written and cannot be recovered. A birth declaring such a name counts "
+        "too, once per birth. Each new fault is a schema rejection in the Audit Trail, coded "
+        "derived_name. The sibling of aber_ingestion_schema_rejected_total, which counts only what a "
+        "device set to enforce dropped for contradicting its schema.",
     "aber_ingestion_write_batch_failures_total":
         "Transactions carrying more than one message that failed and were retried one message at a "
         "time. The message at fault is counted by aber_ingestion_write_failures_total; the others were "
