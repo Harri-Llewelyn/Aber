@@ -5,7 +5,7 @@ import { navigate, pathSegments, queryOf, useUrl, useUrlState } from '../../hook
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useSortableRows } from '../../hooks/useTableSort'
-import { automationUrl, automationsUrl } from '../../routes'
+import { automationUrl, automationsUrl, newAutomationUrl } from '../../routes'
 import { ActionButton } from '../common/ActionButton'
 import { CardHeading } from '../common/CardHeading'
 import { ClearFilters } from '../common/ClearFilters'
@@ -174,14 +174,14 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
               : entries.length === 0 ? 'There is no automation to export' : `Download every automation as ${AUTOMATIONS_FILE_NAME}. Tick some to export only those`}
             onClick={() => onExport(picked.length ? picked : null)}
           >
-            <IconDownload size={13} aria-hidden="true" /> {picked.length ? `Export ${picked.length}` : 'Export'}
+            <IconDownload size={13} aria-hidden="true" /> {picked.length ? `Export (${picked.length})` : 'Export'}
           </ActionButton>
           <ActionButton
             className="btn btn-primary btn-sm"
             permitted={canWrite}
             deniedTitle={AUTOMATION_WRITE_TITLE}
             title="Write a new automation in the YAML editor, from an example"
-            onClick={() => navigate(automationUrl('new'))}
+            onClick={() => navigate(newAutomationUrl())}
           >
             <IconPlus size={13} aria-hidden="true" /> New Automation
           </ActionButton>

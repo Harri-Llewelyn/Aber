@@ -76,7 +76,7 @@ Every key and every value is listed in [the format's reference](../../docs/autom
 - **All or nothing.** If anything is refused, nothing is applied.
 - **An upload never deletes.** An automation the file leaves out stays as it is. To remove one, open it and select **Delete**.
 
-**Export** downloads `automations.yaml`. With no row ticked it holds every automation. Tick some rows, and **Export** holds only those. Inside an automation, **Export** holds that one.
+**Export** downloads `automations.yaml`. With no row ticked it holds every automation. Tick some rows, and **Export** holds only those and counts them, for example **Export (2)**. Inside an automation, **Export** holds that one.
 
 A file from another site needs its device ids changed first. Each site's devices have ids of their own.
 

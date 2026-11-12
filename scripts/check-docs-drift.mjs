@@ -5931,6 +5931,11 @@ const OPERATOR_PAIRS = [
     problems321.push("routes.js's automationUrl() no longer sends an automation whose id is `new` to ?open=1 or the others to /automations/<id>");
   }
   if (!tab.includes("params.has('open')")) problems321.push(`${TAB} does not read ?open=1, which tells an automation called \`new\` from the starter`);
+  // New Automation opens the starter, never the address of a saved automation whose id is new.
+  if (!/export const newAutomationUrl = \(\) => '\/automations\/new'\n/.test(routes)) {
+    problems321.push("routes.js's newAutomationUrl() is no longer /automations/new with no query");
+  }
+  if (!tab.includes('navigate(newAutomationUrl())')) problems321.push(`${TAB}'s New Automation does not open newAutomationUrl()`);
   if (problems321.length) {
     fail(`the Automations page's address is not stated as the code reads it:\n${problems321.map((p) => `        ${p}`).join('\n')}`);
   } else {
