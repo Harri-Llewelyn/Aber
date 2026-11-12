@@ -18,6 +18,7 @@ import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
 import { AlertKey } from '../common/AlertKey'
+import { DerivedTag } from '../common/DerivedTag'
 import { IconChartLine, IconCpu, IconDownload } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
@@ -25,16 +26,18 @@ import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBands } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import { deviceIds } from '../../utils/sparkplugId'
+import { splitDerived, unitOf } from '../../utils/derivedMetric'
 import {
-  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem, mayExportReadings,
+  DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem,
+  exportableMetrics, mayExportReadings,
 } from '../../utils/telemetryExport'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY,
   HISTORY_SPANS, TOO_MANY_BUCKETS, bucketOptions, bucketStarts, changeSeries, chartSeries, chartSummary, datatypeKind,
-  deviceMatches, deviceMetrics, inReads, markBuckets, metricGroups, pickResolution, pickedAddress, readPlan, readWords,
-  readableResolution, stateReadLine, telemetryKey, validRanges,
+  derivedReadProblem, deviceMatches, deviceMetrics, inReads, markBuckets, metricGroups, pickResolution, pickedAddress, readPlan,
+  readWords, readableResolution, stateReadLine, telemetryKey, validRanges,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -115,7 +118,7 @@ function BucketChoice({ value, options, onChange }) {
 }
 
 /** A unit for each metric, from the catalog, by name. */
-const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, m.units ?? null]))
+const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, unitOf(m)]))
 
 /** Which groups this browser's viewer closed, by datatype. Not in the address: a link opens them all. */
 export const CLOSED_GROUPS_KEY = 'aber_history_closed_groups'
@@ -185,7 +188,7 @@ const WIDTH_SETTLE_MS = 300
 export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, every, setEvery, userRole, showToast }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
-  const metrics = useMemo(() => deviceMetrics(device, schemas), [device, schemas])
+  const metrics = useMemo(() => deviceMetrics(device, schemas, catalog), [device, schemas, catalog])
   const ranges = useMemo(() => validRanges(device, schemas), [device, schemas])
   const units = useMemo(() => unitsOf(catalog), [catalog])
   const kinds = useMemo(() => new Map((catalog || []).map(m => [m.name, datatypeKind(m.datatype)])), [catalog])
@@ -200,6 +203,9 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
   // Each read's number: only the newest may land, so a slow read never draws over a later one.
   const latestRead = useRef(0)
 
+  // The derived metrics charted: computed from the minutes by derived_series(), not read as telemetry.
+  const derivedNames = useMemo(() => new Set(splitDerived(names, catalog).derived), [names, catalog])
+  const derivedAll = useMemo(() => new Set(splitDerived(metrics, catalog).derived), [metrics, catalog])
   const textNames = useMemo(() => new Set(names.filter(n => kinds.get(n) === 'text')), [names, kinds])
   // Text and flags take the change read too: every change, while raw telemetry holds the window.
   const stateNames = useMemo(() => new Set(names.filter(n => ['text', 'flag'].includes(kinds.get(n)))), [names, kinds])
@@ -239,14 +245,25 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
     }
     setReading(r => ({ ...(r?.byMetric ? r : {}), loading: true }))
     const reads = groups.flatMap(g => inReads(g.names, g.resolution.perRead).map(part => ({ part, resolution: g.resolution })))
+    // A derived metric is read apart, by its own function; a window too long for it is said in its charts.
+    const derivedProblem = derivedNames.size
+      ? derivedReadProblem(start.getTime(), end.getTime(), Math.max(...groups.map(g => g.resolution.minutes)), 1, [...derivedNames], catalog)
+      : null
+    span.derivedProblem = derivedProblem
     // Beside the bucket read, which a chart falls back to: its marks are on the group's buckets.
     const changeReads = groups.flatMap(g => inReads(g.changes, HISTORY_CHANGE_SERIES).map(part => ({ part, resolution: g.resolution })))
     const bounds = { from: start.toISOString(), to: end.toISOString(), assetIds: [device.asset_id] }
     try {
       const [parts, changeParts] = await Promise.all([
-        Promise.all(reads.map(({ part, resolution }) => api.readCarriedTelemetry({
-          ...bounds, bucketMinutes: resolution.minutes, metricNames: part,
-        }, { signal }))),
+        Promise.all(reads.flatMap(({ part, resolution }) => {
+          const { measured, derived } = splitDerived(part, catalog)
+          return [
+            measured.length ? api.readCarriedTelemetry({ ...bounds, bucketMinutes: resolution.minutes, metricNames: measured }, { signal }) : null,
+            derived.length && !derivedProblem
+              ? api.readDerivedSeries({ ...bounds, bucketMinutes: resolution.minutes, metricNames: derived }, { signal })
+              : null,
+          ].filter(Boolean)
+        })),
         Promise.all(changeReads.map(({ part, resolution }) => api.readTelemetryChanges({
           ...bounds, bucketMinutes: resolution.minutes, metricNames: part,
         }, { signal }))),
@@ -268,7 +285,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
     }
     // The window and the metrics by value: a new object of the same window is the same read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device.asset_id, namesKey, textKey, statesKey, windowKey, bucket])
+  }, [device.asset_id, namesKey, textKey, statesKey, windowKey, bucket, catalog])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -311,15 +328,19 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
 
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
+  // A derived metric is computed when drawn and holds no reading: the export names the others.
+  const exportable = exportableMetrics(names, catalog)
   const exportBlocked = names.length === 0
     ? 'This device has no metric to export.'
-    : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
+    : exportable.names.length === 0
+      ? DERIVED_EXPORT_NOTE
+      : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
   /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
   const openExport = () => {
     const at = Date.now()
     const { start, end } = windowBounds(win, at)
     setExporting({
-      devices: [{ id: telemetryKey(device), name: device.asset_name }], names,
+      devices: [{ id: telemetryKey(device), name: device.asset_name }], names: exportable.names, left: exportable.left,
       from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
     })
   }
@@ -327,8 +348,10 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
   // The groups of the metrics chosen, and which are open; the Metrics list is grouped the same way.
   const groups = useMemo(() => metricGroups(names, catalog), [names, catalog])
   const metricOptions = useMemo(
-    () => metricGroups(metrics, catalog).flatMap(g => g.names.map(m => ({ value: m, label: m, group: g.label }))),
-    [metrics, catalog]
+    () => metricGroups(metrics, catalog).flatMap(g => g.names.map(m => ({
+      value: m, label: m, group: g.label, tag: derivedAll.has(m) ? <DerivedTag /> : undefined,
+    }))),
+    [metrics, catalog, derivedAll]
   )
   const setGroupsOpen = (keys, open) => setClosedGroups(prev => {
     const next = new Set(prev)
@@ -355,12 +378,14 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
       const read = readWords(change, resolution)
       const unit = units.get(name) ?? null
       const validRange = ranges.get(name) ?? null
+      const derived = derivedNames.has(name)
       return {
-        name, unit, series, validRange, resolution, starts, read, kind: kinds.get(name),
-        summary: chartSummary({ metric: name, unit, windowText: reading.windowText, resolution, series, validRange, starts, span, read }),
+        name, unit, series, validRange, resolution, starts, read, kind: kinds.get(name), derived,
+        note: derived && reading.derivedProblem ? reading.derivedProblem : null,
+        summary: chartSummary({ metric: name, unit, windowText: reading.windowText, resolution, series, validRange, starts, span, read, derived }),
       }
     })
-  }, [reading, units, ranges, kinds])
+  }, [reading, units, ranges, kinds, derivedNames])
   // What the status line says the text and flag charts show; a chart reading otherwise says its own.
   const stateLine = useMemo(() => stateReadLine(charts.filter(c => c.read).map(c => ({ kind: c.kind, words: c.read }))), [charts])
   const chartGroups = useMemo(() => {
@@ -402,7 +427,9 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
             permitted={canExport}
             deniedTitle={EXPORT_DENIED_TITLE}
             disabled={Boolean(exportBlocked)}
-            title={exportBlocked ?? 'Download the readings of the metrics shown, over this window, as CSV'}
+            title={exportBlocked ?? (exportable.left.length
+              ? `Download the readings of the measured metrics shown, over this window, as CSV. ${DERIVED_EXPORT_NOTE}`
+              : 'Download the readings of the metrics shown, over this window, as CSV')}
             onClick={openExport}
           >
             <IconDownload size={13} aria-hidden="true" /> Export CSV
@@ -492,7 +519,8 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
                         syncKey={`history-${device.asset_id}`}
                         band={shownBand}
                         plugins={alerts.plugins}
-                        note={c.read && c.read !== stateLine?.words ? c.read : null}
+                        derived={c.derived}
+                        note={c.note ?? (c.read && c.read !== stateLine?.words ? c.read : null)}
                       />
                     ))}
                   </div>
@@ -509,6 +537,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
         <TelemetryExportModal
           devices={exporting.devices}
           metricNames={exporting.names}
+          left={exporting.left}
           from={exporting.from}
           to={exporting.to}
           windowWords={exporting.windowWords}

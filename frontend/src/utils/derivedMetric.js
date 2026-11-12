@@ -138,11 +138,11 @@ export function derivedUnit(kind, inputRows) {
 
 /**
  * The unit a derived metric will take, in words with its reason, for the dialog's fixed Units line:
- * "COUNT/HOUR, the counter's unit per hour", "None: a share of time has no unit". Before the inputs
+ * "COUNT/HOUR, the counter's unit per hour", "% of the time, stored as a fraction from 0 to 1" (SHARE_UNIT_WORDS). Before the inputs
  * are chosen it says what the unit will follow.
  */
 export function describeUnit(kind, inputRows) {
-  if (kind === 'time_in_state') return 'None: a share of time has no unit'
+  if (kind === 'time_in_state') return SHARE_UNIT_WORDS
   if (kind === 'counter_rate') {
     const row = inputRows[0]
     if (!row) return "The counter's unit per hour"
@@ -207,4 +207,125 @@ export function stateOptions(metric) {
   if (!metric) return null
   if (metric.datatype === 11) return ['true', 'false']
   return metric.permitted_values?.length ? metric.permitted_values : null
+}
+
+// ------------------------------------------------------------------------------------------------
+// Reading a derived metric: derived_series() and derived_current() (0282)
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * What one derived_series() call may take, as the function holds it (mirror check 95): at most
+ * DERIVED_MAX_ROWS devices times metrics times buckets, which is the dashboard's row cap, and at most
+ * DERIVED_MAX_MINUTES minutes of input (devices times inputs times the window's minutes), and a bucket
+ * of at most DERIVED_MAX_BUCKET_MINUTES.
+ */
+export const DERIVED_MAX_ROWS = 5000
+export const DERIVED_MAX_MINUTES = 250000
+export const DERIVED_MAX_BUCKET_MINUTES = 5760
+
+/**
+ * How many minutes before the last whole minute a derived metric's current value looks, as
+ * derived_window_minutes() says (mirror check 94): 60 for a counter rate and a time in state, 0 for a
+ * sum, which is its value at the last whole minute. Null for a definition of another kind.
+ */
+export function derivedWindowMinutes(derivation) {
+  if (derivation?.kind === 'counter_rate' || derivation?.kind === 'time_in_state') return 60
+  if (derivation?.kind === 'sum') return 0
+  return null
+}
+
+/** The window of a current value in words, after "is 4.2": "over the last hour", "at the last whole minute". */
+export const currentWords = (derivation) => (derivedWindowMinutes(derivation) === 0 ? 'at the last whole minute' : 'over the last hour')
+
+/** The derived metrics of a catalog as a Map of name to definition. */
+export function derivedDefinitions(catalog) {
+  return new Map((catalog || []).filter(isDerived).map(m => [m.name, m.derivation]))
+}
+
+/**
+ * The derived metrics whose inputs are all among `reported`, a device's metric names (what it declared
+ * and what its schemas model: "reports"), by name in name order. A derived metric applies to every
+ * device that reports all its inputs, and an input that is itself derived does not count: none can be.
+ */
+export function derivedReportedBy(reported, catalog) {
+  const has = reported instanceof Set ? reported : new Set(reported)
+  return [...derivedDefinitions(catalog)]
+    .filter(([, def]) => derivationInputs(def).every(input => has.has(input)))
+    .map(([name]) => name)
+    .sort((a, b) => a.localeCompare(b))
+}
+
+/** `names` split into the measured ones and the derived ones, each in the order given. */
+export function splitDerived(names, catalog) {
+  const derived = derivedDefinitions(catalog)
+  return { measured: names.filter(n => !derived.has(n)), derived: names.filter(n => derived.has(n)) }
+}
+
+/** How many inputs the derived metrics among `names` read: a minute of each is a minute of input. */
+export function derivedInputCount(names, catalog) {
+  const derived = derivedDefinitions(catalog)
+  return names.reduce((sum, n) => sum + (derived.has(n) ? derivationInputs(derived.get(n)).length : 0), 0)
+}
+
+/**
+ * A time in state is a fraction from 0 to 1 wherever it is data (the API, an alert's values, a
+ * threshold in YAML), and a percentage wherever a person is shown it. SHARE_UNIT is the unit such a
+ * metric is drawn in: readingWords() sees it and says the value with percentWords(), and a chart
+ * titles itself "(% of the time)". SHARE_FRACTION_NOTE is what the Automations editor says of the
+ * threshold, which is a fraction.
+ */
+export const SHARE_UNIT = '% of the time'
+export const SHARE_FRACTION_NOTE = 'a fraction from 0 to 1 (0.9 is 90%)'
+/** A time in state's unit where a dialog or a drawer says it in full, with what the data holds. */
+export const SHARE_UNIT_WORDS = `${SHARE_UNIT}, stored as a fraction from 0 to 1`
+
+/**
+ * A fraction as a percentage in words: at most one decimal place, a trailing zero dropped. 0.42 is
+ * "42%", 0.425 "42.5%", 1 "100%". The same words as automation_value_words() says in an alert: the db suite
+ * and derivedMetricReads.test.js hold one table of fractions and what each is said as.
+ */
+export function percentWords(fraction) {
+  if (fraction === null || fraction === undefined || !Number.isFinite(Number(fraction))) return '—'
+  return `${Math.round(Number(fraction) * 1000) / 10 || 0}%`
+}
+
+/** Whether a definition is a time in state. */
+export const isShare = (derivation) => derivation?.kind === 'time_in_state'
+
+/** A catalog row's unit as a chart and a drawer say it: a time in state's is SHARE_UNIT, any other its own, or null. */
+export const unitOf = (metric) => (isShare(metric?.derivation) ? SHARE_UNIT : (metric?.units ?? null))
+
+/** A list of names as the dashboard says one: "A", "A and B", "A, B and C". */
+const listWords = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`)
+
+/**
+ * The derived drawer's Applies to line, as two parts: `lead`, which the drawer's field label says, and
+ * `rest`. The devices that report every input (the Metric tab's rule): the first two and how many more
+ * past three, then what they report. With none, it says what no device reports yet. The names are in
+ * the order a table sorts them, so the two named are the same whichever order the devices were read in.
+ */
+// The collation utils/tableSort.js gives a text column ("Press 2" before "Press 10", case aside). This
+// module imports nothing, because the mirror check loads it in Node.
+const nameOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+
+function appliesTo(names, derivation) {
+  const inputs = derivationInputs(derivation)
+  const deviceNames = [...names].sort(nameOrder.compare)
+  if (deviceNames.length === 0) return { lead: 'Applies to no device yet', rest: `none reports ${listWords(inputs)}` }
+  const shown = deviceNames.length > 3
+    ? `${deviceNames.slice(0, 2).join(', ')} and ${deviceNames.length - 2} more`
+    : listWords(deviceNames)
+  return { lead: 'Applies to', rest: `${shown}, ${deviceNames.length === 1 ? 'the device that reports' : 'the devices that report'} ${listWords(inputs)}` }
+}
+
+/** The whole line: "Applies to: Press 1, Press 2 and 3 more, the devices that report Controller/PART_COUNT". */
+export function appliesToWords(deviceNames, derivation) {
+  const { lead, rest } = appliesTo(deviceNames, derivation)
+  return `${lead}: ${rest}`
+}
+
+/** What the drawer's Applies To field holds beside its label: the line without "Applies to". */
+export function appliesToValue(deviceNames, derivation) {
+  const { rest } = appliesTo(deviceNames, derivation)
+  return deviceNames.length === 0 ? `No device yet: ${rest}` : rest
 }

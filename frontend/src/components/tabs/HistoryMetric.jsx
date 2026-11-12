@@ -12,6 +12,7 @@ import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
 import { AlertKey } from '../common/AlertKey'
+import { DerivedTag } from '../common/DerivedTag'
 import { SmallMultiples } from '../common/SmallMultiples'
 import { ActionButton } from '../common/ActionButton'
 import { TelemetryExportModal } from '../modals/TelemetryExportModal'
@@ -22,16 +23,16 @@ import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import {
-  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportSizeProblem, exportWindowProblem, mayExportReadings,
-  metricExportNote, metricExportScope,
+  DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportSizeProblem, exportWindowProblem,
+  exportableMetrics, mayExportReadings, metricExportNote, metricExportScope,
 } from '../../utils/telemetryExport'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import { readDeviceSeries } from '../../utils/historyReads'
 import {
   DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, bucketStarts,
-  METRIC_PAGE_SIZE, changeSeries, chartSeries, markBuckets, metricAddress, metricDevices, metricPages, multiplesWords, pageFrom, pagingWords,
-  pickedAddress, readWords, stateReadLine, telemetryKey, validRanges,
+  METRIC_PAGE_SIZE, changeSeries, chartSeries, derivedReadProblem, markBuckets, metricAddress, metricDevices, metricPages,
+  multiplesWords, pageFrom, pagingWords, pickedAddress, readWords, stateReadLine, telemetryKey, validRanges,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -44,16 +45,17 @@ const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 
 /** The toolbar's metric: its name, opening the metrics some device reports, each with how many do. */
 function MetricSwitcher({ metrics, metric, win, filters }) {
+  const derived = metrics.find(m => m.name === metric)?.derived
   const [search, setSearch] = useState('')
   const needle = search.trim().toLowerCase()
   const shown = metrics.filter(m => !needle || m.name.toLowerCase().includes(needle))
   return (
     <ToolbarPopover
       label="Choose a metric"
-      buttonLabel={`Metric: ${metric}`}
+      buttonLabel={`Metric: ${metric}${derived ? ' (derived)' : ''}`}
       buttonClass="btn btn-sm btn-ghost control-md history-device-pick"
       tip="Compare another metric across the devices that report it"
-      button={<OverflowText>{metric}</OverflowText>}
+      button={<><OverflowText>{metric}</OverflowText>{derived && <DerivedTag />}</>}
     >
       {({ close }) => (
         <>
@@ -70,6 +72,7 @@ function MetricSwitcher({ metrics, metric, win, filters }) {
                     onNavigate={() => { close(); navigate(to) }}
                   >
                     <OverflowText>{m.name}</OverflowText>
+                    {m.derived && <DerivedTag />}
                     <span className="history-device-place">{plural(m.count, 'device', 'devices')}</span>
                   </RouteLink>
                 </li>
@@ -121,16 +124,18 @@ function Pager({ plan, onPage }) {
  * shown, in the Device tab's dialog, for an Administrator or a Shopfloor Manager and for a window no
  * longer than history.export_max_days.
  */
-export function HistoryMetric({ metric, devices, schemas, metrics, areas, cells, win, setWin, every, setEvery, userRole, showToast }) {
+export function HistoryMetric({ metric, devices, schemas, catalog = null, metrics, areas, cells, win, setWin, every, setEvery, userRole, showToast }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const info = metrics.find(m => m.name === metric) ?? null
   const unit = info?.unit ?? null
   const kind = info?.kind ?? null
   const stateKind = kind === 'text' || kind === 'flag'
+  // A derived metric is computed from the minutes, and its devices are those that report all its inputs.
+  const derived = info?.derived ?? false
 
   // Everything that reports the metric, before any narrowing: what the Filters panel offers.
-  const everyReporter = useMemo(() => metricDevices(devices, schemas, metric), [devices, schemas, metric])
+  const everyReporter = useMemo(() => metricDevices(devices, schemas, metric, { catalog }), [devices, schemas, metric, catalog])
   const areaOptions = useMemo(() => {
     const ids = new Set(everyReporter.map(d => d.area_id).filter(Boolean))
     return areas.filter(a => ids.has(a.area_id)).map(a => ({ value: a.area_id, label: a.name }))
@@ -151,8 +156,8 @@ export function HistoryMetric({ metric, devices, schemas, metrics, areas, cells,
   const filters = { areas: areaIds, cells: cellIds, devices: deviceKeys }
 
   const reporters = useMemo(
-    () => metricDevices(devices, schemas, metric, { areas: areaIds, cells: cellIds, keys: deviceKeys }),
-    [devices, schemas, metric, areaIds, cellIds, deviceKeys]
+    () => metricDevices(devices, schemas, metric, { areas: areaIds, cells: cellIds, keys: deviceKeys, catalog }),
+    [devices, schemas, metric, areaIds, cellIds, deviceKeys, catalog]
   )
   const allKeys = useMemo(() => reporters.map(telemetryKey), [reporters])
   const keysKey = allKeys.join('\n')
@@ -179,14 +184,19 @@ export function HistoryMetric({ metric, devices, schemas, metrics, areas, cells,
       return
     }
     const keys = allKeys.slice(plan.from, plan.to)
-    const span = { start: start.getTime(), end: end.getTime(), resolution: plan.resolution, at, keys, plan, metric, unit, kind, windowText: windowWords(win, at) }
+    const tooLong = derived && keys.length ? derivedReadProblem(start.getTime(), end.getTime(), plan.resolution.minutes, keys.length, [metric], catalog) : null
+    if (tooLong) {
+      setReading({ problem: tooLong })
+      return
+    }
+    const span = { start: start.getTime(), end: end.getTime(), resolution: plan.resolution, at, keys, plan, metric, unit, kind, derived, windowText: windowWords(win, at) }
     if (keys.length === 0) {
       setReading({ ...span, byAsset: new Map(), changes: new Map(), reads: 0 })
       return
     }
     setReading(r => ({ ...(r?.byAsset ? r : {}), loading: true }))
     try {
-      const got = await readDeviceSeries({ keys, metric, startMs: span.start, endMs: span.end, resolution: plan.resolution, stateKind, signal })
+      const got = await readDeviceSeries({ keys, metric, startMs: span.start, endMs: span.end, resolution: plan.resolution, stateKind, derived, signal })
       if (id !== latestRead.current) return
       setReading({ ...span, ...got })
     } catch (e) {
@@ -198,7 +208,7 @@ export function HistoryMetric({ metric, devices, schemas, metrics, areas, cells,
     }
     // The window, the metric and the devices by value: a new object of the same is the same read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metric, keysKey, page, windowKey, stateKind])
+  }, [metric, keysKey, page, windowKey, stateKind, derived])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -262,7 +272,10 @@ export function HistoryMetric({ metric, devices, schemas, metrics, areas, cells,
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
   const { start: shownStart, end: shownEnd } = windowBounds(win, now)
-  const exportBlocked = !info ? `No device in service reports ${metric}, so there is nothing to export.`
+  // A derived metric is computed when drawn and holds no reading to export.
+  const exportable = exportableMetrics([metric], catalog)
+  const exportBlocked = exportable.left.length ? DERIVED_EXPORT_NOTE
+    : !info ? `No device in service reports ${metric}, so there is nothing to export.`
     : allKeys.length === 0 ? `No device that reports ${metric} is in the area, cell or devices chosen, so there is nothing to export.`
       : exportSizeProblem(allKeys.length, 1) ?? exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
   /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
@@ -271,7 +284,7 @@ export function HistoryMetric({ metric, devices, schemas, metrics, areas, cells,
     const { start, end } = windowBounds(win, at)
     const paged = metricPages(start.getTime(), end.getTime(), allKeys.length, page).paged
     setExporting({
-      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: [metric],
+      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: exportable.names,
       scope: metricExportScope(reporters.length, everyReporter.length),
       note: paged ? metricExportNote(reporters.length, METRIC_PAGE_SIZE) : null,
       from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
@@ -366,6 +379,7 @@ export function HistoryMetric({ metric, devices, schemas, metrics, areas, cells,
                           stateLine={stateLine?.words ?? null}
                           noun="device"
                           scope={plan?.paged ? 'on this page' : ''}
+                          derived={reading.derived}
                         />
                       </div>
                     )}

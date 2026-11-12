@@ -28,9 +28,10 @@ import { createPortal } from 'react-dom'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { OverflowText } from './OverflowText'
+import { DerivedTag } from './DerivedTag'
 import { clockWords } from '../../utils/timeWindow'
 import {
-  chartPalette, chartTitle, latestWords, markWords, markedStretches, momentWords, nowFraction, readingWords, runNear,
+  chartPalette, chartTitle, latestWords, lowWords, markWords, markedStretches, momentWords, nowFraction, readingWords, runNear,
   runWords, shareWords, splitCarried, stateHue, stateKey, stateRuns, stateShares, validRangeWords,
 } from '../../utils/history'
 
@@ -107,7 +108,7 @@ export const PLOT_RIGHT_PX = 28
  * `plugins` are the page's own uPlot plugins, such as the alert bands (alertBands.js). `yRange` fixes
  * a number chart's value scale to [low, high], so several charts can share one.
  */
-function plotOptions({ width, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins }) {
+function plotOptions({ width, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins, unit }) {
   const flag = series.kind === 'flag'
   // A flag's bucket that held both values is a band from false to true (markBuckets()).
   const banded = !flag || (series.marked || []).some(n => n > 1)
@@ -132,7 +133,8 @@ function plotOptions({ width, height, series, start, end, validRange, yRange, pa
         ...axis,
         size: PLOT_LEFT_PX,
         ...(flag ? { splits: () => [0, 1] } : {}),
-        values: (u, splits) => splits.map(v => (flag ? (v === 1 ? 'true' : v === 0 ? 'false' : '') : readingWords(v))),
+        // A percentage says its sign on every tick; any other value says its unit in the title.
+        values: (u, splits) => splits.map(v => (flag ? (v === 1 ? 'true' : v === 0 ? 'false' : '') : lowWords(v, unit))),
       },
     ],
     series: [
@@ -284,7 +286,7 @@ function StateKey({ stateKey: key, carried, mixed }) {
  * charts that share one (sharedScale()); it too is the same array while it is the same. `label`
  * names the chart in place of its metric and unit, and `head` is what the title line shows in place
  * of that name (a link, a status dot), so a machine's chart is named by the machine: the figure
- * keeps `label` as its name.
+ * keeps `label` as its name. `derived` marks a derived metric's chart with a DerivedTag beside its title.
  *
  * Colours and the axis font are the theme's tokens, read again on a theme switch. The figure is
  * named by its title, and `summary` (chartSummary(), utils/history.js) is its text for a screen
@@ -295,7 +297,7 @@ function StateKey({ stateKey: key, carried, mixed }) {
  */
 export function TimeSeriesChart({
   metric, unit, starts, series, start, end, now, minutes, validRange = null, summary, syncKey, band = null, height = 140,
-  plugins = NO_PLUGINS, note = null, yRange = null, label = null, head = null,
+  plugins = NO_PLUGINS, note = null, yRange = null, label = null, head = null, derived = false,
 }) {
   const id = useId()
   const boxRef = useRef(null)
@@ -326,7 +328,7 @@ export function TimeSeriesChart({
     let plot
     try {
       plot = new uPlot(
-        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins }),
+        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins, unit }),
         [starts, series.max, series.min, read, held],
         box,
       )
@@ -345,7 +347,7 @@ export function TimeSeriesChart({
       plot.destroy()
       setOver(null)
     }
-  }, [drawn, starts, series, start, end, height, validRange, yRange, palette, syncKey, plugins])
+  }, [drawn, starts, series, start, end, height, validRange, yRange, palette, syncKey, plugins, unit])
 
   const fraction = nowFraction(start, end, now)
   const range = validRangeWords(validRange, unit)
@@ -382,6 +384,7 @@ export function TimeSeriesChart({
     <figure className="history-chart" {...named}>
       <figcaption className="history-chart-head">
         {head ?? <span className="history-chart-title" id={`${id}-title`}>{title}</span>}
+        {derived && !head && <DerivedTag />}
         {range && <span className="history-chart-range">{range}</span>}
         {note && <span className="history-chart-read">{note}</span>}
         <span className="history-chart-hover" aria-hidden="true">{headWords}</span>
@@ -438,6 +441,6 @@ function hoverWords(x, series, i, unit, minutes) {
   const lo = series.min[i]
   const hi = series.max[i]
   return lo !== null && hi !== null && lo !== hi
-    ? `${when} · ${readingWords(v, unit)} (${readingWords(lo)} to ${readingWords(hi, unit)})`
+    ? `${when} · ${readingWords(v, unit)} (${lowWords(lo, unit)} to ${readingWords(hi, unit)})`
     : `${when} · ${readingWords(v, unit)}`
 }

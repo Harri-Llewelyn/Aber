@@ -226,6 +226,27 @@ describe('completing a value', () => {
     expect(labels(result)).not.toContain('Door/OPEN')
   })
 
+  describe("a time in state's threshold", () => {
+    // The dashboard shows a time in state as a percentage, but the threshold is the fraction the database holds.
+    const share = { name: 'Spindle/UPTIME', datatype: 10, units: null, derivation: { kind: 'time_in_state', input: 'Spindle/STATE', states: ['ACTIVE'] } }
+    const withShare = buildFacts({ devices, schemas, catalog: [...catalog, share] })
+
+    it('says in its completion that it is a fraction from 0 to 1', () => {
+      const text = `${HEAD}      metric: uptime|`
+      const result = completionsAt(bare(text), text.indexOf('|'), withShare)
+      expect(result.options.map(o => [o.label, o.detail])).toEqual([['Spindle/UPTIME', 'a fraction from 0 to 1 (0.9 is 90%)']])
+    })
+
+    it('says so over the metric and over its threshold, and leaves a measured metric as it was', () => {
+      const text = `${HEAD}      device: ${LATHE}\n      metric: Spindle/UPT|IME`
+      expect(hoverAt(bare(text), text.indexOf('|'), withShare).lines[0]).toBe('Unit: a fraction from 0 to 1 (0.9 is 90%)')
+      const threshold = `${HEAD}      device: ${LATHE}\n      metric: Spindle/UPTIME\n      below: 0.|9`
+      expect(hoverAt(bare(threshold), threshold.indexOf('|'), withShare).lines[1]).toBe('Compared in a fraction from 0 to 1 (0.9 is 90%).')
+      const measured = completionsAt(bare(`${HEAD}      metric: load`), `${HEAD}      metric: load`.length, withShare)
+      expect(measured.options.find(o => o.label === 'Spindle/LOAD').detail).toBe('%')
+    })
+  })
+
   it('narrows metrics by what was typed, anywhere in the name', () => {
     expect(labels(at(`${HEAD}      metric: bear|`))).toEqual(['Spindle/BEARING_TEMPERATURE'])
     expect(labels(at(`${HEAD}      metric: spin|`))).toEqual(['Spindle/BEARING_TEMPERATURE', 'Spindle/LOAD'])

@@ -406,7 +406,7 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         pg,
         "metric_catalog",
         {"select": "name,datatype,description,units,standard,semantic_id,deprecated,"
-                   "permitted_values,category,semantic_id_type",
+                   "permitted_values,category,semantic_id_type,derivation",
          "order": "name"},
     )
     schemas_by_device: Dict[str, List[str]] = {}
@@ -478,6 +478,14 @@ def _modelled_metrics(schema_definition) -> set:
     if isinstance(required, list):
         names.update(r for r in required if isinstance(r, str))
     return names
+
+
+def _measured_metrics(space: dict) -> List[dict]:
+    """
+    The catalog rows a device can publish: a derived metric (one with a definition) is left out,
+    since Aber computes it and no device carries it, so it would be a type no object names.
+    """
+    return [row for row in space.get("metric_catalog") or [] if not row.get("derivation")]
 
 
 def _attached_schemas(space: dict) -> Dict[str, tuple]:
@@ -557,7 +565,7 @@ def _build_objects(space: dict) -> Dict[str, dict]:
     area_ids = {a["id"] for a in areas}
     cell_ids = {c["id"] for c in space["cells"]}
     attached = _attached_schemas(space)
-    catalog = {row["name"]: row for row in space.get("metric_catalog", [])}
+    catalog = {row["name"]: row for row in _measured_metrics(space)}
     catalog_types = {name: A.metric_type_from_catalog(row) for name, row in catalog.items()}
     births = _birth_datatypes()
     # Per distinct set of schemas: the metrics they model, and those that are components, sorted.
@@ -652,9 +660,7 @@ def _build_types(space: dict) -> List[dict]:
     that names a catalog metric refers to that metric's type.
     """
     types = list(A.SYNTHETIC_TYPES) + list(A.METRIC_FALLBACK_TYPES)
-    metric_types = {
-        row["name"]: A.metric_type_from_catalog(row) for row in space.get("metric_catalog", [])
-    }
+    metric_types = {row["name"]: A.metric_type_from_catalog(row) for row in _measured_metrics(space)}
     schemas_by_id = {}
     for schema in space["schemas"]:
         types.append(A.object_type_from_schema(schema, metric_types))
@@ -2111,7 +2117,7 @@ def _fill_from_historian(pg: PostgrestClient, space: dict, objects, device_ids) 
             missing[sid] = names
     if not missing:
         return set()
-    catalog = {row["name"]: row.get("datatype") for row in space.get("metric_catalog") or []}
+    catalog = {row["name"]: row.get("datatype") for row in _measured_metrics(space)}
     births = _birth_datatypes()
     failed, pending = set(), sorted(missing)
     for start in range(0, len(pending), FILL_DEVICES_PER_READ):

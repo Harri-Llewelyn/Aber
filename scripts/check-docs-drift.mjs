@@ -1221,6 +1221,9 @@ function edgeFunctionNames() {
     'public.end_person_sessions': '0212 refuses your own sessions by naming Sign Out of All Other Sessions on the Profile page\'s Sessions tab, since Sign Out ends only the browser in use; 0207 named Sign Out. Nothing else changes',
     'public.set_display_name': '0213 keeps the row when it clears the name of a person who has a picture, since the picture is its owner\'s alone to clear; 0203 deleted the row, which would have let an Administrator remove another person\'s picture',
     'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
+    'public.machine_condition_readings': '0283 reads a pair on a derived metric from derived_current(), which gives it a value over the last hour or at the last whole minute; 0270 reads telemetry_latest, which holds nothing under a name no device publishes. The columns are 0270\'s, since a replay runs 0270 again first. A measured metric is read as it was',
+    'public.evaluate_automations': '0283 words the value and the threshold in the summary of an alert it raises through automation_value_words() and automation_threshold_words(): a derived metric\'s value rounded to three decimals with its window, a time in state as a percentage, a measured one as it printed; 0271 printed the value as the evaluator read it. Nothing else changes, and the comparison, the threshold and the values the row keeps are the numbers they were',
+    'public.machine_condition_rows': '0283 says the window in the detail of a derived metric ("is 4.2 over the last hour, below 5") and rounds its value to three decimals; 0270 words every value as it was read',
     'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture, and names the person who started a capture or playback job for the roles that read the jobs; 0203 had no such row and no such arm',
   };
 
@@ -11262,6 +11265,183 @@ const OPERATOR_PAIRS = [
       problems334.map((p) => `        ${p}`).join('\n'));
   } else {
     pass('the API reference names the arguments, the resolutions and the document of export_telemetry() as 0279 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 338. The API reference describes derived_series() as 0282 declares it: the arguments the body
+// requires are the function's, and a row has the columns it returns. A reader building on the reference
+// sends an argument the function does not take, or looks for a column it does not return.
+// -------------------------------------------------------------------------------------------------
+{
+  const sql = read('supabase/migrations/0282_history_draws_a_derived_metric_from_the_minutes.sql')
+    .match(/public\.derived_series\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/derived_series:\n[\s\S]*?required: \[([^\]]*)\]/)?.[1];
+  const row = spec.match(/\n {4}DerivedSeriesBucket:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const problems338 = [];
+  if (!sql) problems338.push('could not read derived_series() out of 0282');
+  if (!path) problems338.push('docs/openapi.yaml has no /rest/v1/rpc/derived_series with its required arguments');
+  if (!row) problems338.push('docs/openapi.yaml has no DerivedSeriesBucket');
+  if (!problems338.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    const args = names(sql[1], /^\s*(\w+) [a-z]/gm);
+    const columns = names(sql[2], /^\s*(\w+) [a-z]/gm);
+    const required = names(path, /(\w+)/g);
+    const described = names(row, /^ {8}(\w+):/gm);
+    if (required !== args) problems338.push(`docs/openapi.yaml requires ${required}; derived_series() takes ${args}`);
+    if (described !== columns) problems338.push(`docs/openapi.yaml's DerivedSeriesBucket has ${described}; the function returns ${columns}`);
+  }
+  if (problems338.length) {
+    fail('The API reference describes derived_series() otherwise than 0282 declares it:\n' +
+      problems338.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments and the columns of derived_series() as 0282 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 339. The API reference describes derived_current() as 0282 declares it, and says its windows as
+// derived_window_minutes() holds them: the arguments the body requires, the columns of a value, and
+// the two numbers window_minutes takes.
+// -------------------------------------------------------------------------------------------------
+{
+  const migration = read('supabase/migrations/0282_history_draws_a_derived_metric_from_the_minutes.sql');
+  const sql = migration.match(/public\.derived_current\(([^)]*)\)\s*RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/);
+  const windows = [...new Set([...migration.matchAll(/WHEN '[a-z_]+' THEN (\d+)/g)].map((m) => Number(m[1])))].sort((a, b) => b - a);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/derived_current:\n[\s\S]*?required: \[([^\]]*)\]/)?.[1];
+  const row = spec.match(/\n {4}DerivedCurrentValue:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const problems339 = [];
+  if (!sql) problems339.push('could not read derived_current() out of 0282');
+  if (windows.length === 0) problems339.push('could not read derived_window_minutes() out of 0282');
+  if (!path) problems339.push('docs/openapi.yaml has no /rest/v1/rpc/derived_current with its required arguments');
+  if (!row) problems339.push('docs/openapi.yaml has no DerivedCurrentValue');
+  if (!problems339.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    const args = names(sql[1], /(\w+) text\[\]/g);
+    const columns = names(sql[2], /^\s*(\w+) [a-z]/gm);
+    const required = names(path, /(\w+)/g);
+    const described = names(row, /^ {8}(\w+):/gm);
+    const enumerated = row.match(/window_minutes: \{[^}]*enum: \[([^\]]*)\]/)?.[1].split(',').map((n) => Number(n.trim())).sort((a, b) => b - a);
+    if (required !== args) problems339.push(`docs/openapi.yaml requires ${required}; derived_current() takes ${args}`);
+    if (described !== columns) problems339.push(`docs/openapi.yaml's DerivedCurrentValue has ${described}; the function returns ${columns}`);
+    if (String(enumerated) !== String(windows)) {
+      problems339.push(`docs/openapi.yaml's window_minutes takes ${enumerated}; derived_window_minutes() answers ${windows}`);
+    }
+  }
+  if (problems339.length) {
+    fail('The API reference describes derived_current() otherwise than 0282 declares it:\n' +
+      problems339.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments, the columns and the windows of derived_current() as 0282 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 340. The documents say a current value's window as derived_window_minutes() holds it. The automation
+// reference gives one row for each kind, an hour or the last whole minute by what the function
+// answers; the Devices help says both phrases the drawer shows. A document that says an hour where
+// the function reads a minute describes a value the alert does not compare.
+// -------------------------------------------------------------------------------------------------
+{
+  const migration = read('supabase/migrations/0282_history_draws_a_derived_metric_from_the_minutes.sql');
+  const windows = new Map([...migration.matchAll(/WHEN '([a-z_]+)' THEN (\d+)/g)].map((m) => [m[1], Number(m[2])]));
+  const automations = read('docs/automations.md').match(/### A threshold on a derived metric\n([\s\S]*?)\n### /)?.[1];
+  const devices = read('help/pages/devices.md');
+  const words = { counter_rate: 'Counter rate', time_in_state: 'Time in state', sum: 'Sum or difference' };
+  const problems340 = [];
+  if (windows.size === 0) problems340.push('could not read derived_window_minutes() out of 0282');
+  if (!automations) problems340.push('docs/automations.md has no "A threshold on a derived metric"');
+  if (!problems340.length) {
+    for (const [kind, minutes] of windows) {
+      const row = automations.match(new RegExp(`^\\| ${words[kind]} \\|(.*)\\|$`, 'm'))?.[1];
+      if (!row) {
+        problems340.push(`docs/automations.md has no row for ${words[kind]}`);
+        continue;
+      }
+      const wants = minutes === 0 ? 'last whole minute' : 'last hour';
+      if (!row.includes(wants)) problems340.push(`docs/automations.md says a ${words[kind]} is judged ${row.trim()}; derived_window_minutes() is ${minutes}, so it is the ${wants}`);
+    }
+    for (const phrase of ['over the last hour', 'at the last whole minute']) {
+      if (!devices.includes(phrase)) problems340.push(`help/pages/devices.md does not say "${phrase}", which the drawer shows`);
+    }
+  }
+  if (problems340.length) {
+    fail("The documents say a derived metric's current value otherwise than derived_window_minutes() holds it:\n" +
+      problems340.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the automation reference and the Devices help say each kind's window as derived_window_minutes() holds it (${[...windows].map(([k, m]) => `${k} ${m}`).join(', ')})`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 341. The documents name derived_series()'s limits as it declares them: the rows (the dashboard's row
+// cap), the minutes of input and the widest bucket. A reader choosing a window reads the number, and a
+// number that is not the function's is a read refused or a window left unasked.
+// -------------------------------------------------------------------------------------------------
+{
+  const def = read('supabase/migrations/0282_history_draws_a_derived_metric_from_the_minutes.sql');
+  const rows = def.match(/c_max_rows\s+CONSTANT bigint := (\d+);/)?.[1];
+  const minutes = def.match(/c_max_minutes CONSTANT bigint := (\d+);/)?.[1];
+  const bucket = def.match(/c_max_bucket\s+CONSTANT integer := (\d+);/)?.[1];
+  const problems341 = [];
+  if (!rows || !minutes || !bucket) problems341.push('could not read the limits of derived_series() out of 0282');
+  if (!problems341.length) {
+    const grouped = (n) => Number(n).toLocaleString('en-US');
+    const days = Number(bucket) / 1440;
+    const says = [
+      ['supabase/README.md', [`${grouped(rows)} devices times metrics times buckets`, `${grouped(minutes)} minutes of input`, `${days} days`]],
+      ['docs/openapi.yaml', [grouped(rows), grouped(minutes), `${days} days`]],
+    ];
+    for (const [file, phrases] of says) {
+      const text = read(file).replace(/\s+/g, ' ');
+      for (const phrase of phrases) if (!text.includes(phrase)) problems341.push(`${file} does not say ${phrase}, which derived_series() declares`);
+    }
+  }
+  if (problems341.length) {
+    fail("The documents name derived_series()'s limits otherwise than 0282 declares them:\n" +
+      problems341.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the README and the API reference name derived_series()'s limits as 0282 declares them: ${Number(rows).toLocaleString('en-US')} rows, ${Number(minutes).toLocaleString('en-US')} minutes of input, a bucket of ${Number(bucket) / 1440} days`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 342. The help says what a derived metric is and is not, as the issue settled it. History's help
+// says a time in state is resolved to the minute, a counter that resets and passes its old value inside
+// one minute is counted short, and a derived sum at a wide bucket need not equal its inputs' averages;
+// the Metrics help no longer says its values are not drawn; the upgrade guide names both calls and says
+// the automation now fires. A page that still says "not drawn in History yet" is wrong about the page
+// it describes.
+// -------------------------------------------------------------------------------------------------
+{
+  const history = read('help/pages/history.md').match(/\n## Derived metrics\n([\s\S]*?)\n## /)?.[1];
+  const metrics = read('help/pages/metrics.md');
+  const upgrading = read('help/site/upgrading.md').match(/\n### From 1\.8\.0, History draws a derived metric, and an automation can read one\n([\s\S]*?)\n### /)?.[1];
+  const problems342 = [];
+  if (!history) problems342.push('help/pages/history.md has no "Derived metrics" section');
+  if (!upgrading) problems342.push('help/site/upgrading.md has no "From 1.8.0, History draws a derived metric" section');
+  if (!problems342.length) {
+    for (const [phrase, what] of [
+      ['resolved to the minute', 'that time in state is resolved to the minute'],
+      ['counted short by that old value', 'that a counter that resets and passes its old value inside one minute is counted short'],
+      ["need not equal the sum of its inputs' averages", "that a wide bucket's derived sum need not equal the sum of its inputs' averages"],
+      ['Export CSV', 'that Export leaves a derived metric out'],
+    ]) {
+      if (!history.includes(phrase)) problems342.push(`help/pages/history.md's Derived metrics does not say ${what}`);
+    }
+    for (const call of ['derived_series', 'derived_current']) {
+      if (!upgrading.includes(call)) problems342.push(`the upgrade guide's From 1.8.0 note on derived metrics does not name ${call}`);
+    }
+    if (!/An automation on a derived metric now fires/.test(upgrading)) problems342.push('the upgrade guide does not say an automation on a derived metric now fires');
+  }
+  if (/not drawn in History yet/i.test(metrics)) problems342.push('help/pages/metrics.md still says a derived metric is not drawn in History yet');
+  if (problems342.length) {
+    fail('The help says a derived metric otherwise than the issue settled it:\n' +
+      problems342.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass("History's help says a derived metric is resolved to the minute, may count a reset short and need not equal its inputs' averages; the Metrics help no longer says it is not drawn; the upgrade guide names both calls");
   }
 }
 

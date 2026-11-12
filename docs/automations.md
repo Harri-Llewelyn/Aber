@@ -87,13 +87,39 @@ Things to know:
 - **Devices are named by id.** Device names are not unique. The id is on the Devices page, and the
   editor completes a typed name into its id. The file the page renders writes the device's name and
   place in a comment beside each id.
-- **The metric is a measured one.** It must be in the metric catalogue and be a number. A text or
-  flag metric has no threshold to compare with.
+- **The metric is a number in the metric catalogue.** A text or flag metric has no threshold to
+  compare with. A [derived metric](#a-threshold-on-a-derived-metric) works too.
 - **Give `above` or `below`, not both.** A number, with no unit. The value is in the metric's
   catalogue unit, which the editor shows.
 - **A hold is judged at each evaluation.** A `for` shorter than the evaluation interval fires at
   the next evaluation that finds the breach that old. [How an automation is evaluated](#how-an-automation-is-evaluated)
   says how often that is.
+
+### A threshold on a derived metric
+
+A derived metric is computed, so no device publishes it and it has no latest reading. A threshold on
+one is judged against its **current value**, by one rule for each kind:
+
+| Kind | The value judged |
+| :--- | :--- |
+| Counter rate | The rate per hour **over the last hour**: the 60 minutes ending at the last whole minute. |
+| Time in state | The share of the **last hour** spent in the states, from 0 to 1. |
+| Sum or difference | The sum **at the last whole minute**. |
+
+The Devices drawer shows the same number, with the window in words. A time in state is shown as a percentage there and in History, and is a fraction wherever it is data: the API, an alert's `values` and a threshold.
+
+- **Why an hour.** A rate from one minute swings between 0 and sixty times the count, and one
+  minute's share is 0 or 1. An hour is what "parts per hour" and "uptime" mean.
+- **A counter that stops counting reads 0 per hour.** A `below` threshold on a rate fires for a machine
+  that stops, and for one that stops reporting. A device that reports only some of a definition's inputs
+  has no value, so it never fires.
+- **`for` and the hold work as for any metric.** Each run judges the current value again. The alert
+  says the window: "Controller/PARTS_PER_HOUR is 4.2 over the last hour, below 5".
+- **A time in state's threshold is a fraction from 0 to 1.** The dashboard shows the value as a
+  percentage, but the file holds the fraction: `below: 0.9` is 90%. An alert on one reads
+  "Press 1: Controller/UPTIME is 42% over the last hour, below 90% for 10m".
+- **Time in state is resolved to the minute.** A counter that resets and passes its old value inside one
+  minute is under-counted by that old value.
 
 ### The `alert` action
 
@@ -118,7 +144,8 @@ A run reads the historian, judges each device, and writes the alerts. It writes 
 alert is written, so acknowledging, suppressing and sending one work as they do for the rest.
 
 - **A run reads the latest value of each metric an automation watches.** It asks the historian once
-  for each metric, and names only the devices that metric is watched on.
+  for each metric, and names only the devices that metric is watched on. A derived metric's current
+  value is [computed from the minutes](#a-threshold-on-a-derived-metric) instead.
 - **The latest value is compared, whenever it arrived.** A device that sends a reading only when it
   changes is compared by its last reading. A value that is a flag, a text or not a number is no
   reading.
@@ -158,10 +185,12 @@ confirming them.
 - **The subject** is the device, so the alert opens on the Devices page and its history is the
   device's.
 - **The summary** names the device, the metric, the value and the threshold:
-  `Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m`.
+  `Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m`. For a derived metric the value is
+  rounded to three decimals and followed by its window:
+  `Press 1: Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5 for 10m`.
 - **The labels** are `severity`, `entity_type`, `metric`, `automation` (the automation's `id`) and
   `trigger_id`.
-- **The values** are `value`, the reading that fired it, and `threshold`.
+- **The values** are `value`, the reading that fired it, and `threshold`. `value` is not rounded.
 - **It has no Grafana rule.** The alert counter and the device's drawer do not link to Grafana for it.
 
 ## What the database does with a file

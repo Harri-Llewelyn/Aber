@@ -354,7 +354,7 @@ BEGIN
             '`trigger` names the type. This release has `threshold`.');
         END IF;
 
-        -- metric: a measured one, in the catalogue, and a number
+        -- metric: one in the catalogue, and a number
         v_metric := NULL;
         v_val := v_trig -> 'metric';
         IF v_val IS NULL OR jsonb_typeof(v_val) <> 'string' THEN
@@ -362,7 +362,7 @@ BEGIN
             '`metric` is the catalogue name of the reading, such as Spindle/LOAD.');
         ELSE
           v_metric := v_val #>> '{}';
-          -- A derived metric is not accepted yet: its check goes here when derived metrics are a catalogue row.
+          -- A derived metric is accepted: every one is a Double, and the evaluator reads its current value.
           SELECT m.datatype BETWEEN 1 AND 10 INTO v_metric_ok FROM public.metric_catalog m WHERE m.name = v_metric;
           IF v_metric_ok IS NULL THEN
             v_reasons := v_reasons || public.automation_reason(v_tpath || '.metric', format(

@@ -42,7 +42,7 @@ vi.mock('../api', async () => {
     ...actual,
     api: {
       get: vi.fn(), readCarriedByGroup: vi.fn(), readCarriedTelemetry: vi.fn(), readTelemetryChanges: vi.fn(), readHourOfDay: vi.fn(),
-      readAlertOccurrences: vi.fn(), exportTelemetry: vi.fn(),
+      readAlertOccurrences: vi.fn(), exportTelemetry: vi.fn(), readDerivedSeries: vi.fn(),
     },
   }
 })
@@ -90,18 +90,18 @@ const crowd = (n) => Array.from({ length: n }, (_, i) => ({
   last_birth_metrics: ['Spindle/LOAD'], ...inCell('c1'),
 }))
 
-const routeGet = (list) => (path) => {
+const routeGet = (list, cat = catalog) => (path) => {
   if (path.startsWith('/api/v1/devices')) return Promise.resolve(list)
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(cells)
   if (path.startsWith('/api/v1/areas')) return Promise.resolve(areas)
   if (path.startsWith('/api/v1/schemas')) return Promise.resolve([])
-  if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(catalog)
+  if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(cat)
   return Promise.resolve([])
 }
 
 /** An Administrator unless a test says otherwise: Export CSV is for an Administrator or a Shopfloor Manager. */
-const visit = async (address, { userRole = 'Administrator', list = devices } = {}) => {
-  api.get.mockImplementation(routeGet(list))
+const visit = async (address, { userRole = 'Administrator', list = devices, cat = catalog } = {}) => {
+  api.get.mockImplementation(routeGet(list, cat))
   window.history.pushState({}, '', address)
   const showToast = vi.fn()
   render(<HistoryTab showToast={showToast} userRole={userRole} />)
@@ -110,6 +110,10 @@ const visit = async (address, { userRole = 'Administrator', list = devices } = {
 }
 
 const DENIED = 'Requires Administrator or Shopfloor Manager'
+// A derived metric every machine that reports Spindle/LOAD reports the input of: computed when drawn, never exported.
+const DERIVED = 'Spindle/LOAD_RATE'
+const withDerived = [...catalog, { name: DERIVED, units: 'kW/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Spindle/LOAD' } }]
+const DERIVED_NOTE = 'A derived metric is computed when it is drawn, and is not exported. Export its inputs.'
 const toolbar = () => document.querySelector('.filter-bar-actions')
 const exportButton = () => within(toolbar()).getByRole('button', { name: /Export CSV/ })
 const asked = () => api.exportTelemetry.mock.calls.map(c => c[0])
@@ -127,6 +131,7 @@ beforeEach(() => {
   api.readTelemetryChanges.mockResolvedValue([])
   api.readHourOfDay.mockResolvedValue([])
   api.readAlertOccurrences.mockResolvedValue([])
+  api.readDerivedSeries.mockResolvedValue([])
   api.exportTelemetry.mockResolvedValue({
     audit_id: 41, resolution: 'raw', columns: ['time', 'asset_id', 'metric_name', 'value', 'unit'],
     rows: [LATHE3, LATHE4, MILL].map((asset, i) => ['2026-11-02T10:00:00.000Z', keyOf(asset), 'Spindle/LOAD', 4 + i, 'kW']), row_count: 3,
@@ -273,6 +278,13 @@ describe("exporting an area's metric", () => {
     await screen.findAllByText(/A mean or a total needs a number/)
     expect(exportButton()).toBeDisabled()
     expect(exportButton()).toHaveAccessibleDescription('Controller/EXECUTION is text or a flag, so this tab draws no mean or total of it and has nothing to export. The Cell tab exports it.')
+  })
+
+  it('is off for a derived metric, which is computed when drawn and holds no reading to export', async () => {
+    await visit(`/history/area/a1?metric=${encodeURIComponent(DERIVED)}`, { cat: withDerived })
+    await waitFor(() => expect(api.readDerivedSeries).toHaveBeenCalled())
+    expect(exportButton()).toBeDisabled()
+    expect(exportButton()).toHaveAccessibleDescription(DERIVED_NOTE)
   })
 
   it('is off for an area with no machine in service, which has no metric to export', async () => {
@@ -447,6 +459,13 @@ describe('exporting a metric across devices', () => {
     await screen.findByText('No device in service reports No/SuchMetric.')
     expect(exportButton()).toBeDisabled()
     expect(exportButton()).toHaveAccessibleDescription('No device in service reports No/SuchMetric, so there is nothing to export.')
+  })
+
+  it('is off for a derived metric, which is computed when drawn and holds no reading to export', async () => {
+    await visit(`/history/metric/${encodeURIComponent(DERIVED)}`, { cat: withDerived })
+    await waitFor(() => expect(api.readDerivedSeries).toHaveBeenCalled())
+    expect(exportButton()).toBeDisabled()
+    expect(exportButton()).toHaveAccessibleDescription(DERIVED_NOTE)
   })
 
   it('takes a text or flag metric as the Cell tab does', async () => {

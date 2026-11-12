@@ -707,6 +707,17 @@ export const SUITES = {
       'different lengths and more than 50,000 devices times buckets refused before any read, and it ' +
       'reads as the caller.',
   },
+  'supabase/migrations/test_history_draws_a_derived_metric_from_the_minutes.py': {
+    lanes: ['db'],
+    why:
+      "0282's derived_series() and derived_current(), over local tables standing in for the " +
+      "historian's one-minute rollup: a counter rate is the increase per hour with a reset counting " +
+      'its new value, a time in state is the share of the bucket\'s minutes with a state carried ' +
+      'across a quiet stretch, a sum is the time-average of the per-minute signed sum and a device ' +
+      'missing an input has no row, a window of more than one chunk answers as one would (whole ' +
+      'buckets, and the devices of a wide bucket), only whole minutes are read, every refusal comes ' +
+      'before any read, each kind has its current value by one rule, and anon may call neither.',
+  },
   'supabase/migrations/test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py': {
     lanes: ['db'],
     why:
@@ -1728,6 +1739,20 @@ export const SUITES = {
       'The daemon reads the catalogue through a cache, so the suite waits out its freshness before ' +
       'the first message rather than racing it. Needs the stack up and the owner connection ' +
       '(SUPABASE_DB_*); everything it made, the audit rows included, is removed.',
+  },
+  'ingestion/test_a_derived_metric_is_read_stack.py': {
+    lanes: ['stack'],
+    why:
+      'THE ONLY CHECK THAT A DERIVED METRIC IS READ FROM REAL READINGS, END TO END. A fixture ' +
+      "gateway's edge node publishes a rising count for two minutes through a real broker, and a " +
+      'Shopfloor Manager reads derived_series() through PostgREST: every minute the counter rose in ' +
+      'has a positive rate that is not carried, and the minutes after the last reading count nothing ' +
+      'and say they are carried. derived_current() is the rate over the last hour, worked out in the ' +
+      'suite from the raw readings by the rule. A measured metric is refused. An automation on the ' +
+      "derived metric is applied, pg_cron's evaluator raises its alert with the value it read at a " +
+      'whole minute, and deleting the automation resolves it. Needs the stack up, the seeded ' +
+      'Shopfloor Manager and the owner connection (SUPABASE_DB_*); about six minutes; everything it ' +
+      'made, the audit rows included, is removed.',
   },
   'test-harness/test_load_generator.py': {
     // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be

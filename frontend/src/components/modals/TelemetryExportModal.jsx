@@ -4,7 +4,7 @@ import { useSetting } from '../../hooks/useSettings'
 import { auditEventUrl } from '../../routes'
 import { downloadCSV } from '../../utils/downloadCSV'
 import {
-  EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS_PLACE, EXPORT_RESOLUTIONS, bestResolutionFor, coversRange,
+  DERIVED_EXPORT_NOTE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS_PLACE, EXPORT_RESOLUTIONS, bestResolutionFor, coversRange,
   exportMaxDays, exportRows, exportWindowProblem, noticeRows, provenanceRow, resolutionByKey
 } from '../../utils/telemetryExport'
 import { dayWords } from '../../utils/alertSuppression'
@@ -34,6 +34,8 @@ import { Tooltip } from '../common/Tooltip'
  * resolution's horizon raises a warning that names the finest resolution which covers it and
  * offers to switch. A file that stops short, at the row cap or where raw begins, says so in its
  * comment lines as well as here.
+ *
+ * `left` is the derived metrics a page chose and exportableMetrics() left out: the dialog says why.
  *
  *   <TelemetryExportModal devices={[{ id: key, name }]} metricNames={names} from={start.toISOString()}
  *     to={end.toISOString()} windowWords="Last 24 hours" onClose={close} showToast={showToast} />
@@ -74,7 +76,7 @@ const fileName = (devices, resolutionKey, from) => {
   return `${stem}-telemetry${resolutionKey === 'raw' ? '' : `-${resolutionKey}`}-${from.slice(0, 10)}.csv`
 }
 
-export function TelemetryExportModal({ devices, metricNames, from, to, windowWords, scope, note, onClose, showToast }) {
+export function TelemetryExportModal({ devices, metricNames, left = [], from, to, windowWords, scope, note, onClose, showToast }) {
   const [resolution, setResolution] = useState('raw')
   const [horizons, setHorizons] = useState(null)   // null until the lookup settles
   const [busy, setBusy]       = useState(false)
@@ -217,6 +219,8 @@ export function TelemetryExportModal({ devices, metricNames, from, to, windowWor
           ))}
         </div>
       </div>
+
+      {left.length > 0 && <p className="form-hint">{DERIVED_EXPORT_NOTE}</p>}
 
       <div className="form-group">
         <label className="form-label">Resolution</label>

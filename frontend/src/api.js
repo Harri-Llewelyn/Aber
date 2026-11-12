@@ -1494,6 +1494,54 @@ const apiMethods = {
   },
 
   /**
+   * History's read of a derived metric (0282): `metricNames`, derived ones only, for `assetIds` over
+   * [from, to), one row per device, metric and bucket of `bucketMinutes` that has a value, computed from
+   * the minutes. The columns are readCarriedTelemetry()'s where they mean the same, so chartSeries()
+   * draws both: `avg_double` is the value, `min_double`, `max_double` and `last_double` are a sum's
+   * lowest, highest and last minute (the value, for a rate and a share), `n_rows` counts the inputs'
+   * readings and `is_carried` says there were none. `assetIds` are device UUIDs or Sparkplug ids. Throws
+   * on a refusal (a metric that is not derived, more than HISTORY_MAX_ROWS rows, more minutes of input
+   * than DERIVED_MAX_MINUTES) or a historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ bucket_ts: string, asset_id: string, metric_name: string,
+   *   avg_double: number, min_double: number, max_double: number, last_double: number,
+   *   n_rows: number, is_carried: boolean }>>}
+   */
+  readDerivedSeries: async ({ from, to, bucketMinutes, assetIds, metricNames }, { signal } = {}) => {
+    let call = supabase.rpc('derived_series', {
+      from_ts: from,
+      to_ts: to,
+      bucket: `${bucketMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_names: metricNames
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the derived readings');
+    return data || [];
+  },
+
+  /**
+   * The current value of each derived metric of `metricNames` for `assetIds` (0282): a counter rate
+   * and a time in state over the last hour, a sum at the last whole minute, `observed_at` being the minute
+   * that window ends at and `window_minutes` 60 or 0. A device with no value has no row. `assetIds` are
+   * device UUIDs or Sparkplug ids. Throws on a metric that is not derived or a historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ asset_id: string, metric_name: string, value: number,
+   *   observed_at: string, window_minutes: number }>>}
+   */
+  readDerivedCurrent: async ({ assetIds, metricNames }, { signal } = {}) => {
+    let call = supabase.rpc('derived_current', {
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_names: metricNames
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the derived values');
+    return data || [];
+  },
+
+  /**
    * History's export (0279): the readings of `assetIds` (device UUIDs or Sparkplug ids) times
    * `metricNames` over [from, to) as one document, at `resolution` (raw, 1m, 5m or 1h, never one in
    * another's place). Only an Administrator or a Shopfloor Manager, for a window no longer than

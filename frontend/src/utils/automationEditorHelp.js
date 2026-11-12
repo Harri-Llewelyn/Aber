@@ -1,6 +1,7 @@
 import { parseDocument, isMap, isScalar, isSeq } from 'yaml'
 import SCHEMA from '../../public/json-schema/automations.schema.json'
 import { deviceMetrics, validRanges } from './history'
+import { SHARE_FRACTION_NOTE } from './derivedMetric'
 import { locateReasons, parseAutomationsYaml } from './automationYaml'
 
 /*
@@ -54,7 +55,8 @@ const MEASURED = (datatype) => datatype >= 1 && datatype <= 10
 export function buildFacts({ devices = [], schemas = [], catalog = [], documentDevices = {} } = {}) {
   const metrics = new Map(catalog.map(m => [m.name, {
     name: m.name,
-    unit: m.units || null,
+    // A time in state is a fraction from 0 to 1, though the dashboard shows it as a percentage.
+    unit: m.derivation?.kind === 'time_in_state' ? SHARE_FRACTION_NOTE : (m.units || null),
     measured: MEASURED(m.datatype),
   }]))
   const byId = new Map()

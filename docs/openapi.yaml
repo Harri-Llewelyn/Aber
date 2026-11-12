@@ -961,6 +961,86 @@ paths:
         '401': { description: 'Not authenticated; `anon` may not call it.' }
         '503': { description: 'The historian could not be reached.' }
 
+  /rest/v1/rpc/derived_series:
+    post:
+      tags: [Telemetry]
+      summary: Read a derived metric's series, computed from the minutes
+      description: |
+        What the History page reads for a derived metric (`0282`). A derived metric has no readings of
+        its own: its definition is on its `metric_catalog` row, and nothing is stored. This reads each
+        input through `/rest/v1/rpc/telemetry_carried` at one minute and combines the minutes into the
+        bucket, at every bucket width.
+
+        - **A counter rate** is the increase per hour. A fall is a reset, and the new value counts as the
+          increase.
+        - **A time in state** is the share of the bucket's minutes in the states, from 0 to 1. It is
+          resolved to the minute.
+        - **A sum** is the time-average of the per-minute signed sum, for the minutes in which every
+          input has a value. A device that lacks an input has no row.
+
+        One row per device, metric and bucket that has a value, in no promised order. `avg_double` is
+        the value. `min_double`, `max_double` and `last_double` are the lowest and highest minute and the
+        last minute of a sum, and the value itself for a rate and a share. `n_rows` counts the inputs'
+        readings in the bucket, and `is_carried` is true when there were none. Buckets lie on the epoch
+        grid. Only whole minutes are read: nothing from the minute that holds now.
+
+        It refuses before it reads anything: a metric that is not derived, and the limits in the body
+        parameters. `SECURITY INVOKER`, so it reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, bucket, asset_ids, metric_names]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                bucket: { type: string, example: '01:00:00', description: 'A whole number of minutes, at least one and at most 4 days, with no months, e.g. `5 minutes` or `1 day`.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id). Devices times metrics times buckets is at most 5,000, and the minutes of input the window reads (devices times inputs times minutes) at most 250,000.' }
+                metric_names: { type: array, items: { type: string }, example: [Controller/PARTS_PER_HOUR], description: 'Derived metrics only, by catalogue name.' }
+      responses:
+        '200':
+          description: The buckets that have a value.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DerivedSeriesBucket' } }
+        '400': { description: 'Bounds out of order, a bad bucket, a list missing, a metric that is not derived, more than 5,000 rows, or more than 250,000 minutes of input, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
+  /rest/v1/rpc/derived_current:
+    post:
+      tags: [Telemetry]
+      summary: Read a derived metric's current value
+      description: |
+        What the Devices drawer shows and an automation compares (`0282`). One row for each device that has
+        a value, by one rule for each kind. **A counter rate and a time in state are over the last hour**:
+        the 60 minutes ending at the last whole minute. **A sum is its value at the last whole
+        minute.** A rate from one minute swings between 0 and sixty times the count, and a minute's share
+        is 0 or 1, so a person's "parts per hour" and "uptime" are over an hour.
+
+        `observed_at` is the minute the window ends at. `window_minutes` is 60, or 0 for a sum. It is
+        computed by `/rest/v1/rpc/derived_series` at one minute, so it is the same number a chart
+        shows. `SECURITY INVOKER`, so it reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset_ids, metric_names]
+              properties:
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id). Devices times metrics is at most 5,000.' }
+                metric_names: { type: array, items: { type: string }, example: [Controller/PARTS_PER_HOUR], description: 'Derived metrics only, by catalogue name.' }
+      responses:
+        '200':
+          description: One row for each device and metric that has a value.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DerivedCurrentValue' } }
+        '400': { description: 'A list missing, a metric that is not derived, or more than 5,000 devices times metrics, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   /rest/v1/rpc/export_telemetry:
     post:
       tags: [Telemetry]
@@ -7392,6 +7472,33 @@ components:
         last_bool: { type: boolean, nullable: true }
         n_rows: { type: integer, description: 'Readings in the bucket; 0 when carried.' }
         is_carried: { type: boolean, description: 'No reading arrived in the bucket, and its values are the last before it.' }
+
+    DerivedSeriesBucket:
+      type: object
+      description: |
+        One bucket of one derived metric on one device, from `/rest/v1/rpc/derived_series`. The columns
+        are `TelemetryCarriedBucket`'s where the meaning is the same.
+      properties:
+        bucket_ts: { type: string, format: date-time, description: 'Start of the bucket, on the epoch grid.' }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        metric_name: { type: string, example: Controller/PARTS_PER_HOUR }
+        avg_double: { type: number, format: double, description: 'The value over the bucket: a rate per hour, a share from 0 to 1, or a sum.' }
+        min_double: { type: number, format: double, description: 'The lowest minute of a sum; the value for a rate and a share.' }
+        max_double: { type: number, format: double, description: 'The highest minute of a sum; the value for a rate and a share.' }
+        last_double: { type: number, format: double, description: 'The last minute of a sum; the value for a rate and a share.' }
+        n_rows: { type: integer, description: "The inputs' readings in the bucket; 0 when none arrived." }
+        is_carried: { type: boolean, description: 'No input had a reading in the bucket, so its value follows from the values carried into it.' }
+
+    DerivedCurrentValue:
+      type: object
+      description: |
+        One device's current value of one derived metric, from `/rest/v1/rpc/derived_current`.
+      properties:
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        metric_name: { type: string, example: Controller/PARTS_PER_HOUR }
+        value: { type: number, format: double, description: 'The current value by the rule for its kind.' }
+        observed_at: { type: string, format: date-time, description: 'The last whole minute: where the window ends.' }
+        window_minutes: { type: integer, enum: [60, 0], description: 'How far back the value looks: 60 for a counter rate and a time in state, 0 for a sum, which is its value at `observed_at`.' }
 
     TelemetryChangesRow:
       type: object

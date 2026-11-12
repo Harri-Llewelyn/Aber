@@ -1738,6 +1738,7 @@ flag steps between false and true, and a state is a strip of its runs in text.
 | `label`, `head` | `label` names the chart in place of the metric and unit. `head` is what the title line shows in place of that name, such as a status dot and a link: the figure keeps `label` as its name |
 | `plugins` | uPlot plugins for a number or flag chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state strip takes none |
 | `note` | Which read the chart shows, in the head, when the status line says another (`readWords()`), or null |
+| `derived` | True for a derived metric: a `DerivedTag` beside the title, and "a derived metric" in the summary ([History's derived metrics](#historys-derived-metrics)) |
 
 - **No sideways scrolling.** The chart is its container's width, and a `ResizeObserver` resizes it.
 - **Colours and the font are the theme's tokens** (`chartPalette()`), read again when
@@ -1816,7 +1817,8 @@ where the lathes sit in several areas. Its arithmetic is `utils/history.js` and 
   the other drawers'). The metrics offered are those some device in service reports (`historyMetrics()`:
   `cellMetrics()` over every device, a last birth's or a schema's), with the catalog's unit and kind where it
   has them. A metric the catalog does not know is offered all the same, with no unit: it is reported, and the
-  Cell tab charts it. A derived metric has no device reporting it, so it is not here.
+  Cell tab charts it. A derived metric is offered where some device reports all its inputs (`deviceMetrics()`
+  with the catalog), with its *derived* tag.
 - **The name is one path segment**, `encodeURIComponent()`, so `Spindle/LOAD` is `Spindle%2FLOAD`
   (`metricHistoryPath()`, `metricNameFrom()`). An address naming a metric no device reports says so and links
   the picker.
@@ -1956,6 +1958,62 @@ serve them all, so there is one set of rules.
   `historyOverview.test.jsx`, `historyCellPage.test.jsx`, `historyExportAreaMetric.test.jsx` and
   `auditTrailReadingsExported.test.jsx` hold the gate, the words over the limit, the five entry points,
   the toast's link, raw by default and the CSV's columns.
+
+### History's derived metrics
+
+A derived metric ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) is a catalogue row with a
+definition, computed where it is read. History offers it, draws it and tags it; the Devices drawer shows
+its current value; Export leaves it out. The database's rules are in
+[supabase/README.md](../supabase/README.md#history-draws-a-derived-metric-from-the-minutes-0282).
+
+- **A device reports a derived metric when it reports all its inputs.** `deviceMetrics(device, schemas,
+  catalog)` adds each such metric to what a device declared and its schemas model, so the Device tab's
+  charts and Metrics filter, the Cell and Area tabs' metric lists, and the Metric tab's picker and its
+  devices all follow one rule (`derivedReportedBy()`). Without the catalog it lists measured metrics
+  only, as it always did, which is what Overview and Export read.
+- **A read is split by the catalogue** (`splitDerived()`): a measured name goes to
+  `api.readCarriedTelemetry()`, a derived one to `api.readDerivedSeries()`, which returns the same
+  columns, so `chartSeries()` draws both. A derived series draws its value as the line and has no band
+  of its own: a rate and a share have the one value, and a sum's band is its lowest to highest minute.
+- **A window can be too long for a derived metric.** It is read from the minutes at every bucket width,
+  so what it costs is the window and the devices, not the bucket: the database refuses more than
+  `DERIVED_MAX_MINUTES` minutes of input (mirror check 95). `derivedReadProblem()` says so before the
+  read, in the chart (Device tab) or as the tab's problem (Cell, Metric and Area), and the measured
+  charts are unaffected. The row cap is the page's own (`DERIVED_MAX_ROWS`, the same 5,000).
+- **The Area tab folds in the browser.** It asks `derived_series()` for every machine at the finest
+  resolution where machines times buckets fit one read (`pickGroupResolution()` with
+  `readRows: DERIVED_MAX_ROWS`), then `foldByGroup()` makes the rows `telemetry_carried_by_group()`
+  makes, so `groupSeries()` draws both and a cell's total is withheld wherever a machine has no value.
+  A measured metric folds in the database and gets a finer bucket for the same area.
+- **A time in state is shown as a percentage, and is a fraction as data.** Its unit in a chart, a
+  picker and a drawer is `SHARE_UNIT` (`unitOf()` gives it, from the definition), which `readingWords()`
+  says with `percentWords()`: one decimal at most and a trailing zero dropped, "42%" and "42.5%". So a
+  chart's value axis ticks, its hover and latest readings, its summary, the Area tab's cell means and
+  the Devices drawer's value all say it, and the chart is titled "(% of the time)". The data, the API,
+  an alert's `values` and a threshold in YAML are the fraction (`below: 0.9` is 90%); the Automations
+  editor says so in the metric's completion and hover (`SHARE_FRACTION_NOTE`), and the derived drawer's
+  Units says the percentage. An alert says it in the database's own words, `automation_value_words()`.
+- **The tag is one component, `common/DerivedTag.jsx`**, the Derived tab's own badge. It is on a chart's
+  title (`TimeSeriesChart`'s `derived`), beside the name in each metric list and picker
+  (`FilterChecklist`'s option `tag`), in the Cell, Metric and Area toolbars, in a line above their
+  charts (`SmallMultiples`'s `derived`) and in the Devices drawer. The word is the tag, never a colour.
+- **The hour-of-day grids say they do not apply.** They read measured readings; a derived metric is
+  computed over a stretch of time and has no mean at an hour.
+- **Export leaves a derived metric out, by one function.** `exportableMetrics(names, catalog)` returns
+  the measured names for `export_telemetry()` and the derived ones as `left`, said with
+  `DERIVED_EXPORT_NOTE` in the button's tooltip and in the dialog (`TelemetryExportModal`'s `left`).
+  The Device and Cell tabs call it; any other place that offers Export passes its names through it.
+- **The Devices drawer lists a device's derived metrics** (`common/DeviceDerivedValues.jsx`): the
+  current value of each, with its unit, its tag and its window in words (`currentWords()`), from one
+  `api.readDerivedCurrent()` when the drawer opens on the device. A device with no value says so, a
+  failed read says that, and a device none apply to has no line. The windows are `derivedWindowMinutes()`,
+  held to `derived_window_minutes()` by mirror check 94.
+- **The derived drawer's Applies To** (`appliesToValue()`) names the devices in service that report all
+  the inputs, by the Metric tab's own function (`metricDevices()`): the first two and how many more past
+  three, or "No device yet: none reports …".
+- `derivedMetricReads.test.js`, `historyDerivedMetric.test.jsx`, `devicesDerivedValues.test.jsx` and
+  `derivedMetrics.test.jsx` hold the rule, the reads, the tag, the fold, the Export rule, the drawer's
+  line and Applies To.
 
 ### History's Alerts tab
 

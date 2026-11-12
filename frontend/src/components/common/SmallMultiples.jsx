@@ -2,9 +2,10 @@ import React, { useMemo } from 'react'
 import { TimeSeriesChart } from './TimeSeriesChart'
 import { DeviceStatusDot } from './DeviceStatusDot'
 import { OverflowText } from './OverflowText'
+import { DerivedTag } from './DerivedTag'
 import { RouteLink } from './RouteLink'
 import { DEVICE_STATUS, deviceLifecycleStatus } from '../../utils/deviceStatus'
-import { chartSummary, readingWords, sharedScale, silentWords } from '../../utils/history'
+import { chartSummary, lowWords, readingWords, sharedScale, silentWords } from '../../utils/history'
 
 /** A machine's title line: its status dot as the Site Map draws it, its name, and Offline in words. */
 function MemberHead({ member }) {
@@ -37,14 +38,15 @@ function MemberHead({ member }) {
  * `stateLine` says another; `plugins` are its uPlot plugins, such as its alert bands. `resolution`
  * and `windowText` name the read in each chart's summary for a screen reader. The time axis, the
  * pointer, the zoom band and the unit are the page's: `syncKey` shares one pointer across the
- * charts, `band` is the drag's band (useChartBand()).
+ * charts, `band` is the drag's band (useChartBand()). `derived` says the metric is a derived one, in a line of
+ * its own above the charts, with the tag.
  *
  *   <SmallMultiples members={members} metric="Spindle/LOAD" unit="kW" start={s} end={e} now={now}
  *     resolution={resolution} windowText="Last 24 hours" syncKey="history-cell-c1" />
  */
 export function SmallMultiples({
   members, metric, unit, start, end, now, resolution, windowText, syncKey, band = null, stateLine = null, height = 110,
-  noun = 'machine', scope = '',
+  noun = 'machine', scope = '', derived = false,
 }) {
   const charted = members.filter(m => m.series)
   // The scale by value: a chart is drawn again when its `yRange` is another array, so the same ends are the same one.
@@ -55,9 +57,15 @@ export function SmallMultiples({
   const span = { start, end, now }
   return (
     <div className="multiples">
+      {derived && (
+        <p className="multiples-scale multiples-derived">
+          <DerivedTag />
+          {` ${metric} is computed from other metrics. No device reports it.`}
+        </p>
+      )}
       {scale && charted.length > 1 && (
         <p className="multiples-scale">
-          {`One scale for every ${noun}${scope ? ` ${scope}` : ''}: ${readingWords(scale[0])} to ${readingWords(scale[1], unit)}.`}
+          {`One scale for every ${noun}${scope ? ` ${scope}` : ''}: ${lowWords(scale[0], unit)} to ${readingWords(scale[1], unit)}.`}
         </p>
       )}
       {members.map(m => {
@@ -70,7 +78,7 @@ export function SmallMultiples({
           )
         }
         const summary = chartSummary({
-          metric, unit, windowText, resolution, series: m.series, validRange: m.validRange ?? null, starts: m.starts, span, read: m.read ?? null,
+          metric, unit, windowText, resolution, series: m.series, validRange: m.validRange ?? null, starts: m.starts, span, read: m.read ?? null, derived,
         })
         return (
           <TimeSeriesChart

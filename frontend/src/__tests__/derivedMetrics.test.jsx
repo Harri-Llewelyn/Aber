@@ -120,7 +120,7 @@ describe('the Derived tab', () => {
     const rows = [...derived.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(td => td.textContent))
     expect(rows).toEqual([
       ['Controller/PARTS_PER_HOUR', 'Counter rate', 'rate of Controller/PART_COUNT, per hour', 'COUNT/HOUR', 'Parts an hour'],
-      ['Controller/UPTIME', 'Time in state', 'share of time Controller/EXECUTION is ACTIVE', '—', '—'],
+      ['Controller/UPTIME', 'Time in state', 'share of time Controller/EXECUTION is ACTIVE', '% of the time', '—'],
       ['Power/TOTAL', 'Sum or difference', 'Power/PHASE_A + Power/PHASE_B', 'KILOWATT', '—']
     ])
     expect(derived.querySelectorAll('td .mono').length).toBeGreaterThan(6)
@@ -147,6 +147,18 @@ describe('the Derived tab', () => {
     }
   })
 
+  it("says a time in state is shown as a percentage of the time, in its drawer's Units, and a rate's unit is as it was", async () => {
+    renderTab()
+    const derived = await openTab('Derived')
+    fireEvent.click(within(derived).getByText('Controller/UPTIME'))
+    const drawer = document.querySelector('.context-panel')
+    const units = () => within(drawer).getByText('Units').closest('.context-field').textContent
+    expect(units()).toContain('% of the time, stored as a fraction from 0 to 1')
+    fireEvent.click(within(derived).getByText('Controller/PARTS_PER_HOUR'))
+    expect(units()).toContain('COUNT/HOUR')
+    expect(units()).not.toContain('percentage')
+  })
+
   it('opens a drawer with the definition and no Edit, which has nothing to correct', async () => {
     renderTab()
     const derived = await openTab('Derived')
@@ -169,6 +181,80 @@ describe('the Derived tab', () => {
     expect(add).toHaveAccessibleDescription(requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE))
     fireEvent.click(add)
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe("a derived metric's Applies To line", () => {
+  const press = (n, metrics) => ({ asset_id: 'p' + n, asset_name: 'Press ' + n, last_birth_metrics: metrics, status: 'ONLINE', location_source: 'inherited' })
+  const serve = (devices) => api.get.mockImplementation((path) => {
+    if (path.startsWith('/api/v1/devices')) return Promise.resolve(devices)
+    const key = Object.keys(routes).find(r => path.startsWith(r))
+    return Promise.resolve(key ? routes[key] : [])
+  })
+  const open = async (name) => {
+    const derived = await openTab('Derived')
+    fireEvent.click(within(derived).getByText(name))
+    const drawer = document.querySelector('.context-panel')
+    expect(drawer.getAttribute('aria-hidden')).toBe('false')
+    return drawer
+  }
+  const line = (drawer) => within(drawer).getByText('Applies To').closest('.context-field').textContent
+
+  it('names the devices that report every input', async () => {
+    serve([press(1, ['Controller/PART_COUNT']), press(2, ['Controller/PART_COUNT', 'Other/X']), press(3, ['Other/X'])])
+    renderTab()
+    const drawer = await open('Controller/PARTS_PER_HOUR')
+    expect(line(drawer)).toContain('Press 1 and Press 2, the devices that report Controller/PART_COUNT')
+  })
+
+  it('says how many more when it is more than three, and uses the Metric tab rule: every input', async () => {
+    serve([1, 2, 3, 4, 5].map(n => press(n, ['Controller/PART_COUNT'])))
+    renderTab()
+    const drawer = await open('Controller/PARTS_PER_HOUR')
+    expect(line(drawer)).toContain('Press 1, Press 2 and 3 more, the devices that report Controller/PART_COUNT')
+  })
+
+  it('needs every input of a sum, not one', async () => {
+    serve([press(1, ['Power/PHASE_A']), press(2, ['Power/PHASE_A', 'Power/PHASE_B'])])
+    renderTab()
+    const drawer = await open('Power/TOTAL')
+    expect(line(drawer)).toContain('Press 2, the device that reports Power/PHASE_A and Power/PHASE_B')
+  })
+
+  it('says no device reports the inputs yet, and what they are', async () => {
+    serve([press(1, ['Other/X'])])
+    renderTab()
+    const drawer = await open('Controller/UPTIME')
+    expect(line(drawer)).toContain('No device yet: none reports Controller/EXECUTION')
+  })
+
+  it('leaves a device out that is not in service', async () => {
+    serve([{ ...press(1, ['Controller/PART_COUNT']), is_archived: true }, press(2, ['Controller/PART_COUNT'])])
+    renderTab()
+    const drawer = await open('Controller/PARTS_PER_HOUR')
+    expect(line(drawer)).toContain('Press 2, the device that reports Controller/PART_COUNT')
+  })
+
+  it('says nothing when the devices could not be read', async () => {
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/devices')) return Promise.reject(new Error('down'))
+      const key = Object.keys(routes).find(r => path.startsWith(r))
+      return Promise.resolve(key ? routes[key] : [])
+    })
+    renderTab()
+    const drawer = await open('Controller/PARTS_PER_HOUR')
+    expect(within(drawer).queryByText('Applies To')).toBeNull()
+  })
+
+  it('is not on a measured metric', async () => {
+    serve([press(1, ['Controller/PART_COUNT'])])
+    renderTab()
+    await waitFor(() => expect(queryTabLink('Metric Catalog')).toBeTruthy())
+    fireEvent.click(queryTabLink('Metric Catalog'))
+    fireEvent.click(await screen.findByRole('button', { name: /Expand all/ }))
+    fireEvent.click(await screen.findByText('Power/PHASE_A'))
+    const drawer = document.querySelector('.context-panel')
+    expect(within(drawer).queryByText('Applies To')).toBeNull()
   })
 })
 
@@ -438,7 +524,7 @@ describe('Add Derived Metric', () => {
     it('says a share of time has none, and a sum takes the one its inputs share', async () => {
       const { dialog } = await open()
       choose(dialog, /Kind/, 'time_in_state')
-      expect(facts(dialog).textContent).toContain('None: a share of time has no unit')
+      expect(facts(dialog).textContent).toContain('% of the time, stored as a fraction from 0 to 1')
       choose(dialog, /Kind/, 'sum')
       expect(facts(dialog).textContent).toContain('The unit the inputs share')
       pick(dialog, 'Power/PHASE_A')

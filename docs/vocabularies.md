@@ -57,6 +57,8 @@ does. They are [`supabase/example-metrics.sql`](../supabase/example-metrics.sql)
   definition on it, added on the Derived tab of the Metrics page, and the database refuses to save
   one with a semantic id or a standard. The checks are in
   [A derived metric is a catalogue row](../supabase/README.md#a-derived-metric-is-a-catalogue-row-0267).
+  Its values are computed when they are read, by `derived_series()`, and nothing is stored
+  ([how](../supabase/README.md#history-draws-a-derived-metric-from-the-minutes-0282)).
 - **AGVs are the one gap the five vocabularies leave, and VDA 5050 does not fill it here.** VDA 5050
   is a complete bidirectional MQTT interface with its own topic tree keyed on
   manufacturer + serialNumber, so it fails the vocabulary test and would introduce a second identity

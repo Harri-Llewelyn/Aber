@@ -26,8 +26,10 @@ import {
 } from '../../utils/semanticIdSources'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import {
-  DERIVED_DATATYPE, describeDerivation, isDerived, kindLabel, matchesDerivedSearch, derivationText
+  DERIVED_DATATYPE, SHARE_UNIT_WORDS, appliesToValue, isShare, describeDerivation, isDerived, kindLabel, matchesDerivedSearch, derivationText,
+  unitOf,
 } from '../../utils/derivedMetric'
+import { metricDevices } from '../../utils/history'
 import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
 import {
   conceptByName, ashrae223Prefill, ashrae223Sections, metricConcepts
@@ -38,6 +40,7 @@ import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
+import { DerivedTag } from '../common/DerivedTag'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
@@ -146,7 +149,7 @@ const CATALOG_SORT = {
   name: { type: 'text', value: m => m.name },
   standard: { type: 'text', value: m => m.standard || LOCAL_EXTENSION_LABEL },
   category: { type: 'text', value: m => m.category },
-  units: { type: 'text', value: m => m.units },
+  units: { type: 'text', value: m => unitOf(m) },
   datatype: { type: 'text', value: m => (m.datatype === null || m.datatype === undefined ? null : datatypeLabel(m.datatype)) },
   semantic_id: { type: 'text', value: m => m.semantic_id },
   description: { type: 'text', value: m => m.description }
@@ -157,7 +160,7 @@ const DERIVED_SORT = {
   name: { type: 'text', value: m => m.name },
   kind: { type: 'text', value: m => kindLabel(m.derivation?.kind) },
   definition: { type: 'text', value: m => derivationText(m.derivation) },
-  units: { type: 'text', value: m => m.units },
+  units: { type: 'text', value: m => unitOf(m) },
   description: { type: 'text', value: m => m.description }
 }
 
@@ -211,6 +214,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // Read for the usage count on a deprecation or a semantic id edit and nothing else -- how many
   // schemas model the metric is the impact warning on either act.
   const [schemas, setSchemas]         = useState([])
+  // The devices, for a derived metric's Applies To line; null until read, and when the read fails.
+  const [devices, setDevices]         = useState(null)
   const [vocabulary, setVocabulary]   = useState([])
   const [isoVocabulary, setIsoVocabulary]     = useState([])
   const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
@@ -292,12 +297,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const load = useCallback(async () => {
     loadUncatalogued()
     try {
-      const [cat, grp, sch] = await Promise.all([
+      const [cat, grp, sch, dev] = await Promise.all([
         api.get('/api/v1/metric-catalog'),
         api.get('/api/v1/metric-groups'),
         api.get('/api/v1/schemas'),
+        api.get('/api/v1/devices').catch(() => null),
       ])
-      setCatalog(cat); setGroups(grp); setSchemas(sch)
+      setCatalog(cat); setGroups(grp); setSchemas(sch); setDevices(dev)
     } finally { setLoaded(true) }
   }, [loadUncatalogued])
 
@@ -866,12 +872,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       {/* The catalog lists measured metrics only; Deprecated lists both, so a derived one says so. */}
       <td>
         <span className="mono">{m.name}</span>
-        {isDerived(m) && <> <Badge tone="neutral" size="sm" title="Aber computes this metric from others. Its drawer has the definition.">Derived</Badge></>}
+        {isDerived(m) && <> <DerivedTag /></>}
       </td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
       <td className="cell-meta">{m.standard || LOCAL_EXTENSION_LABEL}</td>
       <td className="cell-meta">{m.category || '—'}</td>
-      <td className="cell-meta">{m.units || '—'}</td>
+      <td className="cell-meta">{unitOf(m) || '—'}</td>
       <td className="cell-meta">{datatypeLabel(m.datatype)}</td>
       {/* Cut in the middle: the ids share a long prefix, and the end tells two apart. */}
       <td>
@@ -1117,7 +1123,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                           <td><span className="mono">{m.name}</span></td>
                           <td className="cell-meta">{kindLabel(m.derivation.kind)}</td>
                           <td><Definition derivation={m.derivation} /></td>
-                          <td className="cell-meta">{m.units || '—'}</td>
+                          <td className="cell-meta">{unitOf(m) || '—'}</td>
                           <td className="cell-meta">{m.description || '—'}</td>
                         </tr>
                       ))}
@@ -1303,9 +1309,22 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             full: true,
             help: 'How Aber computes it from other metrics. It cannot be changed: a different definition is a new derived metric.'
           },
+          // The devices in service that report every input: the ones the Metric tab compares it across.
+          isDerived(selected) && devices && {
+            label: 'Applies To',
+            value: appliesToValue(
+              metricDevices(devices, schemas, selected.name, { catalog }).map(d => d.asset_name),
+              selected.derivation
+            ),
+            full: true,
+            help: 'Every device in service that reports all its inputs. Nothing is stored: the value is computed when it is drawn.'
+          },
           !isDerived(selected) && { label: 'Standard', value: selected.standard || LOCAL_EXTENSION_LABEL },
           !isDerived(selected) && { label: 'Category', value: selected.category || null },
-          { label: 'Units', value: selected.units || null },
+          // A time in state has no unit of its own: it is a fraction, shown as a percentage of the time.
+          isShare(selected.derivation)
+            ? { label: 'Units', value: SHARE_UNIT_WORDS, full: true }
+            : { label: 'Units', value: selected.units || null },
           { label: 'Datatype', value: datatypeLabel(selected.datatype) },
           !isDerived(selected) && { label: 'Semantic ID', value: selected.semantic_id || null, mono: true, copyable: true, full: true },
           !isDerived(selected) && { label: 'Reference Type', value: selected.semantic_id ? selected.semantic_id_type || null : null },

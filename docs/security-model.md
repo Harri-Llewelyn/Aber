@@ -494,7 +494,7 @@ lane, naming who exported which devices and metrics over which window. Nothing i
 any of this: a call that skips the dashboard meets the same refusals.
 
 **This bounds the export, not access to the readings.** An Operator holds `telemetry:read` and reads
-whatever a chart reads, through the telemetry views and `telemetry_carried()`, and a person can
+whatever a chart reads, through the telemetry views, `telemetry_carried()` and `derived_series()`, and a person can
 page those at the API. The function stops the dashboard's bulk file, and records the ones it makes. It
 does not stop anyone reading the readings a row at a time. **Revisit when** a site needs readings kept
 from a role, which is a change to who may read them (RLS on the telemetry views), not to the export.
