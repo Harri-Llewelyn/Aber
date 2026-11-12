@@ -1811,8 +1811,9 @@ where the lathes sit in several areas. Its arithmetic is `utils/history.js` and 
 
 - **The metric** is picked from a table at `/history/metric` (`MetricChooser` in `HistoryTab.jsx`: the
   metric, its unit and how many devices report it, searchable and sortable as the other pickers are), or by
-  the toolbar's metric name (a `ToolbarPopover`, keeping the window and the filters), or from **Chart** in
-  Overview's selection box. The metrics offered are those some device in service reports (`historyMetrics()`:
+  the toolbar's metric name (a `ToolbarPopover`, keeping the window and the filters), from **Chart** in
+  Overview's selection box, or from any Metrics drawer's **View History** (`metricHistoryUrl()`, ungated like
+  the other drawers'). The metrics offered are those some device in service reports (`historyMetrics()`:
   `cellMetrics()` over every device, a last birth's or a schema's), with the catalog's unit and kind where it
   has them. A metric the catalog does not know is offered all the same, with no unit: it is reported, and the
   Cell tab charts it. A derived metric has no device reporting it, so it is not here.
@@ -1855,7 +1856,7 @@ arithmetic and `historyAreaPage.test.jsx` the page.
 
 - **The area** is picked from a table at `/history/area` (`AreaPicker`: its cells and machines, searchable
   and sortable), by the toolbar's area name, or from the Areas drawer's **View History** (`areaHistoryUrl()`,
-  worded and drawn as the Cells and Devices drawers'; drift check 326 holds the three alike). Its cells are the
+  worded and drawn as the Cells and Devices drawers'; drift check 326 holds the four alike). Its cells are the
   cells in it in service (`historyAreas()`), archived ones left out. A device that is Area-Wide in it belongs
   to no cell, so is in no chart, and the status line says how many.
 - **Each cell's chart is its mean or its total of the metric in every bucket**, which one control picks for

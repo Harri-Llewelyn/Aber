@@ -23,6 +23,9 @@ export const cellHistoryUrl = (id) => `/history/cell/${encodeURIComponent(id)}`
 /** One area's cells compared on the History page, at the window it opens on. */
 export const areaHistoryUrl = (id) => `/history/area/${encodeURIComponent(id)}`
 
+/** One metric across every device that reports it on the History page, at the window it opens on. A name holds slashes, so it is one encoded segment. */
+export const metricHistoryUrl = (name) => `/history/metric/${encodeURIComponent(name)}`
+
 /** Every device provisioned with one schema. */
 export const devicesForSchemaUrl = (uuid) => pageUrl('devices', { schema: uuid })
 
