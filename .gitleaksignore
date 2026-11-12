@@ -65,3 +65,10 @@ bf008e0b56abde6836b626b3d7a1ae24b4fcf264:cspell.json:generic-api-key:100
 # names an automation by (automations.key, #322). It identifies a row; it is not a credential.
 ecd052bf3b3d62d14a7704e81b65a1d47247d165:supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py:generic-api-key:79
 ecd052bf3b3d62d14a7704e81b65a1d47247d165:supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py:generic-api-key:282
+
+# An automation's id in the Automations page's fixtures: `lathe-3-spindle-hot`, the slug an automations
+# document names an automation by (automations.key, #322). It identifies a row; it is not a credential.
+d1f820240adf262bbdd1e8aaadeb9e4d5defd866:frontend/src/__tests__/automationDetail.test.jsx:generic-api-key:344
+d1f820240adf262bbdd1e8aaadeb9e4d5defd866:frontend/src/__tests__/automationsList.test.jsx:generic-api-key:189
+d1f820240adf262bbdd1e8aaadeb9e4d5defd866:frontend/src/__tests__/automationsList.test.jsx:generic-api-key:190
+d1f820240adf262bbdd1e8aaadeb9e4d5defd866:frontend/src/__tests__/automationsList.test.jsx:generic-api-key:345

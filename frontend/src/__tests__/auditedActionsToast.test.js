@@ -499,6 +499,7 @@ const TOASTED_BY = [
 const NO_TOAST = [
   { file: 'pages/OAuthConsent.jsx', piece: '/consent`', why: 'the page leaves the dashboard for the app that asked' },
   { file: 'components/tabs/SystemLogs.jsx', piece: 'api.readServiceLogs(', why: 'reading logs leaves a trace of the read, not an act the person takes; a toast on every filter change would be noise' },
+  { file: 'components/modals/ApplyAutomationsModal.jsx', piece: 'api.applyAutomations(parsed.document, true)', why: 'a preview: with dry-run true nothing is written, so no Audit Trail row; the confirm applies it and toasts' },
 ]
 
 describe('an audited action ends with a success toast', () => {

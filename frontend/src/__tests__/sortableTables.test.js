@@ -41,6 +41,11 @@ const TABLES = {
     sortable: 0,
     fixed: ['An event\'s changes: its properties beside their old and new values. The trail itself is lanes, paged from the server.']
   },
+  'components/tabs/AutomationDetail.jsx': {
+    sortable: 0,
+    fixed: ["An automation's recent firings, newest first, as they happened: a handful, in the order the alerts were raised."]
+  },
+  'components/tabs/AutomationsTab.jsx': { sortable: 1 },
   'components/tabs/BackupsTab.jsx': {
     sortable: 0,
     fixed: ['Paged from the server, 30 runs at a time, newest first: a sort in the browser would sort only the runs on screen.']

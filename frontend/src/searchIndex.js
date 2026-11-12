@@ -46,6 +46,9 @@ export const PAGE_KEYWORDS = {
   // Keeps catalog/catalogue: the catalogue was part of the Schemas page and is searched for by
   // that name as often as by its own.
   'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate', 'derived', 'computed', 'rate'],
+  // What somebody types wanting a rule that watches a reading: Home Assistant's word, and the alert's.
+  'automations':    ['automation', 'rule', 'rules', 'alert rule', 'threshold', 'trigger', 'action', 'condition', 'yaml',
+                     'when this happens', 'watch a reading', 'raise an alert'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
   // 'directory' is the page's old name, which habits keep, as with 'archives' above.
   'system':         ['directory', 'services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness', 'image versions'],
@@ -84,6 +87,7 @@ export const CARDS = [
   { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'create version', 'fork'] },
   /* No "Metric Catalog" card: the catalogue is the Metrics page now, and its page entry answers
      every query this card did. */
+  { id: 'automation-yaml',       label: 'Automation YAML',      tab: 'automations',   keywords: ['yaml editor', 'new automation', 'write a rule', 'upload automations', 'export automations', 'automations.yaml', 'json schema', 'vs code', 'threshold alert'] },
   { id: 'vocab-mtconnect',      ...tabCard('vocabulary', 'mtconnect'), keywords: ['machine tool', 'data items', 'components'] },
   { id: 'vocab-iso22400',       ...tabCard('vocabulary', 'iso-22400'), keywords: ['kpi', 'oee', 'availability', 'mtbf'] },
   { id: 'vocab-opcua',          ...tabCard('vocabulary', 'opc-ua'), keywords: ['companion', 'machinery', 'robotics'] },

@@ -5801,6 +5801,195 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 321. The Automations page's address is stated as the code reads it. frontend/README.md's routing
+// table names each query key the page reads and its two path forms; the page reads each key through
+// the hook that puts it in the address, and routes.js builds the links other pages send there (a
+// device's View in Automations, an alert) with the same keys. A key in the table the page does not
+// read is a link that opens the unfiltered list.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/AutomationsTab.jsx';
+  const readme = read('frontend/README.md');
+  const tab = read(TAB);
+  const routes = read('frontend/src/routes.js');
+  const problems321 = [];
+  const row = readme.split('\n').find((l) => /^\| Automations \|/.test(l));
+  const reads = {
+    search: "useUrlState('search'",
+    entity: "useUrlState('entity'",
+    trigger: "params.get('trigger')",
+    sort: 'useSortableRows(',
+  };
+  if (!row) {
+    problems321.push('frontend/README.md has no Automations row in its routing table');
+  } else {
+    for (const [key, needle] of Object.entries(reads)) {
+      if (!row.includes(`\`${key}\``)) problems321.push(`the routing table's Automations row does not name \`${key}\``);
+      if (!tab.includes(needle)) problems321.push(`${TAB} does not read \`${key}\` (${needle})`);
+    }
+    for (const form of ['<id>', 'new']) {
+      if (!row.includes(`\`${form}\``)) problems321.push(`the routing table's Automations row does not name the path form \`${form}\``);
+    }
+  }
+  for (const [key, builder] of [['entity', 'automationsForEntityUrl'], ['trigger', 'automationForTriggerUrl']]) {
+    if (!new RegExp(`export const ${builder} = \\(\\w+\\) => pageUrl\\('automations', \\{ ${key}: \\w+ \\}\\)`).test(routes)) {
+      problems321.push(`routes.js's ${builder}() does not build /automations?${key}=<id> through pageUrl()`);
+    }
+  }
+  if (!/export const automationUrl = \(key\) => \(key === 'new' \? `\/automations\/new\?open=1` : `\/automations\/\$\{encodeURIComponent\(key\)\}`\)/.test(routes)) {
+    problems321.push("routes.js's automationUrl() no longer sends an automation whose id is `new` to ?open=1 or the others to /automations/<id>");
+  }
+  if (!tab.includes("params.has('open')")) problems321.push(`${TAB} does not read ?open=1, which tells an automation called \`new\` from the starter`);
+  if (problems321.length) {
+    fail(`the Automations page's address is not stated as the code reads it:\n${problems321.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`frontend/README.md's routing table gives the Automations page's ${Object.keys(reads).length} query keys and 2 path forms, each read by ${TAB}, and routes.js builds the entity, trigger and \`new\` links with them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 322. The editor's dependencies are the ones NOTICE.md names, and no others. The dashboard has
+// five runtime dependencies besides the editor's: CodeMirror 6 (its @codemirror and @lezer packages,
+// MIT) and `yaml` (ISC) are the two additions, and a third package, such as a JSON Schema editor
+// binding, is a decision to make here, not a line in package.json. Every package of the CodeMirror
+// family the lockfile holds is MIT, names its licence in the lockfile, and is named in NOTICE.md; yaml
+// is ISC and has its own section; and the two files that carry their notices open with a legal comment.
+// -------------------------------------------------------------------------------------------------
+{
+  const BEFORE = ['@google/model-viewer', '@supabase/supabase-js', 'react', 'react-dom', 'uplot'];
+  const pkg = JSON.parse(read('frontend/package.json'));
+  const lock = JSON.parse(read('frontend/package-lock.json')).packages;
+  const notice = read('NOTICE.md');
+  const problems322 = [];
+  const deps = Object.keys(pkg.dependencies);
+  const family = deps.filter((d) => /^@(codemirror|lezer)\//.test(d));
+  const others = deps.filter((d) => !BEFORE.includes(d) && !family.includes(d) && d !== 'yaml');
+  if (others.length) problems322.push(`frontend/package.json adds ${others.join(', ')}: only @codemirror/*, @lezer/* and yaml were agreed for the editor (#1277)`);
+  if (family.length === 0 || !deps.includes('yaml')) problems322.push('frontend/package.json does not hold the editor\'s CodeMirror packages and yaml');
+  const start = notice.indexOf("## The Automations page's editor — CodeMirror and Lezer (MIT)");
+  const editorSection = start < 0 ? '' : notice.slice(start, notice.indexOf('\n## ', start + 1));
+  if (!editorSection) problems322.push("NOTICE.md has no section 'The Automations page's editor — CodeMirror and Lezer (MIT)'");
+  for (const name of family) {
+    // The table names a scope's packages by their short names: `@codemirror/state`, `view`, `language`.
+    if (!editorSection.includes(name) && !editorSection.includes(`\`${name.split('/')[1]}\``)) {
+      problems322.push(`NOTICE.md's editor section does not name ${name}`);
+    }
+  }
+  const installed = Object.keys(lock).filter((k) => /^node_modules\/@(codemirror|lezer)\//.test(k));
+  for (const key of [...installed, 'node_modules/style-mod', 'node_modules/w3c-keyname', 'node_modules/crelt', 'node_modules/@marijn/find-cluster-break']) {
+    if (lock[key]?.license !== 'MIT') problems322.push(`package-lock.json gives ${key} the licence ${lock[key]?.license ?? '(none)'}, not MIT, which NOTICE.md says every package of the editor has`);
+  }
+  if (lock['node_modules/yaml']?.license !== 'ISC') problems322.push(`package-lock.json gives yaml the licence ${lock['node_modules/yaml']?.license ?? '(none)'}, not ISC`);
+  if (!notice.includes("## The Automations page's YAML parser — yaml (ISC)")) problems322.push("NOTICE.md has no section 'The Automations page's YAML parser — yaml (ISC)'");
+  for (const [file, what] of [['frontend/src/components/common/AutomationEditor.jsx', "CodeMirror's and Lezer's"], ['frontend/src/utils/automationYaml.js', "yaml's"]]) {
+    if (!read(file).startsWith('/*!')) problems322.push(`${file} does not open with ${what} notice as a /*! legal comment, which the build keeps`);
+    if (!notice.includes(file)) problems322.push(`NOTICE.md does not name ${file}, where the notice is`);
+  }
+  if (problems322.length) {
+    fail(`the editor's dependencies and their notices do not match:\n${problems322.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the dashboard adds ${family.length} CodeMirror/Lezer packages and yaml to its ${BEFORE.length} other runtime dependencies, the lockfile holds ${installed.length + 4} MIT packages for the editor and yaml under ISC, and NOTICE.md names them and the two files that carry their notices`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 323. The Automations help names each control as the page labels it, and each column of the list.
+// The help is written to be followed: "select **Save**" in a page whose button says Save Changes
+// sends a reader looking for a control that is not there.
+// -------------------------------------------------------------------------------------------------
+{
+  const HELP = 'help/pages/automations.md';
+  const help = read(HELP);
+  const PAGE = 'frontend/src/components/tabs/AutomationsTab.jsx';
+  const DETAIL = 'frontend/src/components/tabs/AutomationDetail.jsx';
+  const DEVICES = 'frontend/src/components/tabs/DevicesTab.jsx';
+  const problems323 = [];
+  const labels = [
+    ['New Automation', PAGE], ['Upload', PAGE], ['Export', PAGE],
+    ['Automation', PAGE], ['Watches', PAGE], ['Enabled', PAGE], ['Firing now', PAGE], ['Last fired', PAGE], ['Applies because', PAGE],
+    ['Save', DETAIL], ['Delete', DETAIL], ['Disable', DETAIL], ['Enable', DETAIL], ['Recent firings', DETAIL], ['View Audit Trail', DETAIL],
+    ['View in Automations', DEVICES],
+  ];
+  for (const [label, file] of labels) {
+    if (!help.includes(`**${label}**`)) problems323.push(`${HELP} does not name **${label}**`);
+    if (!read(file).includes(label)) problems323.push(`${file} no longer has a control or column called ${label}, which ${HELP} names`);
+  }
+  for (const status of ['New', 'Changed', 'Unchanged', 'Refused']) {
+    if (!help.includes(`**${status}**`)) problems323.push(`${HELP} does not name the preview's **${status}**`);
+  }
+  for (const word of ['Named', 'Site-wide']) {
+    if (!help.includes(`**${word}**`) || !read('frontend/src/utils/automations.js').includes(`label: '${word}'`)) {
+      problems323.push(`${HELP} and utils/automations.js do not both say **${word}** for why an automation applies`);
+    }
+  }
+  if (problems323.length) {
+    fail(`the Automations help does not name the page's controls as the code does:\n${problems323.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the Automations help names ${labels.length} controls and columns, the 4 preview statuses and the 2 reasons, as the page labels them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 324. The editor's styles are drawn where the dashboard's Content-Security-Policy admits them. The
+// policy's style-src names no inline style (the one <style> admitted is the 3D viewer's, by hash),
+// and CodeMirror writes <style> elements into whatever document it is mounted in. So the editor
+// mounts in a shadow root, where it adopts a stylesheet, and the help for people who run the
+// dashboard behind a proxy with a policy of its own says no new style-src is needed. Here: the
+// chart's policy holds no 'unsafe-inline' for styles, the editor attaches a shadow root and gives
+// CodeMirror it as `root`, and the upgrade guide and frontend/README.md say so.
+// -------------------------------------------------------------------------------------------------
+{
+  const EDITOR = 'frontend/src/components/common/AutomationEditor.jsx';
+  const CHART = 'deploy/helm/aber/templates/apps/frontend.yaml';
+  const problems324 = [];
+  const editor = read(EDITOR);
+  const policy = read(CHART).match(/\(printf "style-src [^\n]*\)/)?.[0] ?? null;
+  if (!policy) problems324.push(`${CHART} has no style-src directive in the shape this check reads`);
+  else if (/unsafe-inline/.test(policy)) problems324.push(`${CHART}'s style-src admits 'unsafe-inline', so the shadow root is no longer what keeps the editor within the policy: re-read the editor's section of frontend/README.md`);
+  if (!/attachShadow\(\{ mode: 'open' \}\)/.test(editor) || !/root: shadow,/.test(editor)) {
+    problems324.push(`${EDITOR} does not attach a shadow root and pass it to CodeMirror as \`root\`, so its <style> elements would be refused`);
+  }
+  if (!/### The Automations editor draws in a shadow root/.test(read('frontend/README.md'))) {
+    problems324.push("frontend/README.md has no section 'The Automations editor draws in a shadow root'");
+  }
+  if (!/needs no new `style-src`/.test(read('help/site/upgrading.md'))) {
+    problems324.push("help/site/upgrading.md does not say a proxy with its own policy needs no new `style-src`");
+  }
+  if (problems324.length) {
+    fail(`the editor's styles are not drawn where the Content-Security-Policy admits them, or the docs do not say so:\n${problems324.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass("the chart's style-src admits no inline style, the editor mounts in a shadow root, and frontend/README.md and the upgrade guide say so");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 325. The Automations page has one place in the sidebar, after Metrics and before Vocabulary, and
+// the help's contents list it there. Pages in help/README.md are "in the order the sidebar lists
+// them"; a page filed elsewhere in one of them is a contents list that disagrees with the rail.
+// -------------------------------------------------------------------------------------------------
+{
+  const nav = read('frontend/src/navigation.jsx');
+  const readme = read('help/README.md');
+  const problems325 = [];
+  const model = [...nav.matchAll(/id: '([a-z-]+)',\s+label: '[^']+',\s+group: 'model'/g)].map((m) => m[1]);
+  if (model.join(',') !== 'schemas,metrics,automations,vocabulary') {
+    problems325.push(`the sidebar's Model group is ${model.join(', ')}, not schemas, metrics, automations, vocabulary`);
+  }
+  const listed = [...readme.matchAll(/\]\(pages\/([a-z-]+)\.md\)/g)].map((m) => m[1]).filter((id) => model.includes(id));
+  if (listed.join(',') !== model.join(',')) {
+    problems325.push(`help/README.md lists the Model group's pages as ${listed.join(', ')}, and the sidebar as ${model.join(', ')}`);
+  }
+  if (!read('frontend/src/constants.js').includes("'metrics', 'automations', 'vocabulary'")) {
+    problems325.push("constants.js's VALID_TABS does not hold automations between metrics and vocabulary, so the router would send its address to the Site Map");
+  }
+  if (problems325.length) {
+    fail(`the Automations page's place is not the same in the sidebar and the help's contents:\n${problems325.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the sidebar's Model group (${model.join(', ')}) and help/README.md list the Automations page in the same place, and the router accepts it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 275. DeviceAlert documents platform_alerts as the migrations declare it: each column of the table
 // is a property, and a property that is no column says it is on platform_alerts_active only. The
 // columns are 0001's CREATE TABLE and any later ADD COLUMN. A column left out is one an API client

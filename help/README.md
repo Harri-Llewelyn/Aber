@@ -40,6 +40,7 @@ The help for each page of the dashboard, in the order the sidebar lists them.
 - [Devices](pages/devices.md): the machines, or parts of machines, that gateways send data for.
 - [Schemas](pages/schemas.md): what a kind of device is expected to send.
 - [Metrics](pages/metrics.md): the catalog of values that schemas are built from.
+- [Automations](pages/automations.md): rules that watch a device's readings and raise an alert, written as YAML.
 - [Vocabulary](pages/vocabulary.md): the terms that industrial standards define.
 - [Audit Trail](pages/audit-trail.md): what changed, who changed it, and when.
 - [Capture](pages/capture.md): record what the broker carried, and play it back.
