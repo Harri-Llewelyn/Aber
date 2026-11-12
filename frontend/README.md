@@ -70,6 +70,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/sparkplugDatatype.js` | `functions/_shared/aas/sparkplugToXsd.ts` |
 | `utils/model3d.js` | `functions/_shared/aas/model3dContentType.ts` |
 | `utils/standards.js` (`mtconnectSemanticId()`) | `mtconnect_vocabulary.semantic_id`, as `0002` seeds it |
+| `utils/units.js` (`UNIT_SYMBOLS`) | the units the Add Metric dialog's list offers, which `0002` seeds as the MTConnect `UNIT` and `NATIVE_UNIT` rows, the units the ISO 22400 and OPC UA rows prefill, and the example metrics' units (mirror checks 102 and 103) |
 | `utils/ashrae223.js` (`ASHRAE223_GROUP`) | the one metric group registered under ASHRAE 223P, and the group its seeded metrics file under |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
@@ -340,6 +341,29 @@ slides back when they leave.
 
 The Audit Trail's lane names use it first. The dashboard's other cut lines move onto it with
 [#1219](https://github.com/Harri-Llewelyn/Aber/issues/1219).
+
+### A unit is a symbol where it is read, and a code where it is exchanged
+
+The catalogue holds MTConnect's unit names, and a person reads `°C` for `CELSIUS`: `unitSymbol()`,
+`withUnit()` and `unitAndCode()` in `utils/units.js`, from the one map `UNIT_SYMBOLS`.
+
+- **A symbol is read** in History's chart titles, heads, ticks, ranges and heat maps, the Metric tab's
+  list, the Devices drawer's derived values and the Automations editor's help. The words functions in
+  `utils/history.js` (`readingWords()`, `chartTitle()`) say it, so a chart cannot print a code.
+- **A code is exchanged.** The export's CSV, the AAS exports and the APIs keep the catalogue's code,
+  which other programs read. The data in the page's state is the code too: the symbol is made where
+  it is printed.
+- **The Metrics page says both**, `°C (CELSIUS)` (`unitAndCode()`), in its Units column and its
+  drawer, because it is where a code is chosen. The Add Metric and Add Derived Metric dialogs, the
+  metric picker and the vocabulary pages show the code.
+- **A code with no symbol shows as it is.** A derived rate takes its counter's symbol per hour
+  (`kW/h`). `%` and `°` stand against the number (`42%`, `90°`) and any other symbol follows a space
+  (`18.8 °C`), so a range says them at each end (`0% to 50%`). A time in state is `SHARE_UNIT`, a
+  percentage of its own, and is not in the map.
+- **Checks.** Mirror checks 102 and 103 (`scripts/check-mirror-drift.mjs`) fail on a unit the Add
+  Metric dialog's list, a prefill or an example offers that has no symbol, and on a symbol no source
+  offers. Docs-drift check 373 holds the files that read to the map and the files that write data out
+  away from it, and 374 the symbols the documents name.
 
 ### A page's summary is one row of cards
 
@@ -1723,7 +1747,7 @@ flag steps between false and true, and a state is a strip of its runs in text.
 
 | Prop | What it is |
 | :--- | :--- |
-| `metric`, `unit` | The title, "Spindle/LOAD (kW)", which names the figure and its chart |
+| `metric`, `unit` | The title, "Spindle/LOAD (kW)", which names the figure and its chart. `unit` is the catalogue's code, `KILOWATT`; the chart says its symbol |
 | `starts` | Each bucket's start in seconds: `bucketStarts(start, end, minutes)` |
 | `series` | `chartSeries(rows, starts)`: `kind`, then `avg`, `min`, `max`, `carried`, `states` and `last`, one entry a bucket |
 | `start`, `end` | The window in milliseconds. The time axis is exactly the window |

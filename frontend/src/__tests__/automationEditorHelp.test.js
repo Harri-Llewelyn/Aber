@@ -313,7 +313,7 @@ describe('hovering', () => {
   })
 
   it('shows one side of a range that has one side', () => {
-    expect(over(`${HEAD}      device: ${LATHE}\n      metric: Spindle/LO|AD`).lines[1]).toBe('Valid range on Lathe 3: from 0 %.')
+    expect(over(`${HEAD}      device: ${LATHE}\n      metric: Spindle/LO|AD`).lines[1]).toBe('Valid range on Lathe 3: from 0%.')
   })
 
   it('warns on a metric the catalogue does not have, or one that is not a number', () => {
@@ -391,7 +391,18 @@ describe('the warning for a threshold outside the valid range', () => {
   it('words a range', () => {
     expect(rangeWords({ minimum: -40, maximum: 120 }, '°C')).toBe('-40 to 120 °C')
     expect(rangeWords({ minimum: null, maximum: 120 }, null)).toBe('up to 120')
-    expect(rangeWords({ minimum: 0, maximum: null }, '%')).toBe('from 0 %')
+    // A percent sign stands against the number, as History's ranges have it.
+    expect(rangeWords({ minimum: 0, maximum: null }, '%')).toBe('from 0%')
+    expect(rangeWords({ minimum: 0, maximum: 90 }, '°')).toBe('0 to 90°')
+  })
+
+  it('says the catalogue unit as its symbol, a code with none as it is', () => {
+    const facts = buildFacts({ catalog: [
+      { name: 'Coolant/TEMP', units: 'CELSIUS', datatype: 10 },
+      { name: 'Spindle/LOAD', units: 'PERCENT', datatype: 10 },
+      { name: 'Press/ODDITY', units: 'CUSTOM_UNIT', datatype: 10 },
+    ] })
+    expect([...facts.metrics.values()].map(m => m.unit)).toEqual(['°C', '%', 'CUSTOM_UNIT'])
   })
 
   it('takes the widest range, null on a side where any device has none', () => {

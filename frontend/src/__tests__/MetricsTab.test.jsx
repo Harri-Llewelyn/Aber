@@ -302,7 +302,8 @@ describe('Metric Catalog — collapsible groups', () => {
 
     const row = screen.getByText('Axes/DISPLACEMENT').closest('tr')
     expect(within(row).getByText('SAMPLE')).toBeTruthy()
-    expect(within(row).getByText('MILLIMETER')).toBeTruthy()
+    // The symbol and the code, the Metrics page being where the code is chosen.
+    expect(within(row).getByText('mm (MILLIMETER)')).toBeTruthy()
     // Actions live in the drawer, not in the row.
     expect(within(row).queryByRole('button')).toBeNull()
   })
@@ -1196,7 +1197,7 @@ describe('Metric drawer', () => {
 
     const inDrawer = selectMetric(catalogTable(), 'Axes/DISPLACEMENT')
     expect(drawer().getAttribute('aria-hidden')).toBe('false')
-    expect(inDrawer.getByText('MILLIMETER')).toBeTruthy()
+    expect(inDrawer.getByText('mm (MILLIMETER)')).toBeTruthy()
     expect(inDrawer.getByRole('button', { name: 'Edit' })).toBeTruthy()
     expect(inDrawer.getByRole('button', { name: 'Deprecate' })).toBeTruthy()
     expect(inDrawer.queryByRole('button', { name: 'Restore' })).toBeNull()
@@ -2156,7 +2157,7 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
 
     const row = screen.getByText('Axes/DISPLACEMENT').closest('tr')
     expect(row.querySelector('.badge')).toBeNull()
-    for (const text of ['MTConnect', 'SAMPLE', 'Double', 'MILLIMETER']) {
+    for (const text of ['MTConnect', 'SAMPLE', 'Double', 'mm (MILLIMETER)']) {
       expect(within(row).getByText(text).closest('td')).toHaveClass('cell-meta')
     }
   })

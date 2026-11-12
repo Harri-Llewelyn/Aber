@@ -2,6 +2,7 @@ import { parseDocument, isMap, isScalar, isSeq } from 'yaml'
 import SCHEMA from '../../public/json-schema/automations.schema.json'
 import { deviceMetrics, validRanges } from './history'
 import { SHARE_FRACTION_NOTE } from './derivedMetric'
+import { unitSticks, unitSymbol } from './units'
 import { locateReasons, parseAutomationsYaml } from './automationYaml'
 
 /*
@@ -56,7 +57,8 @@ export function buildFacts({ devices = [], schemas = [], catalog = [], documentD
   const metrics = new Map(catalog.map(m => [m.name, {
     name: m.name,
     // A time in state is a fraction from 0 to 1, though the dashboard shows it as a percentage.
-    unit: m.derivation?.kind === 'time_in_state' ? SHARE_FRACTION_NOTE : (m.units || null),
+    // The symbol, as a chart says it: a threshold is a number in the catalogue's unit.
+    unit: m.derivation?.kind === 'time_in_state' ? SHARE_FRACTION_NOTE : unitSymbol(m.units || null),
     measured: MEASURED(m.datatype),
   }]))
   const byId = new Map()
@@ -124,7 +126,7 @@ export function widestRange(facts, ids, metric) {
   }
 }
 
-const unitText = (unit) => (unit ? ` ${unit}` : '')
+const unitText = (unit) => (!unit ? '' : unitSticks(unit) ? unit : ` ${unit}`)
 
 /** "−40 to 120 °C", "up to 120 °C", "from −40 °C". */
 export function rangeWords(range, unit) {
