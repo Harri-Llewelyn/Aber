@@ -122,6 +122,8 @@ export const tabUrl = (page, tab = '') => pageUrl(page, {}, tab)
 
 /** The Automations page: the list, or one automation by its `id:` in the file. */
 export const automationsUrl = () => pageUrl('automations')
+/** A new automation: the editor on the example. No `?open=1`, which names a saved automation whose id is `new`. */
+export const newAutomationUrl = () => '/automations/new'
 /** `new` opens the starter, so an automation whose id is `new` opens with `?open=1` to say it is that one. */
 export const automationUrl = (key) => (key === 'new' ? `/automations/new?open=1` : `/automations/${encodeURIComponent(key)}`)
 /** Every automation that applies to one device (or any entity), and why. */

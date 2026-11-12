@@ -333,10 +333,13 @@ describe('Export', () => {
 })
 
 describe('New Automation', () => {
-  it('opens the editor on an example at /automations/new', async () => {
+  it('opens the editor on an example at /automations/new, not the automation whose id is new', async () => {
     await show()
-    fireEvent.click(screen.getByRole('button', { name: /New Automation/ }))
-    expect(window.location.pathname).toBe('/automations/new')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /New Automation/ })) })
+    // ?open=1 is the address of a saved automation whose id is new: New Automation must not carry it.
+    expect(window.location.pathname + window.location.search).toBe('/automations/new')
+    expect(api.automationsDocument).not.toHaveBeenCalled()
+    expect(screen.queryByText(/No automation has the id/)).toBeNull()
   })
 })
 
