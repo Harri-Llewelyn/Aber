@@ -202,7 +202,7 @@ To see every change again, zoom in, or choose a shorter window. A window older t
 
 Only an **Administrator** or a **Shopfloor Manager** can export. For anyone else, **Export CSV** is greyed and says **Requires Administrator or Shopfloor Manager**. The charts are unchanged.
 
-1. Choose what to export. On the Device tab, choose the device, the window and the metrics, as above. The export saves what the charts show. On Overview, draw a box or tick the devices. On the Cell tab, choose the cell, the metric and the window.
+1. Choose what to export. On the Device tab, choose the device, the window and the metrics, as above. The export saves what the charts show. On Overview, draw a box or tick the devices. On the Cell tab, choose the cell, the metric and the window. On the Area tab, choose the area, the metric and the window. The file holds each machine behind the charts, not the cells' means or totals. On the Metric tab, choose the metric, the filters and the window. The file holds every device the tab lists, on every page.
 2. Select **Export CSV** in the toolbar, or in Overview's panel. The dialog's first line says what it will save, for example **Lathe 3 · 3 metrics · Last 24 hours (4 Nov 12:41 – 5 Nov 12:41)**. The times are fixed when the dialog opens.
 3. Choose the **Resolution**, then select **Export CSV** in the dialog. The file downloads, and a message links to the export's entry in the Audit Trail.
 
