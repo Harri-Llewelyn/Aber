@@ -22,7 +22,8 @@ decide where a new feature belongs.
 - **Aber watches the readings and shows the alerts.** Every alert appears in Aber's dashboard.
   Aber evaluates the machine conditions a person writes as [automations](automations.md). Today
   Grafana evaluates the platform's own health rules ([`grafana/README.md`](../grafana/README.md)).
-- **Aber hands the readings on.** A person exports them as files, and other software reads them
+- **Aber hands the readings on.** An Administrator or a Shopfloor Manager exports them as files, 14 days at a
+  time unless the site sets another limit, each export recorded in the Audit Trail. Other software reads them
   through [i3X](i3x-openapi.yaml). The equipment register is published as Asset Administration
   Shells.
 - **Grafana is for analysis in depth.** There, a person builds dashboards, writes their own queries

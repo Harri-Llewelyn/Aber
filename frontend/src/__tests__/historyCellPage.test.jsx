@@ -40,6 +40,7 @@ vi.mock('../api', async () => {
     ...actual,
     api: {
       get: vi.fn(), readCarriedTelemetry: vi.fn(), readTelemetryChanges: vi.fn(), readHourOfDay: vi.fn(), readAlertOccurrences: vi.fn(),
+      exportTelemetry: vi.fn(),
     },
   }
 })
@@ -103,10 +104,13 @@ const hours = ({ assetIds }) => Promise.resolve(assetIds.flatMap(asset => Array.
   asset_id: asset, hour_of_day: h, mean_value: (LEVEL[asset] ?? 50) + h, days: 7,
 }))))
 
-const visit = async (address) => {
+/** An Administrator unless a test says otherwise: Export CSV is for an Administrator or a Shopfloor Manager. */
+const visit = async (address, { userRole = 'Administrator' } = {}) => {
   window.history.pushState({}, '', address)
-  render(<HistoryTab hasPermission={() => true} showToast={vi.fn()} />)
+  const showToast = vi.fn()
+  render(<HistoryTab showToast={showToast} userRole={userRole} />)
   await waitFor(() => expect(screen.queryByText(/Loading devices/)).not.toBeInTheDocument())
+  return { showToast }
 }
 
 const heatmap = () => screen.getByRole('grid', { name: /the mean at each hour of the day/ })
@@ -491,5 +495,102 @@ describe('the hour-of-day heatmap', () => {
     api.readHourOfDay.mockResolvedValue([])
     await visit('/history/cell/c1')
     expect(await screen.findByText('No machine has a value for Spindle/LOAD in this window.')).toBeInTheDocument()
+  })
+})
+
+describe("exporting a cell's metric", () => {
+  const DENIED = 'Requires Administrator or Shopfloor Manager'
+  const exportButton = () => screen.getByRole('button', { name: /Export CSV/ })
+  const asked = () => api.exportTelemetry.mock.calls.map(c => c[0])
+  beforeEach(() => {
+    api.exportTelemetry.mockResolvedValue({
+      audit_id: 31, resolution: 'raw', columns: ['time', 'asset_id', 'metric_name', 'value', 'unit'],
+      rows: [['2026-11-02T10:00:00.000Z', telemetryKey({ asset_id: LATHE3 }), 'Spindle/LOAD', 4, 'kW']], row_count: 1,
+      max_rows: 50000, truncated: false, read_from: '2026-11-02T00:00:00.000Z', read_to: '2026-11-03T00:00:00.000Z', raw_from: null,
+    })
+  })
+
+  it('sits after Clear filters and before the refresh control, as the Device tab places it', async () => {
+    await visit('/history/cell/c1?metric=Spindle/LOAD&range=7d')
+    await screen.findAllByRole('figure')
+    const actions = document.querySelector('.filter-bar-actions')
+    const order = [...actions.querySelectorAll('button, [role="group"]')]
+      .filter(el => !el.closest('[role="group"]') || el.getAttribute('role') === 'group')
+      .map(el => el.getAttribute('aria-label') || el.textContent.trim())
+    // The window and the metric are the two filters set.
+    expect(order).toEqual(['✕ Clear filters (2)', 'Export CSV', 'Refresh'])
+    expect(exportButton()).toHaveClass('btn-primary')
+  })
+
+  it("exports the metric of the machines that report it over the window, as raw, and toasts with the row's link", async () => {
+    const { showToast } = await visit('/history/cell/c1?metric=Spindle/LOAD')
+    await screen.findAllByRole('figure')
+    const before = Date.now()
+    fireEvent.click(exportButton())
+    const dialog = await screen.findByRole('dialog', { name: /Export readings — 3 devices/ })
+    expect(within(dialog).getByText(/^3 devices · 1 metric · Last 24 hours \(.+ – .+\)$/)).toBeInTheDocument()
+    for (const name of ['Lathe 3', 'Lathe 4', 'Mill 2']) expect(within(dialog).getByText(name)).toBeInTheDocument()
+    // Press 1 reports nothing and Weld bot is in another cell.
+    expect(within(dialog).queryByText('Press 1')).toBeNull()
+    expect(within(dialog).getByRole('button', { name: /Raw samples/ })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(asked()).toHaveLength(1))
+    const [call] = asked()
+    expect(call.assetIds.sort()).toEqual([LATHE3, LATHE4, MILL].map(asset_id => telemetryKey({ asset_id })).sort())
+    expect(call.metricNames).toEqual(['Spindle/LOAD'])
+    expect(call.resolution).toBe('raw')
+    expect(Date.parse(call.to) - Date.parse(call.from)).toBe(24 * 60 * 60 * 1000)
+    expect(Date.parse(call.to)).toBeGreaterThanOrEqual(before)
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Exported 1 row of 3 devices', 'success', { to: '/audit-trail?event=31' }))
+  })
+
+  it('exports the metric chosen, from the machines that report that one', async () => {
+    await visit('/history/cell/c1?metric=Coolant/TEMP')
+    await screen.findAllByRole('figure')
+    fireEvent.click(exportButton())
+    const dialog = await screen.findByRole('dialog', { name: /Export readings — Mill 2/ })
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(asked()).toHaveLength(1))
+    expect(asked()[0].assetIds).toEqual([telemetryKey({ asset_id: MILL })])
+    expect(asked()[0].metricNames).toEqual(['Coolant/TEMP'])
+  })
+
+  it('is for an Administrator or a Shopfloor Manager, and greyed for the others, saying who may', async () => {
+    for (const role of ['Administrator', 'Shopfloor_Manager']) {
+      await visit('/history/cell/c1?metric=Spindle/LOAD', { userRole: role })
+      await screen.findAllByRole('figure')
+      expect(exportButton()).not.toBeDisabled()
+      cleanup()
+    }
+    for (const role of ['Operator', 'Auditor', null]) {
+      await visit('/history/cell/c1?metric=Spindle/LOAD', { userRole: role })
+      await screen.findAllByRole('figure')
+      expect(exportButton()).toBeDisabled()
+      expect(exportButton()).toHaveClass('btn-disabled')
+      expect(exportButton()).toHaveAccessibleDescription(DENIED)
+      fireEvent.click(exportButton())
+      expect(screen.queryByRole('dialog', { name: /Export readings/ })).toBeNull()
+      // The charts stay.
+      expect(screen.getAllByRole('figure').length).toBeGreaterThan(0)
+      cleanup()
+    }
+  })
+
+  it('says it is off before anything is asked when the window is over the limit', async () => {
+    await visit('/history/cell/c1?metric=Spindle/LOAD&range=30d')
+    await screen.findAllByRole('figure')
+    expect(exportButton()).toBeDisabled()
+    expect(exportButton()).toHaveAccessibleDescription('An export can cover at most 14 days, set on Settings › History. This window is 30 days.')
+    fireEvent.click(exportButton())
+    expect(screen.queryByRole('dialog', { name: /Export readings/ })).toBeNull()
+    expect(asked()).toEqual([])
+  })
+
+  it('is off for a cell with no machine to export', async () => {
+    await visit('/history/cell/c3')
+    await screen.findByText(/No device is in service in this cell/)
+    expect(exportButton()).toBeDisabled()
+    expect(exportButton()).toHaveAccessibleDescription('This cell has no metric to export.')
   })
 })

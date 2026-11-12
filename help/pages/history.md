@@ -36,13 +36,14 @@ The part of the window after now is hatched and says **No readings yet**. A cros
 ### Charting or zooming from Overview
 
 1. Press on a strip and drag across the lanes and the stretch of time you want. A box follows the pointer, and the time axis says what it holds, for example **3 devices · 10:05 – 14:20, 4 h 15 min**.
-2. Let go. The box stays, and a panel opens beside it with what it holds, **Chart**, **Zoom** and **Clear**.
+2. Let go. The box stays, and a panel opens beside it with what it holds, **Chart**, **Zoom**, **Export CSV** and **Clear**.
 3. Select **Zoom** to show that stretch on Overview. **Back** in your browser undoes it.
 4. Or select **Chart**, over the box's stretch. For one device it opens that device's charts on the Device tab. For several it opens the [Metric tab](#the-metric-tab-one-metric-across-devices), narrowed to those devices, on the metric most of them report.
+5. Or select **Export CSV** to save the box's devices, every metric they report, over the box's stretch. [Exporting readings](#exporting-readings) says who may and how long a stretch can be.
 
 Select **Clear**, press **Escape**, or press anywhere outside the panel to clear the box. Scrolling the lanes clears it too.
 
-You don't need to drag. Tick the box at the start of a lane to pick that device, and select **Chart** in the toolbar: it charts the devices you ticked over the time window. The time window's **Zoom in** and **Zoom out** work here as on the Device tab. A lane's name also opens its charts.
+You don't need to drag. Tick the box at the start of a lane to pick that device, and select **Chart** or **Export CSV** in the toolbar: they take the time window. The time window's **Zoom in** and **Zoom out** work here as on the Device tab. A lane's name also opens its charts.
 
 ### Long windows and many devices
 
@@ -199,22 +200,30 @@ To see every change again, zoom in, or choose a shorter window. A window older t
 
 ## Exporting readings
 
-1. Choose the device, the window and the metrics, as above. The export saves what the charts show.
-2. Select **Export CSV** in the toolbar. The dialog's first line says what it will save, for example **Lathe 3 · 3 metrics · Last 24 hours (4 Nov 12:41 – 5 Nov 12:41)**. The times are fixed when the dialog opens.
-3. Choose the **Resolution**, then select **Export CSV** in the dialog. The file downloads.
+Only an **Administrator** or a **Shopfloor Manager** can export. For anyone else, **Export CSV** is greyed and says **Requires Administrator or Shopfloor Manager**. The charts are unchanged.
+
+1. Choose what to export. On the Device tab, choose the device, the window and the metrics, as above. The export saves what the charts show. On Overview, draw a box or tick the devices. On the Cell tab, choose the cell, the metric and the window.
+2. Select **Export CSV** in the toolbar, or in Overview's panel. The dialog's first line says what it will save, for example **Lathe 3 · 3 metrics · Last 24 hours (4 Nov 12:41 – 5 Nov 12:41)**. The times are fixed when the dialog opens.
+3. Choose the **Resolution**, then select **Export CSV** in the dialog. The file downloads, and a message links to the export's entry in the Audit Trail.
+
+The file has one row for each reading: its **time**, **device**, **metric**, **value** and **unit**. Its first line names the resolution, because the file is what gets passed on.
 
 The resolutions:
 
 - **Raw samples**, the one the dialog starts on, is every reading as the machine sent it.
-- **1 minute**, **5 minutes** and **1 hour** are summaries: each period's average, lowest, highest and last reading. The file's first line names the resolution, because the file is what gets passed on.
+- **1 minute**, **5 minutes** and **1 hour** are summaries: one row for each period, with its start as the time and its average as the value. A text or a flag has no average, so its row holds the period's last value.
 
-Each resolution says how far back it has data, because raw readings are kept for much less time than the summaries. If the window starts before the resolution you chose begins, the dialog says so, names the finest resolution that covers the whole window, and offers to switch. It never swaps in a summary by itself.
+Each resolution says how far back it has data, because raw readings are kept for much less time than the summaries. If the window starts before the resolution you chose begins, the dialog says so, names the finest resolution that covers the whole window, and offers to switch. It never swaps in a summary by itself. A raw file that starts later than the window says so in its first lines.
 
 **Buckets** changes only the charts. The export has its own **Resolution**.
 
-An export holds at most 50,000 rows, shared across the metrics. Once it reaches that, the later metrics are left out, and the dialog and the file's first lines say so.
+### How much one export can hold
 
-Exporting needs permission to read telemetry. Without it, **Export CSV** is off and names the roles that have it.
+- **A window of at most 14 days.** An Administrator can change the limit in **Settings**, on the **History** tab. If the window is longer, **Export CSV** is greyed and says how long the limit is. On Overview, the box's words say **over the 14-day export limit** while you draw it. Choose a shorter window, or read older history from Cold Storage's files.
+- **An export holds at most 50,000 rows.** If there are more, the file stops at a whole minute, and the message and the file's first lines say where. Choose a shorter window, fewer devices or metrics, or a coarser resolution.
+- **At most 1,000 devices and 500 metrics.**
+
+If a second factor is required to change the platform, exporting asks for it too. Each export is recorded in the Audit Trail, in the **Readings** lane. The entry names who exported. It lists the devices and metrics, the window and the resolution. It also says how many rows left.
 
 ## The Metric tab: one metric across devices
 

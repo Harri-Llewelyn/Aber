@@ -744,15 +744,19 @@ const shownAfter = (action, d) =>
     ? sessionLabel(d.after)
     : APP_ACT_LABELS[action] && d.field === 'app' && d.after?.name
       ? d.after.name
-      : formatValue(d.after)
+      : action === 'TELEMETRY_EXPORTED' && d.field === 'devices' && Array.isArray(d.after)
+        ? d.after.map(x => x?.name ?? x?.id).join(', ')
+        : action === 'TELEMETRY_EXPORTED' && d.field === 'metrics' && Array.isArray(d.after)
+          ? d.after.join(', ')
+          : formatValue(d.after)
 
 /**
- * The rows the drawer's table draws. A Logs read over a fixed window stores its two ends in UTC;
- * they are one `window` row here, in local time, as the Logs tab chose them. The payload below and
- * the CSV export keep the stored values.
+ * The rows the drawer's table draws. A Logs read over a fixed window, and an export of readings,
+ * store the window's two ends in UTC; they are one `window` row here, in local time, as the person
+ * chose them. The payload below and the CSV export keep the stored values.
  */
 const shownRows = (action, diff) => {
-  if (action !== 'SERVICE_LOGS_READ') return diff
+  if (action !== 'SERVICE_LOGS_READ' && action !== 'TELEMETRY_EXPORTED') return diff
   const ends = Object.fromEntries(diff.filter(d => d.field === 'from' || d.field === 'to').map(d => [d.field, d.after]))
   const words = windowEndsWords(ends.from, ends.to)
   if (!words) return diff
@@ -905,14 +909,22 @@ const APP_ACT_LABELS = {
 }
 
 /**
+ * An export of readings (0279): one-sided like the acts above, `new_data` alone. Its devices are
+ * shown by name and its two window ends as one `window` row (shownRows()).
+ */
+const EXPORT_ACT_LABELS = {
+  TELEMETRY_EXPORTED: ['Readings exported', 'Exported'],
+}
+
+/**
  * The property diff, passed to ContextPanel through `beforeActions`. ContextPanel is presentational
  * and knows nothing about audit payloads.
  */
 function EventDiff({ event, diff }) {
   const action = String(event.event_type || event.action || '').toUpperCase()
-  const captureAct = CAPTURE_ACT_LABELS[action] || APP_ACT_LABELS[action]
+  const captureAct = CAPTURE_ACT_LABELS[action] || APP_ACT_LABELS[action] || EXPORT_ACT_LABELS[action]
   // These acts are one-sided (INSERT, DELETE, SCHEMA_REJECTION, TOKEN_MINTED, BACKUP_REQUESTED,
-  // BACKUP_TAKEN, PERSON_ADDED, PASSWORD_SET, SESSIONS_ENDED, MFA_RESET, SERVICE_LOGS_READ, the capture and app acts): `old_data`
+  // BACKUP_TAKEN, PERSON_ADDED, PASSWORD_SET, SESSIONS_ENDED, MFA_RESET, SERVICE_LOGS_READ, the capture, app and export acts): `old_data`
   // is NULL by construction, and a Previous column would invite a search for a prior state that does not exist.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
     || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'

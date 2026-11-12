@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { HISTORY_CHANGE_SERIES, api } from '../../api'
-import { PERMISSION_UUIDS } from '../../constants'
-import { requiresRolesTitle } from '../../hooks/usePermissions'
+import { useSetting } from '../../hooks/useSettings'
 import { ToolbarPopover } from '../common/FiltersPopover'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
@@ -26,13 +25,16 @@ import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBands } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import { deviceIds } from '../../utils/sparkplugId'
+import {
+  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem, mayExportReadings,
+} from '../../utils/telemetryExport'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY,
   HISTORY_SPANS, TOO_MANY_BUCKETS, bucketOptions, bucketStarts, changeSeries, chartSeries, chartSummary, datatypeKind,
   deviceMatches, deviceMetrics, inReads, markBuckets, metricGroups, pickResolution, pickedAddress, readPlan, readWords,
-  readableResolution, stateReadLine, validRanges,
+  readableResolution, stateReadLine, telemetryKey, validRanges,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -169,7 +171,8 @@ const WIDTH_SETTLE_MS = 300
  * metrics or the buckets change, on Refresh, and on the refresh timer while the window reaches
  * now; never on a re-render. `every` is the timer, in seconds, held by the page so it outlasts a
  * change of device. Export CSV downloads what the page shows: this device, the metrics chosen and
- * the window, resolved to its bounds as it opens, for a role with `telemetry:read`.
+ * the window, resolved to its bounds as it opens, for an Administrator or a Shopfloor Manager, and
+ * for a window no longer than history.export_max_days: the button says why when it is off.
  *
  * The window zooms as the Audit Trail's does: Zoom in and Zoom out in the time control, and a drag
  * across any chart, which shades the band on every chart and sets it as the window on release, as a
@@ -179,7 +182,7 @@ const WIDTH_SETTLE_MS = 300
  * opens and closes it. A closed group only hides its charts: the reads, the row cap and the Metrics
  * filter are the same. Which are closed is kept in this browser (CLOSED_GROUPS_KEY).
  */
-export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, every, setEvery, hasPermission, showToast }) {
+export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, every, setEvery, userRole, showToast }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const metrics = useMemo(() => deviceMetrics(device, schemas), [device, schemas])
@@ -306,15 +309,19 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
     ? pickResolution(shownStart.getTime(), shownEnd.getTime(), names.length)
     : null
 
-  const canExport = hasPermission?.(PERMISSION_UUIDS.TELEMETRY_READ) ?? false
+  const canExport = mayExportReadings(userRole)
+  const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
   const exportBlocked = names.length === 0
     ? 'This device has no metric to export.'
-    : !(shownStart && shownEnd && shownEnd > shownStart) ? 'Set both ends of the custom range to export it.' : null
+    : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
   /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
   const openExport = () => {
     const at = Date.now()
     const { start, end } = windowBounds(win, at)
-    setExporting({ names, from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at) })
+    setExporting({
+      devices: [{ id: telemetryKey(device), name: device.asset_name }], names,
+      from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
+    })
   }
 
   // The groups of the metrics chosen, and which are open; the Metrics list is grouped the same way.
@@ -393,7 +400,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
           <ActionButton
             className="btn btn-primary btn-sm"
             permitted={canExport}
-            deniedTitle={`Exporting readings needs telemetry access. ${requiresRolesTitle(PERMISSION_UUIDS.TELEMETRY_READ)}.`}
+            deniedTitle={EXPORT_DENIED_TITLE}
             disabled={Boolean(exportBlocked)}
             title={exportBlocked ?? 'Download the readings of the metrics shown, over this window, as CSV'}
             onClick={openExport}
@@ -500,7 +507,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
 
       {exporting && (
         <TelemetryExportModal
-          device={device}
+          devices={exporting.devices}
           metricNames={exporting.names}
           from={exporting.from}
           to={exporting.to}

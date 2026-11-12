@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { HISTORY_CHANGE_SERIES, api } from '../../api'
+import { useSetting } from '../../hooks/useSettings'
 import { ToolbarPopover } from '../common/FiltersPopover'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { RefreshButton } from '../common/RefreshButton'
 import { ClearFilters } from '../common/ClearFilters'
+import { ActionButton } from '../common/ActionButton'
+import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { GroupHeading } from '../common/GroupHeading'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
 import { EmptyState } from '../common/EmptyState'
@@ -14,12 +17,15 @@ import { RouteLink } from '../common/RouteLink'
 import { AlertKey } from '../common/AlertKey'
 import { SmallMultiples } from '../common/SmallMultiples'
 import { HourHeatmap } from '../common/HourHeatmap'
-import { IconChartLine, IconCpu, IconLayoutDashboard } from '../common/Icons'
+import { IconChartLine, IconCpu, IconDownload, IconLayoutDashboard } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
 import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
+import {
+  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem, mayExportReadings,
+} from '../../utils/telemetryExport'
 import { navigate, useUrlState } from '../../hooks/useUrlState'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
@@ -138,9 +144,11 @@ function MetricSwitcher({ cell, metrics, metric, win, total }) {
  * The metric is in the address (`metric`), with the window; the page opens on the metric most
  * machines report. A read is made again when the cell, the metric or the window changes, on
  * Refresh, and on the refresh timer while the window reaches now. The window zooms as the Device
- * tab's does: the time control's buttons, and a drag across any chart.
+ * tab's does: the time control's buttons, and a drag across any chart. Export CSV downloads the
+ * metric of the machines that report it over the window, in the Device tab's dialog, for an
+ * Administrator or a Shopfloor Manager and for a window no longer than history.export_max_days.
  */
-export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every, setEvery }) {
+export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every, setEvery, userRole, showToast }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const machines = cell.machines
@@ -160,6 +168,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
 
   const [reading, setReading] = useState(null)
   const [heat, setHeat] = useState(null)
+  const [exporting, setExporting] = useState(null)
   const [closed, setClosed] = useState(() => new Set())
   const sectionsId = useId()
   // Each read's number: only the newest may land, so a slow read never draws over a later one.
@@ -317,6 +326,22 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
   const clear = () => { setWin(DEFAULT_HISTORY_WINDOW); setChosen('') }
   const busy = Boolean(reading?.loading || heat?.loading) || reading === null
 
+  const canExport = mayExportReadings(userRole)
+  const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
+  const { start: shownStart, end: shownEnd } = windowBounds(win, now)
+  const exportBlocked = !metric ? 'This cell has no metric to export.'
+    : reporters.length === 0 ? `None of the machines in ${cell.name} reports ${metric}, so there is nothing to export.`
+      : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
+  /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
+  const openExport = () => {
+    const at = Date.now()
+    const { start, end } = windowBounds(win, at)
+    setExporting({
+      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: [metric],
+      from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
+    })
+  }
+
   const sectionId = (key) => `${sectionsId}-${key}`
   const section = (key, label, detail, body) => {
     const open = !closed.has(key)
@@ -345,6 +370,16 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
         {metricList.length > 0 && <MetricSwitcher cell={cell} metrics={metricList} metric={metric} win={win} total={total} />}
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            permitted={canExport}
+            deniedTitle={EXPORT_DENIED_TITLE}
+            disabled={Boolean(exportBlocked)}
+            title={exportBlocked ?? `Download ${metric} for the machines that report it, over this window, as CSV`}
+            onClick={openExport}
+          >
+            <IconDownload size={13} aria-hidden="true" /> Export CSV
+          </ActionButton>
           <RefreshButton
             onRefresh={() => readAll().catch(() => {})}
             busy={busy}
@@ -417,6 +452,18 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
           </>
         )}
       </div>
+
+      {exporting && (
+        <TelemetryExportModal
+          devices={exporting.devices}
+          metricNames={exporting.names}
+          from={exporting.from}
+          to={exporting.to}
+          windowWords={exporting.windowWords}
+          onClose={() => setExporting(null)}
+          showToast={showToast}
+        />
+      )}
     </>
   )
 }

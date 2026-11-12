@@ -99,7 +99,7 @@ A few things to know:
 
 **Aber decides each event's class, not the page.** The first rule that fits decides:
 
-1. **Read**: a service's logs read on the System page, a gateway's credential shown again, a capture's download link issued, and a device exported.
+1. **Read**: a service's logs read on the System page, a gateway's credential shown again, a capture's download link issued, a device exported, and readings exported from History.
 2. **Operational**: an alert acknowledged from the alert counter, or its acknowledgement withdrawn.
 3. **Configuration**: every other change in the security lane, which is people, access, machine identities, apps, settings, backups and the webhook's signing key. Also a schema rejection, a token minted or revoked, and a schema attached to or detached from a device.
 4. **Created** for something made, and **Lifecycle** for something deleted. A recording or playback started counts as made, and a capture deleted as deleted.

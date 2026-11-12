@@ -63,6 +63,9 @@ export const AUDIT_TRAIL_ACTIONS = {
   // A per-asset bundle stored beside the cold tier (asset_exports): the one row of a device's
   // history that says a copy of it left the platform, and who took it.
   EXPORTED:          'Exported',
+  // Readings exported from History (0279): one row an export that returned rows, naming who, the
+  // devices and metrics, the window, the resolution and how many rows left. A read, in one lane.
+  TELEMETRY_EXPORTED: 'Readings exported',
   // Written by the expiry timer, with `changed_by` NULL because a timer is not a person.
   PROPOSAL_EXPIRED:  'Proposal expired',
   // Written by `log_role_assignment()`, not the generic audit trigger (`user_roles` has no `id`).
@@ -162,6 +165,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset', group: 'plant' },
   // An alert's acknowledgements (0231), one lane per alert across its occurrences (0232).
   { kind: 'ALERT',            table: 'platform_alerts',    label: 'Alerts',             domain: 'asset', group: 'plant' },
+  // Readings exported from History (0279): one lane for every export, in the asset lane, which the
+  // roles that export and an Auditor read.
+  { kind: 'READINGS',         table: 'telemetry',          label: 'Readings',           domain: 'asset', group: 'plant' },
   // The security lane (archive/0070_audit_domain_and_the_acts_nothing_recorded.sql), in the order a
   // reader meets it: who holds what, what the machines are, then the contracts and settings that
   // shape both.
@@ -258,7 +264,7 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
     actions: ['BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
       'BACKUP_PRUNED'],
   },
-  { label: 'Reads', actions: ['SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED'] },
+  { label: 'Reads', actions: ['SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED', 'TELEMETRY_EXPORTED'] },
 ];
 
 /**
@@ -290,6 +296,8 @@ export const AUDIT_TRAIL_ACTION_KINDS = [
     ['operational', 'configuration', 'lifecycle']],
   ['PROPOSAL_EXPIRED', ['change_proposals'], ['operational', 'configuration', 'lifecycle']],
   ['EXPORTED', ['devices'], ['read']],
+  // Readings exported from History (0279), in the one lane for readings.
+  ['TELEMETRY_EXPORTED', ['telemetry'], ['read']],
   ['FLOW_DEPLOYED', ['gateways'], ['operational', 'configuration', 'lifecycle']],
   ['CREDENTIAL_ISSUED', ['gateways'], ['operational', 'configuration', 'lifecycle']],
   ['CREDENTIAL_SHOWN', ['gateways'], ['read']],

@@ -47,6 +47,9 @@ export const trailKindFilter = (type) => {
 export const trailUrl = (id, type = '', deleted = false) =>
   pageUrl('audit-trail', { search: id, type: trailKindFilter(type), deleted })
 
+/** One Audit Trail event with its drawer open, by the id its row has: an export's, in a toast. */
+export const auditEventUrl = (eventId) => pageUrl('audit-trail', { event: eventId })
+
 /** Every change one person or machine identity made, by their user id: the trail's Changed by. */
 export const changesByUrl = (userId) => pageUrl('audit-trail', { changed_by: userId })
 

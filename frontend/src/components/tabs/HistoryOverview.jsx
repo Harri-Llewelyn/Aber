@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { COVERAGE_SMALL_SELECTION, api } from '../../api'
+import { useSetting } from '../../hooks/useSettings'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { RefreshButton } from '../common/RefreshButton'
@@ -13,7 +14,8 @@ import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
 import { DeviceStatusDot } from '../common/DeviceStatusDot'
 import { ARROW_INSET, Tooltip, tooltipHost } from '../common/Tooltip'
-import { IconChartLine, IconCpu, IconX, IconZoomIn } from '../common/Icons'
+import { IconChartLine, IconCpu, IconDownload, IconX, IconZoomIn } from '../common/Icons'
+import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
 import { useBandDrag } from '../../hooks/useBandDrag'
@@ -21,7 +23,11 @@ import { useClickOutside } from '../../hooks/useClickOutside'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { DEVICE_STATUS, deviceLifecycleStatus } from '../../utils/deviceStatus'
-import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds } from '../../utils/timeWindow'
+import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
+import {
+  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportSizeProblem, exportWindowProblem,
+  mayExportReadings, overExportLimit, overLimitShort,
+} from '../../utils/telemetryExport'
 import {
   COVERAGE_KEY, COVERAGE_PER_READ, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW,
   ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_LONG_FOR_MANY, axisTicks, blockReadoutWords,
@@ -257,14 +263,36 @@ function ChartButton({ keys, win, names, chartFor }) {
 
 
 /**
+ * Export CSV, for the devices picked over a window: the readings of all their metrics, raw by
+ * default, in the dialog the Device tab opens. Off for a role that may not export, and while the
+ * devices or the window are more than one export may carry, each saying why in its tooltip and
+ * keeping its Tab stop (`aria-disabled`), as Chart does.
+ */
+function ExportButton({ allowed, reason, onExport }) {
+  const off = !allowed || Boolean(reason)
+  return (
+    <Tooltip text={!allowed ? EXPORT_DENIED_TITLE : reason ?? "Download these devices' readings over this window as CSV"}>
+      <button
+        type="button"
+        className={`btn btn-primary btn-sm${off ? ' btn-disabled' : ''}`}
+        aria-disabled={off ? 'true' : undefined}
+        onClick={() => { if (!off) onExport() }}
+      >
+        <IconDownload size={13} aria-hidden="true" /> Export CSV
+      </button>
+    </Tooltip>
+  )
+}
+
+/**
  * The selection's words and actions in a popover beside the box, as on the Datasets page of AMRC's
- * ACS: Chart (the Device tab for one device, the Metric tab for several), Zoom and Clear. Portalled to <body> as the toolbar's
+ * ACS: Chart (the Device tab for one device, the Metric tab for several), Zoom, Export CSV and Clear. Portalled to <body> as the toolbar's
  * popovers are, so the card cannot clip it, and fixed below the box's visible part, or above it
  * (placeSelection()), its arrow at the box's centre. Focus moves to its first action that is not off,
  * and Tab stays inside it. Escape, Clear, a press outside, a scroll and a resize close it, and the
  * box with it (`onClose`).
  */
-function SelectionPopover({ box, layerRef, words, keys, win, names, chartFor, onZoom, onClose }) {
+function SelectionPopover({ box, layerRef, words, keys, win, names, chartFor, exporting, onZoom, onClose }) {
   const ref = useClickOutside(onClose)
   const [pos, setPos] = useState(null)
   useEscapeKey(onClose)
@@ -334,6 +362,7 @@ function SelectionPopover({ box, layerRef, words, keys, win, names, chartFor, on
             <IconZoomIn size={13} aria-hidden="true" /> Zoom
           </button>
         </Tooltip>
+        <ExportButton {...exporting} />
         <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
           <IconX size={13} aria-hidden="true" /> Clear
         </button>
@@ -356,11 +385,15 @@ function SelectionPopover({ box, layerRef, words, keys, win, names, chartFor, on
  *
  * A drag across the tracks draws a selection box: the devices whose rows it covers and the stretch
  * of the window it spans, named on the axis while it is drawn. On release a popover beside it holds
- * its words, Chart (the Device tab for one device, the Metric tab for several), Zoom (the page's window, as a new history entry)
- * and Clear (SelectionPopover). The box is a shortcut: each lane's tick box picks devices
- * (`?device=`), the toolbar then offers Chart at the time control's window, and the control zooms.
+ * its words, Chart (the Device tab for one device, the Metric tab for several), Zoom (the page's window, as a new history entry),
+ * Export CSV (the box's devices, all their metrics and its window, in the Device tab's dialog) and
+ * Clear (SelectionPopover). The box is a shortcut: each lane's tick box picks devices
+ * (`?device=`), the toolbar then offers Chart and Export CSV at the time control's window, and the
+ * control zooms. Export is for an Administrator or a Shopfloor Manager, and for a window no longer
+ * than history.export_max_days: the box's words say when its window is over, as it is drawn, and the
+ * button says why it is off.
  */
-export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, every, setEvery }) {
+export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, every, setEvery, userRole, showToast }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const [search, setSearch] = useUrlState('search', '')
@@ -390,6 +423,11 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   const [reading, setReading] = useState(null)
   const [box, setBox] = useState(null)
   const [hover, setHover] = useState(null)
+  const [exporting, setExporting] = useState(null)
+  const canExport = mayExportReadings(userRole)
+  const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
+  // What each device reports, for Export's metrics: read once, not on every move of a box.
+  const metricsByKey = useMemo(() => new Map(placed.map(d => [telemetryKey(d), deviceMetrics(d, schemas)])), [placed, schemas])
 
   /** The width a track is drawn at: the axis track's, else the page's less the label column, else a default's. */
   const stripPx = () => {
@@ -559,8 +597,39 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   const pointed = dragged || box ? null : hover
   const boxWindow = shownBox ? bandWindow(atFraction(shownBox.lo), atFraction(shownBox.hi), drawn.ms) : null
   const boxBounds = boxWindow ? windowBounds(boxWindow) : null
-  const boxText = shownBox ? boxWords(shownBox.keys.length, boxBounds.start.getTime(), boxBounds.end.getTime(), now) : null
+  // Said while the box is drawn, so a person who may export hears the limit before they let go.
+  const boxOver = canExport && boxBounds && overExportLimit(boxBounds.start.getTime(), boxBounds.end.getTime(), exportDays)
+  const boxText = shownBox
+    ? `${boxWords(shownBox.keys.length, boxBounds.start.getTime(), boxBounds.end.getTime(), now)}${boxOver ? ` · ${overLimitShort(exportDays)}` : ''}`
+    : null
   const zoomToBox = () => { setWin(boxWindow, { replace: false }); closeBox() }
+
+  // ---- Export ------------------------------------------------------------------------------------
+  /** The metrics Export takes for these devices, all they report, and why it cannot: none, too many, or a window too long. */
+  const exportFor = (keysIn, startMs, endMs) => {
+    const metricNames = [...new Set(keysIn.flatMap(k => metricsByKey.get(k) ?? []))].sort((a, b) => a.localeCompare(b))
+    const reason = metricNames.length === 0
+      ? 'These devices have declared no metric, so there is nothing to export.'
+      : exportSizeProblem(keysIn.length, metricNames.length) ?? exportWindowProblem(startMs, endMs, exportDays)
+    return { metricNames, reason }
+  }
+  const startExport = (keysIn, { start, end }, ofWindow) => {
+    setExporting({
+      devices: keysIn.map(k => ({ id: k, name: names.get(k) ?? k })),
+      names: exportFor(keysIn, start.getTime(), end.getTime()).metricNames,
+      from: start.toISOString(),
+      to: end.toISOString(),
+      windowWords: windowWords(ofWindow, Date.now()),
+    })
+  }
+  const boxExport = box && !dragged && shownBox && boxBounds
+    ? { allowed: canExport, reason: exportFor(shownBox.keys, boxBounds.start.getTime(), boxBounds.end.getTime()).reason,
+      onExport: () => { startExport(shownBox.keys, boxBounds, boxWindow); closeBox() } }
+    : null
+  const tickedExport = ticked.length > 0
+    ? { allowed: canExport, reason: exportFor(ticked, shownStart?.getTime(), shownEnd?.getTime()).reason,
+      onExport: () => startExport(ticked, windowBounds(win, Date.now()), win) }
+    : null
 
   // ---- The readout -------------------------------------------------------------------------------
   /** The block under the pointer: which track, which block and where, from the track's own box. */
@@ -673,6 +742,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
           <ClearFilters count={filterCount} onClear={clear} />
           {/* The tick boxes' way to Chart, without a drag. */}
           {ticked.length > 0 && <ChartButton keys={ticked} win={win} names={names} chartFor={chartFor} />}
+          {tickedExport && <ExportButton {...tickedExport} />}
           <RefreshButton
             onRefresh={() => read().catch(() => {})}
             busy={busy}
@@ -775,6 +845,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
                         win={boxWindow}
                         names={names}
                         chartFor={chartFor}
+                        exporting={boxExport}
                         onZoom={zoomToBox}
                         onClose={closeBox}
                       />
@@ -786,6 +857,18 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
           </>
         )}
       </div>
+
+      {exporting && (
+        <TelemetryExportModal
+          devices={exporting.devices}
+          metricNames={exporting.names}
+          from={exporting.from}
+          to={exporting.to}
+          windowWords={exporting.windowWords}
+          onClose={() => setExporting(null)}
+          showToast={showToast}
+        />
+      )}
     </>
   )
 }

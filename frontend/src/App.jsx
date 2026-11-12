@@ -771,7 +771,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
-            {tab === 'history'        && <HistoryTab hasPermission={hasPermission} showToast={showToast} userRole={userRole} onSelectDevice={showDevice} onSelectGateway={showGateway} />}
+            {tab === 'history'        && <HistoryTab showToast={showToast} userRole={userRole} onSelectDevice={showDevice} onSelectGateway={showGateway} />}
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} userRole={userRole} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} />}

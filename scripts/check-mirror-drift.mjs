@@ -1684,6 +1684,76 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   if (seeded && refused) compare('suppressionMaxDaysPlace', `the Settings tab the writers' refusal names (${fn.file}) and 0002's category`, refused[1], seeded[1]);
 }
 
+// 90. Who may export readings (0279). Export CSV is on or greyed by TELEMETRY_EXPORT_ROLES;
+// export_telemetry() decides by has_role(). A role the dashboard offers and the function refuses
+// meets an error on every click; one it leaves out never sees a button the function would allow.
+{
+  const jsRoles = need(read('frontend/src/utils/telemetryExport.js'),
+    /export const TELEMETRY_EXPORT_ROLES = \[([^\]]*)\]/, 'TELEMETRY_EXPORT_ROLES in utils/telemetryExport.js');
+  const roles = (list) => [...list.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]).sort().join(', ');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.export_telemetry(', '$fn$;', 'export_telemetry()');
+  const sql = fn && need(fn.body, /NOT public\.has_role\(ARRAY\[([^\]]*)\]\) THEN/, `export_telemetry()'s roles (${fn.file})`);
+  if (jsRoles && sql) compare('exportRoles', `the roles export_telemetry() (${fn.file}) admits and the dashboard offers Export CSV to`, roles(jsRoles[1]), roles(sql[1]));
+}
+
+// 91. The longest export, one default and one range in four places: 0278's seed and bounds,
+// telemetry_export_max_days(), which falls back to the default outside the range, and the dashboard,
+// which does the same where the setting cannot be read. Its place, the History category of Settings,
+// is named by 0278's seed, the function's refusal, the dashboard and the Settings page's tabs; a
+// dashboard that offers an end the function refuses, or names another tab, sends people wrong.
+{
+  const seed = need(SCHEMA, /seed_setting\(\s*'history\.export_max_days',\s*to_jsonb\((\d+)\),\s*'number',\s*'([^']+)'/,
+    "history.export_max_days' seed in 0278");
+  const bounds = need(SCHEMA, /SET min_value = (\d+), max_value = (\d+)\s+WHERE key = 'history\.export_max_days'/,
+    "history.export_max_days' bounds in 0278");
+  const reader = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_export_max_days(', '$$;', 'telemetry_export_max_days()');
+  const fallback = reader && need(reader.body, /IF v_days IS NULL OR v_days < (\d+) OR v_days > (\d+) THEN\s+v_days := (\d+);/,
+    `telemetry_export_max_days()'s fallback (${reader.file})`);
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.export_telemetry(', '$fn$;', 'export_telemetry()');
+  const refused = fn && need(fn.body, /set on Settings › ([^.']+)\./, `the tab export_telemetry()'s refusal names (${fn.file})`);
+  const js = read('frontend/src/utils/telemetryExport.js');
+  const jsDays = need(js, /export const EXPORT_MAX_DAYS = (\d+)$/m, 'EXPORT_MAX_DAYS in utils/telemetryExport.js');
+  const jsMin = need(js, /export const EXPORT_MAX_DAYS_MIN = (\d+)$/m, 'EXPORT_MAX_DAYS_MIN in utils/telemetryExport.js');
+  const jsMax = need(js, /export const EXPORT_MAX_DAYS_MAX = (\d+)$/m, 'EXPORT_MAX_DAYS_MAX in utils/telemetryExport.js');
+  const jsKey = need(js, /export const EXPORT_MAX_DAYS_KEY = '([^']+)'/, 'EXPORT_MAX_DAYS_KEY in utils/telemetryExport.js');
+  const jsPlace = need(js, /export const EXPORT_MAX_DAYS_PLACE = 'Settings › ([^']+)'/, 'EXPORT_MAX_DAYS_PLACE in utils/telemetryExport.js');
+  const tab = need(read('frontend/src/navigation.jsx'), /\{ id: 'history', label: '([^']+)', description: /, "the History entry of SETTINGS_TABS in navigation.jsx");
+  if (jsKey) compare('exportMaxDays', "the setting the dashboard reads and 0278 declares", jsKey[1], 'history.export_max_days');
+  if (seed && jsDays) compare('exportMaxDays', 'the longest export the dashboard falls back to and 0278 seeds', jsDays[1], seed[1]);
+  if (fallback && jsDays) compare('exportMaxDays', `the longest export the dashboard and telemetry_export_max_days() (${reader.file}) fall back to`, jsDays[1], fallback[3]);
+  if (bounds && jsMin && jsMax) compare('exportMaxDays', "the setting's range in the dashboard and 0278's bounds", `${jsMin[1]} to ${jsMax[1]}`, `${bounds[1]} to ${bounds[2]}`);
+  if (fallback && jsMin && jsMax) compare('exportMaxDays', `the setting's range in the dashboard and the reader's fallback (${reader.file})`, `${jsMin[1]} to ${jsMax[1]}`, `${fallback[1]} to ${fallback[2]}`);
+  if (seed && jsPlace) compare('exportMaxDaysPlace', "the Settings tab the dashboard names and 0278's category", jsPlace[1], seed[2]);
+  if (seed && refused) compare('exportMaxDaysPlace', `the Settings tab export_telemetry()'s refusal names (${fn.file}) and 0278's category`, refused[1], seed[2]);
+  if (seed && tab) compare('exportMaxDaysPlace', "the Settings tab navigation.jsx lists and 0278's category", tab[1], seed[2]);
+}
+
+// 92. What one export may hold, three limits and one list in two places (0279): export_telemetry()'s
+// rows, devices and metrics, and the resolutions it admits, against the dashboard's. A page that
+// says another cap trusts a file to hold rows it cannot; one that offers a resolution the function
+// refuses meets an error on its own button; one that lets a selection past the device or metric
+// limit finds out when the dialog is refused.
+{
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.export_telemetry(', '$fn$;', 'export_telemetry()');
+  const sqlRows = fn && need(fn.body, /c_max_rows\s+CONSTANT integer := (\d+);/, `the row bound in ${fn.file}`);
+  const sqlAssets = fn && need(fn.body, /c_max_assets\s+CONSTANT integer := (\d+);/, `the device bound in ${fn.file}`);
+  const sqlMetrics = fn && need(fn.body, /c_max_metrics\s+CONSTANT integer := (\d+);/, `the metric bound in ${fn.file}`);
+  const sqlRes = fn && need(fn.body, /NOT v_res = ANY \(ARRAY\[([^\]]*)\]\)/, `the resolutions export_telemetry() admits (${fn.file})`);
+  const rowsJs = need(read('frontend/src/api.js'), /^export const TELEMETRY_EXPORT_MAX_ROWS = (\d+);$/m, 'TELEMETRY_EXPORT_MAX_ROWS in frontend/src/api.js');
+  const js = read('frontend/src/utils/telemetryExport.js');
+  const jsAssets = need(js, /export const EXPORT_MAX_DEVICES = (\d+)$/m, 'EXPORT_MAX_DEVICES in utils/telemetryExport.js');
+  const jsMetrics = need(js, /export const EXPORT_MAX_METRICS = (\d+)$/m, 'EXPORT_MAX_METRICS in utils/telemetryExport.js');
+  const block = need(js, /export const EXPORT_RESOLUTIONS = \[([\s\S]*?)\n\]/, 'EXPORT_RESOLUTIONS in utils/telemetryExport.js');
+  const jsRes = block && [...block[1].matchAll(/\{ key: '([^']+)'/g)].map((m) => m[1]);
+  if (sqlRows && rowsJs) compare('exportBounds', `the rows one export holds, export_telemetry() (${fn.file}) and the dashboard`, rowsJs[1], sqlRows[1]);
+  if (sqlAssets && jsAssets) compare('exportBounds', `the devices one export names, export_telemetry() (${fn.file}) and the dashboard`, jsAssets[1], sqlAssets[1]);
+  if (sqlMetrics && jsMetrics) compare('exportBounds', `the metrics one export names, export_telemetry() (${fn.file}) and the dashboard`, jsMetrics[1], sqlMetrics[1]);
+  if (sqlRes && jsRes) {
+    compare('exportBounds', `the resolutions export_telemetry() (${fn.file}) admits and the dialog offers`,
+      jsRes.join(', '), [...sqlRes[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).join(', '));
+  }
+}
+
 // 55. History's alerts, two numbers in two places. The Alerts tab asks alert_occurrences() (0243)
 // for ALERT_HISTORY_LIMIT and one more, which must fit under the function's bound, or every read is
 // refused. Where alerts.retention_days cannot be read, the tab says alerts are kept for

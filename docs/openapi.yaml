@@ -961,6 +961,60 @@ paths:
         '401': { description: 'Not authenticated; `anon` may not call it.' }
         '503': { description: 'The historian could not be reached.' }
 
+  /rest/v1/rpc/export_telemetry:
+    post:
+      tags: [Telemetry]
+      summary: Export readings, within a limit the database keeps
+      description: |
+        What History's Export CSV calls, from the Device, Overview and Cell views (`0279`). One call
+        checks, reads and records the export, and returns every row as one document, which the
+        browser writes as a CSV. An Administrator or a Shopfloor Manager only: an Operator reads the
+        charts and cannot export. This bounds the export, not access to the readings.
+
+        **It refuses before it reads anything:** a caller who holds neither role (`42501`), a session
+        that has not given its second factor while `security.require_mfa_for_managers` is on
+        (`42501`, detail `mfa_required`), a window that does not end after it starts or is longer
+        than `history.export_max_days` (14 days unless an Administrator changes it, from 1 to 366;
+        the message names the limit and *Settings › History*), a resolution other than `raw`, `1m`,
+        `5m` or `1h`, no device or no metric, and more than 1,000 devices or 500 metrics (`22023`).
+
+        **`raw` reads the raw readings, and a rollup is never read in its place.** A rollup's row is
+        its bucket: `time` is the bucket's start and `value` its average, or its last value for a
+        text or a flag. Raw is read from the oldest reading the historian still holds (`raw_from`);
+        a window that starts earlier is read from there, and `read_from` says where.
+
+        **At most 50,000 rows.** Past that the rows end at a whole minute: `truncated` is true and
+        `read_to` is the time they end. A minute that holds more than 50,000 readings returns none.
+        The read is bounded by time, from the rollup's own count of what each hour and minute holds,
+        because `postgres_fdw` sends no `LIMIT` for a read naming devices and metrics.
+
+        **An export that returns rows writes one `TELEMETRY_EXPORTED` row in the Audit Trail**, in
+        the asset lane under `telemetry`, naming who exported, the devices (id and name), the
+        metrics, the window, the resolution and how many rows left. `audit_id` is that row's id. One
+        that returns none writes none, and a refusal writes none. `SECURITY DEFINER`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, asset_ids, metric_names]
+              properties:
+                from_ts: { type: string, format: date-time, description: 'Readings from this time on.' }
+                to_ts: { type: string, format: date-time, description: 'Readings before this time. After `from_ts`, and at most `history.export_max_days` later.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], maxItems: 1000, description: 'Device Sparkplug IDs (devices.sparkplug_id). A repeated or blank one is ignored.' }
+                metric_names: { type: array, items: { type: string }, example: [Spindle/LOAD], maxItems: 500 }
+                resolution: { type: string, enum: [raw, 1m, 5m, 1h], default: raw, description: '`raw`, or the average of the 1-minute, 5-minute or 1-hour rollup. Never one in place of another.' }
+      responses:
+        '200':
+          description: The export.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelemetryExport' }
+        '400': { description: 'A window out of order or longer than `history.export_max_days` (the message names the limit), an unknown resolution, no device or no metric, or too many of either (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '403': { description: 'Not an Administrator or a Shopfloor Manager, or a session without the second factor while it is required (`42501`).' }
+        '503': { description: 'The historian could not be reached.' }
+
   /rest/v1/rpc/telemetry_coverage:
     post:
       tags: [Telemetry]
@@ -7380,6 +7434,26 @@ components:
         with_value: { type: integer, description: 'How many of them have a value in the bucket. The total is there exactly when this equals `members`.' }
         measured: { type: integer, description: 'How many of them had a reading in the bucket, not a carried value.' }
 
+    TelemetryExport:
+      type: object
+      description: |
+        The document `/rest/v1/rpc/export_telemetry` returns: the rows of one export and what is true of
+        them.
+      properties:
+        audit_id: { type: integer, nullable: true, description: 'The id of the `TELEMETRY_EXPORTED` Audit Trail row, or null when no row was returned and none was written.' }
+        resolution: { type: string, enum: [raw, 1m, 5m, 1h] }
+        columns: { type: array, items: { type: string }, example: [time, asset_id, metric_name, value, unit] }
+        rows:
+          type: array
+          description: 'One array a reading, in time order: the time (UTC, to the millisecond), the device''s Sparkplug ID, the metric, the value (a number, a text or a flag; null for none) and the unit from the metric catalogue (null for none).'
+          items: { type: array, items: {} }
+        row_count: { type: integer }
+        max_rows: { type: integer, example: 50000 }
+        truncated: { type: boolean, description: 'The rows end at `read_to`, not at the window''s end.' }
+        read_from: { type: string, format: date-time, description: 'Where the rows begin: the window''s start, or the oldest raw reading the historian holds when that is later.' }
+        read_to: { type: string, format: date-time, description: 'Where the rows end: the window''s end, or the whole minute they were cut at.' }
+        raw_from: { type: string, format: date-time, nullable: true, description: 'The oldest raw reading the historian holds, for `raw`; null otherwise.' }
+
     TelemetryCoverageRow:
       type: object
       description: |
@@ -7417,7 +7491,7 @@ components:
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
                  backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts,
-                 notification_channels, automations]
+                 notification_channels, automations, telemetry]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -7436,7 +7510,7 @@ components:
                  SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN,
                  SUPPRESSION_WINDOW_SCHEDULED, SUPPRESSION_WINDOW_CHANGED, SUPPRESSION_WINDOW_ENDED,
                  SUPPRESSION_WINDOW_CANCELLED, AUTOMATION_CREATED, AUTOMATION_CHANGED, AUTOMATION_ENABLED,
-                 AUTOMATION_DISABLED, AUTOMATION_DELETED, SIGNING_KEY_ISSUED]
+                 AUTOMATION_DISABLED, AUTOMATION_DELETED, SIGNING_KEY_ISSUED, TELEMETRY_EXPORTED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -7471,7 +7545,10 @@ components:
             one row per automation, in its `automations` lane in the asset lane. A lifecycle row
             carries its `reason`. `SIGNING_KEY_ISSUED` (0248) is an Administrator issuing or rotating the webhook's
             signing key, in the webhook's `notification_channels` lane, written by
-            `issue_notification_signing_key()`; the key is never in the row.
+            `issue_notification_signing_key()`; the key is never in the row. `TELEMETRY_EXPORTED`
+            (0279) is an Administrator or a Shopfloor Manager exporting readings from History, written
+            by `export_telemetry()` in the one `telemetry` lane of the asset lane, naming the devices,
+            metrics, window, resolution and how many rows left.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }

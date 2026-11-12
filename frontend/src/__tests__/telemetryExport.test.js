@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  EXPORT_RESOLUTIONS, bestResolutionFor, commentRow, coversRange, exportColumns,
-  provenanceRow, resolutionByKey, toExportRow
+  EXPORT_COLUMNS, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DEVICES, EXPORT_MAX_METRICS, EXPORT_RESOLUTIONS,
+  TELEMETRY_EXPORT_ROLES, bestResolutionFor, commentRow, coversRange, exportMaxDays, exportRows, exportSizeProblem,
+  exportWindowProblem, mayExportReadings, noticeRows, overExportLimit, overLimitShort, provenanceRow, resolutionByKey
 } from '../utils/telemetryExport'
-import { telemetryValue, telemetryValueType } from '../utils/telemetryValue'
 import { TELEMETRY_RESOLUTION_RELATIONS } from '../api'
 
 /**
@@ -32,7 +32,7 @@ describe('the resolutions offered', () => {
     expect(EXPORT_RESOLUTIONS.map(r => r.key)).toEqual(['raw', '1m', '5m', '1h'])
   })
 
-  it('raw sends no resolution parameter, because absent means raw and "raw" is refused', () => {
+  it('names the rollups as export_telemetry() takes them, and raw as the choice that is none', () => {
     expect(resolutionByKey('raw').param).toBeNull()
     expect(EXPORT_RESOLUTIONS.filter(r => r.param).map(r => r.param)).toEqual(['1m', '5m', '1h'])
   })
@@ -108,51 +108,104 @@ describe('bestResolutionFor', () => {
   })
 })
 
+describe('who may export, and for how long', () => {
+  it('is an Administrator or a Shopfloor Manager, and the denied title says so', () => {
+    expect(TELEMETRY_EXPORT_ROLES).toEqual(['Administrator', 'Shopfloor_Manager'])
+    expect(mayExportReadings('Administrator')).toBe(true)
+    expect(mayExportReadings('Shopfloor_Manager')).toBe(true)
+    for (const role of ['Operator', 'Auditor', null, undefined, '']) expect(mayExportReadings(role)).toBe(false)
+    expect(EXPORT_DENIED_TITLE).toBe('Requires Administrator or Shopfloor Manager')
+  })
+
+  it('takes the setting as the database reads it: 1 to 366, else 14', () => {
+    expect(EXPORT_MAX_DAYS).toBe(14)
+    expect(exportMaxDays(1)).toBe(1)
+    expect(exportMaxDays(366)).toBe(366)
+    expect(exportMaxDays(30)).toBe(30)
+    for (const value of [0, 0.5, 367, -3, '30', null, undefined, NaN]) expect(exportMaxDays(value)).toBe(14)
+  })
+
+  it('measures a window in seconds, so exactly the limit is allowed and a second more is not', () => {
+    const start = Date.parse('2026-11-02T10:00:00Z')
+    const day = 24 * 60 * 60 * 1000
+    expect(overExportLimit(start, start + 14 * day, 14)).toBe(false)
+    expect(overExportLimit(start, start + 14 * day + 1000, 14)).toBe(true)
+    expect(overExportLimit(start, start + day, 1)).toBe(false)
+  })
+
+  it("says why a window cannot go ahead, in the database's own sentence", () => {
+    const start = Date.parse('2026-11-02T10:00:00Z')
+    const day = 24 * 60 * 60 * 1000
+    expect(exportWindowProblem(start, start + 14 * day, 14)).toBeNull()
+    expect(exportWindowProblem(start, start + 14 * day + 1000, 14))
+      .toBe('An export can cover at most 14 days, set on Settings › History. This window is 15 days.')
+    expect(exportWindowProblem(start, start + 2 * day, 1))
+      .toBe('An export can cover at most 1 day, set on Settings › History. This window is 2 days.')
+    expect(exportWindowProblem(start, start, 14)).toBe('Set both ends of the custom range to export it.')
+    expect(exportWindowProblem(undefined, start, 14)).toBe('Set both ends of the custom range to export it.')
+    expect(overLimitShort(14)).toBe('over the 14-day export limit')
+  })
+
+  it('refuses more devices or metrics than one export may name, as the database does', () => {
+    expect([EXPORT_MAX_DEVICES, EXPORT_MAX_METRICS]).toEqual([1000, 500])
+    expect(exportSizeProblem(1000, 500)).toBeNull()
+    expect(exportSizeProblem(1001, 3)).toBe('An export names at most 1,000 devices, and this selection has 1,001.')
+    expect(exportSizeProblem(3, 501)).toBe('An export names at most 500 metrics, and these devices report 501.')
+  })
+})
+
 describe('the CSV shape', () => {
-  const rawRow = {
-    time: '2026-09-15T10:00:00Z', asset_id: 'gwy1', metric_name: 'Speed',
-    val_double: 42.5, val_string: null, val_bool: null
+  const doc = {
+    resolution: 'raw', columns: ['time', 'asset_id', 'metric_name', 'value', 'unit'], max_rows: 50000,
+    read_from: '2026-09-15T10:00:00.000Z', read_to: '2026-09-16T10:00:00.000Z', truncated: false,
+    rows: [
+      ['2026-09-15T10:00:00.000Z', 'dev1', 'Speed', 42.5, 'rpm'],
+      ['2026-09-15T10:00:01.000Z', 'dev1', 'State', 'RUN', null],
+      ['2026-09-15T10:00:02.000Z', 'dev2', 'Running', false, null],
+    ],
   }
-  const bucketRow = {
-    bucket: '2026-09-15T10:00:00Z', asset_id: 'gwy1', metric_name: 'Speed',
-    avg_double: 42.5, min_double: 40, max_double: 45, last_double: 44,
-    last_string: null, last_bool: null, n_double: 60, n_rows: 60
-  }
-  const shape = (key, row) => toExportRow(row, key, { value: telemetryValue, valueType: telemetryValueType })
 
-  it('raw keeps the flattened value/value_type columns', () => {
-    expect(shape('raw', rawRow)).toEqual({
-      time: '2026-09-15T10:00:00Z', asset_id: 'gwy1', metric_name: 'Speed',
-      value: 42.5, value_type: 'double'
-    })
+  it('is one row per reading: time, device, metric, value and unit', () => {
+    expect(EXPORT_COLUMNS).toEqual(['time', 'device', 'metric', 'value', 'unit'])
+    const rows = exportRows(doc, new Map([['dev1', 'Lathe 3']]))
+    expect(rows.map(r => Object.keys(r))).toEqual(rows.map(() => EXPORT_COLUMNS))
+    expect(rows[0]).toEqual({ time: '2026-09-15T10:00:00.000Z', device: 'Lathe 3', metric: 'Speed', value: 42.5, unit: 'rpm' })
   })
 
-  it('a rollup carries its own columns rather than being squeezed into the raw shape', () => {
-    // The issue's load-bearing requirement: a CSV that silently switched would break anyone
-    // parsing it and would hand a user averages when they asked for samples.
-    const out = shape('1h', bucketRow)
-    expect(Object.keys(out)).toEqual(exportColumns('1h'))
-    expect(out.bucket).toBe('2026-09-15T10:00:00Z')
-    expect(out).not.toHaveProperty('time')
-    expect(out).not.toHaveProperty('value')
-    expect(out.avg_double).toBe(42.5)
-    expect(out.min_double).toBe(40)
-    expect(out.max_double).toBe(45)
+  it("names a device by the dashboard's name, and by its id where it is not known", () => {
+    const rows = exportRows(doc, new Map([['dev1', 'Lathe 3']]))
+    expect(rows.map(r => r.device)).toEqual(['Lathe 3', 'Lathe 3', 'dev2'])
   })
 
-  it('the two shapes share no value column, so a parser cannot mistake one for the other', () => {
-    const raw = new Set(exportColumns('raw'))
-    const rollup = new Set(exportColumns('1h'))
-    expect([...raw].filter(c => rollup.has(c))).toEqual(['asset_id', 'metric_name'])
+  it('keeps a number, a text and a flag as they are, so a genuine false or 0 is a value', () => {
+    const rows = exportRows(doc)
+    expect(rows.map(r => r.value)).toEqual([42.5, 'RUN', false])
+    expect(exportRows({ rows: [['t', 'a', 'm', 0, null]] })[0].value).toBe(0)
   })
 
-  it('a comment row carries exactly the resolution\'s columns, so it adds none to the file', () => {
+  it('is no rows for no document', () => {
+    expect(exportRows(undefined)).toEqual([])
+    expect(exportRows({})).toEqual([])
+  })
+
+  it("a comment row carries exactly the file's columns, so it adds none", () => {
     // downloadCSV takes the UNION of the rows' keys; a comment row with keys of its own would
     // silently widen the file.
-    for (const key of ['raw', '1h']) {
-      expect(Object.keys(commentRow(key, '# hello'))).toEqual(exportColumns(key))
-      expect(Object.keys(provenanceRow(key))).toEqual(exportColumns(key))
-    }
+    expect(Object.keys(commentRow('# hello', '# more'))).toEqual(EXPORT_COLUMNS)
+    for (const key of ['raw', '1h']) expect(Object.keys(provenanceRow(key))).toEqual(EXPORT_COLUMNS)
+    expect(commentRow('# hello')).toEqual({ time: '# hello', device: '', metric: '', value: '', unit: '' })
+  })
+
+  it('says in the file where it stops short: raw begins late, and rows end at the cap', () => {
+    expect(noticeRows(doc, '2026-09-15T10:00:00.000Z', 50000)).toEqual([])
+    const late = noticeRows({ ...doc, read_from: '2026-09-15T12:00:00.000Z' }, '2026-09-15T10:00:00.000Z', 50000)
+    expect(late).toHaveLength(1)
+    expect(Object.values(late[0]).join(' ')).toContain('STARTS AT 2026-09-15T12:00:00.000Z')
+    const cut = noticeRows({ ...doc, truncated: true, read_to: '2026-09-15T23:53:00.000Z' }, '2026-09-15T10:00:00.000Z', 50000)
+    expect(Object.values(cut[0]).join(' ')).toContain('TRUNCATED at 50000 rows')
+    expect(Object.values(cut[0]).join(' ')).toContain('the rows end at 2026-09-15T23:53:00.000Z')
+    // A rollup has no raw horizon to begin late at.
+    expect(noticeRows({ ...doc, resolution: '1m', read_from: '2026-09-15T12:00:00.000Z' }, '2026-09-15T10:00:00.000Z', 50000)).toEqual([])
   })
 })
 

@@ -660,6 +660,18 @@ python supabase/migrations/test_history_averages_a_metric_by_the_hour_of_day.py
 # and more than 50,000 devices times buckets are refused before any read; anon may not call it,
 # and it reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_folds_one_metric_across_the_devices_of_each_group.py
+
+# An export of readings is checked, bounded and recorded in the database (0278, 0279).
+# history.export_max_days is a History setting from 1 to 366, 14 unless an Administrator changes it.
+# export_telemetry() refuses, before any read (the historian's relations are gone in those tests):
+# an Operator, an Auditor, a machine identity, anon and service_role; a manager's session without
+# its second factor while that is required; a window over the setting, with the limit named, and not
+# a window of exactly the limit; an unknown resolution; no device or metric; too many of either. It
+# returns one row per reading, raw by default, a rollup's buckets never in raw's place, at most 50,000
+# rows cut at a minute with truncated and read_to, raw from where it begins, and writes one
+# TELEMETRY_EXPORTED row in the asset lane, a read, naming who, the devices, metrics, window,
+# resolution and rows, and none for a refusal or an export with no rows. Every test rolls back.
+python supabase/migrations/test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py
 # History counts where readings arrived (0245). Local tables stand in for the historian's device
 # rollups and the coverage view. One row per device asked for, its counts an array,
 # oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider

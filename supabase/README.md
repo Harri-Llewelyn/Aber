@@ -3915,7 +3915,7 @@ next request.
 - **Where each is declared.** db-init replays every file on every boot, so each policy and body is
   changed where it is stated, as `0235` changed `has_role()`'s: `0001` for the two functions, its
   write policies and the functions whose final form it holds; each later function in its own file
-  (`0164`, `0165`, `0166`, `0168`, `0178`, `0196`, `0203`, `0213`, `0217`, `0218`, `0240`, `0248`); and the same line
+  (`0164`, `0165`, `0166`, `0168`, `0178`, `0196`, `0203`, `0213`, `0217`, `0218`, `0240`, `0248`, `0279`); and the same line
   in `0001`'s and `0164`'s and `0203`'s earlier copies, so no boot serves an ungated body between two
   replays. The policies `0177` and `0204` restate (`STATED_LATER`) are all reads, so neither
   changes. `supabase/storage-policies.sql` puts the guard in each storage write arm. `0251` holds no
@@ -4054,6 +4054,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `end_alert_suppression_window()` | `0240` | yes | Ends or cancels a suppression window |
 | `end_my_other_sessions()` | `0211` | no | A person's own sessions, in any role. |
 | `end_my_session()` | `0211` | no | A person's own session, in any role. |
+| `export_telemetry()` | `0279` | yes | Exports readings from History, which is data leaving the site |
 | `foreign_credential_is_set()` | `0178` | no | A read: whether a credential is set, never what it is. |
 | `fork_schema()` | `0165` | yes | Versions a schema (schema:manage) |
 | `gateway_is_playback_delivery_target()` | `0183` | no | A read the playback dialog makes. |
@@ -5107,6 +5108,128 @@ the historian, which is what `telemetry_carried()` takes there in three parts.
 tables standing in for the rollups. The file's self-check asserts one form, `STABLE`, `SECURITY
 INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any read, so it
 holds on a stack with no historian.
+
+### The longest export is a setting (0278)
+
+History's Export ([#319](https://github.com/Harri-Llewelyn/Aber/issues/319)) covers a window, and how
+long a window one export may cover is a setting: **`history.export_max_days`**
+in the History category: 14 days, from 1 to 366. An Administrator changes it, as for every setting, and every role
+reads it, because it is not marked `sensitive`. The dashboard reads it too, so it can say the limit
+before it asks (`useSetting()`, with 14 where the row cannot be read).
+
+- **It is declared here, not in `0002`.** `seed_setting()` inserts the row on a first boot and
+  afterwards refreshes only the label and the description, so an Administrator's value survives
+  every replay. An additive change goes in a numbered migration (see *The five rules the next fold
+  carries in*). The bounds are an `UPDATE` guarded on the value it sets, as `0002` sets the others',
+  because `seed_setting()` takes none.
+- **The bounds are 1 and 366.** Zero would refuse every export. A window longer than a year is a
+  copy of the history, which Cold Storage's Parquet files are for.
+- **`telemetry_export_max_days()` answers it as the export reads it:** the setting, or 14 where the row
+  is missing or outside the bounds, so a damaged setting never stops exports altogether and never
+  lifts the limit. A part day is taken as it is, as the other day settings take one. No browser role
+  may call it: the setting is readable, and `export_telemetry()` is its one caller. Mirror check 91
+  holds the default, the bounds and the place the refusal names to the dashboard's copies.
+- **Lowering it changes nothing already exported.** Each export is held to the limit as it is asked
+  for, and the Audit Trail row records what was exported.
+
+`test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py` holds the row, its bounds, who
+changes it and the fallback.
+
+### An export of readings is checked, bounded and recorded (0279)
+
+The Device, Overview and Cell views of History each export through one function,
+**`export_telemetry(from_ts, to_ts, asset_ids, metric_names, resolution)`**. The database holds the
+rules, not the button: an Operator reads the charts and cannot export, and a call that skips the
+dashboard meets the same refusals. It returns one `jsonb` document: `columns`, `rows` (time, asset
+id, metric, value, unit), `row_count`, `truncated`, `read_from`, `read_to`, `raw_from`, `max_rows`
+and `audit_id`. The browser writes the CSV from it.
+
+- **It refuses, before it reads anything:** a caller who is not an Administrator or a Shopfloor Manager
+  (`42501`, with the roles in words); a session that has not given its second factor while that is
+  required (`require_mfa()`, as every writer here); a window that does not end after it starts or is
+  longer than `history.export_max_days` (`22023`, naming the limit and *Settings › History*); a
+  resolution that is not `raw`, `1m`, `5m` or `1h`; no device or no metric; and more than 1,000
+  devices or 500 metrics. The test runs each refusal with the historian's relations gone, so a read
+  would fail with another error.
+- **A rollup is never read in raw's place.** `raw` reads `telemetry`; `1m`, `5m` and `1h` read that
+  rollup. A rollup's row is its bucket: its start and its average, or its last value for a text or a
+  flag, which have no average. The minimum and maximum are not in the file.
+- **A row is one reading:** time (UTC, to the millisecond), device (the Sparkplug id), metric, value and
+  unit. The unit is the catalogue's, and empty for a metric it does not know. A number is written as
+  the shortest text that reads back as the same double (`SET extra_float_digits TO 1`), whatever the
+  session's own setting: the image's default of 0 would cut it to 15 digits.
+- **At most 50,000 rows** (`TELEMETRY_EXPORT_MAX_ROWS`; mirror check 92). Past that it returns the
+  readings up to a minute and says so: `truncated`, with `read_to` the time its rows end. **The
+  read is bounded by time, not by `LIMIT`**, because `postgres_fdw` sends a `LIMIT` only under its
+  own row estimate, which is one row for a read naming devices and metrics, so every row inside the
+  time bound would cross first. The rollup's own count of what each hour holds (`n_rows` of
+  `telemetry_1m` for raw, the rows of the rollup for a rollup) names the hours that fit; the minutes
+  of the hour that does not are counted the same way; and the historian is asked for that stretch
+  alone, in one read. A count that was short is trimmed to the cap by a `LIMIT` here, which guards
+  and bounds nothing that crossed. A minute that holds more than the cap returns no rows, says
+  `truncated`, and writes no Audit Trail row.
+- **Raw is read from the oldest reading the historian holds** (`raw_from`), because raw is dropped
+  after 14 days by default and the rollups keep what raw does not. A window that starts before it is
+  read from there, and `read_from` says where; the rollup's older counts do not spend raw's budget.
+- **One call, not slices the browser calls one after another.** The first call has to be the one that
+  refuses and records, and a second call that skips it would read for nothing in the Audit Trail. One
+  call also has one honest row count, and either everything is read and recorded or nothing is. The
+  document is at most 50,000 rows, about 4 MB as JSON, in one response well inside the gateway's
+  15 s and the `authenticated` role's 8 s statement timeout (Measured, below).
+- **It records the export:** one `TELEMETRY_EXPORTED` row in the Audit Trail for an export that returns
+  rows, naming who exported (`changed_by`, and their email as the token carried it), the devices (id
+  and name), the metrics, the window and the resolution, how many rows left, whether they were cut,
+  and where they end. An export that returns none writes none: nothing left the site. A refusal
+  writes none. `audit_id` is the row's id, so the browser's toast can link to it.
+- **`SECURITY DEFINER`**, because `audit_trail` takes no write from an application role. The role check is
+  its first statement and the reads run as the owner through the same foreign tables the telemetry
+  views read, so it reads what an Administrator or a Shopfloor Manager may read there. This
+  bounds the export, not access to the readings: an Operator still reads whatever a chart reads, and
+  RLS on telemetry is unchanged.
+
+**The Audit Trail's arms** are declared where the classifiers are, not here: `audit_domain_for()` and
+`audit_event_class()` in `0232`, `audit_trail_action_kinds()` in `0249`, so a boot has one
+declaration of each.
+
+- **The lane is `asset`, under `telemetry`.** Both roles that export may read it, so the toast's link
+  opens: the security lane is read by an Administrator and an Auditor only, and a Shopfloor Manager
+  could not follow the link to their own export. An Auditor reads it too. This is where a capture's
+  download link is filed, which is also the plant's data leaving.
+- **One lane for every export, `Readings`.** The entity id is `md5('telemetry:readings')`, so the
+  trail lists every export in order, the question a reader asks of it, and not one lane for each.
+- **The class is `read`:** it records access and changes nothing, as `EXPORTED`, a capture's download
+  link and a service's logs read are. The class indexes are unchanged, because no row can exist before
+  this file.
+
+**Not in this file.** The longest window is `0278`'s. The dashboard's three entry points are in
+[`frontend/README.md`](../frontend/README.md#historys-export). The Area and Metric tabs' Export comes with
+those tabs. The function takes ids of devices the platform keys readings by; the dashboard sends each
+device's issued Sparkplug id.
+
+**Measured** through `postgres_fdw` on a private historian (TimescaleDB 2.31, built as the maintenance
+Job builds it, 2.07 million raw rows with their rollups refreshed), into `supabase/postgres`
+17.6.1.175, as an Administrator with `statement_timeout` at the `authenticated` role's 8 s, on a laptop
+three other sessions shared (so one read varied by up to 30%). Three runs each, in seconds:
+
+| Export | Rows | Seconds |
+| :--- | ---: | ---: |
+| One device of 15 metrics at 1 Hz, an hour or a day, raw (cut at 10:55, the first hour holds 54,000) | 49,500 | 0.6 to 0.8 |
+| The same, an hour at 1 minute | 900 | 0.02 |
+| 20 devices of 5 metrics, a reading a minute for 14 days, raw (2 million rows) | 50,000 | 2.3 to 3.0 |
+| The same at 1 minute | 50,000 | 2.3 to 2.9 |
+| The same at 1 hour | 33,600 | 0.5 to 0.7 |
+| The same devices, one day, raw | 50,000 | 0.7 to 0.9 |
+
+The cost is the hour count over the window, one remote aggregate (`EXPLAIN VERBOSE` shows the
+`Foreign Scan` with `Relations: Aggregate on (timescale.telemetry_1m t)` and the `GROUP BY` in its
+remote SQL), so a long window of many series costs most there, not in the 50,000 rows it reads.
+
+`test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py` holds every rule above, with
+local tables standing in for the historian's relations: each refusal before any read, a window of
+exactly the limit, the rows and their order, raw by default, a rollup's buckets, the cap and where
+the rows end, a minute over it, a short count, raw's horizon, the Audit Trail row and who reads it,
+and who may call it. The file's self-check asserts the function's language, its pin and its grants,
+the lane and the class, and that a call with no identity is refused.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

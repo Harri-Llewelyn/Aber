@@ -78,7 +78,7 @@ describe('the action filter offers every action the database can record', () => 
       'BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
       'BACKUP_PRUNED',
       // The reads, the legend's Read class, together.
-      'SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED'
+      'SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED', 'TELEMETRY_EXPORTED'
     ])
     const headings = within(filter()).getAllByRole('group')
       .map(g => document.getElementById(g.getAttribute('aria-labelledby')).textContent)

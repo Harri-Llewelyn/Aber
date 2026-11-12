@@ -87,7 +87,6 @@ const NO_LINK = [
   { file: 'components/modals/DeviceExportModal.jsx', piece: '${label} exported for', why: 'a file, in the downloads' },
   { file: 'components/modals/DeviceExportModal.jsx', piece: 'unmappedWarning,', why: 'given only to a reader who cannot open the Metrics page' },
   { file: 'components/modals/GatewayBundleModal.jsx', piece: 'Bundle downloaded for', why: 'a file, in the downloads' },
-  { file: 'components/modals/TelemetryExportModal.jsx', piece: 'Exported ${rows.length}', why: 'a file, in the downloads' },
   { file: 'components/tabs/SchemasTab.jsx', piece: 'Downloaded ${filename}', why: 'a file, in the downloads' },
   { file: 'components/tabs/CaptureTab.jsx', piece: 'Downloading the capture of', why: 'a file, in the downloads' },
   { file: 'components/tabs/ArchivesTab.jsx', piece: 'permanently deleted', why: 'the record is gone' },
