@@ -152,6 +152,14 @@ python supabase/test_a_person_can_enrol_a_second_factor.py
 # row. The switch is set back and the person deleted. Turning it on ends every covered person's app
 # sessions but Grafana's.
 python supabase/test_a_second_factor_guards_what_changes_the_platform.py
+# A threshold automation fires and resolves (0270, 0271). Needs the stack up and the seeded Shopfloor
+# Manager; kubectl reaches the platform database and the historian. The manager applies an automation
+# on a device the suite makes, a breaching reading is written into the historian, and the suite waits
+# for pg_cron's evaluator to raise the alert: its fingerprint, name, labels and values, and no Grafana
+# rule. A later run confirms it, and a normal reading resolves it. It waits up to 150 s for each run.
+# Skips when the second factor is required of managers, which a script cannot give. Removes everything
+# it made; the Audit Trail keeps its rows.
+python supabase/test_a_threshold_automation_fires_and_resolves.py
 # No service accepts a token signed with the shared secret. Needs the stack up, with the release
 # Secret's keys in the environment (dev-cluster test gives them). The seeded Administrator's ES256
 # session is served by PostgREST, GoTrue, a Realtime channel join, Storage, the Node-RED admin API
@@ -1115,6 +1123,17 @@ python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
 # and the rendered document applies as unchanged. The Audit Trail rows, the lifecycle of a device
 # (archive, restore, delete) with the alerts it resolves, and automations_for_entity(). Every test rolls back.
 python supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py
+# A threshold automation raises its alert from the database (0270, 0271). A local table stands in for
+# the historian, so every test rolls back. The read: the breaching pairs in platform_health_rows()'s
+# shape, no reading is no breach, NaN and a flag are no reading, only a live pair is read. The hold:
+# it fires after `for` and not before, rounds up to the next run, a stopped breach never fires and a
+# changed threshold starts it again. The alert: one occurrence with its fingerprint, labels and
+# values and no rule, confirmed by every run, resolved with its end, never two open rows. Silence
+# leaves a state as it was. A disabled automation, an archived trigger and a changed device or metric
+# raise nothing. A historian outage writes one platform alert and nothing else, and the first run that
+# reads resolves it. The state table by role, and the job scheduled once. With ABER_TEST_HISTORIAN
+# (host:port:password of a historian built as lint-historian.mjs builds it) it reads a real one too.
+python supabase/migrations/test_a_threshold_automation_raises_its_alert_from_the_database.py
 # The automations JSON Schema and apply_automations() agree (0256). Every file in
 # supabase/automations-fixtures/ is one document and one reason: the schema and the function must
 # both accept each valid one, and both refuse each invalid one, or the schema accept what only the

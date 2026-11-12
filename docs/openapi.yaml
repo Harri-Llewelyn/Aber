@@ -4054,6 +4054,30 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/AutomationAction' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
+  /rest/v1/automation_trigger_states:
+    get:
+      tags: [Registry]
+      summary: Read what the evaluator found for each trigger and device
+      description: |
+        One row for each live threshold trigger, device and metric (`0270`): since when its latest
+        value has been breaching and not yet fired (`pending_since`), since when its alert has been
+        firing (`firing_since`), the value the last run read and when that value arrived. A row is
+        deleted once its trigger is no longer live. Every signed-in role reads them. Only the
+        evaluator, which pg_cron runs every minute, writes the table. A device with no latest value
+        in the historian has no row until it has one.
+      parameters:
+        - { name: trigger_id, in: query, schema: { type: string, format: uuid }, description: 'e.g. `eq.<uuid>`' }
+        - { name: entity_id, in: query, schema: { type: string, format: uuid }, description: 'The device. e.g. `eq.<uuid>`' }
+        - { name: firing_since, in: query, schema: { type: string }, description: 'e.g. `not.is.null`, for the pairs that are firing' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching states.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AutomationTriggerState' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/device_nameplate:
     get:
       tags: [Registry]
@@ -8334,6 +8358,23 @@ components:
         is_archived: { type: boolean, description: 'True while the device is archived.' }
         archived_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
+
+    AutomationTriggerState:
+      type: object
+      description: |
+        What the evaluator found for one live threshold trigger on one device and metric (0270). At
+        most one of `pending_since` and `firing_since` is set.
+      properties:
+        trigger_id: { type: string, format: uuid }
+        entity_id: { type: string, format: uuid, description: 'The device.' }
+        metric_name: { type: string }
+        pending_since: { type: string, format: date-time, nullable: true, description: 'When the value began to breach, while its `for` has not yet passed.' }
+        firing_since: { type: string, format: date-time, nullable: true, description: 'When its alert began to fire.' }
+        last_evaluated_at: { type: string, format: date-time, description: 'The run that last read a value for it.' }
+        last_value: { type: number, nullable: true, description: 'The latest value that run read, whenever it arrived.' }
+        last_observed_at: { type: string, format: date-time, nullable: true, description: 'When that value arrived at the historian.' }
+        comparison: { type: string, enum: [above, below], description: 'As that run judged it.' }
+        threshold: { type: number, description: 'As that run judged it.' }
 
     AutomationAction:
       type: object
