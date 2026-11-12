@@ -76,6 +76,41 @@ export function exportSizeProblem(devices, metrics) {
   return null
 }
 
+const countWords = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
+
+/**
+ * What the Area tab's export covers, as the dialog's first line opens: the area, then the machines
+ * behind its charts and the cells they are in. `cellCounts` holds the machine count of each cell
+ * that has a machine reporting the metric: "Boardroom · 14 machines in 3 cells".
+ */
+export function areaExportScope(areaName, cellCounts) {
+  const machines = cellCounts.reduce((sum, n) => sum + n, 0)
+  return `${areaName} · ${countWords(machines, 'machine', 'machines')} in ${countWords(cellCounts.length, 'cell', 'cells')}`
+}
+
+/**
+ * What the Area tab's dialog says the file leaves out. A cell's chart is a mean or a total of its
+ * machines' readings, a fold and not a reading, so the file holds the machines' own readings and
+ * none of those. A device that is Area-Wide is in no cell and in no chart, so it is not in the file.
+ */
+export function areaExportNote(areaWide = 0) {
+  const base = "The cells' means and totals are not in the file. It holds each machine's own readings."
+  if (!areaWide) return base
+  return `${base} ${countWords(areaWide, 'Area-Wide device is', 'Area-Wide devices are')} in no cell, so ${areaWide === 1 ? 'it is' : 'they are'} not in the file.`
+}
+
+/** What the Metric tab's export covers: "23 devices", or "23 of 40 devices" where a filter narrows what reports the metric. */
+export function metricExportScope(listed, reporting) {
+  return listed === reporting
+    ? countWords(listed, 'device', 'devices')
+    : `${listed.toLocaleString()} of ${countWords(reporting, 'device', 'devices')}`
+}
+
+/** What the Metric tab's dialog says where the tab pages: the file holds every device listed, not the page shown. */
+export function metricExportNote(listed, pageSize) {
+  return `The file holds all ${countWords(listed, 'device', 'devices')} the tab lists, not only the ${pageSize} on this page.`
+}
+
 /** The short form, for a line that is already long: "over the 14-day export limit". */
 export const overLimitShort = (maxDays) => `over the ${maxDays}-day export limit`
 

@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
+import { useSetting } from '../../hooks/useSettings'
 import { ToolbarPopover } from '../common/FiltersPopover'
 import { SearchInput } from '../common/SearchInput'
 import { SegmentedControl } from '../common/SegmentedControl'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { RefreshButton } from '../common/RefreshButton'
+import { ActionButton } from '../common/ActionButton'
+import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { ClearFilters } from '../common/ClearFilters'
 import { GroupHeading } from '../common/GroupHeading'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
@@ -16,12 +19,16 @@ import { AlertKey } from '../common/AlertKey'
 import { SmallMultiples } from '../common/SmallMultiples'
 import { HourHeatmap } from '../common/HourHeatmap'
 import { alertBandsPlugin } from '../common/alertBands'
-import { IconChartLine, IconFactory, IconLayoutDashboard } from '../common/Icons'
+import { IconChartLine, IconDownload, IconFactory, IconLayoutDashboard } from '../common/Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import { usePolling } from '../../hooks/usePolling'
 import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
+import {
+  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, areaExportNote, areaExportScope, exportMaxDays, exportSizeProblem,
+  exportWindowProblem, mayExportReadings,
+} from '../../utils/telemetryExport'
 import { navigate, useUrlState } from '../../hooks/useUrlState'
 import { areaWideInService } from '../../utils/inService'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
@@ -152,8 +159,11 @@ function MetricSwitcher({ area, metrics, metric, win, agg, total }) {
  * A text or flag metric has no mean or total: the tab says so and offers each cell's own tab. The
  * metric and the mean or total are in the address, with the window. A read is made again when the area,
  * the metric or the window changes, on Refresh, and on the refresh timer while the window reaches now.
+ * Export CSV downloads the machines behind the charts, not the cells' means and totals, which are a
+ * fold: every machine of the area's cells that reports the metric, in the Device tab's dialog, for an
+ * Administrator or a Shopfloor Manager and for a window no longer than history.export_max_days.
  */
-export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWin, every, setEvery }) {
+export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWin, every, setEvery, userRole, showToast }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const cells = area.cells
@@ -181,6 +191,7 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
 
   const [reading, setReading] = useState(null)
   const [heat, setHeat] = useState(null)
+  const [exporting, setExporting] = useState(null)
   const [closed, setClosed] = useState(() => new Set())
   const sectionsId = useId()
   // Each read's number: only the newest may land, so a slow read never draws over a later one.
@@ -340,6 +351,27 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
   const clear = () => { setWin(DEFAULT_HISTORY_WINDOW); setChosen(''); setAgg(DEFAULT_AGG) }
   const busy = Boolean(reading?.loading || heat?.loading) || reading === null
 
+  const canExport = mayExportReadings(userRole)
+  const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
+  const { start: shownStart, end: shownEnd } = windowBounds(win, now)
+  const exportBlocked = !metric ? 'This area has no metric to export.'
+    : stateKind ? `${metric} is text or a flag, so this tab draws no mean or total of it and has nothing to export. The Cell tab exports it.`
+      : assetKeys.length === 0 ? `None of the machines in ${area.name} reports ${metric}, so there is nothing to export.`
+        : exportSizeProblem(assetKeys.length, 1) ?? exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
+  /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
+  const openExport = () => {
+    const at = Date.now()
+    const { start, end } = windowBounds(win, at)
+    setExporting({
+      devices: reporting.flatMap(({ cell, keys }) => {
+        const reports = new Set(keys)
+        return cell.machines.filter(d => reports.has(telemetryKey(d))).map(d => ({ id: telemetryKey(d), name: d.asset_name }))
+      }),
+      names: [metric], scope: areaExportScope(area.name, reporting.map(c => c.keys.length)),
+      from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
+    })
+  }
+
   const sectionId = (key) => `${sectionsId}-${key}`
   const section = (key, label, detail, body) => {
     const open = !closed.has(key)
@@ -370,6 +402,16 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
         <SegmentedControl label="Each cell's chart is its" options={AGG_OPTIONS} value={agg} onChange={setAgg} />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            permitted={canExport}
+            deniedTitle={EXPORT_DENIED_TITLE}
+            disabled={Boolean(exportBlocked)}
+            title={exportBlocked ?? `Download ${metric} for each machine behind the charts, over this window, as CSV`}
+            onClick={openExport}
+          >
+            <IconDownload size={13} aria-hidden="true" /> Export CSV
+          </ActionButton>
           <RefreshButton
             onRefresh={() => readAll().catch(() => {})}
             busy={busy}
@@ -448,6 +490,20 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
           </>
         )}
       </div>
+
+      {exporting && (
+        <TelemetryExportModal
+          devices={exporting.devices}
+          metricNames={exporting.names}
+          scope={exporting.scope}
+          note={areaExportNote(areaWide)}
+          from={exporting.from}
+          to={exporting.to}
+          windowWords={exporting.windowWords}
+          onClose={() => setExporting(null)}
+          showToast={showToast}
+        />
+      )}
     </>
   )
 }

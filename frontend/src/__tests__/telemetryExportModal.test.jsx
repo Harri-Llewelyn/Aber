@@ -89,6 +89,23 @@ describe('telemetry CSV export dialog', () => {
     expect(screen.queryByLabelText('Range start')).toBeNull()
   })
 
+  it("names a tab's own scope and its one metric where the tab gives one, and says what the file leaves out", () => {
+    const props = { devices: [LATHE, PRESS], metricNames: ['Spindle/LOAD'], ...windowProps() }
+    expect(exportWords({ ...props, scope: 'Boardroom · 2 machines in 1 cell' }))
+      .toMatch(/^Boardroom · 2 machines in 1 cell · Spindle\/LOAD · Last 1 hour \(.+ – .+\)$/)
+    // Several metrics are counted, as without a scope.
+    expect(exportWords({ ...props, metricNames: ['a', 'b'], scope: 'Boardroom · 2 machines in 1 cell' })).toMatch(/^Boardroom · 2 machines in 1 cell · 2 metrics · /)
+    render(<TelemetryExportModal {...props} scope="Boardroom · 2 machines in 1 cell" note="Not the cells' means." onClose={vi.fn()} showToast={vi.fn()} />)
+    expect(screen.getByText(/^Boardroom · 2 machines in 1 cell · Spindle\/LOAD · /)).toBeInTheDocument()
+    expect(screen.getByText("Not the cells' means.")).toBeInTheDocument()
+  })
+
+  it('has no note, and counts the devices, for an entry point that gives neither', async () => {
+    await open({ devices: [LATHE, PRESS], metricNames: ['Spindle/LOAD'] })
+    expect(screen.getByText(/^2 devices · 1 metric · /)).toBeInTheDocument()
+    expect(document.querySelector('.telemetry-export-note')).toBeNull()
+  })
+
   it('names several devices by how many, and lists them', async () => {
     await open({ devices: [LATHE, PRESS] })
     expect(exportWords({ devices: [LATHE, PRESS], metricNames: ['a'], ...windowProps() })).toMatch(/^2 devices · 1 metric · /)

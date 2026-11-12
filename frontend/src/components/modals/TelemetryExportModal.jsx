@@ -17,10 +17,11 @@ import { Tooltip } from '../common/Tooltip'
 /**
  * CSV export of readings over a window its caller resolved: History's Export, from the Device tab
  * (one device and the metrics it charts), Overview's selection box (the box's devices and all
- * their metrics) and the Cell tab (the cell's machines and the metric). `devices` is `[{ id, name }]`
- * with the Sparkplug ids the readings are keyed by, `from` and `to` the window's bounds (ISO), and
- * `windowWords` names it. The dialog has no range of its own, and says what it will export in its
- * first line.
+ * their metrics), and the Cell, Area and Metric tabs (the machines or devices behind the charts, and
+ * the metric). `devices` is `[{ id, name }]` with the Sparkplug ids the readings are keyed by, `from`
+ * and `to` the window's bounds (ISO), and `windowWords` names it. The dialog has no range of its own,
+ * and says what it will export in its first line. A tab whose view is more than its devices names
+ * the subject in `scope`, and says in `note` what the file leaves out or holds beyond the view.
  *
  * One call does it all: export_telemetry() (0279) refuses a caller who may not export and a window
  * over history.export_max_days, bounds the rows, returns them, and records the export in the Audit
@@ -57,10 +58,14 @@ const boundWords = (iso) => {
 /** Who the dialog exports, in words: the device's name, or how many devices. */
 const subjectWords = (devices) => (devices.length === 1 ? devices[0].name : `${devices.length} devices`)
 
-/** What the dialog exports, in words: "Lathe 3 · 3 metrics · Last 24 hours (4 Nov 12:41 – 5 Nov 12:41)". */
-export function exportWords({ devices, metricNames, windowWords, from, to }) {
-  const metrics = `${metricNames.length} metric${metricNames.length === 1 ? '' : 's'}`
-  return `${subjectWords(devices)} · ${metrics} · ${windowWords} (${boundWords(from)} – ${boundWords(to)})`
+/**
+ * What the dialog exports, in words: "Lathe 3 · 3 metrics · Last 24 hours (4 Nov 12:41 – 5 Nov 12:41)".
+ * A caller's own `scope` replaces the device count, and its one metric is named, as its tab names it:
+ * "Boardroom · 14 machines in 3 cells · Spindle/LOAD · Last 24 hours (…)".
+ */
+export function exportWords({ devices, metricNames, windowWords, from, to, scope }) {
+  const metrics = scope && metricNames.length === 1 ? metricNames[0] : `${metricNames.length} metric${metricNames.length === 1 ? '' : 's'}`
+  return `${scope ?? subjectWords(devices)} · ${metrics} · ${windowWords} (${boundWords(from)} – ${boundWords(to)})`
 }
 
 /** The file's name: the device's, or "readings" for several, then the resolution and the window's day. */
@@ -69,7 +74,7 @@ const fileName = (devices, resolutionKey, from) => {
   return `${stem}-telemetry${resolutionKey === 'raw' ? '' : `-${resolutionKey}`}-${from.slice(0, 10)}.csv`
 }
 
-export function TelemetryExportModal({ devices, metricNames, from, to, windowWords, onClose, showToast }) {
+export function TelemetryExportModal({ devices, metricNames, from, to, windowWords, scope, note, onClose, showToast }) {
   const [resolution, setResolution] = useState('raw')
   const [horizons, setHorizons] = useState(null)   // null until the lookup settles
   const [busy, setBusy]       = useState(false)
@@ -190,7 +195,8 @@ export function TelemetryExportModal({ devices, metricNames, from, to, windowWor
         </>
       }
     >
-      <p className="telemetry-export-what">{exportWords({ devices, metricNames, windowWords, from, to })}</p>
+      <p className="telemetry-export-what">{exportWords({ devices, metricNames, windowWords, from, to, scope })}</p>
+      {note && <p className="telemetry-export-note">{note}</p>}
 
       {devices.length > 1 && (
         <div className="form-group">
