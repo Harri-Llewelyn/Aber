@@ -6,11 +6,12 @@
 import { describe, it, expect } from 'vitest'
 import { HISTORY_MAX_ROWS } from '../api'
 import {
-  DERIVED_MAX_BUCKET_MINUTES, DERIVED_MAX_MINUTES, DERIVED_MAX_ROWS, appliesToValue, appliesToWords, currentWords,
-  derivedDefinitions, derivedInputCount, derivedReportedBy, derivedWindowMinutes, splitDerived,
+  DERIVED_MAX_BUCKET_MINUTES, DERIVED_MAX_MINUTES, DERIVED_MAX_ROWS, SHARE_UNIT, appliesToValue, appliesToWords, currentWords,
+  derivedDefinitions, derivedInputCount, derivedReportedBy, derivedWindowMinutes, percentWords, splitDerived, unitOf,
 } from '../utils/derivedMetric'
 import {
-  cellMetrics, defaultCellMetric, derivedReadProblem, deviceMetrics, foldByGroup, groupSeries, historyMetrics, metricDevices, pickGroupResolution,
+  cellMetrics, chartSeries, chartSummary, defaultCellMetric, derivedReadProblem, deviceMetrics, foldByGroup, groupSeries, historyMetrics,
+  latestWords, lowWords, metricDevices, pickGroupResolution, readingWords,
 } from '../utils/history'
 import { DERIVED_EXPORT_NOTE, exportableMetrics } from '../utils/telemetryExport'
 
@@ -173,6 +174,53 @@ describe("the Area tab's fold of a derived metric", () => {
     expect(pickGroupResolution(start, start + 24 * hour, 20, 4, { readRows: DERIVED_MAX_ROWS }).id).toBe('1h')
     // The measured read takes 50,000 devices times buckets, and picks a finer bucket for the same.
     expect(pickGroupResolution(start, start + 24 * hour, 20, 4).id).toBe('5m')
+  })
+})
+
+describe('a time in state as a percentage', () => {
+  it('is a fraction as a percentage with at most one decimal, a trailing zero dropped', () => {
+    expect([0, 0.42, 0.425, 0.4249, 0.4244, 0.9, 1, 0.333, 0.0004, 0.9995].map(percentWords))
+      .toEqual(['0%', '42%', '42.5%', '42.5%', '42.4%', '90%', '100%', '33.3%', '0%', '100%'])
+  })
+
+  it('says nothing for what is no number', () => {
+    expect([null, undefined, NaN, Infinity].map(percentWords)).toEqual(['—', '—', '—', '—'])
+  })
+
+  it("is a time in state's unit, and no other metric's", () => {
+    expect(unitOf({ derivation: state, units: null })).toBe(SHARE_UNIT)
+    expect(unitOf({ derivation: counter, units: 'COUNT/HOUR' })).toBe('COUNT/HOUR')
+    expect(unitOf({ derivation: power, units: 'kW' })).toBe('kW')
+    expect(unitOf({ units: 'kW' })).toBe('kW')
+    expect(unitOf({})).toBeNull()
+    expect(unitOf(undefined)).toBeNull()
+    expect(SHARE_UNIT).toBe('% of the time')
+  })
+
+  it("is how a reading with that unit is said, and every other unit's reading is as it was", () => {
+    expect(readingWords(0.425, SHARE_UNIT)).toBe('42.5%')
+    expect(readingWords(null, SHARE_UNIT)).toBe('—')
+    expect(readingWords(4.2, 'kW')).toBe('4.2 kW')
+    expect(readingWords(123.456, 'COUNT/HOUR')).toBe('123.5 COUNT/HOUR')
+    // The first of a range carries a percentage's sign, and no other unit.
+    expect(lowWords(0, SHARE_UNIT)).toBe('0%')
+    expect(lowWords(0, 'kW')).toBe('0')
+    expect(lowWords(0)).toBe('0')
+  })
+
+  it("is in a chart's latest reading and its summary", () => {
+    const starts = [0, 60, 120]
+    const rows = [0, 1, 2].map(i => ({ bucket_ts: new Date(starts[i] * 1000).toISOString(), avg_double: [0.2, 0.425, 0.425][i], min_double: [0.2, 0.425, 0.425][i], max_double: [0.2, 0.425, 0.425][i], last_double: [0.2, 0.425, 0.425][i], is_carried: i === 2 }))
+    const series = chartSeries(rows, starts)
+    expect(latestWords(series, starts, 1, SHARE_UNIT)).toMatch(/^Latest 42[.]5% · /)
+    const text = chartSummary({ metric: 'A/UPTIME', unit: SHARE_UNIT, windowText: 'Last hour', resolution: { words: '1-minute buckets', minutes: 1 }, series, validRange: null, starts, span: { start: 0, end: 180000, now: 180000 }, derived: true })
+    expect(text).toContain('A/UPTIME (% of the time), a derived metric, Last hour')
+    expect(text).toContain('Lowest 20%, highest 42.5%')
+  })
+
+  it("is the unit the Metric tab's picker lists for it", () => {
+    const row = historyMetrics([device('d1', 'Press 1', ['Controller/EXECUTION'])], [], [...catalog, { name: 'Controller/UPTIME', datatype: 10, derivation: state }]).find(m => m.name === 'Controller/UPTIME')
+    expect(row.unit).toBe('% of the time')
   })
 })
 

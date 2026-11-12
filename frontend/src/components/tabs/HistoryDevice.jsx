@@ -26,7 +26,7 @@ import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBands } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import { deviceIds } from '../../utils/sparkplugId'
-import { splitDerived } from '../../utils/derivedMetric'
+import { splitDerived, unitOf } from '../../utils/derivedMetric'
 import {
   DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem,
   exportableMetrics, mayExportReadings,
@@ -118,7 +118,7 @@ function BucketChoice({ value, options, onChange }) {
 }
 
 /** A unit for each metric, from the catalog, by name. */
-const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, m.units ?? null]))
+const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, unitOf(m)]))
 
 /** Which groups this browser's viewer closed, by datatype. Not in the address: a link opens them all. */
 export const CLOSED_GROUPS_KEY = 'aber_history_closed_groups'

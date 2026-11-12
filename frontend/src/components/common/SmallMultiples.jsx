@@ -5,7 +5,7 @@ import { OverflowText } from './OverflowText'
 import { DerivedTag } from './DerivedTag'
 import { RouteLink } from './RouteLink'
 import { DEVICE_STATUS, deviceLifecycleStatus } from '../../utils/deviceStatus'
-import { chartSummary, readingWords, sharedScale, silentWords } from '../../utils/history'
+import { chartSummary, lowWords, readingWords, sharedScale, silentWords } from '../../utils/history'
 
 /** A machine's title line: its status dot as the Site Map draws it, its name, and Offline in words. */
 function MemberHead({ member }) {
@@ -65,7 +65,7 @@ export function SmallMultiples({
       )}
       {scale && charted.length > 1 && (
         <p className="multiples-scale">
-          {`One scale for every ${noun}${scope ? ` ${scope}` : ''}: ${readingWords(scale[0])} to ${readingWords(scale[1], unit)}.`}
+          {`One scale for every ${noun}${scope ? ` ${scope}` : ''}: ${lowWords(scale[0], unit)} to ${readingWords(scale[1], unit)}.`}
         </p>
       )}
       {members.map(m => {

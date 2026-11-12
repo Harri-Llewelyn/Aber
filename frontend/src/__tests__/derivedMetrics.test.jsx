@@ -147,6 +147,18 @@ describe('the Derived tab', () => {
     }
   })
 
+  it("says a time in state is shown as a percentage of the time, in its drawer's Units, and a rate's unit is as it was", async () => {
+    renderTab()
+    const derived = await openTab('Derived')
+    fireEvent.click(within(derived).getByText('Controller/UPTIME'))
+    const drawer = document.querySelector('.context-panel')
+    const units = () => within(drawer).getByText('Units').closest('.context-field').textContent
+    expect(units()).toContain('% of the time, shown as a percentage of the time. Stored as a fraction from 0 to 1.')
+    fireEvent.click(within(derived).getByText('Controller/PARTS_PER_HOUR'))
+    expect(units()).toContain('COUNT/HOUR')
+    expect(units()).not.toContain('percentage')
+  })
+
   it('opens a drawer with the definition and no Edit, which has nothing to correct', async () => {
     renderTab()
     const derived = await openTab('Derived')

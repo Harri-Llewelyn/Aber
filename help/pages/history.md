@@ -155,7 +155,7 @@ A chart with nothing to draw says **No readings in this window, and none before 
 A derived metric is one Aber computes from others, such as parts per hour. Its chart, and its name wherever you choose a metric, carry a **Derived** tag. No machine sent its values, so you will not find them in an export.
 
 - **Which devices.** The Device, Cell, Metric and Area tabs offer a derived metric on every device that reports all its inputs. The Metric tab's list counts those devices.
-- **How it is drawn.** A rate is how many the counter grew by in an hour. A time in state is the share of the bucket spent in its states. A sum adds its inputs minute by minute, and the bucket is the average of those minutes.
+- **How it is drawn.** A rate is how many the counter grew by in an hour. A time in state is the share of the bucket spent in its states, shown as a percentage of the bucket with one decimal at most, such as 42% or 42.5%. A sum adds its inputs minute by minute, and the bucket is the average of those minutes.
 - **A device that lacks an input has no value.** No partial sum is drawn. The Area tab's cells follow its rule: a cell's total is drawn only where every machine has a value.
 - **It is read from the minutes.** Time in state is resolved to the minute. A counter that resets and then climbs back past its old value inside one minute is counted short by that old value.
 - **A wide bucket's sum need not equal the sum of its inputs' averages.** An input's average weighs its readings, and a quiet input has few of them. A derived sum weighs every minute alike.

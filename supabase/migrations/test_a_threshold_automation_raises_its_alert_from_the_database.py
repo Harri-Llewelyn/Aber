@@ -925,7 +925,7 @@ class DerivedMetrics(Standing):
         self.cur.execute("SELECT metric_name, detail FROM public.machine_condition_rows() ORDER BY metric_name;")
         self.assertEqual(self.cur.fetchall(), [
             (self.POWER, f"{self.POWER} is 7 at the last whole minute, above 5"),
-            (self.UPTIME, f"{self.UPTIME} is 0.333 over the last hour, below 0.5")])
+            (self.UPTIME, f"{self.UPTIME} is 33.3% over the last hour, below 50%")])
 
     def test_a_pair_with_no_value_has_no_row(self):
         self.apply(automation(triggers=[trigger(metric=self.RATE, above=None, below=100, **{"for": None})]))
@@ -1002,11 +1002,51 @@ class DerivedMetrics(Standing):
 
     def test_the_words_are_the_same_in_the_detail_and_the_summary(self):
         self.cur.execute("SELECT public.automation_value_words(%s, 4.166666666666667), public.automation_value_words(%s, 2.0),"
-                         "       public.automation_value_words(%s, 0.0004), public.automation_value_words(%s, 80.12345678),"
+                         "       public.automation_value_words(%s, 80.12345678),"
                          "       public.automation_value_words(%s, NULL), public.automation_value_words(%s, 4.5);",
-                         (self.RATE, self.POWER, self.UPTIME, METRIC, self.RATE, "no/such/metric"))
-        self.assertEqual(self.cur.fetchone(), ("4.167 over the last hour", "2 at the last whole minute", "0 over the last hour",
+                         (self.RATE, self.POWER, METRIC, self.RATE, "no/such/metric"))
+        self.assertEqual(self.cur.fetchone(), ("4.167 over the last hour", "2 at the last whole minute",
                                                "80.12345678", None, "4.5"))
+
+    def test_a_time_in_state_is_said_as_a_percentage_with_one_decimal_at_most(self):
+        # The same table as derivedMetricReads.test.js holds for percentWords(), which says it in the browser.
+        fractions = [0, 0.42, 0.425, 0.4249, 0.4244, 0.9, 1, 0.333, 0.0004, 0.9995]
+        said = []
+        for fraction in fractions:
+            self.cur.execute("SELECT public.automation_value_words(%s, %s::double precision),"
+                             "       public.automation_threshold_words(%s, %s::double precision);",
+                             (self.UPTIME, fraction, self.UPTIME, fraction))
+            value, threshold = self.cur.fetchone()
+            self.assertEqual(value, threshold + " over the last hour")
+            said.append(threshold)
+        self.assertEqual(said, ["0%", "42%", "42.5%", "42.5%", "42.4%", "90%", "100%", "33.3%", "0%", "100%"])
+
+    def test_a_threshold_is_worded_as_its_metric_is_and_only_a_time_in_state_changes(self):
+        self.cur.execute("SELECT public.automation_threshold_words(%s, 100), public.automation_threshold_words(%s, 5.5),"
+                         "       public.automation_threshold_words(%s, 0.9), public.automation_threshold_words(%s, 0.9),"
+                         "       public.automation_threshold_words(%s, NULL);",
+                         (self.RATE, self.POWER, METRIC, "no/such/metric", self.UPTIME))
+        self.assertEqual(self.cur.fetchone(), ("100", "5.5", "0.9", "0.9", None))
+
+    def test_an_alert_on_a_time_in_state_says_its_value_and_its_threshold_as_percentages(self):
+        self.apply(automation(triggers=[trigger(metric=self.UPTIME, above=None, below=0.9, **{"for": "1m"})]))
+        t = self.trigger_id()
+        self.owner()
+        self.cur.execute("INSERT INTO timescale.telemetry_1m (bucket, asset_id, metric_name, last_string, n_rows)"
+                         " VALUES (%s, %s, %s, 'ACTIVE', 1), (%s, %s, %s, 'READY', 1);",
+                         (self.end - timedelta(minutes=60), self.sparkplug[DEV_A], self.STATE,
+                          self.end - timedelta(minutes=40), self.sparkplug[DEV_A], self.STATE))
+        self.evaluate(0)
+        self.evaluate(60)
+        summary, values = self.summary(t, self.UPTIME)
+        self.assertEqual(summary, f"Test_0271_Lathe_3: {self.UPTIME} is 33.3% over the last hour, below 90% for 1m")
+        # The row keeps the fractions: what is compared is not the words.
+        self.assertAlmostEqual(values["value"], 20 / 60, places=9)
+        self.assertEqual(values["threshold"], 0.9)
+        self.cur.execute("SELECT detail FROM public.machine_condition_rows();")
+        self.assertEqual(self.cur.fetchall(), [(f"{self.UPTIME} is 33.3% over the last hour, below 90%",)])
+        self.cur.execute("SELECT threshold FROM public.automation_trigger_states WHERE trigger_id = %s;", (t,))
+        self.assertEqual(self.cur.fetchone()[0], 0.9)
 
     def test_it_is_not_granted_to_an_api_role(self):
         for fn in ("public.machine_condition_readings()", "public.machine_condition_rows()",

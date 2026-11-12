@@ -24,7 +24,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
-import { derivedDefinitions } from '../../utils/derivedMetric'
+import { derivedDefinitions, unitOf } from '../../utils/derivedMetric'
 import {
   DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem,
   exportableMetrics, mayExportReadings,
@@ -45,7 +45,7 @@ const CLOCK_MS = 60 * 1000
 const SECTIONS = ['machines', 'hours']
 
 /** A metric's unit from the catalog, by name. */
-const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, m.units ?? null]))
+const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, unitOf(m)]))
 
 /** The toolbar's cell: its name, opening a list of the others to look at instead, at the same view. */
 function CellSwitcher({ cell, cells, win, metric }) {

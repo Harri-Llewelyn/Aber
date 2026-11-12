@@ -25,7 +25,7 @@ import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import { navigate, useUrlState } from '../../hooks/useUrlState'
 import { areaWideInService } from '../../utils/inService'
-import { DERIVED_MAX_ROWS, derivedDefinitions } from '../../utils/derivedMetric'
+import { DERIVED_MAX_ROWS, derivedDefinitions, unitOf } from '../../utils/derivedMetric'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   AGG_MODES, DEFAULT_AGG, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS,
@@ -49,7 +49,7 @@ const AGG_OPTIONS = [
 ]
 
 /** A metric's unit from the catalog, by name. */
-const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, m.units ?? null]))
+const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, unitOf(m)]))
 
 /** The toolbar's area: its name, opening a list of the others to look at instead, at the same view. */
 function AreaSwitcher({ area, areas, win, metric, agg }) {

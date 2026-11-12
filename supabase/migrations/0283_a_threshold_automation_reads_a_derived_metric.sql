@@ -13,12 +13,17 @@
 --     metric's devices. A derived metric's devices go to derived_current() in chunks of 500.
 --   * automation_value_words() is the one place a value becomes words: a derived metric's value
 --     rounded to three decimals and followed by its window ("4.167 over the last hour", "7 at the
---     last whole minute"), a measured one's exactly as it was printed before.
---   * machine_condition_rows() words its detail with it: "Controller/PARTS_PER_HOUR is 4.167 over the
---     last hour, below 5".
+--     last whole minute"), a measured one's exactly as it was printed before. A time in state is a
+--     fraction from 0 to 1 as data, and a percentage as words: "42% over the last hour", one decimal
+--     at most. automation_threshold_words() says the threshold the same way, "90%", and any other
+--     threshold as it printed.
+--   * machine_condition_rows() words its detail with them: "Controller/PARTS_PER_HOUR is 4.167 over
+--     the last hour, below 5".
 --   * evaluate_automations() is declared again with one change, the summary of the alert it writes,
---     which words the value with it: "Press 1: Controller/PARTS_PER_HOUR is 4.167 over the last hour,
---     below 5 for 10m". What is compared, and the values.value the row keeps, stay unrounded.
+--     which words the value and the threshold with them: "Press 1: Controller/PARTS_PER_HOUR is 4.167
+--     over the last hour, below 5 for 10m" and "Press 1: Controller/UPTIME is 42% over the last hour,
+--     below 90% for 10m". What is compared, the threshold a YAML file holds, and the values the row
+--     keeps stay the fractions and numbers they are.
 --
 -- No function here is granted to an API role, as in 0270 and 0271.
 --
@@ -106,14 +111,19 @@ COMMENT ON FUNCTION public.machine_condition_readings() IS
 -- The one place the detail and the alert's summary say a value. A metric with no catalogue row, or a
 -- measured one, is the value as it prints (p_value::text, which is what format('%s') prints too), so
 -- a measured alert reads as it did. A derived one is trimmed to the three decimals a person can use
--- and followed by the window its current value is over, from derived_window_minutes() (0282).
+-- and followed by the window its current value is over, from derived_window_minutes() (0282). A
+-- time in state is the exception: it is a share of the time, so it is said as a percentage with one
+-- decimal at most and a trailing zero dropped, as percentWords() in utils/derivedMetric.js says it.
+-- Its threshold is worded by automation_threshold_words(), so the pair read alike.
 CREATE OR REPLACE FUNCTION public.automation_value_words(p_metric text, p_value double precision) RETURNS text
     LANGUAGE sql STABLE
     SET search_path TO 'public'
     AS $$
   SELECT CASE
            WHEN m.derivation IS NULL THEN p_value::text
-           ELSE trim_scale(round(p_value::numeric, 3))::text
+           ELSE CASE WHEN m.derivation ->> 'kind' = 'time_in_state'
+                     THEN trim_scale(round((p_value * 100)::numeric, 1))::text || '%'
+                     ELSE trim_scale(round(p_value::numeric, 3))::text END
                 || CASE public.derived_window_minutes(m.derivation) WHEN 0 THEN ' at the last whole minute' ELSE ' over the last hour' END
          END
     FROM (SELECT 1) AS one
@@ -126,7 +136,32 @@ REVOKE ALL ON FUNCTION public.automation_value_words(text, double precision) FRO
 COMMENT ON FUNCTION public.automation_value_words(text, double precision) IS
   'A threshold value in words, for an automation''s detail and its alert''s summary: a derived metric''s '
   'value rounded to three decimals and followed by its window ("4.167 over the last hour", "7 at the '
-  'last whole minute"), any other value as it prints. Granted to no API role (0283).';
+  'last whole minute"), a time in state''s as a percentage with one decimal at most ("42% over the last '
+  'hour"), any other value as it prints. Granted to no API role (0283).';
+
+-- A threshold in words, as its metric's value is: a time in state's is a percentage ("90%" for 0.9),
+-- since the value beside it is, and any other threshold is as it printed. What a YAML file holds, what
+-- is compared and what a row keeps are the number itself; this is words only.
+CREATE OR REPLACE FUNCTION public.automation_threshold_words(p_metric text, p_threshold double precision) RETURNS text
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $$
+  SELECT CASE
+           WHEN m.derivation ->> 'kind' = 'time_in_state'
+           THEN trim_scale(round((p_threshold * 100)::numeric, 1))::text || '%'
+           ELSE p_threshold::text
+         END
+    FROM (SELECT 1) AS one
+    LEFT JOIN public.metric_catalog m ON m.name = p_metric;
+$$;
+
+ALTER FUNCTION public.automation_threshold_words(text, double precision) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.automation_threshold_words(text, double precision) FROM PUBLIC, anon, authenticated, service_role;
+
+COMMENT ON FUNCTION public.automation_threshold_words(text, double precision) IS
+  'A threshold in words, beside automation_value_words(): a time in state''s as a percentage ("90%" for '
+  '0.9), any other threshold as it prints. Words only: the threshold stays the number a file holds. '
+  'Granted to no API role (0283).';
 
 -- -------------------------------------------------------------------------------------------------
 -- 3. The breaching ones, with the window in their words
@@ -141,7 +176,8 @@ RETURNS TABLE (condition text, sparkplug_id text, subject text, value numeric, d
          d.sparkplug_id,
          d.name,
          r.value::numeric,
-         format('%s is %s, %s %s', r.metric_name, public.automation_value_words(r.metric_name, r.value), r.comparison, r.threshold),
+         format('%s is %s, %s %s', r.metric_name, public.automation_value_words(r.metric_name, r.value), r.comparison,
+                public.automation_threshold_words(r.metric_name, r.threshold)),
          r.trigger_id,
          r.entity_id,
          r.metric_name
@@ -163,10 +199,11 @@ COMMENT ON FUNCTION public.machine_condition_rows() IS
 -- -------------------------------------------------------------------------------------------------
 -- 4. The evaluator, with the value in words
 -- -------------------------------------------------------------------------------------------------
--- 0271's function with one change: the summary of an alert it raises says the value through
--- automation_value_words(), so a derived metric's alert reads "4.167 over the last hour" and not
--- 4.166666666666667. Everything else, what is compared and the values the row keeps included, is
--- 0271's, which runs first on every boot and which the job would run in between.
+-- 0271's function with one change: the summary of an alert it raises says the value and the threshold
+-- through automation_value_words() and automation_threshold_words(), so a derived metric's alert reads
+-- "4.167 over the last hour" and not 4.166666666666667, and a time in state's "42% over the last hour,
+-- below 90%". Everything else, what is compared and the values the row keeps included, is 0271's,
+-- which runs first on every boot and which the job would run in between.
 CREATE OR REPLACE FUNCTION public.evaluate_automations(p_at timestamp with time zone DEFAULT now()) RETURNS integer
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -289,7 +326,7 @@ BEGIN
   SELECT public.automation_alert_fingerprint(d.trigger_id, d.entity_id, d.metric_name),
          'device', dev.id, dev.sparkplug_id, a.alias, act.severity, 'firing',
          format('%s: %s is %s, %s %s%s', dev.name, d.metric_name, public.automation_value_words(d.metric_name, d.last_value),
-                d.comparison, d.threshold,
+                d.comparison, public.automation_threshold_words(d.metric_name, d.threshold),
                 CASE WHEN t.hold_seconds > 0 THEN ' for ' || public.automation_duration_text(t.hold_seconds) ELSE '' END),
          p_at, NULL,
          jsonb_build_object('severity', act.severity, 'entity_type', 'device', 'metric', d.metric_name,
@@ -328,7 +365,8 @@ COMMENT ON FUNCTION public.evaluate_automations(timestamp with time zone) IS
   'keeps what it found in automation_trigger_states, fires a breach that has held for its `for` and '
   'resolves one that stopped, writing platform_alerts under automation_alert_fingerprint() and '
   'stamping last_confirmed_at on every row it holds firing. The summary words the value through '
-  'automation_value_words(): a derived metric''s rounded, with its window. A pair with no value is left as '
+  'automation_value_words() and automation_threshold_words(): a derived metric''s value rounded, with its '
+  'window, and a time in state as a percentage. A pair with no value is left as '
   'it was. A run that cannot read the historian writes nothing but one platform alert, Automations Not '
   'Evaluated, which the next run that reads resolves. Returns how many pairs it read. p_at is the '
   'instant to judge at, now() for the job. Granted to no API role (0271, 0283).';
@@ -361,28 +399,35 @@ BEGIN
     RAISE EXCEPTION '0283: machine_condition_readings() no longer reads a measured metric from the historian one metric at a time, or a derived one through derived_current()';
   END IF;
   SELECT p.prosrc INTO v_src FROM pg_proc p WHERE p.oid = 'public.machine_condition_rows()'::regprocedure;
-  IF position('public.automation_value_words(' IN v_src) = 0 THEN
-    RAISE EXCEPTION '0283: machine_condition_rows() no longer words its value with automation_value_words()';
+  IF position('public.automation_value_words(' IN v_src) = 0 OR position('public.automation_threshold_words(' IN v_src) = 0 THEN
+    RAISE EXCEPTION '0283: machine_condition_rows() no longer words its value and threshold with automation_value_words() and automation_threshold_words()';
   END IF;
   -- The evaluator is still 0271's, composing fingerprints in one place and reading through the one
   -- function, and it says its value with the same words the detail does.
   SELECT p.prosrc INTO v_src FROM pg_proc p WHERE p.oid = 'public.evaluate_automations(timestamp with time zone)'::regprocedure;
   IF position('public.automation_value_words(' IN v_src) = 0
+     OR position('public.automation_threshold_words(' IN v_src) = 0
      OR position('public.automation_alert_fingerprint(' IN v_src) = 0
      OR position('public.machine_condition_readings()' IN v_src) = 0
      OR position('''condition:'' ||' IN v_src) <> 0 THEN
-    RAISE EXCEPTION '0283: evaluate_automations() does not word its value with automation_value_words(), or has lost what 0271 holds of it';
+    RAISE EXCEPTION '0283: evaluate_automations() does not word its value and threshold with automation_value_words() and automation_threshold_words(), or has lost what 0271 holds of it';
   END IF;
   IF has_function_privilege('anon', 'public.evaluate_automations(timestamp with time zone)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.evaluate_automations(timestamp with time zone)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public.evaluate_automations(timestamp with time zone)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.automation_value_words(text, double precision)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.automation_value_words(text, double precision)', 'EXECUTE')
-     OR has_function_privilege('service_role', 'public.automation_value_words(text, double precision)', 'EXECUTE') THEN
-    RAISE EXCEPTION '0283: an API role may execute evaluate_automations() or automation_value_words()';
+     OR has_function_privilege('service_role', 'public.automation_value_words(text, double precision)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.automation_threshold_words(text, double precision)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.automation_threshold_words(text, double precision)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public.automation_threshold_words(text, double precision)', 'EXECUTE') THEN
+    RAISE EXCEPTION '0283: an API role may execute evaluate_automations(), automation_value_words() or automation_threshold_words()';
   END IF;
   IF public.automation_value_words('not-in-the-catalogue', 80.12345678) IS DISTINCT FROM '80.12345678' THEN
     RAISE EXCEPTION '0283: a metric the catalogue does not hold is not worded as its value prints';
+  END IF;
+  IF public.automation_threshold_words('not-in-the-catalogue', 0.9) IS DISTINCT FROM '0.9' THEN
+    RAISE EXCEPTION '0283: a metric the catalogue does not hold has its threshold worded otherwise than as it prints';
   END IF;
 END
 $check$;

@@ -26,7 +26,7 @@ import {
 } from '../../utils/semanticIdSources'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import {
-  DERIVED_DATATYPE, appliesToValue, describeDerivation, isDerived, kindLabel, matchesDerivedSearch, derivationText
+  DERIVED_DATATYPE, SHARE_UNIT, appliesToValue, isShare, describeDerivation, isDerived, kindLabel, matchesDerivedSearch, derivationText
 } from '../../utils/derivedMetric'
 import { metricDevices } from '../../utils/history'
 import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
@@ -1314,7 +1314,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           },
           !isDerived(selected) && { label: 'Standard', value: selected.standard || LOCAL_EXTENSION_LABEL },
           !isDerived(selected) && { label: 'Category', value: selected.category || null },
-          { label: 'Units', value: selected.units || null },
+          // A time in state has no unit of its own: it is a fraction, shown as a percentage of the time.
+          isShare(selected.derivation)
+            ? { label: 'Units', value: `${SHARE_UNIT}, shown as a percentage of the time. Stored as a fraction from 0 to 1.`, full: true }
+            : { label: 'Units', value: selected.units || null },
           { label: 'Datatype', value: datatypeLabel(selected.datatype) },
           !isDerived(selected) && { label: 'Semantic ID', value: selected.semantic_id || null, mono: true, copyable: true, full: true },
           !isDerived(selected) && { label: 'Reference Type', value: selected.semantic_id ? selected.semantic_id_type || null : null },

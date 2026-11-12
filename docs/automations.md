@@ -106,7 +106,7 @@ one is judged against its **current value**, by one rule for each kind:
 | Time in state | The share of the **last hour** spent in the states, from 0 to 1. |
 | Sum or difference | The sum **at the last whole minute**. |
 
-The Devices drawer shows the same number, with the window in words.
+The Devices drawer shows the same number, with the window in words. A time in state is shown as a percentage there and in History, and is a fraction wherever it is data: the API, an alert's `values` and a threshold.
 
 - **Why an hour.** A rate from one minute swings between 0 and sixty times the count, and one
   minute's share is 0 or 1. An hour is what "parts per hour" and "uptime" mean.
@@ -115,6 +115,9 @@ The Devices drawer shows the same number, with the window in words.
   has no value, so it never fires.
 - **`for` and the hold work as for any metric.** Each run judges the current value again. The alert
   says the window: "Controller/PARTS_PER_HOUR is 4.2 over the last hour, below 5".
+- **A time in state's threshold is a fraction from 0 to 1.** The dashboard shows the value as a
+  percentage, but the file holds the fraction: `below: 0.9` is 90%. An alert on one reads
+  "Press 1: Controller/UPTIME is 42% over the last hour, below 90% for 10m".
 - **Time in state is resolved to the minute.** A counter that resets and passes its old value inside one
   minute is under-counted by that old value.
 

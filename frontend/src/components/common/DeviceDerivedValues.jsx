@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../../api'
 import { DerivedTag } from './DerivedTag'
-import { currentWords, derivedDefinitions, derivedReportedBy } from '../../utils/derivedMetric'
+import { currentWords, derivedDefinitions, derivedReportedBy, unitOf } from '../../utils/derivedMetric'
 import { deviceMetrics, readingWords, telemetryKey } from '../../utils/history'
 
 /**
@@ -26,7 +26,7 @@ export function DeviceDerivedValues({ device, names, catalog }) {
   }, [key])
 
   const definitions = derivedDefinitions(catalog)
-  const units = new Map((catalog || []).map(m => [m.name, m.units ?? null]))
+  const units = new Map((catalog || []).map(m => [m.name, unitOf(m)]))
   const byName = new Map((state.rows || []).map(r => [r.metric_name, r]))
   return (
     <ul className="derived-values">

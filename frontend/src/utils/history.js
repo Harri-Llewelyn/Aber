@@ -14,7 +14,7 @@ import { modelledConstraints } from './payloadConformance'
 import { deviceIdentifiers, deviceIds } from './sparkplugId'
 import { SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell } from './cellResolution'
 import { areaWideInService, inServiceDevices } from './inService'
-import { DERIVED_MAX_MINUTES, derivedInputCount, derivedReportedBy } from './derivedMetric'
+import { DERIVED_MAX_MINUTES, SHARE_UNIT, derivedInputCount, derivedReportedBy, percentWords, unitOf } from './derivedMetric'
 import {
   SPAN_IDS, TIME_PRESETS, bandWords, calendarTicks, clockWords, localDay, rollingWindow, windowToQuery,
 } from './timeWindow'
@@ -670,12 +670,22 @@ export function nowFraction(startMs, endMs, nowMs) {
 
 const NUMBER = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 4 })
 
-/** A reading in words: four significant figures, with the unit after it. */
+/**
+ * A reading in words: four significant figures, with the unit after it. A time in state's unit
+ * (SHARE_UNIT) says it as a percentage instead, "42%", with one decimal at most.
+ */
 export function readingWords(value, unit) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  if (unit === SHARE_UNIT) return percentWords(value)
   const text = NUMBER.format(value)
   return unit ? `${text} ${unit}` : text
 }
+
+/**
+ * The first of a range, "0 to 120 kW": no unit, which the end carries, except a percentage, whose sign
+ * each end says ("0% to 50%").
+ */
+export const lowWords = (value, unit) => readingWords(value, unit === SHARE_UNIT ? unit : undefined)
 
 /** A value as its chart says it: a reading with its unit, true or false, or a state's text. */
 export function valueWords(kind, value, unit) {
@@ -1409,7 +1419,7 @@ export function metricAddress(name, win, { areas = [], cells = [], devices = [],
 export function historyMetrics(devices, schemas, catalog) {
   const meta = new Map((catalog || []).map(m => [m.name, m]))
   return cellMetrics(inServiceDevices(devices), schemas, catalog).map(m => ({
-    ...m, unit: meta.get(m.name)?.units ?? null, kind: datatypeKind(meta.get(m.name)?.datatype), ...(meta.get(m.name)?.derivation ? { derived: true } : {}),
+    ...m, unit: unitOf(meta.get(m.name)), kind: datatypeKind(meta.get(m.name)?.datatype), ...(meta.get(m.name)?.derivation ? { derived: true } : {}),
   }))
 }
 

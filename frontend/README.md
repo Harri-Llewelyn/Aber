@@ -1973,6 +1973,14 @@ its current value; Export leaves it out. The database's rules are in
   `readRows: DERIVED_MAX_ROWS`), then `foldByGroup()` makes the rows `telemetry_carried_by_group()`
   makes, so `groupSeries()` draws both and a cell's total is withheld wherever a machine has no value.
   A measured metric folds in the database and gets a finer bucket for the same area.
+- **A time in state is shown as a percentage, and is a fraction as data.** Its unit in a chart, a
+  picker and a drawer is `SHARE_UNIT` (`unitOf()` gives it, from the definition), which `readingWords()`
+  says with `percentWords()`: one decimal at most and a trailing zero dropped, "42%" and "42.5%". So a
+  chart's value axis ticks, its hover and latest readings, its summary, the Area tab's cell means and
+  the Devices drawer's value all say it, and the chart is titled "(% of the time)". The data, the API,
+  an alert's `values` and a threshold in YAML are the fraction (`below: 0.9` is 90%); the Automations
+  editor says so in the metric's completion and hover (`SHARE_FRACTION_NOTE`), and the derived drawer's
+  Units says the percentage. An alert says it in the database's own words, `automation_value_words()`.
 - **The tag is one component, `common/DerivedTag.jsx`**, the Derived tab's own badge. It is on a chart's
   title (`TimeSeriesChart`'s `derived`), beside the name in each metric list and picker
   (`FilterChecklist`'s option `tag`), in the Cell, Metric and Area toolbars, in a line above their

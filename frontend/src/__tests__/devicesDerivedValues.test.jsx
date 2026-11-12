@@ -85,7 +85,7 @@ describe("the Devices drawer's derived metrics", () => {
     const rows = [...field().querySelectorAll('.derived-values li')].map(li => li.textContent.replace(/\s+/g, ' ').trim())
     expect(rows).toEqual([
       'Controller/PARTS_PER_HOUR Derived 120.4 COUNT/HOUR over the last hour',
-      'Controller/UPTIME Derived 0.5 over the last hour',
+      'Controller/UPTIME Derived 50% over the last hour',
       'Power/TOTAL Derived 7 kW at the last whole minute',
     ])
   })

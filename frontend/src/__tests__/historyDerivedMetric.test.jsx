@@ -80,12 +80,14 @@ const routeGet = (path) => {
 
 /** Press 1 makes 100 an hour and Press 2 makes 200: three buckets each, the last one carried. */
 const LEVEL = { [telemetryKey({ asset_id: PRESS1 })]: 100, [telemetryKey({ asset_id: PRESS2 })]: 200 }
+/** A time in state is a fraction from 0 to 1, as the database returns it: 42.5% of the bucket. */
+const level = (asset, name) => (name === UPTIME ? 0.425 : LEVEL[asset] ?? 50)
 const derived = ({ from, bucketMinutes, assetIds, metricNames }) => {
   const width = bucketMinutes * 60000
   const first = Math.floor(Date.parse(from) / width) * width
   return Promise.resolve(assetIds.flatMap(asset => metricNames.flatMap(name => [0, 1, 2].map(i => ({
     bucket_ts: new Date(first + i * width).toISOString(), asset_id: asset, metric_name: name,
-    avg_double: LEVEL[asset] ?? 50, min_double: LEVEL[asset] ?? 50, max_double: LEVEL[asset] ?? 50, last_double: LEVEL[asset] ?? 50,
+    avg_double: level(asset, name), min_double: level(asset, name), max_double: level(asset, name), last_double: level(asset, name),
     n_rows: i === 2 ? 0 : 4, is_carried: i === 2,
   })))))
 }
@@ -128,7 +130,7 @@ describe('the Device tab', () => {
     await visit(`/history/device/${PRESS1}?range=24h`)
     const figure = await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (COUNT/HOUR)' })
     expect(within(figure).getByText('Derived')).toBeInTheDocument()
-    expect(screen.getByRole('figure', { name: 'Controller/UPTIME' })).toBeInTheDocument()
+    expect(screen.getByRole('figure', { name: 'Controller/UPTIME (% of the time)' })).toBeInTheDocument()
     expect(api.readDerivedSeries).toHaveBeenCalledTimes(1)
     expect(api.readDerivedSeries.mock.calls[0][0].metricNames).toEqual([RATE, UPTIME])
     // The measured metrics keep their own read, and a derived name is not asked of it.
@@ -140,10 +142,26 @@ describe('the Device tab', () => {
     expect(within(screen.getByRole('figure', { name: 'Controller/PART_COUNT (COUNT)' })).queryByText('Derived')).not.toBeInTheDocument()
   })
 
+  it('draws a time in state as a percentage: the axis, the latest reading, the hover and the summary', async () => {
+    await visit(`/history/device/${PRESS1}?range=24h`)
+    const figure = await screen.findByRole('figure', { name: 'Controller/UPTIME (% of the time)' })
+    // The latest reading is the bucket with a reading in it, not the carried one.
+    expect(within(figure).getByText(/^Latest 42[.]5% · /)).toBeInTheDocument()
+    expect(document.getElementById(figure.querySelector('[role="img"]').getAttribute('aria-describedby')).textContent)
+      .toMatch(/Latest 42[.]5%, in the bucket from .*Lowest 42[.]5%, highest 42[.]5%/)
+    // Each tick of the value axis says its sign; the data is still the fraction.
+    const plot = plots.find(p => p.data[1].some(v => v === 0.425))
+    expect(plot).toBeTruthy()
+    expect(plot.opts.axes[1].values(null, [0, 0.25, 0.5, 0.125, 1])).toEqual(['0%', '25%', '50%', '12.5%', '100%'])
+    // A rate is as it always was.
+    const rate = within(screen.getByRole('figure', { name: 'Controller/PARTS_PER_HOUR (COUNT/HOUR)' }))
+    expect(rate.getByText(/^Latest 50 COUNT[/]HOUR · /)).toBeInTheDocument()
+  })
+
   it('offers only the derived metrics whose inputs the device reports', async () => {
     await visit(`/history/device/${PRESS2}?range=24h`)
     await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (COUNT/HOUR)' })
-    expect(screen.queryByRole('figure', { name: 'Controller/UPTIME' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('figure', { name: /^Controller[/]UPTIME/ })).not.toBeInTheDocument()
     expect(api.readDerivedSeries.mock.calls[0][0].metricNames).toEqual([RATE])
   })
 
@@ -251,7 +269,7 @@ describe('the Metric tab', () => {
       ['Controller/EXECUTION', '—', '1'],
       ['Controller/PART_COUNT', 'COUNT', '2'],
       ['Controller/PARTS_PER_HOUR Derived', 'COUNT/HOUR', '2'],
-      ['Controller/UPTIME Derived', '—', '1'],
+      ['Controller/UPTIME Derived', '% of the time', '1'],
       ['Spindle/LOAD', 'kW', '1'],
     ])
   })
@@ -289,6 +307,13 @@ describe('the Area tab', () => {
     const presses = plots.find(p => p.data[1].some(v => v === 100 || v === 300))
     // The first bucket has Press 1 only, so no total; the next two have both.
     expect(presses.data[1].slice(0, 3)).toEqual([null, 300, 300])
+  })
+
+  it("draws a cell's mean time in state as a percentage", async () => {
+    await visit(`/history/area/a1?metric=${encodeURIComponent(UPTIME)}`)
+    const figure = await screen.findByRole('figure', { name: 'Presses' })
+    expect(within(figure).getByText(/^Latest 42[.]5% · /)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: `Metric: ${UPTIME} (derived)` })).toBeInTheDocument()
   })
 
   it('has no mean at each hour for a derived metric', async () => {

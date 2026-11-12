@@ -5045,7 +5045,8 @@ fingerprints with `automation_alert_fingerprint()` and reads only through
 
 **`0283` declares `evaluate_automations()` again**, changing only the summary of the alert it raises: a
 derived metric's value is said through `automation_value_words()` (rounded to three decimals, with its
-window) where `0271` printed it as the evaluator read it. A measured metric's summary is as it was. The
+window, and a time in state as a percentage, its threshold too through `automation_threshold_words()`)
+where `0271` printed them as the evaluator read them. A measured metric's summary is as it was. The
 comparison and the `values.value` the row keeps are still the unrounded value. See *A threshold
 automation reads a derived metric (0283)*.
 
@@ -5364,11 +5365,17 @@ reads again, after `derived_current()`, and the evaluator with one change, the w
   saved.
 - **A value is said in one place, `automation_value_words(metric, value)`.** A derived metric's value is
   rounded to three decimals and followed by its window, "4.167 over the last hour" or "7 at the last
-  whole minute"; any other value is printed as it was, so a measured alert reads as it did.
-  `machine_condition_rows()` words its detail with it ("Controller/PARTS_PER_HOUR is 4.167 over the last
-  hour, below 5"), and so does the alert's summary.
+  whole minute"; any other value is printed as it was, so a measured alert reads as it did. **A time in
+  state is a percentage in words**, "42% over the last hour", with one decimal at most and a trailing
+  zero dropped, because it reads better so. It is still a fraction from 0 to 1 as data: the value
+  the function returns, `platform_alerts.values`, the threshold in a file (`below: 0.9` is 90%) and
+  what is compared. `automation_threshold_words(metric, threshold)` words the threshold beside it, "90%"
+  for a time in state and as printed for any other. `machine_condition_rows()` words its detail with
+  both ("Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5"), and so does the alert's
+  summary. The browser says a share with `percentWords()`, and one table of fractions and their words
+  is held by this suite and by `derivedMetricReads.test.js`.
 - **`evaluate_automations()` is declared again, changing only that summary**: "Press 1:
-  Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5 for 10m", which is what the alert
+  Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5 for 10m", or "Press 1: Controller/UPTIME is 42% over the last hour, below 90% for 10m", which is what the alert
   counter, the email and the webhook show. Without it the summary printed 4.166666666666667. What is
   compared, and the `values.value` the row keeps, are the unrounded value. It is redeclared here and
   not edited in `0271`, because a boot runs `0271` before this file and the job could run the old one
@@ -5382,7 +5389,7 @@ The columns of the two reads are `0270`'s, because a replay runs `0270` again be
 `CREATE OR REPLACE` cannot change a function's columns. The file's self-check asserts the grants (none
 is any API role's), the `SECURITY DEFINER` form, that the read is still one remote query for each
 measured metric and goes through `derived_current()` for a derived one, and that the detail and the
-evaluator word their value with `automation_value_words()`. The suite for `0271` holds the rest
+evaluator word their value and threshold with `automation_value_words()` and `automation_threshold_words()`. The suite for `0271` holds the rest
 (`DerivedMetrics`): a rate, a share and a sum read and worded, a pair with no value, a measured pair
 beside a derived one, and an alert that fires, holds and resolves. With `ABER_TEST_HISTORIAN`, one more reads a
 derived rate through a real historian's real-time rollup and `postgres_fdw`, and fires on it.

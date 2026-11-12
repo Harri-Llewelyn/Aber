@@ -267,6 +267,32 @@ export function derivedInputCount(names, catalog) {
   return names.reduce((sum, n) => sum + (derived.has(n) ? derivationInputs(derived.get(n)).length : 0), 0)
 }
 
+/**
+ * A time in state is a fraction from 0 to 1 wherever it is data (the API, an alert's values, a
+ * threshold in YAML), and a percentage wherever a person is shown it. SHARE_UNIT is the unit such a
+ * metric is drawn in: readingWords() sees it and says the value with percentWords(), and a chart
+ * titles itself "(% of the time)". SHARE_FRACTION_NOTE is what the Automations editor says of the
+ * threshold, which is a fraction.
+ */
+export const SHARE_UNIT = '% of the time'
+export const SHARE_FRACTION_NOTE = 'a fraction from 0 to 1 (0.9 is 90%)'
+
+/**
+ * A fraction as a percentage in words: at most one decimal place, a trailing zero dropped. 0.42 is
+ * "42%", 0.425 "42.5%", 1 "100%". The same words as automation_value_words() says in an alert: the db suite
+ * and derivedMetricReads.test.js hold one table of fractions and what each is said as.
+ */
+export function percentWords(fraction) {
+  if (fraction === null || fraction === undefined || !Number.isFinite(Number(fraction))) return '—'
+  return `${Math.round(Number(fraction) * 1000) / 10 || 0}%`
+}
+
+/** Whether a definition is a time in state. */
+export const isShare = (derivation) => derivation?.kind === 'time_in_state'
+
+/** A catalog row's unit as a chart and a drawer say it: a time in state's is SHARE_UNIT, any other its own, or null. */
+export const unitOf = (metric) => (isShare(metric?.derivation) ? SHARE_UNIT : (metric?.units ?? null))
+
 /** A list of names as the dashboard says one: "A", "A and B", "A, B and C". */
 const listWords = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`)
 

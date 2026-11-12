@@ -31,7 +31,7 @@ import { OverflowText } from './OverflowText'
 import { DerivedTag } from './DerivedTag'
 import { clockWords } from '../../utils/timeWindow'
 import {
-  chartPalette, chartTitle, latestWords, markWords, markedStretches, momentWords, nowFraction, readingWords, runNear,
+  chartPalette, chartTitle, latestWords, lowWords, markWords, markedStretches, momentWords, nowFraction, readingWords, runNear,
   runWords, shareWords, splitCarried, stateHue, stateKey, stateRuns, stateShares, validRangeWords,
 } from '../../utils/history'
 
@@ -108,7 +108,7 @@ export const PLOT_RIGHT_PX = 28
  * `plugins` are the page's own uPlot plugins, such as the alert bands (alertBands.js). `yRange` fixes
  * a number chart's value scale to [low, high], so several charts can share one.
  */
-function plotOptions({ width, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins }) {
+function plotOptions({ width, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins, unit }) {
   const flag = series.kind === 'flag'
   // A flag's bucket that held both values is a band from false to true (markBuckets()).
   const banded = !flag || (series.marked || []).some(n => n > 1)
@@ -133,7 +133,8 @@ function plotOptions({ width, height, series, start, end, validRange, yRange, pa
         ...axis,
         size: PLOT_LEFT_PX,
         ...(flag ? { splits: () => [0, 1] } : {}),
-        values: (u, splits) => splits.map(v => (flag ? (v === 1 ? 'true' : v === 0 ? 'false' : '') : readingWords(v))),
+        // A percentage says its sign on every tick; any other value says its unit in the title.
+        values: (u, splits) => splits.map(v => (flag ? (v === 1 ? 'true' : v === 0 ? 'false' : '') : lowWords(v, unit))),
       },
     ],
     series: [
@@ -327,7 +328,7 @@ export function TimeSeriesChart({
     let plot
     try {
       plot = new uPlot(
-        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins }),
+        plotOptions({ width: box.clientWidth || 600, height, series, start, end, validRange, yRange, palette, syncKey, onHover, plugins, unit }),
         [starts, series.max, series.min, read, held],
         box,
       )
@@ -346,7 +347,7 @@ export function TimeSeriesChart({
       plot.destroy()
       setOver(null)
     }
-  }, [drawn, starts, series, start, end, height, validRange, yRange, palette, syncKey, plugins])
+  }, [drawn, starts, series, start, end, height, validRange, yRange, palette, syncKey, plugins, unit])
 
   const fraction = nowFraction(start, end, now)
   const range = validRangeWords(validRange, unit)
@@ -440,6 +441,6 @@ function hoverWords(x, series, i, unit, minutes) {
   const lo = series.min[i]
   const hi = series.max[i]
   return lo !== null && hi !== null && lo !== hi
-    ? `${when} · ${readingWords(v, unit)} (${readingWords(lo)} to ${readingWords(hi, unit)})`
+    ? `${when} · ${readingWords(v, unit)} (${lowWords(lo, unit)} to ${readingWords(hi, unit)})`
     : `${when} · ${readingWords(v, unit)}`
 }
