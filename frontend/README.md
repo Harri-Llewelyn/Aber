@@ -1816,7 +1816,8 @@ where the lathes sit in several areas. Its arithmetic is `utils/history.js` and 
   Overview's selection box. The metrics offered are those some device in service reports (`historyMetrics()`:
   `cellMetrics()` over every device, a last birth's or a schema's), with the catalog's unit and kind where it
   has them. A metric the catalog does not know is offered all the same, with no unit: it is reported, and the
-  Cell tab charts it. A derived metric has no device reporting it, so it is not here.
+  Cell tab charts it. A derived metric is offered where some device reports all its inputs (`deviceMetrics()`
+  with the catalog), with its *derived* tag.
 - **The name is one path segment**, `encodeURIComponent()`, so `Spindle/LOAD` is `Spindle%2FLOAD`
   (`metricHistoryPath()`, `metricNameFrom()`). An address naming a metric no device reports says so and links
   the picker.
