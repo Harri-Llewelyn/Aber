@@ -83,8 +83,6 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   [*the ingestion account cannot read them*](#from-170-the-ingestion-account-cannot-read-the-unified-namespace-or-the-directory).
 - **Sessions that should last until someone signs out?** Set the timeout first: see
   [*a session nobody uses for 7 days ends*](#from-170-a-session-nobody-uses-for-7-days-ends).
-- **A script that reads or writes a cell's `grafana_url`?** Change it first: see
-  [*`cells.grafana_url` is removed*](#from-180-cellsgrafana_url-is-removed).
 - **A storage policy of your own, another database server image, or a broker account named `sub`
   and 21 hex characters?** Check them first: see
   [*The upgrade to 1.7.0*](#the-upgrade-to-170-checks-storage-policies-and-the-databases-grants).
@@ -92,6 +90,17 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   first: see [*every token is signed ES256*](#from-180-every-token-is-signed-es256).
 - **Use Supabase Studio?** Turn it and postgres-meta on in your values first: see
   [*Studio and postgres-meta are off by default*](#from-180-studio-and-postgres-meta-are-off-by-default).
+- **A script or runbook that calls `scripts/mint-mcp-token.mjs`, which is removed?** Change it first: see
+  [*`scripts/mint-mcp-token.mjs` is removed*](#from-180-scriptsmint-mcp-tokenmjs-is-removed).
+- **A script that reads or writes a cell's `grafana_url`?** Change it first: see
+  [*`cells.grafana_url` is removed*](#from-180-cellsgrafana_url-is-removed).
+- **An Operator, or a script run as one, that exports readings?** Choose who will export instead: see
+  [*Operators no longer export readings*](#from-180-operators-no-longer-export-readings-and-an-export-covers-14-days-at-most).
+- **An app of your own that signs people in with Aber, and calls the API with the token it gets?**
+  Change it first: see
+  [*an app that signs people in reaches the sign-in endpoints only*](#from-180-an-app-that-signs-people-in-reaches-the-sign-in-endpoints-only).
+- **A role row that names no account?** The upgrade deletes it: see
+  [*The upgrade to 1.8.0*](#the-upgrade-to-180-deletes-the-role-rows-that-name-no-account).
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
@@ -1499,114 +1508,6 @@ Every workload rolls once, as at every release. Beyond that:
   **The forge restarts** with its email fallback off. **Grafana** gains one alert rule, **Service
   Token Expiring**, which warns a week before a machine identity's token expires.
 
-### From 1.8.0, `scripts/mint-mcp-token.mjs` is removed
-
-Before you upgrade, change any script or runbook that calls the removed `scripts/mint-mcp-token.mjs`.
-Call `scripts/mint-api-token.mjs` instead. It takes the same arguments and prints the same output:
-
-```bash
-node scripts/mint-api-token.mjs            # 30 days, prints the token
-node scripts/mint-api-token.mjs --json     # a ready-to-paste mcpServers block
-```
-
-From 1.8.0, the old name stops with `Cannot find module`. A site upgrading straight from 1.6.x
-never saw the warning it printed in 1.7.x. Removing the old name changes no token already issued
-with it.
-
-### From 1.8.0, the Directory page is called System
-
-The dashboard page that lists Aber's services is now called **System**. Its address is `/system`,
-and each tab's address is under it, such as `/system/ingestion`.
-
-Old links and bookmarks still work. `/directory` and each of its tab addresses open the same view
-of System, with its sort order and other settings.
-
-Nothing else is renamed. The database and the API keep their names, such as `directory_services`.
-So does the Factory+ Directory, at `/ping` and `/v1/`.
-
-### From 1.8.0, the metric catalog can hold derived metrics
-
-The **Metrics** page has a new **Derived** tab. A derived metric is one Aber computes from others,
-such as parts per hour from a part counter. It is a row of `metric_catalog` with a new `derivation`
-column, which is `null` for every metric you have. The upgrade adds the column and changes no row.
-
-Check any client that reads the catalog from `/rest/v1/metric_catalog`:
-
-- **A response has a new `derivation` key.** It is `null` for a measured metric.
-- **Skip a row whose `derivation` is not null** when you build a schema or a device's list of
-  metrics. No device publishes a derived metric, and it has no semantic id. The dashboard's schema
-  builder already leaves them out.
-
-### From 1.8.0, History draws a derived metric, and an automation can read one
-
-From 1.8.0, Aber computes a derived metric when it is read. The upgrade adds three functions and changes
-no row.
-
-- **History** offers each derived metric on a device that reports all its inputs, and draws it with a
-  *derived* tag. The Devices drawer lists its current value.
-- **Export leaves it out.** A derived metric is not a reading. Export its inputs.
-- **An automation on a derived metric now fires.** Before, a file could name one and it never fired.
-  The first evaluation after the upgrade judges each such automation. Check the Automations page.
-- **A client that reads the AAS export** now finds each derived metric a device reports the inputs of.
-  It has no `semanticId`, and the export counts it as unmapped.
-- **New API calls** are `/rest/v1/rpc/derived_series` and `/rest/v1/rpc/derived_current`, for every
-  signed-in role. Grafana cannot call them.
-
-The i3X service serves no derived metric.
-
-### From 1.8.0, `cells.grafana_url` is removed
-
-1.7.0 deprecated a cell's `grafana_url` (see
-[*a cell's dashboard address is one of its Attached Links*](#from-170-a-cells-dashboard-address-is-one-of-its-attached-links)).
-From 1.8.0 the column is gone (#1090).
-
-- **Stop any API client that writes or reads it before upgrading.** After the upgrade, a request
-  that names it gets HTTP 400. Read a cell's links from `/rest/v1/links` instead (`entity_type`
-  `cell`, `entity_id` the cell's id). The cell's dashboard is the link named **Dashboard**.
-- **What the upgrade does.** Migration `0219` moves any web address written since 1.7.0 to the
-  cell's **Attached Links**, as 1.7.0 did. Then it drops the column. There is nothing to run.
-- **A value that is not a web address is not lost.** 1.7.0 left such a value on the cell. The
-  upgrade names each one in db-init's log, with its cell. Then it clears it, so the cell's
-  **View Audit Trail** shows the old value. To see before upgrading whether any cell has one, run
-  this. No rows means none:
-
-  ```bash
-  kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
-    "SELECT id, name, grafana_url FROM public.cells
-       WHERE btrim(grafana_url) <> '' AND NOT btrim(grafana_url) ~ '^https?://' ORDER BY name;"
-  ```
-
-### From 1.8.0, a backup can include Grafana's saved dashboards
-
-A dashboard saved in Grafana is kept in Grafana's own database and nowhere else. That covers a copy
-of a platform dashboard, and any dashboard made there. Alert rules, silences and contact points made
-in Grafana are kept there too. From 1.8.0 a backup can include that database. It is off by default,
-so the upgrade changes nothing until you turn it on.
-
-To turn it on, set it in `site.yaml`, then run `helm upgrade` with the same values:
-
-```yaml
-backup:
-  includeGrafana: true
-```
-
-It needs the backup service (`backupService.enabled`) and Grafana's volume
-(`grafana.persistence.enabled`, on by default). Then take a backup on the **Backups** page. Its
-**Holds** column names **Grafana**.
-
-**On a cluster of more than one node, the backup service must then run on Grafana's node.** Grafana's
-volume can be attached to one node at a time, so the backup service is placed beside it. If it
-cannot be, it stays Pending and takes no backups. That is why the setting is off by default. Check
-that it started:
-
-```bash
-kubectl -n aber rollout status deploy/backup-service
-```
-
-If it stays Pending, turn the setting off again. Grafana's volume is then on another node than a
-volume the backup already includes. Restoring Grafana's volume is one step of the runbook in
-[`supabase/README.md`](../../supabase/README.md), *Backup and Recovery*.
-
 ### From 1.8.0, every token is signed ES256
 
 From 1.8.0, Aber signs every token with its ES256 key pair. No service accepts a token signed with
@@ -1631,8 +1532,8 @@ client. On a site that signed HS256 until now, that is every token minted before
 
 **Installed with the server installer:** run the installer again, from its 1.8.0 address
 (`.../v1.8.0/deploy/install.sh`, as [the install guide](install.md) gives it). It adds what the
-values file in `/etc/aber` lacks, and keeps a copy of the file as it was. Then it upgrades. There
-is no other step.
+values file in `/etc/aber` lacks, and keeps a copy of the file as it was, as
+`/etc/aber/values-local.before-1.8.0.yaml`. Then it upgrades. There is no other step.
 
 **Installed with `npm run setup`:**
 
@@ -1699,8 +1600,6 @@ What else changes:
 The reasons, and how to rotate the key pair later, are in
 [supabase/README.md](../../supabase/README.md#signing-with-es256).
 
----
-
 ### From 1.8.0, Studio and postgres-meta are off by default
 
 `supabaseStudio.enabled` and `supabaseMeta.enabled` now default to `false` (#1354). Up to 1.7.x
@@ -1728,8 +1627,126 @@ The two are on or off together, and the render fails if only one is on. So does
   its OAuth client. Each person's approval of it is revoked and its sessions end. The Audit Trail
   records each, and db-init's log says so in a NOTICE. Turn Studio on again and Aber registers
   it again, and each person approves it once more.
+- **Where Studio stays on,** the chart renders two NetworkPolicies, whatever `networkPolicy.enabled`
+  says. Only the gateway reaches Studio, and only Studio reaches postgres-meta. A pod of your own that
+  reached either one no longer does.
 - **The System page** shows Studio's row with no image recorded, as for any service the chart does
   not deploy.
+
+### From 1.8.0, `scripts/mint-mcp-token.mjs` is removed
+
+Before you upgrade, change any script or runbook that calls the removed `scripts/mint-mcp-token.mjs`.
+Call `scripts/mint-api-token.mjs` instead. It takes the same arguments and prints the same output:
+
+```bash
+node scripts/mint-api-token.mjs            # 30 days, prints the token
+node scripts/mint-api-token.mjs --json     # a ready-to-paste mcpServers block
+```
+
+From 1.8.0, the old name stops with `Cannot find module`. A site upgrading straight from 1.6.x
+never saw the warning it printed in 1.7.x. Removing the old name changes no token already issued
+with it.
+
+### From 1.8.0, `cells.grafana_url` is removed
+
+1.7.0 deprecated a cell's `grafana_url` (see
+[*a cell's dashboard address is one of its Attached Links*](#from-170-a-cells-dashboard-address-is-one-of-its-attached-links)).
+From 1.8.0 the column is gone (#1090).
+
+- **Stop any API client that writes or reads it before upgrading.** After the upgrade, a request
+  that names it gets HTTP 400. Read a cell's links from `/rest/v1/links` instead (`entity_type`
+  `cell`, `entity_id` the cell's id). The cell's dashboard is the link named **Dashboard**.
+- **What the upgrade does.** Migration `0219` moves any web address written since 1.7.0 to the
+  cell's **Attached Links**, as 1.7.0 did. Then it drops the column. There is nothing to run.
+- **A value that is not a web address is not lost.** 1.7.0 left such a value on the cell. The
+  upgrade names each one in db-init's log, with its cell. Then it clears it, so the cell's
+  **View Audit Trail** shows the old value. To see before upgrading whether any cell has one, run
+  this. No rows means none:
+
+  ```bash
+  kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+    "SELECT id, name, grafana_url FROM public.cells
+       WHERE btrim(grafana_url) <> '' AND NOT btrim(grafana_url) ~ '^https?://' ORDER BY name;"
+  ```
+
+### From 1.8.0, Operators no longer export readings, and an export covers 14 days at most
+
+From 1.8.0, only an **Administrator** or a **Shopfloor Manager** can export readings, and one export
+covers at most 14 days. The upgrade adds a setting and changes nothing else a site must act on.
+
+- **The export moved to the History page.** Up to 1.7.x, a device's **View Telemetry** on the Devices
+  page held **Export CSV**, and every role that could read telemetry could use it. **View Telemetry**
+  is gone. Its place is **View History**, which opens History on that device. **Export CSV** is on
+  History's Device, Overview, Cell, Area and Metric views.
+- **Every other role can still read the charts.** **Export CSV** is greyed for an Operator or an
+  Auditor, and says who can use it. If one of them needs a file, ask a Shopfloor Manager or an
+  Administrator to export it. A script that reads the history through the API is not affected: only
+  the dashboard's export is limited.
+- **The longest window is a setting.** On **Settings**, on the new **History** tab,
+  **Longest export (days)** is 14 unless you change it, from 1 to 366. A longer window is refused,
+  with the limit named. Cold Storage's files hold older and longer ranges.
+- **Every export is in the Audit Trail**, in the **Readings** lane. The entry names who exported.
+  It lists the devices and metrics, the window and the resolution, and how many rows left.
+- **An export holds at most 50,000 rows, as before.** The database now holds that limit, and a file
+  that reaches it stops at a whole minute and says where.
+
+### From 1.8.0, an app that signs people in reaches the sign-in endpoints only
+
+An Administrator can now register an app that signs people in, on **Access Control**, **Apps**, with
+**Register App**. The app learns who the person is, and nothing more. The upgrade changes nothing
+for Aber's own apps. It changes what an app you added by hand can do with its token.
+
+- **An app you added by hand with the secret key keeps signing people in.** Its token now reaches the
+  sign-in endpoints only: the two token endpoints, user-info, `GET /auth/v1/user`, a local logout,
+  discovery and the key set. It no longer reaches the rest of `/auth/v1/`, such as a person's
+  password, email or second factors.
+- **A token that names an app no longer carries the person's role.** Up to 1.7.x, the API, file
+  storage, Realtime and the functions served an app's token as the person who signed in. From 1.8.0
+  the gateway answers 403, and the database refuses the token too, so a request that reaches it
+  another way fails the same. A token with no `client_id`, such as the dashboard's, a script's or a
+  machine identity's, is served as before.
+- **Change an app that calls Aber's data with its token before you upgrade.** Sign people in with
+  it, and give it a read-only API client's token for the data (**Access Control** → **Issue Token**,
+  or `scripts/mint-api-token.mjs`).
+- **Aber's own four apps,** Grafana, Node-RED and the Studio and forge doors, keep all of the sign-in
+  service and call their own functions, as before.
+- **The sign-in service now names its issuer.** Discovery holds an absolute `issuer`, which is
+  `https://api.<your domain>/auth/v1`, and every token carries it as `iss`. Nothing in Aber checks
+  it. A token signed before the upgrade has none, and goes on working.
+- **A browser app on another origin** needs its origin in `global.corsExtraOrigins` before the page can
+  call the token endpoint. An app that runs on a server does not.
+
+The [app author's guide](../../docs/sign-in-with-aber.md) says how an app signs people in.
+
+### The upgrade to 1.8.0 deletes the role rows that name no account
+
+A role row ties a person to a role. Up to 1.7.x its `user_id` was text with no key, so a row could
+outlive its person's account. From 1.8.0 `user_roles.user_id` is a `uuid` that references
+`auth.users`, as every other person column does, and a role goes when its account goes.
+
+The first start of 1.8.0 converts the column. It deletes two kinds of row first, because each grants
+nothing:
+
+- **A row that names no account.** The Audit Trail records each as a `ROLE_REVOKED` row, and
+  db-init's log says how many went: `user_roles: deleted N row(s) naming no account`.
+- **A row whose `user_id` is not a lower-case uuid.** It never matched anyone, because every check
+  compares the signed-in person's id in lower case. It goes with no Audit Trail row, which cannot
+  name it, and db-init's log names the value.
+
+A site whose people were added on Access Control and People has neither. To see before upgrading
+whether yours has, run this. No rows means none:
+
+```bash
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+  "SELECT ur.user_id, r.name AS role
+     FROM public.user_roles ur JOIN public.roles r ON r.id = ur.role_id
+    WHERE NOT (ur.user_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+       OR NOT EXISTS (SELECT 1 FROM auth.users u WHERE u.id::text = ur.user_id)
+    ORDER BY ur.user_id;"
+```
+
+An API client sees no change: `user_id` on `/rest/v1/user_roles` is still a uuid in a response, and a
+filter on it still matches.
 
 ### From 1.8.0, alert history is kept for 90 days
 
@@ -1746,93 +1763,6 @@ that tab, in place of Grafana's alert history.
 
 The table grows with the alerts that fire, not with the readings, so 90 days takes little space. An
 alert that is still firing is never removed, however old it is.
-
-### From 1.8.0, Operators no longer export readings, and an export covers 14 days at most
-
-From 1.8.0, only an **Administrator** or a **Shopfloor Manager** can export readings, and one export
-covers at most 14 days. The upgrade adds a setting and changes nothing else a site must act on.
-
-- **An Operator can still read the charts.** **Export CSV** on the History page is greyed for an
-  Operator, and says who can use it. It was open to every role that could read telemetry. If an
-  Operator needs a file, ask a Shopfloor Manager or an Administrator to export it.
-- **The longest window is a setting.** On **Settings**, on the new **History** tab,
-  **Longest export (days)** is 14 unless you change it, from 1 to 366. A longer window is refused,
-  with the limit named. Cold Storage's files hold older and longer ranges.
-- **Every export is in the Audit Trail**, in the **Readings** lane. The entry names who exported.
-  It lists the devices and metrics, the window and the resolution, and how many rows left.
-- **An export holds at most 50,000 rows, as before.** The database now holds that limit, and a file
-  that reaches it stops at a whole minute and says where.
-
-### From 1.8.0, the database keeps automations
-
-From 1.8.0, the platform database keeps automations: rules that raise an alert when a device's
-reading goes above or below a number. The upgrade adds three empty tables and changes nothing a
-site must act on. A Shopfloor Manager or an Administrator writes them on the Automations page.
-
-- **A device's automations follow it.** Archiving a device archives the triggers that name it, and
-  an automation left with no trigger is turned off. Restoring the device brings its triggers back
-  and leaves the automation off, for a person to turn on. Deleting a device removes them.
-- **An alert ends with its automation.** Turning one off, or deleting it, resolves the alerts it
-  raised. So does archiving or deleting the device they were about.
-- **A metric an automation watches cannot be deleted** from the metric catalogue. Delete the
-  automation first, or deprecate the metric.
-- **The file's format** is described by a JSON Schema the dashboard serves at
-  `/json-schema/automations.schema.json`. VS Code's YAML extension can read it.
-
-Grafana's own alert rules are untouched.
-
-### From 1.8.0, automations are written on the Automations page
-
-From 1.8.0 the dashboard has an **Automations** page, in a group of its own in the sidebar, under **Vocabulary**. Everyone who
-signs in can read it. An Administrator or a Shopfloor Manager writes. There is nothing to run when
-you upgrade.
-
-- **An automation is written as YAML**, in the page's editor or in a file you upload. The page shows
-  what a file would change before it changes anything. An upload never deletes.
-- **Export** downloads one automation, some or all as `automations.yaml`. A file moved to another
-  site needs its device ids changed first, because each site's devices have ids of their own.
-- **The editor loads only when the page opens.** No other page gets heavier.
-- **A proxy with its own Content-Security-Policy needs no new `style-src`.** The editor draws its
-  styles in a shadow root, which the dashboard's policy already allows. Allowing `'unsafe-inline'`
-  styles is not needed.
-
-### From 1.8.0, the database evaluates automations
-
-From 1.8.0, the platform database evaluates the automations on the Automations page. The upgrade
-adds one table and a job, `evaluate_automations`, that runs every minute. With no automation, the
-job reads nothing and changes nothing.
-
-- **An automation's alert is a platform alert.** It appears in the alert counter and in History's
-  **Alerts** tab, and it can be acknowledged, suppressed and sent to a webhook, as Grafana's alerts
-  can. It has no rule in Grafana, so the counter and the device's drawer do not link there.
-- **A breach fires after its `for`, judged once a minute.** A `for` of 30 seconds fires at the next
-  minute that finds it held. An alert resolves at the first minute the value is back inside.
-- **If the historian cannot be read, nothing is fired or resolved.** The database raises one alert,
-  **Automations Not Evaluated**, and the first minute that reads again resolves it. Alerts already
-  firing stay as they were, and get no reminder meanwhile.
-- **While an automation's alert fires,** an open dashboard reads the alert counter again each minute.
-
-There is nothing to run. Grafana's own alert rules are untouched.
-
-### From 1.8.0, the historian counts its older readings for History's Overview
-
-History's Overview, new in 1.8.0, shows where readings arrived. It reads two new rollups on the
-historian, which count each device's readings every 5 minutes and every hour. The upgrade creates
-them empty, and the historian fills them in the background. Nothing waits for it.
-
-- **The last 25 hours** are counted within a few minutes of the upgrade.
-- **Older history is counted in the background, every 2 minutes.** Each run counts six more hours
-  of the 5-minute rollup and a week more of the hourly one.
-  - **The hourly one reaches back as far as your hourly rollup** (5 years by default). At the storage
-    basis, 1,000 devices of 10 metrics, it fills in about 9 hours.
-  - **The 5-minute one reaches back as far as your 1-minute rollup** (180 days by default). At the
-    storage basis it fills in about a day.
-  - A smaller site takes less. A window older than the 5-minute one reaches is shown in hours.
-- **Until then, Overview hatches the older part of a window** and says so, for example
-  "Coverage before 3 Oct is still being computed". The Device tab's charts read the existing rollups
-  and are complete at once.
-
-The rollups use about a tenth of the space of `telemetry_5m`. Nothing needs setting.
 
 ### From 1.8.0, alerts can be sent to a webhook
 
@@ -1865,24 +1795,6 @@ networkPolicy:
   `podSelector` in place of the `ipBlock`.
 
 A site without NetworkPolicies has nothing to do.
-
-### From 1.8.0, an app that signs people in reaches the sign-in endpoints only
-
-An Administrator can now register an app that signs people in, on **Access Control**, **Apps**, with
-**Register App**. The app learns who the person is, and nothing more. The upgrade changes nothing a
-site must act on.
-
-- **An app you added by hand with the secret key keeps signing people in.** Its token now reaches the
-  sign-in endpoints only: the two token endpoints, user-info, `GET /auth/v1/user`, a local logout,
-  discovery and the key set. It no longer reaches the rest of `/auth/v1/`, such as a person's
-  password, email or second factors. Aber's own apps are not changed.
-- **The sign-in service now names its issuer.** Discovery holds an absolute `issuer`, which is
-  `https://api.<your domain>/auth/v1`, and every token carries it as `iss`. Nothing in Aber checks
-  it. A token signed before the upgrade has none, and goes on working.
-- **A browser app on another origin** needs its origin in `global.corsExtraOrigins` before the page can
-  call the token endpoint. An app that runs on a server does not.
-
-The [app author's guide](../../docs/sign-in-with-aber.md) says how an app signs people in.
 
 ### From 1.8.0, alerts can be emailed
 
@@ -1927,6 +1839,183 @@ chart writes no egress rule for the relay itself.
 
 Use **Email a test** on the same tab to check the whole path. It sends one message to your own
 address and shows how it went. A site without NetworkPolicies has nothing else to do.
+
+### From 1.8.0, System's Logs tab reads Loki through the functions pod
+
+An Administrator can now read a service's recent log lines on **System**, on the **Logs** tab, and
+each new read is recorded in the Audit Trail. The upgrade changes nothing a site must act on.
+
+**The functions pod reads the Loki that Grafana reads.** With the chart's own Loki
+(`observability.enabled`, on by default) the chart opens that path. Where `grafana.lokiUrl` names a
+Loki of your own, and `networkPolicy.enabled` is on, the functions pod needs a rule to reach it.
+Without one the tab cannot read. Add the rule to `networkPolicy.extraEgress`:
+
+```yaml
+networkPolicy:
+  extraEgress:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/component: supabase-functions
+    policyTypes: [Egress]
+    egress:
+      - to: [{ ipBlock: { cidr: 203.0.113.30/32 } }]
+        ports: [{ protocol: TCP, port: 3100 }]
+```
+
+If `extraEgress` already holds a rule, widen its `podSelector` as
+[*alerts can be emailed*](#from-180-alerts-can-be-emailed) shows, and add this rule beside it. With no
+Loki at all, the tab says observability is off. A site without NetworkPolicies has nothing to do.
+
+### From 1.8.0, the Directory page is called System
+
+The dashboard page that lists Aber's services is now called **System**. Its address is `/system`,
+and each tab's address is under it, such as `/system/ingestion`.
+
+Old links and bookmarks still work. `/directory` and each of its tab addresses open the same view
+of System, with its sort order and other settings.
+
+Nothing else is renamed. The database and the API keep their names, such as `directory_services`.
+So does the Factory+ Directory, at `/ping` and `/v1/`.
+
+### From 1.8.0, the metric catalog can hold derived metrics
+
+The **Metrics** page has a new **Derived** tab. A derived metric is one Aber computes from others,
+such as parts per hour from a part counter. It is a row of `metric_catalog` with a new `derivation`
+column, which is `null` for every metric you have. The upgrade adds the column and changes no row.
+
+Check any client that reads the catalog from `/rest/v1/metric_catalog`:
+
+- **A response has a new `derivation` key.** It is `null` for a measured metric.
+- **Skip a row whose `derivation` is not null** when you build a schema or a device's list of
+  metrics. No device publishes a derived metric, and it has no semantic id. The dashboard's schema
+  builder already leaves them out.
+- **Ingestion drops a reading a device publishes under a derived metric's name.** It drops it
+  whatever the device's conformance policy, writes no telemetry for it, and records a `derived_name`
+  finding in the Audit Trail. `aber_ingestion_derived_name_dropped_total` counts them. A new derived
+  metric takes effect within a minute. The catalog refuses a derived metric named like one a device
+  has declared, so no reading a device sends today is dropped by the upgrade.
+
+### From 1.8.0, the database keeps automations
+
+From 1.8.0, the platform database keeps automations: rules that raise an alert when a device's
+reading goes above or below a number. The upgrade adds three empty tables and changes nothing a
+site must act on. A Shopfloor Manager or an Administrator writes them on the Automations page.
+
+- **A device's automations follow it.** Archiving a device archives the triggers that name it, and
+  an automation left with no trigger is turned off. Restoring the device brings its triggers back
+  and leaves the automation off, for a person to turn on. Deleting a device removes them.
+- **An alert ends with its automation.** Turning one off, or deleting it, resolves the alerts it
+  raised. So does archiving or deleting the device they were about.
+- **A metric an automation watches cannot be deleted** from the metric catalogue. Delete the
+  automation first, or deprecate the metric.
+- **The file's format** is described by a JSON Schema the dashboard serves at
+  `/json-schema/automations.schema.json`. VS Code's YAML extension can read it.
+
+Grafana's own alert rules are untouched.
+
+### From 1.8.0, automations are written on the Automations page
+
+From 1.8.0 the dashboard has an **Automations** page. It has a group of its own in the sidebar,
+after the group that ends with **Vocabulary**. Everyone who signs in can read it. An Administrator
+or a Shopfloor Manager writes. There is nothing to run when you upgrade.
+
+- **An automation is written as YAML**, in the page's editor or in a file you upload. The page shows
+  what a file would change before it changes anything. An upload never deletes.
+- **Export** downloads one automation, some or all as `automations.yaml`. A file moved to another
+  site needs its device ids changed first, because each site's devices have ids of their own.
+- **The editor loads only when the page opens.** No other page gets heavier.
+- **A proxy with its own Content-Security-Policy needs no new `style-src`.** The editor draws its
+  styles in a shadow root, which the dashboard's policy already allows. Allowing `'unsafe-inline'`
+  styles is not needed.
+
+### From 1.8.0, the database evaluates automations
+
+From 1.8.0, the platform database evaluates the automations on the Automations page. The upgrade
+adds one table and a job, `evaluate_automations`, that runs every minute. With no automation, the
+job reads nothing and changes nothing.
+
+- **An automation's alert is a platform alert.** It appears in the alert counter and in History's
+  **Alerts** tab, and it can be acknowledged, suppressed and sent to a webhook, as Grafana's alerts
+  can. It has no rule in Grafana, so the counter and the device's drawer do not link there.
+- **A breach fires after its `for`, judged once a minute.** A `for` of 30 seconds fires at the next
+  minute that finds it held. An alert resolves at the first minute the value is back inside.
+- **If the historian cannot be read, nothing is fired or resolved.** The database raises one alert,
+  **Automations Not Evaluated**, and the first minute that reads again resolves it. Alerts already
+  firing stay as they were, and get no reminder meanwhile.
+- **While an automation's alert fires,** an open dashboard reads the alert counter again each minute.
+
+There is nothing to run. Grafana's own alert rules are untouched.
+
+### From 1.8.0, History draws a derived metric, and an automation can read one
+
+From 1.8.0, Aber computes a derived metric when it is read. The upgrade adds three functions and changes
+no row.
+
+- **History** offers each derived metric on a device that reports all its inputs, and draws it with a
+  *derived* tag. The Devices drawer lists its current value.
+- **Export leaves it out.** A derived metric is not a reading. Export its inputs.
+- **An automation on a derived metric now fires,** as it does on any metric (see
+  [*the database evaluates automations*](#from-180-the-database-evaluates-automations)). A rate or a
+  share is read over the last hour, and a sum at the last whole minute. Automations are new in 1.8.0,
+  so no site has one before the upgrade.
+- **A client that reads the AAS export** now finds a `DerivedMetrics` submodel on each device that
+  reports every input of a derived metric. Its properties have no `semanticId`, and the export counts
+  them as unmapped.
+- **New API calls** are `/rest/v1/rpc/derived_series` and `/rest/v1/rpc/derived_current`, for every
+  signed-in role. Grafana cannot call them.
+
+The i3X service serves no derived metric.
+
+### From 1.8.0, the historian counts its older readings for History's Overview
+
+History's Overview, new in 1.8.0, shows where readings arrived. It reads two new rollups on the
+historian, which count each device's readings every 5 minutes and every hour. The upgrade creates
+them empty, and the historian fills them in the background. Nothing waits for it.
+
+- **The last 25 hours** are counted within a few minutes of the upgrade.
+- **Older history is counted in the background, every 2 minutes.** Each run counts six more hours
+  of the 5-minute rollup and a week more of the hourly one.
+  - **The hourly one reaches back as far as your hourly rollup** (5 years by default). At the storage
+    basis, 1,000 devices of 10 metrics, it fills in about 9 hours.
+  - **The 5-minute one reaches back as far as your 1-minute rollup** (180 days by default). At the
+    storage basis it fills in about a day.
+  - A smaller site takes less. A window older than the 5-minute one reaches is shown in hours.
+- **Until then, Overview hatches the older part of a window** and says so, for example
+  "Coverage before 3 Oct is still being computed". The Device tab's charts read the existing rollups
+  and are complete at once.
+
+The rollups use about a tenth of the space of `telemetry_5m`. Nothing needs setting.
+
+### From 1.8.0, a backup can include Grafana's saved dashboards
+
+A dashboard saved in Grafana is kept in Grafana's own database and nowhere else. That covers a copy
+of a platform dashboard, and any dashboard made there. Alert rules, silences and contact points made
+in Grafana are kept there too. From 1.8.0 a backup can include that database. It is off by default,
+so the upgrade changes nothing until you turn it on.
+
+To turn it on, set it in `site.yaml`, then run `helm upgrade` with the same values:
+
+```yaml
+backup:
+  includeGrafana: true
+```
+
+It needs the backup service (`backupService.enabled`) and Grafana's volume
+(`grafana.persistence.enabled`, on by default). Then take a backup on the **Backups** page. Its
+**Holds** column names **Grafana**.
+
+**On a cluster of more than one node, the backup service must then run on Grafana's node.** Grafana's
+volume can be attached to one node at a time, so the backup service is placed beside it. If it
+cannot be, it stays Pending and takes no backups. That is why the setting is off by default. Check
+that it started:
+
+```bash
+kubectl -n aber rollout status deploy/backup-service
+```
+
+If it stays Pending, turn the setting off again. Grafana's volume is then on another node than a
+volume the backup already includes. Restoring Grafana's volume is one step of the runbook in
+[`supabase/README.md`](../../supabase/README.md), *Backup and Recovery*.
 
 ## Backups
 
@@ -1981,6 +2070,8 @@ is fresh.
 | Which self-registered OAuth clients were deleted (upgrading to 1.6.0) | `kubectl -n aber logs job/aber-db-init \| grep 'dynamically registered'` — no line means there were none |
 | Which cells kept a `grafana_url` that is not a web address (upgrading to 1.7.0) | `kubectl -n aber logs job/aber-db-init \| grep 'keeps grafana_url'` — no line means every address moved to Attached Links |
 | Which cells lost a `grafana_url` that was not a web address (upgrading to 1.8.0) | `kubectl -n aber logs job/aber-db-init \| grep '0219: cell'` — no line means none; each old value is in its cell's Audit Trail |
+| Which role rows named no account and were deleted (upgrading to 1.8.0) | `kubectl -n aber logs job/aber-db-init \| grep 'user_roles: deleted'` — no line means none; each row that named no account is a `ROLE_REVOKED` row in the Audit Trail |
+| Whether Studio's sign-in was removed (upgrading to 1.8.0 with Studio off) | `kubectl -n aber logs job/aber-db-init \| grep 'approval(s) revoked'` — no line means Studio had no sign-in to remove |
 | The historian's extension matches its image | `kubectl -n aber logs job/aber-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
 | Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
