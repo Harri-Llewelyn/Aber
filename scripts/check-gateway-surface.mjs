@@ -274,7 +274,8 @@ if (RUNTIME) {
    * a libuv assertion after the report has printed. `agent: false` gives each request its own
    * socket. No headers beyond Accept unless given; a GET unless `method` and `body` are given.
    */
-  const probeOnce = (url, extraHeaders = {}, { method = 'GET', body: payload = null } = {}) =>
+  // `rawPath` is sent as written: new URL() would resolve its dot segments before the gateway saw them.
+  const probeOnce = (url, extraHeaders = {}, { method = 'GET', body: payload = null, rawPath = null } = {}) =>
     new Promise((resolveProbe) => {
       let mod, opts;
       try {
@@ -284,7 +285,7 @@ if (RUNTIME) {
           method,
           hostname: u.hostname,
           port: u.port || (u.protocol === 'https:' ? 443 : 80),
-          path: `${u.pathname}${u.search}`,
+          path: rawPath ?? `${u.pathname}${u.search}`,
           headers: {
             Accept: '*/*',
             ...(payload === null ? {} : { 'Content-Length': Buffer.byteLength(payload) }),
@@ -358,6 +359,30 @@ if (RUNTIME) {
         `${row.route} is open (${row.exemption}): reached its upstream, HTTP ${status}`
       );
     }
+  }
+
+  // A dot segment cannot carry a request out of an open prefix. From each one, ../ (and %2e%2e) climbs
+  // to the gated catch-all's probe; the gateway resolves the path before it routes, so each must meet
+  // the key check. Unresolved, the open route forwards the dots and its upstream answers instead.
+  {
+    const gated = EXPECTED.find((r) => r.route === 'functions-v1-routes');
+    const escapes = EXPECTED.filter((r) => r.auth === 'open')
+      .flatMap((r) => r.paths.filter((p) => p.endsWith('/')))
+      .flatMap((prefix) => ['..', '%2e%2e'].map((dot) =>
+        `${prefix}${Array(prefix.split('/').filter(Boolean).length).fill(dot).join('/')}${gated.probe}`));
+    const answers = await Promise.all(escapes.map((path) => probeOnce(`${base}/`, {}, { rawPath: path })));
+    escapes.forEach((path, i) => {
+      const { status, body, error } = answers[i];
+      if (error) runtimeProblems.push(`${path}: the gateway could not be reached -- ${error}`);
+      else if (status === 401 && body.includes('No API key found in request')) {
+        runtimeOk.push(`${path} is resolved before routing: refused by the key check, 401`);
+      } else {
+        runtimeProblems.push(
+          `${path} was not refused by the key check (HTTP ${status}): the gateway routed the raw path, `
+          + `and the dot segments reached an exempt route's upstream. normalize_path is off.`
+        );
+      }
+    });
   }
 
   // Response headers. nosniff on every routed response, the gateway's own refusals included;
@@ -1102,6 +1127,8 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
     if (!text.includes(fragment)) fail(`${ENVOY_TEMPLATE}: ${what} (expected ${JSON.stringify(fragment)}).`);
   };
 
+  need(gateway, 'normalize_path: true',
+    'the API listener must resolve dot segments before it chooses a route, or a ../ carries a request out of an exempt prefix past the key check');
   need(gateway, 'use_remote_address: true',
     'the API listener must resolve the client address itself, or the sign-in limit keys on Traefik');
   need(gateway, 'xff_num_trusted_hops: __XFF_TRUSTED_HOPS__', 'the trusted hops come from supabaseEnvoy.trustedProxyHops');

@@ -88,6 +88,12 @@ Envoy semantics that produce a stack that looks fine and is not are listed in th
 header: first-match route order, the key in Realtime's query string, Realtime reading its tenant
 from the Host label, per-route credential hiding, and the Directory routes keeping their path.
 
+**The path is resolved before a route is chosen** (`normalize_path` on the API listener). The edge
+runtime resolves dot segments itself, after the gateway has routed, so a raw `/v1/../../<function>`
+would leave the Directory's exempt prefix and start any function without the key. Resolved first,
+it is judged by the route it names, and the key check refuses it. `--runtime` sends `../` and
+`%2e%2e` from every open prefix to the gated catch-all and expects the key check's 401.
+
 ## An app's token
 
 A token GoTrue's OAuth server issued to an app names the app in its `client_id` claim. On the API
