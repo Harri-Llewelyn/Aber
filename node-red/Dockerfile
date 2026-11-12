@@ -46,14 +46,14 @@ USER node-red
 # (node-red/README.md).
 #
 # THE OVERRIDES lift five packages in Node-RED's own tree to the patches that fix their advisories,
-# each keyed to the major it replaces: axios; axios's follow-redirects (CVE-2026-111755 and
-# CVE-2026-111756, high); Express's body-parser (CVE-2026-111181, high) and proxy-addr
+# each keyed to the major it replaces: axios; axios's follow-redirects (CVE-2026-111755,
+# CVE-2026-111756 and CVE-2026-116689, high); Express's body-parser (CVE-2026-111181, high) and proxy-addr
 # (CVE-2026-90711, critical); and multer (CVE-2026-113872, high). Each goes when the pinned base
 # ships that version; the release scan says.
 RUN node -e ' \
       const f = "/usr/src/node-red/package.json"; \
       const p = JSON.parse(require("fs").readFileSync(f)); \
-      p.overrides = { ...p.overrides, "axios@^1": "1.20.0", "body-parser@^1": "1.20.9", "follow-redirects@^1": "1.16.1", "multer@^2": "2.5.0", "proxy-addr@^2": "2.0.8" }; \
+      p.overrides = { ...p.overrides, "axios@^1": "1.20.0", "body-parser@^1": "1.20.9", "follow-redirects@^1": "1.16.2", "multer@^2": "2.5.0", "proxy-addr@^2": "2.0.8" }; \
       require("fs").writeFileSync(f, JSON.stringify(p, null, 2) + "\n");' \
  && npm install --no-audit --no-fund --no-update-notifier --save \
       passport-oauth2@1.8.0 \
