@@ -2238,6 +2238,11 @@ in "building management system".
   listed first, picked in the order under [The drawer is `ContextPanel`](#the-drawer-is-contextpanel).
 - **Tables.** Every header row, group band and section band is one opaque colour, `--bg-base`
   ([Table and Row Conventions](#table-and-row-conventions)).
+- **Callouts in a dialog.** A callout in a dialog's body leaves the gap it has above itself (12px)
+  before a table, a list or a form, so a banner never sits flush on what it qualifies. One rule in
+  `App.css` does it for every dialog. A replay lane that is offline gets an info callout, not the
+  DDEATH warning: a lane is offline between playbacks by design (the Device Configuration
+  Parameters dialog).
 - **Colour is never the only signal.** Tabs, sidebar flags, warning buttons and the Audit Trail
   markers each carry an icon, a shape or a number as well (WCAG 2.2 SC 1.4.1).
 - **The sidebar** colours an icon only when the viewer can act on what it flags, and shows how many.
