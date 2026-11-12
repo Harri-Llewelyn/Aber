@@ -2846,6 +2846,13 @@ Vitest with globals enabled and a jsdom environment. **3,851 tests across 162 fi
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.
 
+A test waits for the condition it checks, not for a time. Use `waitFor` or a `findBy` query. A fixed
+`setTimeout` wait passes on a quiet machine and fails on a busy one, and one long enough for the
+busiest machine slows every run. When the rule under test is about a limit the page reads from
+`../api`, mock the limit small in that test, as `historyAlerts.test.jsx` does for
+`ALERT_HISTORY_LIMIT`, so the test does not render a thousand rows to check a line of text. Some
+older tests still wait for a time. Change each to a condition when you touch it.
+
 ---
 
 ## Related
