@@ -5043,6 +5043,12 @@ execute the evaluator, that it is `SECURITY DEFINER` with its path pinned, that 
 fingerprints with `automation_alert_fingerprint()` and reads only through
 `machine_condition_readings()`, and that pg_cron runs it every minute, once.
 
+**`0283` declares `evaluate_automations()` again**, changing only the summary of the alert it raises: a
+derived metric's value is said through `automation_value_words()` (rounded to three decimals, with its
+window) where `0271` printed it as the evaluator read it. A measured metric's summary is as it was. The
+comparison and the `values.value` the row keeps are still the unrounded value. See *A threshold
+automation reads a derived metric (0283)*.
+
 ### History folds one metric across the devices of each group (0276)
 
 The Area tab compares the cells of an area: one chart a cell, each the cell's mean or total of one
@@ -5239,9 +5245,9 @@ the lane and the class, and that a call with no identity is refused.
 ### History draws a derived metric from the minutes (0282)
 
 A derived metric ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) has no values of its own:
-\`0267\` keeps its definition, and nothing is stored. **\`derived_series(from_ts, to_ts, bucket, asset_ids,
-metric_names)\`** computes it where it is read, from each input's \`telemetry_carried()\` at one minute,
-and **\`derived_current(asset_ids, metric_names)\`** gives its current value. They are the one
+`0267` keeps its definition, and nothing is stored. **`derived_series(from_ts, to_ts, bucket, asset_ids,
+metric_names)`** computes it where it is read, from each input's `telemetry_carried()` at one minute,
+and **`derived_current(asset_ids, metric_names)`** gives its current value. They are the one
 computation of a derived metric: a chart, the Devices drawer and an automation read the same number.
 
 - **A counter rate** is the increase per hour. A minute's increase is its carried last value less the
@@ -5251,48 +5257,48 @@ computation of a derived metric: a chart, the Devices drawer and an automation r
   carried, as it should: under report-by-exception a quiet counter has not moved.
 - **A time in state** is the share of the bucket's minutes whose state is one of the definition's.
   A minute's state is its last value, carried across a quiet stretch, so it is resolved to the
-  minute. A flag is read as \`true\` or \`false\`.
+  minute. A flag is read as `true` or `false`.
 - **A sum** is the time-average of the per-minute signed sum, each input's minute average carried when
   quiet, **a minute counting only where every input has a value**. A device that lacks an input has no
   row, since a partial sum reads as a real one. A wide bucket's sum is therefore not the sum of its
   inputs' bucket averages: those weigh each input's samples, and a quiet input has few of them.
-- **One row per device, metric and bucket that has a value**, in no promised order: \`bucket_ts\`,
-  \`asset_id\`, \`metric_name\`, then the columns \`telemetry_carried()\` uses, so the chart code takes both.
-  \`avg_double\` is the value. \`min_double\`, \`max_double\` and \`last_double\` are the lowest and highest
-  minute and the last minute of a sum, and the value itself for a rate and a share. \`n_rows\` counts the
-  inputs' readings in the bucket and \`is_carried\` says there were none.
+- **One row per device, metric and bucket that has a value**, in no promised order: `bucket_ts`,
+  `asset_id`, `metric_name`, then the columns `telemetry_carried()` uses, so the chart code takes both.
+  `avg_double` is the value. `min_double`, `max_double` and `last_double` are the lowest and highest
+  minute and the last minute of a sum, and the value itself for a rate and a share. `n_rows` counts the
+  inputs' readings in the bucket and `is_carried` says there were none.
 - **It reads whole minutes only**, nothing from the minute that holds now, so a value that has been
   read does not move when the minute ends.
-- **It reads in chunks.** \`telemetry_carried()\` refuses more than 50,000 rows, and a day of minutes
+- **It reads in chunks.** `telemetry_carried()` refuses more than 50,000 rows, and a day of minutes
   for 35 devices passes that. A chunk is as many whole buckets as fit, and as many devices as fit when a
   bucket alone does not: one device's bucket and the minute before it always fits, since a bucket is at
   most 4 days and a definition has at most 8 inputs. Each chunk reads one minute before its start, so a
   counter needs nothing carried from the last.
-- **It refuses before it reads anything** (\`22023\`): a metric that is not derived; bounds that do not
+- **It refuses before it reads anything** (`22023`): a metric that is not derived; bounds that do not
   run forward; a bucket that is not whole minutes, has months, or is over 4 days; **more than 5,000
-  devices times metrics times buckets**, the dashboard's row cap (\`TELEMETRY_MAX_ROWS\`, mirror check 95);
+  devices times metrics times buckets**, the dashboard's row cap (`TELEMETRY_MAX_ROWS`, mirror check 95);
   and **more than 250,000 minutes of input** (devices times inputs times the window's minutes). The
-  second bound is the cost: a read goes through \`postgres_fdw\` a minute at a time at every bucket
+  second bound is the cost: a read goes through `postgres_fdw` a minute at a time at every bucket
   width, so it is the window and the devices that spend the time, and not the bucket. 250,000 minutes
-  is the spike's fleet-week, about two seconds, inside the \`authenticated\` role's 8 s statement timeout. A
+  is the spike's fleet-week, about two seconds, inside the `authenticated` role's 8 s statement timeout. A
   longer window needs fewer devices, or its inputs read as they are.
-- **It runs as the caller**, \`SECURITY INVOKER\` with its \`search_path\` pinned, granted by name to
-  \`authenticated\` and \`service_role\`, as \`telemetry_carried()\` is. Anon is refused. No audit
+- **It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+  `authenticated` and `service_role`, as `telemetry_carried()` is. Anon is refused. No audit
   classifier changes: it reads.
 
-**A current value has one rule, and \`derived_window_minutes()\` states it.** A counter rate and a time
+**A current value has one rule, and `derived_window_minutes()` states it.** A counter rate and a time
 in state are over the 60 minutes ending at the last whole minute, "over the last hour", and a sum is its
 value at the last whole minute. A rate from one minute swings between 0 and sixty times the count, and a
 minute's share is 0 or 1; an hour is what a person means by "parts per hour" and "uptime". The window is
-in one function, and \`derived_current()\` is a fold of \`derived_series()\` at one minute over it: the mean of
+in one function, and `derived_current()` is a fold of `derived_series()` at one minute over it: the mean of
 the minutes' values for a rate and a share, which is the whole window's rate and share, and the last
-minute's last value for a sum. \`observed_at\` is the minute the window ends at, and \`window_minutes\` is 60
+minute's last value for a sum. `observed_at` is the minute the window ends at, and `window_minutes` is 60
 or 0. A device with no value has no row. The browser's copy of the windows is
-\`derivedWindowMinutes()\` in \`utils/derivedMetric.js\` (mirror check 94).
+`derivedWindowMinutes()` in `utils/derivedMetric.js` (mirror check 94).
 
-**Grafana is not granted.** \`grafana_reader\` calls \`platform_health_rows()\` by a grant alone because that
-function is \`SECURITY DEFINER\`. These two run as the caller and read the foreign rollups and
-\`metric_catalog\`, on which \`grafana_reader\` holds nothing: a grant would need a user mapping, a schema
+**Grafana is not granted.** `grafana_reader` calls `platform_health_rows()` by a grant alone because that
+function is `SECURITY DEFINER`. These two run as the caller and read the foreign rollups and
+`metric_catalog`, on which `grafana_reader` holds nothing: a grant would need a user mapping, a schema
 usage and a table grant, and 0001's sweep takes back what is not listed there. A panel on a derived
 metric is a 1.9 question.
 
@@ -5332,44 +5338,52 @@ a minute counts as a whole minute or not at all, by whether it holds at the minu
 unbiased. A counter that resets and passes its old value inside one minute is under-counted by that old
 value. Both are measured in the issue's spike comment.
 
-\`test_history_draws_a_derived_metric_from_the_minutes.py\` holds every rule above, with local tables
+`test_history_draws_a_derived_metric_from_the_minutes.py` holds every rule above, with local tables
 standing in for the rollups: each kind against known minutes (a reset mid-bucket, a state carried across
 a quiet stretch, a sum with an input missing or late), a window that needs two chunks and a bucket whose
 devices need two, each against a reference written from the rule, whole minutes only, each refusal with
 the rollups' tables gone so that a read would fail with another error, the current value of each kind, and
-who may call it. The file's self-check asserts one form, \`STABLE\`, \`SECURITY INVOKER\`, the pinned
-\`search_path\`, the grants, and that the refusals come before any read.
+who may call it. The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the pinned
+`search_path`, the grants, and that the refusals come before any read.
 
 ### A threshold automation reads a derived metric (0283)
 
-An automation on a derived metric was accepted and never fired: \`machine_condition_readings()\` (\`0270\`)
-reads \`telemetry_latest\`, which holds nothing under a name no device publishes. \`0283\` declares the two
-reads again, after \`derived_current()\`.
+An automation on a derived metric was accepted and never fired: `machine_condition_readings()` (`0270`)
+reads `telemetry_latest`, which holds nothing under a name no device publishes. `0283` declares the two
+reads again, after `derived_current()`, and the evaluator with one change, the words of its summary.
 
-- **A pair on a derived metric has the current value \`derived_current()\` gives**, by the rule in
+- **A pair on a derived metric has the current value `derived_current()` gives**, by the rule in
   *History draws a derived metric from the minutes (0282)*: over the last hour for a counter rate and a
-  time in state, at the last whole minute for a sum. \`observed_at\` is the minute that window ends at, so
-  \`last_observed_at\` in \`automation_trigger_states\` is that minute and not the last reading. Its \`for\`
+  time in state, at the last whole minute for a sum. `observed_at` is the minute that window ends at, so
+  `last_observed_at` in `automation_trigger_states` is that minute and not the last reading. Its `for`
   and its hold work as for any metric, since the evaluator reads only the columns this returns, and they
-  are \`0270\`'s.
+  are `0270`'s.
 - **A measured metric is read as it was**, one remote query for each metric carrying that metric's
-  devices. A derived metric's devices go to \`derived_current()\` in chunks of 500, which it takes in parts
+  devices. A derived metric's devices go to `derived_current()` in chunks of 500, which it takes in parts
   of its own. The loop's metric says whether it is derived by its catalogue row, which is fixed once
   saved.
-- **The detail says the window**, in \`machine_condition_rows()\`: "Controller/PARTS_PER_HOUR is 4.2 over the
-  last hour, below 5". A derived value is rounded to three decimals there, where a measured one is
-  printed as it was read. A sum has no window to say. The alert's own summary (\`0271\`) still prints the
-  value as the evaluator read it.
+- **A value is said in one place, `automation_value_words(metric, value)`.** A derived metric's value is
+  rounded to three decimals and followed by its window, "4.167 over the last hour" or "7 at the last
+  whole minute"; any other value is printed as it was, so a measured alert reads as it did.
+  `machine_condition_rows()` words its detail with it ("Controller/PARTS_PER_HOUR is 4.167 over the last
+  hour, below 5"), and so does the alert's summary.
+- **`evaluate_automations()` is declared again, changing only that summary**: "Press 1:
+  Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5 for 10m", which is what the alert
+  counter, the email and the webhook show. Without it the summary printed 4.166666666666667. What is
+  compared, and the `values.value` the row keeps, are the unrounded value. It is redeclared here and
+  not edited in `0271`, because a boot runs `0271` before this file and the job could run the old one
+  in between. The function is otherwise `0271`'s, line for line.
 - **A counter that stops counting reads 0 per hour**, so a rate alert fires for a machine that stops and for
   one that stops reporting. The documentation says so (*docs/automations.md*).
-- **\`apply_automations()\` is unchanged.** It accepted a derived metric already, since every one is a
-  Double. Only a comment in \`0256\` was stale.
+- **`apply_automations()` is unchanged.** It accepted a derived metric already, since every one is a
+  Double. Only a comment in `0256` was stale.
 
-The columns of both functions are \`0270\`'s, because a replay runs \`0270\` again before this file, and
-\`CREATE OR REPLACE\` cannot change a function's columns. The file's self-check asserts the grants (neither
-is any API role's), the \`SECURITY DEFINER\` form, and that the read is still one remote query for each
-measured metric and goes through \`derived_current()\` for a derived one. The suite for \`0271\` holds the rest
-(\`DerivedMetrics\`): a rate, a share and a sum read and worded, a pair with no value, a measured pair
+The columns of the two reads are `0270`'s, because a replay runs `0270` again before this file, and
+`CREATE OR REPLACE` cannot change a function's columns. The file's self-check asserts the grants (none
+is any API role's), the `SECURITY DEFINER` form, that the read is still one remote query for each
+measured metric and goes through `derived_current()` for a derived one, and that the detail and the
+evaluator word their value with `automation_value_words()`. The suite for `0271` holds the rest
+(`DerivedMetrics`): a rate, a share and a sum read and worded, a pair with no value, a measured pair
 beside a derived one, and an alert that fires, holds and resolves. With `ABER_TEST_HISTORIAN`, one more reads a
 derived rate through a real historian's real-time rollup and `postgres_fdw`, and fires on it.
 

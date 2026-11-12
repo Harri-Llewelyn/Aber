@@ -32,8 +32,9 @@ What is held here:
     is the interval and a margin.
   * A derived metric (0283). A pair on one is read from derived_current() and not from
     telemetry_latest: a counter rate and a time in state over the last hour, a sum at the last whole
-    minute, observed_at the minute that window ends at. The detail says the window, a hold and an
-    alert work as for any metric, and a measured pair beside it is read as before.
+    minute, observed_at the minute that window ends at. The detail and the alert's summary say the
+    value rounded to three decimals and its window, from one function (the value is kept unrounded), a
+    hold and an alert work as for any metric, and a measured pair beside it is read and worded as before.
 """
 import json
 import os
@@ -923,7 +924,7 @@ class DerivedMetrics(Standing):
         self.assertAlmostEqual(rows[1][1], 20 / 60)
         self.cur.execute("SELECT metric_name, detail FROM public.machine_condition_rows() ORDER BY metric_name;")
         self.assertEqual(self.cur.fetchall(), [
-            (self.POWER, f"{self.POWER} is 7, above 5"),
+            (self.POWER, f"{self.POWER} is 7 at the last whole minute, above 5"),
             (self.UPTIME, f"{self.UPTIME} is 0.333 over the last hour, below 0.5")])
 
     def test_a_pair_with_no_value_has_no_row(self):
@@ -960,8 +961,56 @@ class DerivedMetrics(Standing):
         self.evaluate(300)
         self.assertEqual([a[0] for a in self.alerts(t, metric=self.RATE)], ["firing"])
 
+    def summary(self, trigger_id, metric):
+        """The summary and the values of the one alert a trigger raised."""
+        self.owner()
+        self.cur.execute("SELECT summary, \"values\" FROM public.platform_alerts"
+                         " WHERE fingerprint = public.automation_alert_fingerprint(%s, %s, %s);", (trigger_id, DEV_A, metric))
+        return self.cur.fetchone()
+
+    def test_an_alert_on_a_derived_metric_says_its_value_rounded_and_its_window(self):
+        self.apply(automation(triggers=[trigger(metric=self.RATE, above=None, below=100, **{"for": "10m"})]))
+        t = self.trigger_id()
+        # A counter that rose by 1 in the last of 7 minutes that have one before them: 60 / 7 an hour.
+        execute_values(self.cur,
+                       "INSERT INTO timescale.telemetry_1m (bucket, asset_id, metric_name, sum_double, n_double,"
+                       " min_double, max_double, last_double, n_rows) VALUES %s",
+                       [(self.end - timedelta(minutes=8 - i), self.sparkplug[DEV_A], self.COUNT, v, 1, v, v, v, 1)
+                        for i, v in enumerate([0] * 7 + [1])])
+        self.evaluate(0)
+        self.evaluate(600)
+        summary, values = self.summary(t, self.RATE)
+        self.assertEqual(summary, f"Test_0271_Lathe_3: {self.RATE} is 8.571 over the last hour, below 100 for 10m")
+        # What is compared, and what the row keeps, is not rounded.
+        self.assertAlmostEqual(values["value"], 60 / 7, places=9)
+        self.assertEqual(values["threshold"], 100)
+
+    def test_an_alert_on_a_sum_says_it_is_the_value_at_the_last_whole_minute(self):
+        self.apply(automation(triggers=[trigger(metric=self.POWER, above=5, **{"for": None})]))
+        t = self.trigger_id()
+        self.phase(self.PHASE_A, 4)
+        self.phase(self.PHASE_B, 3)
+        self.evaluate(0)
+        self.assertEqual(self.summary(t, self.POWER)[0], f"Test_0271_Lathe_3: {self.POWER} is 7 at the last whole minute, above 5")
+
+    def test_an_alert_on_a_measured_metric_is_worded_as_it_always_was(self):
+        self.apply(automation(triggers=[trigger(**{"for": None})]))
+        t = self.trigger_id()
+        self.reading(91.123456789)
+        self.evaluate(0)
+        self.assertEqual(self.summary(t, METRIC)[0], f"Test_0271_Lathe_3: {METRIC} is 91.123456789, above 80")
+
+    def test_the_words_are_the_same_in_the_detail_and_the_summary(self):
+        self.cur.execute("SELECT public.automation_value_words(%s, 4.166666666666667), public.automation_value_words(%s, 2.0),"
+                         "       public.automation_value_words(%s, 0.0004), public.automation_value_words(%s, 80.12345678),"
+                         "       public.automation_value_words(%s, NULL), public.automation_value_words(%s, 4.5);",
+                         (self.RATE, self.POWER, self.UPTIME, METRIC, self.RATE, "no/such/metric"))
+        self.assertEqual(self.cur.fetchone(), ("4.167 over the last hour", "2 at the last whole minute", "0 over the last hour",
+                                               "80.12345678", None, "4.5"))
+
     def test_it_is_not_granted_to_an_api_role(self):
-        for fn in ("public.machine_condition_readings()", "public.machine_condition_rows()"):
+        for fn in ("public.machine_condition_readings()", "public.machine_condition_rows()",
+                   "public.automation_value_words(text, double precision)"):
             self.cur.execute("SELECT has_function_privilege('anon', %s, 'EXECUTE') OR has_function_privilege('authenticated', %s, 'EXECUTE');",
                              (fn, fn))
             self.assertFalse(self.cur.fetchone()[0], fn)

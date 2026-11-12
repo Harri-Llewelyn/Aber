@@ -33,6 +33,7 @@ audit rows included.
 
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -337,7 +338,11 @@ class ADerivedMetricIsRead(unittest.TestCase):
         self.assertIsNone(alert["rule_uid"], "no Grafana rule")
         self.assertGreater(alert["values"]["value"], 0)
         self.assertEqual(alert["values"]["threshold"], 0)
-        self.assertIn(self.derived, alert["summary"])
+        # The summary words the value as the detail does: rounded to three decimals, with its window.
+        pattern = rf"DERIVED_READ_Device: {re.escape(self.derived)} is (\d+(?:\.\d{{1,3}})?) over the last hour, above 0"
+        said = re.fullmatch(pattern, alert["summary"])
+        self.assertIsNotNone(said, alert["summary"])
+        self.assertAlmostEqual(float(said.group(1)), alert["values"]["value"], delta=0.0005)
 
         # The state every role reads names the minute the value was read at, not the last reading.
         status, states = self.get(f"/rest/v1/automation_trigger_states?trigger_id=eq.{self.trigger_id}"

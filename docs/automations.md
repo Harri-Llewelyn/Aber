@@ -182,10 +182,12 @@ confirming them.
 - **The subject** is the device, so the alert opens on the Devices page and its history is the
   device's.
 - **The summary** names the device, the metric, the value and the threshold:
-  `Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m`.
+  `Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m`. For a derived metric the value is
+  rounded to three decimals and followed by its window:
+  `Press 1: Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5 for 10m`.
 - **The labels** are `severity`, `entity_type`, `metric`, `automation` (the automation's `id`) and
   `trigger_id`.
-- **The values** are `value`, the reading that fired it, and `threshold`.
+- **The values** are `value`, the reading that fired it, and `threshold`. `value` is not rounded.
 - **It has no Grafana rule.** The alert counter and the device's drawer do not link to Grafana for it.
 
 ## What the database does with a file
