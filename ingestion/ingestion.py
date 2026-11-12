@@ -2944,6 +2944,24 @@ def _after_commit(item):
             item.payload_dt,
         )
 
+def _connection_lost(exc, conn):
+    """
+    True when `exc` is the connection's failure, not the message's: an InterfaceError, or an
+    OperationalError after which the connection reports itself closed. Any other error leaves the
+    connection usable and is a fault in the message.
+    """
+    if isinstance(exc, psycopg2.InterfaceError):
+        return True
+    return isinstance(exc, psycopg2.OperationalError) and conn.closed != 0
+
+def _retire_connection(conn):
+    """Close a connection that failed but still reports itself open, so the next caller reconnects."""
+    if conn.closed == 0:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - it is being thrown away
+            pass
+
 class TelemetryWriter:
     """
     The queue between the callback thread and the historian, and the thread that drains it.
@@ -3026,7 +3044,13 @@ class TelemetryWriter:
                 break
         return items
 
-    def _write(self, batch):
+    def _write(self, batch, retry=True):
+        """
+        Write `batch` as one transaction. True once it is committed.
+
+        A lone message that fails because the connection went is written once more on a fresh one
+        (`retry`); a batch is split instead, and each message takes that retry on its own.
+        """
         # The clock starts before the connection is acquired: a reconnect occupies this thread
         # for up to DB_CONNECT_MAX_ATTEMPTS * DB_CONNECT_BACKOFF_SECONDS, and that stall is what
         # the histogram exists to expose.
@@ -3041,13 +3065,16 @@ class TelemetryWriter:
                     item.wire_id,
                     device=item.wire_id,
                 )
-            return
+            return False
 
         try:
             with db_conn:
                 with db_conn.cursor() as cur:
                     windows = _write_batch(cur, batch)
         except Exception as e:
+            lost = _connection_lost(e, db_conn)
+            if lost:
+                _retire_connection(db_conn)
             if len(batch) > 1:
                 # One message can poison a batch. Retried one at a time, so only that message is
                 # lost and write_failures counts it alone.
@@ -3056,20 +3083,31 @@ class TelemetryWriter:
                     "Historian write of %d message(s) failed (%s); retrying each on its own.",
                     len(batch), e,
                 )
-                for item in batch:
-                    self._write([item])
-                return
+                return all([self._write([item]) for item in batch])
+            if lost and retry:
+                # One reconnect, through get_timescaledb_connection()'s bounded retry, and one more
+                # write. Rows are ON CONFLICT DO NOTHING, so a commit whose acknowledgement was
+                # lost is not written twice; _after_commit has not run for this attempt.
+                logger.warning(
+                    "TimescaleDB connection lost while writing DDATA for '%s' (%s); retrying once "
+                    "on a fresh connection.", batch[0].wire_id, e,
+                )
+                if self._write(batch, retry=False):
+                    count("write_retries_saved")
+                    return True
+                return False
             # The message is lost: `with db_conn` rolled the transaction back. Counted so the
             # loss is visible in STATS rather than only in the log.
             count("write_failures")
             logger.error("Error writing DDATA telemetry to TimescaleDB: %s", e, exc_info=True)
-            return
+            return False
 
         # After `with db_conn` exits: the commit is where a hypertable write becomes durable.
         observe_write_seconds(time.perf_counter() - started)
         count("rollup_windows_recorded", windows)
         for item in batch:
             _after_commit(item)
+        return True
 
 _writer = TelemetryWriter(TELEMETRY_QUEUE_MAX_MESSAGES, TELEMETRY_BATCH_MAX_MESSAGES)
 
