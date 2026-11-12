@@ -41,13 +41,21 @@ describe('the groups', () => {
     expect(TABS.filter(t => t.group === NAV_GROUPS[0].id).map(t => t.id)).toEqual(['site-map', 'history'])
   })
 
+  it('gives Automations a group of its own, right after the Modelling group that ends with Vocabulary', () => {
+    // Modelling says what the data means; an automation acts on readings as they arrive.
+    const groups = groupedNav(TABS).map(g => [g.id, g.tabs.map(t => t.id)])
+    const at = groups.findIndex(([id]) => id === 'model')
+    expect(groups[at][1]).toEqual(['schemas', 'metrics', 'vocabulary'])
+    expect(groups[at + 1]).toEqual(['automation', ['automations']])
+  })
+
   it('leaves History ungated, as the Site Map is', () => {
     const history = TABS.find(t => t.id === 'history')
     expect(history.label).toBe('History')
     expect(history.permission).toBeUndefined()
     expect(history.role).toBeUndefined()
     expect(tabIsVisible(history, () => false, 'Operator')).toBe(true)
-    expect(history.pageTabs.map(t => t.id)).toEqual(['overview', 'device', 'alerts'])
+    expect(history.pageTabs.map(t => t.id)).toEqual(['overview', 'device', 'metric', 'cell', 'area', 'alerts'])
   })
 
   /**

@@ -308,8 +308,10 @@ class TheSendDecision(DispatchBase):
         stale = self.upsert(fingerprint="fp-0247-stale", confirmed=self.cur.fetchone()[0])
         never = self.upsert(fingerprint="fp-0247-never", confirmed=None)
         condition = self.upsert(fingerprint="condition:press-4-overheat")
-        self.assertEqual([self.decide(a, "reminder") for a in (fresh, stale_but_inside, stale, never, condition)],
-                         ["send", "send", "drop", "drop", "drop"])
+        self.cur.execute("SELECT now() - interval '6 minutes';")
+        condition_stale = self.upsert(fingerprint="condition:press-4-late", confirmed=self.cur.fetchone()[0])
+        self.assertEqual([self.decide(a, "reminder") for a in (fresh, stale_but_inside, stale, never, condition, condition_stale)],
+                         ["send", "send", "drop", "drop", "send", "drop"])
         self.assertEqual(self.decide(stale, "firing"), "send", "the firing message does not need the stamp")
 
     def test_a_resolve_follows_its_firing_message(self):
@@ -508,11 +510,13 @@ class TheSettings(DispatchBase):
         return self.as_person(user_id, "UPDATE public.system_settings SET value = %s WHERE key = %s RETURNING key;",
                               (Json(value), key))
 
-    def test_three_closed_keys_in_the_notifications_category(self):
+    def test_five_closed_keys_in_the_notifications_category(self):
         self.cur.execute(
             "SELECT key, value_type, category, sensitive, read_only, min_value, max_value FROM public.system_settings"
             " WHERE starts_with(key, 'notifications.') ORDER BY key;")
         self.assertEqual(self.cur.fetchall(), [
+            ("notifications.email_min_severity", "string", "Notifications", False, False, None, None),
+            ("notifications.email_roles", "json", "Notifications", False, False, None, None),
             ("notifications.reminder_hours", "number", "Notifications", False, False, 1, 168),
             ("notifications.webhook_allowed_hosts", "json", "Notifications", True, False, None, None),
             ("notifications.webhook_min_severity", "string", "Notifications", False, False, None, None),
@@ -523,6 +527,7 @@ class TheSettings(DispatchBase):
         self.cur.execute("SELECT key, value FROM public.system_settings WHERE starts_with(key, 'notifications.')"
                          " ORDER BY key;")
         self.assertEqual(self.cur.fetchall(), [
+            ("notifications.email_min_severity", "warning"), ("notifications.email_roles", []),
             ("notifications.reminder_hours", 12), ("notifications.webhook_allowed_hosts", []),
             ("notifications.webhook_min_severity", "warning"),
         ])
@@ -563,8 +568,9 @@ class TheSettings(DispatchBase):
         sql = "SELECT key FROM public.system_settings WHERE starts_with(key, 'notifications.') ORDER BY key;"
         for user_id in NON_ADMINS:
             self.assertEqual(self.as_person(user_id, sql),
-                             [("notifications.reminder_hours",), ("notifications.webhook_min_severity",)])
-        self.assertEqual(len(self.as_person(ADMIN_ID, sql)), 3)
+                             [("notifications.email_min_severity",), ("notifications.email_roles",),
+                              ("notifications.reminder_hours",), ("notifications.webhook_min_severity",)])
+        self.assertEqual(len(self.as_person(ADMIN_ID, sql)), 5)
 
     def test_a_change_is_audited_as_any_setting_is(self):
         self.update_setting(ADMIN_ID, "notifications.reminder_hours", 6)

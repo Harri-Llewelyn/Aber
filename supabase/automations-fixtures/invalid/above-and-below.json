@@ -1,0 +1,27 @@
+{
+  "about": "Both `above` and `below`.",
+  "path": "$[0].triggers[0]",
+  "database": false,
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m",
+          "below": 10
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ]
+    }
+  ]
+}

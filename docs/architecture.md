@@ -20,8 +20,10 @@ decide where a new feature belongs.
 - **Aber shows the site as it is now, and what changed.** The Site Map draws the present state of
   every area, cell and device. The Audit Trail records every change.
 - **Aber watches the readings and shows the alerts.** Every alert appears in Aber's dashboard.
-  Today Grafana evaluates the platform's own health rules ([`grafana/README.md`](../grafana/README.md)).
-- **Aber hands the readings on.** A person exports them as files, and other software reads them
+  Aber evaluates the machine conditions a person writes as [automations](automations.md). Today
+  Grafana evaluates the platform's own health rules ([`grafana/README.md`](../grafana/README.md)).
+- **Aber hands the readings on.** An Administrator or a Shopfloor Manager exports them as files, 14 days at a
+  time unless the site sets another limit, each export recorded in the Audit Trail. Other software reads them
   through [i3X](i3x-openapi.yaml). The equipment register is published as Asset Administration
   Shells.
 - **Grafana is for analysis in depth.** There, a person builds dashboards, writes their own queries
@@ -183,8 +185,7 @@ Every file in `supabase/migrations/` is applied by the `db-init` Job on every in
 harmlessly each time. At 1.0 there are two, the schema baseline (`0001`) and the seed data
 (`0002`), which fold the incremental chain kept in
 [`supabase/migrations/archive/`](../supabase/migrations/archive/README.md): the 197 files four squashes
-retired. An archived number is never issued again, so the next migration is `0163` and a cited
-number names one file for good (the archive's two `0074`s predate the rule). The archive's
+retired. An archived number is never issued again, so a cited number names one file for good (the archive's two `0074`s predate the rule). The archive's
 README says why each squash was shaped as it was, and each archived file states the decision it
 made. The demo user accounts are seeded separately, by `supabase/seed.sql`.
 

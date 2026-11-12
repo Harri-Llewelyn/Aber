@@ -21,7 +21,8 @@ import {
   IconInbox,
   IconTag,
   IconUser,
-  IconChartLine
+  IconChartLine,
+  IconZap
 } from './components/common/Icons'
 
 /*
@@ -48,6 +49,7 @@ export const APPROVALS_TABS = [
 
 export const METRICS_TABS = [
   { id: 'catalog', label: 'Metric Catalog', description: "The metrics schema authors build from, grouped by their name's first segment. A name cannot change once created." },
+  { id: 'derived', label: 'Derived', description: 'Metrics Aber computes from others, such as a rate or a total. Each shows its definition, which cannot change.' },
   { id: 'deprecated', label: 'Deprecated Metrics', description: 'Metrics withheld from the schema builder, and what replaced each. Schemas that model one keep it, with its readings.' },
   { id: 'uncatalogued', label: 'Uncatalogued', description: 'Metric names devices declare that no catalog row describes. Their readings are stored, but carry no unit or meaning.' },
 ]
@@ -102,7 +104,7 @@ export const ACCESS_CONTROL_PEOPLE_TAB = {
 export const ACCESS_CONTROL_APPS_TAB = {
   id: 'apps',
   label: 'Apps',
-  description: 'The apps that sign people in with Aber, such as Grafana, and who has allowed each one.',
+  description: 'Apps that sign people in with Aber, such as Grafana, and who allows each. Register one of your own here.',
 }
 
 export const ACCESS_CONTROL_TABS = [
@@ -122,7 +124,8 @@ export const SETTINGS_TABS = [
   { id: 'approvals', label: 'Approvals', description: 'How many proposals one person may hold open, when an open one expires, and how long decided ones are kept.' },
   { id: 'audit-trail', label: 'Audit Trail', description: 'How often the Audit Trail page reads the audit log again while it is open.' },
   { id: 'cold-storage', label: 'Cold Storage', description: "When readings move out to the cold archive, and the key that names this site's archive." },
-  { id: 'notifications', label: 'Notifications', description: 'Where Aber sends each alert: the webhook, the lowest severity it carries, how often it reminds, and what was sent.' },
+  { id: 'history', label: 'History', description: 'The longest window one export of readings may cover, which History holds every export to.' },
+  { id: 'notifications', label: 'Notifications', description: 'Where Aber sends alerts: the webhook and email, their lowest severity, reminders, and what was sent.' },
   { id: 'retention', label: 'Retention', description: 'How long Aber keeps records, such as resolved alerts, before the nightly prune removes them.' },
   { id: 'security', label: 'Security', description: 'Whether managers and Administrators need MFA to change the platform and to sign in to its apps.' },
   { id: 'site', label: 'Site', description: "The site's name, the Sparkplug group its gateways publish under, and how close cells may sit on a plan." },
@@ -132,6 +135,9 @@ export const SETTINGS_TABS = [
 export const HISTORY_TABS = [
   { id: 'overview', label: 'Overview', description: 'Where readings arrived over the window: a lane for each device, darker where more arrived, grouped by area and cell.' },
   { id: 'device', label: 'Device', description: "One device's metrics over the window you choose, a chart each, on one time axis." },
+  { id: 'metric', label: 'Metric', description: 'One metric across every device that reports it, a chart each on one scale, narrowed by area or cell, wherever the devices sit.' },
+  { id: 'cell', label: 'Cell', description: "One metric across every machine in a cell, a chart each on one scale so the odd one stands out, and its mean at each hour of the day." },
+  { id: 'area', label: 'Area', description: "One metric across the cells of an area, a chart each of its mean or total on one scale, and each cell's mean at each hour of the day." },
   { id: 'alerts', label: 'Alerts', description: 'Every alert that fired over the window you choose, with who acknowledged it and why.' },
 ]
 
@@ -139,6 +145,7 @@ export const HISTORY_TABS = [
 export const PROFILE_TABS = [
   { id: 'account', label: 'Account', description: 'Your picture, the address you sign in with, your role, and your password.' },
   { id: 'appearance', label: 'Appearance', description: 'How the dashboard looks and behaves for you: theme, sidebar layout and single-key shortcuts.' },
+  { id: 'notifications', label: 'Notifications', description: 'Whether a firing alert raises a notification on your desktop. Your choice follows you to any PC.' },
   { id: 'sessions', label: 'Sessions', description: 'Every browser and service you are signed in to, and ending them. Ending one stops its access at once.' },
   { id: 'mfa', label: 'MFA', description: 'Multi-factor authentication: apps that give a code after your password. Settings can require one of managers and Administrators.' },
   { id: 'allowed-apps', label: 'Allowed Apps', description: 'The apps you have let sign you in, and what each may read about you. Revoking one signs it out.' },
@@ -150,7 +157,10 @@ export const PROFILE_TABS = [
  *   Work           -- what is waiting for me? Approvals.
  *   Assets         -- what is out there? The physical estate.
  *   Modelling      -- what does it mean? Read down: the contract, the catalogue it is built from,
- *                     the standards the catalogue draws on. Most-worked to most-reference.
+ *                     the standards the catalogue draws on.
+ *   Automation     -- what is watched, and what happens then? The rules that act on readings as
+ *                     they arrive. Acting is not modelling, so it is a group of its own, as Work is.
+ *                     Most-worked to most-reference.
  *   History        -- what happened? Both pages are a record of the past.
  *   Retention      -- what is kept, and how is it got back? Every page here runs a retention
  *                     timer over something and offers a way to restore from it.
@@ -171,6 +181,7 @@ export const NAV_GROUPS = [
   { id: 'work' },
   { id: 'assets' },
   { id: 'model' },
+  { id: 'automation' },
   { id: 'history' },
   { id: 'retention' },
   { id: 'admin' }
@@ -203,6 +214,11 @@ export const TABS = [
   { id: 'metrics',        label: 'Metrics',        group: 'model',   icon: <IconTag size={16} />, pageTabs: METRICS_TABS },
   // Reference you read, where the two above are state you edit.
   { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} />, pageTabs: VOCABULARY_TABS },
+
+  // Ungated, as Settings is: every role reads an automation (RLS), and writing one is for
+  // Administrators and Shopfloor Managers, so anyone else sees no write controls. IconZap: when this
+  // happens, do that. No tabs yet; the Blueprints and Built-in tabs are later additions.
+  { id: 'automations',    label: 'Automations',    group: 'automation', icon: <IconZap size={16} /> },
 
   /* Gated on the permission, not on role names: the `audit_trail` SELECT policies resolve
      `audit_trail:read`, so one predicate decides visibility and access. Without it an Operator

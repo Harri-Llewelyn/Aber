@@ -63,6 +63,9 @@ export const AUDIT_TRAIL_ACTIONS = {
   // A per-asset bundle stored beside the cold tier (asset_exports): the one row of a device's
   // history that says a copy of it left the platform, and who took it.
   EXPORTED:          'Exported',
+  // Readings exported from History (0279): one row an export that returned rows, naming who, the
+  // devices and metrics, the window, the resolution and how many rows left. A read, in one lane.
+  TELEMETRY_EXPORTED: 'Readings exported',
   // Written by the expiry timer, with `changed_by` NULL because a timer is not a person.
   PROPOSAL_EXPIRED:  'Proposal expired',
   // Written by `log_role_assignment()`, not the generic audit trigger (`user_roles` has no `id`).
@@ -129,6 +132,13 @@ export const AUDIT_TRAIL_ACTIONS = {
   SUPPRESSION_WINDOW_CHANGED:   'Suppression window changed',
   SUPPRESSION_WINDOW_ENDED:     'Suppression window ended',
   SUPPRESSION_WINDOW_CANCELLED: 'Suppression window cancelled',
+  // An automation created, changed, switched on or off, or deleted, by the Automations page or by
+  // the lifecycle that follows a device (0256, 0257): in the automation's own lane.
+  AUTOMATION_CREATED:           'Automation created',
+  AUTOMATION_CHANGED:           'Automation changed',
+  AUTOMATION_ENABLED:           'Automation enabled',
+  AUTOMATION_DISABLED:          'Automation disabled',
+  AUTOMATION_DELETED:           'Automation deleted',
   // An Administrator issuing or rotating the webhook's signing key on Settings › Notifications
   // (0248), in the webhook's lane. The key itself is never in the row.
   SIGNING_KEY_ISSUED:              'Signing key issued',
@@ -155,6 +165,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'DEVICE',           table: 'devices',            label: 'Devices',            domain: 'asset', group: 'plant' },
   // An alert's acknowledgements (0231), one lane per alert across its occurrences (0232).
   { kind: 'ALERT',            table: 'platform_alerts',    label: 'Alerts',             domain: 'asset', group: 'plant' },
+  // Readings exported from History (0279): one lane for every export, in the asset lane, which the
+  // roles that export and an Auditor read.
+  { kind: 'READINGS',         table: 'telemetry',          label: 'Readings',           domain: 'asset', group: 'plant' },
   // The security lane (archive/0070_audit_domain_and_the_acts_nothing_recorded.sql), in the order a
   // reader meets it: who holds what, what the machines are, then the contracts and settings that
   // shape both.
@@ -174,6 +187,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset', group: 'model' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset', group: 'model' },
+  // An automation's acts (0256), one lane per automation, in the asset lane: an Administrator or a
+  // Shopfloor Manager writes it and every role reads it.
+  { kind: 'AUTOMATION',       table: 'automations',        label: 'Automations',        domain: 'asset', group: 'model' },
   { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security', group: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset', group: 'model' },
@@ -220,6 +236,11 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
       'SUPPRESSION_WINDOW_CHANGED', 'SUPPRESSION_WINDOW_ENDED', 'SUPPRESSION_WINDOW_CANCELLED'],
   },
   {
+    label: 'Automations',
+    actions: ['AUTOMATION_CREATED', 'AUTOMATION_CHANGED', 'AUTOMATION_ENABLED', 'AUTOMATION_DISABLED',
+      'AUTOMATION_DELETED'],
+  },
+  {
     label: 'Capture and playback',
     actions: ['CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
       'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED'],
@@ -243,7 +264,7 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
     actions: ['BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
       'BACKUP_PRUNED'],
   },
-  { label: 'Reads', actions: ['SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED'] },
+  { label: 'Reads', actions: ['SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED', 'TELEMETRY_EXPORTED'] },
 ];
 
 /**
@@ -275,6 +296,8 @@ export const AUDIT_TRAIL_ACTION_KINDS = [
     ['operational', 'configuration', 'lifecycle']],
   ['PROPOSAL_EXPIRED', ['change_proposals'], ['operational', 'configuration', 'lifecycle']],
   ['EXPORTED', ['devices'], ['read']],
+  // Readings exported from History (0279), in the one lane for readings.
+  ['TELEMETRY_EXPORTED', ['telemetry'], ['read']],
   ['FLOW_DEPLOYED', ['gateways'], ['operational', 'configuration', 'lifecycle']],
   ['CREDENTIAL_ISSUED', ['gateways'], ['operational', 'configuration', 'lifecycle']],
   ['CREDENTIAL_SHOWN', ['gateways'], ['read']],
@@ -327,6 +350,12 @@ export const AUDIT_TRAIL_ACTION_KINDS = [
   ['SUPPRESSION_WINDOW_CHANGED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
   ['SUPPRESSION_WINDOW_ENDED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
   ['SUPPRESSION_WINDOW_CANCELLED', ['devices', 'gateways', 'cells'], ['operational', 'configuration', 'lifecycle']],
+  // An automation's acts, in its own lane.
+  ['AUTOMATION_CREATED', ['automations'], ['created']],
+  ['AUTOMATION_CHANGED', ['automations'], ['configuration']],
+  ['AUTOMATION_ENABLED', ['automations'], ['operational']],
+  ['AUTOMATION_DISABLED', ['automations'], ['operational']],
+  ['AUTOMATION_DELETED', ['automations'], ['lifecycle']],
   // The webhook's signing key, issued or rotated, in the webhook's lane.
   ['SIGNING_KEY_ISSUED', ['notification_channels'], ['configuration']],
 ];
@@ -363,7 +392,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  * here renders and does nothing when clicked. `appRouting.test.jsx` asserts the two match.
  */
 export const VALID_TABS = [
-  'site-map', 'history', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'vocabulary', 'system',
+  'site-map', 'history', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'automations', 'vocabulary', 'system',
   'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings',
   'profile'
 ];
@@ -427,12 +456,20 @@ export const i3xUrl = () =>
 export const FORGE_ORGANISATION = 'gateways'
 
 /**
+ * Whether Aber's own evaluator raised an alert: its fingerprint starts `condition:`, the prefix
+ * automation_alert_fingerprint() composes (0255). Grafana has no rule for one.
+ */
+export const isAutomationAlert = (alert) => String(alert?.fingerprint ?? '').startsWith('condition:')
+
+/**
  * The Grafana page for the rule that raised a `platform_alerts` row: the rule itself by its
  * `rule_uid`, which the webhook keeps. A row written before the column existed has none, and opens
  * the alert list searched by the rule's name. That search reads rule definitions, so a
- * `label:sparkplug_id=` filter (a label on evaluated series) would match nothing.
+ * `label:sparkplug_id=` filter (a label on evaluated series) would match nothing. An alert an
+ * automation raised has no rule there, and answers null.
  */
 export const grafanaAlertUrl = (alert) => {
+  if (isAutomationAlert(alert)) return null
   const { rule_uid: ruleUid, alert_name: alertName } = alert ?? {};
   if (ruleUid) return `${GRAFANA_URL}/alerting/grafana/${encodeURIComponent(ruleUid)}/view`;
   return alertName

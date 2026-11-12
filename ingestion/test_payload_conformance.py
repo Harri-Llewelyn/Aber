@@ -492,7 +492,8 @@ class PayloadConformanceContractTestCase(unittest.TestCase):
         with open(os.path.join(INGESTION_DIR, "conformance.py"), "r", encoding="utf-8") as handle:
             source = handle.read()
         emitted = (set(re.findall(r'\(\s*"([a-z]+(?:_[a-z]+)+)",', source))
-                   | set(re.findall(r'"code":\s*"([a-z_]+)"', source)))
+                   | set(re.findall(r'"code":\s*"([a-z_]+)"', source))
+                   | set(re.findall(r'_CODE = "([a-z_]+)"', source)))
         covered = {v["code"] for case in self.cases for v in case.get("expected", [])}
         self.assertIn("type_mismatch", emitted)
         self.assertEqual(emitted - covered, set())

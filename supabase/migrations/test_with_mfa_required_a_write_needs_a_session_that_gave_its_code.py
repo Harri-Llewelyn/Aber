@@ -450,6 +450,28 @@ class AWindowAndTheWebhookAskToo(MfaBase):
         err, _ = self.attempt(call, (self.HOOK_URL,))
         self.assertIsNone(err, err)
 
+    def test_a_test_email_is_queued_only_from_a_session_that_gave_its_code(self):
+        self.cur.execute("SELECT to_regprocedure('public.queue_test_email_notification()');")
+        if self.cur.fetchone()[0] is None:
+            self.skipTest("0263 is not in this database")
+        call = "SELECT public.queue_test_email_notification();"
+        self.switch(True)
+        self.claims(ADMIN_ID, "aal1")
+        err, _ = self.attempt(call)
+        self.assert_mfa_refusal(err, "queueing a test email at aal1")
+        self.claims(ADMIN_ID, "aal2")
+        err, rows = self.attempt(call)
+        self.assertIsNone(err, err)
+        self.assertEqual(len(rows), 1)
+        self.claims(MANAGER_ID, "aal2")
+        err, _ = self.attempt(call)
+        self.assertIsInstance(err, psycopg2.errors.InsufficientPrivilege)
+        self.assertFalse(self.is_mfa_refusal(err), "a manager was refused for MFA, not for their role")
+        self.switch(False)
+        self.claims(ADMIN_ID, "aal1")
+        err, _ = self.attempt(call)
+        self.assertIsNone(err, err)
+
 
 class DoorSessions(MfaBase):
     def setUp(self):

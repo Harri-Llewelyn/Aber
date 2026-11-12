@@ -202,7 +202,8 @@ silently discarding a misconfigured gateway makes it invisible instead of diagno
 | `GATEWAY_MISMATCH` | Published by an edge node the device is not bound to |
 
 Birth parameters and declared metrics are recorded **even for quarantined devices** — that is
-exactly what an administrator needs to inspect before approving. Only DDATA telemetry is gated.
+exactly what an administrator needs to inspect before approving. Only DDATA telemetry is gated. The
+one value left out is a derived metric's: [that name is Aber's](#a-reading-under-a-derived-metrics-name-is-dropped-under-either-policy).
 
 The declared metrics (`devices.last_birth_metrics`) leave out the identity metrics and
 Sparkplug's control metrics: `bdSeq`, `Node Control/*` and `Device Control/*`
@@ -292,6 +293,52 @@ what another of its own submodels accounts for.
   regular expression. It is reported under its own code and never enforced.
 - **The rest of the message.** Only the offending metric is dropped, mirroring how an unresolved
   alias and an out-of-window timestamp are already handled.
+
+### A reading under a derived metric's name is dropped under either policy
+
+A derived metric is a `metric_catalog` row whose `derivation` is set: Aber computes its value from
+other metrics at read time, and nothing is stored for it
+([*A derived metric is a catalogue row*](../supabase/README.md#a-derived-metric-is-a-catalogue-row-0267)).
+A device that publishes the name would put a second source under the computed series. So ingestion
+drops that reading under `audit` as well as `enforce`. This is not a judgement of the device's
+schema, which is why `audit` does not keep it.
+
+- **The metric only.** The rest of the message is handled as before, and a measured metric of the
+  same group is untouched. A DDATA metric is judged by its name once its alias is resolved, before
+  its value or its timestamp is read. A message of nothing else writes no telemetry and still counts
+  as the device being heard.
+- **A birth that declares the name.** The values a DBIRTH declares are kept as the device's
+  parameters (`asset_config`, the Config view). A derived name's value is left out. The name stays in
+  `devices.last_birth_metrics`, which records what the device declared.
+- **The finding** has its own code, `derived_name`, and is recorded as a dropped metric
+  (`dropped: true`) through `record_ingestion_rejection()`, once per change in the set of faults as
+  for any other. Its words say the name belongs to a metric Aber computes and the device should
+  publish under another name. A birth's finding is kept apart from the readings' so that a clean
+  reading does not clear it.
+- **The count** is `aber_ingestion_derived_name_dropped_total`, a series of its own rather than a
+  label on `aber_ingestion_schema_rejected_total`. That one is non-zero only for a device set to
+  `enforce`, and this drop holds under both policies, so one series would stop saying either. Sum
+  them for every reading ingestion refused on a schema's or a catalogue's account. A log line names
+  the device and the metrics, at most once every five minutes per device.
+- **The names come from the catalogue**, not from a schema. They are read through the UNS bridge's
+  TTL cache (`uns_publish.derived_names_of()`, beside `units_of()`), so a derived metric added on the
+  Metrics page is dropped under **within `UNS_CONTEXT_TTL_SECONDS`**, 60 seconds by default, and a
+  reading published in that minute is stored. If the read fails, the names last read are used and a
+  warning says so; before any read has succeeded nothing is dropped, because the set is not known.
+  The cache is kept whether or not the UNS bridge is on.
+
+**No Sparkplug rule is involved.** A derived value never travels over MQTT, and Sparkplug 3.0.0 has
+no statement requiring a host application to store every metric it receives. What it keeps is its
+own decision, as the one above already is for a reading with no value. Sequence handling, rebirth
+requests and a device's state are as they were. The assertions read before this change, from
+chapter 5, *Operational Behavior*:
+
+- the host's reordering (`tck-id-operational-behavior-host-reordering-param`, `-start`, `-rebirth`
+  and `-success`): `seq` is judged before any metric is, so a message of dropped readings still
+  advances it;
+- the rebirth request (`tck-id-operational-behavior-data-commands-ncmd-rebirth-verb`, `-name` and
+  `-value`) and what the edge node does on it (`-rebirth-action-1`, `-2` and `-3`): the daemon sends
+  one only for an alias it cannot resolve, and a name that resolves to a derived metric is not that.
 
 ### The delay, and why the drop is loud instead
 
@@ -1805,7 +1852,8 @@ as the historian write, and it is measured the same way: `aber_ingestion_uns_pub
 beside `aber_ingestion_write_seconds`, and the two together are the per-message cost. A device's
 row in `device_uns_paths`, and the catalog's units, are cached for `UNS_CONTEXT_TTL_SECONDS`, so a
 message costs no directory read and a relocation or a rename on the dashboard moves a device's
-topic within that window.
+topic within that window. The names of the derived metrics, which conformance drops readings under,
+are cached in the same place for the same time, with the bridge on or off.
 
 ### Configuration
 
@@ -1813,7 +1861,7 @@ topic within that window.
 | :--- | :--- | :--- |
 | `UNS_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
 | `UNS_MQTT_TOPIC_ROOT` | `uns` | Set by the chart from `ingestion.unsMqttTopicRoot`, which also gives the broker's `ingestion` role its `<root>/#` grant |
-| `UNS_CONTEXT_TTL_SECONDS` | `60` | How long a device's path and the catalog's units are believed |
+| `UNS_CONTEXT_TTL_SECONDS` | `60` | How long a device's path, the catalog's units and the derived metrics' names are believed |
 
 ## Device Liveness Watchdog
 

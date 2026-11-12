@@ -66,6 +66,8 @@ describe('the action filter offers every action the database can record', () => 
       'SCHEMA_REJECTION', 'PROPOSAL_APPLIED', 'PROPOSAL_EXPIRED', 'FLOW_DEPLOYED',
       'ALERT_ACKNOWLEDGED', 'ALERT_ACKNOWLEDGEMENT_WITHDRAWN', 'SUPPRESSION_WINDOW_SCHEDULED',
       'SUPPRESSION_WINDOW_CHANGED', 'SUPPRESSION_WINDOW_ENDED', 'SUPPRESSION_WINDOW_CANCELLED',
+      'AUTOMATION_CREATED', 'AUTOMATION_CHANGED', 'AUTOMATION_ENABLED', 'AUTOMATION_DISABLED',
+      'AUTOMATION_DELETED',
       'CAPTURE_STARTED', 'CAPTURE_STOPPED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED',
       'CAPTURE_DELETED', 'PLAYBACK_STARTED', 'PLAYBACK_STOPPED',
       'PERSON_ADDED', 'ROLE_GRANTED', 'ROLE_REVOKED', 'ACCESS_REMOVED', 'ACCESS_RESTORED',
@@ -76,7 +78,7 @@ describe('the action filter offers every action the database can record', () => 
       'BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN', 'BACKUP_FAILED',
       'BACKUP_PRUNED',
       // The reads, the legend's Read class, together.
-      'SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED'
+      'SERVICE_LOGS_READ', 'CREDENTIAL_SHOWN', 'CAPTURE_DOWNLOAD_ISSUED', 'EXPORTED', 'TELEMETRY_EXPORTED'
     ])
     const headings = within(filter()).getAllByRole('group')
       .map(g => document.getElementById(g.getAttribute('aria-labelledby')).textContent)

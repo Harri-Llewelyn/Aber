@@ -13,7 +13,7 @@ import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
-import { ALLOWED_HOSTS_KEY, DELIVERY_LOG_LIMIT } from './utils/notifications';
+import { ALLOWED_HOSTS_KEY, DELIVERY_LOG_LIMIT, EMAIL_MIN_SEVERITY_KEY, EMAIL_ROLES_KEY } from './utils/notifications';
 import { factorError, normaliseCode } from './utils/secondFactor';
 import {
   MODEL_3D_EXTENSIONS,
@@ -174,14 +174,17 @@ const planCoordFrom = (v) => {
 };
 
 export const TELEMETRY_PAGE_SIZE = 500;
-// postgres_fdw ships a LIMIT to TimescaleDB only below about 6,300 rows; past that every matching
-// row crosses the wrapper before it is trimmed. Stay under it.
+// postgres_fdw sends a LIMIT to TimescaleDB only when it is under its own row estimate. With no
+// statistics each condition shrinks that estimate, to about one row for a read naming a device and a
+// metric; then every row inside the time bound crosses before the limit trims it. So this caps what a
+// page returns, and the time bound caps what crosses.
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
- * Ceiling on a single CSV export, across all selected metrics. Higher than TELEMETRY_MAX_ROWS
- * because an export is a deliberate act with a progress bar, but still bounded. On reaching it the
- * export downloads the most recent rows and says it was truncated.
+ * Ceiling on a single CSV export, across every device and metric in it: export_telemetry()'s
+ * c_max_rows (0279), which returns the readings up to the minute it is reached and says it was
+ * truncated (mirror check 92). Higher than TELEMETRY_MAX_ROWS because an export is a deliberate act,
+ * and one call that is bounded in the database.
  */
 export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
 
@@ -226,6 +229,15 @@ export const HISTORY_RESOLUTIONS = Object.freeze([
 export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;
 
 /**
+ * History's read of every change of a text or a flag, telemetry_changes() (0254), as its bounds
+ * are: past HISTORY_MAX_CHANGES changes of one metric, or HISTORY_CHANGE_READINGS readings, a chart
+ * shows its buckets instead. At most HISTORY_CHANGE_SERIES series a read.
+ */
+export const HISTORY_MAX_CHANGES = 2000;
+export const HISTORY_CHANGE_READINGS = 20000;
+export const HISTORY_CHANGE_SERIES = 50;
+
+/**
  * The most alert occurrences History's Alerts tab lists for one window. It asks
  * alert_occurrences() (0243) for one more, to say when more fired; the function's own bound is
  * 5,000.
@@ -233,8 +245,15 @@ export const HISTORY_MAX_ROWS = TELEMETRY_MAX_ROWS;
 export const ALERT_HISTORY_LIMIT = 1000;
 
 /**
- * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so the
- * 6,300-row LIMIT threshold above does not apply. At most COVERAGE_MAX_DEVICES a read. More than
+ * How many of the newest occurrences of automations' alerts the Automations page reads, for each
+ * automation's last firing and its recent firings. An automation whose last firing is older than the
+ * newest AUTOMATION_ALERT_LIMIT shows none: the alerts firing now are read apart, so they are never missed.
+ */
+export const AUTOMATION_ALERT_LIMIT = 2000;
+
+/**
+ * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so no
+ * LIMIT is involved (see TELEMETRY_MAX_ROWS). At most COVERAGE_MAX_DEVICES a read. More than
  * COVERAGE_SMALL_SELECTION devices read only the device rollups' own widths, 5 minutes and 1 hour,
  * and the page shows them at most COVERAGE_LARGE_MAX_HOURS at once; that many or fewer may take
  * any block width.
@@ -245,11 +264,26 @@ export const COVERAGE_LARGE_MAX_HOURS = 169;
 export const COVERAGE_ROLLUP_MINUTES = Object.freeze([5, 60]);
 
 /**
+ * History's hour-of-day read, telemetry_hour_of_day() (0265): it reads one hourly bucket for each
+ * hour of the window for each device, and refuses more than HOUR_OF_DAY_MAX_ROWS of them, as
+ * telemetry_carried() does. The page checks the same arithmetic before it asks.
+ */
+export const HOUR_OF_DAY_MAX_ROWS = 50000;
+
+/**
+ * History's group read, telemetry_carried_by_group() (0276): it reads every device's series through
+ * telemetry_carried(), which refuses more than HISTORY_GROUP_READ_ROWS buckets times devices, and
+ * returns one row per group per bucket, so the row cap (HISTORY_MAX_ROWS) holds what is returned.
+ * The page checks both before it asks.
+ */
+export const HISTORY_GROUP_READ_ROWS = 50000;
+
+/**
  * The lower time bound applied when a caller supplies none.
  *
- * `public.telemetry` is a postgres_fdw projection and a LIMIT ships only below about 6,300 rows, so
- * a query with no time predicate can drag an asset's entire history across the wrapper before
- * `.range()` applies. Every live caller already passes a window; this exists so the next caller
+ * `public.telemetry` is a postgres_fdw projection whose LIMIT is often applied here, not on the
+ * historian (TELEMETRY_MAX_ROWS), so a query with no time predicate can drag an asset's entire
+ * history across the wrapper before `.range()` applies. Every live caller already passes a window; this exists so the next caller
  * cannot reintroduce the unbounded scan by omitting an argument.
  */
 export const TELEMETRY_DEFAULT_WINDOW_MINUTES = 60;
@@ -1358,6 +1392,33 @@ const apiMethods = {
   },
 
   /**
+   * History's read of a text or a flag (0254): one row per series of `assetIds` times
+   * `metricNames`. `read` is `changes` (every change in [from, to), each at its time, and the value
+   * carried in) or why not: `change_cap`, `reading_cap` or `retention`, the first two with the
+   * buckets of `bucketMinutes` that held more than one value. Throws on a refusal or a historian it
+   * cannot reach.
+   *
+   * @returns {Promise<Array<{ asset_id: string, metric_name: string, read: string,
+   *   change_ts: ?string[], val_string: ?Array<?string>, val_bool: ?Array<?boolean>,
+   *   carried_string: ?string, carried_bool: ?boolean, n_changes: ?number, marked_ts: ?string[],
+   *   marked_values: ?number[], raw_from: ?string }>>}
+   */
+  readTelemetryChanges: async ({ from, to, bucketMinutes, assetIds, metricNames, maxChanges = HISTORY_MAX_CHANGES }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_changes', {
+      from_ts: from,
+      to_ts: to,
+      bucket: `${bucketMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_names: metricNames,
+      max_changes: maxChanges
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the changes');
+    return data || [];
+  },
+
+  /**
    * History's Overview read (0245): one row per device of `assetIds`, how many readings it sent in
    * each block of `blockMinutes` over [from, to), over every metric, as `counts` (oldest block first,
    * 0 for none, block i starting at `first_block` plus i widths), and the stretch the rollup has
@@ -1378,6 +1439,129 @@ const apiMethods = {
     const { data, error } = await call;
     if (error) throw new Error(error.message || 'Could not read where readings arrived');
     return data || [];
+  },
+
+  /**
+   * History's hour-of-day read (0265): for each device of `assetIds`, the mean of the numeric
+   * metric `metricName` at each hour of the day in `timeZone` (an IANA name), across the days of
+   * [from, to). One row per device per hour that has a value, `days` being how many local dates the
+   * mean spans. A text or a flag metric has no row. `assetIds` are device UUIDs or Sparkplug ids, as
+   * the telemetry routes take them. Throws on a refusal (an unknown time zone, more than
+   * HOUR_OF_DAY_MAX_ROWS hourly buckets) or a historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ asset_id: string, hour_of_day: number, mean_value: number, days: number }>>}
+   */
+  readHourOfDay: async ({ from, to, assetIds, metricName, timeZone }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_hour_of_day', {
+      from_ts: from,
+      to_ts: to,
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_name: metricName,
+      tz: timeZone
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the readings by the hour of the day');
+    return data || [];
+  },
+
+  /**
+   * History's Area read (0276): one numeric metric `metricName` over [from, to), one row per group
+   * per bucket of `bucketMinutes`. `assetIds[i]` is in the group `groupKeys[i]`. A row has the mean
+   * across the group's devices that have a value, and their total only where every device of the
+   * group does (null otherwise); `members` is the group's devices and `with_value` how many had
+   * one, `measured` how many had a reading rather than a carried value. A text or a flag metric has
+   * no row. `assetIds` are device UUIDs or Sparkplug ids, as the telemetry routes take them. Throws
+   * on a refusal (HISTORY_GROUP_READ_ROWS buckets times devices, two lists of another length) or a
+   * historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ group_key: string, bucket_ts: string, mean_double: number,
+   *   total_double: ?number, members: number, with_value: number, measured: number }>>}
+   */
+  readCarriedByGroup: async ({ from, to, bucketMinutes, assetIds, groupKeys, metricName }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_carried_by_group', {
+      from_ts: from,
+      to_ts: to,
+      bucket: `${bucketMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey),
+      group_keys: groupKeys,
+      metric_name: metricName
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the readings by group');
+    return data || [];
+  },
+
+  /**
+   * History's read of a derived metric (0282): `metricNames`, derived ones only, for `assetIds` over
+   * [from, to), one row per device, metric and bucket of `bucketMinutes` that has a value, computed from
+   * the minutes. The columns are readCarriedTelemetry()'s where they mean the same, so chartSeries()
+   * draws both: `avg_double` is the value, `min_double`, `max_double` and `last_double` are a sum's
+   * lowest, highest and last minute (the value, for a rate and a share), `n_rows` counts the inputs'
+   * readings and `is_carried` says there were none. `assetIds` are device UUIDs or Sparkplug ids. Throws
+   * on a refusal (a metric that is not derived, more than HISTORY_MAX_ROWS rows, more minutes of input
+   * than DERIVED_MAX_MINUTES) or a historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ bucket_ts: string, asset_id: string, metric_name: string,
+   *   avg_double: number, min_double: number, max_double: number, last_double: number,
+   *   n_rows: number, is_carried: boolean }>>}
+   */
+  readDerivedSeries: async ({ from, to, bucketMinutes, assetIds, metricNames }, { signal } = {}) => {
+    let call = supabase.rpc('derived_series', {
+      from_ts: from,
+      to_ts: to,
+      bucket: `${bucketMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_names: metricNames
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the derived readings');
+    return data || [];
+  },
+
+  /**
+   * The current value of each derived metric of `metricNames` for `assetIds` (0282): a counter rate
+   * and a time in state over the last hour, a sum at the last whole minute, `observed_at` being the minute
+   * that window ends at and `window_minutes` 60 or 0. A device with no value has no row. `assetIds` are
+   * device UUIDs or Sparkplug ids. Throws on a metric that is not derived or a historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ asset_id: string, metric_name: string, value: number,
+   *   observed_at: string, window_minutes: number }>>}
+   */
+  readDerivedCurrent: async ({ assetIds, metricNames }, { signal } = {}) => {
+    let call = supabase.rpc('derived_current', {
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_names: metricNames
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the derived values');
+    return data || [];
+  },
+
+  /**
+   * History's export (0279): the readings of `assetIds` (device UUIDs or Sparkplug ids) times
+   * `metricNames` over [from, to) as one document, at `resolution` (raw, 1m, 5m or 1h, never one in
+   * another's place). Only an Administrator or a Shopfloor Manager, for a window no longer than
+   * history.export_max_days; the database refuses otherwise, in a sentence that is shown as it came.
+   * An export that returns rows is recorded in the Audit Trail, and `audit_id` is that row's id.
+   *
+   * @returns {Promise<{ audit_id: ?number, resolution: string, columns: string[],
+   *   rows: Array<[string, string, string, (number|string|boolean|null), ?string]>, row_count: number,
+   *   max_rows: number, truncated: boolean, read_from: string, read_to: string, raw_from: ?string }>}
+   */
+  exportTelemetry: async ({ from, to, assetIds, metricNames, resolution = 'raw' }) => {
+    const { data, error } = await supabase.rpc('export_telemetry', {
+      from_ts: from,
+      to_ts: to,
+      asset_ids: assetIds.map(toTelemetryKey),
+      metric_names: metricNames,
+      resolution
+    });
+    if (error) throw new Error(error.message || 'Could not export the readings');
+    return data;
   },
 
   /**
@@ -1881,6 +2065,47 @@ const apiMethods = {
     return data || [];
   },
 
+  /**
+   * A device or gateway alert's subject for its desktop notification: `{ name, place }`, the place
+   * "Area › Cell", or the area alone for an area-wide asset, else null. Null for any other alert.
+   * A failed read leaves its part out; nothing here throws. A device's place is device_locations'.
+   */
+  readAlertSubject: async (alert) => {
+    const kind = alert?.entity_type || 'device';
+    if ((kind !== 'device' && kind !== 'gateway') || !isUuid(alert?.entity_id)) return null;
+    try {
+      let name = null;
+      let cellId = null;
+      let areaId = null;
+      if (kind === 'device') {
+        const [device, location] = await Promise.all([
+          supabase.from('devices').select('name').eq('id', alert.entity_id).maybeSingle(),
+          supabase.from('device_locations').select('effective_cell_id, effective_area_id').eq('device_id', alert.entity_id).maybeSingle()
+        ]);
+        name = device.data?.name ?? null;
+        cellId = location.data?.effective_cell_id ?? null;
+        areaId = location.data?.effective_area_id ?? null;
+      } else {
+        const { data } = await supabase.from('gateways').select('name, cell_id, area_id, location_scope').eq('id', alert.entity_id).maybeSingle();
+        const scope = normaliseScope(data?.location_scope);
+        name = data?.name ?? null;
+        cellId = scope === SCOPE_CELL ? data?.cell_id ?? null : null;
+        areaId = scope === SCOPE_AREA_WIDE ? data?.area_id ?? null : null;
+      }
+      let place = null;
+      if (cellId) {
+        const { data } = await supabase.from('cells').select('name, areas(name)').eq('id', cellId).maybeSingle();
+        place = [data?.areas?.name, data?.name].filter(Boolean).join(' › ') || null;
+      } else if (areaId) {
+        const { data } = await supabase.from('areas').select('name').eq('id', areaId).maybeSingle();
+        place = data?.name ?? null;
+      }
+      return { name, place };
+    } catch {
+      return null;
+    }
+  },
+
   // -------------------------------------------------------------------------------------------
   // Suppression windows (0240), from the drawer of the device, gateway or cell a window covers.
   // Each write is one Audit Trail row in that subject's lane. The database's refusals are
@@ -1930,6 +2155,131 @@ const apiMethods = {
     const { data, error } = await supabase.rpc('end_alert_suppression_window', { p_window_id: windowId });
     if (error) throw new Error(error.message || 'Could not end the window');
     return data;
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // Automations (0255-0257): rules kept as rows, written as YAML on the Automations page. The page
+  // renders the YAML from automations_document() and parses it back into one apply_automations()
+  // call. The database's refusals are sentences, shown as they come. Each write is one Audit Trail
+  // row per automation.
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * The alerts automations raised: `active` (firing now, from platform_alerts_active) and `history`
+   * (the newest AUTOMATION_ALERT_LIMIT occurrences, newest first, from platform_alerts), each row one
+   * whose fingerprint starts `condition:`. The alerts firing now are read apart, so a long-lived one
+   * is never lost to the limit. A failed read gives its rows empty: the page lists without them.
+   */
+  readAutomationAlerts: async ({ signal } = {}) => {
+    const call = (query) => (signal ? query.abortSignal(signal) : query);
+    const [active, history] = await Promise.all([
+      call(supabase.from('platform_alerts_active')
+        .select('id, fingerprint, entity_id, sparkplug_id, alert_name, severity, summary, starts_at, labels')
+        .like('fingerprint', 'condition:%')),
+      call(supabase.from('platform_alerts')
+        .select('*')
+        .like('fingerprint', 'condition:%')
+        .order('starts_at', { ascending: false })
+        .limit(AUTOMATION_ALERT_LIMIT)),
+    ]);
+    return { active: active.error ? [] : active.data ?? [], history: history.error ? [] : history.data ?? [] };
+  },
+
+  /**
+   * What the Automations page lists, in one read: `automations` and `devices` from
+   * automations_document() (each automation in the document's shape, and the name and place of each
+   * device they name), `rows` (each automation's uuid and its trigger ids, for the alerts'
+   * fingerprints), and the alerts (readAutomationAlerts()).
+   */
+  readAutomations: async ({ signal } = {}) => {
+    const call = (query) => (signal ? query.abortSignal(signal) : query);
+    const [document, rows, alerts] = await Promise.all([
+      call(supabase.rpc('automations_document', { p_keys: null })),
+      call(supabase.from('automations').select('id, key, created_at, updated_at, automation_triggers(id, is_archived)')),
+      api.readAutomationAlerts({ signal }),
+    ]);
+    if (document.error) throw new Error(document.error.message || 'Could not read the automations');
+    if (rows.error) throw new Error(rows.error.message || 'Could not read the automations');
+    return {
+      automations: document.data?.automations ?? [],
+      devices: document.data?.devices ?? {},
+      rows: rows.data ?? [],
+      ...alerts,
+    };
+  },
+
+  /**
+   * The automations rendered as a document, all of them or the keys asked for: `{ automations,
+   * devices }`, which renderAutomationsYaml() writes as YAML. What an export and an open automation share.
+   */
+  automationsDocument: async (keys = null) => {
+    const { data, error } = await supabase.rpc('automations_document', { p_keys: keys });
+    if (error) throw new Error(error.message || 'Could not read the automations');
+    return { automations: data?.automations ?? [], devices: data?.devices ?? {} };
+  },
+
+  /**
+   * One automation's row: its uuid (the Audit Trail's key for it) and trigger ids, by its `id:`.
+   * Null when none has the key.
+   */
+  automationRow: async (key) => {
+    const { data, error } = await supabase
+      .from('automations')
+      .select('id, key, created_at, updated_at, automation_triggers(id, is_archived)')
+      .eq('key', key)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read the automation');
+    return data;
+  },
+
+  /**
+   * The automation that owns a trigger, by the trigger's id (an alert's fingerprint names it), as
+   * `{ key }`; null when the automation has gone.
+   */
+  automationOfTrigger: async (triggerId) => {
+    if (!isUuid(triggerId)) return null;
+    const { data, error } = await supabase
+      .from('automation_triggers')
+      .select('automations(key)')
+      .eq('id', triggerId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read the automation');
+    return data?.automations ? { key: data.automations.key } : null;
+  },
+
+  /**
+   * Check a parsed document, or apply it (`dryRun` false): one result per automation, `{ index, key,
+   * status, id, changes, reasons }`, status new, changed, unchanged or refused, each reason `{ path,
+   * message }`. All or nothing: with a refusal, or a dry run, nothing is written. Never deletes.
+   */
+  applyAutomations: async (document, dryRun) => {
+    const { data, error } = await supabase.rpc('apply_automations', { p_doc: document, p_dry_run: dryRun });
+    if (error) throw new Error(error.message || 'Could not apply the automations');
+    return data ?? [];
+  },
+
+  /** Enable or disable the automation with this key. Returns its row. */
+  setAutomationEnabled: async (key, enabled) => {
+    const { data, error } = await supabase.rpc('set_automation_enabled', { p_key: key, p_enabled: enabled });
+    if (error) throw new Error(error.message || 'Could not change the automation');
+    return data;
+  },
+
+  /** Delete the automation with this key, with its triggers and actions. */
+  deleteAutomation: async (key) => {
+    const { error } = await supabase.rpc('delete_automation', { p_key: key });
+    if (error) throw new Error(error.message || 'Could not delete the automation');
+  },
+
+  /**
+   * The automations that apply to a device and why, one row per reason: `{ automation_id, key, alias,
+   * enabled, reason }`, reason `named` or `site-wide` (automations_for_entity(), 0256).
+   */
+  automationsForEntity: async (entityId) => {
+    if (!isUuid(entityId)) return [];
+    const { data, error } = await supabase.rpc('automations_for_entity', { p_entity_id: entityId });
+    if (error) throw new Error(error.message || 'Could not read the automations');
+    return data ?? [];
   },
 
   // -------------------------------------------------------------------------------------------
@@ -1985,6 +2335,20 @@ const apiMethods = {
     const { data, error } = await supabase.rpc('revoke_app_approval', { p_user_id: userId, p_client_id: clientId });
     if (error) throw new Error(error.message || 'Could not revoke the approval');
     return typeof data === 'number' ? data : 0;
+  },
+
+  /**
+   * Register an app that signs people in (`register_app()`). `clientType` is `public` or
+   * `confidential`. Resolves to `{ id, name, client_type, redirect_uris, client_secret }`: the
+   * secret is null for a public app, and for a confidential one it is in this answer alone.
+   * Administrator only, with a second factor while Settings requires one.
+   */
+  registerApp: async (name, redirectUris, clientType) => {
+    const { data, error } = await supabase.rpc('register_app', {
+      p_name: name, p_redirect_uris: redirectUris, p_client_type: clientType,
+    });
+    if (error) throw new Error(error.message || 'Could not register the app');
+    return data;
   },
 
   /**
@@ -2183,6 +2547,43 @@ const apiMethods = {
   },
 
   /**
+   * Email as every role may read it: the roles told and the lowest severity (settings rows), and
+   * whether this site has a relay and a sender at all, which only the functions' environment knows.
+   * `relay` is `{ available, reason }`, or null when the dispatcher could not be asked, in which
+   * case the page says nothing of it rather than guess.
+   */
+  notificationEmail: async () => {
+    const { data: session } = await supabase.auth.getSession();
+    const [rows, relay] = await Promise.all([
+      supabase.from('system_settings').select('key,value').in('key', [EMAIL_ROLES_KEY, EMAIL_MIN_SEVERITY_KEY]),
+      fetch(`${SUPABASE_URL}/functions/v1/notification-dispatch`, {
+        headers: {
+          apikey: SUPABASE_GATEWAY_KEY,
+          Authorization: `Bearer ${session?.session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        },
+      }).then(async (res) => {
+        const body = res.ok ? await res.json().catch(() => null) : null;
+        const email = body?.email;
+        return email && typeof email.available === 'boolean' ? { available: email.available, reason: email.reason || null } : null;
+      }).catch(() => null)
+    ]);
+    if (rows.error) throw new Error(rows.error.message || 'Could not read the email settings');
+    const value = (key) => (rows.data || []).find(r => r.key === key)?.value;
+    return {
+      roles: Array.isArray(value(EMAIL_ROLES_KEY)) ? value(EMAIL_ROLES_KEY) : [],
+      minSeverity: typeof value(EMAIL_MIN_SEVERITY_KEY) === 'string' ? value(EMAIL_MIN_SEVERITY_KEY) : 'warning',
+      relay
+    };
+  },
+
+  /** Queue a test email to the signed-in Administrator's own address, and return its delivery log row's id. */
+  sendTestEmailNotification: async () => {
+    const { data, error } = await supabase.rpc('queue_test_email_notification');
+    if (error) throw new Error(error.message || 'Could not send a test email');
+    return data;
+  },
+
+  /**
    * The delivery log, newest first, each with the alert it is about. The alert is read through its
    * own policy, so a row about one the reader may not see is not returned at all.
    */
@@ -2190,7 +2591,7 @@ const apiMethods = {
     let query = supabase
       .from('notification_deliveries')
       .select('id,event,channel,state,attempts,next_attempt_at,last_attempt_at,finished_at,response_status,'
-        + 'last_error,created_at,platform_alerts(alert_name,severity,entity_type,sparkplug_id)')
+        + 'last_error,recipients,refused,created_at,platform_alerts(alert_name,severity,entity_type,sparkplug_id)')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .limit(limit);
@@ -2464,6 +2865,21 @@ const apiMethods = {
       ...g,
       devices: (g.devices || []).filter(d => !d.is_archived)
     }));
+  },
+
+  /**
+   * Whether this gateway holds a broker credential, as gateway_has_broker_credential() decides it:
+   * the question a type change asks about the stored row before it revokes (0252). Read for one
+   * gateway, when its Edit dialog opens, because a Host gateway's answer reads the Audit Trail.
+   */
+  gatewayHoldsBrokerCredential: async (gatewayId) => {
+    const { data, error } = await supabase
+      .from('gateways')
+      .select('gateway_has_broker_credential')
+      .eq('id', gatewayId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read whether the gateway holds a credential');
+    return data?.gateway_has_broker_credential === true;
   },
 
   /**
@@ -3203,6 +3619,8 @@ const apiMethods = {
         // The values a discrete metric may report, as text; NULL is no closed set. The schema
         // builders copy them into `enum`, and the Devices page's Out of vocabulary tag reads them.
         permitted_values: m.permitted_values ?? null,
+        // NULL for a measured metric; a derived one's definition (0267), fixed once saved.
+        derivation: m.derivation ?? null,
         description: m.description,
         deprecated: m.deprecated,
         superseded_by: m.superseded_by,
@@ -3629,6 +4047,8 @@ const apiMethods = {
         standard: emptyToNull(body.standard),
         ...semanticIdPair(body),
         permitted_values: permittedValuesColumn(body.permitted_values),
+        // Only a derived metric sends one; the database sets its unit from the inputs.
+        ...(body.derivation && { derivation: body.derivation }),
         description: body.description || null
       }).select();
       if (error) throw error;
@@ -3644,7 +4064,13 @@ const apiMethods = {
       if (error || !data || data.length === 0) {
         return { error: 'Target schema definition not found' };
       }
-      return judgePayload(data[0].schema_definition, payload);
+      // A reading under a derived metric's name is dropped whatever the schema says, so the names
+      // are read too; judging without them would pass a payload ingestion refuses.
+      const derived = await supabase.from('metric_catalog').select('name').not('derivation', 'is', null);
+      if (derived.error) {
+        return { error: 'The metric catalog could not be read, so a derived metric\'s name cannot be checked.' };
+      }
+      return judgePayload(data[0].schema_definition, payload, (derived.data || []).map((row) => row.name));
     }
 
     // Both are RPCs rather than table writes: `version` is computed from the parent and `publish`

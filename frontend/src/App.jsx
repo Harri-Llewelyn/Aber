@@ -85,6 +85,8 @@ import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
 import { useHelpExpanded } from './hooks/useHelpExpanded'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
+import { useDesktopAlerts } from './hooks/useDesktopAlerts'
+import { alertOpener } from './utils/desktopNotifications'
 import { countedAlerts } from './utils/alertSuppression'
 import { useNavSignals } from './hooks/useNavSignals'
 import { BugReportModal } from './components/modals/BugReportModal'
@@ -103,6 +105,7 @@ const AuditTrailTab = lazy(() => import('./components/tabs/AuditTrailTab').then(
 const OAuthConsent     = lazy(() => import('./pages/OAuthConsent').then(m => ({ default: m.OAuthConsent })))
 const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(m => ({ default: m.SchemasTab })))
 const MetricsTab       = lazy(() => import('./components/tabs/MetricsTab').then(m => ({ default: m.MetricsTab })))
+const AutomationsTab   = lazy(() => import('./components/tabs/AutomationsTab').then(m => ({ default: m.AutomationsTab })))
 const VocabularyTab    = lazy(() => import('./components/tabs/VocabularyTab').then(m => ({ default: m.VocabularyTab })))
 const SystemTab        = lazy(() => import('./components/tabs/SystemTab').then(m => ({ default: m.SystemTab })))
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
@@ -527,7 +530,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // One source for both: the person's user_settings row, cached in this browser. The account menu's
   // two switches and the Profile page all write through it.
   const {
-    theme, setTheme, sidebarMode, setSidebarMode, singleKeyShortcuts, setSingleKeyShortcuts, source: settingsSource,
+    theme, setTheme, sidebarMode, setSidebarMode, singleKeyShortcuts, setSingleKeyShortcuts,
+    desktopNotifications, setDesktopNotifications, source: settingsSource,
   } = useUserSettings(session?.user?.id)
   const { toasts, showToast, expireToast, dismissToast, history, markRead, clearHistory } = useToast()
 
@@ -572,7 +576,14 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // visible whichever page is open. Each toast links where alertToastUrl() says. The counter, the
   // title and the favicon count the ones nobody has acknowledged and no window suppresses; the
   // pages and the counter's list are handed them all.
-  const firingAlerts = usePlatformAlerts(showToast)
+  // A desktop notification follows the same read: one per occurrence as it starts firing, for a
+  // person who turned them on. A click opens the alert as the counter's row does.
+  const syncDesktopAlerts = useDesktopAlerts({
+    enabled: desktopNotifications && settingsSource !== 'loading',
+    userId: session?.user?.id,
+    onOpen: alertOpener({ showDevice, showGateway, navigate }),
+  })
+  const firingAlerts = usePlatformAlerts(showToast, syncDesktopAlerts)
   const countedCount = countedAlerts(firingAlerts).length
 
   // Whether the page is still refreshing, from every poll and Realtime channel. Read by the strip
@@ -760,7 +771,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
-            {tab === 'history'        && <HistoryTab hasPermission={hasPermission} showToast={showToast} userRole={userRole} onSelectDevice={showDevice} onSelectGateway={showGateway} />}
+            {tab === 'history'        && <HistoryTab showToast={showToast} userRole={userRole} onSelectDevice={showDevice} onSelectGateway={showGateway} />}
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} userRole={userRole} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} />}
@@ -775,6 +786,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             )}
             {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} />}
             {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
+            {/* Ungated: every role reads. `userRole` decides which write controls the page offers, so it
+                waits for the role, as Settings does; the database refuses a write from anyone else. */}
+            {tab === 'automations'    && !loadingPerms && <AutomationsTab showToast={showToast} userRole={userRole} hasPermission={hasPermission} />}
             {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
             {tab === 'system'         && <SystemTab showToast={showToast} userRole={userRole} rolePending={loadingPerms} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
@@ -820,6 +834,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 onChangeSidebarMode={setSidebarMode}
                 singleKeyShortcuts={singleKeyShortcuts}
                 onChangeSingleKeyShortcuts={setSingleKeyShortcuts}
+                desktopNotifications={desktopNotifications}
+                onChangeDesktopNotifications={setDesktopNotifications}
                 settingsSource={settingsSource}
                 showToast={showToast}
               />

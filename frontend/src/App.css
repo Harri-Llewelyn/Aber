@@ -4689,18 +4689,20 @@ a.chip { text-decoration: none; }
 /* The cell and area icon picker: a grid of labelled buttons rather than a <select>, because the
    operator is choosing what the pin will look like on the plan. `auto-fit` so the grid reflows at
    any modal width; each option carries its label. */
+/* The pictures alone, in square tiles: each one's name is its tooltip and its accessible name. */
 .icon-picker {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  grid-template-columns: repeat(auto-fill, 44px);
   gap: 6px;
 }
 
 .icon-picker-option {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 9px 6px;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg-base);
@@ -5034,6 +5036,11 @@ a.chip { text-decoration: none; }
   gap: 4px;
   margin-top: 4px;
 }
+
+/* The Devices drawer's derived metrics: a name, its tag, and its value with the window it is over. */
+.derived-values { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.derived-values li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.derived-value { font-weight: 600; color: var(--text-primary); }
 
 /* Archive and its kin. Separated from the reads above it rather than tinted red on arrival: this
    is a list someone scans, and a permanently red row teaches people to ignore red. The colour
@@ -6071,6 +6078,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 }
 .history-chart-title { font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
 .history-chart-range { font-size: 12px; color: var(--warning-text); }
+/* Which read a state chart shows, when the status line says another: "the last value in each 5-minute bucket, …". */
+.history-chart-read { font-size: 12px; color: var(--text-muted); }
 .history-chart-hover { min-width: 0; margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
 .chart-frame { position: relative; min-width: 0; }
 .chart-box { position: relative; width: 100%; min-width: 0; overflow: hidden; }
@@ -6114,6 +6123,18 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   color: var(--text-primary);
 }
 .chart-state > .overflow-text { position: relative; }
+/* A run too narrow to name: its own width, at least 2px, a fill and a leading edge, so a change of
+   seconds over a day still shows; the head names it under the pointer. */
+.chart-state.chart-state-thin { min-width: 2px; padding: 0; border-width: 0 0 0 1px; border-radius: 0; }
+/* A bucket that held more than one value, past the change read's cap: dotted along the strip's foot,
+   over the box that shows the bucket's last value. */
+.chart-state-mixed {
+  position: absolute;
+  bottom: 0;
+  height: 4px;
+  pointer-events: none;
+  background: repeating-linear-gradient(90deg, var(--text-primary) 0 2px, transparent 2px 4px);
+}
 .chart-state-carried {
   position: absolute;
   top: 0;
@@ -6148,14 +6169,21 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .chart-state-swatch-carried {
   background: repeating-linear-gradient(45deg, var(--tone) 0 1px, transparent 1px 4px), var(--bg-card);
 }
+.chart-state-swatch-mixed {
+  background: repeating-linear-gradient(90deg, var(--text-primary) 0 2px, transparent 2px 4px) bottom / 100% 4px no-repeat, var(--bg-card);
+}
 .chart-overlay { position: absolute; inset: 0; pointer-events: none; }
 /* Which alerts were firing at the pointer, at the plot's foot (alertBands.js): opaque over the
    shading, one line an alert, held inside the plot near either end as the now marker is. */
+/* Its own width, not the room between the cursor and the right edge: left alone, an absolute box is as
+   wide as that room, so near the edge it narrowed, wrapped and outgrew the chart before the transform
+   moved it back. */
 .chart-alert-readout {
   position: absolute;
   bottom: 18px;
   z-index: 2;
   transform: translateX(-50%);
+  width: max-content;
   max-width: 70%;
   padding: 2px 6px;
   border: 1px solid var(--danger);
@@ -6223,11 +6251,81 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-group-head > .group-heading { padding: 8px var(--inset); }
 /* The export dialog's first line: the device, the metrics and the window it exports. */
 .telemetry-export-what { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
+/* What the file leaves out or holds beyond the view, under the first line, closer to it than the next field. */
+.telemetry-export-note { margin: -6px 0 12px; font-size: 12px; color: var(--text-muted); }
 /* Buckets: its size in the toolbar, shaped as the Metrics dropdown beside it, and its choices a
    column in the popover. */
 .history-bucket-pick { justify-content: space-between; min-width: 0; }
 .history-bucket-choices { display: flex; flex-direction: column; gap: 6px; }
 .history-bucket-choices .btn { justify-content: flex-start; }
+
+/* ===== History: Cell ===== */
+/* A device's status dot with its tooltip, in Overview's lanes, the machines' charts and the
+   heatmap's rows. */
+.device-status-dot { display: inline-flex; flex-shrink: 0; }
+/* The machines' charts, the Device tab's stack of charts, each titled by its machine, under one
+   line that says they share a scale (SmallMultiples). */
+.multiples { display: flex; flex-direction: column; gap: var(--stack); min-width: 0; }
+.multiples-scale { margin: 0; font-size: 12px; color: var(--text-muted); }
+/* The line that says the metric is derived: the tag, then the words, on one row. */
+.multiples-derived { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.multiple-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(100%, 24rem);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.multiple-link { min-width: 0; color: var(--accent-text); text-decoration: none; }
+.multiple-link:hover .multiple-name-text,
+.multiple-link:focus-visible .multiple-name-text { text-decoration: underline; }
+/* Where a device sits, after its name, on the Metric tab, whose devices are in several places. */
+.multiple-place { min-width: 0; font-size: 12px; font-weight: 400; color: var(--text-muted); }
+/* The Metric tab's pager under the charts: Previous, the page, Next. It sits after the scroller. */
+.history-pager { justify-content: center; }
+/* A machine that does not report the metric: a line in words where its chart would be. */
+.multiple-absent { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--text-muted); }
+/* A section's body under its heading, and the words that open it. */
+.cell-section { min-width: 0; padding: 12px var(--inset) var(--inset); }
+.cell-section[hidden] { display: none; }
+.cell-note { margin: 0 0 10px; font-size: 12px; color: var(--text-muted); }
+/* The hour-of-day heatmap: a column of machine names, then 24 columns that share the rest of the
+   width, so nothing scrolls sideways. A cell takes its shade from .heatmap-step-N, Overview's
+   ramp; one with no value is the card with an edge, as Overview's block with no readings is. */
+.heatmap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.heatmap-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.heatmap-key-item { display: inline-flex; align-items: center; gap: 6px; }
+.heatmap-swatch { display: inline-block; flex-shrink: 0; width: 14px; height: 10px; border-radius: 2px; }
+.heatmap-grid { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.heatmap-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 11rem) repeat(24, minmax(0, 1fr));
+  align-items: center;
+  gap: 2px;
+}
+.heatmap-label { display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: 6px; font-size: 12px; color: var(--text-primary); }
+.heatmap-name { min-width: 0; font-weight: 600; }
+.heatmap-hour { overflow: visible; font-size: 11px; line-height: 1; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.heatmap-cell { height: 22px; min-width: 0; border-radius: 2px; cursor: default; }
+.heatmap-cell:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
+.heatmap-step-1 { background: var(--coverage-1); }
+.heatmap-step-2 { background: var(--coverage-2); }
+.heatmap-step-3 { background: var(--coverage-3); }
+.heatmap-step-4 { background: var(--coverage-4); }
+.heatmap-cell-none { background: var(--bg-card); box-shadow: inset 0 0 0 1px var(--border-hover); }
+.heatmap-absent { grid-column: 2 / -1; font-size: 12px; color: var(--text-muted); }
+/* What the cell under the pointer or focus is, in words, under the grid; the line keeps its height
+   so the grid does not move as the words change. */
+.heatmap-readout { min-height: 1.5em; margin: 0; font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); overflow-wrap: anywhere; }
 
 /* ===== History: Overview ===== */
 /* Overview is the Audit Trail's lane grid (.trail-swimlanes, .trail-lane, .trail-section,
@@ -6246,12 +6344,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .overview-lane-deep .trail-lane-label { padding-left: calc(var(--trail-name-indent) + 18px); }
 /* A lane's label: tick box, status dot, name, then the metric count as the qualifier. */
 .overview-pick { flex-shrink: 0; margin: 0; }
-.overview-status { display: inline-flex; flex-shrink: 0; }
 .overview-lane-name { min-width: 0; text-decoration: none; }
 .overview-lane-name .trail-lane-name { display: block; color: var(--accent-text); }
 .overview-lane-name:hover .trail-lane-name,
 .overview-lane-name:focus-visible .trail-lane-name { text-decoration: underline; }
-.overview-lane-offline { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+.device-offline-word { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
 /* A track's blocks: a run of one shade a box, between the row's rules, on the track's own colour. */
 .overview-track { cursor: crosshair; user-select: none; }
 .overview-run { position: absolute; top: 7px; bottom: 7px; }
@@ -6919,7 +7016,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* Settings › Notifications: under the category's table, the delivery log, a table of its own with
-   its own header row. Time, Event, Outcome and Attempts are fixed, so the rows line up; the alert
+   its own header row. Time, Event, Channel, Outcome and Attempts are fixed, so the rows line up; the alert
    and the error take the rest, cut with an ellipsis and slid on hover (OverflowText). */
 .notification-admin-note { min-height: 0; }
 
@@ -6946,10 +7043,16 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .notification-log-table { table-layout: fixed; width: 100%; }
 .notification-col-time { width: 170px; }
 .notification-col-event { width: 96px; }
+.notification-col-channel { width: 88px; }
 .notification-col-outcome { width: 104px; }
 .notification-col-attempts { width: 80px; }
 
 .notification-log-cut { display: block; min-width: 0; max-width: 100%; }
+
+/* Who is emailed and whether the site can send, between the toolbar and the table. Every role reads it. */
+.notification-email { padding: 12px var(--inset) 0; }
+.notification-email .callout { margin-bottom: 8px; }
+.notification-email .notification-log-lead { margin-bottom: 0; }
 .notification-log-none { color: var(--text-dim); }
 
 /* ===== Profile ============================================================================== */
@@ -7630,6 +7733,10 @@ ol.gateway-steps {
 /* The chip keeps the id's last 24 characters (CopyableId truncate="start") at this width. */
 .metric-col-semantic-id { width: 252px; }
 .metric-col-superseded { width: 220px; }
+/* Derived: Definition takes what is left, which is why it is the one column with no width. */
+.metric-table-derived { min-width: 900px; }
+.metric-col-kind { width: 140px; }
+.metric-col-description { width: 240px; }
 /* Uncatalogued: Declared By takes what is left, and its chips wrap within it. */
 .metric-table-uncatalogued { min-width: 860px; }
 .metric-col-count { width: 80px; }
@@ -7721,6 +7828,101 @@ ol.gateway-steps {
 
 /* The schema detail dialog's five footer buttons do not fit one row at its width. */
 .modal-lg .modal-actions { flex-wrap: wrap; }
+
+/* AUTOMATIONS. The list's select and switch columns, the chip that names the entity a list is
+   narrowed to, the page of one automation, the editor's frame and the apply dialog's results. Every
+   colour is a theme token. The editor itself is drawn in a shadow root (AutomationEditor.jsx), which
+   inherits these tokens, so only its frame is styled here. */
+.automation-select { width: 36px; padding-right: 0; }
+.automation-select input,
+.automation-switch input { accent-color: var(--accent); }
+.automation-summary { max-width: 420px; }
+.automation-summary-text { display: block; min-width: 0; }
+.automation-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.automation-switch:has(input:disabled) { cursor: default; }
+.automation-reason { margin-right: 6px; }
+
+.automation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-glass);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.automation-chip strong { font-weight: 600; }
+.automation-chip-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.automation-chip-clear:hover,
+.automation-chip-clear:focus-visible { background: var(--bg-glass); color: var(--text-primary); }
+.automation-chip-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.automation-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: var(--inset);
+}
+.automation-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.automation-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
+.automation-hint,
+.automation-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.automation-note code,
+.automation-hint code { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); }
+.automation-editor {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+}
+.automation-schema-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.automation-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.automation-section-title { margin: 8px 0 0; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.automation-pairs { max-width: 260px; font-size: 12px; color: var(--text-muted); }
+.automation-trail { margin: 0; font-size: 13px; }
+
+.apply-summary { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.apply-note { margin: 0 0 8px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.apply-note-problem { color: var(--danger-text); }
+.apply-results,
+.apply-reasons { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.apply-result { display: flex; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-primary); }
+.apply-result-block { flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-xs); }
+.apply-result-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.apply-changes { font-size: 12px; color: var(--text-muted); }
+.apply-reasons li { display: flex; gap: 10px; font-size: 12px; line-height: 1.5; }
+.apply-line { flex-shrink: 0; color: var(--text-muted); }
 
 /* VOCABULARY. `.vocab-sections` is the card's scroller (`.card-fill-scroll`). A section header reuses
    `.table-group-button` and `.table-group-label`; the strip behind it is the header colour, and pins

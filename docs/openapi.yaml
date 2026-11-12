@@ -417,6 +417,12 @@ paths:
     patch:
       tags: [Assets]
       summary: Update gateways matching a filter
+      description: |
+        A change of `deployment` that crosses Remote's boundary ends what the old type held (0252):
+        any unredeemed enrolment token is burned, the broker credential the gateway held is disabled
+        and `credential_revoked_at` stamped, and a gateway that becomes Remote, or leaves it
+        mid-enrolment, is set `OFFLINE`. The returned row carries both. A change among `host`,
+        `third_party` and `is_simulated` ends nothing.
       parameters:
         - { name: id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
         - $ref: '#/components/parameters/Prefer'
@@ -834,6 +840,259 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/TelemetryCarriedBucket' } }
         '400': { description: 'Bounds out of order, a bad bucket, a list missing, or more than 50,000 rows (buckets times series), refused before anything is read (`22023`).' }
         '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
+  /rest/v1/rpc/telemetry_changes:
+    post:
+      tags: [Telemetry]
+      summary: Read every change of a text or a flag, each at its own time
+      description: |
+        What the History page reads for a text or a flag (`0254`). One row per series, a series
+        being one asset and one metric, every pair of the two lists. `read` says what it holds.
+        **`changes`**: while raw telemetry holds the window, the first reading in it and then each
+        reading whose value differs from the one before, with its time. A refresh of an unchanged
+        value is not returned. The value in force at `from_ts` is `carried_string` or
+        `carried_bool`. **`change_cap`** is more than `max_changes` changes, and **`reading_cap`**
+        more than 20,000 readings of one series in the window. For both, `marked_ts` and
+        `marked_values` name each bucket of `bucket` that held more than one value, and how many.
+        **`retention`**: the historian has dropped raw readings of the series inside the window.
+        Chart the last three from `/rest/v1/rpc/telemetry_carried` instead.
+
+        Only text (`val_string`) and flag (`val_bool`) values are compared. `SECURITY INVOKER`, so
+        it reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, bucket, asset_ids, metric_names]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                bucket: { type: string, example: '00:05:00', description: 'The buckets a mark names, as `telemetry_carried` takes them: a whole number of minutes, at least one, with no months.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id).' }
+                metric_names: { type: array, items: { type: string }, example: [MotionDevice/OnPath], description: 'At most 50 series a read, assets times metrics.' }
+                max_changes: { type: integer, minimum: 1, maximum: 5000, default: 2000, description: 'Past this many changes, `read` is `change_cap`.' }
+      responses:
+        '200':
+          description: One row per series, ordered by asset and metric.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryChangesRow' } }
+        '400': { description: 'Bounds out of order, a bad bucket, a list missing, more than 50 series, `max_changes` outside 1 to 5,000, or more than 50,000 buckets times series, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
+  /rest/v1/rpc/telemetry_hour_of_day:
+    post:
+      tags: [Telemetry]
+      summary: Average one numeric metric by the hour of the day
+      description: |
+        What the History page's Cell tab reads for its heatmap (`0265`). For each device asked for,
+        the mean of one metric at each hour of the day, 0 to 23, in the time zone given, across the
+        days of the window. It reads `/rest/v1/rpc/telemetry_carried` at one hour, so a quiet hour
+        counts as the value carried into it, and every hour weighs the same however many readings it
+        held. One row per device per hour that has a value: a text or a flag metric has no row, and
+        a device with nothing to carry has none before its first value.
+
+        The hour is the one an hourly bucket starts in, so in a time zone offset by part of an hour
+        a bucket is filed under the hour it begins in. `days` is how many local dates the mean
+        spans. `SECURITY INVOKER`, so it reads what the caller may read through the telemetry
+        views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, asset_ids, metric_name, tz]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id). Hours times devices is at most 50,000.' }
+                metric_name: { type: string, example: Spindle/LOAD, description: 'One metric.' }
+                tz: { type: string, example: Europe/London, description: 'The time zone the hours are in: an IANA name.' }
+      responses:
+        '200':
+          description: One row per device per hour of the day, ordered by device and hour.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryHourOfDayRow' } }
+        '400': { description: 'Bounds out of order, a list or the metric missing, a time zone Postgres does not know, or more than 50,000 hours times devices, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
+  /rest/v1/rpc/telemetry_carried_by_group:
+    post:
+      tags: [Telemetry]
+      summary: Fold one numeric metric across the devices of each group, a mean and a total a bucket
+      description: |
+        What the History page's Area tab reads for its cells (`0276`). For each group of devices, one
+        row per bucket: the mean of one metric across the group's devices that have a value in the
+        bucket, and their total, which is there only where EVERY device of the group has a value, since a
+        partial sum reads as a real one. It reads `/rest/v1/rpc/telemetry_carried` for every device in
+        one call, so a quiet bucket counts as the value carried into it, and folds the rows where the read
+        is made: what returns is groups times buckets, not devices times buckets.
+
+        `asset_ids[i]` is in the group `group_keys[i]`. `members` is the group's devices as asked for,
+        `with_value` how many had a value in the bucket and `measured` how many had a reading rather
+        than a carried value. A device that never reports the metric keeps its group from ever having a
+        total, so name only the devices that report it. A text or a flag metric has no row.
+        `SECURITY INVOKER`, so it reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, bucket, asset_ids, group_keys, metric_name]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                bucket: { type: string, example: 5 minutes, description: 'A whole number of minutes, at least one, no months.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000, dev220000000000400080001], description: 'Device Sparkplug IDs (devices.sparkplug_id). Devices times buckets is at most 50,000.' }
+                group_keys: { type: array, items: { type: string }, example: [cell-1, cell-2], description: 'The group of each device, as long as `asset_ids`: `asset_ids[i]` is in `group_keys[i]`.' }
+                metric_name: { type: string, example: Spindle/LOAD, description: 'One metric.' }
+      responses:
+        '200':
+          description: One row per group per bucket that has a value, ordered by group and bucket.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryGroupRow' } }
+        '400': { description: 'Bounds out of order, a bad bucket, a list or the metric missing, lists of different lengths, or more than 50,000 devices times buckets, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
+  /rest/v1/rpc/derived_series:
+    post:
+      tags: [Telemetry]
+      summary: Read a derived metric's series, computed from the minutes
+      description: |
+        What the History page reads for a derived metric (`0282`). A derived metric has no readings of
+        its own: its definition is on its `metric_catalog` row, and nothing is stored. This reads each
+        input through `/rest/v1/rpc/telemetry_carried` at one minute and combines the minutes into the
+        bucket, at every bucket width.
+
+        - **A counter rate** is the increase per hour. A fall is a reset, and the new value counts as the
+          increase.
+        - **A time in state** is the share of the bucket's minutes in the states, from 0 to 1. It is
+          resolved to the minute.
+        - **A sum** is the time-average of the per-minute signed sum, for the minutes in which every
+          input has a value. A device that lacks an input has no row.
+
+        One row per device, metric and bucket that has a value, in no promised order. `avg_double` is
+        the value. `min_double`, `max_double` and `last_double` are the lowest and highest minute and the
+        last minute of a sum, and the value itself for a rate and a share. `n_rows` counts the inputs'
+        readings in the bucket, and `is_carried` is true when there were none. Buckets lie on the epoch
+        grid. Only whole minutes are read: nothing from the minute that holds now.
+
+        It refuses before it reads anything: a metric that is not derived, and the limits in the body
+        parameters. `SECURITY INVOKER`, so it reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, bucket, asset_ids, metric_names]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                bucket: { type: string, example: '01:00:00', description: 'A whole number of minutes, at least one and at most 4 days, with no months, e.g. `5 minutes` or `1 day`.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id). Devices times metrics times buckets is at most 5,000, and the minutes of input the window reads (devices times inputs times minutes) at most 250,000.' }
+                metric_names: { type: array, items: { type: string }, example: [Controller/PARTS_PER_HOUR], description: 'Derived metrics only, by catalogue name.' }
+      responses:
+        '200':
+          description: The buckets that have a value.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DerivedSeriesBucket' } }
+        '400': { description: 'Bounds out of order, a bad bucket, a list missing, a metric that is not derived, more than 5,000 rows, or more than 250,000 minutes of input, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
+  /rest/v1/rpc/derived_current:
+    post:
+      tags: [Telemetry]
+      summary: Read a derived metric's current value
+      description: |
+        What the Devices drawer shows and an automation compares (`0282`). One row for each device that has
+        a value, by one rule for each kind. **A counter rate and a time in state are over the last hour**:
+        the 60 minutes ending at the last whole minute. **A sum is its value at the last whole
+        minute.** A rate from one minute swings between 0 and sixty times the count, and a minute's share
+        is 0 or 1, so a person's "parts per hour" and "uptime" are over an hour.
+
+        `observed_at` is the minute the window ends at. `window_minutes` is 60, or 0 for a sum. It is
+        computed by `/rest/v1/rpc/derived_series` at one minute, so it is the same number a chart
+        shows. `SECURITY INVOKER`, so it reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset_ids, metric_names]
+              properties:
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], description: 'Device Sparkplug IDs (devices.sparkplug_id). Devices times metrics is at most 5,000.' }
+                metric_names: { type: array, items: { type: string }, example: [Controller/PARTS_PER_HOUR], description: 'Derived metrics only, by catalogue name.' }
+      responses:
+        '200':
+          description: One row for each device and metric that has a value.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DerivedCurrentValue' } }
+        '400': { description: 'A list missing, a metric that is not derived, or more than 5,000 devices times metrics, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
+  /rest/v1/rpc/export_telemetry:
+    post:
+      tags: [Telemetry]
+      summary: Export readings, within a limit the database keeps
+      description: |
+        What History's Export CSV calls, from the Device, Overview and Cell views (`0279`). One call
+        checks, reads and records the export, and returns every row as one document, which the
+        browser writes as a CSV. An Administrator or a Shopfloor Manager only: an Operator reads the
+        charts and cannot export. This bounds the export, not access to the readings.
+
+        **It refuses before it reads anything:** a caller who holds neither role (`42501`), a session
+        that has not given its second factor while `security.require_mfa_for_managers` is on
+        (`42501`, detail `mfa_required`), a window that does not end after it starts or is longer
+        than `history.export_max_days` (14 days unless an Administrator changes it, from 1 to 366;
+        the message names the limit and *Settings › History*), a resolution other than `raw`, `1m`,
+        `5m` or `1h`, no device or no metric, and more than 1,000 devices or 500 metrics (`22023`).
+
+        **`raw` reads the raw readings, and a rollup is never read in its place.** A rollup's row is
+        its bucket: `time` is the bucket's start and `value` its average, or its last value for a
+        text or a flag. Raw is read from the oldest reading the historian still holds (`raw_from`);
+        a window that starts earlier is read from there, and `read_from` says where.
+
+        **At most 50,000 rows.** Past that the rows end at a whole minute: `truncated` is true and
+        `read_to` is the time they end. A minute that holds more than 50,000 readings returns none.
+        The read is bounded by time, from the rollup's own count of what each hour and minute holds,
+        because `postgres_fdw` sends no `LIMIT` for a read naming devices and metrics.
+
+        **An export that returns rows writes one `TELEMETRY_EXPORTED` row in the Audit Trail**, in
+        the asset lane under `telemetry`, naming who exported, the devices (id and name), the
+        metrics, the window, the resolution and how many rows left. `audit_id` is that row's id. One
+        that returns none writes none, and a refusal writes none. `SECURITY DEFINER`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, asset_ids, metric_names]
+              properties:
+                from_ts: { type: string, format: date-time, description: 'Readings from this time on.' }
+                to_ts: { type: string, format: date-time, description: 'Readings before this time. After `from_ts`, and at most `history.export_max_days` later.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], maxItems: 1000, description: 'Device Sparkplug IDs (devices.sparkplug_id). A repeated or blank one is ignored.' }
+                metric_names: { type: array, items: { type: string }, example: [Spindle/LOAD], maxItems: 500 }
+                resolution: { type: string, enum: [raw, 1m, 5m, 1h], default: raw, description: '`raw`, or the average of the 1-minute, 5-minute or 1-hour rollup. Never one in place of another.' }
+      responses:
+        '200':
+          description: The export.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelemetryExport' }
+        '400': { description: 'A window out of order or longer than `history.export_max_days` (the message names the limit), an unknown resolution, no device or no metric, or too many of either (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '403': { description: 'Not an Administrator or a Shopfloor Manager, or a session without the second factor while it is required (`42501`).' }
         '503': { description: 'The historian could not be reached.' }
 
   /rest/v1/rpc/telemetry_coverage:
@@ -1842,6 +2101,58 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: 'No such person, or no approval of that app by them in force (`P0002`).' }
 
+  /rest/v1/rpc/register_app:
+    post:
+      tags: [Auth]
+      summary: Register an app that signs people in
+      description: |
+        Register App on Access Control's Apps tab (`0260`). Adds one client the way `0002` adds
+        Aber's own: `registration_type` `manual`, the code and refresh grants, and for a confidential
+        app a secret that is returned here once and kept only as its SHA-256 hash. A public app has
+        none and uses PKCE alone. The app is sign-in only: its token reaches GoTrue's sign-in
+        endpoints and nothing else (`docs/security-model.md`). An `APP_REGISTERED` row in the app's
+        lane names you. Administrator only, and with Settings requiring a second factor, only from a
+        session that gave its code (`403`, `mfa_required`). Dynamic registration stays off.
+
+        Plain `http` addresses are allowed only on the site's own network: `localhost`, `.localhost`
+        names, loopback and private IPv4 addresses, `::1`, and the site's domain with every name
+        under it. `https` goes anywhere. No fragment, wildcard, comma, user name or space.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_name, p_redirect_uris, p_client_type]
+              properties:
+                p_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                  description: A name no app not removed holds, whatever its case and with or without a leading `Aber `.
+                p_redirect_uris:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items: { type: string }
+                p_client_type: { type: string, enum: [public, confidential] }
+      responses:
+        '200':
+          description: The app. The secret is in this answer alone.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:            { type: string, format: uuid, description: The `client_id`. }
+                  name:          { type: string }
+                  client_type:   { type: string, enum: [public, confidential] }
+                  redirect_uris: { type: array, items: { type: string } }
+                  client_secret: { type: string, nullable: true, description: Null for a public app. }
+        '400': { description: 'A bad name, type or address, in a message that names it (`22023`).' }
+        '403': { description: 'Not an Administrator (`42501`), or a second factor is required and the session gave none (`mfa_required`).' }
+        '409': { description: 'An app not removed holds the name (`23505`).' }
+
   /rest/v1/rpc/remove_app:
     post:
       tags: [Auth]
@@ -2208,6 +2519,171 @@ paths:
         '403': { description: 'Not a Shopfloor Manager or an Administrator (`42501`).' }
         '404': { description: 'No such window.' }
 
+  /rest/v1/rpc/apply_automations:
+    post:
+      tags: [Registry]
+      summary: Check a document of automations, and apply it
+      description: |
+        The one call that validates and applies an Automations file (`0256`). The browser parses the
+        YAML into JSON and sends the list; the database checks every field, resolves every device and
+        metric, and checks the caller's right. The file format is in
+        [`docs/automations.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/docs/automations.md),
+        and the dashboard serves its JSON Schema at `/json-schema/automations.schema.json`.
+
+        It answers one result per automation: its `status` (`new`, `changed`, `unchanged` or
+        `refused`) and, for a refusal, `reasons`, each with a JSON `path` such as
+        `$[0].triggers[1].above`. All or nothing: with any refusal nothing is written, and with
+        `p_dry_run` true nothing is written either, so a preview and an apply are the same call. It
+        never deletes: an automation the document leaves out is left alone. An automation is found
+        by its `id`; a re-upload updates it. A change writes one `AUTOMATION_CREATED`,
+        `AUTOMATION_CHANGED`, `AUTOMATION_ENABLED` or `AUTOMATION_DISABLED` row in the Audit Trail;
+        an unchanged automation writes none.
+
+        A Shopfloor Manager or an Administrator may call it, and with the second-factor switch on
+        their session must have given its code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_doc, p_dry_run]
+              properties:
+                p_doc: { type: array, items: { type: object }, description: 'The automations, as the JSON Schema describes them. At most 500.' }
+                p_dry_run: { type: boolean, description: 'True to preview and write nothing; false to apply.' }
+      responses:
+        '200':
+          description: One result per automation, in the document's order. A document that is not a list answers one refused result with the path `$`.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AutomationResult' }
+        '400': { description: '`p_dry_run` missing (`22023`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator, or the second factor is required (`42501`).' }
+
+  /rest/v1/rpc/automations_document:
+    post:
+      tags: [Registry]
+      summary: Read the automations in the document's shape
+      description: |
+        The rows rendered back to the shape `apply_automations` takes (`0256`): `automations`, all of
+        them or the keys asked for, ordered by key; and `devices`, for each device they name its
+        current `name` and `place`, for the page to write as a comment beside the id. Trigger rows
+        archived with their device are left out. `apply_automations` of the `automations` list
+        reports every one `unchanged`. Every signed-in role may call it.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                p_keys: { type: array, nullable: true, items: { type: string }, description: 'The automation ids to render. Null renders all of them.' }
+      responses:
+        '200':
+          description: The automations and the devices they name.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  automations: { type: array, items: { type: object } }
+                  devices:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        place: { type: string, nullable: true, example: 'Cell 2 · Machining' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+
+  /rest/v1/rpc/set_automation_enabled:
+    post:
+      tags: [Registry]
+      summary: Turn an automation on or off
+      description: |
+        The list's switch (`0256`). Turning one off resolves its open alerts. Enabling one with no
+        live trigger is refused: its triggers are archived or gone. Writes one `AUTOMATION_ENABLED`
+        or `AUTOMATION_DISABLED` row in the Audit Trail, or nothing when it is already so. A Shopfloor
+        Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_key, p_enabled]
+              properties:
+                p_key: { type: string, description: 'The automation''s `id` in the file.' }
+                p_enabled: { type: boolean }
+      responses:
+        '200':
+          description: The automation, as it is now.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Automation' }
+        '400': { description: '`p_enabled` missing (`22023`), or an automation with no live trigger enabled (`23514`).' }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator, or the second factor is required (`42501`).' }
+        '404': { description: 'No such automation.' }
+
+  /rest/v1/rpc/delete_automation:
+    post:
+      tags: [Registry]
+      summary: Delete an automation
+      description: |
+        Deletes the automation with its triggers and actions, and resolves its open alerts (`0256`).
+        Writes one `AUTOMATION_DELETED` row in the Audit Trail holding the automation as it was. A
+        Shopfloor Manager or an Administrator may call it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_key]
+              properties:
+                p_key: { type: string, description: 'The automation''s `id` in the file.' }
+      responses:
+        '204': { description: Deleted. }
+        '403': { description: 'Not a Shopfloor Manager or an Administrator, or the second factor is required (`42501`).' }
+        '404': { description: 'No such automation.' }
+
+  /rest/v1/rpc/automations_for_entity:
+    post:
+      tags: [Registry]
+      summary: Which automations apply to a device, and why
+      description: |
+        One row per reason an automation applies to the device (`0256`): `named` when a live trigger
+        names it, `site-wide` when a trigger that names no device applies to every modelled device,
+        one with a schema attached. A disabled automation is listed, with `enabled` false. Every
+        signed-in role may call it. An id that is no device answers no rows.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_entity_id]
+              properties:
+                p_entity_id: { type: string, format: uuid, description: 'The device''s `id`.' }
+      responses:
+        '200':
+          description: The automations and their reasons, named first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    automation_id: { type: string, format: uuid }
+                    key: { type: string }
+                    alias: { type: string }
+                    enabled: { type: boolean }
+                    reason: { type: string, enum: [named, site-wide] }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+
   /rest/v1/rpc/alert_occurrences:
     post:
       tags: [Registry]
@@ -2347,6 +2823,24 @@ paths:
         '403': { description: 'Not an Administrator (`42501`).' }
         '409': { description: 'The webhook has no address, or no signing key, yet (`55000`).' }
 
+  /rest/v1/rpc/queue_test_email_notification:
+    post:
+      tags: [Registry]
+      summary: Email the caller a test
+      description: |
+        Queues a test email to the caller's own address and returns its id (`0263`). The row with
+        that id in `/rest/v1/notification_deliveries` says how it went once the dispatcher has sent
+        it; a test is tried once. It checks the whole path: the relay, the sender and the message.
+        Keeps the newest 20 finished email tests. Administrator only.
+      responses:
+        '200':
+          description: The delivery log row's id.
+          content:
+            application/json:
+              schema: { type: string, format: uuid }
+        '403': { description: 'Not an Administrator (`42501`).' }
+        '409': { description: 'The account has no email address (`55000`).' }
+
   /rest/v1/notification_deliveries:
     get:
       tags: [Registry]
@@ -2360,6 +2854,7 @@ paths:
       parameters:
         - { name: state, in: query, schema: { type: string, enum: [pending, sent, dropped, dead] }, description: 'e.g. `eq.dead`' }
         - { name: event, in: query, schema: { type: string, enum: [firing, resolved, reminder, test] } }
+        - { name: channel, in: query, schema: { type: string, enum: [webhook, email] } }
         - $ref: '#/components/parameters/Select'
       responses:
         '200':
@@ -2374,7 +2869,7 @@ paths:
                     id: { type: string, format: uuid, description: 'Also the CloudEvents id and the webhook-id header, the same on every retry.' }
                     alert_id: { type: string, format: uuid, nullable: true, description: 'The occurrence; null for a test.' }
                     event: { type: string, enum: [firing, resolved, reminder, test] }
-                    channel: { type: string, enum: [webhook] }
+                    channel: { type: string, enum: [webhook, email] }
                     state: { type: string, enum: [pending, sent, dropped, dead] }
                     attempts: { type: integer, description: 'Posts made. A hold is not one.' }
                     next_attempt_at: { type: string, format: date-time }
@@ -2383,6 +2878,8 @@ paths:
                     response_status: { type: integer, nullable: true }
                     last_error: { type: string, nullable: true, maxLength: 500, description: 'In the dispatcher''s words; never the address.' }
                     requested_by: { type: string, format: uuid, nullable: true, description: 'For a test, the Administrator who sent it.' }
+                    recipients: { type: integer, nullable: true, description: 'For an email, how many people the relay took it for (`0263`). A count, never the addresses.' }
+                    refused: { type: integer, nullable: true, description: 'For an email, how many addresses the relay refused while taking the others.' }
                     created_at: { type: string, format: date-time }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
@@ -2678,7 +3175,7 @@ paths:
             schema: { $ref: '#/components/schemas/MetricCatalogWrite' }
       responses:
         '201': { description: Created. }
-        '400': { description: 'Name format, group spelling, or `semantic_id_type` CHECK violation.' }
+        '400': { description: 'Name format, group spelling, `semantic_id_type` CHECK violation, or a derived metric the database refuses (an input missing, derived or of the wrong datatype, a sum of unlike units, a name a device declares): the message says which.' }
         '403': { $ref: '#/components/responses/Forbidden' }
     patch:
       tags: [Registry]
@@ -3523,9 +4020,9 @@ paths:
       tags: [Registry]
       summary: Read your own display preferences
       description: |
-        One row per person (`0188`, `0194`): the theme, sidebar layout and single-key shortcuts
-        the dashboard's Profile page and account menu set, so they follow the account rather than
-        the browser. RLS returns the
+        One row per person (`0188`, `0194`, `0264`): the theme, sidebar layout, single-key shortcuts
+        and desktop notifications the dashboard's Profile page and account menu set, so they follow
+        the account rather than the browser. RLS returns the
         caller's own row and nobody else's, an `Administrator` included; an empty array means
         this person has chosen nothing yet, and the defaults apply. `anon` and `service_role` hold
         nothing on the table.
@@ -3563,6 +4060,7 @@ paths:
                 theme: { type: string, enum: [dark, light] }
                 sidebar_mode: { type: string, enum: [hover, expanded, collapsed] }
                 single_key_shortcuts: { type: boolean }
+                desktop_notifications: { type: boolean }
       responses:
         '201': { description: 'Created or changed.' }
         '400': { description: 'A value outside the CHECK (`23514`).' }
@@ -3627,6 +4125,91 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/AlertSuppressionWindow' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/automations:
+    get:
+      tags: [Registry]
+      summary: Read the automations
+      description: |
+        One row per automation (`0255`). The YAML is rendered from the rows and parsed back on save;
+        it is never stored. Every signed-in role reads every automation. Nobody writes the table
+        here: use `/rest/v1/rpc/apply_automations`, `/rest/v1/rpc/set_automation_enabled` and
+        `/rest/v1/rpc/delete_automation`. `/rest/v1/rpc/automations_document` reads them in the file's
+        shape.
+      parameters:
+        - { name: key, in: query, schema: { type: string }, description: 'e.g. `eq.lathe-3-spindle-hot`' }
+        - { name: enabled, in: query, schema: { type: string }, description: 'e.g. `eq.true`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching automations.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Automation' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/automation_triggers:
+    get:
+      tags: [Registry]
+      summary: Read the triggers of the automations
+      description: |
+        One row per trigger and device (`0255`): a trigger that names several devices is one row
+        each, so each is evaluated, and fires, on its own. A row archived with its device has
+        `is_archived` true. Every signed-in role reads them. Nobody writes the table here.
+      parameters:
+        - { name: automation_id, in: query, schema: { type: string, format: uuid }, description: 'e.g. `eq.<uuid>`' }
+        - { name: entity_id, in: query, schema: { type: string, format: uuid }, description: 'The device. e.g. `eq.<uuid>`' }
+        - { name: is_archived, in: query, schema: { type: string }, description: 'e.g. `eq.false`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching triggers.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AutomationTrigger' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/automation_actions:
+    get:
+      tags: [Registry]
+      summary: Read the actions of the automations
+      description: |
+        One row per action (`0255`). `alert` is the one action in this release. Every signed-in role
+        reads them. Nobody writes the table here.
+      parameters:
+        - { name: automation_id, in: query, schema: { type: string, format: uuid }, description: 'e.g. `eq.<uuid>`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching actions.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AutomationAction' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/automation_trigger_states:
+    get:
+      tags: [Registry]
+      summary: Read what the evaluator found for each trigger and device
+      description: |
+        One row for each live threshold trigger, device and metric (`0270`): since when its latest
+        value has been breaching and not yet fired (`pending_since`), since when its alert has been
+        firing (`firing_since`), the value the last run read and when that value arrived. A row is
+        deleted once its trigger is no longer live. Every signed-in role reads them. Only the
+        evaluator, which pg_cron runs every minute, writes the table. A device with no latest value
+        in the historian has no row until it has one.
+      parameters:
+        - { name: trigger_id, in: query, schema: { type: string, format: uuid }, description: 'e.g. `eq.<uuid>`' }
+        - { name: entity_id, in: query, schema: { type: string, format: uuid }, description: 'The device. e.g. `eq.<uuid>`' }
+        - { name: firing_since, in: query, schema: { type: string }, description: 'e.g. `not.is.null`, for the pairs that are firing' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching states.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AutomationTriggerState' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/device_nameplate:
@@ -5086,9 +5669,9 @@ paths:
         '400': { description: Body is not JSON. }
         '401':
           description: >-
-            The token is unknown, expired, or already redeemed. The three are deliberately
-            indistinguishable — reporting which would let an enumerator learn that a token value
-            once existed.
+            The token is unknown, expired or already redeemed, or its gateway is archived or no
+            longer Remote. They are deliberately indistinguishable — reporting which would let an
+            enumerator learn that a token value once existed.
         '405': { description: Method not allowed. }
         '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
@@ -5112,9 +5695,9 @@ paths:
 
         The apikey passes the gateway's key check as on every function; the token is what
         authorises. Refused identically (401) for a missing header, a malformed token, an unknown,
-        expired or spent one, and an archived gateway. Refused outright (503) on a deployment whose
-        public URL is plain HTTP, unless the development values allow it: the route carries a
-        token and a secret.
+        expired or spent one, and a gateway that is archived or not Remote. Refused outright (503)
+        on a deployment whose public URL is plain HTTP, unless the development values allow it: the
+        route carries a token and a secret.
       parameters:
         - in: header
           name: X-Enrolment-Token
@@ -6177,13 +6760,16 @@ paths:
         `sweep_notifications()` every minute from `pg_cron` while one is due.
 
         One pass takes each due row of `notification_deliveries`, oldest first, asks
-        `platform_alert_send_decision()` whether it still applies, and posts it to the webhook: a
-        CloudEvents 1.0 event in structured JSON mode, signed with the Standard Webhooks headers
-        `webhook-id`, `webhook-timestamp` and `webhook-signature` (`v1,` and the base64
-        HMAC-SHA256 of `id.timestamp.body`). An address whose host is not allowed is refused, a
-        redirect is a failure and is not followed, and a receiver has 10 seconds to answer. A
-        failure is retried after 30 seconds, doubling to an hour, and is dead after the tenth
-        attempt.
+        `platform_alert_send_decision()` whether it still applies, and sends it down its channel.
+        The webhook gets a CloudEvents 1.0 event in structured JSON mode, signed with the Standard
+        Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature` (`v1,` and the
+        base64 HMAC-SHA256 of `id.timestamp.body`). An address whose host is not allowed is refused,
+        a redirect is a failure and is not followed, and a receiver has 10 seconds to answer. Email
+        goes to the people `notification_email_recipients()` resolves as the row is sent, through
+        the relay the functions pod's `SMTP_*` variables name (the same `supabaseAuth.smtp` GoTrue
+        reads): one plain-text message in UTF-8 with the recipients in the envelope alone. A relay
+        refusing the message itself is final; a relay that is down is retried. A failure is retried
+        after 30 seconds, doubling to an hour, and is dead after the tenth attempt.
 
         Authorised by the dispatch secret in the `x-dispatch-secret` header, **not** by the
         publishable key. The database generated it and alone sends it. Every message comes from the
@@ -6214,7 +6800,7 @@ paths:
         '401':
           description: The secret is missing or wrong.
         '405':
-          description: Not a POST.
+          description: Neither a POST nor a GET.
         '500': { $ref: '#/components/responses/FunctionFailure' }
         '502':
           description: >-
@@ -6223,6 +6809,35 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not configured.
+    get:
+      tags: [Edge Functions]
+      summary: Whether this site can send email
+      description: |
+        For the Settings page. Answers whether the functions pod has a mail relay and a sender
+        address (`SMTP_HOST` and `SMTP_ADMIN_EMAIL`, from `supabaseAuth.smtp`), which the database
+        cannot see. Any signed-in person's token will do; it says nothing of the relay but whether
+        it is set, and, when it is not, which value to set.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The relay's state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email:
+                    type: object
+                    properties:
+                      available: { type: boolean }
+                      reason: { type: string, nullable: true, description: 'Why not, in words, when `available` is false.' }
+        '401':
+          description: No token, or one PostgREST does not accept.
+        '502':
+          description: The caller could not be checked.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
   /functions/v1/forge-signout:
     get:
       tags: [Edge Functions]
@@ -6858,6 +7473,94 @@ components:
         n_rows: { type: integer, description: 'Readings in the bucket; 0 when carried.' }
         is_carried: { type: boolean, description: 'No reading arrived in the bucket, and its values are the last before it.' }
 
+    DerivedSeriesBucket:
+      type: object
+      description: |
+        One bucket of one derived metric on one device, from `/rest/v1/rpc/derived_series`. The columns
+        are `TelemetryCarriedBucket`'s where the meaning is the same.
+      properties:
+        bucket_ts: { type: string, format: date-time, description: 'Start of the bucket, on the epoch grid.' }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        metric_name: { type: string, example: Controller/PARTS_PER_HOUR }
+        avg_double: { type: number, format: double, description: 'The value over the bucket: a rate per hour, a share from 0 to 1, or a sum.' }
+        min_double: { type: number, format: double, description: 'The lowest minute of a sum; the value for a rate and a share.' }
+        max_double: { type: number, format: double, description: 'The highest minute of a sum; the value for a rate and a share.' }
+        last_double: { type: number, format: double, description: 'The last minute of a sum; the value for a rate and a share.' }
+        n_rows: { type: integer, description: "The inputs' readings in the bucket; 0 when none arrived." }
+        is_carried: { type: boolean, description: 'No input had a reading in the bucket, so its value follows from the values carried into it.' }
+
+    DerivedCurrentValue:
+      type: object
+      description: |
+        One device's current value of one derived metric, from `/rest/v1/rpc/derived_current`.
+      properties:
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        metric_name: { type: string, example: Controller/PARTS_PER_HOUR }
+        value: { type: number, format: double, description: 'The current value by the rule for its kind.' }
+        observed_at: { type: string, format: date-time, description: 'The last whole minute: where the window ends.' }
+        window_minutes: { type: integer, enum: [60, 0], description: 'How far back the value looks: 60 for a counter rate and a time in state, 0 for a sum, which is its value at `observed_at`.' }
+
+    TelemetryChangesRow:
+      type: object
+      description: |
+        One series from `/rest/v1/rpc/telemetry_changes`: every change in the window, or why not.
+      properties:
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        metric_name: { type: string, example: MotionDevice/OnPath }
+        read: { type: string, enum: [changes, change_cap, reading_cap, retention], description: 'What the row holds: every change, or which bound stopped it.' }
+        change_ts: { type: array, nullable: true, items: { type: string, format: date-time }, description: 'For `changes`: the first reading in the window, then each that changed the value, oldest first.' }
+        val_string: { type: array, nullable: true, items: { type: string, nullable: true }, description: 'The text that starts at each of `change_ts`.' }
+        val_bool: { type: array, nullable: true, items: { type: boolean, nullable: true }, description: 'The flag that starts at each of `change_ts`.' }
+        carried_string: { type: string, nullable: true, description: 'For `changes`: the text in force at `from_ts`, from before the window.' }
+        carried_bool: { type: boolean, nullable: true, description: 'For `changes`: the flag in force at `from_ts`, from before the window.' }
+        n_changes: { type: integer, nullable: true, description: 'How many changes the window holds; null for `reading_cap` and `retention`.' }
+        marked_ts: { type: array, nullable: true, items: { type: string, format: date-time }, description: 'Past a cap: the start of each bucket that held more than one value.' }
+        marked_values: { type: array, nullable: true, items: { type: integer }, description: 'How many values each of `marked_ts` held.' }
+        raw_from: { type: string, format: date-time, nullable: true, description: 'The oldest raw reading the historian holds.' }
+
+    TelemetryHourOfDayRow:
+      type: object
+      description: |
+        One device's mean at one hour of the day, from `/rest/v1/rpc/telemetry_hour_of_day`.
+      properties:
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        hour_of_day: { type: integer, minimum: 0, maximum: 23, description: 'The hour in the time zone asked for: 14 is 14:00 to 15:00.' }
+        mean_value: { type: number, format: double, description: 'The mean of that hour across the window''s days.' }
+        days: { type: integer, description: 'How many local dates the mean spans.' }
+
+    TelemetryGroupRow:
+      type: object
+      description: |
+        One group's mean and total in one bucket, from `/rest/v1/rpc/telemetry_carried_by_group`.
+      properties:
+        group_key: { type: string, example: cell-1, description: 'The group the devices were named under.' }
+        bucket_ts: { type: string, format: date-time, description: 'Start of the bucket, on the epoch grid.' }
+        mean_double: { type: number, format: double, description: "The mean of the group's devices that have a value in the bucket, carried or measured." }
+        total_double: { type: number, format: double, nullable: true, description: 'Their total, only where every device of the group has a value; null otherwise.' }
+        members: { type: integer, description: "The group's devices, as asked for." }
+        with_value: { type: integer, description: 'How many of them have a value in the bucket. The total is there exactly when this equals `members`.' }
+        measured: { type: integer, description: 'How many of them had a reading in the bucket, not a carried value.' }
+
+    TelemetryExport:
+      type: object
+      description: |
+        The document `/rest/v1/rpc/export_telemetry` returns: the rows of one export and what is true of
+        them.
+      properties:
+        audit_id: { type: integer, nullable: true, description: 'The id of the `TELEMETRY_EXPORTED` Audit Trail row, or null when no row was returned and none was written.' }
+        resolution: { type: string, enum: [raw, 1m, 5m, 1h] }
+        columns: { type: array, items: { type: string }, example: [time, asset_id, metric_name, value, unit] }
+        rows:
+          type: array
+          description: 'One array a reading, in time order: the time (UTC, to the millisecond), the device''s Sparkplug ID, the metric, the value (a number, a text or a flag; null for none) and the unit from the metric catalogue (null for none).'
+          items: { type: array, items: {} }
+        row_count: { type: integer }
+        max_rows: { type: integer, example: 50000 }
+        truncated: { type: boolean, description: 'The rows end at `read_to`, not at the window''s end.' }
+        read_from: { type: string, format: date-time, description: 'Where the rows begin: the window''s start, or the oldest raw reading the historian holds when that is later.' }
+        read_to: { type: string, format: date-time, description: 'Where the rows end: the window''s end, or the whole minute they were cut at.' }
+        raw_from: { type: string, format: date-time, nullable: true, description: 'The oldest raw reading the historian holds, for `raw`; null otherwise.' }
+
     TelemetryCoverageRow:
       type: object
       description: |
@@ -6895,7 +7598,7 @@ components:
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
                  change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
                  backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts,
-                 notification_channels]
+                 notification_channels, automations, telemetry]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -6913,7 +7616,8 @@ components:
                  APP_REGISTERED, APP_REMOVED, APP_RESTORED, APP_APPROVED, APP_APPROVAL_REVOKED,
                  SERVICE_LOGS_READ, ALERT_ACKNOWLEDGED, ALERT_ACKNOWLEDGEMENT_WITHDRAWN,
                  SUPPRESSION_WINDOW_SCHEDULED, SUPPRESSION_WINDOW_CHANGED, SUPPRESSION_WINDOW_ENDED,
-                 SUPPRESSION_WINDOW_CANCELLED, SIGNING_KEY_ISSUED]
+                 SUPPRESSION_WINDOW_CANCELLED, AUTOMATION_CREATED, AUTOMATION_CHANGED, AUTOMATION_ENABLED,
+                 AUTOMATION_DISABLED, AUTOMATION_DELETED, SIGNING_KEY_ISSUED, TELEMETRY_EXPORTED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
@@ -6943,9 +7647,15 @@ components:
             alert about its token. The `SUPPRESSION_WINDOW_` actions (0240) are written by
             `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and
             `end_alert_suppression_window()`, in the lane of the device, gateway or cell the window
-            covers. `SIGNING_KEY_ISSUED` (0248) is an Administrator issuing or rotating the webhook's
+            covers. The `AUTOMATION_` actions (0256, 0257) are written by `apply_automations()`,
+            `set_automation_enabled()`, `delete_automation()` and the lifecycle that follows a device,
+            one row per automation, in its `automations` lane in the asset lane. A lifecycle row
+            carries its `reason`. `SIGNING_KEY_ISSUED` (0248) is an Administrator issuing or rotating the webhook's
             signing key, in the webhook's `notification_channels` lane, written by
-            `issue_notification_signing_key()`; the key is never in the row.
+            `issue_notification_signing_key()`; the key is never in the row. `TELEMETRY_EXPORTED`
+            (0279) is an Administrator or a Shopfloor Manager exporting readings from History, written
+            by `export_telemetry()` in the one `telemetry` lane of the asset lane, naming the devices,
+            metrics, window, resolution and how many rows left.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
@@ -7163,6 +7873,17 @@ components:
             The values a discrete metric may report, as text; NULL is no closed set. Never an empty
             list (`metric_catalog_permitted_values_shape`). Not frozen. A schema built from the
             metric copies them into the property's `enum`, in its JSON type.
+        derivation:
+          type: object
+          nullable: true
+          example: { kind: counter_rate, input: Controller/PART_COUNT }
+          description: >-
+            NULL for a measured metric. A derived metric's definition, one of three kinds:
+            `{"kind": "counter_rate", "input": name}`,
+            `{"kind": "time_in_state", "input": name, "states": [...]}` or
+            `{"kind": "sum", "inputs": [{"metric": name, "sign": 1 | -1}, ...]}`. Set when the row is
+            created and never changed: a measured metric cannot become derived, and a different
+            definition is a new metric. The row's `units` follow its inputs. No device publishes it.
         created_at: { type: string, format: date-time, readOnly: true }
 
     MetricCatalogWrite:
@@ -7179,6 +7900,7 @@ components:
         semantic_id: { type: string, nullable: true }
         semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
         permitted_values: { type: array, nullable: true, items: { type: string, minLength: 1 }, minItems: 1 }
+        derivation: { type: object, nullable: true, description: 'A derived metric''s definition; see MetricCatalogEntry. Send no `units`: they follow the inputs.' }
 
     UncataloguedMetric:
       type: object
@@ -7313,6 +8035,10 @@ components:
           type: boolean
           default: true
           description: 'Whether the shortcuts that are one character with no modifier (`?`, `/`, `[` and `]`) act for this person (`0194`). Ctrl K and the arrow keys are not covered.'
+        desktop_notifications:
+          type: boolean
+          default: false
+          description: 'Whether a dashboard tab this person has open raises a browser notification when an alert starts firing (`0264`). The browser''s own permission to show one is granted per browser and is not stored.'
         updated_at: { type: string, format: date-time, readOnly: true }
 
     SystemSetting:
@@ -7781,6 +8507,91 @@ components:
         created_at: { type: string, format: date-time }
         ended_by: { type: string, format: uuid, nullable: true, description: 'Who ended it early, or null.' }
         ended_by_email: { type: string, nullable: true }
+
+    Automation:
+      type: object
+      description: |
+        A rule that watches readings and raises an alert (0255). `key` is the `id` a person writes in
+        the YAML; `id` is the row's own uuid.
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string, pattern: '^[a-z0-9][a-z0-9_-]{0,63}$', example: lathe-3-spindle-hot }
+        alias: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 1000 }
+        enabled: { type: boolean, description: 'Whether its triggers are evaluated. Turned off by a person, or by the lifecycle when the last trigger that could fire is gone.' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AutomationTrigger:
+      type: object
+      description: |
+        What starts an automation, one row per trigger and device (0255). A `threshold` row compares
+        the latest value of `metric_name` on the device `entity_id` with `threshold`, held for
+        `hold_seconds`.
+      properties:
+        id: { type: string, format: uuid }
+        automation_id: { type: string, format: uuid }
+        position: { type: integer, description: 'The trigger''s place in the automation''s `triggers` list.' }
+        device_position: { type: integer, description: 'The device''s place in the trigger''s `device` list.' }
+        kind: { type: string, example: threshold }
+        entity_id: { type: string, format: uuid, nullable: true, description: 'The device. Null for a kind that applies to every modelled device.' }
+        metric_name: { type: string, nullable: true }
+        comparison: { type: string, nullable: true, enum: [above, below] }
+        threshold: { type: number, nullable: true, description: 'In the metric''s catalogue unit.' }
+        hold_seconds: { type: integer, minimum: 0, maximum: 3596400 }
+        is_archived: { type: boolean, description: 'True while the device is archived.' }
+        archived_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    AutomationTriggerState:
+      type: object
+      description: |
+        What the evaluator found for one live threshold trigger on one device and metric (0270). At
+        most one of `pending_since` and `firing_since` is set.
+      properties:
+        trigger_id: { type: string, format: uuid }
+        entity_id: { type: string, format: uuid, description: 'The device.' }
+        metric_name: { type: string }
+        pending_since: { type: string, format: date-time, nullable: true, description: 'When the value began to breach, while its `for` has not yet passed.' }
+        firing_since: { type: string, format: date-time, nullable: true, description: 'When its alert began to fire.' }
+        last_evaluated_at: { type: string, format: date-time, description: 'The run that last read a value for it.' }
+        last_value: { type: number, nullable: true, description: 'The latest value that run read, whenever it arrived.' }
+        last_observed_at: { type: string, format: date-time, nullable: true, description: 'When that value arrived at the historian.' }
+        comparison: { type: string, enum: [above, below], description: 'As that run judged it.' }
+        threshold: { type: number, description: 'As that run judged it.' }
+
+    AutomationAction:
+      type: object
+      description: What a firing trigger does (0255).
+      properties:
+        id: { type: string, format: uuid }
+        automation_id: { type: string, format: uuid }
+        position: { type: integer }
+        kind: { type: string, example: alert }
+        severity: { type: string, nullable: true, enum: [critical, warning, info] }
+        created_at: { type: string, format: date-time }
+
+    AutomationResult:
+      type: object
+      description: |
+        What `apply_automations` made of one automation of the document (0256).
+      properties:
+        index: { type: integer, nullable: true, description: 'Its place in the document. Null for a refusal of the document as a whole.' }
+        key: { type: string, nullable: true, description: 'Its `id`, or null where the id is itself refused.' }
+        status: { type: string, enum: [new, changed, unchanged, refused] }
+        id: { type: string, format: uuid, nullable: true, description: 'The row''s id, for a new automation once applied and for one that exists.' }
+        changes:
+          type: array
+          items: { type: string }
+          description: 'For a changed automation, the keys that differ: alias, description, enabled, triggers, actions.'
+        reasons:
+          type: array
+          description: 'For a refusal, each reason with the JSON path it is at.'
+          items:
+            type: object
+            properties:
+              path: { type: string, example: '$[0].triggers[1].above' }
+              message: { type: string }
 
     DeviceNameplate:
       type: object

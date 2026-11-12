@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { areaUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
+import { areaUrl, cellHistoryUrl, cellUrl, deviceUrl, devicesInCellUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -28,6 +28,7 @@ import { RestoreEntityModal } from '../modals/RestoreEntityModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
   IconLayoutDashboard,
+  IconChartLine,
   IconPlus,
   IconPencil,
   IconArchive,
@@ -532,21 +533,23 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             </Tooltip>
           </div>
           <div className="form-group">
-            {/* A grid of buttons, not a select: the choice is visual. */}
+            {/* A grid of buttons, not a select: the choice is visual. Each picture's name is its
+                accessible name and its tooltip, so the grid shows the pictures alone. */}
             <label className="form-label">Cell Icon</label>
             <div className="icon-picker" role="radiogroup" aria-label="Cell icon" aria-describedby="cell-icon-hint">
               {CELL_ICONS.map(({ key, label, Icon }) => (
-                <button
-                  key={key}
-                  type="button"
-                  role="radio"
-                  aria-checked={(formVal.icon || DEFAULT_CELL_ICON) === key}
-                  className={`icon-picker-option ${(formVal.icon || DEFAULT_CELL_ICON) === key ? 'is-selected' : ''}`}
-                  onClick={() => setFormVal(f => ({ ...f, icon: key }))}
-                >
-                  <Icon size={20} />
-                  <span>{label}</span>
-                </button>
+                <Tooltip key={key} text={label}>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-label={label}
+                    aria-checked={(formVal.icon || DEFAULT_CELL_ICON) === key}
+                    className={`icon-picker-option ${(formVal.icon || DEFAULT_CELL_ICON) === key ? 'is-selected' : ''}`}
+                    onClick={() => setFormVal(f => ({ ...f, icon: key }))}
+                  >
+                    <Icon size={20} aria-hidden="true" />
+                  </button>
+                </Tooltip>
               ))}
             </div>
             <div className="form-hint" id="cell-icon-hint">A picture to tell this cell apart on the Site Map and in lists.</div>
@@ -762,6 +765,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 : !canManage && !canPropose
                   ? requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)
                   : 'Edit cell configuration'
+          },
+          {
+            // Ungated, as the History page is: the machines of this cell compared over time, one
+            // metric on one scale, and their hours of the day.
+            label: 'View History', icon: <IconChartLine size={13} />,
+            to: cellHistoryUrl(selectedCell.cell_id),
+            title: "Compare this cell's machines over time on the History page"
           },
           /* Withheld from a reader who may not open the page: the nav hides Audit Trail without
              `audit_trail:read`. `.filter(Boolean)` drops it. */

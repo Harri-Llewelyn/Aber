@@ -8,7 +8,7 @@
  */
 import { COLD_STORAGE_DIALOG_KEYS } from './utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite'
-import { WEBHOOK_DIALOG_KEYS } from './utils/notifications'
+import { EMAIL_DIALOG_KEYS, WEBHOOK_DIALOG_KEYS } from './utils/notifications'
 import { pageTabsOf } from './navigation'
 
 /** Settings a page's own destination dialog edits, with the page a search for one opens. */
@@ -16,7 +16,8 @@ const EDITED_ON = new Map([
   ...COLD_STORAGE_DIALOG_KEYS.map(k => [k, { tabId: 'cold-storage', page: 'Cold Storage' }]),
   ...BACKUP_OFFSITE_SETTING_KEYS.map(k => [k, { tabId: 'backups', page: 'Backups' }]),
   // The webhook's dialog is on Settings itself, on the tab its toolbar is.
-  ...WEBHOOK_DIALOG_KEYS.map(k => [k, { tabId: 'settings', section: 'notifications', page: 'Settings' }])
+  ...WEBHOOK_DIALOG_KEYS.map(k => [k, { tabId: 'settings', section: 'notifications', page: 'Settings' }]),
+  ...EMAIL_DIALOG_KEYS.map(k => [k, { tabId: 'settings', section: 'notifications', page: 'Settings' }])
 ])
 
 /**
@@ -44,7 +45,10 @@ export const PAGE_KEYWORDS = {
   'schemas':        ['contract', 'registry', 'model', 'version', 'draft', 'create version', 'fork', 'publish'],
   // Keeps catalog/catalogue: the catalogue was part of the Schemas page and is searched for by
   // that name as often as by its own.
-  'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate'],
+  'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate', 'derived', 'computed', 'rate'],
+  // What somebody types wanting a rule that watches a reading: Home Assistant's word, and the alert's.
+  'automations':    ['automation', 'rule', 'rules', 'alert rule', 'threshold', 'trigger', 'action', 'condition', 'yaml',
+                     'when this happens', 'watch a reading', 'raise an alert'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
   // 'directory' is the page's old name, which habits keep, as with 'archives' above.
   'system':         ['directory', 'services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness', 'image versions'],
@@ -83,6 +87,7 @@ export const CARDS = [
   { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'create version', 'fork'] },
   /* No "Metric Catalog" card: the catalogue is the Metrics page now, and its page entry answers
      every query this card did. */
+  { id: 'automation-yaml',       label: 'Automation YAML',      tab: 'automations',   keywords: ['yaml editor', 'new automation', 'write a rule', 'upload automations', 'export automations', 'automations.yaml', 'json schema', 'vs code', 'threshold alert'] },
   { id: 'vocab-mtconnect',      ...tabCard('vocabulary', 'mtconnect'), keywords: ['machine tool', 'data items', 'components'] },
   { id: 'vocab-iso22400',       ...tabCard('vocabulary', 'iso-22400'), keywords: ['kpi', 'oee', 'availability', 'mtbf'] },
   { id: 'vocab-opcua',          ...tabCard('vocabulary', 'opc-ua'), keywords: ['companion', 'machinery', 'robotics'] },
@@ -94,6 +99,9 @@ export const CARDS = [
   { id: 'system-logs',          ...tabCard('system', 'logs'), keywords: ['log', 'log lines', 'service logs', 'errors', 'traceback', 'loki', 'why did it fail'] },
 
   { id: 'history-overview',     ...tabCard('history', 'overview'), keywords: ['coverage', 'gaps', 'where readings arrived', 'silent devices', 'lanes'] },
+  { id: 'history-metric',       ...tabCard('history', 'metric'), keywords: ['one metric across devices', 'compare devices', 'small multiples', 'every lathe', 'across the site', 'bearing temperature'] },
+  { id: 'history-cell',         ...tabCard('history', 'cell'), keywords: ['compare machines', 'small multiples', 'heatmap', 'hour of day', 'which machine is different', 'outlier', 'cell comparison'] },
+  { id: 'history-area',         ...tabCard('history', 'area'), keywords: ['compare cells', 'cell against cell', 'mean', 'total', 'heatmap', 'hour of day', 'area comparison'] },
   { id: 'history-alerts',       ...tabCard('history', 'alerts'), keywords: ['alert history', 'past alerts', 'fired', 'resolved alerts', 'acknowledged alerts', 'acknowledgements'] },
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
@@ -110,6 +118,7 @@ export const CARDS = [
 
   { id: 'profile-account',      ...tabCard('profile', 'account'), keywords: ['picture', 'photo', 'avatar', 'email', 'role', 'password', 'change password', 'my role'] },
   { id: 'profile-appearance',   ...tabCard('profile', 'appearance'), keywords: ['theme', 'dark mode', 'light mode', 'dark', 'light', 'sidebar layout', 'collapse sidebar', 'expand sidebar', 'keyboard shortcuts', 'single-key shortcuts', 'speech input'] },
+  { id: 'profile-notifications', ...tabCard('profile', 'notifications'), keywords: ['desktop notifications', 'browser notifications', 'alert notification', 'pop-up', 'popup', 'permission', 'allow notifications', 'blocked notifications'] },
   { id: 'profile-sessions',     ...tabCard('profile', 'sessions'), keywords: ['security', 'signed in', 'sign out everywhere', 'sign out other sessions', 'other browsers', 'end session', 'lost laptop'] },
   { id: 'profile-mfa',          ...tabCard('profile', 'mfa'), keywords: ['security', 'multi-factor authentication', 'second factor', 'two-factor', '2fa', 'authenticator', 'totp'] },
   { id: 'profile-allowed-apps', ...tabCard('profile', 'allowed-apps'), keywords: ['security', 'apps you have allowed', 'authorized apps', 'connected apps', 'revoke app'] }

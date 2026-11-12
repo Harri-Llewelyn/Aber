@@ -194,14 +194,14 @@ describe('Audit Trail filter bar', () => {
     const kinds = filterList('Entity')
     expect(within(kinds).getAllByRole('group').map(g => g.getAttribute('aria-labelledby') && document.getElementById(g.getAttribute('aria-labelledby')).textContent))
       .toEqual(['The plant', 'The model', 'Capture', 'Security'])
-    expect(offered(within(kinds).getByRole('group', { name: 'The plant' }))).toEqual(['Areas', 'Cells', 'Gateways', 'Devices', 'Alerts'])
+    expect(offered(within(kinds).getByRole('group', { name: 'The plant' }))).toEqual(['Areas', 'Cells', 'Gateways', 'Devices', 'Alerts', 'Readings'])
     toggleInList('Entity', 'Gateways')
     toggleInList('Entity', 'Devices')
     await waitFor(() => expect(params().get('entity_type')).toBe('GATEWAY,DEVICE'))
     expect(window.location.search).toBe('?type=GATEWAY,DEVICE')
     // The heading takes the whole group.
     fireEvent.click(within(kinds).getByRole('checkbox', { name: 'The plant' }))
-    await waitFor(() => expect(params().get('entity_type')).toBe('AREA,CELL,GATEWAY,DEVICE,ALERT'))
+    await waitFor(() => expect(params().get('entity_type')).toBe('AREA,CELL,GATEWAY,DEVICE,ALERT,READINGS'))
   })
 
   it('counts the popover\'s own filters on its button, and its Clear resets only those', async () => {

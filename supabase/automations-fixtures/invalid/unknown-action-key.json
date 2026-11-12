@@ -1,0 +1,27 @@
+{
+  "about": "A key an alert action does not take.",
+  "path": "$[0].actions[0].message",
+  "database": false,
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Lathe 3 spindle bearing hot",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning",
+          "message": "hot"
+        }
+      ]
+    }
+  ]
+}

@@ -14,6 +14,7 @@ Your own choices, such as your theme and sidebar layout, are not here. They are 
 - **The grey line under a description** says what applies if the setting has never been changed (**Falls back to**). Where that is a `values.yaml` path or a single identifier, it copies too.
 - **Save** and **Discard** appear in Actions only once an Administrator changes the value. The database refuses a save if the value is out of bounds or your role may not change it, and the message says which.
 - **Each setting carries its own bounds.** A retention window has a floor and a ceiling, and the field refuses a value outside them. The range is written beneath the field, for example **7 to 3650**. That way a typo is refused today, rather than causing a silent outage weeks later.
+- **History** holds **Longest export (days)**: the most days one [export of readings](history.md#exporting-readings) may cover, 14 unless you change it, from 1 to 366. A longer window is refused, with the limit named. Lowering it changes nothing already exported.
 - **Retention** holds how long things are kept. It also holds **Longest suppression window (days)**: the most days a [suppression window](devices.md#suppression-windows) may last, 7 unless you change it, from 1 to 90. A longer window is refused when someone schedules it or changes its times. Lowering it leaves the windows already scheduled as they are.
 - **Enabled / Disabled** switches turn scheduled jobs on and off. A change takes effect the next time the job runs, and does not undo anything already done.
 - **Cold Storage** here holds the archive threshold and the read-only site key. The archive destination, and the switch that turns archiving on, are set in one dialog on the Cold Storage page, so they are not listed here.
@@ -27,8 +28,9 @@ Your own choices, such as your theme and sidebar layout, are not here. They are 
 
 ## The Notifications tab
 
-This tab says where Aber sends each alert, besides the dashboard. Today that is one webhook: an
-address on your network, or a chat service's, that receives a message for each alert.
+This tab says where Aber sends each alert, besides the dashboard. There are two places: a webhook,
+which is an address on your network, or a chat service's, that receives a message for each alert; and
+email, which goes to the people in the roles you choose.
 
 **To set up the webhook** (an Administrator):
 
@@ -41,7 +43,25 @@ address on your network, or a chat service's, that receives a message for each a
    once.
 6. Select **Send a test**. A toast says how it went, and the delivery log gets a row.
 
-**What is sent, and when:**
+**To set up email** (an Administrator):
+
+1. Check the page does not say that email cannot be sent yet. If it does, your site has no mail
+   relay. The person who runs Aber sets one in the deployment, the same one that sends password
+   resets.
+2. Select **Set up email** at the right of the toolbar.
+3. Tick the roles to tell, then select **Save**. Nobody is emailed until you tick one.
+4. Select **Email a test**. It sends one message to your own address, and a toast says how it went.
+
+Everyone with a ticked role who has an email address on their account is emailed. The lowest severity
+emailed is a row of the table below, **Lowest severity emailed**. A message is sent when an alert
+starts firing, as a reminder while it fires and nobody has acknowledged it, and when it resolves. The
+subject names the severity, the alert, what it is about and which of those it is. The body says when
+it started, the values it carried and where to open it in Aber. Nobody sees another person's address.
+
+An alert about a machine identity's token is emailed to Administrators only, and only if you ticked
+Administrator.
+
+**What is sent to the webhook, and when:**
 
 - **A message when an alert starts firing, and one when it resolves.** Only an alert at the lowest
   severity the webhook sends, or above, is sent.
@@ -50,8 +70,8 @@ address on your network, or a chat service's, that receives a message for each a
 - **A suppressed alert waits.** While a [suppression window](devices.md#suppression-windows) covers
   it, its message stays **Waiting** in the log. If it still fires when the window ends, the message
   is sent then. If it fires and resolves inside the window, nothing is sent.
-- **No alert about a machine identity's token is sent.** Only an Administrator can see those, and
-  the webhook's readers are not known.
+- **No alert about a machine identity's token is sent to the webhook.** Only an Administrator can see
+  those, and the webhook's readers are not known.
 - **Each message is signed** with the signing key, so the receiver can check it came from this site.
   **Rotate signing key** makes a new one, and the old one stops working at once. Give the receiver the
   new key straight away.
@@ -59,16 +79,17 @@ address on your network, or a chat service's, that receives a message for each a
 **The delivery log** lists the newest 50 messages, newest first, for every role. Each row says when
 it was queued, what it was about and what became of it:
 
-- **Sent**: the receiver accepted it.
+- **Sent**: the receiver accepted it. For an email, it says how many people the mail relay took it
+  for. The log never shows an address.
 - **Waiting** or **Retrying**: it is queued, or a post failed and it is tried again. A message is
   tried for about three hours before it is marked **Failed**.
 - **Not sent**: it no longer applied when it was due. For example, the alert resolved or was
-  acknowledged first.
-- **Last error** says why a post failed, such as an answer that was not a success, a redirect, or a
-  host that is not allowed. It never shows the address.
+  acknowledged first, or no one was left to email.
+- **Last error** says why a post or an email failed, such as an answer that was not a success, a
+  redirect, a host that is not allowed, or a mail relay that refused it. It never shows an address.
 
-Only an Administrator sees the webhook's toolbar and its allowed hosts. Every role sees the lowest
-severity, the reminder interval and the log.
+Only an Administrator sees the toolbar and the webhook's allowed hosts. Every role sees who is
+emailed, the lowest severities, the reminder interval and the log.
 
 ## What the states mean
 

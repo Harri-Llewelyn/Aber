@@ -50,6 +50,17 @@ const renderProfile = (props = {}) => {
   return handlers
 }
 
+/** The page again with other props, as App renders it once a save has landed. */
+const renderProfileWith = (props = {}) => {
+  const handlers = { onChangePassword: vi.fn(), onChangeTheme: vi.fn(), onChangeSidebarMode: vi.fn() }
+  const element = (more) => (
+    <ProfileTab email="operator@site.test" userRole="Shopfloor_Manager" theme="dark" sidebarMode="hover"
+      settingsSource="account" {...handlers} {...props} {...more} />
+  )
+  const view = render(element())
+  return { ...handlers, rerender: (more) => view.rerender(element(more)) }
+}
+
 const tab = (name) => tabLink(name)
 const row = (label) => screen.getByText(label, { selector: '.setting-label' }).closest('tr')
 const headers = () => screen.getAllByRole('columnheader').map(h => h.textContent)
@@ -61,10 +72,10 @@ describe('the page', () => {
     expect(document.querySelector('.card-heading-note')).toHaveTextContent('Applies to you, on any browser.')
   })
 
-  it('has five tabs, Account, Appearance, Sessions, MFA then Allowed Apps, with the ids the routing names', () => {
+  it('has six tabs, Account, Appearance, Notifications, Sessions, MFA then Allowed Apps, with the ids the routing names', () => {
     renderProfile()
-    expect(tabLinks().map(t => t.textContent)).toEqual(['Account', 'Appearance', 'Sessions', 'MFA', 'Allowed Apps'])
-    expect(PROFILE_SECTIONS.map(s => s.id)).toEqual(['account', 'appearance', 'sessions', 'mfa', 'allowed-apps'])
+    expect(tabLinks().map(t => t.textContent)).toEqual(['Account', 'Appearance', 'Notifications', 'Sessions', 'MFA', 'Allowed Apps'])
+    expect(PROFILE_SECTIONS.map(s => s.id)).toEqual(['account', 'appearance', 'notifications', 'sessions', 'mfa', 'allowed-apps'])
   })
 
   /* The user's rule: every tab has the header row, even a tab of one or two rows. */
@@ -72,6 +83,8 @@ describe('the page', () => {
     renderProfile()
     expect(headers()).toEqual(['Setting', 'Description', 'Value', 'Actions'])
     fireEvent.click(tab('Appearance'))
+    expect(headers()).toEqual(['Setting', 'Description', 'Value', 'Actions'])
+    fireEvent.click(tab('Notifications'))
     expect(headers()).toEqual(['Setting', 'Description', 'Value', 'Actions'])
   })
 
@@ -366,6 +379,183 @@ describe('Single-key shortcuts', () => {
     fireEvent.click(shortcutsSwitch())
     fireEvent.click(shortcutsSwitch())
     expect(within(row('Single-key shortcuts')).queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+})
+
+/**
+ * Desktop notifications: one switch, off until the person turns it on. Turning it on asks the
+ * browser for permission, in the Save click; a browser that refused, that has no such thing, or
+ * that serves the page over plain HTTP is told so in words. `Notification` is a stand-in here.
+ */
+describe('Notifications', () => {
+  const desktopSwitch = () => screen.getByRole('switch', { name: 'Desktop notifications' })
+  const detail = () => document.getElementById('profile-desktop-detail')
+  let requestPermission
+
+  /** A browser's Notification: `permission` is what it holds, and requestPermission answers. */
+  const browser = (permission, answer = permission) => {
+    const Fake = function Notification() {}
+    Fake.permission = permission
+    requestPermission = vi.fn((done) => {
+      Fake.permission = answer
+      done?.(answer)
+      return Promise.resolve(answer)
+    })
+    Fake.requestPermission = requestPermission
+    vi.stubGlobal('Notification', Fake)
+  }
+  const secure = (value) => Object.defineProperty(window, 'isSecureContext', { value, configurable: true })
+  const open = () => fireEvent.click(tab('Notifications'))
+
+  beforeEach(() => secure(true))
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete window.isSecureContext
+  })
+
+  it('is a switch, off unless the person turned it on, and says what it does', () => {
+    browser('default')
+    renderProfile({ onChangeDesktopNotifications: vi.fn() })
+    open()
+    expect(desktopSwitch()).not.toBeChecked()
+    expect(desktopSwitch()).toBeEnabled()
+    expect(within(row('Desktop notifications')).getByText('Off')).toBeInTheDocument()
+    expect(row('Desktop notifications').querySelector('.setting-description')).toHaveTextContent(/when an alert starts firing/)
+    expect(within(row('Desktop notifications')).queryByRole('button')).toBeNull()
+    expect(detail()).toBeNull()
+  })
+
+  it('asks the browser when Save turns it on, and saves the choice once it has answered', async () => {
+    browser('default', 'granted')
+    const onChangeDesktopNotifications = vi.fn()
+    renderProfile({ onChangeDesktopNotifications })
+    open()
+
+    fireEvent.click(desktopSwitch())
+    expect(desktopSwitch()).toBeChecked()
+    expect(detail()).toHaveTextContent('Select Save, and the browser will ask')
+    // Nothing is asked or saved until Save.
+    expect(requestPermission).not.toHaveBeenCalled()
+    expect(onChangeDesktopNotifications).not.toHaveBeenCalled()
+
+    fireEvent.click(within(row('Desktop notifications')).getByRole('button', { name: 'Save' }))
+    // Asked inside the click, before anything is awaited.
+    expect(requestPermission).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(onChangeDesktopNotifications).toHaveBeenCalledWith(true))
+    await waitFor(() => expect(within(row('Desktop notifications')).queryByRole('button', { name: 'Save' })).toBeNull())
+  })
+
+  it('does not ask a browser that has already allowed it', async () => {
+    browser('granted')
+    const onChangeDesktopNotifications = vi.fn()
+    renderProfile({ onChangeDesktopNotifications })
+    open()
+    fireEvent.click(desktopSwitch())
+    fireEvent.click(within(row('Desktop notifications')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onChangeDesktopNotifications).toHaveBeenCalledWith(true))
+    expect(requestPermission).not.toHaveBeenCalled()
+  })
+
+  it('keeps the choice on when the browser refuses, and says so with how to allow it again', async () => {
+    browser('default', 'denied')
+    const onChangeDesktopNotifications = vi.fn()
+    // The parent saves what it is given, as App does.
+    const { rerender } = renderProfileWith({ onChangeDesktopNotifications })
+    open()
+    fireEvent.click(desktopSwitch())
+    fireEvent.click(within(row('Desktop notifications')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onChangeDesktopNotifications).toHaveBeenCalledWith(true))
+    rerender({ desktopNotifications: true })
+    await waitFor(() => expect(detail()).toHaveTextContent('This browser has blocked notifications from this site'))
+    expect(detail()).toHaveTextContent('site settings')
+    expect(detail()).toHaveTextContent('set Notifications to Allow')
+    expect(desktopSwitch()).toHaveAccessibleDescription(/blocked notifications/)
+  })
+
+  it('says a saved choice is blocked here when the browser had refused before', () => {
+    browser('denied')
+    renderProfile({ desktopNotifications: true, onChangeDesktopNotifications: vi.fn() })
+    open()
+    expect(desktopSwitch()).toBeChecked()
+    expect(detail()).toHaveTextContent('has blocked notifications')
+  })
+
+  it('offers Allow Notifications where the choice is on and the browser has not been asked', async () => {
+    browser('default', 'granted')
+    renderProfile({ desktopNotifications: true, onChangeDesktopNotifications: vi.fn() })
+    open()
+    expect(detail()).toHaveTextContent('has not been asked yet')
+    fireEvent.click(within(row('Desktop notifications')).getByRole('button', { name: 'Allow Notifications' }))
+    expect(requestPermission).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(detail()).toHaveTextContent('Allowed in this browser'))
+    expect(within(row('Desktop notifications')).queryByRole('button', { name: 'Allow Notifications' })).toBeNull()
+  })
+
+  it('shows the saved choice as on, saves off on Save, and never asks to turn it off', async () => {
+    browser('granted')
+    const onChangeDesktopNotifications = vi.fn()
+    renderProfile({ desktopNotifications: true, onChangeDesktopNotifications })
+    open()
+    expect(desktopSwitch()).toBeChecked()
+    expect(within(row('Desktop notifications')).getByText('On')).toBeInTheDocument()
+    fireEvent.click(desktopSwitch())
+    expect(detail()).toBeNull()
+    fireEvent.click(within(row('Desktop notifications')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onChangeDesktopNotifications).toHaveBeenCalledWith(false))
+    expect(requestPermission).not.toHaveBeenCalled()
+  })
+
+  it('puts the saved value back on Discard, and saves nothing', () => {
+    browser('default')
+    const onChangeDesktopNotifications = vi.fn()
+    renderProfile({ onChangeDesktopNotifications })
+    open()
+    fireEvent.click(desktopSwitch())
+    fireEvent.click(within(row('Desktop notifications')).getByRole('button', { name: /Discard/ }))
+    expect(desktopSwitch()).not.toBeChecked()
+    expect(onChangeDesktopNotifications).not.toHaveBeenCalled()
+    expect(requestPermission).not.toHaveBeenCalled()
+  })
+
+  it('is disabled, with its reason, over plain HTTP', () => {
+    // The browser may still define Notification there; a secure context is checked first.
+    browser('default')
+    secure(false)
+    renderProfile({ onChangeDesktopNotifications: vi.fn() })
+    open()
+    expect(desktopSwitch()).toBeDisabled()
+    expect(detail()).toHaveTextContent('Browsers allow notifications only over HTTPS or on localhost')
+    expect(desktopSwitch()).toHaveAccessibleDescription(/only over HTTPS or on localhost/)
+  })
+
+  it('is disabled, with its own reason, in a browser with no Notification API', () => {
+    vi.stubGlobal('Notification', undefined)
+    renderProfile({ onChangeDesktopNotifications: vi.fn() })
+    open()
+    expect(desktopSwitch()).toBeDisabled()
+    expect(detail()).toHaveTextContent('It does not support desktop notifications')
+    expect(detail()).not.toHaveTextContent('HTTPS')
+  })
+
+  it('still lets a choice made on another PC be turned off from a browser that cannot raise one', async () => {
+    secure(false)
+    const onChangeDesktopNotifications = vi.fn()
+    renderProfile({ desktopNotifications: true, onChangeDesktopNotifications })
+    open()
+    expect(desktopSwitch()).toBeChecked()
+    expect(desktopSwitch()).toBeEnabled()
+    expect(detail()).toHaveTextContent('only over HTTPS or on localhost')
+    expect(within(row('Desktop notifications')).queryByRole('button', { name: 'Allow Notifications' })).toBeNull()
+    fireEvent.click(desktopSwitch())
+    fireEvent.click(within(row('Desktop notifications')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onChangeDesktopNotifications).toHaveBeenCalledWith(false))
+  })
+
+  it('says the choices are this browser\'s when the account could not be read', () => {
+    browser('default')
+    renderProfile({ settingsSource: 'browser', onChangeDesktopNotifications: vi.fn() })
+    open()
+    expect(document.querySelector('.profile-source')).toHaveTextContent('could not be read from your account')
   })
 })
 

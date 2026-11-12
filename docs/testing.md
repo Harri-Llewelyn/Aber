@@ -62,6 +62,13 @@ python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_stale_node_death.py  # an earlier session's NDEATH (bdSeq) changes nothing
 python ingestion/test_payload_conformance.py
+# A reading under a derived metric's name (a metric Aber computes) is dropped under audit as well as
+# enforce, files a `derived_name` finding and is counted in a series of its own, not the schema
+# counter that only an enforcing device raises. The names come from the catalogue through the UNS
+# bridge's TTL cache: one read per freshness, an addition takes effect when it ends, a failed read
+# keeps the names last read, and before any read nothing is dropped. A birth's value under the name
+# is left out of the device's parameters. A fake catalogue; no broker, no database.
+python ingestion/test_a_derived_name_is_dropped.py
 # What the dashboard's schema builders write (enum, minimum, maximum), read by conformance.py:
 # test-harness/fixtures/schema-builder-output.json, whose other half is schemaBuilderContract.test.jsx.
 python ingestion/test_schema_builder_contract.py
@@ -118,6 +125,18 @@ python supabase/test_revoking_an_app_ends_its_refresh_token.py
 # person's dashboard token reaches all of them, and an app's ID token is not served as the person.
 # An app whose client is not registered (Studio's when Studio is off) is skipped, with the reason.
 python supabase/test_each_app_s_token_reaches_only_its_own_routes.py
+# An app an Administrator registers signs people in (0260). Needs the stack up, and
+# security.require_mfa_for_managers off: the suite signs in by password, so with it on the Administrator's
+# registration is refused for want of a code and the suite skips, saying so. The seeded Administrator
+# registers a confidential and a public app with register_app(), and the seeded Shopfloor Manager
+# completes each one's code flow with PKCE. Discovery names an absolute issuer, the access and ID
+# tokens carry it as `iss`, and the ID token verifies against the key set (with the `cryptography`
+# package installed). The access token reaches user-info and GET /auth/v1/user, refreshes and signs
+# out its own session, and is refused with the gateway's 403 on PUT /auth/v1/user, the factor routes,
+# the approvals, PostgREST, Storage and every function. Revoking the approval ends its session, a
+# removed app cannot start a sign-in, and the Audit Trail names the Administrator. Every app it
+# registers is removed at the end.
+python supabase/test_an_app_registered_by_an_administrator_signs_people_in.py
 # A service token shows when it was last used (0209). Needs the stack up, with the i3X server. As
 # the seeded Administrator it issues a one-day token for the Read-only API client, makes one i3X
 # request with it, and reads its row back: the identity and the current UTC hour. A second request
@@ -140,6 +159,14 @@ python supabase/test_a_person_can_enrol_a_second_factor.py
 # row. The switch is set back and the person deleted. Turning it on ends every covered person's app
 # sessions but Grafana's.
 python supabase/test_a_second_factor_guards_what_changes_the_platform.py
+# A threshold automation fires and resolves (0270, 0271). Needs the stack up and the seeded Shopfloor
+# Manager; kubectl reaches the platform database and the historian. The manager applies an automation
+# on a device the suite makes, a breaching reading is written into the historian, and the suite waits
+# for pg_cron's evaluator to raise the alert: its fingerprint, name, labels and values, and no Grafana
+# rule. A later run confirms it, and a normal reading resolves it. It waits up to 150 s for each run.
+# Skips when the second factor is required of managers, which a script cannot give. Removes everything
+# it made; the Audit Trail keeps its rows.
+python supabase/test_a_threshold_automation_fires_and_resolves.py
 # No service accepts a token signed with the shared secret. Needs the stack up, with the release
 # Secret's keys in the environment (dev-cluster test gives them). The seeded Administrator's ES256
 # session is served by PostgREST, GoTrue, a Realtime channel join, Storage, the Node-RED admin API
@@ -256,6 +283,26 @@ python ingestion/test_playback_replay.py
 # read without that call, nor a minute after it. Same needs and environment as the suite above, whose
 # helpers it reuses; kubectl removes the fixture's broker account afterwards and reads the cgroups.
 python ingestion/test_recorded_capture_replay.py
+# A DERIVED NAME IS DROPPED THROUGH THE REAL CHAIN. test_a_derived_name_is_dropped.py holds the rule
+# with a fake catalogue; this adds a derived metric (a counter rate and the counter it is built on)
+# as the database's owner, then has a fixture Host gateway's edge node,
+# with the credential the Gateways page issues, declare and publish the derived name beside the
+# measured counter. The counter must reach the historian twice and the derived name not at all, nor
+# the device's parameters, and the Audit Trail must hold a `derived_name` finding for the birth and
+# one for the readings, not one for each message. The daemon reads the catalogue once per
+# UNS_CONTEXT_TTL_SECONDS, so the suite waits that long after adding the row. Needs the stack up and
+# the environment test_playback_replay.py reads, plus SUPABASE_DB_*; removes what it made.
+python ingestion/test_a_derived_name_is_dropped_stack.py
+# A derived metric is read from real readings, and an automation on it fires and resolves (0282,
+# 0283). Needs the stack up, the seeded Shopfloor Manager and SUPABASE_DB_*; about six minutes. It adds a
+# measured counter and a derived rate on it as the database's owner, has a fixture Host gateway's edge
+# node publish a rising count for two minutes, and after the minute that holds the last reading has
+# ended has the manager read derived_series() (every minute the counter rose in has a positive rate,
+# none carried, and the minutes after count nothing and say so) and derived_current() (the rate over
+# the last hour, worked out from the raw readings by the rule). It refuses a measured metric. The
+# manager then applies an automation on the derived metric, pg_cron's evaluator raises its alert with
+# the value it read, and deleting the automation resolves it. Removes what it made.
+python ingestion/test_a_derived_metric_is_read_stack.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
 # Deliberately narrow: the export path needs a historian, object storage and a chunk to mean
@@ -345,6 +392,17 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=..
 # NetworkPolicies off; skips without the keys.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
   python supabase/functions/notification-dispatch/test_notification_dispatch.py
+# The dispatcher's email, end to end (0262, 0263). A relay pod of the ingestion image takes each
+# message and prints it; a Service named aber-test-smtp in front of it is the host the functions
+# pod must already send through, so deploy with supabaseAuth.smtp.host=aber-test-smtp, port 25 and a
+# from address, and no user. A firing alert written with psql is emailed to the roles told with its
+# subject, facts and link, the envelope alone naming the people; a resolve follows in the same
+# thread; an acknowledgement before the reminder stops it; an unacknowledged alert is reminded; a
+# machine identity's alert goes to Administrators only; and a test goes to the person who asked.
+# The log keeps counts and no address. Skips, saying so, on any other relay, with NetworkPolicies
+# on, or without the keys. TLS, AUTH, UTF-8 and the relay's refusals are held by the Deno tests.
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/notification-dispatch/test_notification_dispatch_email.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the
 # service's gates; a requested backup is taken -- both dumps, the storage objects, the forge and,
@@ -586,6 +644,56 @@ python supabase/migrations/test_the_system_page_shows_what_the_stack_is_doing.py
 # bad bounds and reads over 50,000 rows are refused before any read; anon may not call it, and it
 # reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_reads_each_series_carried_forward.py
+# History reads every change of a text or a flag (0254). Local tables stand in for raw telemetry
+# and the rollups. While raw holds the window, a state held for seconds inside one minute comes back
+# with its times, a refresh of an unchanged value collapses, the first reading in the window is
+# kept, and the value in force at the start is carried in from raw, the 1-minute rollup or
+# telemetry_1h. Past max_changes, or past 20,000 readings, it says so and marks each bucket that held
+# more than one value; a window whose raw readings were dropped says so, and a series with nothing
+# dropped is still read from raw. Bad bounds and more than 50 series are refused before any read;
+# anon may not call it, and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_reads_every_change_of_a_text_or_a_flag.py
+# History averages a metric by the hour of the day (0265). A local table stands in for the
+# historian's hourly rollup. One row per device per hour of the day in the time zone given: the mean
+# of that hour across the window's days, a quiet hour counted as the value carried into it and every
+# hour weighed alike. The hour moves with the zone, with a clock change inside the window, and, in a
+# zone offset by part of an hour, files a bucket under the hour it starts in; a text or a flag has no
+# row. An unknown zone, bad bounds and more than 50,000 hours times devices are refused before any
+# read; anon may not call it, and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_averages_a_metric_by_the_hour_of_day.py
+# History folds one metric across the devices of each group (0276). Local tables stand in for the
+# historian's hourly rollup. One row per group per bucket: the mean across the group's devices that
+# have a value, carried or measured, and the total, which is there only where every device of the
+# group has one; a device that never reports keeps its group from ever having a total. It says how
+# many devices the group has, how many had a value and how many had a reading rather than a carried
+# one; a text or a flag has no row. Bad bounds, lists of different lengths, a missing list or metric
+# and more than 50,000 devices times buckets are refused before any read; anon may not call it,
+# and it reads as the caller. Every test rolls back.
+python supabase/migrations/test_history_folds_one_metric_across_the_devices_of_each_group.py
+
+# History draws a derived metric from the minutes (0282). derived_series() and derived_current(),
+# over local tables standing in for the historian's one-minute rollup. A counter rate is the increase
+# per hour, a reset counting its new value; a time in state is the share of the bucket's minutes, a
+# state carried across a quiet stretch and a flag read as true or false; a sum is the time-average of
+# the per-minute signed sum, and a device missing an input, or late with it, has no value for the
+# minutes before. A window of 35 days answers as one chunk would, and so do 9 devices of a 4-day
+# bucket, against a reference written from the rule. Only whole minutes are read. Each refusal comes
+# before any read (the rollups' tables are gone in those tests): a metric that is not derived, bad
+# bounds and buckets, more than 5,000 rows, more than 250,000 minutes of input. Each kind has its
+# current value by one rule, and anon may call neither. Every test rolls back.
+python supabase/migrations/test_history_draws_a_derived_metric_from_the_minutes.py
+
+# An export of readings is checked, bounded and recorded in the database (0278, 0279).
+# history.export_max_days is a History setting from 1 to 366, 14 unless an Administrator changes it.
+# export_telemetry() refuses, before any read (the historian's relations are gone in those tests):
+# an Operator, an Auditor, a machine identity, anon and service_role; a manager's session without
+# its second factor while that is required; a window over the setting, with the limit named, and not
+# a window of exactly the limit; an unknown resolution; no device or metric; too many of either. It
+# returns one row per reading, raw by default, a rollup's buckets never in raw's place, at most 50,000
+# rows cut at a minute with truncated and read_to, raw from where it begins, and writes one
+# TELEMETRY_EXPORTED row in the asset lane, a read, naming who, the devices, metrics, window,
+# resolution and rows, and none for a refusal or an export with no rows. Every test rolls back.
+python supabase/migrations/test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py
 # History counts where readings arrived (0245). Local tables stand in for the historian's device
 # rollups and the coverage view. One row per device asked for, its counts an array,
 # oldest block first, 0 for a block with none; a block the rollup's own width read as it is, a wider
@@ -608,11 +716,11 @@ python supabase/migrations/test_reading_a_service_s_logs_is_recorded.py
 # in order and at most 169 hours apart; one six-argument form, its ends defaulting to NULL, after
 # 0225 and 0230 replay over the four-argument one. Every test rolls back.
 python supabase/migrations/test_a_logs_read_names_a_range_or_a_fixed_window.py
-# A person's own preferences (0188, 0194). Each person reads, creates and changes their own
+# A person's own preferences (0188, 0194, 0264). Each person reads, creates and changes their own
 # user_settings row and nobody else's, an Administrator included; anon and service_role hold
 # nothing; the CHECKs refuse an unknown theme or sidebar mode; single-key shortcuts start on and
-# are never null; the first sign-in's seed never overwrites a row; and deleting the account
-# deletes the row, with nothing in the Audit Trail.
+# desktop notifications off, and neither is ever null; the first sign-in's seed never overwrites a
+# row; and deleting the account deletes the row, with nothing in the Audit Trail.
 python supabase/migrations/test_user_settings.py
 # A person can have a display name (0203). A person sets only their own and an Administrator
 # anyone's, never a machine identity's; the CHECKs refuse 81 characters and a control character,
@@ -792,6 +900,17 @@ python supabase/migrations/test_a_failed_or_stuck_job_is_a_platform_condition.py
 # is_shadow column it tests.
 python supabase/migrations/test_a_shadow_gateway_holds_no_health.py
 python supabase/migrations/test_metric_catalog_seed.py
+# A derived metric is a catalogue row (0267). Each of the three kinds, a counter rate, a time in state
+# and a sum, saves with its unit taken from its inputs: a rate is the input's unit per hour, a ratio
+# has none, a sum takes the one its inputs share. Every refusal of the save gives its reason: an input
+# that is missing, derived or of the wrong datatype, a sum of unlike units, a state the input cannot
+# report, a name a device has declared, a semantic id, a standard or permitted values, a malformed
+# definition (the CHECK holds that too). A measured metric cannot become derived, and a derived
+# metric's definition and unit cannot change, though its description and deprecation can, and nor can
+# the unit of a metric a counter rate or a sum is built on, deprecated ones included. Only an
+# Administrator writes, behind the second factor; every signed-in role reads. The Audit Trail files
+# the save as it files any catalogue change. Every test rolls back.
+python supabase/migrations/test_a_derived_metric_is_a_catalogue_row.py
 # The metric names devices declare that no catalog row describes (0189), which the Metrics page's
 # Uncatalogued tab lists. A deprecated row counts as catalogued, and a name matches exactly; archived
 # devices, replay lanes and Sparkplug control metrics are left out. The view runs as its caller, so
@@ -806,6 +925,13 @@ python supabase/migrations/test_replay_recreates_only_what_differs.py
 # holding an account once issued so the archive disables it, and kept by a replay of 0001's CHECK.
 # Remote and Host answer as before. Every test rolls back.
 python supabase/migrations/test_third_party_gateway.py
+# Changing a gateway's type (0252): a move across Remote's boundary burns the setup token, revokes
+# and stamps the credential the old type held, forgets its kept copy and leaves the gateway OFFLINE
+# where it was mid-enrolment or has become Remote. A move among Host, Simulated and Third-party, or
+# to the type it already had, ends nothing. A token for a gateway that is not Remote is refused
+# unspent. The one-off clean-up leaves a Remote gateway alone and changes nothing a second time.
+# Every test rolls back.
+python supabase/migrations/test_changing_a_gateway_s_type_cleans_up_after_the_old_type.py
 python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.
@@ -931,6 +1057,15 @@ python supabase/migrations/test_an_administrator_resets_a_person_s_second_factor
 # whether a dashboard call or GoTrue's own role wrote the table, and 0002's re-seed of a stack app
 # writes none. Every test rolls back.
 python supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py
+# An Administrator registers an app that signs people in (0260). register_app() adds one client as
+# 0002 adds the stack's four: manual, the code and refresh grants, a confidential app's secret
+# returned once and kept as the SHA-256 hash GoTrue compares, a public app's none. Only an
+# Administrator may, and with Settings requiring a second factor only from a session that gave its
+# code. A bad name, type or address is refused in words that name it: app_redirect_problem() answers
+# every case in test-harness/fixtures/app-redirect-addresses.json, which the dialog's rule shares. A
+# name already held is refused whatever its case and with or without "Aber ". The registration is one
+# Audit Trail row naming the Administrator, with neither the secret nor its hash. Every test rolls back.
+python supabase/migrations/test_an_administrator_registers_an_app_that_signs_people_in.py
 # With Studio off, db-init says so without a warning (0002). Studio's client block runs as db-init's
 # psql runs it, with studio_enabled false, true and unset. False is a NOTICE, never a WARNING. A
 # client an earlier boot registered is removed, its approvals revoked and its sessions ended, with
@@ -1031,6 +1166,30 @@ python supabase/migrations/test_a_person_acknowledges_an_alert.py
 # covered it, at its start or when a window opens over it, and nothing clears it. Each act writes
 # one audit row in the subject's lane. Every test rolls back.
 python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
+# Automations are kept as rows (0255, 0256, 0257). The three tables: every role reads, nobody writes
+# directly, anon touches nothing, the CHECKs and keys hold. Who writes: a Shopfloor Manager and an
+# Administrator; an Operator, an Auditor and a machine are refused; the second factor. apply_automations():
+# a dry run writes nothing, one refusal writes nothing, new / changed / unchanged are told apart, a
+# re-upload keeps the rows that still fit, a document never deletes, a list of devices is one row each,
+# and the rendered document applies as unchanged. The Audit Trail rows, the lifecycle of a device
+# (archive, restore, delete) with the alerts it resolves, and automations_for_entity(). Every test rolls back.
+python supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py
+# A threshold automation raises its alert from the database (0270, 0271). A local table stands in for
+# the historian, so every test rolls back. The read: the breaching pairs in platform_health_rows()'s
+# shape, no reading is no breach, NaN and a flag are no reading, only a live pair is read. The hold:
+# it fires after `for` and not before, rounds up to the next run, a stopped breach never fires and a
+# changed threshold starts it again. The alert: one occurrence with its fingerprint, labels and
+# values and no rule, confirmed by every run, resolved with its end, never two open rows. Silence
+# leaves a state as it was. A disabled automation, an archived trigger and a changed device or metric
+# raise nothing. A historian outage writes one platform alert and nothing else, and the first run that
+# reads resolves it. The state table by role, and the job scheduled once. With ABER_TEST_HISTORIAN
+# (host:port:password of a historian built as lint-historian.mjs builds it) it reads a real one too.
+python supabase/migrations/test_a_threshold_automation_raises_its_alert_from_the_database.py
+# The automations JSON Schema and apply_automations() agree (0256). Every file in
+# supabase/automations-fixtures/ is one document and one reason: the schema and the function must
+# both accept each valid one, and both refuse each invalid one, or the schema accept what only the
+# database can know. The schema's fields are all described and every object closed. Needs jsonschema.
+python supabase/migrations/test_the_automations_schema_and_the_function_agree.py
 # History lists the alerts that fired (0243). alert_occurrences() lists each occurrence that
 # overlaps the window, not only one that started in it, and none that ended at its start or started
 # at its end. A firing occurrence a later one of the same fingerprint replaced ends where that one
@@ -1049,6 +1208,16 @@ python supabase/migrations/test_history_lists_the_alerts_that_fired.py
 # rotated, a SIGNING_KEY_ISSUED row) and the test by role; the lease, the dispatch secret and each
 # recorded outcome. Every test rolls back.
 python supabase/migrations/test_aber_sends_each_alert_to_a_webhook.py
+# Aber emails the people whose roles an alert's email route names (0262, 0263). Email is a channel
+# of the same queue, off until a role is named, with its own route (the lowest severity and the
+# roles told), each setting's rule and who reads and writes it. It is queued, reminded and decided
+# as the webhook is: acknowledgement drops it, a suppression window holds it, a reminder needs its
+# writer's confirmation, and a machine identity's alert is carried only when Administrators are
+# told and goes to them alone. The people are resolved at send time by auth.users.email: a person
+# with no address, a banned or removed account and a machine identity are never told, an address is
+# listed once, and a pass without the lease is refused. The log holds counts and no address, and the
+# Administrator's test goes to their own address. Every test rolls back.
+python supabase/migrations/test_aber_emails_the_people_an_alert_concerns.py
 # A machine has a name an operator gave it (0125): create_machine_principal() takes a name and
 # writes machine_principals in the same transaction as the identity, refuses a blank or duplicate
 # name before anything exists, and the 0080 two-argument form is gone rather than overloaded (an

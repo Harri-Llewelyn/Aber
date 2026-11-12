@@ -2,12 +2,12 @@
  * History's Overview: a lane per device, grouped as the Site Map places devices, each a strip of
  * blocks darker where more readings arrived, read from telemetry_coverage() (0245). Its groups and
  * what this browser remembers of them, the shades and the words, the block widths a selection may
- * take, what the rollups have not counted yet, the selection box with Chart and Zoom, the tick
+ * take, what the rollups have not counted yet, the selection box with Chart, Zoom and Export, the tick
  * boxes, the address, the default tab, and a thousand lanes. In London's zone on Monday 2 November
  * 2026 at 15:20.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within, act, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -19,7 +19,7 @@ import { deviceHistoryUrl } from '../routes'
 import { groupDevicesByCell, SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED } from '../utils/cellResolution'
 import { pathSegments } from '../hooks/useUrlState'
 import {
-  AREA_WIDE_GROUP, CHART_SEVERAL_REASON, COVERAGE_KEY, DEFAULT_HISTORY_WINDOW, OVERVIEW_GROUPS_KEY, OVERVIEW_OPEN_LANES_MAX,
+  AREA_WIDE_GROUP, COVERAGE_KEY, DEFAULT_HISTORY_WINDOW, OVERVIEW_GROUPS_KEY, OVERVIEW_OPEN_LANES_MAX,
   TOO_LONG_FOR_MANY, UNFILED_GROUP, boxWords, coverageBlock, coverageCounts, coverageRuns, coverageSteps, groupIsOpen,
   historyPath, overviewAddress, overviewGroups, readOverviewGroups, readingsStopWords, telemetryKey, uncountedStretches,
   intervalMinutes, readWidth, uncountedWords, writeOverviewGroups,
@@ -45,7 +45,7 @@ vi.mock('uplot', () => {
 })
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), readCoverage: vi.fn(), readCarriedTelemetry: vi.fn() } }
+  return { ...actual, api: { get: vi.fn(), readCoverage: vi.fn(), readCarriedTelemetry: vi.fn(), exportTelemetry: vi.fn() } }
 })
 
 const uuid = (n) => `2b3e0c4a-${String(n).padStart(4, '0')}-4000-8000-${String(n).padStart(12, '0')}`
@@ -136,10 +136,13 @@ afterEach(() => {
   window.history.replaceState(null, '', '/')
 })
 
-const visit = async (address) => {
+/** An Administrator unless a test says otherwise: Export CSV is for an Administrator or a Shopfloor Manager. */
+const visit = async (address, { userRole = 'Administrator' } = {}) => {
   window.history.replaceState(null, '', address)
-  render(<HistoryTab hasPermission={() => true} showToast={vi.fn()} />)
+  const showToast = vi.fn()
+  render(<HistoryTab showToast={showToast} userRole={userRole} />)
   await waitFor(() => expect(document.querySelector('.overview-swimlanes, .empty-state, .callout')).toBeTruthy())
+  return { showToast }
 }
 const lanes = () => [...document.querySelectorAll('.overview-lane')]
 const laneNamed = (name) => lanes().find(l => within(l).queryByText(name))
@@ -274,7 +277,7 @@ describe("History's Overview", () => {
   it('is the first tab and the default, and reads every device in service', async () => {
     await visit('/history?span=day&at=2026-11-02')
     const tabs = screen.getByRole('navigation', { name: 'History' })
-    expect(within(tabs).getAllByRole('link').map(a => a.textContent)).toEqual(['Overview', 'Device', 'Alerts'])
+    expect(within(tabs).getAllByRole('link').map(a => a.textContent)).toEqual(['Overview', 'Device', 'Metric', 'Cell', 'Area', 'Alerts'])
     expect(within(tabs).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page')
     expect(within(tabs).getByRole('link', { name: 'Device' })).toHaveAttribute('href', '/history/device')
     const asked = api.readCoverage.mock.calls[0][0]
@@ -287,7 +290,7 @@ describe("History's Overview", () => {
     expect(within(laneNamed('Lathe 3')).getByText('2 metrics')).toBeInTheDocument()
     expect(within(laneNamed('Press 1')).getByText(/^No readings since /)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Turning/ })).toHaveTextContent('Turning· 2 devices')
-    // Export CSV is the Device tab's; Overview has none.
+    // Export CSV is for the devices ticked or boxed, so there is none before one is picked.
     expect(screen.queryByRole('button', { name: /Export CSV/ })).not.toBeInTheDocument()
   })
 
@@ -303,18 +306,26 @@ describe("History's Overview", () => {
     expect(lanes()).toHaveLength(8)
   })
 
-  it('charts one ticked device from the toolbar, and says why several cannot be', async () => {
+  it('charts one ticked device from the toolbar on the Device tab, and several on the Metric tab', async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
     expect(new URLSearchParams(search()).get('device')).toBe(telemetryKey(LATHE))
     const chart = toolbarChart()
     expect(chart).not.toHaveAttribute('aria-disabled')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Mill 2' }))
-    const several = toolbarChart()
-    expect(several).toHaveAttribute('aria-disabled', 'true')
-    fireEvent.focus(several)
-    await waitFor(() => expect(screen.getByText(CHART_SEVERAL_REASON)).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Mill 2' }))
+    // Two devices open the Metric tab on the metric both report, narrowed to them, at the window shown.
+    expect(toolbarChart()).not.toHaveAttribute('aria-disabled')
+    fireEvent.click(toolbarChart())
+    expect(window.location.pathname).toBe('/history/metric/Spindle%2FLOAD')
+    const asked = new URLSearchParams(search())
+    expect(asked.get('span')).toBe('day')
+    expect(asked.get('at')).toBe('2026-11-02')
+    expect(asked.get('devices').split(',').sort()).toEqual([LATHE, MILL].map(telemetryKey).sort())
+  })
+
+  it('charts one ticked device on the Device tab', async () => {
+    await visit('/history/overview?span=day&at=2026-11-02')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
     fireEvent.click(toolbarChart())
     expect(window.location.pathname).toBe(`/history/device/${telemetryKey(LATHE)}`)
     expect(search()).toBe('?span=day&at=2026-11-02')
@@ -343,8 +354,7 @@ describe("History's Overview", () => {
     // The row above the lanes keeps its status line, and no block is read out under the popover.
     expect(document.querySelector('.history-header .history-meta')).toBeInTheDocument()
     expect(document.querySelector('.overview-readout')).toBeNull()
-    const chart = within(popover).getByRole('button', { name: /Chart/ })
-    expect(chart).toHaveAttribute('aria-disabled', 'true')
+    expect(within(popover).getByRole('button', { name: /Chart/ })).not.toHaveAttribute('aria-disabled')
     // The popover itself takes the focus, so no action's tooltip opens over the box.
     await waitFor(() => expect(popover).toHaveFocus())
     // Escape closes it and clears the box, and focus goes back to the box's first lane.
@@ -384,7 +394,7 @@ describe("History's Overview", () => {
       return screen.getByRole('dialog', { name: 'Selection' })
     }
     let popover = draw()
-    const [chart, , clear] = within(popover).getAllByRole('button')
+    const [chart, , , clear] = within(popover).getAllByRole('button')
     await waitFor(() => expect(popover).toHaveFocus())
     // Shift+Tab from the popover itself goes to its last action, not out of it.
     fireEvent.keyDown(popover, { key: 'Tab', shiftKey: true })
@@ -563,5 +573,141 @@ describe("History's Overview", () => {
     // jsdom is slower than a browser; the bound catches a render that grows out of hand.
     console.log(`1,000 lanes rendered in ${Math.round(ms)} ms (jsdom)`)
     expect(ms).toBeLessThan(15000)
+  })
+})
+
+describe('exporting from Overview', () => {
+  const DENIED = 'Requires Administrator or Shopfloor Manager'
+  const strips = () => [...document.querySelectorAll('.overview-lane .overview-track')]
+  const rowY = (name) => [...document.querySelectorAll('[data-lanes]')].indexOf(laneNamed(name)) * 30 + 15
+  /** A box from `from` to `to` (fractions of the window) across the lanes from `first` to `last`. */
+  const draw = (from, to, first, last) => {
+    const track = strips()[0]
+    const x = (f) => LEFT + 1000 * f
+    fireEvent.pointerDown(track, mouse(x(from), rowY(first)))
+    fireEvent.pointerMove(track, mouse(x(to), rowY(last)))
+    fireEvent.pointerUp(track, mouse(x(to), rowY(last)))
+    return screen.getByRole('dialog', { name: 'Selection' })
+  }
+  /** A day's 10:00 to 14:00, across the three lanes from Mill 2 to Press 1. */
+  const tenToTwo = () => draw(10 / 24, 14 / 24, 'Mill 2', 'Press 1')
+  const exportIn = (popover) => within(popover).getByRole('button', { name: /Export CSV/ })
+  const toolbarExport = () => within(document.querySelector('.filter-bar-actions')).queryByRole('button', { name: /Export CSV/ })
+  const asked = () => api.exportTelemetry.mock.calls.map(c => c[0])
+  const answer = {
+    audit_id: 77, resolution: 'raw', columns: ['time', 'asset_id', 'metric_name', 'value', 'unit'], rows: [], row_count: 0,
+    max_rows: 50000, truncated: false, read_from: '2026-11-02T00:00:00.000Z', read_to: '2026-11-03T00:00:00.000Z', raw_from: null,
+  }
+  beforeEach(() => { api.exportTelemetry.mockResolvedValue({ ...answer, rows: [['2026-11-02T10:00:00.000Z', telemetryKey(LATHE), 'Spindle/LOAD', 4, 'kW']], row_count: 1 }) })
+
+  it("is in the selection's popover after Zoom, and exports the box's devices, all their metrics and its window as raw", async () => {
+    const { showToast } = await visit('/history/overview?span=day&at=2026-11-02')
+    const popover = tenToTwo()
+    expect(within(popover).getAllByRole('button').map(b => b.textContent.trim())).toEqual(['Chart', 'Zoom', 'Export CSV', 'Clear'])
+    // Under the limit the words are the box's alone.
+    expect(within(popover).getByRole('status')).toHaveTextContent(/^3 devices · 10:00 – 14:00, 4 h$/)
+    expect(exportIn(popover)).not.toHaveAttribute('aria-disabled')
+
+    fireEvent.click(exportIn(popover))
+    const dialog = await screen.findByRole('dialog', { name: /Export readings — 3 devices/ })
+    // The box is gone, and the dialog holds what it picked.
+    expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
+    expect(within(dialog).getByText(/^3 devices · 2 metrics · /)).toBeInTheDocument()
+    expect(within(dialog).getByText('Lathe 3')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /Raw samples/ })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(asked()).toHaveLength(1))
+    expect(asked()[0].assetIds.sort()).toEqual([LATHE, PRESS, MILL].map(telemetryKey).sort())
+    expect(asked()[0].metricNames).toEqual(['Spindle/LOAD', 'Spindle/SPEED'])
+    expect(asked()[0].from).toBe(new Date(2026, 10, 2, 10).toISOString())
+    expect(asked()[0].to).toBe(new Date(2026, 10, 2, 14).toISOString())
+    expect(asked()[0].resolution).toBe('raw')
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Exported 1 row of 3 devices', 'success', { to: '/audit-trail?event=77' }))
+  })
+
+  it('is greyed for a role that may not export, saying who may, and does not open the dialog', async () => {
+    await visit('/history/overview?span=day&at=2026-11-02', { userRole: 'Operator' })
+    const popover = tenToTwo()
+    const button = exportIn(popover)
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+    expect(button).toHaveClass('btn-disabled')
+    fireEvent.focus(button)
+    await waitFor(() => expect(screen.getByText(DENIED)).toBeInTheDocument())
+    fireEvent.click(button)
+    expect(screen.queryByRole('dialog', { name: /Export readings/ })).not.toBeInTheDocument()
+    // The charts stay: Chart and Zoom are as they were.
+    expect(within(popover).getByRole('button', { name: /Zoom/ })).not.toHaveAttribute('aria-disabled')
+  })
+
+  it("says the window is over the limit as the box is drawn and in its popover, and holds Export, for a role that may export", async () => {
+    await visit('/history/overview?span=month&at=2026-11-02')
+    const track = strips()[0]
+    const x = (f) => LEFT + 1000 * f
+    // A box across 80% of a 30-day month is 24 days.
+    fireEvent.pointerDown(track, mouse(x(0.1), rowY('Mill 2')))
+    fireEvent.pointerMove(track, mouse(x(0.9), rowY('Press 1')))
+    expect(document.querySelector('.trail-axis .trail-band-words')).toHaveTextContent(/ · over the 14-day export limit$/)
+    fireEvent.pointerUp(track, mouse(x(0.9), rowY('Press 1')))
+    const popover = screen.getByRole('dialog', { name: 'Selection' })
+    expect(within(popover).getByRole('status')).toHaveTextContent(/ · over the 14-day export limit$/)
+    const button = exportIn(popover)
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.focus(button)
+    await waitFor(() => expect(screen.getByText(/^An export can cover at most 14 days, set on Settings › History\. This window is 2\d days\.$/)).toBeInTheDocument())
+    fireEvent.click(button)
+    expect(screen.queryByRole('dialog', { name: /Export readings/ })).not.toBeInTheDocument()
+    expect(asked()).toEqual([])
+  })
+
+  it('says nothing of the limit to a role that may not export', async () => {
+    await visit('/history/overview?span=month&at=2026-11-02', { userRole: 'Operator' })
+    const popover = draw(0.1, 0.9, 'Mill 2', 'Press 1')
+    expect(within(popover).getByRole('status').textContent).not.toMatch(/export limit/)
+  })
+
+  it('exports the devices ticked from the toolbar, over the time control\'s window, when there is no box', async () => {
+    await visit('/history/overview?span=day&at=2026-11-02')
+    expect(toolbarExport()).toBeNull()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Mill 2' }))
+    expect(toolbarExport()).toHaveClass('btn-primary')
+    expect(toolbarExport()).not.toHaveAttribute('aria-disabled')
+    fireEvent.click(toolbarExport())
+    const dialog = await screen.findByRole('dialog', { name: /Export readings — 2 devices/ })
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(asked()).toHaveLength(1))
+    expect(asked()[0].assetIds.sort()).toEqual([LATHE, MILL].map(telemetryKey).sort())
+    expect(asked()[0].from).toBe(new Date(2026, 10, 2).toISOString())
+    expect(asked()[0].to).toBe(new Date(2026, 10, 3).toISOString())
+  })
+
+  it('is greyed in the toolbar for a role that may not export, and for a window over the limit', async () => {
+    await visit('/history/overview?span=day&at=2026-11-02', { userRole: 'Shopfloor_Manager' })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
+    expect(toolbarExport()).not.toHaveAttribute('aria-disabled')
+    cleanup()
+
+    await visit('/history/overview?span=day&at=2026-11-02', { userRole: 'Auditor' })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
+    expect(toolbarExport()).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.focus(toolbarExport())
+    await waitFor(() => expect(screen.getByText(DENIED)).toBeInTheDocument())
+    cleanup()
+
+    await visit('/history/overview?span=month&at=2026-11-02')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
+    expect(toolbarExport()).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(toolbarExport())
+    expect(screen.queryByRole('dialog', { name: /Export readings/ })).not.toBeInTheDocument()
+  })
+
+  it('says why when the devices declare no metric, and has nothing to export', async () => {
+    fleet = [place(1, 'Blank rig', inCell('c1'), { last_birth_metrics: [] })]
+    await visit('/history/overview?span=day&at=2026-11-02')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Blank rig' }))
+    expect(toolbarExport()).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.focus(toolbarExport())
+    await waitFor(() => expect(screen.getByText('These devices have declared no metric, so there is nothing to export.')).toBeInTheDocument())
   })
 })

@@ -173,11 +173,23 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GRAFANA_ALERT_WEBHOOK_SECRET",
   ],
 
-  // Aber's dispatcher (0247): drains the notification queue and posts each message to the webhook.
-  // Asked for by the database through pg_net with the dispatch secret it generated, which the
-  // function checks through an RPC, so no secret of its own is forwarded. The service-role key is
-  // for the queue's RPCs; the dashboard's address is each message's source and link.
-  "notification-dispatch": ["SUPABASE_SERVICE_ROLE_KEY", "FRONTEND_PUBLIC_URL"],
+  // Aber's dispatcher (0247): drains the notification queue, posting each message to the webhook or
+  // emailing it. Asked for by the database through pg_net with the dispatch secret it generated, which
+  // the function checks through an RPC, so no secret of its own is forwarded. The service-role key is
+  // for the queue's RPCs; the dashboard's address is each message's source and link. The SMTP_*
+  // variables are the mail relay GoTrue reads from supabaseAuth.smtp, and SMTP_CA_PEM a private
+  // authority's certificate for it.
+  "notification-dispatch": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "FRONTEND_PUBLIC_URL",
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_USER",
+    "SMTP_PASS",
+    "SMTP_ADMIN_EMAIL",
+    "SMTP_SENDER_NAME",
+    "SMTP_CA_PEM",
+  ],
 
   // Resolves a role from public.user_roles for Grafana's OIDC `api_url`.
   "grafana-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],

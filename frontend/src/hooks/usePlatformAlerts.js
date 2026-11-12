@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { REALTIME_ENABLED, grafanaAlertUrl } from '../constants'
 import { classifyRefreshError, FAILURE_SESSION } from '../lib/connectionState'
-import { alertPage } from '../routes'
+import { alertPage, deviceUrl } from '../routes'
 import { isSuppressed, nextSuppressionChange } from '../utils/alertSuppression'
 
 /**
@@ -52,9 +52,11 @@ async function upcomingWindowStarts() {
 /**
  * Where an alert's toast leads: the page in the dashboard that alertPage() names, such as a machine
  * identity on Access Control or a job on the Capture page; for any other alert, its rule in Grafana
- * Alerting, where its thresholds are set.
+ * Alerting, where its thresholds are set. An automation's alert has no rule there: it leads to its
+ * device, or nowhere when it names none.
  */
-export const alertToastUrl = (row) => alertPage(row)?.to ?? grafanaAlertUrl(row)
+export const alertToastUrl = (row) =>
+  alertPage(row)?.to ?? grafanaAlertUrl(row) ?? (row?.sparkplug_id ? deviceUrl(row.sparkplug_id) : undefined)
 
 /**
  * The live set of firing alerts, machine and platform alike, with a toast on each transition. It
@@ -71,17 +73,22 @@ export const alertToastUrl = (row) => alertPage(row)?.to ?? grafanaAlertUrl(row)
  * A suppressed alert toasts nothing, firing or resolved. When its window ends while it still fires
  * it toasts as if it had just fired. Whether an alert is suppressed changes at a window's start and
  * end with nothing written, so the hook reads again at the nearest one it knows of.
+ *
+ * `onRead(rows)`, when given, is called with every successful read, after the toasts: it is how a
+ * desktop notification (useDesktopAlerts) follows the same set the counter shows.
  */
-export function usePlatformAlerts(showToast) {
+export function usePlatformAlerts(showToast, onRead) {
   const [active, setActive] = useState([])
   const knownRef = useRef(new Map())
   const primedRef = useRef(false)
   const showToastRef = useRef(showToast)
+  const onReadRef = useRef(onRead)
   // The re-read at the next window start or end, and whether the hook is still mounted to make it.
   const changeTimerRef = useRef(null)
   const liveRef = useRef(false)
 
   useEffect(() => { showToastRef.current = showToast }, [showToast])
+  useEffect(() => { onReadRef.current = onRead }, [onRead])
 
   /**
    * Re-read the active view and announce the difference. Diffs two snapshots rather than trusting
@@ -131,6 +138,7 @@ export function usePlatformAlerts(showToast) {
     knownRef.current = next
     primedRef.current = true
     setActive(rows)
+    onReadRef.current?.(rows)
 
     const at = nextSuppressionChange(rows, await upcomingWindowStarts())
     clearTimeout(changeTimerRef.current)

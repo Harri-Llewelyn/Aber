@@ -488,12 +488,18 @@ const TOASTED_BY = [
     by: { file: 'components/tabs/NotificationsPanel.jsx', piece: 'const onWebhookSaved = async () => {' },
     why: 'the webhook dialog saves the hosts and then the address, and the panel toasts once for both',
   },
+  {
+    file: 'components/tabs/NotificationsPanel.jsx', piece: 'api.patchSetting(EMAIL_ROLES_KEY',
+    by: { file: 'components/tabs/NotificationsPanel.jsx', piece: 'const onEmailSaved = async (roles) => {' },
+    why: 'the email dialog saves the roles told, and the panel toasts for the save',
+  },
 ]
 
 /** Audited calls with no success toast, by file and a piece of the call, each with its reason. */
 const NO_TOAST = [
   { file: 'pages/OAuthConsent.jsx', piece: '/consent`', why: 'the page leaves the dashboard for the app that asked' },
   { file: 'components/tabs/SystemLogs.jsx', piece: 'api.readServiceLogs(', why: 'reading logs leaves a trace of the read, not an act the person takes; a toast on every filter change would be noise' },
+  { file: 'components/modals/ApplyAutomationsModal.jsx', piece: 'api.applyAutomations(parsed.document, true)', why: 'a preview: with dry-run true nothing is written, so no Audit Trail row; the confirm applies it and toasts' },
 ]
 
 describe('an audited action ends with a success toast', () => {

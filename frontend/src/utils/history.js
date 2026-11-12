@@ -4,8 +4,8 @@
  * rule is unit-tested; frontend/README.md, "History and its chart".
  */
 import {
-  COVERAGE_LARGE_MAX_HOURS, COVERAGE_MAX_DEVICES, COVERAGE_ROLLUP_MINUTES, COVERAGE_SMALL_SELECTION, HISTORY_MAX_ROWS,
-  HISTORY_RESOLUTIONS,
+  COVERAGE_LARGE_MAX_HOURS, COVERAGE_MAX_DEVICES, COVERAGE_ROLLUP_MINUTES, COVERAGE_SMALL_SELECTION, HISTORY_CHANGE_READINGS,
+  HISTORY_GROUP_READ_ROWS, HISTORY_MAX_CHANGES, HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS, HOUR_OF_DAY_MAX_ROWS,
 } from '../api'
 import { encodeList } from '../hooks/useUrlState'
 import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
@@ -14,6 +14,7 @@ import { modelledConstraints } from './payloadConformance'
 import { deviceIdentifiers, deviceIds } from './sparkplugId'
 import { SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell } from './cellResolution'
 import { areaWideInService, inServiceDevices } from './inService'
+import { DERIVED_MAX_MINUTES, SHARE_UNIT, derivedInputCount, derivedReportedBy, percentWords, unitOf } from './derivedMetric'
 import {
   SPAN_IDS, TIME_PRESETS, bandWords, calendarTicks, clockWords, localDay, rollingWindow, windowToQuery,
 } from './timeWindow'
@@ -167,18 +168,25 @@ export function readableResolution(startMs, endMs, series, widthPx, {
  * metric at it. Under Auto, or when the choice is too fine (`refused`), text metrics (`textNames`)
  * read apart at readableResolution() for charts `widthPx` wide, flagged `text`, and the rest at
  * pickResolution() for their own number. `problem` when one series does not fit even at 1 day.
+ *
+ * Each group's `changes` are its text and flag metrics (`stateNames`), whatever the buckets: they
+ * also take the change read (telemetry_changes(), 0254), which draws every change while raw
+ * telemetry holds the window and the cap allows, and marks the group's buckets otherwise.
  */
-export function readPlan(startMs, endMs, { names, textNames = new Set(), bucket = 'auto', widthPx = DEFAULT_CHART_PX }) {
+export function readPlan(startMs, endMs, {
+  names, textNames = new Set(), stateNames = new Set(), bucket = 'auto', widthPx = DEFAULT_CHART_PX,
+}) {
+  const withChanges = (g) => ({ ...g, changes: g.names.filter(n => stateNames.has(n)) })
   const { resolution: chosen, refused } = resolutionFor(startMs, endMs, names.length, bucket)
   if (!chosen) return { problem: true, groups: [], refused: null }
-  if (bucket !== 'auto' && !refused) return { groups: names.length ? [{ names, resolution: chosen }] : [], refused: null, chosen }
+  if (bucket !== 'auto' && !refused) return { groups: names.length ? [withChanges({ names, resolution: chosen })] : [], refused: null, chosen }
   const text = names.filter(n => textNames.has(n))
   const rest = names.filter(n => !textNames.has(n))
   const groups = []
   if (rest.length) groups.push({ names: rest, resolution: pickResolution(startMs, endMs, rest.length) })
   if (text.length) groups.push({ names: text, resolution: readableResolution(startMs, endMs, text.length, widthPx), text: true })
   if (groups.some(g => !g.resolution)) return { problem: true, groups: [], refused: null }
-  return { groups, refused, chosen }
+  return { groups: groups.map(withChanges), refused, chosen }
 }
 
 /** `list` in groups of at most `size`, in order. */
@@ -251,7 +259,7 @@ export function pickedAddress(deviceId, win, { metrics = [], bucket = 'auto' } =
 
 /**
  * The devices History offers: every device but a quarantined one, whose readings are held until it
- * is approved. Each carries the names of the cell and area it sits in, and they are sorted by name.
+ * is approved. Each carries the names and ids of the cell and area it sits in, and they are sorted by name.
  */
 export function historyDevices(devices, cells, areas) {
   const cellById = new Map(cells.map(c => [c.cell_id ?? c.id, c]))
@@ -261,7 +269,10 @@ export function historyDevices(devices, cells, areas) {
     .map(d => {
       const cell = cellById.get(d.effective_cell_id) || null
       const area = areaById.get(d.effective_area_id ?? cell?.area_id) || null
-      return { ...d, cell_name: cell?.name ?? null, area_name: area?.name ?? null }
+      return {
+        ...d, cell_name: cell ? (cell.cell_name ?? cell.name ?? null) : null, area_name: area ? (area.area_name ?? area.name ?? null) : null,
+        cell_id: cell ? (cell.cell_id ?? cell.id) : null, area_id: area ? (area.area_id ?? area.id) : null,
+      }
     })
     .sort((a, b) => String(a.asset_name).localeCompare(String(b.asset_name)))
 }
@@ -276,12 +287,16 @@ export function deviceMatches(device, text) {
 
 /**
  * The metrics a device reports: those its last birth declared and those its schemas model, by
- * name. A metric it stopped declaring is still charted while a schema models it.
+ * name. A metric it stopped declaring is still charted while a schema models it. With the `catalog`,
+ * each derived metric whose inputs it reports is among them too, all of them (a derived metric applies
+ * to every device that reports all its inputs); nothing else changes.
  */
-export function deviceMetrics(device, schemas) {
+export function deviceMetrics(device, schemas, catalog = null) {
   const declared = Array.isArray(device?.last_birth_metrics) ? device.last_birth_metrics : []
   const modelled = modelledMetricsAcross(schemasForDevice(device, schemas)) || new Set()
-  return [...new Set([...declared, ...modelled])].filter(Boolean).sort((a, b) => a.localeCompare(b))
+  const measured = [...new Set([...declared, ...modelled])].filter(Boolean)
+  const derived = catalog ? derivedReportedBy(new Set(measured), catalog) : []
+  return [...new Set([...measured, ...derived])].sort((a, b) => a.localeCompare(b))
 }
 
 /**
@@ -341,6 +356,143 @@ export function chartSeries(rows, starts) {
     series.last.push(r ? last(r) : null)
   }
   return series
+}
+
+// ------------------------------------------------------------------------------------------------
+// Every change of a text or a flag: telemetry_changes() (0254)
+// ------------------------------------------------------------------------------------------------
+
+/** What a change read says of a series, as telemetry_changes() names it in `read`. */
+export const CHANGE_READS = Object.freeze({
+  changes: 'changes', changeCap: 'change_cap', readingCap: 'reading_cap', retention: 'retention',
+})
+
+const isValue = (v) => v !== null && v !== undefined
+
+/**
+ * A change read's row as a chart draws it, or null when the row is not every change. `starts` are
+ * in seconds: the window's start when a value was carried in, each change, then where the last run
+ * stops, the window's end or now. The series on them is shaped as chartSeries() shapes one, a flag
+ * as 1 and 0, so a flag steps at each change. `runs` are each value's real stretch, `exact`, the
+ * one carried in from before the window marked carried up to the first reading in it.
+ */
+export function changeSeries(row, { start, end, now }) {
+  if (row?.read !== CHANGE_READS.changes) return null
+  const flag = (row.val_bool || []).some(isValue) || isValue(row.carried_bool)
+  const kind = flag ? 'flag' : (row.val_string || []).some(isValue) || isValue(row.carried_string) ? 'state' : 'none'
+  const values = (flag ? row.val_bool : row.val_string) || []
+  const stop = Math.min(end, now)
+  const points = []
+  const carried = flag ? row.carried_bool : row.carried_string
+  if (isValue(carried)) points.push({ ms: start, value: carried, carried: true })
+  ;(row.change_ts || []).forEach((ts, i) => {
+    const ms = Math.max(start, Date.parse(ts))
+    if (ms < stop) points.push({ ms, value: values[i] ?? null, carried: false })
+  })
+  // Each value holds until the next change; one that starts and stops at once draws nothing.
+  const held = points.filter((p, i) => (i + 1 < points.length ? points[i + 1].ms : stop) > p.ms)
+  const runs = []
+  held.forEach((p, i) => {
+    const to = i + 1 < held.length ? held[i + 1].ms : stop
+    const last = runs[runs.length - 1]
+    if (!isValue(p.value)) return
+    if (last && last.state === p.value && last.endMs === p.ms) {
+      last.endMs = to
+      last.to = i + 1
+    } else {
+      runs.push({ state: p.value, from: i, to: i + 1, startMs: p.ms, endMs: to, carried: p.carried ? [{ startMs: p.ms, endMs: to }] : [], exact: true })
+    }
+  })
+  if (held.length) held.push({ ...held[held.length - 1], ms: stop })
+  const number = (v) => (kind === 'flag' && isValue(v) ? (v ? 1 : 0) : null)
+  const line = held.map(p => number(p.value))
+  return {
+    starts: held.map(p => p.ms / 1000),
+    series: {
+      kind,
+      avg: line,
+      min: line,
+      max: line,
+      carried: held.map(p => p.carried),
+      states: held.map(p => (kind === 'state' ? p.value : null)),
+      last: held.map(p => p.value),
+      runs,
+      changes: runs.filter(r => r.carried.length === 0).length,
+    },
+  }
+}
+
+/**
+ * The run under the pointer at `t`, in milliseconds: the one holding it, unless a run thinner than
+ * twice `slackMs` lies within `slackMs` of it, which is taken instead, the nearest first. A change
+ * of a few seconds is drawn far wider than its time, and is the run worth finding.
+ */
+export function runNear(runs, t, slackMs = 0) {
+  const at = runs.find(r => t >= r.startMs && t < r.endMs) ?? null
+  if (!(slackMs > 0)) return at
+  const away = (r) => (t < r.startMs ? r.startMs - t : t >= r.endMs ? t - r.endMs : 0)
+  const thin = runs.filter(r => r.endMs - r.startMs < 2 * slackMs && away(r) <= slackMs)
+  return thin.length ? thin.reduce((best, r) => (away(r) < away(best) ? r : best)) : at
+}
+
+/**
+ * A bucket series with the change read's marks laid on its buckets: `marked`, how many values each
+ * bucket held, 0 where it held one or none. A flag's bucket that held both runs from false to true,
+ * as a number's band runs from its lowest to its highest reading.
+ */
+export function markBuckets(series, starts, row) {
+  const at = new Map((row?.marked_ts || []).map((ts, i) => [Math.round(Date.parse(ts) / 1000), row.marked_values?.[i] ?? 2]))
+  if (!at.size) return series
+  const marked = starts.map(x => at.get(x) ?? 0)
+  if (series.kind !== 'flag') return { ...series, marked }
+  return {
+    ...series,
+    marked,
+    min: series.min.map((v, i) => (marked[i] > 1 && isValue(v) ? 0 : v)),
+    max: series.max.map((v, i) => (marked[i] > 1 && isValue(v) ? 1 : v)),
+  }
+}
+
+/** Each marked bucket of a series as a stretch of the window, clipped to it and to now, with its last value. */
+export function markedStretches(series, starts, { start, end, now, minutes }) {
+  const width = minutes * MINUTE
+  const stop = Math.min(end, now)
+  return (series.marked || []).flatMap((n, i) => {
+    const from = Math.max(start, starts[i] * 1000)
+    const to = Math.min(stop, starts[i] * 1000 + width)
+    return n > 1 && to > from ? [{ startMs: from, endMs: to, values: n, last: series.last[i] }] : []
+  })
+}
+
+/**
+ * Which read a state chart shows, in words: "every change", or "the last value in each 5-minute
+ * bucket" with the reason the change read gave. Null when no change read answered for it.
+ */
+export function readWords(row, resolution) {
+  if (!row) return null
+  if (row.read === CHANGE_READS.changes) return 'every change'
+  const each = `the last value in each ${resolution.words.replace(/s$/, '')}`
+  if (row.read === CHANGE_READS.changeCap) return `${each}, past the ${HISTORY_MAX_CHANGES.toLocaleString()}-change cap`
+  if (row.read === CHANGE_READS.readingCap) return `${each}, past the ${HISTORY_CHANGE_READINGS.toLocaleString()}-reading cap`
+  if (row.read === CHANGE_READS.retention) {
+    const kept = Date.parse(row.raw_from)
+    const day = Number.isFinite(kept) ? new Date(kept).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null
+    return `${each}, older than raw retention${day ? ` (kept from ${day})` : ''}`
+  }
+  return each
+}
+
+/**
+ * The status line's part for the state charts, `states` being each one's kind (text or flag) and
+ * read in words: "text and flags show every change" when any does, else the first chart's read.
+ * `words` is that read, so a chart reading otherwise can say its own. Null for no state chart.
+ */
+export function stateReadLine(states) {
+  if (!states.length) return null
+  const kinds = new Set(states.map(s => s.kind))
+  const noun = kinds.has('text') && kinds.has('flag') ? 'text and flags' : kinds.has('flag') ? 'flags' : 'text'
+  const words = states.some(s => s.words === 'every change') ? 'every change' : states[0].words
+  return { line: `${noun} ${noun === 'text' ? 'shows' : 'show'} ${words}`, words }
 }
 
 /**
@@ -454,17 +606,44 @@ export function momentWords(ms, minutes) {
   return minutes >= 1440 ? day : `${day} ${clockWords(d)}`
 }
 
+const secondsWords = (d) => d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+/** A moment to the second, "2 Nov 10:05:12": a change's own time, which no bucket rounds. */
+export function momentSecondsWords(ms) {
+  const d = new Date(ms)
+  return `${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${secondsWords(d)}`
+}
+
+/** A stretch in words to the second under a minute, "35 s", and as durationWords() says it after. */
+export const spanWords = (ms) => (ms < 59500 ? `${Math.max(1, Math.round(ms / 1000))} s` : durationWords(ms))
+
 /**
  * A run under the pointer in words: "2 Nov 10:05 – 10:40 · RUNNING, 35 min", and how much of it was
- * carried forward: all of it, or "20 min carried forward".
+ * carried forward: all of it, or "20 min carried forward". A run of every change (`exact`) is told
+ * to the second: "2 Nov 10:05:12 – 10:05:47 · false, 35 s".
  */
 export function runWords(run, minutes) {
   const sameDay = new Date(run.startMs).toDateString() === new Date(run.endMs).toDateString()
-  const to = minutes < 1440 && sameDay ? clockWords(new Date(run.endMs)) : momentWords(run.endMs, minutes)
   const length = run.endMs - run.startMs
   const held = run.carried.reduce((a, c) => a + c.endMs - c.startMs, 0)
   const carried = held <= 0 ? '' : held >= length ? ', carried forward' : `, ${durationWords(held)} carried forward`
+  if (run.exact) {
+    const to = sameDay ? secondsWords(new Date(run.endMs)) : momentSecondsWords(run.endMs)
+    return `${momentSecondsWords(run.startMs)} – ${to} · ${run.state}, ${spanWords(length)}${carried}`
+  }
+  const to = minutes < 1440 && sameDay ? clockWords(new Date(run.endMs)) : momentWords(run.endMs, minutes)
   return `${momentWords(run.startMs, minutes)} – ${to} · ${run.state}, ${durationWords(length)}${carried}`
+}
+
+/**
+ * A marked bucket under the pointer in words: its stretch, how many values it held, and the last,
+ * which is the one its box shows: "2 Nov 10:05 – 10:10 · 3 values in this bucket, RUNNING last".
+ */
+export function markWords(mark, minutes, kind = 'state') {
+  const sameDay = new Date(mark.startMs).toDateString() === new Date(mark.endMs).toDateString()
+  const to = minutes < 1440 && sameDay ? clockWords(new Date(mark.endMs)) : momentWords(mark.endMs, minutes)
+  const held = kind === 'flag' ? 'both values' : `${mark.values} values`
+  return `${momentWords(mark.startMs, minutes)} – ${to} · ${held} in this bucket, ${valueWords(kind, mark.last)} last`
 }
 
 /**
@@ -491,12 +670,22 @@ export function nowFraction(startMs, endMs, nowMs) {
 
 const NUMBER = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 4 })
 
-/** A reading in words: four significant figures, with the unit after it. */
+/**
+ * A reading in words: four significant figures, with the unit after it. A time in state's unit
+ * (SHARE_UNIT) says it as a percentage instead, "42%", with one decimal at most.
+ */
 export function readingWords(value, unit) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  if (unit === SHARE_UNIT) return percentWords(value)
   const text = NUMBER.format(value)
   return unit ? `${text} ${unit}` : text
 }
+
+/**
+ * The first of a range, "0 to 120 kW": no unit, which the end carries, except a percentage, whose sign
+ * each end says ("0% to 50%").
+ */
+export const lowWords = (value, unit) => readingWords(value, unit === SHARE_UNIT ? unit : undefined)
 
 /** A value as its chart says it: a reading with its unit, true or false, or a state's text. */
 export function valueWords(kind, value, unit) {
@@ -512,6 +701,14 @@ export function valueWords(kind, value, unit) {
  */
 export function latestWords(series, starts, minutes, unit) {
   if (series.kind === 'none') return null
+  if (series.runs) {
+    // Every change: the value now, and since when it has held.
+    const run = series.runs[series.runs.length - 1]
+    const read = run && run.carried.reduce((a, c) => a - (c.endMs - c.startMs), run.endMs - run.startMs) > 0
+    if (!read) return 'No reading in this window'
+    const since = run.carried.length ? 'since before this window' : `since ${momentSecondsWords(run.startMs)}`
+    return `Latest ${valueWords(series.kind, run.state, unit)} · ${since}`
+  }
   const latest = latestReading(series)
   if (!latest) return 'No reading in this window'
   return `Latest ${valueWords(series.kind, latest.value, unit)} · ${momentWords(starts[latest.i] * 1000, minutes)}`
@@ -527,14 +724,24 @@ export const chartTitle = (metric, unit) => (unit ? `${metric} (${unit})` : metr
  * where the schema declares one. `span` (`{ start, end, now }`, in milliseconds) places a state's
  * runs.
  */
-export function chartSummary({ metric, unit, windowText, resolution, series, validRange, starts, span }) {
-  const head = `${chartTitle(metric, unit)}, ${windowText}, in ${resolution.words}.`
+export function chartSummary({ metric, unit, windowText, resolution, series, validRange, starts, span, read = null, derived = false }) {
+  const head = `${chartTitle(metric, unit)}${derived ? ', a derived metric' : ''}, ${windowText}, ${series.runs ? 'every change' : read ?? `in ${resolution.words}`}.`
   const shown = series.avg.map((v, i) => i).filter(i => series.avg[i] !== null)
   if (series.kind === 'none' || (series.kind !== 'state' && shown.length === 0)) {
     return `${head} No readings in this window, and none before it.`
   }
   const parts = [head]
   const word = (v) => valueWords(series.kind, v, unit)
+  if (series.runs) {
+    const latest = latestWords(series, starts, resolution.minutes, unit)
+    const last = series.runs[series.runs.length - 1]
+    if (latest.startsWith('Latest ')) parts.push(`${latest.replace(' · ', ', ')}.`)
+    else parts.push(last ? `No reading in this window; ${word(last.state)} is carried forward from before it.` : `${latest}.`)
+    parts.push(`${series.changes} change${series.changes === 1 ? '' : 's'} in this window.`)
+    const key = stateKey(stateShares(series.runs))
+    if (key.shown.length) parts.push(`Time in each value: ${keyWords(key)}.`)
+    return parts.join(' ')
+  }
   const latest = latestReading(series)
   if (latest) {
     parts.push(`Latest ${word(latest.value)}, in the bucket from ${momentWords(starts[latest.i] * 1000, resolution.minutes)}.`)
@@ -556,6 +763,8 @@ export function chartSummary({ metric, unit, windowText, resolution, series, val
   if (held > 0) {
     parts.push(`${held} of ${total} bucket${total === 1 ? '' : 's'} had no reading and carry the last one forward.`)
   }
+  const mixed = (series.marked || []).filter(n => n > 1).length
+  if (mixed > 0) parts.push(`${mixed} of ${total} bucket${total === 1 ? '' : 's'} held more than one value, and show the last.`)
   const range = validRangeWords(validRange, unit)
   if (range) parts.push(`${range}.`)
   return parts.join(' ')
@@ -897,9 +1106,6 @@ export function coverageSummary(name, counts, stopWords) {
 export const boxWords = (count, start, end, now = Date.now()) =>
   `${count} ${count === 1 ? 'device' : 'devices'} · ${bandWords(start, end, now)}`
 
-/** Why Chart is off with several devices picked. */
-export const CHART_SEVERAL_REASON = 'Pick one device to chart it. Charting several comes with the Metric tab.'
-
 /**
  * The Overview's time axis: a calendar window's own ticks (calendarTicks()), else five evenly
  * spaced, labelled with the clock (to the second under an hour) inside a day, the date and clock up
@@ -918,4 +1124,523 @@ export function axisTicks(win, startMs, endMs) {
     ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : span <= DAY ? clockWords(d) : momentWords(d.getTime(), span <= 3 * DAY ? 1 : 1440))
   return [0, 0.25, 0.5, 0.75, 1].map(f => ({ f, label: label(new Date(startMs + span * f)) }))
+}
+
+// ------------------------------------------------------------------------------------------------
+// The Cell tab: one metric across a cell's machines, on one scale, and by the hour of the day
+// ------------------------------------------------------------------------------------------------
+
+/** The Cell tab's id among History's tabs, and its path: `/history/cell` picks a cell. */
+export const CELL_TAB = 'cell'
+export const CELL_PATH = '/history/cell'
+
+/** The path of one cell's tab, the picker's when `cellId` is empty. */
+export const cellHistoryPath = (cellId) => (cellId ? `${CELL_PATH}/${encodeURIComponent(cellId)}` : CELL_PATH)
+
+/** The cell a path's segments name, `/history/cell/<id>`; empty for the picker and for any other path. */
+export function cellIdFrom(segments) {
+  const [, tab, id] = segments
+  if (tab !== CELL_TAB || !id) return ''
+  try { return decodeURIComponent(id) } catch { return '' }
+}
+
+/** The address of a cell's tab at window `win`, with the metric chosen when there is one. */
+export function cellAddress(cellId, win, { metric = '' } = {}) {
+  const query = new URLSearchParams()
+  for (const [k, v] of Object.entries(windowToQuery(win, DEFAULT_HISTORY_WINDOW))) if (v) query.set(k, v)
+  if (metric) query.set('metric', metric)
+  const q = query.toString()
+  return `${cellHistoryPath(cellId)}${q ? `?${q}` : ''}`
+}
+
+/**
+ * The cells the Cell tab offers, archived ones too as the device picker offers archived devices, each as
+ * `{ cell_id, name, area_name, is_archived, machines }`, `machines` being its devices in service, in name order.
+ */
+export function historyCells(cells, devices, areas = []) {
+  const byCell = groupDevicesByCell(inServiceDevices(devices))
+  const areaName = new Map(areas.map(a => [a.area_id ?? a.id, a.area_name ?? a.name]))
+  return (cells || [])
+    .map(c => {
+      const id = c.cell_id ?? c.id
+      return {
+        cell_id: id, name: String(c.cell_name ?? c.name ?? ''), area_id: c.area_id ?? null, area_name: areaName.get(c.area_id) ?? null,
+        is_archived: Boolean(c.is_archived), machines: byCell.get(id) || [],
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * Each metric the cell's machines report, as `{ name, count }`, `count` being how many do, in name
+ * order. A machine reports a metric when its last birth declared it or a schema of it models it
+ * (deviceMetrics()).
+ */
+export function cellMetrics(machines, schemas, catalog = null) {
+  const counts = new Map()
+  for (const d of machines) for (const m of deviceMetrics(d, schemas, catalog)) counts.set(m, (counts.get(m) || 0) + 1)
+  return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * The metric the tab opens on: the one most machines report, the first by name among equals. A
+ * measured metric is preferred to a derived one (`derived: true` on the entry), which has no hour-of-day
+ * grid and no export: a tab opens on one only when the machines report nothing else.
+ */
+export function defaultCellMetric(metrics) {
+  const measured = metrics.filter(m => !m.derived)
+  return (measured.length ? measured : metrics).reduce((best, m) => (!best || m.count > best.count ? m : best), null)?.name ?? ''
+}
+
+/** What a shared scale adds above and below the data, as a fraction of its span. */
+const SCALE_PAD = 0.08
+
+/**
+ * One y scale for every number series in `list`: the lowest minimum to the highest maximum across
+ * all of them, padded so a line does not run along an edge. Null when none holds a number, and uPlot
+ * then scales a chart by itself. A flat metric is padded by a tenth of its value, or 1.
+ */
+export function sharedScale(list) {
+  let low = Infinity
+  let high = -Infinity
+  for (const s of list) {
+    if (s?.kind !== 'number') continue
+    for (const v of s.min) if (isValue(v) && v < low) low = v
+    for (const v of s.max) if (isValue(v) && v > high) high = v
+  }
+  if (!(low <= high)) return null
+  const pad = high > low ? (high - low) * SCALE_PAD : Math.max(Math.abs(high) * 0.1, 1)
+  return [low - pad, high + pad]
+}
+
+/** The words for a machine that does not report the metric chosen. */
+export const silentWords = (name, metric) => `${name} does not report ${metric}.`
+
+/**
+ * The status line of the machines' charts: how many are charted, in which buckets, how many do not
+ * report the metric, how many parts the read took, and what the text and flag charts show. `noun`
+ * is what a chart is of: the Metric tab's are devices.
+ */
+export function multiplesWords({ shown, silent, resolution, reads = 1, stateLine = null, noun = 'machine' }) {
+  const count = `${shown} ${shown === 1 ? noun : `${noun}s`}`
+  const apart = silent ? `, ${silent} ${silent === 1 ? 'does' : 'do'} not report it` : ''
+  const parts = reads > 1 ? `, read in ${reads} parts` : ''
+  return `${count}, in ${resolution.words}${apart}${parts}${stateLine ? `; ${stateLine}` : ''}`
+}
+
+// ------------------------------------------------------------------------------------------------
+// Derived metrics: computed from the minutes (derived_series(), 0282)
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * Why `devices` devices of the derived metrics `names` cannot be read over [startMs, endMs) at
+ * `minutes`-minute buckets, or null. A derived series is read from the minutes at every bucket width, so
+ * what it costs is the window and the devices, not the bucket: past DERIVED_MAX_MINUTES minutes of input
+ * (devices times inputs times the window's minutes) the database refuses it before reading anything.
+ */
+export function derivedReadProblem(startMs, endMs, minutes, devices, names, catalog) {
+  const inputs = derivedInputCount(names, catalog)
+  if (!inputs || !devices) return null
+  const window = bucketCount(startMs, endMs, minutes) * minutes
+  if (devices * inputs * window <= DERIVED_MAX_MINUTES) return null
+  return `A derived metric is computed from the minutes, and this window has too many of them for ${devices === 1 ? 'it' : `${devices.toLocaleString()} devices`}. Choose a shorter window${devices === 1 ? '' : ' or fewer devices'}.`
+}
+
+/**
+ * Each group's rows of derived_series() folded as telemetry_carried_by_group() folds them, so
+ * groupSeries() draws both: the mean of the group's devices that have a value in a bucket, their total
+ * only where EVERY device of the group has one, and how many had a reading and not a carried value.
+ * `groups` are `{ key, keys }`, `keys` being the group's devices as they were asked for; `rows` carry
+ * the device in `asset_id`. Rows come back in the shape that function returns, in bucket order.
+ */
+export function foldByGroup(rows, groups) {
+  const groupOf = new Map()
+  for (const g of groups) for (const k of g.keys) groupOf.set(k, g.key)
+  const sizes = new Map(groups.map(g => [g.key, g.keys.length]))
+  const cells = new Map()
+  for (const r of rows) {
+    const key = groupOf.get(r.asset_id)
+    if (key === undefined || r.avg_double === null || r.avg_double === undefined) continue
+    const id = `${key}\n${r.bucket_ts}`
+    if (!cells.has(id)) cells.set(id, { group_key: key, bucket_ts: r.bucket_ts, sum: 0, with_value: 0, measured: 0 })
+    const c = cells.get(id)
+    c.sum += r.avg_double
+    c.with_value += 1
+    if (!r.is_carried) c.measured += 1
+  }
+  return [...cells.values()]
+    .sort((a, b) => (a.group_key < b.group_key ? -1 : a.group_key > b.group_key ? 1 : Date.parse(a.bucket_ts) - Date.parse(b.bucket_ts)))
+    .map(c => ({
+      group_key: c.group_key,
+      bucket_ts: c.bucket_ts,
+      mean_double: c.sum / c.with_value,
+      total_double: c.with_value === sizes.get(c.group_key) ? c.sum : null,
+      members: sizes.get(c.group_key),
+      with_value: c.with_value,
+      measured: c.measured,
+    }))
+}
+
+// ------------------------------------------------------------------------------------------------
+// The hour-of-day heatmap: a row a machine, a column an hour, coloured by the mean at that hour
+// ------------------------------------------------------------------------------------------------
+
+/** The hours of the day, the heatmap's columns. */
+export const HOURS_OF_DAY = Object.freeze(Array.from({ length: 24 }, (_, h) => h))
+
+/** The browser's time zone, an IANA name, which the hours are read in; UTC where it cannot say. */
+export function browserTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' }
+}
+
+/**
+ * Whether telemetry_hour_of_day() will read `machines` over [start, end): one hourly bucket for each
+ * hour for each machine, at most HOUR_OF_DAY_MAX_ROWS. Otherwise `problem`, in words, naming the
+ * longest window those machines allow.
+ */
+export function hourOfDayPlan(startMs, endMs, machines) {
+  const hours = bucketCount(startMs, endMs, 60)
+  if (machines < 1 || hours * machines <= HOUR_OF_DAY_MAX_ROWS) return { hours }
+  const longest = Math.floor(HOUR_OF_DAY_MAX_ROWS / machines / 24)
+  const problem = longest >= 1
+    ? `The heatmap reads every hour of the window for each machine, so for ${machines} machines it covers at most ${longest} ${longest === 1 ? 'day' : 'days'}. Choose a shorter window.`
+    : `${machines} machines are too many for the heatmap. It reads every hour of the window for each machine.`
+  return { hours, problem }
+}
+
+/** An hour as the heatmap names it: "14:00–15:00", the day's last "23:00–00:00". */
+export const hourWords = (hour) => `${String(hour).padStart(2, '0')}:00–${String((hour + 1) % 24).padStart(2, '0')}:00`
+
+/** How many shades the heatmap steps through: Overview's ramp, lightest to darkest. */
+export const HEAT_STEPS = COVERAGE_STEPS
+
+/**
+ * The rows of telemetry_hour_of_day() laid on the machines asked for: a Map of each key in `keys`
+ * to its 24 hours, each `{ value, days }` or null where the hour has no value, and the lowest and
+ * highest value across every machine, null with none. One scale across all of them, so an outlier
+ * shows against the others.
+ */
+export function hourGrid(rows, keys) {
+  const cells = new Map(keys.map(k => [k, new Array(24).fill(null)]))
+  let low = Infinity
+  let high = -Infinity
+  for (const r of rows) {
+    const row = cells.get(r.asset_id)
+    const hour = Number(r.hour_of_day)
+    const value = Number(r.mean_value)
+    if (!row || !Number.isInteger(hour) || hour < 0 || hour > 23 || !isValue(r.mean_value) || !Number.isFinite(value)) continue
+    row[hour] = { value, days: Number(r.days) || 0 }
+    low = Math.min(low, value)
+    high = Math.max(high, value)
+  }
+  return { cells, low: low === Infinity ? null : low, high: high === -Infinity ? null : high }
+}
+
+/** The shade of `value` between `low` and `high`: 1 to `steps`, in equal widths; the first when they are level. */
+export function heatStep(value, low, high, steps = HEAT_STEPS) {
+  if (!(high > low)) return 1
+  return Math.min(steps, 1 + Math.floor(((value - low) / (high - low)) * steps))
+}
+
+/** The values each shade stands for, lowest first: `{ step, from, to }`; one band when they are level. */
+export function heatBands(low, high, steps = HEAT_STEPS) {
+  if (low === null || high === null) return []
+  if (!(high > low)) return [{ step: 1, from: low, to: high }]
+  const width = (high - low) / steps
+  return Array.from({ length: steps }, (_, i) => ({ step: i + 1, from: low + width * i, to: i + 1 === steps ? high : low + width * (i + 1) }))
+}
+
+/** A band in words: "21.3 to 28.1 kW", or its one value when the band is level. */
+export const bandRangeWords = (band, unit) =>
+  (band.from === band.to ? readingWords(band.from, unit) : `${readingWords(band.from)} to ${readingWords(band.to, unit)}`)
+
+/**
+ * A cell of the heatmap in words: "Lathe 3 · 14:00–15:00 · 21.3 kW, the mean of 7 days". An hour
+ * with no value says so. A cell of the Area tab's heatmap is of several machines (`machines`), and says
+ * how many: "the mean of 7 days, across 5 machines".
+ */
+export function heatCellWords(name, hour, cell, unit) {
+  const head = `${name} · ${hourWords(hour)}`
+  if (!cell) return `${head} · No value in this window`
+  const across = cell.machines > 1 ? `, across ${cell.machines} machines` : ''
+  return `${head} · ${readingWords(cell.value, unit)}, the mean of ${cell.days} ${cell.days === 1 ? 'day' : 'days'}${across}`
+}
+
+// ------------------------------------------------------------------------------------------------
+// The Metric tab: one metric across every device that reports it
+// ------------------------------------------------------------------------------------------------
+
+/** The Metric tab's id among History's tabs, and its path: `/history/metric` picks a metric. */
+export const METRIC_TAB = 'metric'
+export const METRIC_PATH = '/history/metric'
+
+/** The path of one metric's tab, the picker's when `name` is empty. A name holds slashes, so it is one encoded segment. */
+export const metricHistoryPath = (name) => (name ? `${METRIC_PATH}/${encodeURIComponent(name)}` : METRIC_PATH)
+
+/** The metric a path's segments name, `/history/metric/<name>`; empty for the picker and for any other path. */
+export function metricNameFrom(segments) {
+  const [, tab, name] = segments
+  if (tab !== METRIC_TAB || !name) return ''
+  try { return decodeURIComponent(name) } catch { return '' }
+}
+
+/** The window's keys as a query, for an address that adds its own. */
+function windowQuery(win) {
+  const query = new URLSearchParams()
+  for (const [k, v] of Object.entries(windowToQuery(win, DEFAULT_HISTORY_WINDOW))) if (v) query.set(k, v)
+  return query
+}
+
+/** A query as an address's tail, its lists written with their commas. */
+const queryTail = (query) => {
+  const q = query.toString().replace(/%2C/gi, ',')
+  return q ? `?${q}` : ''
+}
+
+/**
+ * The address of a metric's tab at window `win`: the devices narrowed by area (`area`) and cell
+ * (`cell`), by ids, and to a list of telemetry keys (`devices`), and the page when it is not the
+ * first. The picker's when `name` is empty.
+ */
+export function metricAddress(name, win, { areas = [], cells = [], devices = [], page = 1 } = {}) {
+  const query = windowQuery(win)
+  if (areas.length) query.set('area', encodeList(areas))
+  if (cells.length) query.set('cell', encodeList(cells))
+  if (devices.length) query.set('devices', encodeList(devices))
+  if (page > 1) query.set('page', String(page))
+  return `${metricHistoryPath(name)}${queryTail(query)}`
+}
+
+/**
+ * Each metric some device in service reports, as `{ name, count, unit, kind }`, `count` being how many
+ * devices do, in name order: cellMetrics() over every device in service, with the catalog's unit and
+ * kind (datatypeKind()), both null for a metric the catalog does not know.
+ */
+export function historyMetrics(devices, schemas, catalog) {
+  const meta = new Map((catalog || []).map(m => [m.name, m]))
+  return cellMetrics(inServiceDevices(devices), schemas, catalog).map(m => ({
+    ...m, unit: unitOf(meta.get(m.name)), kind: datatypeKind(meta.get(m.name)?.datatype), ...(meta.get(m.name)?.derivation ? { derived: true } : {}),
+  }))
+}
+
+/**
+ * The devices in service that report `metric` (deviceMetrics()), narrowed to those in one of `areas`
+ * and in one of `cells` (ids) and named in `keys` (telemetry keys), where each is given; in the
+ * order given. With the `catalog`, a derived metric is reported by the devices that report all its
+ * inputs.
+ */
+export function metricDevices(devices, schemas, metric, { areas = [], cells = [], keys = [], catalog = null } = {}) {
+  return inServiceDevices(devices).filter(d =>
+    deviceMetrics(d, schemas, catalog).includes(metric)
+    && (areas.length === 0 || areas.includes(d.area_id))
+    && (cells.length === 0 || cells.includes(d.cell_id))
+    && (keys.length === 0 || keys.includes(telemetryKey(d))))
+}
+
+/** The most devices the Metric tab draws on one page when the row cap lets one read carry them all. */
+export const METRIC_DRAW_MAX = 200
+
+/**
+ * How many devices a page holds once the Metric tab pages. Twelve at the coarsest resolution, a day,
+ * are 4,400 rows over a Year, inside HISTORY_MAX_ROWS, so a page is one read for any window up to
+ * 416 days.
+ */
+export const METRIC_PAGE_SIZE = 12
+
+/**
+ * The Metric tab's pages for `count` devices over [start, end). One page of everything while one read
+ * carries every device at some resolution (pickResolution()) and there are at most METRIC_DRAW_MAX of
+ * them. Past that, pages of METRIC_PAGE_SIZE, each read apart at the finest resolution its own devices
+ * fit. `page` is clamped into the pages there are; `from` and `to` slice the devices; `resolution` is
+ * pickResolution() for the page, null when even one device does not fit at the coarsest.
+ */
+export function metricPages(startMs, endMs, count, page = 1, { size = METRIC_PAGE_SIZE, drawMax = METRIC_DRAW_MAX } = {}) {
+  const whole = pickResolution(startMs, endMs, count)
+  if (count <= drawMax && whole && whole.perRead >= count) {
+    return { paged: false, page: 1, pages: 1, from: 0, to: count, size: count, resolution: whole }
+  }
+  const pages = Math.max(1, Math.ceil(count / size))
+  const at = Math.min(pages, Math.max(1, Math.trunc(page) || 1))
+  const from = (at - 1) * size
+  const to = Math.min(count, at * size)
+  return { paged: true, page: at, pages, from, to, size, resolution: pickResolution(startMs, endMs, Math.max(1, to - from)) }
+}
+
+/** The page the address names: a whole number above 1, else 1. */
+export const pageFrom = (raw) => {
+  const n = Number(raw)
+  return Number.isInteger(n) && n > 1 ? n : 1
+}
+
+/** Why the devices come a page at a time, and which. */
+export const pagingWords = ({ total, from, to, size }) =>
+  `${total.toLocaleString()} devices are too many to chart at once, so they come ${size} to a page: devices ${from + 1} to ${to}.`
+
+/**
+ * The Overview box's Chart for `picked` devices at window `win`: the Device tab for one, else the Metric
+ * tab narrowed to them, on the metric most of them report (defaultCellMetric()); the picker, narrowed,
+ * when none reports any.
+ */
+export function chartAddress(picked, schemas, win) {
+  if (picked.length === 1) return pickedAddress(telemetryKey(picked[0]), win)
+  const metric = defaultCellMetric(cellMetrics(picked, schemas))
+  return metricAddress(metric, win, { devices: picked.map(telemetryKey) })
+}
+
+// ------------------------------------------------------------------------------------------------
+// The Area tab: one metric across the cells of an area, a mean or a total a cell
+// ------------------------------------------------------------------------------------------------
+
+/** The Area tab's id among History's tabs, and its path: `/history/area` picks an area. */
+export const AREA_TAB = 'area'
+export const AREA_PATH = '/history/area'
+
+/** The path of one area's tab, the picker's when `areaId` is empty. */
+export const areaHistoryPath = (areaId) => (areaId ? `${AREA_PATH}/${encodeURIComponent(areaId)}` : AREA_PATH)
+
+/** The area a path's segments name, `/history/area/<id>`; empty for the picker and for any other path. */
+export function areaIdFrom(segments) {
+  const [, tab, id] = segments
+  if (tab !== AREA_TAB || !id) return ''
+  try { return decodeURIComponent(id) } catch { return '' }
+}
+
+/** What each cell's chart is: the mean across its machines, or their total. The first is the default. */
+export const AGG_MODES = Object.freeze(['mean', 'total'])
+export const DEFAULT_AGG = 'mean'
+
+/** The address of an area's tab at window `win`, with the metric chosen and the total when it is not the mean. */
+export function areaAddress(areaId, win, { metric = '', agg = DEFAULT_AGG } = {}) {
+  const query = windowQuery(win)
+  if (metric) query.set('metric', metric)
+  if (agg !== DEFAULT_AGG) query.set('agg', agg)
+  return `${areaHistoryPath(areaId)}${queryTail(query)}`
+}
+
+/**
+ * The areas the Area tab offers, archived ones too, as `{ area_id, name, is_archived, cells, machines }`:
+ * `cells` its cells in service as historyCells() gives them, `machines` all their machines. A device
+ * Area-Wide in the area belongs to no cell, so it is in neither.
+ */
+export function historyAreas(areas, cells) {
+  return (areas || [])
+    .map(a => {
+      const id = a.area_id ?? a.id
+      const own = cells.filter(c => c.area_id === id && !c.is_archived)
+      return {
+        area_id: id, name: String(a.area_name ?? a.name ?? ''), is_archived: Boolean(a.is_archived),
+        cells: own, machines: own.flatMap(c => c.machines),
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * The finest resolution at which an area's cells can be read: its `devices` fit telemetry_carried()'s
+ * bound (HISTORY_GROUP_READ_ROWS, which the function reads them under) and its `groups`, the rows
+ * returned, fit the row cap. Null when not even a day does.
+ */
+export function pickGroupResolution(startMs, endMs, devices, groups, {
+  resolutions = HISTORY_RESOLUTIONS, maxRows = HISTORY_MAX_ROWS, readRows = HISTORY_GROUP_READ_ROWS,
+} = {}) {
+  for (const r of resolutions) {
+    const buckets = bucketCount(startMs, endMs, r.minutes)
+    if (buckets * Math.max(1, groups) <= maxRows && buckets * Math.max(1, devices) <= readRows) return r
+  }
+  return null
+}
+
+/**
+ * One cell's rows of telemetry_carried_by_group() laid on `starts` as a number series, for its
+ * `agg`: the mean, or the total, which the function withholds (null) for a bucket in which a machine
+ * had no value. `withheld` is true for each such bucket, and a bucket with no row at all is empty.
+ * A bucket is carried when no machine had a reading in it. A line only: its minimum and maximum are
+ * its value.
+ */
+export function groupSeries(rows, starts, agg) {
+  const at = new Map(rows.map(r => [Math.round(Date.parse(r.bucket_ts) / 1000), r]))
+  const series = { kind: 'none', avg: [], min: [], max: [], carried: [], states: [], last: [], withheld: [] }
+  for (const x of starts) {
+    const r = at.get(x)
+    const v = !r ? null : (agg === 'total' ? r.total_double : r.mean_double) ?? null
+    series.avg.push(v)
+    series.min.push(v)
+    series.max.push(v)
+    series.last.push(v)
+    series.states.push(null)
+    series.carried.push(Boolean(r) && r.measured === 0)
+    series.withheld.push(agg === 'total' && Boolean(r) && v === null)
+  }
+  if (series.avg.some(isValue)) series.kind = 'number'
+  return series
+}
+
+/** The stretches of `withheld` flags that are true, as `{ from, to }` indexes, `to` exclusive. */
+export function withheldRuns(withheld) {
+  const runs = []
+  withheld.forEach((w, i) => {
+    const last = runs[runs.length - 1]
+    if (w && last && last.to === i) last.to = i + 1
+    else if (w) runs.push({ from: i, to: i + 1 })
+  })
+  return runs
+}
+
+/**
+ * Where a cell's total was withheld, in words: "withheld from 2 Nov 10:05 to 10:35, where a machine
+ * had no value", or how many stretches there are and the first. Null where it was not.
+ */
+export function withheldWords(withheld, starts, minutes) {
+  const runs = withheldRuns(withheld)
+  if (!runs.length) return null
+  const stretch = (r) => {
+    const from = starts[r.from] * 1000
+    const to = starts[r.to - 1] * 1000 + minutes * MINUTE
+    const sameDay = new Date(from).toDateString() === new Date(to).toDateString()
+    return `from ${momentWords(from, minutes)} to ${minutes < 1440 && sameDay ? clockWords(new Date(to)) : momentWords(to, minutes)}`
+  }
+  const [first] = runs
+  return runs.length === 1
+    ? `withheld ${stretch(first)}, where a machine had no value`
+    : `withheld in ${runs.length} stretches, the first ${stretch(first)}, where a machine had no value`
+}
+
+/** The words for a cell none of whose machines reports the metric chosen. */
+export const silentCellWords = (name, metric) => `None of the machines in ${name} reports ${metric}.`
+
+/**
+ * The status line of the cells' charts: how many cells are charted, what each is, in which buckets,
+ * how many report nothing of the metric, and the devices that sit in no cell.
+ */
+export function cellsWords({ shown, silent, agg, resolution, areaWide = 0 }) {
+  const count = `${shown} ${shown === 1 ? 'cell' : 'cells'}`
+  const what = agg === 'total' ? 'each the total of its machines, withheld where one has no value' : 'each the mean of its machines that have a value'
+  const apart = silent ? `, ${silent} ${silent === 1 ? 'does' : 'do'} not report it` : ''
+  const loose = areaWide ? `; ${areaWide} ${areaWide === 1 ? 'device is' : 'devices are'} Area-Wide, in no cell, so not charted` : ''
+  return `${count}, ${what}, in ${resolution.words}${apart}${loose}`
+}
+
+/**
+ * The heatmap's grid for an area: a row a cell, the mean of the cell's machines at each hour, from
+ * the machines' own (hourGrid()). `cells` are `{ key, keys }`, `keys` being the machines of the cell
+ * the grid was read for. A cell hour is the mean of the machines that have a value in it, `machines`
+ * how many, and `days` the most any of them spans. A cell no machine has a value for has no row.
+ * Same shape as hourGrid(): one scale across every cell.
+ */
+export function cellHourGrid(grid, cells) {
+  const out = new Map()
+  let low = Infinity
+  let high = -Infinity
+  for (const c of cells) {
+    const hours = Array.from({ length: 24 }, (_, h) => {
+      const have = c.keys.map(k => grid.cells.get(k)?.[h]).filter(Boolean)
+      if (!have.length) return null
+      const value = have.reduce((sum, v) => sum + v.value, 0) / have.length
+      low = Math.min(low, value)
+      high = Math.max(high, value)
+      return { value, days: Math.max(...have.map(v => v.days)), machines: have.length }
+    })
+    if (hours.some(Boolean)) out.set(c.key, hours)
+  }
+  return { cells: out, low: low === Infinity ? null : low, high: high === -Infinity ? null : high }
 }

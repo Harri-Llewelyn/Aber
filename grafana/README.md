@@ -238,8 +238,8 @@ the Topbar pill decrements; Grafana defaults them on, and the file says so becau
 off would leave every alert latched on in the UI forever with the rule showing Normal.
 
 **One route.** Grafana has exactly one consumer, `grafana-alert-webhook`, which records each alert
-in `platform_alerts`. Aber's dispatcher fans out from that table, to the dashboard and to the
-webhook a site configures on Settings › Notifications ([`supabase/README.md`](../supabase/README.md),
+in `platform_alerts`. Aber's dispatcher fans out from that table, to the dashboard, to the
+webhook a site configures on Settings › Notifications and by email to the roles it names ([`supabase/README.md`](../supabase/README.md),
 *An alert is queued for each channel that carries it (0247)*). It routes by severity, reminds while
 an alert fires unacknowledged, and stops when someone acknowledges it: Grafana knows none of that.
 So a tree with per-severity branches here would branch on a distinction nothing downstream of

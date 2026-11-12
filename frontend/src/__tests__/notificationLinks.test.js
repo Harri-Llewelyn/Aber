@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  entityUrl, proposalUrl, metricUrl, captureSubjectUrl, backupUrl, personUrl, identityUrl, changesByUrl, replayLanesUrl
+  entityUrl, proposalUrl, metricUrl, captureSubjectUrl, backupUrl, personUrl, identityUrl, changesByUrl, replayLanesUrl,
+  automationUrl, automationsUrl, automationsForEntityUrl, automationForTriggerUrl, alertPage
 } from '../routes'
 
 /**
@@ -86,7 +87,6 @@ const NO_LINK = [
   { file: 'components/modals/DeviceExportModal.jsx', piece: '${label} exported for', why: 'a file, in the downloads' },
   { file: 'components/modals/DeviceExportModal.jsx', piece: 'unmappedWarning,', why: 'given only to a reader who cannot open the Metrics page' },
   { file: 'components/modals/GatewayBundleModal.jsx', piece: 'Bundle downloaded for', why: 'a file, in the downloads' },
-  { file: 'components/modals/TelemetryExportModal.jsx', piece: 'Exported ${rows.length}', why: 'a file, in the downloads' },
   { file: 'components/tabs/SchemasTab.jsx', piece: 'Downloaded ${filename}', why: 'a file, in the downloads' },
   { file: 'components/tabs/CaptureTab.jsx', piece: 'Downloading the capture of', why: 'a file, in the downloads' },
   { file: 'components/tabs/ArchivesTab.jsx', piece: 'permanently deleted', why: 'the record is gone' },
@@ -94,6 +94,7 @@ const NO_LINK = [
   { file: 'components/tabs/AccessControlTab.jsx', piece: '” deleted`', why: 'the read-only broker account is gone' },
   { file: 'components/tabs/DevicesTab.jsx', piece: "Quarantined device '${item.asset_name}' rejected", why: 'a rejected device is deleted' },
   { file: 'components/tabs/SchemasTab.jsx', piece: 'discarded', why: 'a discarded draft is deleted' },
+  { file: 'components/tabs/AutomationsTab.jsx', piece: 'Exported ${', why: 'a file, in the downloads' },
 ]
 
 describe('a notification about a record links to it', () => {
@@ -143,6 +144,28 @@ describe('where a notification links to', () => {
     expect(replayLanesUrl('g-1')).toBe('/devices?gateway=g-1&replay=1')
   })
 
+  it('opens an automation by its id, and the list on what applies to one device or one alert', () => {
+    expect(automationsUrl()).toBe('/automations')
+    expect(automationUrl('lathe-3-spindle-hot')).toBe('/automations/lathe-3-spindle-hot')
+    // /automations/new is the starter, so an automation whose id is new says it is that one.
+    expect(automationUrl('new')).toBe('/automations/new?open=1')
+    const device = '3f1c9a6e-2b4d-4e8a-9c71-5d0e8f2a4b13'
+    expect(automationsForEntityUrl(device)).toBe(`/automations?entity=${device}`)
+    const trigger = 'aaaaaaaa-0000-4000-8000-000000000001'
+    expect(automationForTriggerUrl(trigger)).toBe(`/automations?trigger=${trigger}`)
+  })
+
+  it('opens the automation that raised an alert, found by the trigger its fingerprint names', () => {
+    const trigger = 'aaaaaaaa-0000-4000-8000-000000000001'
+    const raised = { fingerprint: `condition:${trigger}:3f1c9a6e-2b4d-4e8a-9c71-5d0e8f2a4b13:Spindle/BEARING_TEMPERATURE`, entity_type: 'device', sparkplug_id: 'devlathe' }
+    expect(alertPage(raised)).toEqual({ to: `/automations?trigger=${trigger}`, title: 'Show the automation that raised this alert' })
+    // Only a fingerprint composed as automation_alert_fingerprint() composes it.
+    expect(alertPage({ fingerprint: 'condition:not-a-trigger:x:y', entity_type: 'device' })).toBeNull()
+    expect(alertPage({ fingerprint: 'grafana-rule-1', entity_type: 'device' })).toBeNull()
+    expect(alertPage({ fingerprint: `${trigger}:x`, entity_type: 'device' })).toBeNull()
+    expect(alertPage(undefined)).toBeNull()
+  })
+
   it('finds a backup run, a person and a machine identity', () => {
     expect(backupUrl()).toBe('/backups')
     expect(backupUrl('b-1')).toBe('/backups?run=b-1')
@@ -167,6 +190,8 @@ describe('where a notification links to', () => {
     ['components/tabs/DevicesTab.jsx', ["useUrlList('gateway'", "useUrlState('replay'"], null],
     ['components/tabs/PeopleSection.jsx', ["useUrlState('removed'", "useUrlState('search'", "useUrlState('person'"], null],
     ['components/tabs/AccessControlTab.jsx', ["useUrlState('withdrawn'"], 'identities'],
+    // The list reads the filter its device's link writes, and the alert's link names a trigger.
+    ['components/tabs/AutomationsTab.jsx', ["useUrlState('entity'", "params.get('trigger')"], null],
   ])('%s reads what its link writes', (file, needles, tab) => {
     const text = source(file)
     for (const needle of needles) expect(text).toContain(needle)

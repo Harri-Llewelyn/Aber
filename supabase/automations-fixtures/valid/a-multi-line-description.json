@@ -1,0 +1,25 @@
+{
+  "about": "A description may span lines and hold any text.",
+  "document": [
+    {
+      "id": "lathe-3-spindle-hot",
+      "alias": "Café oven",
+      "triggers": [
+        {
+          "trigger": "threshold",
+          "device": "@DEVICE_A@",
+          "metric": "@METRIC@",
+          "above": 80,
+          "for": "5m"
+        }
+      ],
+      "actions": [
+        {
+          "action": "alert",
+          "severity": "warning"
+        }
+      ],
+      "description": "First line.\nSecond line, with °C and a “quote”."
+    }
+  ]
+}

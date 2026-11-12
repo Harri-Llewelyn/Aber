@@ -555,6 +555,11 @@ try {
       if (at !== `/${tab}`) problems.push(`/${tab}: the dashboard moved to ${at}, so the page was not walked`)
     }
 
+    // The Automations editor mounts only on an automation's own page. CodeMirror writes <style>
+    // elements, which the policy refuses, so the editor draws in a shadow root; this is the page that
+    // shows it does.
+    await visit('/automations/new', "!!document.querySelector('.automation-editor')?.shadowRoot?.querySelector('.cm-content')")
+
     try {
       await makeFixtures()
     } catch (e) {

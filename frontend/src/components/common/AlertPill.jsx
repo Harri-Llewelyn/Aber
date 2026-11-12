@@ -4,7 +4,7 @@ import { alertPage, deviceUrl, gatewayUrl } from '../../routes'
 import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExternalLink, IconCheck, IconBellOff } from './Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
-import { REALTIME_ENABLED, grafanaAlertUrl } from '../../constants'
+import { REALTIME_ENABLED, grafanaAlertUrl, isAutomationAlert } from '../../constants'
 import { POLL_INTERVAL_MS, RECONCILE_MS } from '../../hooks/usePlatformAlerts'
 import { Tooltip } from './Tooltip'
 import { api } from '../../api'
@@ -34,8 +34,9 @@ import { ALERTS_PATH, acknowledgerName } from '../../utils/alertHistory'
  * A row goes where its subject lives, decided by the rule's `entity_type` label (checked by
  * `platform_alerts_entity_type_valid`), not by the id prefix. An alert whose subject has a page in
  * the dashboard opens it, as alertPage() names it: a machine identity's token opens the identity on
- * Access Control, and a capture or playback job opens the Capture page. Any other platform alert has
- * no asset and opens the rule in Grafana Alerting.
+ * Access Control, a capture or playback job opens the Capture page, and an alert an automation raised
+ * opens that automation. Any other platform alert has no asset and opens the rule in Grafana Alerting,
+ * unless Aber's own evaluator raised it: Grafana has no rule for that.
  *
  * This is the only place in the dashboard that counts alerts: their toasts are not recorded in the
  * bell's history. What fired and cleared, from every writer, is History's Alerts tab, which the
@@ -161,12 +162,13 @@ export function AlertPill({
                 const onSelect = kind === 'gateway' ? onSelectGateway : kind === 'device' ? onSelectDevice : null
                 const to = kind === 'gateway' ? gatewayUrl(a.sparkplug_id) : deviceUrl(a.sparkplug_id)
                 const page = kind === 'gateway' ? 'Gateways' : 'Devices'
-                // A row is a button only when it can go somewhere: an alert whose sparkplug_id
-                // matched no row has nothing to navigate to.
-                const navigable = Boolean(onSelect && a.sparkplug_id)
                 const inApp = alertPage(a)
+                // A row is a button only when it can go somewhere: an alert whose sparkplug_id
+                // matched no row has nothing to navigate to. One with a page of its own goes there,
+                // as an automation's alert goes to the automation.
+                const navigable = Boolean(onSelect && a.sparkplug_id && !inApp)
                 // The other fleet-wide rules. No page here, so Grafana is the subject's home.
-                const external = !a.sparkplug_id && kind === 'platform' && !inApp
+                const external = !a.sparkplug_id && kind === 'platform' && !inApp && !isAutomationAlert(a)
                 const acked = isAcknowledged(a)
                 const quieted = isSuppressed(a)
                 const body = (

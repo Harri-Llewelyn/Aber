@@ -97,9 +97,10 @@ it is judged by the route it names, and the key check refuses it. `--runtime` se
 ## An app's token
 
 A token GoTrue's OAuth server issued to an app names the app in its `client_id` claim. On the API
-listener it reaches `/auth/v1/` and the functions its own app calls, and nothing else
-([`docs/security-model.md`](security-model.md#an-apps-token-reaches-only-its-own-routes)). Two
-filters decide it, after the key check and before the router:
+listener one of the stack's four apps reaches `/auth/v1/` and the functions its own app calls. A
+token issued to any other app, one an Administrator registered, reaches the sign-in endpoints and
+nothing else ([`docs/security-model.md`](security-model.md#an-apps-token-reaches-only-its-own-routes)).
+Two filters decide it, after the key check and before the router:
 
 - **`jwt_authn` verifies the bearer and records its claims, and refuses nothing.** Its requirement
   is `allow_missing_or_failed`: no token, a key, an expired token or one that does not verify goes
@@ -107,17 +108,27 @@ filters decide it, after the key check and before the router:
   `client_id` is read whatever else it says, against the JWKS the other two browser listeners use.
   It reads the bearer in every spelling an upstream accepts: any scheme, a tab, or none, since
   Storage takes all three. The bearer is forwarded.
-- **`rbac` decides on the verified `client_id` alone.** A token with none passes everywhere. One
-  with it passes on `/auth/v1/`, where every app's functions check its session, and on
+- **`rbac` decides on the verified `client_id` alone.** A token with none passes everywhere. One of
+  the stack's four passes on all of `/auth/v1/`, where its functions check its session, and on
   `/functions/v1/grafana-userinfo` for Grafana's client and `/functions/v1/nodered-userinfo` for
-  Node-RED's. Everything else answers `403 {"message":"This token was issued to an app, and reaches
-  only that app's own routes"}`, the key check's shape, from `local_reply_config`.
+  Node-RED's. A token with any other `client_id` passes on eight sign-in requests alone: `POST
+  /auth/v1/token` and `/auth/v1/oauth/token`, `GET /auth/v1/oauth/userinfo` and `/auth/v1/user`,
+  `POST /auth/v1/logout?scope=local`, and `GET` of the discovery document, its RFC 8414 twin and
+  the key set under `/auth/v1/.well-known/`. Everything else answers `403 {"message":"This token
+  was issued to an app, and reaches only that app's own routes"}`, the key check's shape, from
+  `local_reply_config`.
+
+An outside app's token cannot change the person's password or email, touch their second factors,
+list or revoke their approvals, or approve another app's sign-in: each is a route under `/auth/v1/`
+that its policy does not name. A path is matched as sent, and the API listener does not normalise
+it, so a spelling the policy does not name (a trailing slash, a doubled slash, another case) is a
+403 and never a pass. The logout is the local scope alone because GoTrue's default scope ends every
+session the person holds, the dashboard's among them.
 
 Because it runs after the key check, a request that check refuses keeps its 401. The Studio and
 forge doors have no function here: they call theirs from their own listeners, straight to the edge
-runtime. An app the stack does not register is in no policy, so it reaches `/auth/v1/` alone.
-`APP_ROUTES` in `check-gateway-surface.mjs` holds the policies, and mirror check 48 holds their
-client ids to `stack_app_ids()`.
+runtime. `check-gateway-surface.mjs` holds the policies as `APP_ROUTES` and `OUTSIDE_SIGN_IN`, and
+mirror check 48 holds their client ids to `stack_app_ids()`.
 
 ## The consent step
 

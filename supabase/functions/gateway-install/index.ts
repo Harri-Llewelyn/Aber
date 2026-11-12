@@ -14,7 +14,7 @@ import { zip } from "../_shared/zip.ts";
  * gateway-bundle's ZIP, served in pieces to a machine rather than as one archive to a person, on
  * enroll-gateway's model rather than gateway-bundle's: the dashboard minted the token (role-gated),
  * the appliance fetches with it (token-gated), and only enrolment consumes it.
- * `peek_gateway_enrollment_token()` (0105) is the check: the same four refusals as redemption,
+ * `peek_gateway_enrollment_token()` (0105) is the check: the same refusals as redemption,
  * answered identically, and no UPDATE.
  *
  * The token rides in a header, never the query string, so it lands in no access log. Nothing here

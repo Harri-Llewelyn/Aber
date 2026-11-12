@@ -52,6 +52,13 @@ Anything Aber tracks on the shopfloor: areas, cells, gateways and devices.
 One named value a device sends, such as a temperature or a spindle speed. It has a datatype and a
 meaning.
 
+### Derived metric
+
+A metric Aber computes from other metrics, instead of a device sending it. For example, parts per
+hour from a part counter, or a machine's total power from its three phases. It is added on the
+Derived tab of the Metrics page, and its definition cannot change
+([Metrics](../pages/metrics.md)).
+
 ### Schema
 
 What a kind of device is expected to send: which metrics, of which datatype, meaning what. Giving a
@@ -95,6 +102,12 @@ the historian.
 
 A capture records the traffic the broker carried. Playback sends it again later through the
 Playback gateway.
+
+### Automation
+
+A rule that watches a device's readings and raises an alert. An example: when a spindle's
+temperature is above 80 for five minutes, raise a warning. You write one as YAML on the
+[Automations](../pages/automations.md) page.
 
 ### Audit Trail
 

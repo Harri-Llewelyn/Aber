@@ -18,9 +18,9 @@ how each was confirmed, and for the one that was wrong.
 
 Every addition follows the existing **"vocabulary, not catalog"** stance of `mtconnect_vocabulary`,
 `iso22400_vocabulary` and `opcua_vocabulary`: reference data describing what a standard *defines*,
-kept separate from `metric_catalog`, which records what a device actually publishes.
-A name a device declares that the catalog does not record yet is listed on the Metrics page's
-Uncatalogued tab (`uncatalogued_metrics`, 0189).
+kept separate from `metric_catalog`, which records what a device actually publishes, and the derived
+metrics Aber computes from those. A name a device declares that the catalog does not record yet is
+listed on the Metrics page's Uncatalogued tab (`uncatalogued_metrics`, 0189).
 
 **A fresh install seeds the vocabularies and leaves the catalog empty.** Every standard semantic id
 is there when an operator registers a metric on the Metrics page, and nothing is registered until
@@ -53,8 +53,12 @@ does. They are [`supabase/example-metrics.sql`](../supabase/example-metrics.sql)
   **Derived series over what we DO have are fine, and must not borrow these ids.**
   `Controller/EXECUTION` and `Controller/PART_COUNT` support an uptime ratio and a parts-per-hour
   rate. Both are legitimate; neither may carry an ISO 22400 semantic id, because that asserts an
-  interoperability claim the computation cannot support. No check enforces this: it is a rule for
-  whoever registers the derived metric.
+  interoperability claim the computation cannot support. A derived metric is a catalog row with its
+  definition on it, added on the Derived tab of the Metrics page, and the database refuses to save
+  one with a semantic id or a standard. The checks are in
+  [A derived metric is a catalogue row](../supabase/README.md#a-derived-metric-is-a-catalogue-row-0267).
+  Its values are computed when they are read, by `derived_series()`, and nothing is stored
+  ([how](../supabase/README.md#history-draws-a-derived-metric-from-the-minutes-0282)).
 - **AGVs are the one gap the five vocabularies leave, and VDA 5050 does not fill it here.** VDA 5050
   is a complete bidirectional MQTT interface with its own topic tree keyed on
   manufacturer + serialNumber, so it fails the vocabulary test and would introduce a second identity

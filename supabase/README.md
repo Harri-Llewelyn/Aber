@@ -52,9 +52,9 @@ The third squash restarted live numbering at `0003`, a number the archive alread
 bare citation of an archived `0003`–`0032` quietly came to name a different, live file as the
 chain grew past it. The fourth archived its 28 files under `0135`–`0162`, after the archive's
 highest, with the old-to-new table in [`migrations/archive/README.md`](migrations/archive/README.md).
-**The next migration is `0163`**, and each later one takes the next number above the highest ever
-issued, so a number names one file for good, whichever squash later archives it. Check 9d of
-`scripts/check-docs-drift.mjs` refuses an applied migration whose number the archive holds.
+Each new migration takes the next number above the highest ever issued, so a number names one file
+for good, whichever squash later archives it. Check 9d of `scripts/check-docs-drift.mjs` refuses an
+applied migration whose number the archive holds.
 
 ### The five rules the next fold carries in
 
@@ -2289,7 +2289,7 @@ is one row of `auth.oauth_clients`; a person's approval of it, given once on the
 Dynamic registration has been off since `0197` (measured on 2026-10-27: `POST
 /auth/v1/oauth/clients/register` answers 403 `oauth_dynamic_client_registration_disabled`, with the
 publishable key or none), so an app is added only through GoTrue's admin API, with the secret key,
-or by SQL.
+or by SQL. From `0260` an Administrator registers one on the Apps tab ([`register_app()`](#an-administrator-registers-an-app-that-signs-people-in-0260)).
 
 - **Reading.** `list_apps()` returns every app not removed (`deleted_at` null), Aber's four first:
   its name, `registration_type`, `part_of_stack`, `client_type`, `redirect_uris` as an array (GoTrue
@@ -2479,7 +2479,9 @@ produces, and the fingerprint is half of the occurrence key.
 
 **A row from before keeps working.** All three are NULL on rows written before the upgrade.
 `grafanaAlertUrl()` (`frontend/src/constants.js`) opens `/alerting/grafana/<uid>/view` when the row
-has a uid, and otherwise Grafana's alert list searched by the rule's name, as before.
+has a uid, and otherwise Grafana's alert list searched by the rule's name, as before. An alert an
+automation raised has a `condition:` fingerprint and no rule: `grafanaAlertUrl()` answers null for
+it, and no surface links to Grafana (0271).
 
 **The shape lives in `0001`.** `0001` states `platform_alerts_active` with a column list and replays
 first on every boot. Had `0220` widened the view, `0001`'s `CREATE OR REPLACE VIEW` would have tried
@@ -3143,6 +3145,19 @@ the refusals, the inheritance, the audit rows and who reads them.
 - **The map.** `audit_trail_action_kinds()` lists both actions on both kinds, `operational` only,
   and `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43).
 
+**An automation's acts are filed here too, edited in place (0256, 0257).** The five acts are not a
+migration of their own: this file and `0249` are unreleased, and their functions replay in file
+order on every boot, so a second declaration would be a second place to drift.
+
+- **The lane.** `audit_domain_for()` files `automations` in the asset lane. An Administrator or a
+  Shopfloor Manager performs the act, as for `metric_catalog`, and the asset lane's readers (those
+  two and an Auditor) read it.
+- **The classes.** `audit_event_class()` answers by the action: `AUTOMATION_CREATED` is created,
+  `AUTOMATION_CHANGED` configuration, `AUTOMATION_ENABLED` and `AUTOMATION_DISABLED` operational,
+  `AUTOMATION_DELETED` lifecycle. The arms come after the acknowledgements' and before the security
+  lane's rule, so the snapshots do not decide. The class indexes are not rebuilt: no row with these
+  actions exists before the arms do.
+
 Each function is redeclared whole, unchanged but for those lines: `0001`, `0168`, `0193`, `0228`
 and `0229` replay first on every boot, and the last declaration stands. For `audit_domain_for()` the
 moment between them files nothing wrongly that matters: a row stamped then lands in the security
@@ -3194,8 +3209,10 @@ rather than carry values a second time, so its contract stays plain:
 - **Each series is seeded from the rollups, never from raw**, which the historian drops after 14
   days by default (`timescaledb.retention.retainFor`): a series silent for longer would otherwise
   seed empty. One query takes the newest values of every series in the 288 source buckets before
-  the window (a day of 5-minute buckets). Each series it misses is then read on its own, with
-  `ORDER BY bucket DESC LIMIT 1`, and from `telemetry_1h` when its own rollup has nothing.
+  the window (a day of 5-minute buckets). Each series it misses is then read on its own: its
+  newest bucket's values, null or not, as one remote aggregate
+  (`(array_agg(... ORDER BY bucket DESC))[1]` and `count(*)`), and from `telemetry_1h` when its
+  own rollup has nothing.
 - **Nothing is carried past now**, and a series with no value at or before a bucket has no row
   for it, so an unknown is never drawn as a value. A window may still end after now: a Day ends at
   midnight.
@@ -3214,10 +3231,13 @@ the same roles read through the `timescale` foreign tables and the `FOR PUBLIC` 
 parameters and each window read is one remote aggregate. Three things it does not ship, each found
 while measuring: `now()` (evaluated here, so a bound written with it would pull every row across),
 a lateral join (planned once per outer row: a seed written as one ran 2,535 remote queries for one
-chart, 10 s), and a `LIMIT` on a parameterised scan (the per-series seed is therefore its
-own statement, not a join). The 6,338-row `LIMIT` threshold in `api.js` governs a `LIMIT` on a
-view; none of these reads carries one, and a `LIMIT` a client puts on the RPC trims the result
-after the work is done, which is why the function bounds itself.
+chart, 10 s), and a `LIMIT` it does not expect to cut. postgres_fdw sends `ORDER BY ... LIMIT` only
+when the limit is under its own row estimate, and with no statistics it estimates one row for one
+series, so it sorts and limits here, after the series' every matching row has crossed. The
+per-series seed is therefore an aggregate: one row crosses. Written as `ORDER BY bucket DESC
+LIMIT 1`, a series quiet 6 hours, with 12 days of 1-minute buckets behind it, brought 16,950 rows
+across for its one value (measured; the aggregate brings 1). A `LIMIT` a client puts on the RPC
+trims the result after the work is done, which is why the function bounds itself.
 
 **Measured** for #324's spike, on a private historian (TimescaleDB 2.31, the chart's retention and
 compression, 20 devices of 15 metrics over 10 days, 3.06 million `telemetry_1m` rows), warm, median
@@ -3253,9 +3273,12 @@ an Administrator register, could then change anything the person who allowed it 
   verify the token themselves and never run the hook, so this is what closes the rows a role gates
   there. `has_authority()`'s machine arm is behind the same test, though GoTrue never issues a
   machine identity's token.
-- **The gateway admits it only on `/auth/v1/` and its own app's functions**, and answers 403
-  everywhere else ([`docs/gateway.md`](../docs/gateway.md#an-apps-token)). The functions each app
-  calls are recorded in [`docs/security-model.md`](../docs/security-model.md#an-apps-token-reaches-only-its-own-routes).
+- **The gateway admits one of the stack's four apps only on `/auth/v1/` and its own app's
+  functions**, and any other app's token only on the sign-in endpoints
+  ([An Administrator registers an app that signs people in](#an-administrator-registers-an-app-that-signs-people-in-0260)).
+  It answers 403 everywhere else ([`docs/gateway.md`](../docs/gateway.md#an-apps-token)). The
+  functions each app calls are recorded in
+  [`docs/security-model.md`](../docs/security-model.md#an-apps-token-reaches-only-its-own-routes).
 
 **What still passes.** A token with no `client_id`, or an empty or null one: the dashboard's
 sessions, scripts, machine identities, the i3X and MCP clients' tokens, and the publishable and
@@ -3609,7 +3632,7 @@ added later is sent without changing.
 
 **`notification_deliveries` is the queue and the delivery log.** One row is one message to one
 channel: the occurrence (`alert_id`, NULL for a test), the `event` (`firing`, `resolved`, `reminder`
-or `test`), the `channel` (`webhook` today), `attempts`, `next_attempt_at`, the `state` and the
+or `test`), the `channel` (`webhook` or `email`, `0262`), `attempts`, `next_attempt_at`, the `state` and the
 `last_error`. A row is `pending` until it leaves the queue: `sent` (the receiver answered 2xx),
 `dropped` (the send decision said it no longer applies) or `dead` (every attempt failed). The
 partial unique index `notification_deliveries_once_per_occurrence` allows one firing and one resolve
@@ -3623,7 +3646,7 @@ occurrence starts firing or resolves. The `last_confirmed_at` stamp is not a sta
 queues nothing either.
 
 - **A firing message** is queued for each channel that carries the alert: one that is configured
-  (`notification_channel_is_configured()`: the webhook needs its address and its signing key),
+  (`notification_channel_is_configured()`: the webhook needs its address and its signing key, email a role to tell),
   whose route admits its severity (`notification_severity_carried()`), and that may carry it. The
   webhook carries only what every signed-in role may read, so it is never queued a
   `service_identity` alert.
@@ -3640,7 +3663,7 @@ sent**, so whatever changed since the row was queued counts. It answers `send`, 
 | Event | When | Answer |
 | :--- | :--- | :--- |
 | Any | The occurrence is gone (pruned) | drop |
-| Any | The channel is the webhook and the alert is about a machine identity | drop |
+| Any | The channel may not carry the alert: the webhook and a machine identity's alert, or email and one while Administrators are not told (`0262`) | drop |
 | `resolved` | Its channel's firing message was sent | send |
 | `resolved` | That message is still pending | hold |
 | `resolved` | That message was dropped or died, or there is none | drop |
@@ -3674,8 +3697,8 @@ margin covers a repeat that waits for its group's next flush or for the webhook 
 A row whose resolve never arrived is therefore reminded for at most 13 hours after Grafana stopped
 repeating it, where before it would have been reminded for ever: `prune_platform_alerts()` keeps the
 newest occurrence of a fingerprint however old it is. A fingerprint starting `condition:` is the
-evaluator's (#322), which will stamp on every run. Its arm answers no window, so no reminder, until
-the evaluator states its run interval there. A row never stamped is not reminded.
+evaluator's (#322), which stamps on every run, each minute (0271). Its arm answers five minutes, that
+interval and a margin of four. A row never stamped is not reminded.
 
 **The dispatcher is `notification-dispatch`, asked for as `sweep_forge()` asks for `forge-sweep`.**
 `request_notification_dispatch()` reads the functions' address, the publishable key and the dispatch
@@ -3709,7 +3732,8 @@ Nothing a caller sends chooses what is sent, since every message comes from the 
 
 **Visibility.** The dispatcher runs as the service role, past RLS, so the database applies each
 row's visibility itself. No `service_identity` alert is ever sent to the webhook: the trigger does not
-queue one, `notification_deliveries_due()` does not select one, and the decision drops one. Every
+queue one, `notification_deliveries_due()` does not select one, and the decision drops one. Email
+carries one only when Administrators are told, and tells them alone (`0262`, `0263`). Every
 signed-in role reads the delivery log, as the Settings page shows it to every role. Its select policy
 calls `notification_delivery_is_readable(alert_id)`, a `SECURITY INVOKER` lookup of the alert under
 the reader's own policy on `platform_alerts`, so a row about an alert a role may not read is not
@@ -3727,7 +3751,7 @@ the allow-list, a redirect not followed, the backoff to a dead letter and a hold
 
 The one channel `0247` sends to today is a generic outbound webhook: any URL whose host an
 Administrator has allowed. No product is named. A site that wants a chat channel points the webhook
-at it, or at a receiver on its own network. Email is the second channel (#325 part 2); it adds its own
+at it, or at a receiver on its own network. Email is the second channel (`0262`); it adds its own
 keys and changes none of these.
 
 **The address is a foreign credential.** A webhook URL is a bearer secret its receiver issued, so
@@ -3751,7 +3775,7 @@ webhook is changed only from a session that gave its code (`0251`).
 | `notifications.reminder_hours` | A whole number of hours, 1 to 168 (seeded 12) | Every role |
 
 Only an Administrator writes them, by `system_settings_update_admin`, and the audit trigger records
-each change as for any setting. A channel's route is its own keys, named
+each change as for any setting. `0262` redeclares the guard with email's two arms. A channel's route is its own keys, named
 `notifications.<channel>_*`, so email adds `notifications.email_min_severity` and the roles it tells
 beside these without a migration of the webhook's.
 
@@ -3825,8 +3849,12 @@ backs. It needs one line in the map of kinds and nothing else:
   `AUDIT_TRAIL_ACTION_KINDS` mirrors it (mirror check 43). `0241` declares the map too, and replays
   first on every boot: the last declaration stands, so this one carries `0241`'s rows.
 
-The file's self-check asserts the lane, the class and the map's row, and that `0232`'s and `0241`'s
-rows are still there.
+**An automation's five acts are listed here too** (0256, 0257), on `automations`, before the signing key:
+`AUTOMATION_CREATED`, `AUTOMATION_CHANGED`, `AUTOMATION_ENABLED`, `AUTOMATION_DISABLED` and
+`AUTOMATION_DELETED`. Their lane and classes are `0232`'s.
+
+The file's self-check asserts the lane, the class and the map's row, the automations' lane, classes
+and rows, and that `0232`'s and `0241`'s rows are still there.
 
 ### A suppressed alert is held until its window ends (0250)
 
@@ -3887,7 +3915,7 @@ next request.
 - **Where each is declared.** db-init replays every file on every boot, so each policy and body is
   changed where it is stated, as `0235` changed `has_role()`'s: `0001` for the two functions, its
   write policies and the functions whose final form it holds; each later function in its own file
-  (`0164`, `0165`, `0166`, `0168`, `0178`, `0196`, `0203`, `0213`, `0217`, `0218`, `0240`, `0248`); and the same line
+  (`0164`, `0165`, `0166`, `0168`, `0178`, `0196`, `0203`, `0213`, `0217`, `0218`, `0240`, `0248`, `0279`); and the same line
   in `0001`'s and `0164`'s and `0203`'s earlier copies, so no boot serves an ungated body between two
   replays. The policies `0177` and `0204` restate (`STATED_LATER`) are all reads, so neither
   changes. `supabase/storage-policies.sql` puts the guard in each storage write arm. `0251` holds no
@@ -4005,6 +4033,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | :--- | :--- | :--- | :--- |
 | `acknowledge_alert()` | `0231` | no | An Operator's write as much as a manager's: acknowledging an alert changes no platform state. |
 | `app_approvals()` | `0217` | no | A read: who allows an app. |
+| `apply_automations()` | `0256` | yes | Applies a document of automations (a preview too: the same call) |
 | `approve_proposal()` | `0165` | yes | Applies a proposed change |
 | `audit_trail_backup_job_ids_matching()` | `0001` | no | A read: the Audit Trail's search. |
 | `audit_trail_user_ids_matching()` | `0203` | no | A read: the Audit Trail's search. |
@@ -4018,12 +4047,14 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `cold_archive_backlog()` | `0001` | no | A read: the Cold Storage page. |
 | `cold_storage_rows()` | `0001` | no | A read: the Cold Storage page. |
 | `create_machine_principal()` | `0001` | yes | Creates a machine identity |
+| `delete_automation()` | `0256` | yes | Deletes an automation |
 | `describe_machine_principal()` | `0001` | yes | Renames a machine identity |
 | `discard_schema_draft()` | `0165` | yes | Discards a schema draft (schema:manage) |
 | `display_names_for()` | `0213` | no | A read: the names the dashboard shows. |
 | `end_alert_suppression_window()` | `0240` | yes | Ends or cancels a suppression window |
 | `end_my_other_sessions()` | `0211` | no | A person's own sessions, in any role. |
 | `end_my_session()` | `0211` | no | A person's own session, in any role. |
+| `export_telemetry()` | `0279` | yes | Exports readings from History, which is data leaving the site |
 | `foreign_credential_is_set()` | `0178` | no | A read: whether a credential is set, never what it is. |
 | `fork_schema()` | `0165` | yes | Versions a schema (schema:manage) |
 | `gateway_is_playback_delivery_target()` | `0183` | no | A read the playback dialog makes. |
@@ -4051,12 +4082,14 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `playback_delivery_targets()` | `0183` | no | A read the playback dialog makes. |
 | `playback_stale_credentials()` | `0184` | no | A read the playback dialog makes. |
 | `publish_schema_version()` | `0165` | yes | Publishes a schema (schema:manage) |
+| `queue_test_email_notification()` | `0263` | yes | Sends a test email to the Administrator who asks |
 | `queue_test_notification()` | `0248` | yes | Sends a test to the webhook |
 | `raw_telemetry_window()` | `0001` | no | A read: the Cold Storage page. |
 | `record_broker_account_created()` | `0218` | yes | Records a read-only broker account |
 | `record_broker_account_deleted()` | `0218` | yes | Records its deletion |
 | `record_gateway_credential_issued()` | `0001` | yes | Records an issued gateway credential |
 | `record_service_logs_read()` | `0225` | no | Records a read of a service's logs: reading is never refused. |
+| `register_app()` | `0260` | yes | Registers an app that signs people in |
 | `reinstate_service_principal()` | `0001` | yes | Reinstates a machine identity |
 | `reject_proposal()` | `0165` | yes | Decides a proposal |
 | `release_backup()` | `0001` | yes | Releases a kept backup |
@@ -4066,6 +4099,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `revoke_service_principal()` | `0001` | yes | Revokes a machine identity |
 | `revoke_service_token()` | `0001` | yes | Revokes a service token |
 | `schedule_alert_suppression_window()` | `0240` | yes | Schedules a suppression window, which keeps a machine's alerts quiet |
+| `set_automation_enabled()` | `0256` | yes | Turns an automation on or off |
 | `set_backup_offsite_destination()` | `0001` | yes | Sets the off-site backup destination |
 | `set_device_schemas()` | `0168` | yes | Changes a device's schemas |
 | `set_display_name()` | `0213` | yes | Names another person (your own name is yours at any assurance) |
@@ -4107,6 +4141,1258 @@ and the sessions that end with their refresh tokens. In the stack lane,
 `test_a_second_factor_guards_what_changes_the_platform.py` drives the consent step, a gated function
 and the ending of a Node-RED session with a throwaway person and a computed TOTP code, and
 `check-gateway-surface.mjs --runtime --consent` holds the gate's decisions at the live gateway.
+
+### Changing a gateway's type cleans up after the old type (0252)
+
+The Edit form's Type select writes `deployment` and `is_simulated`, and before this file nothing
+followed it. The clean-up triggers fire on archive and delete alone. So a Remote gateway edited to
+Host kept `PENDING_ENROLLMENT` and a setup token an appliance could still redeem for a broker
+credential, and a Host gateway edited to Remote kept a working credential the dashboard no longer
+offered.
+
+**`trg_gateways_type_change_cleans_up`** runs `clean_up_after_a_gateway_type_change()` `BEFORE
+UPDATE OF deployment, is_simulated`, on every path that writes the type: the Edit form, an approved
+proposal and any later writer. Only crossing Remote's boundary ends anything. Host, Simulated and
+Third-party all hold a credential issued in the dashboard, so a change among them, or an UPDATE that
+names the columns without changing them, does nothing. Nor does any change to an archived gateway,
+whose archive ended it all already. Crossing either way:
+
+- **Every unredeemed setup token is burned**, as `withdraw_gateway_enrollment_tokens()` burns it on
+  archive.
+- **The credential the OLD row holds is revoked.** `gateway_has_broker_credential()` decides by the
+  row's `deployment`, so it is asked about OLD: NEW would be asked for the new type's record, which a
+  gateway that has just changed type lacks. The call is `revoke_gateway_credential()`, and the stamp
+  `credential_revoked_at` is written optimistically, as archiving writes it.
+- **The kept copy of a dashboard-issued password is forgotten**, as `forget_gateway_credential()`
+  forgets it on archive (0164). A Remote gateway keeps none.
+- **A gateway that becomes Remote reads `OFFLINE`** until Set up issues a token. One that leaves
+  Remote reads `OFFLINE` if it was `PENDING_ENROLLMENT` or `AWAITING_BIRTH`, as a new gateway of its
+  type starts. Any other status is the gateway's own word, which its NDEATH replaces once the broker
+  drops the session.
+
+**One audited UPDATE.** The status and the stamp are written into NEW, so the Audit Trail holds one
+row for the change and what it ended. Archiving writes its stamp in a second UPDATE, so it holds two.
+A burned token leaves no row of its own on either path: `gateway_enrollment_tokens` is not audited,
+and no new action kind is added.
+
+**The second lock.** `consume_gateway_enrollment_token()` and its read-only twin
+`peek_gateway_enrollment_token()` refuse a gateway that is not Remote, with the no rows an archived
+one gets. A refused token is not burned. Both are redeclared whole from `0001`, unchanged but for
+that line and its comment, and ahead of the trigger and the clean-up, so a token cannot be redeemed
+for the new type while they run. During a boot, `0001`'s older bodies serve between `0001` and this
+file, and the tokens the trigger burned are not live for them to redeem.
+
+**Once, for the rows earlier changes left.** A gateway that is not Remote reads `OFFLINE` rather than
+an enrolment state, and its unredeemed tokens are burned. Each statement matches nothing once it has
+run, so a replay changes nothing. Nothing is revoked here: no record says which type a credential was
+issued under, and revoking on a guess could cut off a gateway that works.
+
+**What it does not reach.**
+
+- **The forge repository** of a Remote gateway that enrolled is kept, with the deploy key its
+  appliance registered. Archiving archives the repository and removes the key; a type change does
+  neither, so the old appliance can still read its repository until the key is removed in the
+  forge.
+- **The revocation sweep judges archived gateways alone.** Its first statement drops the request
+  row of a gateway that is not archived, so a type change's stamp is never judged and a failed call
+  is not asked again. Retrying it as the sweep retries an archive is not safe as it stands: a
+  credential issued to the new type since, under the same account name, would be disabled.
+- **`enrolled_at` is kept** when a gateway leaves Remote. The dashboard reads a revocation after it
+  as no enrolment standing (`enrolmentStands()` in `utils/credentialState.js`), and a credential
+  issued or enrolled after the stamp as the one the gateway holds.
+
+**`credential_revoked_at`'s column comment is restated.** `0001`'s said re-enrolment clears the
+stamp, which nothing does, and that only an archived gateway carries one. It now says the stamp is
+written by an archive or a change of type across Remote's boundary, cleared by the sweep or a
+restore, and outranked by a credential issued, or enrolled, after it.
+
+The file's self-check asserts that both token functions refuse a gateway that is not Remote and
+that no browser-facing role may run them, that the trigger is `BEFORE UPDATE OF deployment,
+is_simulated`, and that `anon` may not run its function.
+`test_changing_a_gateway_s_type_cleans_up_after_the_old_type.py` holds each crossing before and
+after: the status, the tokens, the stamp, the queued request and the kept copy. It also holds a
+change among the three dashboard-issued types, an unchanged type, an archived gateway, the one audit
+row, a token refused for a gateway that is not Remote, and the clean-up leaving a Remote gateway
+alone and changing nothing a second time.
+
+### History reads every change of a text or a flag (0254)
+
+The bucket read keeps a text's or a flag's last value in each bucket (`last(val_string, time)` and
+`last(val_bool, time)`, `timescaledb/aggregates.sql`), so a state that begins and ends inside one
+bucket is not in it. On a state metric the brief change is usually the event: a fault, a robot off
+its path, a program that ran for a minute ([#1370](https://github.com/Harri-Llewelyn/Aber/issues/1370)).
+Under report by exception such a metric sends a row when it changes and a refresh every couple of
+minutes, so raw telemetry over a day holds few of them.
+**`telemetry_changes(from_ts, to_ts, bucket, asset_ids, metric_names, max_changes)`** reads them.
+
+- **One row per series**, every pair of the two lists, in asset and metric order. `read` says how
+  its chart is drawn: `changes`, `change_cap`, `reading_cap` or `retention`.
+- **`changes` comes from raw telemetry.** `change_ts`, `val_string` and `val_bool` hold the first
+  reading in the window, then each reading whose value differs from the one before, oldest first.
+  `lag()` over the series' raw rows drops the refreshes here, so only changes cross to the browser.
+  The first reading stays even when it repeats the value before the window: it is where that value
+  stops being carried in. `n_changes` counts them.
+- **The value in force at `from_ts`** is `carried_string` or `carried_bool`: the newest raw reading
+  before it in the bucket holding `from_ts`, else the 1-minute rollup's last value in the day before
+  that bucket, else `telemetry_1h`'s, as `telemetry_carried()` seeds. A rollup bucket wholly before
+  the window ends on the last reading in it, so this is the value raw would give.
+- **`change_cap`** is more than `max_changes` changes, 2,000 unless given and at most 5,000.
+  **`reading_cap`** is more than 20,000 readings of one series in the window, such as a metric
+  published every second whether it changed or not; none of them crosses. For both, `marked_ts`
+  and `marked_values` name each bucket of `bucket` that held more than one value, and how many,
+  counted from raw with `count(DISTINCT)`. The chart marks that bucket instead of showing its last
+  value as if it held all of it. Over 1,000,000 readings the historian is not asked to count.
+- **`retention`**: the historian has dropped raw readings of the series inside the window.
+  `telemetry_raw_retention()` drops raw a chunk at a time, oldest first (14 days by default,
+  `timescaledb.retention.retainFor`), so raw is complete from its oldest reading on. `raw_from` is
+  that reading, on every row. A window starting before it is `retention` only when `telemetry_1h`
+  holds the series in the hours between, so a series that began later, or a young stack with
+  nothing dropped, is still read from raw. Nothing is marked: the rollups keep a last value only.
+- **Text and flags only.** It compares `val_string` and `val_bool`. A number's values are never
+  compared, since nearly every reading of one is a change.
+- **Its bounds** are 50 series, 50,000 buckets times series as `telemetry_carried()` takes,
+  `max_changes` 1 to 5,000, and that function's window and bucket rules (`22023`), all refused
+  before anything is read.
+
+**Why a count bounds the raw read, not a `LIMIT`.** postgres_fdw sends a `LIMIT` only when it is
+under its own row estimate, and with no statistics it estimates one row for a series over a window.
+Measured: `ORDER BY time LIMIT 5001`, and `LIMIT 1`, over one series came back as a remote `WHERE`
+and a local sort, so every matching row would cross. The 1-minute rollup's `sum(n_rows)` over the
+window's buckets, one remote aggregate for every series, decides first whether a series' rows may
+cross at all. They then cross once (a materialised CTE), and the changes, the value carried in and
+the marks are all computed from them here. The seeds, the guard and `reading_cap`'s marks are
+aggregates (`(array_agg(... ORDER BY ...))[1]`, `sum`, `count(DISTINCT)` with its `HAVING`), which
+postgres_fdw sends whole; the retention probe is an `EXISTS` on `telemetry_1h`.
+
+**It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`, as `telemetry_carried()` is.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression), warm,
+as `authenticated`, over 10 days of the tutorial device's simulation (a flag and a text, a tick every
+5 s, a refresh every 120 s):
+
+| Read | Readings | Changes | Warm |
+| :--- | ---: | ---: | ---: |
+| The flag and the text, Last 24 hours, in 5-minute buckets | 1,336 + 1,473 | 935 + 1,473 | 21 ms |
+| The same two, the bucket read (`telemetry_carried()`) | | | 11 ms |
+| Those two, a quiet mode and a flag published every second, Last 24 hours | + 720 + 86,400 | the last `reading_cap` | 60 ms |
+| The flag published every second alone, its marks counted on the historian | 86,400 | 288 buckets marked | 39 ms |
+| The tutorial's flag and text over a week, in 1-hour buckets | 9,324 + 10,314 | 6,503 + 10,314, `change_cap`, 168 marked | 97 ms |
+
+`test_history_reads_every_change_of_a_text_or_a_flag.py` holds every rule above with local tables
+standing in for raw telemetry and the rollups. The file's self-check asserts one form, `STABLE`,
+`SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
+read, so it holds on a stack with no historian.
+
+### Automations are kept as rows (0255)
+
+An automation is a rule that watches a reading and raises an alert: when this device's metric is
+above 80 for five minutes, raise a warning. A person writes one as YAML on the Automations page
+([#1277](https://github.com/Harri-Llewelyn/Aber/issues/1277)), but **the rows are the record and the
+YAML is never stored**. That is why a rule is in the database at all
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)): it is bound to the devices it names,
+the Audit Trail knows who changed a threshold and when, row security decides who may write, and the
+backups hold it by construction. A Grafana rule binds to nothing: archive the device and it keeps
+evaluating. The file format is the reference in [`docs/automations.md`](../docs/automations.md).
+
+- **`automations`**, one row per automation. `key` is the `id:` a person writes: a slug of 1 to 64
+  lowercase letters, digits, hyphens and underscores, unique, and what a re-upload finds the row by.
+  `id` is the row's own uuid. The names (`automations`, `automation_triggers`, `automation_actions`)
+  leave the word *condition* with Home Assistant's meaning, a check made when a trigger fires.
+- **`automation_triggers`**, one row per trigger **and device**. A trigger that names a list of
+  devices is a row each, so each device is evaluated, and fires, on its own, the lifecycle can
+  archive one device's row, and a foreign key can keep the row from outliving its device.
+  `position` and `device_position` are the trigger's place in the `triggers` list and the device's
+  in its `device:` list, so a renderer can group the rows back into what a person wrote.
+- **`automation_actions`**, one row per action. `alert` is the one action, with a `severity`.
+- **`kind` is a column from the first release.** `threshold` is the one kind written today.
+  `entity_id` and `metric_name` are nullable, so a row with neither can be a site-wide rule, and
+  `comparison` and `threshold` are nullable for a kind with none. A kind's shape is its own CHECK
+  (`automation_triggers_threshold_shape`), not a list of every legal kind: a CHECK naming every
+  kind is wrong on the first boot after one is added. Only `threshold` is accepted by
+  `apply_automations()`. A per-device row that overrides a site-wide one needs no column: the
+  override is a row of the same kind for that device.
+- **The metric is a measured one.** `metric_name` is a foreign key to `metric_catalog(name)`, with
+  `ON DELETE RESTRICT`, so a metric a trigger uses cannot be deleted from under it. A derived metric
+  is a catalogue row too, and its refusal is added to `automations_parse()` when derived metrics
+  exist.
+- **Devices are named by id.** `entity_id` is a foreign key to `devices(id)` with `ON DELETE
+  CASCADE`, the second line behind 0257's trigger.
+- **Who reads and writes.** Every signed-in role reads all three tables. `anon` is revoked by name.
+  Nobody holds `INSERT`, `UPDATE` or `DELETE`: 0256's functions write as the owner. They are the
+  only door, for an Administrator and a Shopfloor Manager, which is #322's decision of 2026-10-28.
+- **The fingerprint** of an alert an automation raises is `condition:<trigger id>:<device
+  id>:<metric>`, composed by `automation_alert_fingerprint()` and nowhere else. The metric comes
+  last because a metric name may hold a slash, never a colon. With no device or no metric it
+  answers the prefix every fingerprint of that trigger starts with. `0247`'s
+  `platform_alert_confirmation_window()` already tells a `condition:` row from Grafana's.
+- **Where the evaluator goes.** Its state is per (trigger, device, metric): pending since, firing
+  since, last evaluated. That is `automation_trigger_states`, which 0270 adds with a foreign key to
+  `automation_triggers` and `ON DELETE CASCADE`. These tables needed no reshaping for it.
+
+The file's self-check asserts row security on all three, that `anon` holds nothing, that
+`authenticated` reads and writes nothing directly, and the fingerprint's form.
+`test_an_automation_is_a_set_of_rows_applied_from_one_document.py` holds the CHECKs and the keys.
+
+### A document of automations is checked and applied in one call (0256)
+
+The Automations page parses a person's YAML into JSON and calls one function. **The database is the
+authority**: the stack has no `pg_jsonschema`, so `apply_automations()` checks every field itself,
+and the JSON Schema the dashboard serves is a convenience that a test holds to it.
+
+- **`apply_automations(p_doc, p_dry_run)`** answers a list with one result per automation: `index`,
+  `key`, `status` (`new`, `changed`, `unchanged` or `refused`), `id`, `changes` and `reasons`. Each
+  reason is a `path` and a `message`; the path is a JSON path, such as `$[0].triggers[1].above`,
+  which the editor maps back to a line. Every field is checked and every reason reported, so a
+  file is fixed in one pass. **All or nothing:** with any refusal, or with `p_dry_run` true, nothing
+  is written, so the upload preview and the apply are one call. **It never deletes:** a file is a
+  batch of changes, not the whole set, as Home Assistant's `automations.yaml` is.
+- **The vocabulary is closed.** One trigger, `threshold`, with `device` (one id or a list),
+  `metric`, exactly one of `above` or `below`, and `for`. One action, `alert`, with a `severity`.
+  `conditions` only when absent or empty. A key it does not know is refused, never ignored: a file
+  that seemed to work and did half of what it said would be worse than a refusal. An automation
+  takes exactly one action, because the alert's fingerprint carries the trigger and not the
+  action, so two would raise one alert twice. An enabled automation needs a trigger.
+- **A file is bounded:** 500 automations, 100 triggers each, 500 devices a trigger and 10,000
+  devices in all. The first three are in the schema too (`maxItems`, held by mirror check 71); the
+  last is the function's alone, because a schema cannot count across items.
+- **A metric** must be in `metric_catalog` and a number (Sparkplug datatype 1 to 10): a threshold on
+  a string never breaches and never errors, which is the silence #322 refuses for derived
+  metrics. A **device** must exist and not be archived. Both checks are the database's alone; no
+  schema can make them.
+- **`for:`** is a whole number of at most three digits and `s`, `m` or `h`: 999 hours at most. The
+  limit is in the pattern, so the schema and the function cannot disagree about it. It is stored
+  in seconds and rendered as the largest unit that divides it, so `60s` comes back as `1m` and
+  still applies as unchanged.
+- **Found by key, changed by comparison.** A document and the stored automation are both rendered
+  by `automation_document_of()` and compared as JSON, so `unchanged` is exact and writes nothing,
+  not even an Audit Trail row. A changed automation keeps the trigger rows that still name the
+  same device and metric, so an alert already firing keeps its fingerprint and its row; only a
+  row whose device or metric goes is deleted, and its alert resolved (0257).
+- **`automations_document(p_keys)`** renders the rows back as `{automations, devices}`: the
+  automations in the document's shape, and each device they name with its name and place (cell and
+  area) for the comment the page writes beside the id. The YAML keeps no comments, so the page
+  writes them again on every render. Trigger rows archived with their device are left out.
+  `apply_automations()` of the `automations` list reports every one unchanged.
+- **`set_automation_enabled()` and `delete_automation()`** are the list's two acts. Enabling one with
+  no live trigger is refused.
+- **`automations_for_entity(p_entity_id)`** says which automations apply to a device and why, one
+  row per reason: `named` (a live trigger names it) and `site-wide` (a trigger that names no device
+  applies to every modelled device, one with a schema attached). The reasons a per-device override
+  and a place condition give are added with the rules that have them.
+- **Each writer** is `SECURITY DEFINER` with its path pinned, checks `has_role()` for an
+  Administrator or a Shopfloor Manager (42501 otherwise) and then calls `require_mfa()`, as every
+  gated writer does (0251). They are listed in 0251's table.
+- **The Audit Trail.** Each act writes one row per automation, by `file_automation_act()`, naming
+  the person, in the asset lane under `automations`, holding the automation before and after in the
+  document's shape with its `alias` as `name`: `AUTOMATION_CREATED`, `AUTOMATION_CHANGED`,
+  `AUTOMATION_ENABLED`, `AUTOMATION_DISABLED` and `AUTOMATION_DELETED`. A document that changes
+  only `enabled` is an enable or a disable, not a change. They are written by the
+  functions, not by an audit trigger on the tables, because one act on an automation is several
+  rows and the trail should read as one. Their lane and classes are `0232`'s and their place in
+  the map `0249`'s, both edited in place: see those sections.
+
+**The JSON Schema** is
+[`frontend/public/json-schema/automations.schema.json`](../frontend/public/json-schema/automations.schema.json),
+served by the dashboard at `/json-schema/automations.schema.json` (not under `/schemas`, which is
+the Schemas page's). It describes exactly this vocabulary with `additionalProperties: false`
+throughout and a description on every field, which the editor's hover help reads, and a person who
+prefers their own editor can point VS Code's YAML extension at it.
+`test_the_automations_schema_and_the_function_agree.py` runs every file in
+[`supabase/automations-fixtures/`](automations-fixtures) through the schema (`jsonschema`) and
+through `apply_automations(..., true)`, one document and one reason each, and fails if they
+disagree. A fixture marked `database` is what a schema cannot know (a device that is not there, a
+metric that is not in the catalogue, an id used twice): the schema must accept it and the function
+refuse it. Mirror check 71 holds the patterns and limits the fixtures cannot reach.
+
+The file's self-check asserts that each writer is `SECURITY DEFINER`, pinned, and asks for the second
+factor, that `anon` may run none of the functions and `authenticated` the five that are its, that the
+checker and the audit writer are no one's, and that the checker refuses what it should.
+
+### An automation follows the devices it names (0257)
+
+- **A device archived** archives the trigger rows that name it: they are kept and nothing evaluates
+  them. **Restoring** it brings them back and **enables nothing**: a rule coming back to life by
+  itself would surprise a person who had read that it was off. **A device deleted** removes them.
+- **An automation left with no live trigger is disabled,** and the Audit Trail records why. The row
+  is `AUTOMATION_DISABLED` with a `reason` such as "its last trigger watched the device Lathe 3,
+  which was archived", filed in the transaction of the person who archived the device, so it names
+  them. An automation that keeps another trigger is recorded as `AUTOMATION_CHANGED` with the same
+  reason. A purge by the timer has no person, and the row says so as every such row does.
+- **Its alerts end with it.** `platform_alerts` keeps the newest occurrence of a fingerprint for
+  ever (`prune_platform_alerts()`), so a firing row nothing resolved would stay in the counter. The
+  alerts of a trigger are resolved when it is deleted, archived or given another device or metric
+  (a different fingerprint), when its automation is turned off, and when the automation is deleted
+  (its triggers go with it). A resolve is the UPDATE that ends an occurrence, so a notification
+  already sent is followed by its "resolved". A new threshold resolves nothing: the trigger keeps
+  its identity and its alert, and the evaluator judges it against the new number.
+- **They are rules of the tables, not steps of the writers:** triggers on `devices` and on
+  `automation_triggers` and `automations`, so a row changed any other way keeps them. The alerts are
+  found by `automation_alert_fingerprint()`'s prefix, one definition for the lifecycle and the
+  evaluator.
+
+The file's self-check asserts that each function is no browser-facing role's, that the five triggers
+are in place and enabled, and that the cascade from devices is there.
+
+### An Administrator registers an app that signs people in (0260)
+
+An app someone built, such as an AAS viewer, can sign people in with their Aber account without a
+second login ([#1036](https://github.com/Harri-Llewelyn/Aber/issues/1036)). An Administrator
+registers it on Access Control › Apps with **Register App**: a name, public or confidential, and
+one to ten addresses the app sends a person back to. What the app then holds is sign-in only. The
+author's side is [`docs/sign-in-with-aber.md`](../docs/sign-in-with-aber.md).
+
+**`register_app(p_name, p_redirect_uris, p_client_type)` is SQL, as `remove_app()` is.** It inserts
+one `auth.oauth_clients` row the way `0002` inserts the stack's four: `registration_type` `manual`,
+`authorization_code,refresh_token`, `client_secret_basic` for a confidential app and `none` for a
+public one. A confidential app's secret is 32 random bytes in base64url, returned in the answer and
+kept as `base64url(sha256(secret))`, the hash GoTrue compares (`ValidateClientSecret`, v2.197.0).
+A public app's secret hash is `''` and not NULL: GoTrue scans the column into a Go string
+(`OAuthServerClient`, v2.197.0, which also wants `''` there), so a NULL fails the app's lookup and
+every authorize answers 500. Its other plain columns are all given; `client_uri`, `logo_uri` and
+`deleted_at` are pointers there and stay NULL. The id is the `client_id`. The issue first named GoTrue's admin API. Two things in v2.197.0 decided
+against it:
+
+- **The admin API cannot take the addresses a shopfloor needs.** `POST /admin/oauth/clients` runs
+  `validateRedirectURI`, which allows plain `http` only for `localhost`, `127.0.0.1` and `::1`.
+  Aber has no ACME on a shopfloor network, so an app there is at a private address or under the
+  site's own domain over `http`. `PUT /admin/oauth/clients/{id}` validates the same way, so there is
+  no second step that gets round it. GoTrue's authorize endpoint then compares the address as a string
+  and checks no scheme, so a row that holds such an address works.
+- **A row the admin API inserts names nobody.** GoTrue writes with its own role and no token, so
+  `0217`'s trigger records `APP_REGISTERED` with `actor_source = 'service'` and no person. Here
+  `auth.uid()` is the Administrator, and the same trigger records them (`actor_source = 'user'`).
+  The row's `new_data` is `app_facts()`: never the secret, never its hash.
+
+**Who and when.** `has_role(ARRAY['Administrator'])`, then `PERFORM public.require_mfa()`: with
+`security.require_mfa_for_managers` on, a session that gave no code is refused with `mfa_required`,
+before anything is checked or written. Nothing exempts it, so `mfa-exemptions.json` is unchanged.
+Dynamic registration stays off (`0197`): an app is added only by an Administrator, and
+`check-docs-drift` check 115 now says which insert in a migration is expected.
+
+**The address rule** is `app_redirect_problem(address, site_domain)`, which returns NULL or the
+words that follow the address. `frontend/src/utils/apps.js` says the same before the dialog asks.
+`test-harness/fixtures/app-redirect-addresses.json` holds both to the same 57 cases, and mirror check
+74 holds the two tests to the file.
+
+- `https` goes anywhere. Plain `http` goes only to `localhost` and any `.localhost` name, `127.0.0.0/8`,
+  `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `::1`, and the site's own domain with every name
+  under it. The check is of the whole name: `notplant.example` is not under `plant.example`.
+- No fragment (RFC 6749 §3.1.2 forbids one), wildcard, comma (GoTrue keeps the list as one
+  comma-separated string), user name, space, control character or backslash. No scheme but those two,
+  a port in 1 to 65535, at most 2,048 characters, and no address twice.
+- **The site's domain** is `site_domain()`: the host of the Directory's API row (`f1111111-…-0007`,
+  which db-init sets from `SUPABASE_PUBLIC_URL` on every boot) with its first label dropped when it
+  has three or more, so `api.plant.example` gives `plant.example`. An IP address or a name with no dot
+  gives NULL and no domain arm. The dashboard computes the same from its own API address. The two
+  agree where the chart builds its addresses as `<sub>.<publicBaseDomain>`. A site that sets
+  `publicUrls.supabase` to an unrelated host has that host's domain, and the dialog names the domain
+  it uses in its hint.
+- **Ten addresses and 80 characters** (`c_max_uris` and `c_max_name`; mirror check 75). Ten is GoTrue's
+  own limit. The name's limit is `person_profiles`' display-name length.
+
+**Names are unique among apps not removed**, whatever the case and with or without a leading `Aber `.
+The consent page and the Apps tab say "Grafana" for "Aber Grafana", so an app called `Grafana` would
+otherwise ask a person to sign it in under the name of one they trust. An advisory lock serialises
+registrations, so two cannot both pass the check. A removed app's name is free again.
+
+**The consent flow is the existing one.** The app's name is `client_name`, which GoTrue returns to
+`OAuthConsent.jsx` as `client.name`. `consent-gate` asks only whether the authorization's client is
+Grafana's, so a registered app is covered by `#184`'s step as Node-RED is: while Settings requires a
+second factor, an Administrator or Shopfloor Manager gives a code before they can allow it. A person
+sees the app under Profile › Allowed Apps (`list_my_app_approvals()` lists any app not removed) and
+revokes it there. The Apps tab lists it with the stack's four as **Added by an Administrator**
+(`part_of_stack` false), and **Remove App** works on it (`remove_app()`).
+
+**An outside app's token reaches the sign-in endpoints and nothing else** (decided 2026-11-09). The
+gateway's `rbac` filter admits a token whose `client_id` is one of `stack_app_ids()` on all of
+`/auth/v1/`, as before. It admits any other app's on eight requests: `POST /auth/v1/token` and
+`/auth/v1/oauth/token`, `GET /auth/v1/oauth/userinfo` and `/auth/v1/user`, `POST
+/auth/v1/logout?scope=local`, and `GET` of `/auth/v1/.well-known/openid-configuration`,
+`oauth-authorization-server` and `jwks.json`. Every other route in GoTrue's router is closed to it:
+`PUT /user`, `/factors…`, `/user/oauth/grants`, `/reauthenticate`, the consent calls under
+`/oauth/authorizations/` and `/admin/…`.
+
+- **Matching is on the path as sent.** The API listener does not normalise, so a trailing slash, a
+  doubled slash or another case is a 403 and never a pass.
+- **The logout is the local scope alone,** because GoTrue's default (`global`) deletes every session
+  of the person, the dashboard's among them. Matching it takes the `:path` header, query included, so
+  `?scope=local` must be the whole query.
+- **The token endpoints answer a caller with no token as well.** They are listed so an app that sends
+  a stale bearer to one is not refused.
+- **It was run, not only read.** The rendered gateway ran in Envoy 1.39.2 with tokens signed ES256
+  against the template's JWKS, and 46 requests answered as this section says, with an `iss`, with
+  none and with a foreign one. `check-gateway-surface.mjs` holds the two policies as `APP_ROUTES` and
+  `OUTSIDE_SIGN_IN`; mirror check 48 holds the stack policy's ids to `stack_app_ids()`.
+
+**An outside app's token reaches no data API** (`0235`, unchanged). The gateway answers 403 on
+PostgREST, Storage and every function, `auth_pre_request()` refuses it in the database, and
+`has_role()` and `has_authority()` answer false. Realtime's join message is the accepted gap in
+[`docs/security-model.md`](../docs/security-model.md#an-apps-token-still-receives-what-realtime-sends-any-signed-in-account).
+
+**GoTrue's issuer is the site's public auth address.** The chart sets `GOTRUE_JWT_ISSUER` to
+`<API address>/auth/v1` (`aber.supabaseUrl`, which `API_EXTERNAL_URL` uses). GoTrue builds the
+discovery document from it: `issuer` as given, and the authorization, token, user-info and key-set
+addresses from it with any trailing slash trimmed. Every access token and ID token carries it as
+`iss` (`internal/tokens/service.go`; `JWT.Issuer` is read nowhere else). Unset, discovery named no
+issuer and relative paths, which a standard sign-in library refuses. **Every reader of a token was
+looked at for an `iss` check:**
+
+| Reader | Checks `iss`? | How it was found |
+| :--- | :--- | :--- |
+| GoTrue | No: `jwt.NewParser(jwt.WithValidMethods(...))` | v2.197.0 `internal/api/auth.go` |
+| The gateway's `jwt_authn`, on all four listeners | No: no provider names an `issuer`, so Envoy does not check one | The template; Envoy 1.39.2 verified tokens with and without `iss` and with a foreign one |
+| PostgREST | No: it holds the key set and checks signature and expiry, and `aud` only if `PGRST_JWT_AUD` is set, which the chart does not | The chart's environment; the service is stock |
+| Realtime, Storage | Not by the chart: neither is given an issuer or a claim validator | The chart's environment only: check live after the upgrade |
+| The edge functions | No: `VERIFY_JWT` is false and each calls `auth.getUser()`, which is GoTrue's check | `functions.yaml`, `main/index.ts` |
+| i3X | No: it decodes the payload unverified and forwards the bearer to PostgREST | `i3x_service.py` |
+| Node-RED's sign-in | No: `verifyGotrueToken()` checks ES256 by `kid`, expiry and audience | `node-red-init.mjs` |
+| Grafana's sign-in | No: `[auth.generic_oauth]` sets no issuer, expected claims or discovery | `grafana.ini` |
+| Studio's and the forge's doors | No: Envoy's `oauth2` filter holds the endpoints and a session, and `jwt_authn` names no issuer | The template |
+| The dashboard | No: supabase-js reads the session, and the dashboard calls no `getClaims()` | `frontend/src` |
+
+A token signed before the upgrade carries no `iss` and goes on working everywhere, for the same
+reason. A site does nothing at the upgrade beyond `helm upgrade`, which restarts GoTrue and the
+gateway.
+
+**What a browser app has to know.** The gateway echoes only the origins the chart lists
+(`global.corsExtraOrigins` adds more), so a browser app on another origin cannot call the token
+endpoint or user-info from the page until its origin is listed. A server-side app is unaffected. The
+author's guide says so.
+
+**Not here.** A lost secret is not regenerated: the Administrator removes the app and registers it
+again. What an outside app may reach beyond a sign-in is a grant per app, designed with the MCP
+clients' sign-in ([#1193](https://github.com/Harri-Llewelyn/Aber/issues/1193)).
+
+The file's self-check asserts the three functions' pinned `search_path`, that `anon` and
+`service_role` run none of them and `authenticated` only `register_app()`, one case in each arm of
+the address rule, and that a request with no identity is refused. It registers nothing, so a replay
+writes no app. `test_an_administrator_registers_an_app_that_signs_people_in.py` holds the rest: the 57
+cases, the site domain, the row as `0002` writes the stack's, the secret and its hash, who may call,
+the second factor, every refusal, the names and the one audit row. The stack lane's
+`test_an_app_registered_by_an_administrator_signs_people_in.py` completes the code flow for a public
+and a confidential app against the running stack.
+
+### An alert reaches the roles its email route names (0262)
+
+`0247`'s queue carried one channel, the webhook. Email is the second (#325 part 2), and it is the
+same queue: the same trigger, the same send decision, the same reminders, the same lease and the same
+retries. This file states what makes it a channel. Who the people are is `0263`.
+
+- **`notification_deliveries.channel` admits `email`.** `0247` declares the table and its first
+  CHECK, and a table that exists keeps the CHECK it has, so this file drops the constraint and adds
+  it again with both channels. A replay replaces it with itself.
+- **A route is two settings, read by every role and written by an Administrator alone**, each checked
+  by `notification_setting_guard()` (`23514`):
+
+  | Key | Holds | Seeded |
+  | :--- | :--- | :--- |
+  | `notifications.email_min_severity` | `info`, `warning` or `critical`: the lowest severity emailed | `warning` |
+  | `notifications.email_roles` | A list of role names from `public.roles`, each once: the roles whose people are told | `[]` |
+
+  **Email starts off.** No role is named, so nothing is queued, and a site that already sends
+  password-reset mail through `supabaseAuth.smtp` is not emailed alerts by an upgrade. An Administrator
+  chooses the roles on Settings › Notifications. A route matches on severity alone, as the webhook's
+  does (#1170 turns routes into rules in 1.12). The roles are checked against the roles table when
+  they are written, so a role added later is accepted.
+- **`notification_channel_reaches(channel, entity_type)` is the one rule for which alerts a channel may
+  carry.** The webhook never carries a `service_identity` alert, as before. Email carries one only
+  when `Administrator` is among the roles told, since only an Administrator may read it (`0204`), and
+  `0263` then tells Administrators alone. Any other alert is carried by either channel. The queue
+  trigger, `queue_platform_alert_reminders()` and `platform_alert_send_decision()` each ask it, so
+  the three cannot disagree about a machine identity's alert.
+- **`notification_channel_is_configured('email')` is true once a role is told.** Whether the site has
+  a mail relay is not the database's to know, since the relay is the functions pod's environment: the
+  dispatcher says so in the delivery log, and the Settings page asks it.
+- **The trigger queues an email beside the webhook's** when an occurrence starts firing and the email
+  route carries its severity. A resolve follows each channel's own firing message, whatever its
+  route says now, so it needed no change. A reminder is queued per channel on its own clock.
+- **The send decision has no email arm.** Acknowledgement, a suppression window and the writer's
+  confirmation window are decided for any channel, so an acknowledged alert sends no email and a
+  suppressed one is held until its window ends. The only change is the machine identity rule above.
+
+The trigger function, the reminders, the decision, `notification_channel_is_configured()` and
+`notification_setting_guard()` are redeclared whole from `0247`, `0250` and `0248`, each unchanged but
+for what is said here: those files replay first on every boot, and the last declaration stands
+(`INTENDED_REDECLARATIONS` in `check-docs-drift.mjs` records the reasons).
+
+**`notification_setting_guard()` becomes `SECURITY DEFINER`.** It was an invoker's function that called
+`notification_allowed_hosts_problem()`, which no API role may run. Postgres checks `EXECUTE` on every
+function an expression names when it first evaluates the expression in a transaction, whichever arm
+is taken, so an Administrator's first change of any Notifications setting in a transaction was
+refused with `42501`. `0248`'s suite did not see it, because its setup changed a setting as the owner
+first, in the same transaction. The guard uses nothing of the caller's, so it runs as its owner; no
+API role may run it directly.
+
+The file's self-check asserts that the channel list admits `email` and refuses another channel, that
+both settings are declared as a string and a list with the category and no `sensitive` mark, the
+roles' rule and the guard's arms, that `notification_channel_reaches()` keeps `0247`'s answers for the
+webhook and admits what email may carry, that the trigger, the reminders and the decision ask it, that
+`0250`'s arms are still there in its order, and that no API role runs the new functions.
+`test_aber_emails_the_people_an_alert_concerns.py` holds the route, the queue, the decision and the
+reminders for email.
+
+### An email goes to the people who hold the roles it names (0263)
+
+The people are found when the message is sent, as the dispatcher asks, so a role changed, a person
+removed or an address corrected after the row was queued counts.
+
+- **An address is `auth.users.email`.** `notification_email_address(user)` returns it, trimmed and
+  lower-cased, for a person who can sign in, and nothing for a machine identity (no way to sign in),
+  for access that was removed or that GoTrue bans (`person_access_is_removed()`, which `0166`
+  declares), or for an account with no address. A person with no address is told nothing, and the
+  delivery log says only how many people the relay took the message for.
+- **`notification_email_recipients(holder, delivery)` resolves one message.** For a test it is the
+  person who asked. For an alert it is the people in `user_roles` whose role `notifications.email_roles`
+  names now, each address once and in order. A machine identity's alert is told to Administrators
+  alone, whatever else is named. The dispatcher runs as the service role, past RLS, so the database
+  applies each alert's visibility itself. Only the pass holding the lease may ask (`55P03`).
+- **The log keeps counts, never addresses.** Every signed-in role reads `notification_deliveries`, and an
+  address is not theirs to read. `recipients` is how many people the relay took the message for and
+  `refused` how many addresses it refused while taking the others; both are NULL for the webhook and
+  until a send. The file's self-check refuses a column of that table that is not an integer and
+  could hold an address. A relay's words are kept with their addresses replaced, so `last_error` holds
+  none either.
+- **`record_notification_email_delivery()` records an email's outcome.** It calls
+  `record_notification_delivery()` and then writes the counts, and, for a send the relay part refused,
+  the relay's note in `last_error`. A new name beside the old one, since a changed signature would
+  have left `0247`'s behind on every database that has run it.
+- **A test goes to the Administrator who asks.** `queue_test_email_notification()` queues an email
+  `test` row for the caller's own address, so it checks the whole path: the relay, the sender and the
+  message. It is the Administrator's alone (`42501`), asks `require_mfa()` after its role check, as the
+  webhook's test does (`0251`), and is refused with `55000` when the account has no address. It keeps
+  the newest 20 finished email tests. Like the webhook's, it writes no Audit Trail row: the log row
+  names who asked.
+
+**The relay is the one GoTrue reads.** The dispatcher sends through `supabaseAuth.smtp` and the same
+optional `SMTP_PASSWORD` key, which the functions Deployment now reads too (`SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASS`, `SMTP_ADMIN_EMAIL`, `SMTP_SENDER_NAME`), and `main/index.ts` forwards to
+`notification-dispatch` alone. `supabaseFunctions.smtpCaCert` is an optional PEM, `SMTP_CA_PEM`, for a
+relay whose certificate a private authority signed; GoTrue cannot take one. A site configures the
+relay once. With no host or no sender address, email is unavailable, and the delivery log and the
+Settings page say which value to set. The functions pod needs an egress rule for the relay under
+`networkPolicy.enabled`, as it does for a webhook
+([`help/site/upgrading.md`](../help/site/upgrading.md#from-180-alerts-can-be-emailed)).
+
+**There is no mail library: the client is `notification-dispatch/smtp.ts`, about 400 lines.** A spike on
+the pinned runtime (`supabase/edge-runtime` v1.77.4, Deno 2.1.4) found that `Deno.connect`,
+`Deno.connectTls` and `Deno.startTls` open sockets to a relay on the site's network with no outbound
+filter of their own, where Supabase documents that its hosted functions refuse ports 25 and 587.
+It was measured against a stdlib Python receiver on 465 (implicit TLS) and 587 (STARTTLS) with AUTH
+PLAIN and LOGIN, a site CA, an untrusted issuer, a wrong host name, an expired certificate and a
+self-signed one. Every case behaved as written below, so no library is vendored, `deno.json` and
+`deno.lock` are unchanged and the image gains nothing to fetch.
+
+- **The port decides the security, as GoTrue's does.** 465 is TLS from the first byte. Any other port
+  upgrades with STARTTLS when the relay offers it, and asks for its capabilities again afterwards
+  (RFC 3207). A login is never sent without TLS: a relay that offers AUTH but no TLS gets the
+  message refused with that said, and a relay that offers neither gets the message in the clear.
+- **A certificate is checked against Deno's public roots plus `SMTP_CA_PEM`.** A certificate marked as
+  a certificate authority cannot be its own server's, whatever is trusted (`CaUsedAsEndEntity`): a
+  site with a self-signed relay certificate must issue a leaf from an authority. The runtime's
+  errors are turned into sentences (`not issued by an authority this platform trusts`, `not valid for
+  the relay's host name`, `has expired`).
+- **A refusal is final only when it is about the message.** A 5xx at the sender, a recipient, DATA or
+  after the final dot is dead at once. A relay that is down, a refused login or a certificate problem
+  is retried on the webhook's backoff, since a site can fix them. A relay that takes some addresses
+  and refuses others has sent the message: the refusals are counted and noted, because sending again
+  would repeat it to the people it reached.
+- **The message is built from fields.** Subject: `[Aber] <severity>: <alert> - <subject> (<event>)`.
+  A plain-text body: what fired, where, when, the values and labels the rule carried, the link the
+  alert counter opens, and why the person is told. English only (#446 translates it in 1.14). Headers
+  with non-ASCII text are RFC 2047 encoded words that never split a character, the body is
+  quoted-printable UTF-8, `To` is `undisclosed-recipients:;` with every address in the envelope
+  alone, and `Auto-Submitted: auto-generated` keeps an out-of-office reply from answering an alert. A
+  firing message is the thread's root, and a resolve or a reminder follows it in `References`.
+- **Bounds.** A step has 10 seconds and the whole exchange 15, inside the pass's 40-second budget
+  and the runtime's 60-second limit. A reply of more than 2,048 characters on a line, or of more than
+  100 lines, is refused. An address with a space, a bracket, a quote or a control character is refused
+  before any connection, and a header value cannot carry a line break.
+- **A GET answers the Settings page** whether the site has a relay and a sender (`SMTP_HOST` and
+  `SMTP_ADMIN_EMAIL`), for any signed-in person, since the database cannot see the functions' environment.
+
+The file's self-check asserts the two columns, that no column of the log could hold an address, the
+dispatcher's grants and pins, the Administrator's alone for the test, that the lookup is nobody's to
+call, and that a request with no person behind it, an id that is no account and a pass that holds no
+lease are refused. `test_aber_emails_the_people_an_alert_concerns.py` holds who is told and who is
+left out, the log, and the test by role. `notification-dispatch/smtp_test.ts`, `mail_test.ts` and
+`email_test.ts` hold the protocol against an in-memory relay (465 and 587, both AUTH methods, a
+refusal at each step, dot-stuffing, UTF-8, multi-line and byte-at-a-time replies, a stalled relay,
+hostile addresses), the encoding against decoders written apart from it, and the dispatcher's
+decisions. `test_notification_dispatch_email.py` is the stack suite.
+
+### A person can ask for a desktop notification when an alert starts firing (0264)
+
+While a dashboard tab is open somewhere, a firing alert can also raise a browser notification, so
+someone working in another window sees it. It is a person's own choice, off until they turn it on,
+and it follows them to any PC they sign in on.
+
+- **`user_settings.desktop_notifications`**, `boolean NOT NULL DEFAULT false`. Profile › Notifications
+  writes it, as a one-column upsert like the shortcuts' (`0194`). A row written before `0264` reads off.
+- **No new grant or policy.** `0188` grants on the table and its policies match rows, so both cover
+  the new column, and a person still reads and writes their own row only. The file's self-check
+  asserts that `anon` holds nothing on it.
+- **The database sends nothing.** The notification is raised by the dashboard tab, from the alerts
+  it already reads (`platform_alerts_active`, so it has the visibility the alert counter has: RLS
+  withholds a machine identity's alert from anyone but an Administrator). It queues nothing in
+  `notification_deliveries`, and the dispatcher (`0247`) does not see it. With no dashboard tab
+  open nothing arrives: reaching people away from the dashboard is what email and the webhook are for.
+- **The browser's permission is not stored.** A browser grants it per browser, so turning the setting
+  on, or signing in on a new PC with it on, brings up that browser's prompt. The column holds only
+  the person's wish.
+- **No site-wide switch.** A site that wants desktop notifications blocked does it through browser
+  policy, so there is no `system_settings` key for it.
+
+The dashboard keeps a copy in `aber_desktop_notifications` and reads and writes the column through
+`useUserSettings.js`; `useDesktopAlerts.js` raises and closes the notifications. `test_user_settings.py`
+holds the default, the one-column save and that nobody else's row is reachable.
+
+### History averages a metric by the hour of the day (0265)
+
+The Cell tab's heatmap colours each machine's mean at each hour of the day, 00 to 23, across the
+window's days ([#319](https://github.com/Harri-Llewelyn/Aber/issues/319)). The hourly read it is
+built on, `telemetry_carried()` at one hour, returns one row per hour of the window: 14,400 rows for
+a cell of 20 over a Month. **`telemetry_hour_of_day(from_ts, to_ts, asset_ids, metric_name, tz)`**
+folds them where the read is made, so what crosses is devices times 24 rows.
+
+- **One row per device per hour of the day that has a value**, in device and hour order:
+  `asset_id`, `hour_of_day` (0 to 23 in `tz`), `mean_value` and `days`, how many local dates the
+  mean spans, so the heatmap can say "the mean of 7 days".
+- **It reads `telemetry_carried()` at one hour**, so it takes that read's rules. A quiet hour carries
+  the last value forward and counts as that value, which under report-by-exception is what held. A
+  series has no row before its first value. A text or a flag metric has no `avg_double`, and so no row.
+- **Every hour weighs the same.** The mean is of the hourly averages, so an hour of 1,000 readings
+  and an hour of one count alike. A reading-weighted mean would let a chatty hour outweigh a quiet one.
+- **The hour is the one in the time zone given**: `bucket_ts AT TIME ZONE tz`, per bucket, so across
+  a clock change the same UTC hour lands in another local hour, and the session's own `timezone`
+  setting does not matter. The browser sends its IANA name (`Intl`). An hourly bucket starts on a
+  UTC hour, so in a zone offset by part of an hour (Kolkata, UTC+5:30) it begins at :30 and is filed
+  under the hour it starts in.
+- **The window's first bucket is the one holding `from_ts`**, as in `telemetry_carried()`, and
+  nothing is read past now.
+- **Its bounds** are `telemetry_carried()`'s own, said in terms of the window: it refuses more than
+  50,000 hours times devices, a time zone Postgres does not know, a blank one, and the usual bad
+  bounds and missing lists (`22023`), all before anything is read. The 50,000 is `c_max_rows`,
+  stated again here so the refusal names hours and devices rather than a bucket, and
+  `HOUR_OF_DAY_MAX_ROWS` in `api.js` is the page's copy (mirror check 79). **For a cell of 20 that is
+  2,500 hours, 104 days**: a Week and a Month read, a Year does not. Five devices read a Year
+  (43,800 hours), six do not (347 days). The page checks the same arithmetic first
+  (`hourOfDayPlan()`) and says the longest window in words. It does not read the devices in parts:
+  the window is the thing to shorten, and the charts above the heatmap are unaffected.
+
+It runs as the caller, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`, as `telemetry_carried()` is. No audit classifier changes: it
+reads.
+
+**Why not fold in the browser.** The browser's row cap is 5,000 (`TELEMETRY_MAX_ROWS`), so a Month of
+20 devices at one hour, 14,400 rows, would be read in three parts and folded there. Done here it is
+one call and 480 rows. The function's own cost is the read it wraps, so the saving is in what
+leaves the database:
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression
+policies; 20 devices of 10 metrics, a reading every 5 minutes for 35 days, and the cell's metric
+hourly for the 75 days before that, 2.1 million raw rows), through `postgres_fdw` into
+`supabase/postgres` 17.6.1.175, warm, as `authenticated`, median of 5 on a laptop six helpers
+shared (so one read varied by up to 40%):
+
+| A cell of 20 devices | `telemetry_hour_of_day()` | rows | JSON | `telemetry_carried()` at 1 h | rows | JSON |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Day | 40 ms | 480 | | 48 ms | 500 | |
+| Week | 135 ms | 480 | 47 KB | 90 ms | 3,380 | 979 KB |
+| Month | 337 ms | 480 | 48 KB | 454 ms | 14,420 | 4.2 MB |
+| 104 days, the most 20 may read | 1,409 ms | 480 | | 1,535 ms | 49,940 | |
+
+`test_history_averages_a_metric_by_the_hour_of_day.py` holds every rule above with a local table
+standing in for the hourly rollup. The file's self-check asserts one form, `STABLE`,
+`SECURITY INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any
+read, so it holds on a stack with no historian.
+
+### A derived metric is a catalogue row (0267)
+
+A derived metric is a metric whose value Aber computes from other metrics, such as parts per hour
+from a part counter ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)). It is a
+`metric_catalog` row with its definition in the new `derivation` column, so the schema builder, the
+AAS exporter and the telemetry export still read one table. A row with no derivation is measured,
+as every row was before. This file keeps the definition and refuses a bad one. It computes nothing:
+`derived_series()` is `0282`, and nothing is stored for a derived metric.
+
+**`derivation` is one `jsonb` column, not a column for each part.** The three kinds hold different
+parts: one input, one input and its states, or a signed list of inputs. Separate columns would be
+null for most rows and would need parallel arrays for a sum's signs. One column keeps a measured
+row as it was (NULL) and a fourth kind needs no new column. `derivation_shape_problem()` says what is
+wrong with a definition's shape, and the CHECK `metric_catalog_derivation_shape` refuses any row
+for which it says something. The kinds, in `utils/derivedMetric.js` too (mirror check 80):
+
+| Kind | Definition | Value | Unit |
+| :--- | :--- | :--- | :--- |
+| `counter_rate` | `{"kind": "counter_rate", "input": name}` | the counter's increase per hour; a fall is a reset, and the new value counts as the increase | the input's unit followed by `/HOUR`, `COUNT/HOUR` for an input with none |
+| `time_in_state` | `{"kind": "time_in_state", "input": name, "states": [...]}` | the share of time the input is in those states, 0 to 1, resolved to the minute | none |
+| `sum` | `{"kind": "sum", "inputs": [{"metric": name, "sign": 1 or -1}, ...]}` | the signed sum of two to eight inputs | the unit the inputs share |
+
+**`enforce_derived_metric()` is the trigger that checks a save**, `BEFORE INSERT OR UPDATE`, so its
+reason is the one the dialog shows. Each refusal is a `check_violation` (`23514`) naming what is
+wrong:
+
+- **Every input is in the catalogue, measured and of the right kind.** A derived input is refused,
+  so a derived metric cannot be built on another. A rate and a sum read numbers (Sparkplug datatypes
+  1 to 10). A time in state reads a string or a boolean. A deprecated input is allowed: deprecating
+  a metric withholds it from new schemas, and its readings are still there.
+- **A sum's inputs share one unit, and the row takes it.** No unit counts as a unit: a metric in
+  kilowatts and one with none cannot be added. The trigger sets `units` from the inputs, and refuses
+  a `units` that is something else, so the row cannot disagree with its definition.
+- **A state is one the input can report.** A boolean reports `true` or `false`. A string with
+  `permitted_values` reports those. One without them takes any state, which the dialog says.
+- **The name is not one any device has declared.** Any row of `devices` counts, archived ones
+  included, by `last_birth_metrics`. The device could publish it, and both would put readings in one
+  series. The trigger is `SECURITY DEFINER` so it reads every device whatever the writer's policies
+  show. It writes nothing but the row's own unit.
+- **No semantic id, standard or permitted values, and the datatype is Double.** A derived metric is a
+  local extension (see [A local extension carries no minted id](#a-local-extension-carries-no-minted-id-archived-migration-0149)),
+  computed rather than reported.
+- **A measured metric cannot become derived, and a derived metric's definition and unit cannot
+  change.** Devices may already publish a measured name, and its history would mix two sources.
+  Nothing is stored for a derived one, so an edit would change every past value. A changed
+  definition is a new derived metric, and the old one is deprecated with `superseded_by` pointing at
+  it, as for any metric. A description, a deprecation and a restore are not edits of the definition.
+- **An input's unit cannot change while a rate or a sum is built on it.** Their units follow the
+  inputs and nothing is stored, so a changed input unit would leave the derived row stale and alter
+  its past values. A deprecated derived metric counts. The reason names one derived metric and how
+  many more. A time in state has no unit to follow, so a unit change and a permitted-values edit on
+  its input are allowed.
+
+**The writers are the table's own policies**, as for any catalogue row: Administrator only, and
+behind `require_mfa()` where the second factor is required. `trg_metric_catalog_audit_trail` files
+the save as it files any catalogue change, with the definition in `new_data`. No audit action kind
+is new. The shape function is granted to `authenticated` and `service_role` by name, because the
+CHECK runs as the writer. The trigger function is not granted to anyone.
+
+**What a derived metric is not.** No schema holds one: the schema builders leave it out, since
+nothing publishes it. The i3X service serves none, and builds no type for one (`0282`'s readers
+below).
+
+**Ingestion enforces the other direction.** The save refuses a name a device has declared. A device
+that declares or publishes the name after the row exists has the reading dropped under either
+`conformance_policy`, with a `derived_name` finding in the Audit Trail and a count of its own,
+`aber_ingestion_derived_name_dropped_total`. The daemon reads the names from `metric_catalog`
+(`derivation IS NOT NULL`) through the UNS bridge's cache, so a metric added here is dropped under
+within `UNS_CONTEXT_TTL_SECONDS`, 60 seconds by default. A birth's value under the name is left out of
+the device's parameters. No function or migration is new: the findings go through
+`record_ingestion_rejection()`, which holds no list of codes. The rules are in
+[ingestion's README](../ingestion/README.md#a-reading-under-a-derived-metrics-name-is-dropped-under-either-policy).
+
+**How it is read** (`0282`). A counter rate and a sum's average read the 1-minute rollup
+(`telemetry_1m`, through `telemetry_carried()`) at every bucket width. Measured against raw on a
+private historian, the rollup that matches the bucket loses what was counted before a reset inside
+the bucket (up to 60% of an hour with one reset), and its average weighs a quiet input's few
+samples as if they were its time. A time in state is within a percentage point of raw at a day. Both
+the figures and the reads' cost are in [the issue's spike comment](https://github.com/Harri-Llewelyn/Aber/issues/324).
+
+`test_a_derived_metric_is_a_catalogue_row.py` holds all of the above. The file's self-check asserts
+the column, the CHECK, the trigger's timing, what the shape function says of a few definitions and
+the grants, and reads no row.
+
+### A threshold automation is read against the historian (0270)
+
+An automation's `threshold` trigger names a device, a metric and a number
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)). `0270` holds the read that finds which
+of them are breaching, and the table that remembers what each run found. `0271` is the evaluator
+that uses them.
+
+- **`machine_condition_readings()` is the read.** It returns one row for each live threshold pair
+  (an enabled automation's unarchived trigger on an unarchived device) that has a latest value,
+  breached or not: the trigger, the device, the metric, the comparison and threshold, the value,
+  when it arrived and `breached`. It reads `timescale.telemetry_latest` over `postgres_fdw`. A pair
+  with no row has no value, which is no breach.
+- **`machine_condition_rows()` is the breaching ones**, in the shape `platform_health_rows()`
+  answers (`condition`, `sparkplug_id`, `subject`, `value`, `detail`) with `trigger_id`,
+  `entity_id` and `metric_name` beside them. It is a function of its own and no arm of
+  `platform_health_rows()`: `postgres_fdw` raises on connect, so a historian outage would take the
+  platform's own conditions down with it. The evaluator reads the first function and not this one,
+  because it must tell a value that stopped breaching, which resolves, from a pair with no value,
+  which does not.
+- **One remote query for each metric, carrying that metric's devices.** One query with both arrays,
+  every device and every metric, asks the historian for their cross product: 300 devices of 10
+  metrics asks for 3,000 series to find 300, and was 8 times slower in the spike. The filter on
+  asset and metric is shipped, and the historian pushes it below the view's `DISTINCT ON`, so the
+  work is one index probe for each matching series for each chunk. The newest value is compared
+  whenever it arrived: the filter has no time bound, and none comes from `now()`, which
+  `postgres_fdw` would evaluate here and ship nothing for.
+- **A value that is not a number is no reading.** That is `NULL` (the value is a flag or a text) and
+  `NaN`. Postgres sorts `NaN` above every number, so it would breach every `above`.
+- **Neither function is granted to an API role.** They run as the historian's admin mapping, which
+  is the mapping a pg_cron job has, and a browser has no reason to start a read of the historian.
+- **`automation_trigger_states`** has one row for each (trigger, device, metric): `pending_since`,
+  `firing_since` (never both), `last_evaluated_at`, `last_value`, `last_observed_at`, and the
+  comparison and threshold the row was last judged against. Every signed-in role reads it, nobody
+  writes it directly, and `anon` is revoked by name. A foreign key to `automation_triggers` with
+  `ON DELETE CASCADE` takes a trigger's rows with it. The key carries the device and the metric as
+  well as the trigger, so a trigger given another of either is another pair, and the row of the old
+  one is no longer live. `fillfactor` is 70, so the update every run makes of each row can stay on
+  its page.
+
+The file's self-check asserts row security and the grants on the table, the cascade, that neither
+function is any API role's, that each is `SECURITY DEFINER` with its path pinned, and that the read
+is still one metric at a time with each metric's devices in the filter.
+
+**`0283` declares both functions again**, after `derived_series()` and `derived_current()` (`0282`), so
+that a pair on a derived metric has a value: the read above finds nothing for one, since no device
+publishes its name. See *A threshold automation reads a derived metric (0283)*. A measured metric is
+read as it was.
+
+### A threshold automation raises its alert from the database (0271)
+
+**`evaluate_automations()` is what pg_cron runs every minute**, as it runs
+`refresh_directory_liveness()`, and the only place an automation's alert is written. It reads the
+historian through `machine_condition_readings()`, keeps what it found in
+`automation_trigger_states`, and writes `platform_alerts` as `grafana-alert-webhook` does. So
+acknowledgement, suppression and delivery read an automation's alert as they read Grafana's, and
+never ask which wrote a row. A separate worker is not needed: the spike
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)) measured one read at 300 triggers at
+0.24 to 0.31 s, and one of every series on a 1,000-device site at 1.1 s.
+
+- **A breach fires when it has held for the trigger's `for`.** The first run that reads it breaching
+  sets `pending_since`. The first run at which `for` has passed, with it still breaching, fires: one
+  occurrence row, `status` `firing`, `starts_at` that run's time. **A hold is judged at each run, so
+  it rounds up to a run.** `for: 30s` fires at the second run, a minute after the first, and `0s`
+  at the first run that finds the breach. A breach that stops first clears `pending_since`, and the
+  next one starts the hold again. **A changed comparison or threshold starts it again** for a
+  breach that has not yet fired. A firing one stays firing while the new threshold is breached, and
+  resolves when it is not.
+- **A firing one that stops breaching resolves** at the first run that reads it back inside. That is
+  the UPDATE that sets `status` `resolved` and `ends_at`, as a resolved notification from Grafana
+  does, so a message already queued is followed by its resolve. There is one occurrence for each
+  firing: the next firing is a new row.
+- **The alert is written as the webhook writes one.** `fingerprint` is
+  `automation_alert_fingerprint()`'s (0255), `alert_name` the automation's alias, `severity` the
+  `alert` action's, `entity_type` `device` with the device's id and `sparkplug_id`, and `summary`
+  "Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m". `labels` are `severity`,
+  `entity_type`, `metric`, `automation` (the automation's key) and `trigger_id`, all strings as
+  Grafana's are. `values` are `value`, the reading that fired it, and `threshold`. `rule_uid` is
+  null, and the frontend's link to Grafana does not apply to a `condition:` row
+  (`isAutomationAlert()`, mirror check 83).
+- **Each run stamps `last_confirmed_at` on every row it holds firing**, a pair with no value
+  included, because its state still holds. A stamp changes no status, so it queues nothing. It is an
+  UPDATE, which Realtime carries: a dashboard reads again once a minute for as long as an
+  automation's alert fires, where Grafana's alerts are stamped every 12 hours.
+  **`platform_alert_confirmation_window()` (0247) gives a `condition:` fingerprint five minutes**,
+  the run interval and a margin of four, so a reminder is sent only for an alert the last run
+  confirmed. Mirror check 82 holds the window above the job's interval. The arm is edited in place
+  in `0247`, which is unreleased, and its self-check follows.
+- **No reading is not a breach.** A pair `machine_condition_readings()` returns no row for is left
+  as it was. A firing alert stays firing and is confirmed, a pending breach neither starts nor
+  clears, and a pair that never had a value has no state. Under report-by-exception the last value
+  is compared whenever it arrived, so a device silent for an hour still fires after its hold if the
+  last thing it said breaches. A series older than the historian's raw window
+  (`telemetry.retain_after`, 14 days) leaves `telemetry_latest`, and its state holds from there.
+- **A run that cannot read the historian writes nothing.** The read and the first write of what it
+  found are one statement inside its own block, so a failure rolls back what the block did. The run
+  raises **Automations Not Evaluated**: one platform alert, fingerprint `condition:not-evaluated`,
+  `entity_type` `platform`, severity `warning`, naming the SQLSTATE. It confirms that alert on each
+  run that still cannot read. The first run that reads resolves it, and so does a run with nothing
+  left to read, since an alert for a historian nobody asks anything of would never end. Nothing
+  fires and nothing resolves meanwhile: a state nobody observed is never written, the rule
+  `refresh_directory_liveness()` follows. The error's own text goes to the server's log, not to a
+  row every role reads. A foreign-key failure in that block is a trigger deleted while the run read,
+  and a deadlock or serialization failure is a person's act meeting the run. Each ends the run
+  quietly: the next one reads what is left.
+- **What is no longer live is forgotten.** The state of a disabled automation, an archived trigger
+  or device, or a trigger given another device or metric is deleted by the next run. It cannot fire
+  meanwhile, since only a live pair is read. The alerts of such a trigger are resolved by `0257`'s
+  triggers, not here.
+- **Firing is what `platform_alerts` says.** A state that claims to fire with no open occurrence (its
+  alert resolved by the lifecycle, or the automation turned off and on again within a minute)
+  starts its hold again. An open occurrence its state does not know is adopted, so there is never a
+  second open row for one fingerprint.
+- **One run at a time**, under a transaction advisory lock: a run started by hand while pg_cron's is
+  under way returns 0 at once. pg_cron itself runs one instance of a job at a time. `p_at` is the
+  instant to judge at, `now()` for the job. Only the owner may call the function.
+- **No role, no second factor.** The evaluator is the platform's act and not a person's, so it is no
+  writer `mfa-exemptions.json` lists, and it is granted to no API role.
+
+**A person can be refused with a deadlock.** Deleting or turning off an automation resolves its
+alerts (0257), which takes their rows before the trigger rows. A run that writes the same alerts
+takes the trigger rows first, through the state table's foreign key. When the two meet, Postgres
+ends one with `40P01`. If it is the run, nothing was written and no alert is raised, and the next
+minute's run reads again.
+If it is the person, the act is refused and succeeds when tried again. It needs the two to overlap
+for the length of a run, under a second at 10,000 pairs, and an automation with alerts firing.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression; its
+log shows one cursor for each metric, each with the filter), through `postgres_fdw` into
+`supabase/postgres` 17.6.1.175, as pg_cron runs it, each run its own transaction, on a laptop three
+helpers shared. The historian held only these readings, in three chunks, so the read is quicker than
+the spike's, which had 7.29 million raw rows over 15 chunks and took 0.24 to 0.31 s at 300 triggers.
+The writes are what this adds:
+
+| Live pairs | Firing | The read alone | A run, warm |
+| ---: | ---: | ---: | ---: |
+| 300 (30 devices of 10 metrics) | about half | 0.02 s | 0.1 to 0.15 s |
+| 10,000 (1,000 devices of 10 metrics) | 4,955 | 0.2 s | 0.7 to 1.1 s |
+
+The first run after 10,000 triggers are applied took 2.7 s: it inserts every state row and fires the
+alerts. A run is under 2% of the historian's time at one a minute. Its cost on the platform database
+is the writes: every state row is updated each run, and so is every firing alert's stamp. Both
+tables are vacuumed as they go. The sites this is built for fire a few alerts and hold a few hundred
+triggers, and the 10,000 is a file's own limit.
+
+`test_a_threshold_automation_raises_its_alert_from_the_database.py` holds every rule above with a
+local table standing in for the historian, so it needs none, and reads a real one too when
+`ABER_TEST_HISTORIAN` names it. `supabase/test_a_threshold_automation_fires_and_resolves.py` is the
+stack lane's, against pg_cron and the real link. The file's self-check asserts that no API role may
+execute the evaluator, that it is `SECURITY DEFINER` with its path pinned, that it composes
+fingerprints with `automation_alert_fingerprint()` and reads only through
+`machine_condition_readings()`, and that pg_cron runs it every minute, once.
+
+**`0283` declares `evaluate_automations()` again**, changing only the summary of the alert it raises: a
+derived metric's value is said through `automation_value_words()` (rounded to three decimals, with its
+window, and a time in state as a percentage, its threshold too through `automation_threshold_words()`)
+where `0271` printed them as the evaluator read them. A measured metric's summary is as it was. The
+comparison and the `values.value` the row keeps are still the unrounded value. See *A threshold
+automation reads a derived metric (0283)*.
+
+### History folds one metric across the devices of each group (0276)
+
+The Area tab compares the cells of an area: one chart a cell, each the cell's mean or total of one
+metric in every bucket ([#319](https://github.com/Harri-Llewelyn/Aber/issues/319)). The read it is
+built on, `telemetry_carried()`, returns one row per device per bucket, and the browser's row cap is
+5,000 (`TELEMETRY_MAX_ROWS`). **`telemetry_carried_by_group(from_ts, to_ts, bucket, asset_ids,
+group_keys, metric_name)`** folds those rows where the read is made, so what crosses is cells times
+buckets. `asset_ids[i]` is in the group `group_keys[i]`: the browser names each machine's cell, so the
+function knows nothing of the location model.
+
+- **One row per group per bucket that has a value**, in group and bucket order: `group_key`,
+  `bucket_ts`, `mean_double`, `total_double`, `members`, `with_value` and `measured`. Both figures are
+  in the row, so the tab's mean-or-total control re-draws without a read.
+- **The mean is of the devices that have a value in the bucket**, carried or measured, as
+  `telemetry_carried()` gives them: under report-by-exception a quiet bucket holds the value it
+  last had. `with_value` says how many that was.
+- **The total is there only where EVERY device of the group has a value**, and is null otherwise: a
+  partial sum reads as a real one. `members` is the group's devices as they were asked for, so
+  `with_value = members` is exactly when the total is there. A device with nothing to carry yet has
+  no value, so the total waits for it; a device that never reports the metric keeps its group from ever
+  having one, so the caller names only the devices that report it.
+- **`measured` is how many of those devices had a reading in the bucket**, not a carried value, so
+  the page can draw a bucket nobody reported in as carried (dashed), as the other charts do.
+- **A text or a flag metric has no `avg_double`**, so it has no row. The page says a mean or total
+  needs a number and offers each cell's own tab.
+- **A device named under two groups counts in each.** The page never does that: a device is in one cell.
+- **Its bounds** are `telemetry_carried()`'s own: it refuses more than 50,000 devices times buckets
+  (`HISTORY_GROUP_READ_ROWS` in `api.js` is the page's copy, mirror check 88), bad bounds and buckets, a
+  missing list or metric, and two lists of different lengths (`22023`), all before anything is read.
+  The page also keeps the rows returned, cells times buckets, under `HISTORY_MAX_ROWS`, and picks the
+  finest resolution that satisfies both (`pickGroupResolution()`).
+
+It runs as the caller, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+`authenticated` and `service_role`, as `telemetry_carried()` is. No audit classifier changes: it reads.
+
+**Why a function, and not the browser.** The browser can fold one `telemetry_carried()` read into
+cells. It is held to the row cap, though, with every device a series, so an area of 20 machines is read
+at 1-hour buckets for a Day and a Week and 1-day buckets for a Month. The function is held to cells
+times buckets for what it returns and devices times buckets for what it reads, so the same area is
+drawn at 5-minute, 1-hour and 1-hour buckets. At the same resolution it returns one row for each group
+where the browser reads one for each device: a fifth of the rows for cells of five.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression
+policies; 20 devices of 2 metrics, a reading a minute for 36 days, 2.1 million raw rows), through
+`postgres_fdw` into `supabase/postgres` 17.6.1.175, warm, as `authenticated`, median of 5, on a
+laptop shared with five other helpers (so one read varied by up to 40%). An area of 4 cells of 5
+devices:
+
+| An area of 4 cells of 5 devices | Read | Bucket | Rows | JSON | Warm |
+| :--- | :--- | :--- | ---: | ---: | ---: |
+| Day | browser: one `telemetry_carried()` | 1 hour | 500 | 144 KB | 27 ms |
+| Day | **`telemetry_carried_by_group()`** | 5 minutes | 1,156 | 185 KB | 107 ms |
+| Day | browser, at 5 minutes, in 2 parts | 5 minutes | 5,780 | 1.7 MB | 123 ms |
+| Week | browser: one `telemetry_carried()` | 1 hour | 3,380 | 975 KB | 55 ms |
+| Week | **`telemetry_carried_by_group()`** | 1 hour | 676 | 108 KB | 72 ms |
+| Month (30 days) | browser: one `telemetry_carried()` | 1 day | 620 | 180 KB | 43 ms |
+| Month (30 days) | **`telemetry_carried_by_group()`** | 1 hour | 2,884 | 461 KB | 249 ms |
+| Month (30 days) | browser, at 1 hour, in 3 parts | 1 hour | 14,420 | 4.2 MB | 240 ms |
+| Day, at the browser's resolution | `telemetry_carried_by_group()` | 1 hour | 100 | 16 KB | 31 ms |
+| Month, at the browser's resolution | `telemetry_carried_by_group()` | 1 day | 124 | 20 KB | 61 ms |
+
+The fold costs what its read does: at the same bucket it is a few milliseconds over
+`telemetry_carried()`, and a fifth of the rows leave. What the function buys is the finer bucket,
+for at most about a quarter of a second at the measured scale. A Month at 1 hour reads 14,420 rows on
+the historian, which is what `telemetry_carried()` takes there in three parts.
+
+`test_history_folds_one_metric_across_the_devices_of_each_group.py` holds every rule above with local
+tables standing in for the rollups. The file's self-check asserts one form, `STABLE`, `SECURITY
+INVOKER`, the pinned `search_path`, the grants, and that the refusals come before any read, so it
+holds on a stack with no historian.
+
+### The longest export is a setting (0278)
+
+History's Export ([#319](https://github.com/Harri-Llewelyn/Aber/issues/319)) covers a window, and how
+long a window one export may cover is a setting: **`history.export_max_days`**
+in the History category: 14 days, from 1 to 366. An Administrator changes it, as for every setting, and every role
+reads it, because it is not marked `sensitive`. The dashboard reads it too, so it can say the limit
+before it asks (`useSetting()`, with 14 where the row cannot be read).
+
+- **It is declared here, not in `0002`.** `seed_setting()` inserts the row on a first boot and
+  afterwards refreshes only the label and the description, so an Administrator's value survives
+  every replay. An additive change goes in a numbered migration (see *The five rules the next fold
+  carries in*). The bounds are an `UPDATE` guarded on the value it sets, as `0002` sets the others',
+  because `seed_setting()` takes none.
+- **The bounds are 1 and 366.** Zero would refuse every export. A window longer than a year is a
+  copy of the history, which Cold Storage's Parquet files are for.
+- **`telemetry_export_max_days()` answers it as the export reads it:** the setting, or 14 where the row
+  is missing or outside the bounds, so a damaged setting never stops exports altogether and never
+  lifts the limit. A part day is taken as it is, as the other day settings take one. No browser role
+  may call it: the setting is readable, and `export_telemetry()` is its one caller. Mirror check 91
+  holds the default, the bounds and the place the refusal names to the dashboard's copies.
+- **Lowering it changes nothing already exported.** Each export is held to the limit as it is asked
+  for, and the Audit Trail row records what was exported.
+
+`test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py` holds the row, its bounds, who
+changes it and the fallback.
+
+### An export of readings is checked, bounded and recorded (0279)
+
+The Device, Overview and Cell views of History each export through one function,
+**`export_telemetry(from_ts, to_ts, asset_ids, metric_names, resolution)`**. The database holds the
+rules, not the button: an Operator reads the charts and cannot export, and a call that skips the
+dashboard meets the same refusals. It returns one `jsonb` document: `columns`, `rows` (time, asset
+id, metric, value, unit), `row_count`, `truncated`, `read_from`, `read_to`, `raw_from`, `max_rows`
+and `audit_id`. The browser writes the CSV from it.
+
+- **It refuses, before it reads anything:** a caller who is not an Administrator or a Shopfloor Manager
+  (`42501`, with the roles in words); a session that has not given its second factor while that is
+  required (`require_mfa()`, as every writer here); a window that does not end after it starts or is
+  longer than `history.export_max_days` (`22023`, naming the limit and *Settings › History*); a
+  resolution that is not `raw`, `1m`, `5m` or `1h`; no device or no metric; and more than 1,000
+  devices or 500 metrics. The test runs each refusal with the historian's relations gone, so a read
+  would fail with another error.
+- **A rollup is never read in raw's place.** `raw` reads `telemetry`; `1m`, `5m` and `1h` read that
+  rollup. A rollup's row is its bucket: its start and its average, or its last value for a text or a
+  flag, which have no average. The minimum and maximum are not in the file.
+- **A row is one reading:** time (UTC, to the millisecond), device (the Sparkplug id), metric, value and
+  unit. The unit is the catalogue's, and empty for a metric it does not know. A number is written as
+  the shortest text that reads back as the same double (`SET extra_float_digits TO 1`), whatever the
+  session's own setting: the image's default of 0 would cut it to 15 digits.
+- **At most 50,000 rows** (`TELEMETRY_EXPORT_MAX_ROWS`; mirror check 92). Past that it returns the
+  readings up to a minute and says so: `truncated`, with `read_to` the time its rows end. **The
+  read is bounded by time, not by `LIMIT`**, because `postgres_fdw` sends a `LIMIT` only under its
+  own row estimate, which is one row for a read naming devices and metrics, so every row inside the
+  time bound would cross first. The rollup's own count of what each hour holds (`n_rows` of
+  `telemetry_1m` for raw, the rows of the rollup for a rollup) names the hours that fit; the minutes
+  of the hour that does not are counted the same way; and the historian is asked for that stretch
+  alone, in one read. A count that was short is trimmed to the cap by a `LIMIT` here, which guards
+  and bounds nothing that crossed. A minute that holds more than the cap returns no rows, says
+  `truncated`, and writes no Audit Trail row.
+- **Raw is read from the oldest reading the historian holds** (`raw_from`), because raw is dropped
+  after 14 days by default and the rollups keep what raw does not. A window that starts before it is
+  read from there, and `read_from` says where; the rollup's older counts do not spend raw's budget.
+- **One call, not slices the browser calls one after another.** The first call has to be the one that
+  refuses and records, and a second call that skips it would read for nothing in the Audit Trail. One
+  call also has one honest row count, and either everything is read and recorded or nothing is. The
+  document is at most 50,000 rows, about 4 MB as JSON, in one response well inside the gateway's
+  15 s and the `authenticated` role's 8 s statement timeout (Measured, below).
+- **It records the export:** one `TELEMETRY_EXPORTED` row in the Audit Trail for an export that returns
+  rows, naming who exported (`changed_by`, and their email as the token carried it), the devices (id
+  and name), the metrics, the window and the resolution, how many rows left, whether they were cut,
+  and where they end. An export that returns none writes none: nothing left the site. A refusal
+  writes none. `audit_id` is the row's id, so the browser's toast can link to it.
+- **`SECURITY DEFINER`**, because `audit_trail` takes no write from an application role. The role check is
+  its first statement and the reads run as the owner through the same foreign tables the telemetry
+  views read, so it reads what an Administrator or a Shopfloor Manager may read there. This
+  bounds the export, not access to the readings: an Operator still reads whatever a chart reads, and
+  RLS on telemetry is unchanged.
+
+**The Audit Trail's arms** are declared where the classifiers are, not here: `audit_domain_for()` and
+`audit_event_class()` in `0232`, `audit_trail_action_kinds()` in `0249`, so a boot has one
+declaration of each.
+
+- **The lane is `asset`, under `telemetry`.** Both roles that export may read it, so the toast's link
+  opens: the security lane is read by an Administrator and an Auditor only, and a Shopfloor Manager
+  could not follow the link to their own export. An Auditor reads it too. This is where a capture's
+  download link is filed, which is also the plant's data leaving.
+- **One lane for every export, `Readings`.** The entity id is `md5('telemetry:readings')`, so the
+  trail lists every export in order, the question a reader asks of it, and not one lane for each.
+- **The class is `read`:** it records access and changes nothing, as `EXPORTED`, a capture's download
+  link and a service's logs read are. The class indexes are unchanged, because no row can exist before
+  this file.
+
+**Not in this file.** The longest window is `0278`'s. The dashboard's three entry points are in
+[`frontend/README.md`](../frontend/README.md#historys-export). The Area and Metric tabs' Export comes with
+those tabs. The function takes ids of devices the platform keys readings by; the dashboard sends each
+device's issued Sparkplug id.
+
+**Measured** through `postgres_fdw` on a private historian (TimescaleDB 2.31, built as the maintenance
+Job builds it, 2.07 million raw rows with their rollups refreshed), into `supabase/postgres`
+17.6.1.175, as an Administrator with `statement_timeout` at the `authenticated` role's 8 s, on a laptop
+three other sessions shared (so one read varied by up to 30%). Three runs each, in seconds:
+
+| Export | Rows | Seconds |
+| :--- | ---: | ---: |
+| One device of 15 metrics at 1 Hz, an hour or a day, raw (cut at 10:55, the first hour holds 54,000) | 49,500 | 0.6 to 0.8 |
+| The same, an hour at 1 minute | 900 | 0.02 |
+| 20 devices of 5 metrics, a reading a minute for 14 days, raw (2 million rows) | 50,000 | 2.3 to 3.0 |
+| The same at 1 minute | 50,000 | 2.3 to 2.9 |
+| The same at 1 hour | 33,600 | 0.5 to 0.7 |
+| The same devices, one day, raw | 50,000 | 0.7 to 0.9 |
+
+The cost is the hour count over the window, one remote aggregate (`EXPLAIN VERBOSE` shows the
+`Foreign Scan` with `Relations: Aggregate on (timescale.telemetry_1m t)` and the `GROUP BY` in its
+remote SQL), so a long window of many series costs most there, not in the 50,000 rows it reads.
+
+`test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py` holds every rule above, with
+local tables standing in for the historian's relations: each refusal before any read, a window of
+exactly the limit, the rows and their order, raw by default, a rollup's buckets, the cap and where
+the rows end, a minute over it, a short count, raw's horizon, the Audit Trail row and who reads it,
+and who may call it. The file's self-check asserts the function's language, its pin and its grants,
+the lane and the class, and that a call with no identity is refused.
+
+### History draws a derived metric from the minutes (0282)
+
+A derived metric ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) has no values of its own:
+`0267` keeps its definition, and nothing is stored. **`derived_series(from_ts, to_ts, bucket, asset_ids,
+metric_names)`** computes it where it is read, from each input's `telemetry_carried()` at one minute,
+and **`derived_current(asset_ids, metric_names)`** gives its current value. They are the one
+computation of a derived metric: a chart, the Devices drawer and an automation read the same number.
+
+- **A counter rate** is the increase per hour. A minute's increase is its carried last value less the
+  minute before's; **a fall is a reset, and the new value counts as the increase**. A bucket's rate is
+  its increases over the hours its minutes cover, so a bucket that is not whole (the first of a series,
+  the one holding now) is the rate over what it has. A counter that stops counting reads 0 per hour,
+  carried, as it should: under report-by-exception a quiet counter has not moved.
+- **A time in state** is the share of the bucket's minutes whose state is one of the definition's.
+  A minute's state is its last value, carried across a quiet stretch, so it is resolved to the
+  minute. A flag is read as `true` or `false`.
+- **A sum** is the time-average of the per-minute signed sum, each input's minute average carried when
+  quiet, **a minute counting only where every input has a value**. A device that lacks an input has no
+  row, since a partial sum reads as a real one. A wide bucket's sum is therefore not the sum of its
+  inputs' bucket averages: those weigh each input's samples, and a quiet input has few of them.
+- **One row per device, metric and bucket that has a value**, in no promised order: `bucket_ts`,
+  `asset_id`, `metric_name`, then the columns `telemetry_carried()` uses, so the chart code takes both.
+  `avg_double` is the value. `min_double`, `max_double` and `last_double` are the lowest and highest
+  minute and the last minute of a sum, and the value itself for a rate and a share. `n_rows` counts the
+  inputs' readings in the bucket and `is_carried` says there were none.
+- **It reads whole minutes only**, nothing from the minute that holds now, so a value that has been
+  read does not move when the minute ends.
+- **It reads in chunks.** `telemetry_carried()` refuses more than 50,000 rows, and a day of minutes
+  for 35 devices passes that. A chunk is as many whole buckets as fit, and as many devices as fit when a
+  bucket alone does not: one device's bucket and the minute before it always fits, since a bucket is at
+  most 4 days and a definition has at most 8 inputs. Each chunk reads one minute before its start, so a
+  counter needs nothing carried from the last.
+- **It refuses before it reads anything** (`22023`): a metric that is not derived; bounds that do not
+  run forward; a bucket that is not whole minutes, has months, or is over 4 days; **more than 5,000
+  devices times metrics times buckets**, the dashboard's row cap (`TELEMETRY_MAX_ROWS`, mirror check 95);
+  and **more than 250,000 minutes of input** (devices times inputs times the window's minutes). The
+  second bound is the cost: a read goes through `postgres_fdw` a minute at a time at every bucket
+  width, so it is the window and the devices that spend the time, and not the bucket. 250,000 minutes
+  is the spike's fleet-week, about two seconds, inside the `authenticated` role's 8 s statement timeout. A
+  longer window needs fewer devices, or its inputs read as they are.
+- **It runs as the caller**, `SECURITY INVOKER` with its `search_path` pinned, granted by name to
+  `authenticated` and `service_role`, as `telemetry_carried()` is. Anon is refused. No audit
+  classifier changes: it reads.
+
+**A current value has one rule, and `derived_window_minutes()` states it.** A counter rate and a time
+in state are over the 60 minutes ending at the last whole minute, "over the last hour", and a sum is its
+value at the last whole minute. A rate from one minute swings between 0 and sixty times the count, and a
+minute's share is 0 or 1; an hour is what a person means by "parts per hour" and "uptime". The window is
+in one function, and `derived_current()` is a fold of `derived_series()` at one minute over it: the mean of
+the minutes' values for a rate and a share, which is the whole window's rate and share, and the last
+minute's last value for a sum. `observed_at` is the minute the window ends at, and `window_minutes` is 60
+or 0. A device with no value has no row. The browser's copy of the windows is
+`derivedWindowMinutes()` in `utils/derivedMetric.js` (mirror check 94).
+
+**Grafana is not granted.** `grafana_reader` calls `platform_health_rows()` by a grant alone because that
+function is `SECURITY DEFINER`. These two run as the caller and read the foreign rollups and
+`metric_catalog`, on which `grafana_reader` holds nothing: a grant would need a user mapping, a schema
+usage and a table grant, and 0001's sweep takes back what is not listed there. A panel on a derived
+metric is a 1.9 question.
+
+**The Area tab folds in the browser.** It reads `derived_series()` for every machine that reports the
+inputs, at the finest resolution at which machines times buckets fit the row cap
+(`pickResolution()`), and folds each cell as `telemetry_carried_by_group()` does: the mean of the
+machines that have a value, and the total only where every machine has one. A group variant would
+return a fifth of the rows, but the historian reads the same minutes, and the read, not the rows, is
+what costs: 20 machines over a Day read 355 ms at 1-hour buckets, which the cap picks, and 319 ms at
+5 minutes (17 machines, to stay under the cap). A variant would buy the finer bucket for the same
+time, for a second function to hold in step. It is one to add if an area's cells are wanted finer.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression policies;
+20 devices over 3 days, each a counter every 30 seconds that resets at midnight, a state that changes
+every 10 minutes and three phases every 30 seconds: 700,000 raw rows, 354,000 in `telemetry_1m`),
+through `postgres_fdw` into `supabase/postgres` 17.6.1.175, as `authenticated`, the first read then
+the median of five, on a laptop another helper shared (so a read varied by up to 2 times):
+
+| Read | Rows | Warm |
+| :--- | ---: | ---: |
+| One device, a rate, 24 hours, 5-minute buckets | 289 | 29 ms |
+| One device, a rate, a share and a sum of 3 inputs, 24 hours, 5 minutes | 867 | 109 ms |
+| One device, the same three, 72 hours, 1 hour | 219 | 245 ms |
+| 20 devices, a rate, 24 hours, 1 hour (a Cell tab) | 500 | 355 ms |
+| 20 devices, a time in state, 24 hours, 1 hour | 500 | 150 ms |
+| 20 devices, a sum of 3 inputs, 24 hours, 1 hour | 500 | 1,166 ms |
+| 20 devices, a rate, 72 hours, 1 hour (an Area tab) | 1,460 | 1,167 ms |
+| 20 devices, a rate, 72 hours, 1 day (86,400 minutes read) | 80 | 1,198 ms |
+| `derived_current()`, 20 devices: a rate, a share, a sum, all three | 20, 20, 20, 60 | 30, 13, 41, 84 ms |
+
+The cost is the minutes read: a sum of three inputs reads three, and a read of 20 devices over 72 hours
+is 86,400 for one input. `derived_current()` reads an hour, so the evaluator's cost at a few hundred
+pairs is a few hundred of those.
+
+**What is not exact, and the help says so.** Time in state is resolved to the minute: a state shorter than
+a minute counts as a whole minute or not at all, by whether it holds at the minute's end, which is
+unbiased. A counter that resets and passes its old value inside one minute is under-counted by that old
+value. Both are measured in the issue's spike comment.
+
+`test_history_draws_a_derived_metric_from_the_minutes.py` holds every rule above, with local tables
+standing in for the rollups: each kind against known minutes (a reset mid-bucket, a state carried across
+a quiet stretch, a sum with an input missing or late), a window that needs two chunks and a bucket whose
+devices need two, each against a reference written from the rule, whole minutes only, each refusal with
+the rollups' tables gone so that a read would fail with another error, the current value of each kind, and
+who may call it. The file's self-check asserts one form, `STABLE`, `SECURITY INVOKER`, the pinned
+`search_path`, the grants, and that the refusals come before any read.
+
+### A threshold automation reads a derived metric (0283)
+
+An automation on a derived metric was accepted and never fired: `machine_condition_readings()` (`0270`)
+reads `telemetry_latest`, which holds nothing under a name no device publishes. `0283` declares the two
+reads again, after `derived_current()`, and the evaluator with one change, the words of its summary.
+
+- **A pair on a derived metric has the current value `derived_current()` gives**, by the rule in
+  *History draws a derived metric from the minutes (0282)*: over the last hour for a counter rate and a
+  time in state, at the last whole minute for a sum. `observed_at` is the minute that window ends at, so
+  `last_observed_at` in `automation_trigger_states` is that minute and not the last reading. Its `for`
+  and its hold work as for any metric, since the evaluator reads only the columns this returns, and they
+  are `0270`'s.
+- **A measured metric is read as it was**, one remote query for each metric carrying that metric's
+  devices. A derived metric's devices go to `derived_current()` in chunks of 500, which it takes in parts
+  of its own. The loop's metric says whether it is derived by its catalogue row, which is fixed once
+  saved.
+- **A value is said in one place, `automation_value_words(metric, value)`.** A derived metric's value is
+  rounded to three decimals and followed by its window, "4.167 over the last hour" or "7 at the last
+  whole minute"; any other value is printed as it was, so a measured alert reads as it did. **A time in
+  state is a percentage in words**, "42% over the last hour", with one decimal at most and a trailing
+  zero dropped, because it reads better so. It is still a fraction from 0 to 1 as data: the value
+  the function returns, `platform_alerts.values`, the threshold in a file (`below: 0.9` is 90%) and
+  what is compared. `automation_threshold_words(metric, threshold)` words the threshold beside it, "90%"
+  for a time in state and as printed for any other. `machine_condition_rows()` words its detail with
+  both ("Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5"), and so does the alert's
+  summary. The browser says a share with `percentWords()`, and one table of fractions and their words
+  is held by this suite and by `derivedMetricReads.test.js`.
+- **`evaluate_automations()` is declared again, changing only that summary**: "Press 1:
+  Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5 for 10m", or "Press 1: Controller/UPTIME is 42% over the last hour, below 90% for 10m", which is what the alert
+  counter, the email and the webhook show. Without it the summary printed 4.166666666666667. What is
+  compared, and the `values.value` the row keeps, are the unrounded value. It is redeclared here and
+  not edited in `0271`, because a boot runs `0271` before this file and the job could run the old one
+  in between. The function is otherwise `0271`'s, line for line.
+- **A counter that stops counting reads 0 per hour**, so a rate alert fires for a machine that stops and for
+  one that stops reporting. The documentation says so (*docs/automations.md*).
+- **`apply_automations()` is unchanged.** It accepted a derived metric already, since every one is a
+  Double. Only a comment in `0256` was stale.
+
+The columns of the two reads are `0270`'s, because a replay runs `0270` again before this file, and
+`CREATE OR REPLACE` cannot change a function's columns. The file's self-check asserts the grants (none
+is any API role's), the `SECURITY DEFINER` form, that the read is still one remote query for each
+measured metric and goes through `derived_current()` for a derived one, and that the detail and the
+evaluator word their value and threshold with `automation_value_words()` and `automation_threshold_words()`. The suite for `0271` holds the rest
+(`DerivedMetrics`): a rate, a share and a sum read and worded, a pair with no value, a measured pair
+beside a derived one, and an alert that fires, holds and resolves. With `ABER_TEST_HISTORIAN`, one more reads a
+derived rate through a real historian's real-time rollup and `postgres_fdw`, and fires on it.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
@@ -4488,6 +5774,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `platform_alerts` | `authenticated`; a `service_identity` row `Administrator` only (`0204`) | none — `grafana-alert-webhook` writes the alert as `service_role`; `acknowledge_alert()` and `withdraw_alert_acknowledgement()` the acknowledgement (`0231`); the database the suppression stamp (`0240`) |
 | `alert_suppression_windows` | `authenticated` (`0240`) | none — `schedule_alert_suppression_window()`, `change_alert_suppression_window()` and `end_alert_suppression_window()`, as `Administrator` / `Shopfloor_Manager` |
+| `automations`, `automation_triggers`, `automation_actions` | `authenticated` (`0255`) | none — `apply_automations()`, `set_automation_enabled()` and `delete_automation()`, as `Administrator` / `Shopfloor_Manager`; the lifecycle (`0257`) as the trigger of a device's change |
 | `service_token_last_use` | `Administrator`, `Auditor` (`0209`) | none — `record_service_token_use()`, which the i3X server calls as the token's own caller |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
@@ -6663,11 +7950,15 @@ Two findings decided rows of that table:
   `JWT_SECRET`, no database or role setting holds one, and the only vault secret named for a JWT is
   `nodered_webhook_jwt_secret`. So the variable is not passed.
 
-**The forge and discovery do not change.** GoTrue's `/.well-known/openid-configuration` is built
-from `GOTRUE_JWT_ISSUER`, which the chart leaves unset, so the issuer stays empty and the endpoints
-relative; `id_token_signing_alg_values_supported` is a fixed list. `jwks_uri`
-(`/.well-known/jwks.json`) serves the public key. Setting the issuer changes every token's `iss`, so
-the forge stays on reverse-proxy headers
+**GoTrue's issuer is the site's public auth address** (decided 2026-11-09). The chart sets
+`GOTRUE_JWT_ISSUER` to `<API address>/auth/v1`, the address `API_EXTERNAL_URL` and the Directory
+name with `/auth/v1` after it. GoTrue builds `/.well-known/openid-configuration` from it and takes
+`iss` for every token it signs from it, access and ID tokens alike. Unset, the issuer was empty and the
+endpoints relative, which a standard sign-in library refuses
+([An Administrator registers an app that signs people in](#an-administrator-registers-an-app-that-signs-people-in-0260)).
+`id_token_signing_alg_values_supported` is a fixed list, and `jwks_uri` (`/.well-known/jwks.json`)
+serves the public key. Nothing here checks `iss`: the table in that section goes service by service.
+The forge stays on reverse-proxy headers
 ([the forge's door](#the-forges-door-and-the-room-behind-it-archived-migration-0094)).
 
 **`NODERED_WEBHOOK_JWT_SECRET` stays a separate symmetric secret** (decided 2026-10-28). It is not
@@ -7779,7 +9070,7 @@ what it lacks:
 | Filter | What it does | The thing worth knowing |
 | :--- | :--- | :--- |
 | `oauth2` | Runs the authorization-code flow against this stack's GoTrue and holds the session cookie | Needs **Envoy ≥ 1.34**: GoTrue requires PKCE and the filter could not send it before that release |
-| `jwt_authn` | Verifies the access token GoTrue signed, and forwards it for `ext_authz` | The **JWKS** the initContainer renders: the public key, ES256 by `kid`, and no `oct` key, which the initContainer refuses ([Signing with ES256](#signing-with-es256)). **No issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
+| `jwt_authn` | Verifies the access token GoTrue signed, and forwards it for `ext_authz` | The **JWKS** the initContainer renders: the public key, ES256 by `kid`, and no `oct` key, which the initContainer refuses ([Signing with ES256](#signing-with-es256)). **No issuer check**, because a token GoTrue signed before its issuer was set carries no `iss` claim, and the client and the role decide here |
 | `rbac` | Requires `app_metadata.role == Administrator` | Reads the claim out of the verified payload; every persona can complete the flow, and only one gets through this |
 | `ext_authz` | Asks [`studio-admission`](functions/studio-admission) whether the caller is an Administrator **now** | GoTrue for the session, then `user_roles`, on every request. `failure_mode_allow`: a 5xx admits on the claim `rbac` checked; a 403 and a 302 to `/oauth2/signout` are honoured |
 | `header_mutation` | Removes `Authorization` before the request reaches Studio | Studio runs as the owner and needs no Supabase JWT, so it never sees one |
@@ -7903,13 +9194,14 @@ against the JWKS Studio's also uses, and a role check admitting `Administrator` 
 `Operator` and `Auditor` complete the login and meet a 403. `0094` registers the OAuth client and
 puts the forge in the Directory.
 
-**Gitea is not an OIDC client of GoTrue, and cannot be.** Three things were measured against
-`gitea/gitea:1.27.3`: GoTrue's discovery document carries an empty `issuer` and relative endpoint
-paths, so Gitea resolves `/oauth/authorize` against itself; its request carries `scope=openid`,
-which GoTrue refused under HS256 (`HS256 is not supported for ID token signing`); and whether it
-sends the `code_challenge` GoTrue requires is unmeasured behind the first two. ES256 signing removed
-the second and not the first: discovery is built from `GOTRUE_JWT_ISSUER`, unset here, so the paths
-stay relative ([Signing with ES256](#signing-with-es256)).
+**Gitea is not an OIDC client of GoTrue.** Three things were measured against
+`gitea/gitea:1.27.3`, before 1.8.0: GoTrue's discovery document carried an empty `issuer` and
+relative endpoint paths, so Gitea resolved `/oauth/authorize` against itself; its request carries
+`scope=openid`, which GoTrue refused under HS256 (`HS256 is not supported for ID token signing`); and
+whether it sends the `code_challenge` GoTrue requires was unmeasured behind the first two. ES256
+signing removed the second, and the issuer the chart sets from 1.8.0 removes the first
+([Signing with ES256](#signing-with-es256)). Whether Gitea now completes the flow is unmeasured, so
+the door stays as built.
 
 **Identity enters Gitea as headers**, through `ENABLE_REVERSE_PROXY_AUTHENTICATION` with
 auto-registration. The username is the token's `sub` (Gitea refuses `@` in a name), the email rides
@@ -8548,9 +9840,9 @@ the appliance's `.env` (rendered by [`_shared/gatewayEnv.ts`](functions/_shared/
 which the ZIP bundle now shares). Nothing on that route is cacheable.
 
 **A token can be checked without being spent.** `peek_gateway_enrollment_token()` is the
-read-only twin of `consume_gateway_enrollment_token()`: the same shape check, the same four
-refusals (unknown, expired, consumed, archived gateway) answered identically with no rows, and no
-UPDATE. `service_role` alone, like the consumer, because a signed-in user who could call it could
+read-only twin of `consume_gateway_enrollment_token()`: the same shape check, the same refusals
+(unknown, expired, consumed, archived gateway, and since `0252` one that is not Remote) answered
+identically with no rows, and no UPDATE. `service_role` alone, like the consumer, because a signed-in user who could call it could
 enumerate which token values exist. Only enrolment spends the token, and the credential secret in
 the `.env` is generated per fetch: the installer writes the file once, so a retry before enrolment
 costs nothing and a fetch after changes nothing. `test_gateway_enrollment.py` proves the check
@@ -8900,6 +10192,7 @@ person's.
 | `theme` | `dark` (the default) or `light`, by CHECK |
 | `sidebar_mode` | `hover` (the default), `expanded` or `collapsed`, by CHECK |
 | `single_key_shortcuts` | `true` (the default) or `false`: whether `?`, `/`, `[` and `]` act (`0194`) |
+| `desktop_notifications` | `false` (the default) or `true`: whether a dashboard tab they have open raises a browser notification when an alert starts firing (`0264`) |
 | `updated_at` | Stamped by `user_settings_stamp()` on every write; the caller cannot supply it |
 
 - **Typed columns, not key/value rows.** The database refuses a value the dashboard does not know,
@@ -8911,7 +10204,7 @@ person's.
   `service_role` hold nothing.
 - **Not audited.** A display choice is not platform state, so the table has no audit trigger.
 - **The browser keeps a copy** in localStorage (`aber_theme`, `aber_sidebar_mode`,
-  `aber_single_key_shortcuts`), so the page
+  `aber_single_key_shortcuts`, `aber_desktop_notifications`), so the page
   paints in the right theme before the row arrives, and the sign-in screen, which has no account
   yet, shows the theme last used on that PC. Once the row loads it wins, and the copy follows it.
 - **A first row keeps the browser's choice.** A person with no row gets one seeded from the

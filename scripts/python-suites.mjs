@@ -164,6 +164,20 @@ export const SUITES = {
       'the Python half of test-harness/fixtures/payload-conformance.json; the JavaScript half, ' +
       "Validate Payload's copy of the rules, runs in frontend-build.",
   },
+  'ingestion/test_a_derived_name_is_dropped.py': {
+    lanes: ['unit'],
+    why:
+      "A reading under a derived metric's name, a metric Aber computes. Nothing publishes it, so a " +
+      'device that does would put a second source under the computed series: ingestion drops the ' +
+      'reading under audit as well as enforce, files a `derived_name` finding and counts it in a ' +
+      'series of its own. THE DROP IS NOT A SCHEMA FAULT, which is what the suite holds against ' +
+      'the code around it: an open schema, a closed one that models the name and no schema at all ' +
+      'drop it alike, a measured name of the same group is stored, and the schema counter that only ' +
+      'an enforcing device raises stays where it was. The names come from the catalogue through the ' +
+      "UNS bridge's TTL cache: one read per freshness, an addition takes effect when it ends, a " +
+      'failed read keeps the names last read without a read per message, and before any read ' +
+      'nothing is dropped. A fake catalogue and a fake historian connection; no broker.',
+  },
   'ingestion/test_schema_builder_contract.py': {
     lanes: ['unit'],
     why:
@@ -664,6 +678,58 @@ export const SUITES = {
       'rollups before the window, a series silent longer than raw retention still seeds, nothing is ' +
       'carried past now, bad bounds are refused before any read, and it reads as the caller.',
   },
+  'supabase/migrations/test_history_reads_every_change_of_a_text_or_a_flag.py': {
+    lanes: ['db'],
+    why:
+      "0254's telemetry_changes(), over local tables standing in for raw telemetry and the rollups: " +
+      'a state held for seconds inside one minute is returned with its times, a refresh of an ' +
+      'unchanged value collapses, the value in force at the start is carried in, past either cap ' +
+      'it says so and marks each bucket that held more than one value, a window whose raw readings ' +
+      'were dropped says so, bad bounds are refused before any read, and it reads as the caller.',
+  },
+  'supabase/migrations/test_history_averages_a_metric_by_the_hour_of_day.py': {
+    lanes: ['db'],
+    why:
+      "0265's telemetry_hour_of_day(), over local tables standing in for the historian's hourly " +
+      "rollup: each device's mean at each hour of the day in the zone asked for, across the " +
+      'window\'s days, a quiet hour counted as the value carried into it, every hour weighed alike, ' +
+      'the hour moving with the zone and with a clock change, no row for a text or a flag, an ' +
+      'unknown zone, bad bounds and more than 50,000 hours times devices refused before any read, ' +
+      'and it reads as the caller.',
+  },
+  'supabase/migrations/test_history_folds_one_metric_across_the_devices_of_each_group.py': {
+    lanes: ['db'],
+    why:
+      "0276's telemetry_carried_by_group(), over local tables standing in for the historian's hourly " +
+      "rollup: each group's mean across its devices that have a value in a bucket, its total only " +
+      'where every device has one (a carried value counts, a device that never reports keeps the ' +
+      'total away), how many had a reading, no row for a text or a flag, bad bounds, lists of ' +
+      'different lengths and more than 50,000 devices times buckets refused before any read, and it ' +
+      'reads as the caller.',
+  },
+  'supabase/migrations/test_history_draws_a_derived_metric_from_the_minutes.py': {
+    lanes: ['db'],
+    why:
+      "0282's derived_series() and derived_current(), over local tables standing in for the " +
+      "historian's one-minute rollup: a counter rate is the increase per hour with a reset counting " +
+      'its new value, a time in state is the share of the bucket\'s minutes with a state carried ' +
+      'across a quiet stretch, a sum is the time-average of the per-minute signed sum and a device ' +
+      'missing an input has no row, a window of more than one chunk answers as one would (whole ' +
+      'buckets, and the devices of a wide bucket), only whole minutes are read, every refusal comes ' +
+      'before any read, each kind has its current value by one rule, and anon may call neither.',
+  },
+  'supabase/migrations/test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py': {
+    lanes: ['db'],
+    why:
+      "0278's history.export_max_days and 0279's export_telemetry(), over local tables standing in for " +
+      "the historian's relations: each refusal comes before any read (an Operator, an Auditor, a " +
+      'machine identity, anon, a manager without the second factor, a window over the limit, an ' +
+      'unknown resolution, none or too many devices and metrics), a window of exactly the limit is ' +
+      'allowed, a row is one reading with its unit, raw is the default and a rollup is never read in ' +
+      "its place, the rows stop at 50,000 on a minute and say where, raw is read from where it " +
+      'begins, and one TELEMETRY_EXPORTED row in the asset lane names who exported what, and none ' +
+      'for a refusal or an export with no rows.',
+  },
   'supabase/migrations/test_history_counts_where_readings_arrived.py': {
     lanes: ['db'],
     why:
@@ -741,8 +807,8 @@ export const SUITES = {
       "0188's per-person preferences, which the Profile page and the account menu write. A person " +
       "reads, creates and changes their own row and nobody else's, an Administrator included, and " +
       'cannot hand it to someone else; anon and service_role hold nothing; the CHECKs refuse a ' +
-      'value the dashboard does not know, and single-key shortcuts (0194) start on and are never ' +
-      "null; the first sign-in's seed never overwrites a row another " +
+      'value the dashboard does not know, and single-key shortcuts (0194) start on and desktop ' +
+      "notifications (0264) off, neither ever null; the first sign-in's seed never overwrites a row another " +
       "tab created, and a one-column save leaves the other column alone; and the row goes with the " +
       'account, unaudited.',
   },
@@ -866,6 +932,17 @@ export const SUITES = {
       "The example metrics' PROVENANCE, and that db-init replaying them changes nothing. A metric " +
       'registered with a missing or wrong semantic id breaks nothing at runtime -- it asserts an ' +
       'interoperability claim that is simply untrue, which no other check would notice.',
+  },
+  'supabase/migrations/test_a_derived_metric_is_a_catalogue_row.py': {
+    lanes: ['db'],
+    why:
+      "0267 -- a derived metric is a catalogue row: each of the three kinds saves and takes its unit " +
+      "from its inputs; every refusal of the save gives its reason (an input missing, derived or of " +
+      "the wrong datatype, a sum of unlike units, a state the input cannot report, a name a device " +
+      "declares, a semantic id, a standard or permitted values, a malformed definition); a measured " +
+      "metric cannot become derived, a definition or unit cannot change, nor the unit of a metric a " +
+      "rate or a sum is built on; only an Administrator " +
+      "writes, behind the second factor; and the Audit Trail files the save.",
   },
   'supabase/migrations/test_uncatalogued_metrics.py': {
     lanes: ['db'],
@@ -1139,6 +1216,17 @@ export const SUITES = {
       'unknown person, a machine identity and a missing count are refused with no row, while a ' +
       "removed person's factors may be reset and no session ends.",
   },
+  'supabase/migrations/test_an_administrator_registers_an_app_that_signs_people_in.py': {
+    lanes: ['db'],
+    why:
+      '0260 -- that an Administrator registers an app the way 0002 registers the stack\'s own (manual, ' +
+      "the code and refresh grants, the secret kept as GoTrue's SHA-256 hash) and gets a confidential " +
+      "app's secret once and a public app none; that nobody else may, and a second factor is asked " +
+      'first while Settings requires one; that a bad name, type or address is refused in words that ' +
+      "name it, an address by the fixture the dialog's rule shares, and a name already held whatever " +
+      'its case or "Aber " prefix; and that the registration is one row naming the Administrator ' +
+      'with neither the secret nor its hash.',
+  },
   'supabase/migrations/test_apps_that_sign_people_in_are_listed_and_revoked.py': {
     lanes: ['db'],
     why:
@@ -1256,6 +1344,23 @@ export const SUITES = {
       'during and after it and keeps its columns; that an occurrence records the window that first ' +
       "covered it and nothing clears it; and the audit rows in the subject's lane.",
   },
+  'supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py': {
+    lanes: ['db'],
+    why:
+      '0255, 0256 and 0257 -- the three tables (every role reads, nobody writes directly, anon touches ' +
+      'nothing, the CHECKs); who writes (a Shopfloor Manager and an Administrator, the second factor); ' +
+      'apply_automations() (a dry run and a refusal write nothing, new, changed and unchanged, a re-upload ' +
+      'keeps the rows that fit, a document never deletes, the round trip); the audit rows; a device ' +
+      'archived, restored or deleted and the alerts that end with a trigger; and automations_for_entity().',
+  },
+  'supabase/migrations/test_the_automations_schema_and_the_function_agree.py': {
+    lanes: ['db'],
+    why:
+      '0256 -- every fixture in supabase/automations-fixtures/ through the JSON Schema the dashboard ' +
+      "serves (jsonschema) and through apply_automations(..., true): both accept each valid one, both " +
+      'refuse each invalid one, or the schema accepts what only the database can know. Every field of the ' +
+      'schema is described and every object closed.',
+  },
   'supabase/migrations/test_history_lists_the_alerts_that_fired.py': {
     lanes: ['db'],
     why:
@@ -1273,6 +1378,30 @@ export const SUITES = {
       'stop when the alert is acknowledged, resolved or no longer confirmed by its writer; the ' +
       'Notifications settings, their rules and who writes them; the webhook\'s address, signing key ' +
       'and test by role; and that no machine identity\'s alert is ever selected for the webhook.',
+  },
+  'supabase/migrations/test_aber_emails_the_people_an_alert_concerns.py': {
+    lanes: ['db'],
+    why:
+      '0262 and 0263 -- that email is a channel beside the webhook, off until a role is named, with ' +
+      "its own route and the roles told, each setting's rule and who writes it; that it is queued " +
+      'and reminded as the webhook is and decided by the same arms (acknowledgement, suppression, ' +
+      "the writer's confirmation); that a machine identity's alert is carried only when " +
+      'Administrators are told and goes to them alone; who a message is resolved to at send time ' +
+      '(by auth.users.email, never a person with no address, a banned or removed account or a ' +
+      "machine identity); that the log keeps counts and no address; and the Administrator's test.",
+  },
+  'supabase/migrations/test_a_threshold_automation_raises_its_alert_from_the_database.py': {
+    lanes: ['db'],
+    why:
+      '0270 and 0271 -- the read (the breaching pairs in the shape of platform_health_rows(), no reading is ' +
+      'no breach, NaN and a flag are no reading, only a live pair is read); the hold (fires after ' +
+      '`for` and not before, rounds up to the next run, a stopped breach never fires, a changed ' +
+      'threshold starts it again); the alert (one occurrence with its fingerprint, labels, values and ' +
+      'no rule, confirmed by every run, resolved with its ends_at, never two open rows); silence ' +
+      '(a pair with no value is left as it was); the lifecycle (a disabled automation, an archived ' +
+      'trigger, a changed device or metric); a historian outage (one platform alert and nothing else ' +
+      'written, resolved at the first run that reads); the state table by role; and the job, scheduled ' +
+      'once. Reads a real historian too when ABER_TEST_HISTORIAN names one.',
   },
   'supabase/migrations/test_service_token_revocation.py': {
     lanes: ['db'],
@@ -1383,6 +1512,14 @@ export const SUITES = {
       'issued a bundle, and counts as holding an account once issued, so archiving disables it; ' +
       'Remote and Host answer as before, and a replay of 0001 keeps the widened CHECK.',
   },
+  'supabase/migrations/test_changing_a_gateway_s_type_cleans_up_after_the_old_type.py': {
+    lanes: ['db'],
+    why:
+      'A type change across Remote\'s boundary (0252) burns the setup token, revokes the credential ' +
+      'the old type held and leaves the gateway OFFLINE; a change among Host, Simulated and ' +
+      'Third-party ends nothing. Missing either half fails silently: a redeemable token for a ' +
+      'gateway with no appliance, or a credential the dashboard no longer offers working on.',
+  },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of
     // its assertions is made AS a seeded demo account, and the db lane deliberately applies no
@@ -1459,6 +1596,17 @@ export const SUITES = {
       'message, and an address whose host is not allowed is refused before anything is posted. ' +
       'Configures the webhook as the database owner and puts back what the stack held. Needs ' +
       'kubectl, the functions image with notification-dispatch, and NetworkPolicies off.',
+  },
+  'supabase/functions/notification-dispatch/test_notification_dispatch_email.py': {
+    lanes: ['stack'],
+    why:
+      "The dispatcher's email end to end (0262, 0263): a firing alert written with psql reaches a " +
+      'relay pod addressed to the roles told, with its facts and link, the envelope alone naming ' +
+      'the people; a resolve follows in the same thread, an acknowledgement before the reminder ' +
+      "stops it, an unacknowledged alert is reminded, a machine identity's alert goes to " +
+      'Administrators only, a test goes to the person who asked, and the log keeps counts and no ' +
+      'address. Needs the functions pod to send through aber-test-smtp (supabaseAuth.smtp.host), ' +
+      'kubectl and NetworkPolicies off; skips, saying so, on any other relay.',
   },
   'backup-service/test_backup_service.py': {
     lanes: ['stack'],
@@ -1579,6 +1727,33 @@ export const SUITES = {
       'neither signed nor served to a person without issue_capture_download(), which only the ' +
       'real storage-api can show. Needs `playback.enabled`, which values-dev.yaml sets.',
   },
+  'ingestion/test_a_derived_name_is_dropped_stack.py': {
+    lanes: ['stack'],
+    why:
+      'THE ONLY CHECK THAT A DERIVED NAME IS DROPPED THROUGH THE REAL CHAIN. The unit suite holds the ' +
+      "rule against a fake catalogue; this adds a derived metric as the database's owner, has a " +
+      "device declare and publish its name through a real broker as the Gateways page's credential " +
+      'allows, and reads the answer where it matters: the measured sibling is in the historian and ' +
+      "the derived name is not, nor in the device's parameters, and the Audit Trail holds a " +
+      '`derived_name` finding for the birth and one for the readings, not one for each message. ' +
+      'The daemon reads the catalogue through a cache, so the suite waits out its freshness before ' +
+      'the first message rather than racing it. Needs the stack up and the owner connection ' +
+      '(SUPABASE_DB_*); everything it made, the audit rows included, is removed.',
+  },
+  'ingestion/test_a_derived_metric_is_read_stack.py': {
+    lanes: ['stack'],
+    why:
+      'THE ONLY CHECK THAT A DERIVED METRIC IS READ FROM REAL READINGS, END TO END. A fixture ' +
+      "gateway's edge node publishes a rising count for two minutes through a real broker, and a " +
+      'Shopfloor Manager reads derived_series() through PostgREST: every minute the counter rose in ' +
+      'has a positive rate that is not carried, and the minutes after the last reading count nothing ' +
+      'and say they are carried. derived_current() is the rate over the last hour, worked out in the ' +
+      'suite from the raw readings by the rule. A measured metric is refused. An automation on the ' +
+      "derived metric is applied, pg_cron's evaluator raises its alert with the value it read at a " +
+      'whole minute, and deleting the automation resolves it. Needs the stack up, the seeded ' +
+      'Shopfloor Manager and the owner connection (SUPABASE_DB_*); about six minutes; everything it ' +
+      'made, the audit rows included, is removed.',
+  },
   'test-harness/test_load_generator.py': {
     // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be
     // repeated cheaply: by the time anyone reads a load figure the stack has changed, so the
@@ -1689,6 +1864,18 @@ export const SUITES = {
       "other function, while the person's dashboard token reaches them all. Only GoTrue can issue " +
       'a token that names an app, and only the gateway decides on it.',
   },
+  'supabase/test_an_app_registered_by_an_administrator_signs_people_in.py': {
+    lanes: ['stack'],
+    why:
+      'An app an Administrator registers signs people in (0260): the seeded Administrator registers a ' +
+      'confidential and a public app with register_app(), and a seeded Shopfloor Manager completes ' +
+      "each one's authorization-code flow with PKCE. Discovery names an absolute issuer, the access and " +
+      'ID tokens carry it, and the ID token verifies against the key set. The access token reaches ' +
+      "user-info, GET /auth/v1/user, its refresh and its own local logout and is refused with the " +
+      'gateway\'s 403 on PUT /auth/v1/user, the factor routes, the approvals, PostgREST, Storage and ' +
+      'every function; revoking the approval ends its session; and a removed app cannot start a ' +
+      'sign-in. Only GoTrue issues these tokens and only the gateway refuses them.',
+  },
   'supabase/test_a_token_s_use_is_recorded.py': {
     lanes: ['stack'],
     why:
@@ -1716,6 +1903,17 @@ export const SUITES = {
       "Grafana's sign-in passes at aal1, gateway-bundle refuses aal1 before it reads a gateway, and " +
       "turning the switch on ends its Node-RED session while its Grafana session refreshes. The " +
       'switch goes back to what it was and the person is deleted.',
+  },
+  'supabase/test_a_threshold_automation_fires_and_resolves.py': {
+    lanes: ['stack'],
+    why:
+      'A threshold automation fires and resolves (0270, 0271), which only the running stack shows ' +
+      "end to end: pg_cron's evaluator in the platform database, its postgres_fdw read of the " +
+      'historian and the Row Level Security PostgREST applies. A seeded Shopfloor Manager applies an ' +
+      'automation on a device the suite makes, a breaching reading is written into the historian, ' +
+      'and the suite waits for the alert (its fingerprint, name, labels, values and no Grafana rule), ' +
+      'for a later run to confirm it, and for the run that resolves it after a normal reading. ' +
+      'Removes everything it made.',
   },
   'supabase/test_no_service_accepts_the_shared_secret.py': {
     lanes: ['stack'],

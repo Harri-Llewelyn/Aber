@@ -10,7 +10,7 @@ import {
   HISTORY_LIMIT, HISTORY_STORAGE_KEY, MAX_VISIBLE_TOASTS
 } from '../hooks/useToast'
 import { grafanaAlertUrl } from '../constants'
-import { identityUrl } from '../routes'
+import { identityUrl, deviceUrl } from '../routes'
 import { alertToastUrl } from '../hooks/usePlatformAlerts'
 
 /**
@@ -478,6 +478,12 @@ describe('a firing platform alert', () => {
     expect(alertToastUrl({ ...failed, rule_uid: 'aber-playback-worker-stale', labels: {} })).toBe('/capture/playbacks')
     // A row written before 0220 has no labels, and its link stays the rule's.
     expect(alertToastUrl({ ...failed, labels: null })).toBe(grafanaAlertUrl(failed))
+  })
+
+  it("leads an automation's alert to its device, and to nowhere when it names none", () => {
+    const automation = { ...row, fingerprint: 'condition:5d1f0c1e:dev22:Spindle/LOAD', rule_uid: null, entity_type: 'device', sparkplug_id: 'dev220000000000400080000' }
+    expect(alertToastUrl(automation)).toBe(deviceUrl('dev220000000000400080000'))
+    expect(alertToastUrl({ ...automation, entity_type: 'platform', sparkplug_id: null })).toBeUndefined()
   })
 
   it('links any other alert to its rule, whatever entity_id it carries', () => {

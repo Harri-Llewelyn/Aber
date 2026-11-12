@@ -198,6 +198,69 @@ export function modelledMetrics(definition: Record<string, unknown> | null): str
   return [...names].sort();
 }
 
+/** The input names of a derived metric's definition (metric_catalog.derivation), in the order it holds them. */
+export function derivationInputs(derivation: Record<string, unknown> | null): string[] {
+  if (!derivation || typeof derivation !== "object") return [];
+  if (derivation.kind === "sum") {
+    const inputs = Array.isArray(derivation.inputs) ? derivation.inputs : [];
+    return inputs
+      .map((i) => (i && typeof i === "object" ? (i as { metric?: unknown }).metric : null))
+      .filter((m): m is string => typeof m === "string");
+  }
+  return typeof derivation.input === "string" ? [derivation.input] : [];
+}
+
+/**
+ * A definition in words, as the Metrics page says it: "rate of Controller/PART_COUNT, per hour",
+ * "share of time Controller/EXECUTION is ACTIVE", "Power/PHASE_A + Power/PHASE_B − Power/PHASE_C".
+ * Kept in step with describeDerivation() in frontend/src/utils/derivedMetric.js.
+ */
+export function describeDerivation(derivation: Record<string, unknown> | null): string {
+  if (!derivation || typeof derivation !== "object") return "";
+  if (derivation.kind === "counter_rate") return `rate of ${derivation.input}, per hour`;
+  if (derivation.kind === "time_in_state") {
+    const states = (Array.isArray(derivation.states) ? derivation.states : []).map(String);
+    const list = states.length > 1
+      ? `${states.slice(0, -1).join(", ")} or ${states[states.length - 1]}`
+      : states.join("");
+    return `share of time ${derivation.input} is ${list}`;
+  }
+  if (derivation.kind === "sum") {
+    const inputs = (Array.isArray(derivation.inputs) ? derivation.inputs : []) as {
+      metric?: unknown;
+      sign?: unknown;
+    }[];
+    return inputs
+      .map((input, i) => {
+        const minus = Number(input.sign) < 0;
+        const name = String(input.metric);
+        return i === 0 ? (minus ? `−${name}` : name) : `${minus ? " − " : " + "}${name}`;
+      })
+      .join("");
+  }
+  return "";
+}
+
+/**
+ * The derived metrics of a device: each catalog row with a definition whose inputs are all among
+ * `reported`, the metrics the device declared and its schemas model, in name order. A derived metric
+ * applies to every device that reports all its inputs, as the dashboard's History offers it.
+ */
+export function derivedMetricsFor(
+  reported: Iterable<string>,
+  catalog: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const has = new Set(reported);
+  return catalog
+    .filter((m) => {
+      const derivation = m.derivation as Record<string, unknown> | null | undefined;
+      if (!derivation) return false;
+      const inputs = derivationInputs(derivation);
+      return inputs.length > 0 && inputs.every((name) => has.has(name));
+    })
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
 // Concept descriptions
 
 /**
@@ -706,6 +769,37 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     }
   }
 
+  // Submodel: DerivedMetrics. A derived metric is in no schema and no birth, so the telemetry
+  // submodels above never list it: this one adds each whose inputs the device reports, all of them. No
+  // semanticId, because it is a local extension (so it is counted as unmapped, the honest form), and
+  // no value: a shell is the asset's description, and a current value would need a read of the
+  // historian that the loader does not make. The description says how Aber computes it.
+  const reported = new Set<string>(
+    (Array.isArray(device.last_birth_metrics) ? device.last_birth_metrics : []).map(String),
+  );
+  for (const schema of schemas) {
+    for (const name of modelledMetrics((schema.schema_definition as Record<string, unknown> | null) ?? null)) {
+      reported.add(name);
+    }
+  }
+  const derivedRows = derivedMetricsFor(reported, catalog);
+  if (derivedRows.length > 0) {
+    unmappedCount += derivedRows.length;
+    submodels.push({
+      modelType: "Submodel",
+      id: submodelId("DerivedMetrics"),
+      idShort: "DerivedMetrics",
+      kind: "Instance",
+      submodelElements: derivedRows.map((m) =>
+        property(toIdShort(String(m.name), "Metric"), sparkplugToXsd(m.datatype as number | undefined), null, {
+          description: `Computed by Aber, not published by the device: ${
+            describeDerivation(m.derivation as Record<string, unknown>)
+          }. It carries no semantic id.`,
+        })
+      ),
+    });
+  }
+
   // Submodel: VisualRepresentation (3D model). Emitted only when the device carries a model; an
   // empty submodel would assert the aspect exists and then fail to describe it. `model_3d_path`
   // holds an object key, and the absolute URL is composed from a configurable base.
@@ -766,6 +860,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     attached_schemas: schemas.length,
     telemetry_metrics: telemetryTotal,
     kpi_metrics: kpiTotal,
+    derived_metrics: derivedRows.length,
     unmapped_semantic_ids: unmappedCount,
     concept_descriptions: conceptDescriptions.length,
     has_3d_model: Boolean(modelPath),

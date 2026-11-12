@@ -2,6 +2,7 @@ import {
   buildConceptDescriptions,
   buildEnvironment,
   conceptIdsFor,
+  describeDerivation,
   type DeviceRecord,
   loadDeviceRecord,
   OPC_MACHINERY,
@@ -250,4 +251,80 @@ Deno.test("the nameplate's OPC UA ids are Machinery ExpandedNodeIds", () => {
       throw new Error(`${id} is not a Machinery ExpandedNodeId`);
     }
   }
+});
+
+// A derived metric: a catalog row with a definition, in no schema and no birth.
+const derivedRow = (name: string, derivation: Record<string, unknown>) => ({
+  name,
+  semantic_id: null,
+  datatype: 10,
+  units: "COUNT/HOUR",
+  description: null,
+  standard: null,
+  deprecated: false,
+  derivation,
+});
+
+Deno.test("each derived metric a device reports the inputs of is in the shell, with no semantic id and no value", () => {
+  const rows = record(DEFINED);
+  rows.device = { ...rows.device, last_birth_metrics: ["Controller/PART_COUNT", "Controller/EXECUTION"] };
+  rows.catalog = [
+    ...rows.catalog,
+    metric("Controller/PART_COUNT", null, "Parts made", { units: "COUNT", standard: null }),
+    derivedRow("Controller/PARTS_PER_HOUR", { kind: "counter_rate", input: "Controller/PART_COUNT" }),
+    derivedRow("Controller/UPTIME", { kind: "time_in_state", input: "Controller/EXECUTION", states: ["ACTIVE", "READY"] }),
+    // An input this device does not report: no row for it.
+    derivedRow("Power/TOTAL", { kind: "sum", inputs: [{ metric: "Power/A", sign: 1 }, { metric: "Power/B", sign: -1 }] }),
+  ];
+  const built = buildEnvironment(rows);
+  // deno-lint-ignore no-explicit-any
+  const submodel = (built.submodels as any[]).find((s) => s.idShort === "DerivedMetrics");
+  assert.equal(
+    // deno-lint-ignore no-explicit-any
+    submodel.submodelElements.map((e: any) => [e.idShort, e.semanticId, e.value, e.valueType]),
+    [["Controller_PARTS_PER_HOUR", undefined, undefined, "xs:double"], ["Controller_UPTIME", undefined, undefined, "xs:double"]],
+  );
+  assert.equal(
+    // deno-lint-ignore no-explicit-any
+    submodel.submodelElements.map((e: any) => e.description[0].text),
+    [
+      "Computed by Aber, not published by the device: rate of Controller/PART_COUNT, per hour. It carries no semantic id.",
+      "Computed by Aber, not published by the device: share of time Controller/EXECUTION is ACTIVE or READY. It carries no semantic id.",
+    ],
+  );
+  assert.equal(submodel.semanticId, undefined);
+  // Counted with the unmapped ones, the honest form, and said apart.
+  assert.equal([built.stats.derived_metrics, built.stats.unmapped_semantic_ids], [2, 2]);
+});
+
+Deno.test("a device that reports no input of a derived metric has no DerivedMetrics submodel", () => {
+  const rows = record(DEFINED);
+  rows.catalog = [...rows.catalog, derivedRow("Controller/PARTS_PER_HOUR", { kind: "counter_rate", input: "Controller/PART_COUNT" })];
+  const built = buildEnvironment(rows);
+  // deno-lint-ignore no-explicit-any
+  assert.equal((built.submodels as any[]).some((s) => s.idShort === "DerivedMetrics"), false);
+  assert.equal(built.stats.derived_metrics, 0);
+});
+
+Deno.test("a schema's modelled metrics count as reported, as History counts them", () => {
+  const rows = record(DEFINED);
+  rows.schemas = [{
+    id: "s1",
+    schema_name: "AHU",
+    semantic_id: null,
+    schema_definition: { properties: { "Power/A": {}, "Power/B": {} } },
+  }];
+  rows.catalog = [
+    ...rows.catalog,
+    derivedRow("Power/TOTAL", { kind: "sum", inputs: [{ metric: "Power/A", sign: 1 }, { metric: "Power/B", sign: -1 }] }),
+  ];
+  // deno-lint-ignore no-explicit-any
+  const submodel = (buildEnvironment(rows).submodels as any[]).find((s) => s.idShort === "DerivedMetrics");
+  assert.equal(submodel.submodelElements[0].description[0].text, "Computed by Aber, not published by the device: Power/A − Power/B. It carries no semantic id.");
+});
+
+Deno.test("a definition is worded as the Metrics page words it", () => {
+  assert.equal(describeDerivation({ kind: "sum", inputs: [{ metric: "A/X", sign: -1 }, { metric: "A/Y", sign: 1 }] }), "−A/X + A/Y");
+  assert.equal(describeDerivation({ kind: "time_in_state", input: "A/S", states: ["ON"] }), "share of time A/S is ON");
+  assert.equal(describeDerivation({ kind: "unknown" }), "");
 });

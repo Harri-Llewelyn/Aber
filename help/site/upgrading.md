@@ -1524,6 +1524,36 @@ of System, with its sort order and other settings.
 Nothing else is renamed. The database and the API keep their names, such as `directory_services`.
 So does the Factory+ Directory, at `/ping` and `/v1/`.
 
+### From 1.8.0, the metric catalog can hold derived metrics
+
+The **Metrics** page has a new **Derived** tab. A derived metric is one Aber computes from others,
+such as parts per hour from a part counter. It is a row of `metric_catalog` with a new `derivation`
+column, which is `null` for every metric you have. The upgrade adds the column and changes no row.
+
+Check any client that reads the catalog from `/rest/v1/metric_catalog`:
+
+- **A response has a new `derivation` key.** It is `null` for a measured metric.
+- **Skip a row whose `derivation` is not null** when you build a schema or a device's list of
+  metrics. No device publishes a derived metric, and it has no semantic id. The dashboard's schema
+  builder already leaves them out.
+
+### From 1.8.0, History draws a derived metric, and an automation can read one
+
+From 1.8.0, Aber computes a derived metric when it is read. The upgrade adds three functions and changes
+no row.
+
+- **History** offers each derived metric on a device that reports all its inputs, and draws it with a
+  *derived* tag. The Devices drawer lists its current value.
+- **Export leaves it out.** A derived metric is not a reading. Export its inputs.
+- **An automation on a derived metric now fires.** Before, a file could name one and it never fired.
+  The first evaluation after the upgrade judges each such automation. Check the Automations page.
+- **A client that reads the AAS export** now finds each derived metric a device reports the inputs of.
+  It has no `semanticId`, and the export counts it as unmapped.
+- **New API calls** are `/rest/v1/rpc/derived_series` and `/rest/v1/rpc/derived_current`, for every
+  signed-in role. Grafana cannot call them.
+
+The i3X service serves no derived metric.
+
 ### From 1.8.0, `cells.grafana_url` is removed
 
 1.7.0 deprecated a cell's `grafana_url` (see
@@ -1717,6 +1747,73 @@ that tab, in place of Grafana's alert history.
 The table grows with the alerts that fire, not with the readings, so 90 days takes little space. An
 alert that is still firing is never removed, however old it is.
 
+### From 1.8.0, Operators no longer export readings, and an export covers 14 days at most
+
+From 1.8.0, only an **Administrator** or a **Shopfloor Manager** can export readings, and one export
+covers at most 14 days. The upgrade adds a setting and changes nothing else a site must act on.
+
+- **An Operator can still read the charts.** **Export CSV** on the History page is greyed for an
+  Operator, and says who can use it. It was open to every role that could read telemetry. If an
+  Operator needs a file, ask a Shopfloor Manager or an Administrator to export it.
+- **The longest window is a setting.** On **Settings**, on the new **History** tab,
+  **Longest export (days)** is 14 unless you change it, from 1 to 366. A longer window is refused,
+  with the limit named. Cold Storage's files hold older and longer ranges.
+- **Every export is in the Audit Trail**, in the **Readings** lane. The entry names who exported.
+  It lists the devices and metrics, the window and the resolution, and how many rows left.
+- **An export holds at most 50,000 rows, as before.** The database now holds that limit, and a file
+  that reaches it stops at a whole minute and says where.
+
+### From 1.8.0, the database keeps automations
+
+From 1.8.0, the platform database keeps automations: rules that raise an alert when a device's
+reading goes above or below a number. The upgrade adds three empty tables and changes nothing a
+site must act on. A Shopfloor Manager or an Administrator writes them on the Automations page.
+
+- **A device's automations follow it.** Archiving a device archives the triggers that name it, and
+  an automation left with no trigger is turned off. Restoring the device brings its triggers back
+  and leaves the automation off, for a person to turn on. Deleting a device removes them.
+- **An alert ends with its automation.** Turning one off, or deleting it, resolves the alerts it
+  raised. So does archiving or deleting the device they were about.
+- **A metric an automation watches cannot be deleted** from the metric catalogue. Delete the
+  automation first, or deprecate the metric.
+- **The file's format** is described by a JSON Schema the dashboard serves at
+  `/json-schema/automations.schema.json`. VS Code's YAML extension can read it.
+
+Grafana's own alert rules are untouched.
+
+### From 1.8.0, automations are written on the Automations page
+
+From 1.8.0 the dashboard has an **Automations** page, in a group of its own in the sidebar, under **Vocabulary**. Everyone who
+signs in can read it. An Administrator or a Shopfloor Manager writes. There is nothing to run when
+you upgrade.
+
+- **An automation is written as YAML**, in the page's editor or in a file you upload. The page shows
+  what a file would change before it changes anything. An upload never deletes.
+- **Export** downloads one automation, some or all as `automations.yaml`. A file moved to another
+  site needs its device ids changed first, because each site's devices have ids of their own.
+- **The editor loads only when the page opens.** No other page gets heavier.
+- **A proxy with its own Content-Security-Policy needs no new `style-src`.** The editor draws its
+  styles in a shadow root, which the dashboard's policy already allows. Allowing `'unsafe-inline'`
+  styles is not needed.
+
+### From 1.8.0, the database evaluates automations
+
+From 1.8.0, the platform database evaluates the automations on the Automations page. The upgrade
+adds one table and a job, `evaluate_automations`, that runs every minute. With no automation, the
+job reads nothing and changes nothing.
+
+- **An automation's alert is a platform alert.** It appears in the alert counter and in History's
+  **Alerts** tab, and it can be acknowledged, suppressed and sent to a webhook, as Grafana's alerts
+  can. It has no rule in Grafana, so the counter and the device's drawer do not link there.
+- **A breach fires after its `for`, judged once a minute.** A `for` of 30 seconds fires at the next
+  minute that finds it held. An alert resolves at the first minute the value is back inside.
+- **If the historian cannot be read, nothing is fired or resolved.** The database raises one alert,
+  **Automations Not Evaluated**, and the first minute that reads again resolves it. Alerts already
+  firing stay as they were, and get no reminder meanwhile.
+- **While an automation's alert fires,** an open dashboard reads the alert counter again each minute.
+
+There is nothing to run. Grafana's own alert rules are untouched.
+
 ### From 1.8.0, the historian counts its older readings for History's Overview
 
 History's Overview, new in 1.8.0, shows where readings arrived. It reads two new rollups on the
@@ -1768,6 +1865,68 @@ networkPolicy:
   `podSelector` in place of the `ipBlock`.
 
 A site without NetworkPolicies has nothing to do.
+
+### From 1.8.0, an app that signs people in reaches the sign-in endpoints only
+
+An Administrator can now register an app that signs people in, on **Access Control**, **Apps**, with
+**Register App**. The app learns who the person is, and nothing more. The upgrade changes nothing a
+site must act on.
+
+- **An app you added by hand with the secret key keeps signing people in.** Its token now reaches the
+  sign-in endpoints only: the two token endpoints, user-info, `GET /auth/v1/user`, a local logout,
+  discovery and the key set. It no longer reaches the rest of `/auth/v1/`, such as a person's
+  password, email or second factors. Aber's own apps are not changed.
+- **The sign-in service now names its issuer.** Discovery holds an absolute `issuer`, which is
+  `https://api.<your domain>/auth/v1`, and every token carries it as `iss`. Nothing in Aber checks
+  it. A token signed before the upgrade has none, and goes on working.
+- **A browser app on another origin** needs its origin in `global.corsExtraOrigins` before the page can
+  call the token endpoint. An app that runs on a server does not.
+
+The [app author's guide](../../docs/sign-in-with-aber.md) says how an app signs people in.
+
+### From 1.8.0, alerts can be emailed
+
+Aber can now email an alert to the people in the roles you choose. It sends when the alert starts
+firing, as a reminder while it fires unacknowledged, and when it resolves. Acknowledging the alert
+stops the reminders.
+
+Email starts off. Nothing is sent until an Administrator opens Settings › Notifications, chooses
+**Set up email**, and ticks the roles to tell. The upgrade changes nothing a site must act on.
+
+**Email uses the mail relay you already set for password resets.** It reads `supabaseAuth.smtp`
+(`host`, `port`, `user`, `from`, `senderName`) and `secrets.smtpPassword`. There is nothing to
+configure twice. With no `host`, the Notifications tab says that email cannot be sent yet.
+
+- **Port 465** is encrypted from the first byte. **Any other port** upgrades to TLS if the relay
+  offers it. Aber never sends a password without TLS.
+- **A relay whose certificate a private authority signed** needs that authority's certificate in
+  `supabaseFunctions.smtpCaCert`, as a PEM. The password-reset mail does not read it.
+- **A self-signed certificate** works only if it is not marked as a certificate authority.
+  `openssl req -x509` marks it as one by default. Issue the relay's certificate from an authority
+  and give Aber the authority's certificate instead.
+
+**The functions pod opens the connection to the relay.** A site with `networkPolicy.enabled` must
+let it reach the relay, or every email fails and the delivery log says the relay could not be
+reached. If your `networkPolicy.extraEgress` already has a rule for the auth pod's relay, its
+`podSelector` picks the auth pod alone. Widen it to the functions pod too:
+
+```yaml
+networkPolicy:
+  extraEgress:
+    podSelector:
+      matchExpressions:
+        - { key: app.kubernetes.io/component, operator: In, values: [supabase-auth, supabase-functions] }
+    policyTypes: [Egress]
+    egress:
+      - to: [{ ipBlock: { cidr: 203.0.113.25/32 } }]
+        ports: [{ protocol: TCP, port: 587 }]
+```
+
+The same widening lets the functions pod reach a webhook's host, as the section above says. The
+chart writes no egress rule for the relay itself.
+
+Use **Email a test** on the same tab to check the whole path. It sends one message to your own
+address and shows how it went. A site without NetworkPolicies has nothing else to do.
 
 ## Backups
 

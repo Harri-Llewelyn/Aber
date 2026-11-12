@@ -210,6 +210,57 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 74. An app's redirect addresses, one rule in two places (0260). app_redirect_problem() decides in
+// the database and redirectAddressProblem() says it before the dialog asks. Both are held to
+// test-harness/fixtures/app-redirect-addresses.json by their own tests, which must still read it, and
+// the file must keep a case for each way an address is allowed and each way it is refused: a case
+// removed leaves a rule only one side was ever tested on.
+{
+  const FIXTURE = 'test-harness/fixtures/app-redirect-addresses.json';
+  const readers = [
+    ['the database suite', 'supabase/migrations/test_an_administrator_registers_an_app_that_signs_people_in.py'],
+    ["the dashboard's tests", 'frontend/src/__tests__/registerApp.test.jsx'],
+  ];
+  const cases = JSON.parse(read(FIXTURE)).cases ?? [];
+  const rules = new Set(cases.map((c) => c.rule));
+  const ALLOWED = [
+    'https goes anywhere', 'http: localhost', 'http: .localhost names', 'http: loopback', 'http: private addresses',
+    "http: the site's domain",
+  ];
+  const REFUSED = [
+    'http elsewhere is refused', "the site's domain is a whole name", 'localhost is a whole name',
+    'an address that is not one', 'no fragment', 'no wildcard', 'no comma', 'no user name', 'no space', 'no backslash',
+    'https and http alone', 'not empty',
+  ];
+  const before74 = problems.length;
+  for (const [who, file] of readers) {
+    if (!read(file).includes('app-redirect-addresses.json')) problems.push(`redirectAddresses: ${who} (${file}) no longer reads ${FIXTURE}, so one side of the rule is untested against it`);
+  }
+  for (const rule of ALLOWED) {
+    if (!cases.some((c) => c.rule === rule && c.ok === true)) problems.push(`redirectAddresses: ${FIXTURE} has no allowed case for "${rule}"`);
+  }
+  for (const rule of REFUSED) {
+    if (!cases.some((c) => c.rule === rule && c.ok === false)) problems.push(`redirectAddresses: ${FIXTURE} has no refused case for "${rule}"`);
+  }
+  if (problems.length === before74) ok.push(`redirectAddresses: ${cases.length} cases across ${rules.size} rules, read by the database suite and the dashboard's tests`);
+}
+
+// 75. How much an app may be given, three places each (0260). register_app() takes 1 to c_max_uris
+// redirect addresses, GoTrue refuses a client with more than ten, and the dialog's redirectAddressesProblem()
+// stops at APP_REDIRECT_MAX; the name is 1 to c_max_name characters, and appNameProblem() stops at APP_NAME_MAX.
+{
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.register_app(', '$$;', 'register_app() in the applied chain');
+  const js = read('frontend/src/utils/apps.js');
+  const sqlUris = fn && need(fn.body, /c_max_uris\s+CONSTANT integer := (\d+);/, 'c_max_uris in register_app()');
+  const sqlName = fn && need(fn.body, /c_max_name\s+CONSTANT integer := (\d+);/, 'c_max_name in register_app()');
+  const jsUris = need(js, /export const APP_REDIRECT_MAX = (\d+)/, 'APP_REDIRECT_MAX in utils/apps.js');
+  const jsName = need(js, /export const APP_NAME_MAX = (\d+)/, 'APP_NAME_MAX in utils/apps.js');
+  if (sqlUris && jsUris) compare('appLimits', `most redirect addresses register_app() (${fn.file}) and the dialog take`, jsUris[1], sqlUris[1]);
+  if (sqlName && jsName) compare('appLimits', `longest app name register_app() (${fn.file}) and the dialog take`, jsName[1], sqlName[1]);
+  // GoTrue's own limit (v2.197.0 validateRedirectURIList): a client with more is refused by its router.
+  if (sqlUris && Number(sqlUris[1]) > 10) problems.push(`appLimits: register_app() takes ${sqlUris[1]} redirect addresses, and GoTrue (v2.197.0) refuses a client with more than 10`);
+}
+
 // 26. A person's picture. The dashboard uploads to, downloads from and deletes `<id>/avatar` in the
 // avatars bucket; manage-people's Remove Access deletes the same object; storage-init.mjs creates
 // the bucket with its types and limit; and 0213's CHECK and is_own_avatar_object() name the object.
@@ -349,10 +400,12 @@ const compare = (mirror, label, jsValue, sqlValue) => {
 }
 
 // 48. What an app's token reaches at the gateway. The API listener's app check (supabase/envoy.yaml)
-// admits a token GoTrue issued to an app on the functions that app calls, by client id, and each
-// door listener signs in as a client of its own. An id stack_app_ids() does not list is an app the
-// stack does not register, given a route; a function with no directory, or one the edge runtime's
-// allow-list (functions/main/index.ts) does not name, is a route to nothing.
+// admits a token GoTrue issued to one of the stack's apps on all of /auth/v1/, and on the functions
+// that app calls, by client id; each door listener signs in as a client of its own. An id
+// stack_app_ids() does not list is an app the stack does not register, given a route; an id it lists
+// that the stack-apps-sign-in policy lacks is an app of the stack held to the sign-in endpoints an
+// outside app has; a function with no directory, or one the edge runtime's allow-list
+// (functions/main/index.ts) does not name, is a route to nothing.
 {
   const before = problems.length;
   const envoy = read('supabase/envoy.yaml').replace(/\r\n/g, '\n');
@@ -387,6 +440,9 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   } else {
     for (const id of [...Object.keys(routes), ...doors].filter((x) => !listed.includes(x))) {
       problems.push(`appRoutes: supabase/envoy.yaml names the client ${id}, which stack_app_ids() (${ids?.file}) does not list: an app the stack does not register is given a route`);
+    }
+    for (const id of listed.filter((x) => !(x in routes))) {
+      problems.push(`appRoutes: stack_app_ids() (${ids?.file}) lists the client ${id}, which the gateway's stack-apps-sign-in policy does not name: its token reaches the sign-in endpoints an outside app's does, and not the rest of /auth/v1/`);
     }
     for (const fn of Object.values(routes).flat()) {
       if (!existsSync(join(ROOT, 'supabase/functions', fn, 'index.ts'))) {
@@ -571,6 +627,44 @@ const compare = (mirror, label, jsValue, sqlValue) => {
       ok.push(`gatewayStatus: read the LAST of ${view.redeclarations} declarations of ensure_gateway_status_view() (${view.file})`);
     }
   }
+}
+
+// 68. What a change of type ends, one rule in the trigger and the Edit form (0252). The trigger, and
+// 0252's one-off clean-up, move a gateway that leaves Remote out of the enrolment states
+// gatewayStatus.js counts as pending. The form says a setup command is cancelled for the state
+// issue_gateway_enrollment_token() writes, and reads a Remote gateway's credential from the column
+// gateway_has_broker_credential()'s remote arm reads. A state one side adds leaves a gateway reading
+// Awaiting setup after its type changed; another column has the form say nothing ends where the
+// trigger revokes.
+{
+  const js = read('frontend/src/utils/gatewayStatus.js');
+  const constants = new Map([...js.matchAll(/export const (GATEWAY_STATUS_[A-Z_]+) = '([A-Z_]+)'/g)].map((m) => [m[1], m[2]]));
+  const pending = need(js, /const PENDING_STATUSES = new Set\(\[([^\]]*)\]\)/, 'PENDING_STATUSES in gatewayStatus.js');
+  const jsStates = pending
+    ? [...pending[1].matchAll(/[A-Z_]+/g)].map((m) => constants.get(m[0]) ?? `(unresolved ${m[0]})`).sort().join(',')
+    : null;
+  const list = (text) => [...text.matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]).sort().join(',');
+
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.clean_up_after_a_gateway_type_change(', '$$;',
+    'clean_up_after_a_gateway_type_change()');
+  const trigger = fn && need(fn.body, /NEW\.status IN \(([^)]*)\) THEN\s+NEW\.status := 'OFFLINE'/,
+    `the states clean_up_after_a_gateway_type_change() ends (${fn.file})`);
+  const cleanUp = need(SCHEMA, /UPDATE public\.gateways\s+SET status = 'OFFLINE'\s+WHERE deployment <> 'remote'\s+AND status IN \(([^)]*)\)/,
+    "0252's one-off clean-up of the enrolment states");
+  if (jsStates && trigger) compare('gatewayTypeChange', `the enrolment states the trigger ends (${fn.file}) and PENDING_STATUSES`, jsStates, list(trigger[1]));
+  if (jsStates && cleanUp) compare('gatewayTypeChange', "the enrolment states 0252's clean-up ends and PENDING_STATUSES", jsStates, list(cleanUp[1]));
+
+  const type = read('frontend/src/utils/gatewayType.js');
+  const issue = lastDefinition('CREATE OR REPLACE FUNCTION public.issue_gateway_enrollment_token(', '$$;', 'issue_gateway_enrollment_token()');
+  const issued = issue && need(issue.body, /UPDATE public\.gateways\s+SET status = '([A-Z_]+)'/, `the status issue_gateway_enrollment_token() writes (${issue.file})`);
+  const jsSetup = need(type, /wasRemote && stored\.status === '([A-Z_]+)'/, "gatewayTypeChange()'s setup state in utils/gatewayType.js");
+  if (issued && jsSetup) compare('gatewayTypeChange', `the state a setup command leaves (${issue.file}) and the form's`, jsSetup[1], issued[1]);
+
+  const has = lastDefinition('CREATE OR REPLACE FUNCTION public.gateway_has_broker_credential(', '$$;', 'gateway_has_broker_credential()');
+  const arm = has && need(has.body, /g\.deployment = 'remote' AND g\.([a-z_]+) IS NOT NULL/, `gateway_has_broker_credential()'s remote arm (${has.file})`);
+  const jsArm = need(read('frontend/src/components/tabs/GatewaysTab.jsx'), /editingRemote \? !!editing\.([a-z_]+)/,
+    "the Edit form's Remote credential in GatewaysTab.jsx");
+  if (arm && jsArm) compare('gatewayTypeChange', `the column a Remote gateway's credential is read from (${has.file}) and the form's`, jsArm[1], arm[1]);
 }
 
 // 41. The playback worker's staleness. The playback dialog reads a heartbeat older than
@@ -1024,6 +1118,135 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 69. History's change read, one rule in two places. telemetry_changes() (0254) falls back past
+// its default max_changes and past the raw readings one series may bring across, and reads at most
+// so many series; api.js states the same for the page, which passes that cap, names both in its
+// words and reads in parts of that many series. A value only one side has is a chart labelled with
+// a cap the function does not hold, or a read the function refuses.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_changes(', '$fn$;', 'telemetry_changes()');
+  const api = read('frontend/src/api.js');
+  const changes = need(api, /^export const HISTORY_MAX_CHANGES = (\d+);$/m, 'HISTORY_MAX_CHANGES in frontend/src/api.js');
+  const readings = need(api, /^export const HISTORY_CHANGE_READINGS = (\d+);$/m, 'HISTORY_CHANGE_READINGS in frontend/src/api.js');
+  const series = need(api, /^export const HISTORY_CHANGE_SERIES = (\d+);$/m, 'HISTORY_CHANGE_SERIES in frontend/src/api.js');
+  if (def && changes && readings && series) {
+    const sqlDefault = need(def.body, /max_changes integer DEFAULT (\d+)/, `max_changes' default in ${def.file}`);
+    const sqlMost = need(def.body, /c_max_changes\s+CONSTANT integer := (\d+);/, `the most max_changes may be in ${def.file}`);
+    const sqlReadings = need(def.body, /c_max_readings CONSTANT bigint := (\d+);/, `the readings bound in ${def.file}`);
+    const sqlSeries = need(def.body, /c_max_series\s+CONSTANT integer := (\d+);/, `the series bound in ${def.file}`);
+    if (sqlDefault && sqlMost && sqlReadings && sqlSeries) {
+      compare('changeRead', 'the changes past which a chart shows its buckets, in api.js and telemetry_changes()', changes[1], sqlDefault[1]);
+      compare('changeRead', 'the readings one series may bring across, in api.js and telemetry_changes()', readings[1], sqlReadings[1]);
+      compare('changeRead', 'the series one read may carry, in api.js and telemetry_changes()', series[1], sqlSeries[1]);
+      if (Number(changes[1]) > Number(sqlMost[1])) {
+        problems.push(`changeRead: the page's cap (${changes[1]}) is over the ${sqlMost[1]} telemetry_changes() takes, so every read is refused`);
+      } else {
+        ok.push(`changeRead: the page's cap (${changes[1]}) is one telemetry_changes() takes (1 to ${sqlMost[1]})`);
+      }
+    }
+  }
+}
+
+// 70. What History's change read says of a series, one closed set in three places: the values
+// telemetry_changes() (0254) gives `read`, CHANGE_READS in utils/history.js, which the page draws
+// each by, and the API reference's TelemetryChangesRow enum. A value only the function gives is a
+// chart the page draws from the wrong read.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_changes(', '$fn$;', 'telemetry_changes()');
+  const js = need(read('frontend/src/utils/history.js'), /export const CHANGE_READS = Object\.freeze\(\{([\s\S]*?)\}\)/,
+    'CHANGE_READS in frontend/src/utils/history.js');
+  const spec = need(read('docs/openapi.yaml'), /\n {4}TelemetryChangesRow:\n[\s\S]*?\n {8}read: \{ type: string, enum: \[([^\]]*)\]/,
+    "TelemetryChangesRow's read enum in docs/openapi.yaml");
+  if (def && js && spec) {
+    const sorted = (values) => [...new Set(values)].sort().join(', ');
+    const sql = sorted([...def.body.matchAll(/\bread := '([a-z_]+)';/g)].map((m) => m[1]));
+    compare('changeReads', 'the reads the page draws by', sorted([...js[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1])), sql);
+    compare('changeReads', 'the reads the API reference names', sorted(spec[1].split(',').map((v) => v.trim())), sql);
+  }
+}
+
+// 79. History's hour-of-day read, one rule in two places. telemetry_hour_of_day() (0265) refuses
+// more hours times devices than telemetry_carried() takes, which it reads at one hour, and api.js
+// states the same bound for the Cell tab, which checks it before it asks and says the longest window
+// it allows. It returns the columns the page's hourGrid() reads, and takes the arguments
+// readHourOfDay() sends. A bound the page holds and the function does not is a heatmap the page
+// offers and the function refuses; a column or an argument one side names is a heatmap that draws
+// nothing.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_hour_of_day(', '$fn$;', 'telemetry_hour_of_day()');
+  const carried = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_carried(', '$fn$;', 'telemetry_carried()');
+  const api = read('frontend/src/api.js');
+  const bound = need(api, /^export const HOUR_OF_DAY_MAX_ROWS = (\d+);$/m, 'HOUR_OF_DAY_MAX_ROWS in frontend/src/api.js');
+  const call = need(api, /supabase\.rpc\('telemetry_hour_of_day', \{([^}]*)\}\)/, "readHourOfDay()'s rpc call in frontend/src/api.js");
+  const doc = need(api, /@returns \{Promise<Array<\{([^}]*)\}>>\}\s*\*\/\s*readHourOfDay: async/, "readHourOfDay()'s @returns in frontend/src/api.js");
+  if (def && carried && bound && call && doc) {
+    const sqlBound = need(def.body, /c_max_rows CONSTANT bigint := (\d+);/, `the row bound in ${def.file}`);
+    const carriedBound = need(carried.body, /c_max_rows CONSTANT bigint := (\d+);/, `the row bound in ${carried.file}`);
+    const args = need(def.body, /telemetry_hour_of_day\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${def.file}`);
+    if (sqlBound && carriedBound && args) {
+      compare('hourOfDayRead', 'the rows one read may take, in api.js and telemetry_hour_of_day()', bound[1], sqlBound[1]);
+      compare('hourOfDayRead', 'the rows telemetry_hour_of_day() takes and telemetry_carried(), which it reads, takes', sqlBound[1], carriedBound[1]);
+      const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+      compare('hourOfDayRead', 'the arguments readHourOfDay() sends and telemetry_hour_of_day() takes',
+        names(call[1], /^\s*(\w+):/gm), names(args[1], /^\s*(\w+) [a-z]/gm));
+      compare('hourOfDayRead', 'the columns readHourOfDay() documents and telemetry_hour_of_day() returns',
+        names(doc[1], /(\w+): /g), names(args[2], /^\s*(\w+) [a-z]/gm));
+    }
+  }
+}
+
+// 88. History's Area read, one rule in two places. telemetry_carried_by_group() (0276) reads every
+// device through telemetry_carried(), which refuses more than c_max_rows buckets times devices, and
+// api.js states the same bound for the Area tab, which keeps the finest resolution it asks for inside
+// it (pickGroupResolution()). It takes the arguments readCarriedByGroup() sends. A bound the page
+// holds and the function does not is a chart the page offers and the function refuses; an argument one
+// side names is an Area tab that draws nothing.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_carried_by_group(', '$fn$;', 'telemetry_carried_by_group()');
+  const carried = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_carried(', '$fn$;', 'telemetry_carried()');
+  const api = read('frontend/src/api.js');
+  const bound = need(api, /^export const HISTORY_GROUP_READ_ROWS = (\d+);$/m, 'HISTORY_GROUP_READ_ROWS in frontend/src/api.js');
+  // Up to the call's closing line, not the first brace: bucket is a template literal.
+  const call = need(api, /supabase\.rpc\('telemetry_carried_by_group', \{([\s\S]*?)\n\s*\}\)/, "readCarriedByGroup()'s rpc call in frontend/src/api.js");
+  if (def && carried && bound && call) {
+    const carriedBound = need(carried.body, /c_max_rows CONSTANT bigint := (\d+);/, `the row bound in ${carried.file}`);
+    const args = need(def.body, /telemetry_carried_by_group\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${def.file}`);
+    if (carriedBound && args) {
+      compare('groupRead', 'the rows one read may take, in api.js and telemetry_carried(), which telemetry_carried_by_group() reads', bound[1], carriedBound[1]);
+      const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+      compare('groupRead', 'the arguments readCarriedByGroup() sends and telemetry_carried_by_group() takes',
+        names(call[1], /^\s*(\w+):/gm), names(args[1], /^\s*(\w+) [a-z]/gm));
+    }
+  }
+}
+
+// 89. History's Area read, the columns. telemetry_carried_by_group() returns the columns
+// readCarriedByGroup() documents, and the page reads no column it does not return: groupSeries() takes
+// bucket_ts, mean_double, total_double and measured, and the Area tab files a row by group_key. A column
+// the page reads and the function does not return is a chart of nothing, and a column documented and not
+// returned sends a reader looking for it.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_carried_by_group(', '$fn$;', 'telemetry_carried_by_group()');
+  const api = read('frontend/src/api.js');
+  const doc = need(api, /@returns \{Promise<Array<\{([^}]*)\}>>\}\s*\*\/\s*readCarriedByGroup: async/, "readCarriedByGroup()'s @returns in frontend/src/api.js");
+  const series = need(read('frontend/src/utils/history.js'), /export function groupSeries\(([\s\S]*?)\n\}\n/, 'groupSeries() in frontend/src/utils/history.js');
+  const area = read('frontend/src/components/tabs/HistoryArea.jsx');
+  if (def && doc && series) {
+    const args = need(def.body, /telemetry_carried_by_group\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${def.file}`);
+    if (args) {
+      const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort();
+      const columns = names(args[2], /^\s*(\w+) [a-z]/gm);
+      compare('groupColumns', 'the columns readCarriedByGroup() documents and telemetry_carried_by_group() returns',
+        names(doc[1], /(\w+): /g).join(', '), columns.join(', '));
+      const read = new Set([...series[1].matchAll(/\br\.(\w+)/g)].map((m) => m[1]));
+      for (const m of area.matchAll(/\brow\.(group_key)\b/g)) read.add(m[1]);
+      const missing = [...read].filter((c) => !columns.includes(c));
+      if (missing.length) problems.push(`groupColumns: the Area tab reads ${missing.join(', ')}, which telemetry_carried_by_group() does not return`);
+      else ok.push(`groupColumns: the columns the Area tab reads, ${[...read].sort().join(', ')}, are ones telemetry_carried_by_group() returns`);
+    }
+  }
+}
+
 // 56. History's Overview read, one rule in two places. telemetry_coverage() (0245) caps a read's
 // devices, lets only a small selection sum a block, reads a larger one at the device rollups' own
 // widths, and bounds the buckets it reads; api.js states the same for the page, which reads in parts
@@ -1279,6 +1502,150 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   if (refused && js) compare('suppressionReasonMax', `the reason's limit schedule_alert_suppression_window() refuses past (${fn.file}) and the dialog`, js[1], refused[1]);
 }
 
+// 71. The automations vocabulary, one set of patterns, names and limits in four places (0255, 0256):
+// the JSON Schema the dashboard serves, automations_parse()'s constants and lists, and the CHECKs on
+// the tables. A pattern the schema accepts and the function refuses is an editor that offers a file
+// the database turns back; the reverse is one that refuses what the database would apply. The guard
+// suite holds the two over fixtures; this holds the words and numbers that no fixture reaches.
+{
+  const schema = JSON.parse(read('frontend/public/json-schema/automations.schema.json'));
+  const parse = lastDefinition('CREATE OR REPLACE FUNCTION public.automations_parse(', '$$;', 'automations_parse()');
+  const key = need(SCHEMA, /CONSTRAINT automations_key_format CHECK \(\(key ~ '([^']+)'::text\)\)/, 'automations_key_format in the migrations');
+  const hold = need(SCHEMA, /CONSTRAINT automation_triggers_hold_valid CHECK \(\(\(hold_seconds >= 0\) AND \(hold_seconds <= (\d+)\)\)\)/,
+    'automation_triggers_hold_valid in the migrations');
+  const severity = need(SCHEMA, /CONSTRAINT automation_actions_alert_shape\s+CHECK \(\(\(kind <> 'alert'::text\) OR \(severity = ANY \(ARRAY\[([^\]]*)\]\)\)\)\)/,
+    'automation_actions_alert_shape in the migrations');
+  const platform = need(SCHEMA, /ADD CONSTRAINT platform_alerts_severity_valid CHECK \(\(severity = ANY \(ARRAY\[([^\]]*)\]\)\)\)/,
+    'platform_alerts_severity_valid in the migrations');
+  const constant = (name) => parse && need(parse.body.split('\n').find((line) => line.trim().startsWith(`${name} `)) ?? '',
+    /CONSTANT (?:text|integer) := '?([^';]+)'?;/, `${name} in automations_parse() (${parse.file})`);
+  const words = (list) => [...list.matchAll(/'([a-z]+)'/g)].map((m) => m[1]).join(', ');
+  const { automation, thresholdTrigger, alertAction, deviceId } = schema.$defs;
+  const id = constant('c_id');
+  const forPattern = constant('c_for');
+  const uuid = constant('c_uuid');
+  const limits = ['c_max_automations', 'c_max_triggers', 'c_max_devices'].map(constant);
+  if (id && key) {
+    compare('automationsVocabulary', `the id pattern in the schema and in automations_parse() (${parse.file})`,
+      automation.properties.id.pattern, id[1]);
+    compare('automationsVocabulary', 'the id pattern in the schema and in the table CHECK',
+      automation.properties.id.pattern, key[1]);
+  }
+  if (forPattern && hold) {
+    compare('automationsVocabulary', `the pattern of for in the schema and in automations_parse() (${parse.file})`,
+      thresholdTrigger.properties.for.pattern, forPattern[1]);
+    // Three digits of an hour at most, and the table holds that many seconds.
+    const digits = Number(thresholdTrigger.properties.for.pattern.match(/\{0,(\d)\}/)?.[1]) + 1;
+    compare('automationsVocabulary', 'the longest hold in hours the for pattern allows and the table CHECK holds',
+      10 ** digits - 1, Number(hold[1]) / 3600);
+  }
+  if (uuid) {
+    compare('automationsVocabulary', 'the device id pattern in the schema and in automations_parse()', deviceId.pattern, uuid[1]);
+  }
+  if (limits.every(Boolean)) {
+    compare('automationsVocabulary', "the most automations in a file, triggers in an automation and devices in a trigger, in the schema and in automations_parse()",
+      [schema.maxItems, automation.properties.triggers.maxItems, thresholdTrigger.properties.device.oneOf[1].maxItems].join(', '),
+      limits.map((m) => m[1]).join(', '));
+  }
+  if (severity && platform) {
+    compare('automationsVocabulary', 'the severities of the schema and the actions table',
+      alertAction.properties.severity.enum.join(', '), words(severity[1]));
+    compare('automationsVocabulary', 'the severities of the actions table and platform_alerts', words(severity[1]), words(platform[1]));
+  }
+  if (parse) {
+    const listed = need(parse.body, /NOT \(v_val #>> '\{\}'\) = ANY \(ARRAY\[([^\]]*)\]\)/, `automations_parse()'s severities (${parse.file})`);
+    if (listed) {
+      compare('automationsVocabulary', `the severities automations_parse() admits (${parse.file}) and the schema`,
+        words(listed[1]), alertAction.properties.severity.enum.join(', '));
+    }
+    compare('automationsVocabulary', `the trigger and action types automations_parse() admits (${parse.file}) and the schema`,
+      [...parse.body.matchAll(/\(v_val #>> '\{\}'\) <> '([a-z]+)'/g)].map((m) => m[1]).join(', '),
+      [thresholdTrigger.properties.trigger.const, alertAction.properties.action.const].join(', '));
+    // The keys each level admits, in the order the function checks them: automation, trigger, action.
+    const admitted = [...parse.body.matchAll(/NOT v_key = ANY \(ARRAY\[([^\]]*)\]\)/g)]
+      .map((m) => [...m[1].matchAll(/'([a-z]+)'/g)].map((k) => k[1]).sort().join(', '));
+    compare('automationsVocabulary', `the keys automations_parse() admits on an automation, a trigger and an action (${parse.file}) and the schema's properties`,
+      admitted.join(' | '),
+      [automation, thresholdTrigger, alertAction].map((d) => Object.keys(d.properties).sort().join(', ')).join(' | '));
+  }
+}
+
+// 85. Who may write automations, in the dashboard and in the three writers (0256). The page greys
+// Save, Upload, New Automation, Delete and the switch for any other role; a list the writers do not
+// share is a button that offers an act the database refuses, or withholds one it would allow.
+{
+  const roles = need(read('frontend/src/utils/automations.js'), /export const AUTOMATION_WRITE_ROLES = \[([^\]]*)\]/,
+    'AUTOMATION_WRITE_ROLES in utils/automations.js');
+  const words = (list) => [...list.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]).join(', ');
+  for (const name of ['apply_automations', 'set_automation_enabled', 'delete_automation']) {
+    const fn = lastDefinition(`CREATE OR REPLACE FUNCTION public.${name}(`, '$$;', `${name}()`);
+    const sql = fn && need(fn.body, /has_role\(ARRAY\[([^\]]*)\]\)/, `${name}()'s has_role() list (${fn.file})`);
+    if (roles && sql) {
+      compare('automationsWriters', `the roles the page offers its write controls to and ${name}() admits (${fn.file})`,
+        words(roles[1]), words(sql[1]));
+    }
+  }
+}
+
+// 86. The patterns a file's values answer to, in the page and in the database (0255, 0256): an
+// automation's id, a hold, and the severities. The page uses them to say what a person typed is not an
+// id before asking; a pattern the table's CHECK does not share would let a refusal through, or turn
+// away an id the database keeps. Mirror check 71 holds the schema to the same SQL.
+{
+  const js = read('frontend/src/utils/automations.js');
+  const key = need(js, /export const AUTOMATION_KEY_PATTERN = \/(.+)\/$/m, 'AUTOMATION_KEY_PATTERN in utils/automations.js');
+  const hold = need(js, /export const AUTOMATION_HOLD_PATTERN = \/(.+)\/$/m, 'AUTOMATION_HOLD_PATTERN in utils/automations.js');
+  const severities = need(js, /export const AUTOMATION_SEVERITIES = \[([^\]]*)\]/, 'AUTOMATION_SEVERITIES in utils/automations.js');
+  const sqlKey = need(SCHEMA, /CONSTRAINT automations_key_format CHECK \(\(key ~ '([^']+)'::text\)\)/, 'automations_key_format in the migrations');
+  const parse = lastDefinition('CREATE OR REPLACE FUNCTION public.automations_parse(', '$$;', 'automations_parse()');
+  const sqlHold = parse && need(parse.body.split('\n').find((line) => line.trim().startsWith('c_for ')) ?? '',
+    /CONSTANT text := '([^']+)';/, `c_for in automations_parse() (${parse.file})`);
+  const sqlSeverities = need(SCHEMA, /CONSTRAINT automation_actions_alert_shape\s+CHECK \(\(\(kind <> 'alert'::text\) OR \(severity = ANY \(ARRAY\[([^\]]*)\]\)\)\)\)/,
+    'automation_actions_alert_shape in the migrations');
+  const words = (list) => [...list.matchAll(/'([a-z]+)'/g)].map((m) => m[1]).join(', ');
+  if (key && sqlKey) compare('automationsPatterns', "an automation's id pattern in the page and in the table CHECK", key[1], sqlKey[1]);
+  if (hold && sqlHold) compare('automationsPatterns', `the hold pattern in the page and in automations_parse() (${parse.file})`, hold[1], sqlHold[1]);
+  if (severities && sqlSeverities) compare('automationsPatterns', 'the severities in the page and in the actions table', words(severities[1]), words(sqlSeverities[1]));
+}
+
+// 87. What the page reads out of the database's answers, in the words the functions use (0255, 0256).
+// The fingerprint of an alert an automation raised, which the page takes the trigger out of to open
+// its automation; the reasons automations_for_entity() gives, which the list says in words; and the
+// statuses apply_automations() gives each automation, which the preview draws. A word the page does
+// not know is drawn as it came, but a fingerprint it cannot read opens nothing.
+{
+  const fingerprint = lastDefinition('CREATE OR REPLACE FUNCTION public.automation_alert_fingerprint(', '$$;', 'automation_alert_fingerprint()');
+  const sqlShape = fingerprint && need(fingerprint.body,
+    /ELSE '(condition:)' \|\| p_trigger_id::text \|\| '(:)' \|\| p_entity_id::text \|\| '(:)' \|\| p_metric_name/,
+    `automation_alert_fingerprint()'s composition (${fingerprint.file})`);
+  const routes = read('frontend/src/routes.js');
+  const jsPattern = need(routes, /export const triggerIdOfFingerprint =[\s\S]*?\/\^(condition:)\(\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{12\}\)(:)\//,
+    'triggerIdOfFingerprint() in routes.js');
+  if (sqlShape && jsPattern) {
+    compare('automationsReads', `the fingerprint of an automation's alert, up to its trigger id, in routes.js and automation_alert_fingerprint() (${fingerprint.file})`,
+      `${jsPattern[1]}<trigger>${jsPattern[2]}`, `${sqlShape[1]}<trigger>${sqlShape[2]}`);
+  }
+
+  const js = read('frontend/src/utils/automations.js');
+  const forEntity = lastDefinition('CREATE OR REPLACE FUNCTION public.automations_for_entity(', '$$;', 'automations_for_entity()');
+  const sqlReasons = forEntity && [...forEntity.body.matchAll(/'([a-z][a-z-]*)'::text/g)].map((m) => m[1]);
+  const block = need(js, /export const APPLIES_BECAUSE = \{([\s\S]*?)\n\}/, 'APPLIES_BECAUSE in utils/automations.js');
+  const jsReasons = block && [...block[1].matchAll(/^ {2}(?:'([a-z-]+)'|([a-z]+)): \{/gm)].map((m) => m[1] ?? m[2]);
+  if (sqlReasons && jsReasons) {
+    compare('automationsReads', `the reasons the list says and automations_for_entity() gives (${forEntity.file})`,
+      [...jsReasons].sort().join(', '), [...new Set(sqlReasons)].sort().join(', '));
+  }
+
+  const apply = lastDefinition('CREATE OR REPLACE FUNCTION public.apply_automations(', '$$;', 'apply_automations()');
+  const sqlStatuses = apply && [...new Set([...apply.body.matchAll(/v_status := '([a-z]+)'/g)].map((m) => m[1]))].sort();
+  const statuses = need(js, /export const RESULT_STATUSES = \[([\s\S]*?)\n\]/, 'RESULT_STATUSES in utils/automations.js');
+  const jsStatuses = statuses && [...statuses[1].matchAll(/value: '([a-z]+)'/g)].map((m) => m[1]).sort();
+  if (sqlStatuses && jsStatuses) {
+    compare('automationsReads', `the statuses the preview draws and apply_automations() gives (${apply.file})`,
+      jsStatuses.join(', '), sqlStatuses.join(', '));
+  }
+}
+
 // 62. The longest suppression window, one default and one range in three places: 0002's seed and
 // bounds, the writers' check, which falls back to the default outside the range, and the dialog,
 // which does the same where the setting cannot be read. A dialog with another default offers an
@@ -1315,6 +1682,100 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     'SUPPRESSION_MAX_DAYS_PLACE in utils/alertSuppression.js');
   if (seeded && js) compare('suppressionMaxDaysPlace', "the Settings tab the dialog names and 0002's category", js[1], seeded[1]);
   if (seeded && refused) compare('suppressionMaxDaysPlace', `the Settings tab the writers' refusal names (${fn.file}) and 0002's category`, refused[1], seeded[1]);
+}
+
+// 90. Who may export readings (0279). Export CSV is on or greyed by TELEMETRY_EXPORT_ROLES;
+// export_telemetry() decides by has_role(). A role the dashboard offers and the function refuses
+// meets an error on every click; one it leaves out never sees a button the function would allow.
+{
+  const jsRoles = need(read('frontend/src/utils/telemetryExport.js'),
+    /export const TELEMETRY_EXPORT_ROLES = \[([^\]]*)\]/, 'TELEMETRY_EXPORT_ROLES in utils/telemetryExport.js');
+  const roles = (list) => [...list.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]).sort().join(', ');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.export_telemetry(', '$fn$;', 'export_telemetry()');
+  const sql = fn && need(fn.body, /NOT public\.has_role\(ARRAY\[([^\]]*)\]\) THEN/, `export_telemetry()'s roles (${fn.file})`);
+  if (jsRoles && sql) compare('exportRoles', `the roles export_telemetry() (${fn.file}) admits and the dashboard offers Export CSV to`, roles(jsRoles[1]), roles(sql[1]));
+}
+
+// 91. The longest export, one default and one range in four places: 0278's seed and bounds,
+// telemetry_export_max_days(), which falls back to the default outside the range, and the dashboard,
+// which does the same where the setting cannot be read. Its place, the History category of Settings,
+// is named by 0278's seed, the function's refusal, the dashboard and the Settings page's tabs; a
+// dashboard that offers an end the function refuses, or names another tab, sends people wrong.
+{
+  const seed = need(SCHEMA, /seed_setting\(\s*'history\.export_max_days',\s*to_jsonb\((\d+)\),\s*'number',\s*'([^']+)'/,
+    "history.export_max_days' seed in 0278");
+  const bounds = need(SCHEMA, /SET min_value = (\d+), max_value = (\d+)\s+WHERE key = 'history\.export_max_days'/,
+    "history.export_max_days' bounds in 0278");
+  const reader = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_export_max_days(', '$$;', 'telemetry_export_max_days()');
+  const fallback = reader && need(reader.body, /IF v_days IS NULL OR v_days < (\d+) OR v_days > (\d+) THEN\s+v_days := (\d+);/,
+    `telemetry_export_max_days()'s fallback (${reader.file})`);
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.export_telemetry(', '$fn$;', 'export_telemetry()');
+  const refused = fn && need(fn.body, /set on Settings › ([^.']+)\./, `the tab export_telemetry()'s refusal names (${fn.file})`);
+  const js = read('frontend/src/utils/telemetryExport.js');
+  const jsDays = need(js, /export const EXPORT_MAX_DAYS = (\d+)$/m, 'EXPORT_MAX_DAYS in utils/telemetryExport.js');
+  const jsMin = need(js, /export const EXPORT_MAX_DAYS_MIN = (\d+)$/m, 'EXPORT_MAX_DAYS_MIN in utils/telemetryExport.js');
+  const jsMax = need(js, /export const EXPORT_MAX_DAYS_MAX = (\d+)$/m, 'EXPORT_MAX_DAYS_MAX in utils/telemetryExport.js');
+  const jsKey = need(js, /export const EXPORT_MAX_DAYS_KEY = '([^']+)'/, 'EXPORT_MAX_DAYS_KEY in utils/telemetryExport.js');
+  const jsPlace = need(js, /export const EXPORT_MAX_DAYS_PLACE = 'Settings › ([^']+)'/, 'EXPORT_MAX_DAYS_PLACE in utils/telemetryExport.js');
+  const tab = need(read('frontend/src/navigation.jsx'), /\{ id: 'history', label: '([^']+)', description: /, "the History entry of SETTINGS_TABS in navigation.jsx");
+  if (jsKey) compare('exportMaxDays', "the setting the dashboard reads and 0278 declares", jsKey[1], 'history.export_max_days');
+  if (seed && jsDays) compare('exportMaxDays', 'the longest export the dashboard falls back to and 0278 seeds', jsDays[1], seed[1]);
+  if (fallback && jsDays) compare('exportMaxDays', `the longest export the dashboard and telemetry_export_max_days() (${reader.file}) fall back to`, jsDays[1], fallback[3]);
+  if (bounds && jsMin && jsMax) compare('exportMaxDays', "the setting's range in the dashboard and 0278's bounds", `${jsMin[1]} to ${jsMax[1]}`, `${bounds[1]} to ${bounds[2]}`);
+  if (fallback && jsMin && jsMax) compare('exportMaxDays', `the setting's range in the dashboard and the reader's fallback (${reader.file})`, `${jsMin[1]} to ${jsMax[1]}`, `${fallback[1]} to ${fallback[2]}`);
+  if (seed && jsPlace) compare('exportMaxDaysPlace', "the Settings tab the dashboard names and 0278's category", jsPlace[1], seed[2]);
+  if (seed && refused) compare('exportMaxDaysPlace', `the Settings tab export_telemetry()'s refusal names (${fn.file}) and 0278's category`, refused[1], seed[2]);
+  if (seed && tab) compare('exportMaxDaysPlace', "the Settings tab navigation.jsx lists and 0278's category", tab[1], seed[2]);
+}
+
+// 92. What one export may hold, three limits and one list in two places (0279): export_telemetry()'s
+// rows, devices and metrics, and the resolutions it admits, against the dashboard's. A page that
+// says another cap trusts a file to hold rows it cannot; one that offers a resolution the function
+// refuses meets an error on its own button; one that lets a selection past the device or metric
+// limit finds out when the dialog is refused.
+{
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.export_telemetry(', '$fn$;', 'export_telemetry()');
+  const sqlRows = fn && need(fn.body, /c_max_rows\s+CONSTANT integer := (\d+);/, `the row bound in ${fn.file}`);
+  const sqlAssets = fn && need(fn.body, /c_max_assets\s+CONSTANT integer := (\d+);/, `the device bound in ${fn.file}`);
+  const sqlMetrics = fn && need(fn.body, /c_max_metrics\s+CONSTANT integer := (\d+);/, `the metric bound in ${fn.file}`);
+  const sqlRes = fn && need(fn.body, /NOT v_res = ANY \(ARRAY\[([^\]]*)\]\)/, `the resolutions export_telemetry() admits (${fn.file})`);
+  const rowsJs = need(read('frontend/src/api.js'), /^export const TELEMETRY_EXPORT_MAX_ROWS = (\d+);$/m, 'TELEMETRY_EXPORT_MAX_ROWS in frontend/src/api.js');
+  const js = read('frontend/src/utils/telemetryExport.js');
+  const jsAssets = need(js, /export const EXPORT_MAX_DEVICES = (\d+)$/m, 'EXPORT_MAX_DEVICES in utils/telemetryExport.js');
+  const jsMetrics = need(js, /export const EXPORT_MAX_METRICS = (\d+)$/m, 'EXPORT_MAX_METRICS in utils/telemetryExport.js');
+  const block = need(js, /export const EXPORT_RESOLUTIONS = \[([\s\S]*?)\n\]/, 'EXPORT_RESOLUTIONS in utils/telemetryExport.js');
+  const jsRes = block && [...block[1].matchAll(/\{ key: '([^']+)'/g)].map((m) => m[1]);
+  if (sqlRows && rowsJs) compare('exportBounds', `the rows one export holds, export_telemetry() (${fn.file}) and the dashboard`, rowsJs[1], sqlRows[1]);
+  if (sqlAssets && jsAssets) compare('exportBounds', `the devices one export names, export_telemetry() (${fn.file}) and the dashboard`, jsAssets[1], sqlAssets[1]);
+  if (sqlMetrics && jsMetrics) compare('exportBounds', `the metrics one export names, export_telemetry() (${fn.file}) and the dashboard`, jsMetrics[1], sqlMetrics[1]);
+  if (sqlRes && jsRes) {
+    compare('exportBounds', `the resolutions export_telemetry() (${fn.file}) admits and the dialog offers`,
+      jsRes.join(', '), [...sqlRes[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).join(', '));
+  }
+}
+
+// 97. Who may export readings, at every entry point (0279; check 90 holds the roles themselves). A
+// file that opens TelemetryExportModal holds the gate: mayExportReadings() to turn its button off and
+// EXPORT_DENIED_TITLE to say who may. One that opens the dialog without them offers Export CSV to a
+// role export_telemetry() refuses, an error on every click. The entry points are found by their
+// import, so a sixth is held to the gate the day it is written.
+{
+  const sourceFiles = (dir) => readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) => {
+    const rel = `${dir}/${e.name}`;
+    if (e.isDirectory()) return e.name === '__tests__' || e.name === 'node_modules' ? [] : sourceFiles(rel);
+    return /\.jsx?$/.test(e.name) ? [rel] : [];
+  });
+  const modal = 'frontend/src/components/modals/TelemetryExportModal.jsx';
+  const entries = sourceFiles('frontend/src').filter((f) => f !== modal && /from '(\.\.?\/)+modals\/TelemetryExportModal'/.test(read(f)));
+  if (entries.length === 0) {
+    problems.push('exportGate: found no file that opens TelemetryExportModal -- the dialog moved or was renamed, so this check is no longer checking anything');
+  }
+  for (const file of entries) {
+    const code = read(file);
+    const missing = ['mayExportReadings(', 'EXPORT_DENIED_TITLE'].filter((name) => !code.includes(name));
+    if (missing.length) problems.push(`exportGate: ${file} opens the export dialog without ${missing.join(' and ')}, so Export CSV is offered to a role export_telemetry() refuses`);
+    else ok.push(`exportGate: ${file} holds the role gate`);
+  }
 }
 
 // 55. History's alerts, two numbers in two places. The Alerts tab asks alert_occurrences() (0243)
@@ -1355,6 +1816,56 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 82. How long an automation's alert confirmation holds (0247, 0271). evaluate_automations() stamps
+// last_confirmed_at on every run, and pg_cron runs it on the schedule 0271 gives. The window
+// platform_alert_confirmation_window() allows a condition: fingerprint must be longer than that
+// interval: a window no longer than the run interval stops the reminders of every automation alert
+// still firing, and a far longer one keeps reminding about an alert nothing has confirmed for hours.
+{
+  const job = need(SCHEMA, /ensure_cron_job\(\s*'evaluate_automations',\s*'([^']+)'/, 'the evaluate_automations job in the migrations');
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.platform_alert_confirmation_window(', '$$;',
+    'platform_alert_confirmation_window()');
+  const arm = fn && need(fn.body, /WHEN starts_with\(p_fingerprint, 'condition:'\) THEN interval '(\d+) minutes'/,
+    `platform_alert_confirmation_window()'s condition: arm (${fn.file})`);
+  if (job && arm) {
+    // `* * * * *` is every minute and `*/N * * * *` every N; anything else is not read.
+    const every = /^\* \* \* \* \*$/.test(job[1]) ? 1 : Number(job[1].match(/^\*\/(\d+) \* \* \* \*$/)?.[1]);
+    if (!Number.isInteger(every) || every < 1) {
+      problems.push(`alertConfirmationWindow: the evaluate_automations schedule "${job[1]}" is neither every minute nor every N minutes, so the window cannot be held to it`);
+    } else if (Number(arm[1]) <= every) {
+      problems.push(`alertConfirmationWindow: the evaluator runs every ${every} minute(s) and its confirmation holds ${arm[1]}, which stops the reminders of every automation alert still firing (${fn.file})`);
+    } else {
+      ok.push(`alertConfirmationWindow: an automation alert's confirmation (${arm[1]} minutes) outlasts the evaluator's interval (${every} minute${every === 1 ? '' : 's'})`);
+    }
+  }
+}
+
+// 83. What marks an alert as an automation's, one prefix in four places (0255, 0271): the dashboard's
+// isAutomationAlert() reads it, automation_alert_fingerprint() composes every trigger's fingerprint
+// with it, evaluate_automations() names its own alert with it, and platform_alert_confirmation_window()
+// gives it its window. A prefix one of them spells differently is an automation's alert opening
+// Grafana, or a reminder that is never sent.
+{
+  const js = need(read('frontend/src/constants.js'), /isAutomationAlert = \(alert\) => String\(alert\?\.fingerprint \?\? ''\)\.startsWith\('([^']+)'\)/,
+    'isAutomationAlert() in constants.js');
+  const compose = lastDefinition('CREATE OR REPLACE FUNCTION public.automation_alert_fingerprint(', '$$;', 'automation_alert_fingerprint()');
+  const composed = compose && need(compose.body, /WHEN p_entity_id IS NULL OR p_metric_name IS NULL THEN '([^']+)' \|\|/,
+    `automation_alert_fingerprint()'s prefix (${compose.file})`);
+  const evaluator = lastDefinition('CREATE OR REPLACE FUNCTION public.evaluate_automations(', '$$;', 'evaluate_automations()');
+  const own = evaluator && need(evaluator.body, /c_not_evaluated CONSTANT text := '([^']+)'/,
+    `evaluate_automations()'s own fingerprint (${evaluator.file})`);
+  const window = lastDefinition('CREATE OR REPLACE FUNCTION public.platform_alert_confirmation_window(', '$$;',
+    'platform_alert_confirmation_window()');
+  const windowed = window && need(window.body, /WHEN starts_with\(p_fingerprint, '([^']+)'\)/,
+    `platform_alert_confirmation_window()'s condition: arm (${window.file})`);
+  if (js && composed && own && windowed) {
+    compare('automationAlertPrefix', `the dashboard's prefix and the one automation_alert_fingerprint() composes (${compose.file})`, js[1], composed[1]);
+    compare('automationAlertPrefix', `the dashboard's prefix and the one the evaluator's own alert starts with (${evaluator.file})`,
+      js[1], own[1].slice(0, js[1].length));
+    compare('automationAlertPrefix', `the dashboard's prefix and the one the confirmation window answers for (${window.file})`, js[1], windowed[1]);
+  }
+}
+
 // 58. The Notifications vocabulary, one closed set in each place it is written (0247, 0248): the
 // severities a route may name, as notification_setting_guard() admits them, notification_severity_carried()
 // ranks them and the Settings page offers them; and the events a message may be, as the queue's CHECK
@@ -1389,6 +1900,75 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     compare('notificationEvents', 'the events the dispatcher types and the queue admits',
       [...typed[1].matchAll(/"([a-z]+)"/g)].map((m) => m[1]).join(', '), sql);
   }
+}
+
+// 76. The channels a message may go down, one closed set in each place it is written (0247, 0262):
+// the queue's CHECK admits them, the delivery log names each, notification_channel_is_configured()
+// has an arm for each, and notification_channel_reaches() says which alerts each may carry. A
+// channel the log cannot name shows as its raw word; one the configured test lacks is queued
+// for never or always, and its messages wait or fail with no sentence.
+{
+  const notifications = read('frontend/src/utils/notifications.js');
+  // The last declaration stands: 0247 creates the table with one channel and 0262 replaces the CHECK.
+  const declared = [...SCHEMA.matchAll(/CONSTRAINT notification_deliveries_channel_valid\s+CHECK \(\(channel = ANY \(ARRAY\[([^\]]*)\]\)\)\)/g)];
+  const check = declared.length ? declared[declared.length - 1] : null;
+  if (!check) problems.push('notificationChannels: found no notification_deliveries_channel_valid in the migrations -- the shape this check reads has changed');
+  const labels = need(notifications, /export const CHANNEL_LABELS = \{([^}]*)\}/, 'CHANNEL_LABELS in utils/notifications.js');
+  const configured = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_channel_is_configured(', '$;',
+    'notification_channel_is_configured()');
+  const reaches = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_channel_reaches(', '$;',
+    'notification_channel_reaches()');
+  const words = (list) => [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).join(', ');
+  if (check && labels) {
+    const sql = words(check[1].replace(/::text/g, ''));
+    compare('notificationChannels', 'the channels the delivery log labels and the queue admits',
+      [...labels[1].matchAll(/([a-z]+):/g)].map((m) => m[1]).join(', '), sql);
+    if (configured) {
+      compare('notificationChannels', `the channels the queue admits and notification_channel_is_configured() has an arm for (${configured.file})`,
+        sql, [...configured.body.matchAll(/WHEN '([a-z]+)' THEN/g)].map((m) => m[1]).join(', '));
+    }
+    if (reaches) {
+      compare('notificationChannels', `the channels the queue admits and notification_channel_reaches() rules on (${reaches.file})`,
+        sql, [...reaches.body.matchAll(/WHEN '([a-z]+)' THEN/g)].map((m) => m[1]).join(', '));
+    }
+  }
+}
+
+// 77. The Notifications keys the page names are the keys the migrations seed, and the guard checks
+// each: a key the page reads that nothing seeds is an empty read, and one the guard does not name
+// takes any value an Administrator types, which the dispatcher then reads as it can.
+{
+  const notifications = read('frontend/src/utils/notifications.js');
+  const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.notification_setting_guard(', '$;', 'notification_setting_guard()');
+  const named = [...notifications.matchAll(/^export const [A-Z_]+_KEY = '(notifications\.[a-z_]+)'$/gm)].map((m) => m[1]).sort();
+  const seeded = [...SCHEMA.matchAll(/seed_setting\(\s*'(notifications\.[a-z_]+)'/g)].map((m) => m[1]).sort();
+  if (!named.length) {
+    problems.push('notificationKeys: found no notifications.* key in utils/notifications.js -- the shape this check reads has changed');
+  } else {
+    compare('notificationKeys', 'the Notifications keys the page names and the migrations seed', named.join(', '), seeded.join(', '));
+    if (guard) {
+      const guarded = [...guard.body.matchAll(/WHEN '(notifications\.[a-z_]+)' THEN/g)].map((m) => m[1]).sort();
+      compare('notificationKeys', `the Notifications keys the page names and the guard checks (${guard.file})`, named.join(', '), guarded.join(', '));
+    }
+  }
+}
+
+// 78. The desktop-notification choice, one column in two places (0264). user_settings.desktop_notifications
+// is off by default, and the browser's copy of it (useDesktopNotifications.js) starts off too, so a
+// first paint and a row never written agree. The dashboard reads and writes the column by name,
+// utils/userSettings.js selecting it and useUserSettings.js saving to it: a name that differs reads
+// back as nothing and saves as an error, which the page turns into a choice held in one browser.
+{
+  const declared = [...SCHEMA.matchAll(/ADD COLUMN IF NOT EXISTS (desktop_notifications) boolean DEFAULT (true|false) NOT NULL/g)].at(-1);
+  if (!declared) problems.push('could not find user_settings.desktop_notifications in any applied migration -- the file\'s shape changed, so this check is no longer checking anything');
+  const hook = need(read('frontend/src/hooks/useDesktopNotifications.js'), /^const DEFAULT_ON = (true|false)$/m,
+    'DEFAULT_ON in frontend/src/hooks/useDesktopNotifications.js');
+  const selected = need(read('frontend/src/utils/userSettings.js'), /\.select\('([^']*)'\)/, "the columns readUserSettings() selects in frontend/src/utils/userSettings.js");
+  const saved = need(read('frontend/src/hooks/useUserSettings.js'), /save\('(desktop_notifications)', next\)/,
+    'the column the desktop notifications choice is saved to in frontend/src/hooks/useUserSettings.js');
+  if (declared && hook) compare('desktopNotifications', 'the default, in the migrations and the browser copy', hook[1], declared[2]);
+  if (declared && selected) compare('desktopNotifications', "whether the dashboard reads the column the migrations add", selected[1].split(',').includes(declared[1]), true);
+  if (declared && saved) compare('desktopNotifications', 'the column the dashboard saves and the one the migrations add', saved[1], declared[1]);
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -1452,6 +2032,169 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     if (strays.length) {
       problems.push(`ashrae223Group: example 223P metrics file under ${JSON.stringify(strays)}, not the registered '${registered[0]}'`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 80. A derived metric's kinds and the most inputs a sum takes, SQL and JavaScript (0267). The shape
+// function refuses any kind it does not list and a sum of more inputs than its limit; the Add Derived
+// Metric dialog offers DERIVATION_KINDS and stops adding at DERIVED_MAX_INPUTS. A kind the dialog
+// offers and the database refuses fails every save; a kind the database admits and the dialog lacks
+// can never be added. Compared in order, so the dialog lists them as the function does.
+// -------------------------------------------------------------------------------------------------
+{
+  const shape = lastDefinition('CREATE OR REPLACE FUNCTION public.derivation_shape_problem(', '$$;', 'derivation_shape_problem()');
+  const js = read('frontend/src/utils/derivedMetric.js');
+  const kindsJs = need(js, /export const DERIVATION_KINDS = \[([\s\S]*?)\n\]/, 'DERIVATION_KINDS in utils/derivedMetric.js');
+  const maxJs = need(js, /export const DERIVED_MAX_INPUTS = (\d+)/, 'DERIVED_MAX_INPUTS in utils/derivedMetric.js');
+  const kindsSql = shape && need(shape.body, /NOT IN \(('counter_rate'[^)]*)\)/, `derivation_shape_problem()'s kinds (${shape.file})`);
+  const maxSql = shape && need(shape.body, /c_max_inputs CONSTANT integer := (\d+)/, `derivation_shape_problem()'s input limit (${shape.file})`);
+  if (kindsJs && maxJs && kindsSql && maxSql) {
+    compare('derivedKinds', `the kinds the dialog offers and the shape function admits (${shape.file})`,
+      [...kindsJs[1].matchAll(/id: '([a-z_]+)'/g)].map((m) => m[1]).join(', '),
+      [...kindsSql[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).join(', '));
+    compare('derivedKinds', `the most inputs a sum takes in the dialog and in the shape function (${shape.file})`, maxJs[1], maxSql[1]);
+  }
+}
+
+// 81. How a derived metric's unit and datatypes follow its inputs, SQL and JavaScript (0267).
+// enforce_derived_metric() sets the unit (an input's unit followed by '/HOUR' for a rate, COUNT for a
+// counter with none), reads numbers in a range of Sparkplug codes and states in three, and takes only a
+// Double. The dialog shows the unit it will take and offers inputs by the same codes. A unit the dialog
+// shows and the database does not set contradicts the row it creates; an input it offers and the
+// database refuses fails the save.
+{
+  const trigger = lastDefinition('CREATE OR REPLACE FUNCTION public.enforce_derived_metric(', '$$;', 'enforce_derived_metric()');
+  const js = read('frontend/src/utils/derivedMetric.js');
+  const suffixJs = need(js, /export const RATE_UNIT_SUFFIX = '([^']+)'/, 'RATE_UNIT_SUFFIX in utils/derivedMetric.js');
+  const bareJs = need(js, /export const UNITLESS_COUNTER = '([^']+)'/, 'UNITLESS_COUNTER in utils/derivedMetric.js');
+  const typeJs = need(js, /export const DERIVED_DATATYPE = (\d+)/, 'DERIVED_DATATYPE in utils/derivedMetric.js');
+  const rangeJs = need(js, /export const NUMBER_DATATYPE_RANGE = \[(\d+), (\d+)\]/, 'NUMBER_DATATYPE_RANGE in utils/derivedMetric.js');
+  const statesJs = need(js, /export const STATE_DATATYPES = \[([\d, ]+)\]/, 'STATE_DATATYPES in utils/derivedMetric.js');
+  const suffixSql = trigger && need(trigger.body, /c_hour_suffix CONSTANT text := '([^']+)'/, `enforce_derived_metric()'s rate suffix (${trigger.file})`);
+  const bareSql = trigger && need(trigger.body, /coalesce\(v_unit, '([^']+)'\) \|\| c_hour_suffix/, `enforce_derived_metric()'s unit for a counter with none (${trigger.file})`);
+  const typeSql = trigger && need(trigger.body, /IF NEW\.datatype <> (\d+) THEN/, `enforce_derived_metric()'s datatype (${trigger.file})`);
+  const rangeSql = trigger && need(trigger.body, /v_in\.datatype NOT BETWEEN (\d+) AND (\d+) THEN/, `enforce_derived_metric()'s numbers (${trigger.file})`);
+  const statesSql = trigger && need(trigger.body, /v_in\.datatype NOT IN \(([\d, ]+)\) THEN/, `enforce_derived_metric()'s states (${trigger.file})`);
+  if (suffixJs && bareJs && typeJs && rangeJs && statesJs && suffixSql && bareSql && typeSql && rangeSql && statesSql) {
+    compare('derivedUnit', `what follows a rate's unit (${trigger.file})`, suffixJs[1], suffixSql[1]);
+    compare('derivedUnit', `the unit of a counter that has none (${trigger.file})`, bareJs[1], bareSql[1]);
+    compare('derivedDatatypes', `a derived metric's datatype (${trigger.file})`, typeJs[1], typeSql[1]);
+    compare('derivedDatatypes', `the numbers a rate and a sum read (${trigger.file})`, `${rangeJs[1]}-${rangeJs[2]}`, `${rangeSql[1]}-${rangeSql[2]}`);
+    compare('derivedDatatypes', `what a time in state reads (${trigger.file})`,
+      statesJs[1].replace(/\s/g, ''), statesSql[1].replace(/\s/g, ''));
+  }
+}
+
+// 94. How far back a derived metric's current value looks, SQL and JavaScript (0282).
+// derived_window_minutes() is the one place the rule is written: an hour for a counter rate and a
+// time in state, none for a sum, which is its value at the last whole minute. The Devices drawer words
+// it (currentWords()) from derivedWindowMinutes(). A window the drawer says and the evaluator does not
+// read is a value on the page that is not the one in the alert. Compared kind by kind.
+{
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.derived_window_minutes(', '$$;', 'derived_window_minutes()');
+  const { derivedWindowMinutes } = await import(pathToFileURL(join(ROOT, 'frontend/src/utils/derivedMetric.js')).href);
+  if (fn) {
+    const sql = [...fn.body.matchAll(/WHEN '([a-z_]+)' THEN (\d+)/g)].map((m) => [m[1], Number(m[2])]);
+    if (sql.length === 0) problems.push('derivedWindow: could not find the kinds in derived_window_minutes() -- the file\'s shape changed');
+    for (const [kind, minutes] of sql) {
+      compare('derivedWindow', `the window of a ${kind} in the dashboard and in derived_window_minutes() (${fn.file})`, derivedWindowMinutes({ kind }), minutes);
+    }
+    compare('derivedWindow', 'the kinds that have a window, in the dashboard and in derived_window_minutes()',
+      ['counter_rate', 'time_in_state', 'sum'].filter((k) => derivedWindowMinutes({ kind: k }) !== null).sort().join(', '),
+      sql.map(([k]) => k).sort().join(', '));
+  }
+}
+
+// 95. What one derived_series() read may take, SQL and JavaScript (0282). The function refuses more
+// than c_max_rows devices times metrics times buckets, more than c_max_minutes minutes of input, and a
+// bucket over c_max_bucket minutes; the page checks the same arithmetic before it asks
+// (DERIVED_MAX_ROWS, DERIVED_MAX_MINUTES, derivedReadProblem()), and the rows are the page's own row
+// cap, TELEMETRY_MAX_ROWS. A bound the page holds and the function does not is a read the function
+// refuses; a bucket History offers that the function refuses is a chart of nothing.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.derived_series(', '$fn$;', 'derived_series()');
+  const js = read('frontend/src/utils/derivedMetric.js');
+  const api = read('frontend/src/api.js');
+  const rowsJs = need(js, /export const DERIVED_MAX_ROWS = (\d+)/, 'DERIVED_MAX_ROWS in utils/derivedMetric.js');
+  const minutesJs = need(js, /export const DERIVED_MAX_MINUTES = (\d+)/, 'DERIVED_MAX_MINUTES in utils/derivedMetric.js');
+  const bucketJs = need(js, /export const DERIVED_MAX_BUCKET_MINUTES = (\d+)/, 'DERIVED_MAX_BUCKET_MINUTES in utils/derivedMetric.js');
+  const cap = need(api, /^const TELEMETRY_MAX_ROWS = (\d+);$/m, 'TELEMETRY_MAX_ROWS in frontend/src/api.js');
+  const widths = need(api, /export const HISTORY_RESOLUTIONS = Object\.freeze\(\[([\s\S]*?)\]\);/, 'HISTORY_RESOLUTIONS in frontend/src/api.js');
+  if (def && rowsJs && minutesJs && bucketJs && cap && widths) {
+    const rowsSql = need(def.body, /c_max_rows\s+CONSTANT bigint := (\d+);/, `derived_series()'s row bound (${def.file})`);
+    const minutesSql = need(def.body, /c_max_minutes CONSTANT bigint := (\d+);/, `derived_series()'s minutes bound (${def.file})`);
+    const bucketSql = need(def.body, /c_max_bucket\s+CONSTANT integer := (\d+);/, `derived_series()'s widest bucket (${def.file})`);
+    if (rowsSql && minutesSql && bucketSql) {
+      compare('derivedRead', 'the rows one derived_series() call may return, in the dashboard and in the function', rowsJs[1], rowsSql[1]);
+      compare('derivedRead', "the rows one derived_series() call may return and the page's row cap, TELEMETRY_MAX_ROWS", rowsJs[1], cap[1]);
+      compare('derivedRead', 'the minutes of input one derived_series() call may read, in the dashboard and in the function', minutesJs[1], minutesSql[1]);
+      compare('derivedRead', 'the widest bucket derived_series() takes, in minutes, in the dashboard and in the function', bucketJs[1], bucketSql[1]);
+      const wide = [...widths[1].matchAll(/minutes: (?:TELEMETRY_RESOLUTIONS\['\w+'\]\.bucketMinutes|(\d+))/g)].map((m) => m[1]).filter(Boolean).map(Number);
+      const refused = wide.filter((minutes) => minutes > Number(bucketSql[1]));
+      if (refused.length) problems.push(`derivedRead: History offers ${refused.join(', ')}-minute buckets, which derived_series() refuses`);
+      else ok.push(`derivedRead: derived_series() takes each of History's literal bucket widths (${wide.join(', ')} minutes) and the rollups'`);
+    }
+  }
+}
+
+// 96. What History reads of a derived metric, SQL and JavaScript (0282). derived_series() takes the
+// arguments readDerivedSeries() sends and returns the columns it documents and chartSeries() reads;
+// derived_current() takes what readDerivedCurrent() sends and returns what the Devices drawer reads. A
+// column the page reads and the function does not return is a chart or a line of nothing; an argument
+// one side names is a read that fails.
+{
+  const series = lastDefinition('CREATE OR REPLACE FUNCTION public.derived_series(', '$fn$;', 'derived_series()');
+  const current = lastDefinition('CREATE OR REPLACE FUNCTION public.derived_current(', '$fn$;', 'derived_current()');
+  const api = read('frontend/src/api.js');
+  const chart = need(read('frontend/src/utils/history.js'), /export function chartSeries\(([\s\S]*?)\n\}\n/, 'chartSeries() in frontend/src/utils/history.js');
+  const drawer = read('frontend/src/components/common/DeviceDerivedValues.jsx');
+  const seriesCall = need(api, /supabase\.rpc\('derived_series', \{([\s\S]*?)\n\s*\}\)/, "readDerivedSeries()'s rpc call in frontend/src/api.js");
+  const currentCall = need(api, /supabase\.rpc\('derived_current', \{([\s\S]*?)\n\s*\}\)/, "readDerivedCurrent()'s rpc call in frontend/src/api.js");
+  const seriesDoc = need(api, /@returns \{Promise<Array<\{([^}]*)\}>>\}\s*\*\/\s*readDerivedSeries: async/, "readDerivedSeries()'s @returns in frontend/src/api.js");
+  const currentDoc = need(api, /@returns \{Promise<Array<\{([^}]*)\}>>\}\s*\*\/\s*readDerivedCurrent: async/, "readDerivedCurrent()'s @returns in frontend/src/api.js");
+  const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort();
+  if (series && current && seriesCall && currentCall && seriesDoc && currentDoc) {
+    const sq = need(series.body, /derived_series\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${series.file}`);
+    const cq = need(current.body, /derived_current\(([^)]*)\)\s*RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${current.file}`);
+    if (sq && cq) {
+      compare('derivedColumns', 'the arguments readDerivedSeries() sends and derived_series() takes',
+        names(seriesCall[1], /^\s*(\w+):/gm).join(', '), names(sq[1], /^\s*(\w+) [a-z]/gm).join(', '));
+      compare('derivedColumns', 'the arguments readDerivedCurrent() sends and derived_current() takes',
+        names(currentCall[1], /^\s*(\w+):/gm).join(', '), names(cq[1], /(\w+) text\[\]/g).join(', '));
+      const seriesColumns = names(sq[2], /^\s*(\w+) [a-z]/gm);
+      const currentColumns = names(cq[2], /^\s*(\w+) [a-z]/gm);
+      compare('derivedColumns', 'the columns readDerivedSeries() documents and derived_series() returns', names(seriesDoc[1], /(\w+): /g).join(', '), seriesColumns.join(', '));
+      compare('derivedColumns', 'the columns readDerivedCurrent() documents and derived_current() returns', names(currentDoc[1], /(\w+): /g).join(', '), currentColumns.join(', '));
+      // The columns the chart reads of any row it is given, and those a row of derived_series() lacks by design.
+      const read = new Set([...chart[1].matchAll(/\br\.(\w+)/g)].map((m) => m[1]));
+      const lacks = ['last_string', 'last_bool'];
+      const missing = [...read].filter((c) => !seriesColumns.includes(c) && !lacks.includes(c));
+      if (missing.length) problems.push(`derivedColumns: chartSeries() reads ${missing.join(', ')}, which derived_series() does not return`);
+      else ok.push(`derivedColumns: chartSeries() reads ${[...read].sort().join(', ')}; derived_series() returns all but ${lacks.join(' and ')}, which a number has none of`);
+      const drawn = new Set([...drawer.matchAll(/\brow\.(\w+)/g)].map((m) => m[1]));
+      const absent = [...drawn].filter((c) => !currentColumns.includes(c));
+      if (absent.length) problems.push(`derivedColumns: the Devices drawer reads ${absent.join(', ')}, which derived_current() does not return`);
+      else ok.push(`derivedColumns: the Devices drawer reads ${[...drawn].sort().join(', ')}, which derived_current() returns`);
+    }
+  }
+}
+
+// 93. The finding for a reading under a derived metric's name, Python and JavaScript. Ingestion
+// records code and detail (conformance.py's DERIVED_NAME_CODE and DERIVED_NAME_DETAIL); Validate
+// Payload reports the same finding from the names the catalogue holds (DERIVED_NAME in
+// utils/payloadConformance.js). A dialog saying other words than the Audit Trail row it predicts
+// describes a finding nobody will ever see recorded. The fixture holds the two to one answer for the
+// cases it lists; this holds the words themselves, which a case can leave stale.
+{
+  const py = read('ingestion/conformance.py');
+  const js = read('frontend/src/utils/payloadConformance.js');
+  const codePy = need(py, /^DERIVED_NAME_CODE = "([a-z_]+)"$/m, 'DERIVED_NAME_CODE in conformance.py');
+  const detailPy = need(py, /^DERIVED_NAME_DETAIL = \(\s*"([^"]+)"\s*\)$/m, 'DERIVED_NAME_DETAIL in conformance.py');
+  const pairJs = need(js, /^const DERIVED_NAME = \['([a-z_]+)', '([^']+)'\]$/m, 'DERIVED_NAME in utils/payloadConformance.js');
+  if (codePy && detailPy && pairJs) {
+    compare('derivedNameFinding', 'the code of the finding for a derived name (conformance.py)', pairJs[1], codePy[1]);
+    compare('derivedNameFinding', 'the words of the finding for a derived name (conformance.py)', pairJs[2], detailPy[1]);
   }
 }
 

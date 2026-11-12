@@ -397,15 +397,16 @@ COMMENT ON FUNCTION public.notification_channel_is_configured(text) IS
 -- By the writer, which the fingerprint names. Grafana repeats a firing alert every repeat_interval
 -- (12h in grafana/provisioning/alerting/policies.yaml; mirror check 57 holds the two together), and
 -- the webhook stamps each repeat. The margin, one hour, covers a repeat that waits for its group's
--- next flush or for the webhook to answer again.
+-- next flush or for the webhook to answer again. Aber's evaluator stamps each minute.
 CREATE OR REPLACE FUNCTION public.platform_alert_confirmation_window(p_fingerprint text) RETURNS interval
     LANGUAGE sql IMMUTABLE
     SET search_path TO 'public'
     AS $$
   SELECT CASE
-    -- Aber's own evaluator stamps on every run and names its fingerprints condition:<...>. Its run
-    -- interval plus the margin goes here when it is built; until then such a row is not reminded.
-    WHEN starts_with(p_fingerprint, 'condition:') THEN NULL::interval
+    -- Aber's own evaluator (0271) stamps on every run and names its fingerprints condition:<...>.
+    -- It runs every minute; the window is that interval and a margin of four, so a late or slow run
+    -- still confirms. Mirror check 82 holds the two together.
+    WHEN starts_with(p_fingerprint, 'condition:') THEN interval '5 minutes'
     -- Grafana's repeat_interval, then the margin.
     ELSE interval '12 hours' + interval '1 hour'
   END;
@@ -415,8 +416,8 @@ ALTER FUNCTION public.platform_alert_confirmation_window(text) OWNER TO postgres
 
 COMMENT ON FUNCTION public.platform_alert_confirmation_window(text) IS
   'How long a writer''s last_confirmed_at stamp holds for a fingerprint: Grafana''s repeat_interval '
-  '(12 hours) plus a one-hour margin; NULL, no reminder, for a condition: fingerprint until its '
-  'evaluator states its interval (0247).';
+  '(12 hours) plus a one-hour margin; five minutes for a condition: fingerprint, the evaluator''s '
+  'one-minute interval (0271) plus a margin (0247).';
 
 CREATE OR REPLACE FUNCTION public.platform_alert_is_confirmed(p_alert public.platform_alerts) RETURNS boolean
     LANGUAGE sql STABLE
@@ -908,8 +909,8 @@ BEGIN
 
   -- The windows, and a decision about an occurrence that is not there.
   IF public.platform_alert_confirmation_window('grafana-fingerprint') <> interval '13 hours'
-     OR public.platform_alert_confirmation_window('condition:x') IS NOT NULL THEN
-    RAISE EXCEPTION '0247: platform_alert_confirmation_window() answers other than 13 hours for Grafana and none for a condition';
+     OR public.platform_alert_confirmation_window('condition:x') <> interval '5 minutes' THEN
+    RAISE EXCEPTION '0247: platform_alert_confirmation_window() answers other than 13 hours for Grafana and 5 minutes for a condition';
   END IF;
   IF public.platform_alert_send_decision('00000000-0000-4000-8000-000000000000', 'firing', 'webhook') <> 'drop' THEN
     RAISE EXCEPTION '0247: platform_alert_send_decision() does not drop a message about an occurrence that is gone';

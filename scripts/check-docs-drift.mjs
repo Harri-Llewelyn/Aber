@@ -1175,7 +1175,11 @@ function edgeFunctionNames() {
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71). 0226 adds a capture or playback job that failed in the last hour, one stuck past its own limits, and a playback worker silent while a playback waits, which the Grafana rules read (check 191)',
-    'public.platform_alert_send_decision': '0250 holds a firing message or a reminder while a suppression window (0240) covers its alert, in the place 0247 marked for it, so 0247 stands alone where 0240 is not applied',
+    'public.platform_alert_send_decision': '0250 holds a firing message or a reminder while a suppression window (0240) covers its alert, in the place 0247 marked for it, so 0247 stands alone where 0240 is not applied. 0262 asks notification_channel_reaches() whether the channel may carry the alert, where 0247 and 0250 named the webhook and a machine identity',
+    'public.notification_channel_is_configured': '0262 adds the email arm, which is configured once a role is told; 0247 declares the webhook alone, so it stands where email is not applied',
+    'public.queue_platform_alert_notifications': '0262 queues an email beside the webhook when the email route carries the alert; 0247 queues the webhook alone',
+    'public.queue_platform_alert_reminders': '0262 reminds only on a channel that still carries the alert, through notification_channel_reaches(), where 0247 named the webhook and a machine identity',
+    'public.notification_setting_guard': '0262 adds the two email settings, and makes the guard SECURITY DEFINER because no API role may run its helpers and Postgres checks EXECUTE on every function an expression names; 0248 declares the webhook settings alone',
     'public.refresh_directory_liveness': '0223 takes Prometheus\'s address from directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares first, so the baseline\'s copy never names it during a replay. It also counts content that is not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the baseline raised on such content without firing the next probe, and left every scraped service at its last ACTIVE when a probe failed',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
@@ -1209,12 +1213,17 @@ function edgeFunctionNames() {
     'public.keep_gateway_credential': '0196 keeps the copy of a Third-party gateway\'s password too, so an Administrator can show it again; 0164 kept a Host or Simulated gateway\'s alone',
     'public.issue_gateway_enrollment_token': '0196 refuses a Third-party gateway as it refuses a Host one, because a bundle enrols Aber\'s gateway appliance; the baseline refused Host alone',
     'public.gateway_has_broker_credential': '0196 counts a Third-party gateway\'s CREDENTIAL_ISSUED row as a Host gateway\'s, so archiving it disables its account; the baseline counted Host alone',
+    'public.consume_gateway_enrollment_token': '0252 refuses a gateway that is not Remote, with the no rows an archived one gets, so a token issued before a change of type cannot enrol an appliance as the new type; the baseline checked archiving alone',
+    'public.peek_gateway_enrollment_token': '0252 refuses a gateway that is not Remote, as the consumer it is the read-only twin of now does, so the installer is served only for a token enrolment would redeem',
     'public.proposable_columns': '0202 dropped cells.grafana_url from the cell lane when its values moved to Attached Links. It declares it as the baseline now does, in its final form, since 0219 drops the column, and restates 0176\'s search_path pin, which the redeclaration would otherwise clear',
     'public.audit_trail_user_ids_matching': '0203 matches a person\'s display name as well as their email, since the Audit Trail labels a person\'s lane with the name; the baseline matches the email alone. It restates 0176\'s search_path pin',
     'public.end_my_session': '0211 writes a SESSIONS_ENDED row in the caller\'s lane, with the session as list_my_sessions() returned it, in the delete\'s transaction; 0206 wrote none',
     'public.end_person_sessions': '0212 refuses your own sessions by naming Sign Out of All Other Sessions on the Profile page\'s Sessions tab, since Sign Out ends only the browser in use; 0207 named Sign Out. Nothing else changes',
     'public.set_display_name': '0213 keeps the row when it clears the name of a person who has a picture, since the picture is its owner\'s alone to clear; 0203 deleted the row, which would have let an Administrator remove another person\'s picture',
     'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
+    'public.machine_condition_readings': '0283 reads a pair on a derived metric from derived_current(), which gives it a value over the last hour or at the last whole minute; 0270 reads telemetry_latest, which holds nothing under a name no device publishes. The columns are 0270\'s, since a replay runs 0270 again first. A measured metric is read as it was',
+    'public.evaluate_automations': '0283 words the value and the threshold in the summary of an alert it raises through automation_value_words() and automation_threshold_words(): a derived metric\'s value rounded to three decimals with its window, a time in state as a percentage, a measured one as it printed; 0271 printed the value as the evaluator read it. Nothing else changes, and the comparison, the threshold and the values the row keeps are the numbers they were',
+    'public.machine_condition_rows': '0283 says the window in the detail of a derived metric ("is 4.2 over the last hour, below 5") and rounds its value to three decimals; 0270 words every value as it was read',
     'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture, and names the person who started a capture or playback job for the roles that read the jobs; 0203 had no such row and no such arm',
   };
 
@@ -3862,6 +3871,163 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 300. The dispatcher's email reads the relay GoTrue reads, and one place says so. The functions
+// Deployment sets SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_ADMIN_EMAIL and SMTP_SENDER_NAME from
+// supabaseAuth.smtp's own values, SMTP_PASS from the same optional Secret key GoTrue's GOTRUE_SMTP_PASS
+// reads, and SMTP_CA_PEM from supabaseFunctions.smtpCaCert; main/index.ts forwards exactly those to
+// notification-dispatch and to no other function (a relay's password is nothing else's); and email.ts
+// reads exactly those. A name in one place and not another reads as a relay that is never set, on a
+// site that sends password-reset mail and is told that email cannot be sent.
+// -------------------------------------------------------------------------------------------------
+{
+  const fnChart = read('deploy/helm/aber/templates/supabase/functions.yaml');
+  const authChart = read('deploy/helm/aber/templates/supabase/auth.yaml');
+  const registry = read('supabase/functions/main/index.ts');
+  const email = read('supabase/functions/notification-dispatch/email.ts');
+  const problems300 = [];
+
+  const NAMES = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_ADMIN_EMAIL', 'SMTP_SENDER_NAME', 'SMTP_CA_PEM'];
+  const block = registry.match(/const FUNCTION_REGISTRY[^{]*\{([\s\S]*?)\n\};/)?.[1] ?? '';
+  const holders = [...block.matchAll(/^\s*"([a-z0-9-]+)"\s*:\s*\[([^\]]*)\]/gm)]
+    .filter((m) => NAMES.some((n) => m[2].includes(`"${n}"`))).map((m) => m[1]);
+  if (holders.join() !== 'notification-dispatch') {
+    problems300.push(`main/index.ts forwards the SMTP_ variables to ${holders.join(', ') || 'no function'}; notification-dispatch alone may hold them`);
+  }
+  const entry = block.match(/"notification-dispatch":\s*\[([\s\S]*?)\]/)?.[1] ?? '';
+  const forwarded = NAMES.filter((n) => entry.includes(`"${n}"`));
+  const read_ = new Set([...email.matchAll(/env\("(SMTP_[A-Z_]+)"\)/g)].map((m) => m[1]));
+  for (const name of NAMES) {
+    if (!forwarded.includes(name)) problems300.push(`main/index.ts does not forward ${name} to notification-dispatch`);
+    if (!read_.has(name)) problems300.push(`notification-dispatch/email.ts does not read ${name}`);
+    if (!new RegExp(`- name: ${name}\\n|"name" "${name}"`).test(fnChart)) problems300.push(`templates/supabase/functions.yaml does not set ${name}`);
+  }
+  for (const name of read_) if (!NAMES.includes(name)) problems300.push(`email.ts reads ${name}, which this check does not know and the chart may not set`);
+  // One configuration: each from the value or Secret key GoTrue reads, so the two cannot name different relays.
+  for (const [name, gotrue] of [['SMTP_HOST', 'host'], ['SMTP_PORT', 'port'], ['SMTP_USER', 'user'], ['SMTP_ADMIN_EMAIL', 'from'], ['SMTP_SENDER_NAME', 'senderName']]) {
+    const at = fnChart.match(new RegExp(`- name: ${name}\\n\\s+value: \\{\\{ \\.Values\\.supabaseAuth\\.smtp\\.(\\w+)`))?.[1];
+    if (at !== gotrue) problems300.push(`the functions Deployment sets ${name} from supabaseAuth.smtp.${at ?? '(not found)'}, not .${gotrue} as GoTrue reads it`);
+  }
+  const passKey = fnChart.match(/"name" "SMTP_PASS" "secretName" \$secretName "key" "(\w+)"/)?.[1];
+  const gotruePass = authChart.match(/- name: GOTRUE_SMTP_PASS\n\s+valueFrom:\n\s+secretKeyRef:\n\s+name: [^\n]+\n\s+key: (\w+)/)?.[1];
+  if (!passKey || passKey !== gotruePass) problems300.push(`SMTP_PASS reads the Secret key ${passKey ?? '(not found)'}, and GOTRUE_SMTP_PASS reads ${gotruePass ?? '(not found)'}`);
+  if (!/include "aber\.optionalSecretEnv" \(dict "name" "SMTP_PASS"/.test(fnChart)) {
+    problems300.push('SMTP_PASS is not read through aber.optionalSecretEnv, so an external Secret without the key would stop the functions pod');
+  }
+  if (!/with \.Values\.supabaseFunctions\.smtpCaCert \}\}\s+- name: SMTP_CA_PEM/.test(fnChart)) {
+    problems300.push('SMTP_CA_PEM is not set from supabaseFunctions.smtpCaCert, only when it is given');
+  }
+  if (!/^ {2}smtpCaCert: ""$/m.test(CHART_VALUES)) problems300.push('values.yaml has no supabaseFunctions.smtpCaCert, empty by default');
+  if (problems300.length) {
+    fail("the dispatcher's email does not read the relay GoTrue reads:\n" + problems300.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`notification-dispatch alone holds the ${NAMES.length} SMTP_ variables, set from supabaseAuth.smtp and GoTrue's own Secret key, and email.ts reads exactly those`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 301. The upgrade note for email says what a site must do, as the chart has it: the Settings tab
+// that sets it up, the values it reads and the NetworkPolicy the functions pod needs for the relay.
+// A note that names a value the chart does not have sends an administrator looking for it.
+// -------------------------------------------------------------------------------------------------
+{
+  const upgrading = read('help/site/upgrading.md');
+  const note = upgrading.match(/### From 1\.8\.0, alerts can be emailed\n([\s\S]*?)\n## /)?.[1] ?? '';
+  const problems301 = [];
+  if (!note) problems301.push("help/site/upgrading.md has no '### From 1.8.0, alerts can be emailed' section");
+  for (const said of ['Settings › Notifications', 'Set up email', 'Email a test', '`supabaseAuth.smtp`', '`secrets.smtpPassword`',
+    '`supabaseFunctions.smtpCaCert`', '`networkPolicy.extraEgress`', 'supabase-functions', 'Email starts off']) {
+    if (note && !note.includes(said)) problems301.push(`the email note does not say ${said}`);
+  }
+  for (const value of ['smtpCaCert', 'smtpPassword']) {
+    if (!CHART_VALUES.includes(`${value}:`)) problems301.push(`values.yaml has no ${value}, which the email note names`);
+  }
+  const labels = read('frontend/src/components/tabs/NotificationsPanel.jsx');
+  for (const button of ['Set up email', 'Email a test']) {
+    if (!labels.includes(button)) problems301.push(`the Notifications panel has no "${button}" button, which the email note names`);
+  }
+  if (problems301.length) {
+    fail("the email upgrade note and the chart or the page disagree:\n" + problems301.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass("the upgrade note for email names the tab, both buttons, the values it reads and the functions pod's NetworkPolicy, all of which exist");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 302. The 0263 section says what bounds the SMTP client as the code holds it: a step's time, the
+// whole exchange's, and the longest reply it reads. A reader sizing a relay's timeout, or a reviewer
+// checking the pass's budget, would act on a number that is not the code's.
+// -------------------------------------------------------------------------------------------------
+{
+  const smtp = read('supabase/functions/notification-dispatch/smtp.ts');
+  const section = read('supabase/README.md').match(/### An email goes to the people who hold the roles it names \(0263\)([\s\S]*?)\n### /)?.[1] ?? '';
+  const dispatch = read('supabase/functions/notification-dispatch/index.ts');
+  const email = read('supabase/functions/notification-dispatch/email.ts');
+  const problems302 = [];
+  const grab = (src, re, what) => {
+    const m = src.match(re);
+    if (!m) problems302.push(`could not read ${what}`);
+    return m ? m[1] : null;
+  };
+  const num = (v) => (v === null ? null : Number(v.replace(/_/g, '')));
+  const step = num(grab(email, /timeoutMs: ([\d_]+),/, "the step limit in email.ts's send"));
+  const total = num(grab(email, /totalMs: ([\d_]+),/, "the whole-exchange limit in email.ts's send"));
+  const line = num(grab(smtp, /const MAX_REPLY_LINE = ([\d_]+);/, 'MAX_REPLY_LINE in smtp.ts'));
+  const lines = num(grab(smtp, /const MAX_REPLY_LINES = ([\d_]+);/, 'MAX_REPLY_LINES in smtp.ts'));
+  const budget = num(grab(dispatch, /const PASS_BUDGET_MS = ([\d_]+);/, "the pass's budget in index.ts"));
+  const flat = section.replace(/\s+/g, ' ');
+  if (!section) problems302.push("supabase/README.md has no '### An email goes to the people who hold the roles it names (0263)' section");
+  else {
+    for (const [value, said] of [
+      [step, `A step has ${step === null ? '?' : step / 1000} seconds and the whole exchange ${total === null ? '?' : total / 1000}`],
+      [line, `A reply of more than ${line === null ? '?' : line.toLocaleString('en-US')} characters on a line`],
+      [lines, `or of more than ${lines} lines`],
+    ]) {
+      if (value !== null && !flat.includes(said)) problems302.push(`the 0263 section does not say "${said}"`);
+    }
+  }
+  if (step !== null && total !== null && budget !== null && (budget + total > 60_000 || total < step)) {
+    problems302.push(`the pass starts a row up to ${budget} ms in and a send takes up to ${total} ms, over the runtime's 60 s, or the whole is shorter than a step`);
+  }
+  if (problems302.length) {
+    fail("the 0263 section's bounds are not the SMTP client's:\n" + problems302.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the 0263 section holds the SMTP client's bounds: ${step / 1000} s a step, ${total / 1000} s in all, ${line.toLocaleString('en-US')}-character and ${lines}-line replies, inside the pass's ${budget / 1000} s budget`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 303. The email surface is named alike where it is declared and where it is called: the test
+// email's RPC in the migrations, api.js and the OpenAPI document, and the dispatcher's GET in
+// index.ts, api.js and the OpenAPI document. A rename in one place leaves a button that calls
+// nothing, or a page that cannot learn whether the site can send.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const openapi = read('docs/openapi.yaml');
+  const index = read('supabase/functions/notification-dispatch/index.ts');
+  const problems303 = [];
+  const migrations = readdirSync(join(REPO, 'supabase/migrations')).filter((n) => n.endsWith('.sql')).sort()
+    .map((n) => read(`supabase/migrations/${n}`)).join('\n');
+  const declared = (name) => migrations.includes(`CREATE OR REPLACE FUNCTION public.${name}(`);
+  for (const name of ['queue_test_email_notification', 'notification_email_recipients', 'record_notification_email_delivery']) {
+    if (!declared(name)) problems303.push(`no applied migration declares public.${name}()`);
+  }
+  if (!api.includes(`supabase.rpc('queue_test_email_notification')`)) problems303.push('api.js does not call queue_test_email_notification');
+  if (!openapi.includes('/rest/v1/rpc/queue_test_email_notification:')) problems303.push('docs/openapi.yaml does not describe /rest/v1/rpc/queue_test_email_notification');
+  if (!/req\.method === "GET"\) return await emailStatus\(req\)/.test(index)) problems303.push('notification-dispatch/index.ts does not answer a GET with the relay status');
+  if (!api.includes('/functions/v1/notification-dispatch`')) problems303.push('api.js does not read the dispatcher\'s relay status');
+  if (!/\/functions\/v1\/notification-dispatch:\n {4}post:[\s\S]*?\n {4}get:\n/.test(openapi)) problems303.push("docs/openapi.yaml does not describe the dispatcher's GET beside its POST");
+  for (const name of ['notification_email_recipients', 'record_notification_email_delivery']) {
+    if (!index.includes(`"${name}"`)) problems303.push(`notification-dispatch/index.ts does not call ${name}`);
+  }
+  if (problems303.length) {
+    fail("the email surface is named differently where it is declared and where it is called:\n" + problems303.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass("the test email's RPC, the dispatcher's two RPCs and its GET are declared, called and documented under one name each");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 193. Every list filter is the shared one, as frontend/README.md says. A `<select>` in a page's
 // toolbar (`.filter-bar`, the Filters panel inside it included) takes one value, which is what the
 // shared FilterChecklist replaced; System › Logs' Service and Level are the two left, each a value
@@ -4674,6 +4840,218 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 311. The Derived tab's docs say how many inputs a sum takes as utils/derivedMetric.js holds it
+// (DERIVED_MAX_INPUTS, which mirror check 80 holds to 0267's shape function). A page saying another
+// limit sends a person to build a sum the dialog will not let them finish, or tells them they may
+// not.
+// -------------------------------------------------------------------------------------------------
+{
+  const max = Number(read('frontend/src/utils/derivedMetric.js').match(/^export const DERIVED_MAX_INPUTS = (\d+)/m)?.[1]);
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const problems311 = [];
+  if (!Number.isInteger(max) || !words[max]) problems311.push('could not read DERIVED_MAX_INPUTS out of frontend/src/utils/derivedMetric.js');
+  else {
+    const claims = [
+      ['help/pages/metrics.md', `adds or subtracts two to ${words[max]} numeric metrics`],
+      ['supabase/README.md', `the signed sum of two to ${words[max]} inputs`],
+    ];
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems311.push(`${file} does not say "${said}"`);
+  }
+  if (problems311.length) {
+    fail('the docs name the most inputs a sum takes otherwise than DERIVED_MAX_INPUTS holds it:\n' +
+      problems311.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Metrics help and the 0267 section say a sum takes two to ${words[max]} inputs, as DERIVED_MAX_INPUTS holds`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 312. The Metrics help names the page's tabs as navigation.jsx lists them (METRICS_TABS): how many
+// there are, and each by its label, in order. A tab the help leaves out is one nobody is told about;
+// a label it misspells is one nobody finds.
+// -------------------------------------------------------------------------------------------------
+{
+  const block = read('frontend/src/navigation.jsx').match(/^export const METRICS_TABS = \[([\s\S]*?)\n\]/m)?.[1] ?? '';
+  const labels = [...block.matchAll(/label: '([^']+)'/g)].map((m) => m[1]);
+  const numbers = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const problems312 = [];
+  if (labels.length < 2) problems312.push('could not read METRICS_TABS out of frontend/src/navigation.jsx');
+  else {
+    const bold = labels.map((l) => `**${l}**`);
+    const said = `${bold.slice(0, -1).join(', ')} and ${bold[bold.length - 1]} are the ${numbers[labels.length]} tabs of the page's one card`;
+    if (!read('help/pages/metrics.md').includes(said)) problems312.push(`help/pages/metrics.md does not say "${said}"`);
+  }
+  if (problems312.length) {
+    fail('the Metrics help names the page\'s tabs otherwise than navigation.jsx lists them:\n' +
+      problems312.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Metrics help names the page's ${labels.length} tabs, ${labels.join(', ')}, as METRICS_TABS lists them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 313. The Metrics help and the 0267 section give a rate's unit as the dialog and the trigger make it:
+// the counter's unit followed by RATE_UNIT_SUFFIX, and UNITLESS_COUNTER with the suffix for a counter
+// with none (mirror check 81 holds both to enforce_derived_metric()). A page naming another unit
+// tells a person the wrong thing about a row they cannot edit.
+// -------------------------------------------------------------------------------------------------
+{
+  const js = read('frontend/src/utils/derivedMetric.js');
+  const suffix = js.match(/^export const RATE_UNIT_SUFFIX = '([^']+)'/m)?.[1];
+  const bare = js.match(/^export const UNITLESS_COUNTER = '([^']+)'/m)?.[1];
+  const problems313 = [];
+  if (!suffix || !bare) problems313.push('could not read RATE_UNIT_SUFFIX and UNITLESS_COUNTER out of frontend/src/utils/derivedMetric.js');
+  else {
+    const claims = [
+      ['help/pages/metrics.md', `or \`${bare}${suffix}\` for a counter with none`],
+      ['supabase/README.md', `\`${bare}${suffix}\` for an input with none`],
+    ];
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems313.push(`${file} does not say "${said}"`);
+  }
+  if (problems313.length) {
+    fail('the docs give a derived rate\'s unit otherwise than the dialog and the trigger make it:\n' +
+      problems313.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Metrics help and the 0267 section give a counter with no unit ${bare}${suffix}, as the dialog and enforce_derived_metric() do`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 314. Every kind of derived metric DERIVATION_KINDS offers is written out as its definition in the
+// 0267 section, the OpenAPI description of the column and the column's own comment. A kind named in
+// the dialog and in none of them is one an API caller cannot learn the shape of.
+// -------------------------------------------------------------------------------------------------
+{
+  const block = read('frontend/src/utils/derivedMetric.js').match(/^export const DERIVATION_KINDS = \[([\s\S]*?)\n\]/m)?.[1] ?? '';
+  const kinds = [...block.matchAll(/id: '([a-z_]+)'/g)].map((m) => m[1]);
+  const problems314 = [];
+  if (kinds.length < 3) problems314.push('could not read DERIVATION_KINDS out of frontend/src/utils/derivedMetric.js');
+  else {
+    const files = ['supabase/README.md', 'docs/openapi.yaml', 'supabase/migrations/0267_a_derived_metric_is_a_catalogue_row.sql'];
+    for (const file of files) {
+      const text = read(file);
+      for (const kind of kinds) if (!text.includes(`"kind": "${kind}"`)) problems314.push(`${file} does not write out {"kind": "${kind}", ...}`);
+    }
+  }
+  if (problems314.length) {
+    fail('a kind of derived metric is not written out where its shape is documented:\n' +
+      problems314.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the ${kinds.length} kinds of derived metric, ${kinds.join(', ')}, are written out in the 0267 section, the OpenAPI description and the column comment`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 315. docs/vocabularies.md's derived-series paragraph points at the 0267 section by its heading, and
+// no longer says nothing enforces the rule it states: the save refuses a semantic id and a standard on
+// a derived metric. A stale "no check enforces this" tells whoever registers one that the rule is
+// theirs to keep.
+// -------------------------------------------------------------------------------------------------
+{
+  const heading = 'A derived metric is a catalogue row (0267)';
+  const slug = heading.toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/ /g, '-');
+  const problems315 = [];
+  if (!read('supabase/README.md').includes(`\n### ${heading}\n`)) problems315.push(`supabase/README.md has no section "${heading}"`);
+  const vocab = read('docs/vocabularies.md').replace(/\s+/g, ' ');
+  if (!vocab.includes(`](../supabase/README.md#${slug})`)) problems315.push(`docs/vocabularies.md does not link to supabase/README.md#${slug}`);
+  if (/no check enforces this/i.test(vocab)) problems315.push('docs/vocabularies.md still says no check enforces the derived-series rule, which the save checks of 0267 now do');
+  if (problems315.length) {
+    fail('the derived-series paragraph is out of step with the save checks:\n' +
+      problems315.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`docs/vocabularies.md's derived-series paragraph links to the 0267 section (#${slug}) and says the save checks enforce its rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 335. The count of readings dropped under a derived name is one series, named as the daemon exports
+// it. metrics.py maps the flat counter ingestion.py raises to a series and gives it a help text; the
+// ingestion README and the 0267 section name that series. A README naming another is a query that
+// returns nothing, and a counter with no help is one a scraper cannot read the meaning of.
+// -------------------------------------------------------------------------------------------------
+{
+  const metrics = read('ingestion/metrics.py');
+  const flat = 'metrics_dropped_derived_name';
+  const series = metrics.match(new RegExp(`"${flat}": \\("([a-z_]+)", \\{\\}\\)`))?.[1];
+  const problems335 = [];
+  if (!series) problems335.push(`could not read the series of ${flat} out of ingestion/metrics.py`);
+  else {
+    if (!metrics.includes(`"${series}":\n`)) problems335.push(`ingestion/metrics.py gives ${series} no help text`);
+    if (!/count\("metrics_dropped_derived_name"/.test(read('ingestion/ingestion.py'))) problems335.push(`ingestion/ingestion.py never counts ${flat}`);
+    for (const file of ['ingestion/README.md', 'supabase/README.md']) {
+      if (!read(file).includes(`\`${series}\``)) problems335.push(`${file} does not name \`${series}\``);
+    }
+  }
+  if (problems335.length) {
+    fail('the docs and the exporter name the derived-name drop\'s counter otherwise than metrics.py:\n' +
+      problems335.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`${series} is mapped, helped, counted and named in the ingestion README and the 0267 section`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 336. How soon a derived metric added on the Metrics page is dropped under. Ingestion reads the
+// names through the UNS bridge's cache, so the answer is that cache's freshness: UNS_CONTEXT_TTL_SECONDS,
+// which uns_publish.py defaults and the chart sets (ingestion.unsContextTtlSeconds). The ingestion
+// README and the 0267 section say the figure, and the README's variable table too; a page naming
+// another tells an operator how long readings under a new name are still stored, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const inCode = read('ingestion/uns_publish.py').match(/^UNS_CONTEXT_TTL_SECONDS = int\(os\.getenv\("UNS_CONTEXT_TTL_SECONDS", "(\d+)"\)\)$/m)?.[1];
+  const inChart = read('deploy/helm/aber/values.yaml').match(/^ {2}unsContextTtlSeconds: (\d+)$/m)?.[1];
+  const problems336 = [];
+  if (!inCode || !inChart) problems336.push('could not read the default out of ingestion/uns_publish.py and the chart\'s unsContextTtlSeconds');
+  else {
+    if (inCode !== inChart) problems336.push(`uns_publish.py defaults UNS_CONTEXT_TTL_SECONDS to ${inCode} and the chart to ${inChart}`);
+    const claims = [
+      ['ingestion/README.md', `**within \`UNS_CONTEXT_TTL_SECONDS\`**, ${inCode} seconds by default`],
+      ['ingestion/README.md', `| \`UNS_CONTEXT_TTL_SECONDS\` | \`${inCode}\` |`],
+      ['supabase/README.md', `within \`UNS_CONTEXT_TTL_SECONDS\`, ${inCode} seconds by default`],
+    ];
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems336.push(`${file} does not say "${said}"`);
+  }
+  if (problems336.length) {
+    fail('the docs say how soon a new derived metric is dropped under otherwise than the cache\'s freshness:\n' +
+      problems336.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the ingestion README and the 0267 section say a new derived metric is dropped under within ${inCode} seconds, as UNS_CONTEXT_TTL_SECONDS defaults`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 337. The finding for a derived name is written up as conformance.py codes it, and the pages that
+// said nobody publishes a derived metric say what happens when one does. The code is named in the
+// ingestion README and the 0267 section; the Devices and Metrics help each say the reading is
+// dropped; and the 0267 section no longer says ingestion is as it was.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('ingestion/conformance.py').match(/^DERIVED_NAME_CODE = "([a-z_]+)"$/m)?.[1];
+  const problems337 = [];
+  if (!code) problems337.push('could not read DERIVED_NAME_CODE out of ingestion/conformance.py');
+  else {
+    for (const file of ['ingestion/README.md', 'supabase/README.md']) {
+      if (!read(file).includes(`\`${code}\``)) problems337.push(`${file} does not name the finding's code \`${code}\``);
+    }
+  }
+  const claims = [
+    ['help/pages/devices.md', 'a reading published under the name of a derived metric is dropped'],
+    ['help/pages/metrics.md', 'A reading a device publishes under its name is dropped'],
+    ['supabase/README.md', '**Ingestion enforces the other direction.**'],
+  ];
+  for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems337.push(`${file} does not say "${said}"`);
+  if (/The AAS export and ingestion are as they were/.test(read('supabase/README.md').replace(/\s+/g, ' '))) {
+    problems337.push('supabase/README.md still says ingestion is as it was, which the derived-name drop changed');
+  }
+  if (problems337.length) {
+    fail('the docs say what a derived name\'s reading meets otherwise than ingestion does:\n' +
+      problems337.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the finding \`${code}\` is named in the ingestion README and the 0267 section, and the Devices and Metrics help say the reading is dropped`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 14. The product does not call itself Factory+.
 //
 // Factory+ is a real external framework this stack implements, and every reference to it as a
@@ -5175,6 +5553,552 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 290. docs/automations.md documents the automations JSON Schema as it is: every key of an
+// automation, of the threshold trigger and of the alert action, with whether it is required, and
+// no other; the limits the schema states; and the path the dashboard serves it at.
+// -------------------------------------------------------------------------------------------------
+{
+  const DOC = 'docs/automations.md';
+  const SCHEMA_FILE = 'frontend/public/json-schema/automations.schema.json';
+  const schema = JSON.parse(read(SCHEMA_FILE));
+  const doc = read(DOC);
+  const problems290 = [];
+  const { automation, thresholdTrigger, alertAction } = schema.$defs;
+  const sections = [
+    ['### An automation', automation],
+    ['### The `threshold` trigger', thresholdTrigger],
+    ['### The `alert` action', alertAction],
+  ];
+  let keys = 0;
+  for (const [heading, def] of sections) {
+    const at = doc.indexOf(`\n${heading}\n`);
+    if (at < 0) {
+      problems290.push(`${DOC} has no "${heading}" section`);
+      continue;
+    }
+    const rest = doc.slice(at + heading.length + 2);
+    const end = rest.search(/\n#{2,3} /);
+    const body = end < 0 ? rest : rest.slice(0, end);
+    const rows = [...body.matchAll(/^\| `([a-z]+)` \| ([^|]+) \|/gm)].map((m) => [m[1], m[2].trim()]);
+    const documented = rows.map(([key]) => key).sort().join(', ');
+    const declared = Object.keys(def.properties).sort().join(', ');
+    if (documented !== declared) {
+      problems290.push(`${DOC}: "${heading}" documents the keys ${documented}, the schema has ${declared}`);
+    }
+    const oneOf = new Set((def.oneOf ?? []).flatMap((branch) => branch.required ?? []));
+    for (const [key, says] of rows) {
+      const expected = (def.required ?? []).includes(key) ? 'Yes' : oneOf.has(key) ? 'One of the two' : 'No';
+      if (says !== expected) problems290.push(`${DOC}: "${heading}" says ${key} is "${says}", the schema makes it "${expected}"`);
+    }
+    keys += rows.length;
+  }
+  // The limits a reader plans a file by.
+  const comma = (n) => n.toLocaleString('en-US');
+  const props = automation.properties;
+  const hold = Number(thresholdTrigger.properties.for.pattern.match(/\{0,(\d)\}/)?.[1]) + 1;
+  const claims = [
+    [`1 to ${Number(props.id.pattern.match(/\{0,(\d+)\}/)?.[1]) + 1} lowercase letters`, 'the length of an id'],
+    [`1 to ${props.alias.maxLength} characters`, "an alias's length"],
+    [`up to ${comma(props.description.maxLength)} characters`, "a description's length"],
+    [`at most ${props.triggers.maxItems} triggers`, 'the triggers in an automation'],
+    [`a list of 1 to ${thresholdTrigger.properties.device.oneOf[1].maxItems}`, 'the devices in a trigger'],
+    [`up to ${10 ** hold - 1} of one unit`, 'the digits of a hold'],
+  ];
+  for (const [text, what] of claims) {
+    if (!doc.includes(text)) problems290.push(`${DOC} does not say ${what} as the schema holds it: "${text}"`);
+  }
+  if (!doc.includes('`/json-schema/automations.schema.json`')) problems290.push(`${DOC} does not name the path the dashboard serves the schema at`);
+  if (problems290.length) {
+    fail(`docs/automations.md does not document the JSON Schema as it is:\n${problems290.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`docs/automations.md documents the ${keys} keys of the automations JSON Schema, with whether each is required, and its limits`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 291. The API reference documents the automations as 0255 and 0256 declare them: the three tables
+// under their own paths, each function granted to authenticated under its own path with the
+// arguments it declares and no others, the result's schema and the five actions on AuditTrailEntry.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const TABLES = 'supabase/migrations/0255_automations_are_kept_as_rows.sql';
+  const FUNCTIONS = 'supabase/migrations/0256_a_document_of_automations_is_checked_and_applied_in_one_call.sql';
+  const spec = read(SPEC);
+  const sql = read(FUNCTIONS);
+  const problems291 = [];
+  // A path's block in the spec: from its key to the next path key, or the end of the paths.
+  const pathBlock = (name) => {
+    const start = spec.indexOf(`\n  ${name}:\n`);
+    if (start < 0) return undefined;
+    const rest = spec.slice(start + name.length + 5);
+    const end = rest.search(/\n {2}\/|\n[a-z]/);
+    return end < 0 ? rest : rest.slice(0, end);
+  };
+  for (const table of [...read(TABLES).matchAll(/CREATE TABLE IF NOT EXISTS public\.(\w+)/g)].map((m) => m[1])) {
+    if (!pathBlock(`/rest/v1/${table}`)) problems291.push(`${SPEC} has no /rest/v1/${table}`);
+  }
+  const granted = [...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)\(([^)]*)\) TO authenticated;/g)]
+    .map((m) => [m[1], m[2]]);
+  const callable = granted.filter(([name]) => !/^automation_(duration_text|document_of|stored_document)$/.test(name));
+  if (callable.length !== 5) problems291.push(`${FUNCTIONS}: expected five functions for the page and the API, found ${callable.map(([n]) => n).join(', ') || 'none'}`);
+  for (const [name] of callable) {
+    const block = pathBlock(`/rest/v1/rpc/${name}`);
+    if (!block) {
+      problems291.push(`${SPEC} has no /rest/v1/rpc/${name}`);
+      continue;
+    }
+    const head = `CREATE OR REPLACE FUNCTION public.${name}(`;
+    const from = sql.indexOf(head);
+    const args = from < 0 ? '' : sql.slice(from + head.length, sql.indexOf(')', from));
+    const declared = [...args.matchAll(/\b(p_\w+)\b/g)].map((m) => m[1]).sort().join(', ');
+    const properties = block.match(/\n {14}properties:\n([\s\S]*?)(?=\n {6}responses:)/)?.[1] ?? '';
+    const documented = [...properties.matchAll(/^ {16}(p_\w+):/gm)].map((m) => m[1]).sort().join(', ');
+    if (declared !== documented) problems291.push(`${SPEC}: /rest/v1/rpc/${name} documents the arguments "${documented}", ${FUNCTIONS} declares "${declared}"`);
+  }
+  for (const schema of ['Automation', 'AutomationTrigger', 'AutomationAction', 'AutomationResult']) {
+    if (!new RegExp(`^ {4}${schema}:`, 'm').test(spec)) problems291.push(`${SPEC} has no ${schema} schema`);
+  }
+  const entry = spec.match(/^ {4}AuditTrailEntry:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  const acts = [...new Set([...sql.matchAll(/'(AUTOMATION_[A-Z]+)'/g)].map((m) => m[1]))];
+  if (acts.length !== 5) problems291.push(`${FUNCTIONS}: expected five AUTOMATION_ actions, found ${acts.join(', ') || 'none'}`);
+  for (const act of acts) {
+    if (!entry.includes(act)) problems291.push(`${SPEC}: AuditTrailEntry does not list ${act}`);
+  }
+  if (!/entity_type:[\s\S]*?enum:[^\]]*\bautomations\b/.test(entry)) problems291.push(`${SPEC}: AuditTrailEntry's entity_type does not list automations`);
+  if (problems291.length) {
+    fail(`the API reference does not document the automations as 0255 and 0256 declare them:\n${problems291.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`docs/openapi.yaml documents the three automations tables, ${callable.map(([n]) => n).join(', ')} with their arguments, and the five AUTOMATION_ actions`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 292. The automations JSON Schema is one file, served at one path. The dashboard's static folder
+// holds it and nothing else holds a copy; the page that describes the format, the migrations'
+// README and the guard suite each name that path; and the folder the guard suite reads its
+// fixtures from exists and holds both kinds.
+// -------------------------------------------------------------------------------------------------
+{
+  const PATH = '/json-schema/automations.schema.json';
+  const FILE = `frontend/public${PATH}`;
+  const problems292 = [];
+  const copies = allFiles.filter((f) => /(^|\/)automations\.schema\.json$/.test(f));
+  if (copies.length !== 1 || copies[0] !== FILE) {
+    problems292.push(`expected one automations.schema.json, at ${FILE}; found ${copies.join(', ') || 'none'}`);
+  }
+  for (const doc of ['docs/automations.md', 'supabase/README.md']) {
+    if (!read(doc).includes(PATH)) problems292.push(`${doc} does not name ${PATH}`);
+  }
+  const suite = read('supabase/migrations/test_the_automations_schema_and_the_function_agree.py');
+  if (!suite.includes('"frontend" / "public" / "json-schema" / "automations.schema.json"')) {
+    problems292.push('the guard suite does not read the schema from frontend/public/json-schema/');
+  }
+  const fixtures = (kind) => allFiles.filter((f) => f.startsWith(`supabase/automations-fixtures/${kind}/`) && f.endsWith('.json'));
+  if (fixtures('valid').length === 0 || fixtures('invalid').length === 0) {
+    problems292.push('supabase/automations-fixtures/ holds no valid or no invalid fixture');
+  }
+  for (const f of fixtures('invalid')) {
+    const fixture = JSON.parse(read(f));
+    if (typeof fixture.about !== 'string' || !/^\$/.test(fixture.path ?? '') || typeof fixture.database !== 'boolean' || !('document' in fixture)) {
+      problems292.push(`${f} is not {about, path, database, document}`);
+    }
+  }
+  if (problems292.length) {
+    fail(`the automations JSON Schema is not one file served at ${PATH}:\n${problems292.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the automations JSON Schema is one file, served at ${PATH}, named by its page, the migrations' README and the guard suite, over ${fixtures('valid').length} valid and ${fixtures('invalid').length} invalid fixtures`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 316. docs/automations.md says how an automation is evaluated as 0271 and 0247 declare it: that the
+// job runs every minute, how long a run's confirmation holds, the platform alert a run that cannot
+// read the historian raises by its name and its fingerprint, and the labels and values an alert holds
+// as the evaluator writes them. A number that moved in the migration and not here is a reader
+// planning around a minute that is now two.
+// -------------------------------------------------------------------------------------------------
+{
+  const DOC = 'docs/automations.md';
+  const EVALUATOR = 'supabase/migrations/0271_a_threshold_automation_raises_its_alert_from_the_database.sql';
+  const doc = read(DOC);
+  const sql = read(EVALUATOR);
+  const window = read('supabase/migrations/0247_an_alert_is_queued_for_each_channel_that_carries_it.sql');
+  const problems316 = [];
+  // The quoted keys of a jsonb_build_object( call that starts with `start`: its even arguments.
+  const keysOf = (text, start) => {
+    const at = text.indexOf(start);
+    if (at < 0) return [];
+    const args = [];
+    let depth = 0;
+    let from = at + 'jsonb_build_object('.length;
+    for (let i = from; i < text.length; i++) {
+      const c = text[i];
+      if (c === '(') depth += 1;
+      else if (c === ')') {
+        if (depth === 0) { args.push(text.slice(from, i)); break; }
+        depth -= 1;
+      } else if (c === ',' && depth === 0) { args.push(text.slice(from, i)); from = i + 1; }
+    }
+    return args.filter((_, n) => n % 2 === 0).map((a) => a.trim().replace(/^'|'$/g, ''));
+  };
+  const words = { 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine', 10: 'ten' };
+  const section = doc.match(/\n## How an automation is evaluated\n([\s\S]*?)(?=\n## )/)?.[1];
+  if (!section) {
+    problems316.push(`${DOC} has no "How an automation is evaluated" section`);
+  } else {
+    const schedule = sql.match(/'evaluate_automations',\s*'([^']+)'/)?.[1];
+    if (schedule !== '* * * * *') problems316.push(`${EVALUATOR} schedules evaluate_automations as "${schedule}", and this check reads only every minute`);
+    if (!section.includes('once a minute')) problems316.push(`${DOC} does not say the database evaluates once a minute, as ${EVALUATOR} schedules it`);
+    const minutes = window.match(/WHEN starts_with\(p_fingerprint, 'condition:'\) THEN interval '(\d+) minutes'/)?.[1];
+    if (!minutes) problems316.push('0247 gives no condition: window in minutes');
+    else if (!section.includes(`within the past ${words[minutes] ?? minutes} minutes`)) {
+      problems316.push(`${DOC} does not say a reminder needs the last run's confirmation within the past ${words[minutes] ?? minutes} minutes, as 0247 allows`);
+    }
+    const fingerprint = sql.match(/c_not_evaluated CONSTANT text := '([^']+)'/)?.[1];
+    const name = sql.match(/SELECT c_not_evaluated, 'platform', '([^']+)'/)?.[1];
+    if (!fingerprint || !name) problems316.push(`${EVALUATOR}: could not read the alert a run that cannot read the historian raises`);
+    else {
+      if (!section.includes(`**${name}**`)) problems316.push(`${DOC} does not name the alert **${name}**, which ${EVALUATOR} raises`);
+      if (!section.includes(`\`${fingerprint}\``)) problems316.push(`${DOC} does not give that alert's fingerprint \`${fingerprint}\``);
+    }
+    const holds = doc.match(/\n### What an alert holds\n([\s\S]*?)(?=\n## )/)?.[1] ?? '';
+    const labels = keysOf(sql, "jsonb_build_object('severity', act.severity");
+    const values = keysOf(sql, "jsonb_build_object('value', d.last_value");
+    if (labels.length < 5 || values.length < 2) problems316.push(`${EVALUATOR}: could not read the labels and values of an alert (${labels.length} and ${values.length} keys)`);
+    for (const key of [...labels, ...values]) {
+      if (!holds.includes(`\`${key}\``)) problems316.push(`${DOC}: "What an alert holds" does not name \`${key}\`, which ${EVALUATOR} writes`);
+    }
+  }
+  if (problems316.length) {
+    fail(`docs/automations.md does not say how an automation is evaluated as the migrations declare it:\n${problems316.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass('docs/automations.md says the evaluator runs once a minute, a confirmation holds five minutes, and names the alert for an unreadable historian and the labels and values of an alert');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 317. The migrations' README names, in the sections for 0270 and 0271, each function and table those
+// files create, the job, and the alert a run that cannot read raises. The sections are the only place
+// the reasoning is written, and one that forgets an object leaves it with none.
+// -------------------------------------------------------------------------------------------------
+{
+  const README = 'supabase/README.md';
+  const readme = read(README);
+  const problems317 = [];
+  const at = readme.indexOf('\n### A threshold automation is read against the historian (0270)\n');
+  const end = readme.indexOf('\n### ', readme.indexOf('\n### A threshold automation raises its alert from the database (0271)\n') + 5);
+  const text = at < 0 || end < 0 ? '' : readme.slice(at, end);
+  if (!text) problems317.push(`${README} has no sections for 0270 and 0271, in that order`);
+  const created = [];
+  for (const file of ['0270_a_threshold_automation_is_read_against_the_historian.sql', '0271_a_threshold_automation_raises_its_alert_from_the_database.sql']) {
+    const sql = read(`supabase/migrations/${file}`);
+    for (const m of sql.matchAll(/^CREATE OR REPLACE FUNCTION public\.(\w+)\(/gm)) created.push(m[1]);
+    for (const m of sql.matchAll(/^CREATE TABLE IF NOT EXISTS public\.(\w+) \(/gm)) created.push(m[1]);
+    for (const m of sql.matchAll(/ensure_cron_job\(\s*'(\w+)'/g)) created.push(m[1]);
+    for (const m of sql.matchAll(/c_not_evaluated CONSTANT text := '([^']+)'/g)) created.push(m[1]);
+  }
+  if (created.length < 6) problems317.push(`found ${created.length} objects in 0270 and 0271, so the files were not parsed`);
+  for (const name of created) {
+    if (text && !text.includes(`\`${name}`)) problems317.push(`${README}: the 0270 and 0271 sections do not name ${name}`);
+  }
+  if (problems317.length) {
+    fail(`the migrations' README does not name what 0270 and 0271 create:\n${problems317.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the migrations' README names the ${created.length} functions, table, job and alert that 0270 and 0271 create`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 318. The API reference documents the evaluator's state table as 0270 declares it: each column is a
+// property of AutomationTriggerState and each property is a column. A column left out is one a client
+// never learns of; one documented after it is dropped is one it asks for and is refused.
+// -------------------------------------------------------------------------------------------------
+{
+  const SPEC = 'docs/openapi.yaml';
+  const spec = read(SPEC);
+  const sql = read('supabase/migrations/0270_a_threshold_automation_is_read_against_the_historian.sql');
+  const problems318 = [];
+  const table = sql.match(/^CREATE TABLE IF NOT EXISTS public\.automation_trigger_states \(\n([\s\S]*?)\n\)/m)?.[1] ?? '';
+  const columns = new Set();
+  for (const line of table.split('\n')) {
+    const name = /^ {4}([a-z][a-z0-9_]*) [a-z]/.exec(line)?.[1];
+    if (name) columns.add(name);
+  }
+  if (columns.size < 8) problems318.push(`0270: found ${columns.size} columns of automation_trigger_states, so the table was not parsed`);
+  const schema = spec.match(/^ {4}AutomationTriggerState:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  const properties = new Set([...schema.matchAll(/^ {8}(\w+):/gm)].map((m) => m[1]));
+  for (const c of columns) {
+    if (!properties.has(c)) problems318.push(`${SPEC}: AutomationTriggerState does not document automation_trigger_states.${c}`);
+  }
+  for (const p of properties) {
+    if (!columns.has(p)) problems318.push(`${SPEC}: AutomationTriggerState documents ${p}, which automation_trigger_states has no column for`);
+  }
+  if (!/^ {2}\/rest\/v1\/automation_trigger_states:\n/m.test(spec)) problems318.push(`${SPEC} has no /rest/v1/automation_trigger_states`);
+  if (/^ {2}\/rest\/v1\/rpc\/(evaluate_automations|machine_condition_(rows|readings)):/m.test(spec)) {
+    problems318.push(`${SPEC} documents a function of 0270 or 0271 that no API role may execute`);
+  }
+  if (problems318.length) {
+    fail(`the API reference does not document the automations' state table as 0270 declares it:\n${problems318.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`docs/openapi.yaml documents the ${columns.size} columns of automation_trigger_states, and none of the functions no API role may execute`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 319. The upgrade notes for 1.8.0 say what the evaluator does to a running site, by the job's name,
+// its interval and the platform alert it can raise, as 0271 declares them.
+// -------------------------------------------------------------------------------------------------
+{
+  const DOC = 'help/site/upgrading.md';
+  const upgrading = read(DOC);
+  const sql = read('supabase/migrations/0271_a_threshold_automation_raises_its_alert_from_the_database.sql');
+  const problems319 = [];
+  const section = upgrading.match(/\n### From 1\.8\.0, the database evaluates automations\n([\s\S]*?)(?=\n### |\n---\n)/)?.[1];
+  const job = sql.match(/ensure_cron_job\(\s*'(\w+)',\s*'([^']+)'/);
+  const name = sql.match(/SELECT c_not_evaluated, 'platform', '([^']+)'/)?.[1];
+  if (!section) problems319.push(`${DOC} has no "From 1.8.0, the database evaluates automations" section`);
+  if (!job || job[2] !== '* * * * *' || !name) problems319.push('0271: could not read the job, its schedule or the alert it raises');
+  if (section && job && name) {
+    if (!section.includes(`\`${job[1]}\``)) problems319.push(`${DOC} does not name the job \`${job[1]}\``);
+    if (!section.includes('every minute')) problems319.push(`${DOC} does not say the job runs every minute, as 0271 schedules it`);
+    if (!section.includes(`**${name}**`)) problems319.push(`${DOC} does not name the alert **${name}**`);
+  }
+  if (problems319.length) {
+    fail(`the 1.8.0 upgrade notes do not say what the evaluator does as 0271 declares it:\n${problems319.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass('the 1.8.0 upgrade notes name the evaluator\'s job, its minute, and the alert for an unreadable historian');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 320. The evaluator's suite reads a real historian when ABER_TEST_HISTORIAN names one, and the
+// testing document and the migrations' README say how to name it. A variable nobody documents is a
+// test nobody runs.
+// -------------------------------------------------------------------------------------------------
+{
+  const VARIABLE = 'ABER_TEST_HISTORIAN';
+  const suite = read('supabase/migrations/test_a_threshold_automation_raises_its_alert_from_the_database.py');
+  const problems320 = [];
+  if (!suite.includes(`os.getenv("${VARIABLE}"`)) problems320.push(`the evaluator's suite does not read ${VARIABLE}`);
+  for (const doc of ['docs/testing.md', 'supabase/README.md']) {
+    if (!read(doc).includes(VARIABLE)) problems320.push(`${doc} does not name ${VARIABLE}`);
+  }
+  if (problems320.length) {
+    fail(`the evaluator's historian variable is not documented where it is read:\n${problems320.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`${VARIABLE} is read by the evaluator's suite and named by the testing document and the migrations' README`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 321. The Automations page's address is stated as the code reads it. frontend/README.md's routing
+// table names each query key the page reads and its two path forms; the page reads each key through
+// the hook that puts it in the address, and routes.js builds the links other pages send there (a
+// device's View in Automations, an alert) with the same keys. A key in the table the page does not
+// read is a link that opens the unfiltered list.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/AutomationsTab.jsx';
+  const readme = read('frontend/README.md');
+  const tab = read(TAB);
+  const routes = read('frontend/src/routes.js');
+  const problems321 = [];
+  const row = readme.split('\n').find((l) => /^\| Automations \|/.test(l));
+  const reads = {
+    search: "useUrlState('search'",
+    entity: "useUrlState('entity'",
+    trigger: "params.get('trigger')",
+    sort: 'useSortableRows(',
+  };
+  if (!row) {
+    problems321.push('frontend/README.md has no Automations row in its routing table');
+  } else {
+    for (const [key, needle] of Object.entries(reads)) {
+      if (!row.includes(`\`${key}\``)) problems321.push(`the routing table's Automations row does not name \`${key}\``);
+      if (!tab.includes(needle)) problems321.push(`${TAB} does not read \`${key}\` (${needle})`);
+    }
+    for (const form of ['<id>', 'new']) {
+      if (!row.includes(`\`${form}\``)) problems321.push(`the routing table's Automations row does not name the path form \`${form}\``);
+    }
+  }
+  for (const [key, builder] of [['entity', 'automationsForEntityUrl'], ['trigger', 'automationForTriggerUrl']]) {
+    if (!new RegExp(`export const ${builder} = \\(\\w+\\) => pageUrl\\('automations', \\{ ${key}: \\w+ \\}\\)`).test(routes)) {
+      problems321.push(`routes.js's ${builder}() does not build /automations?${key}=<id> through pageUrl()`);
+    }
+  }
+  if (!/export const automationUrl = \(key\) => \(key === 'new' \? `\/automations\/new\?open=1` : `\/automations\/\$\{encodeURIComponent\(key\)\}`\)/.test(routes)) {
+    problems321.push("routes.js's automationUrl() no longer sends an automation whose id is `new` to ?open=1 or the others to /automations/<id>");
+  }
+  if (!tab.includes("params.has('open')")) problems321.push(`${TAB} does not read ?open=1, which tells an automation called \`new\` from the starter`);
+  // New Automation opens the starter, never the address of a saved automation whose id is new.
+  if (!/export const newAutomationUrl = \(\) => '\/automations\/new'\n/.test(routes)) {
+    problems321.push("routes.js's newAutomationUrl() is no longer /automations/new with no query");
+  }
+  if (!tab.includes('navigate(newAutomationUrl())')) problems321.push(`${TAB}'s New Automation does not open newAutomationUrl()`);
+  if (problems321.length) {
+    fail(`the Automations page's address is not stated as the code reads it:\n${problems321.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`frontend/README.md's routing table gives the Automations page's ${Object.keys(reads).length} query keys and 2 path forms, each read by ${TAB}, and routes.js builds the entity, trigger and \`new\` links with them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 322. The editor's dependencies are the ones NOTICE.md names, and no others. The dashboard has
+// five runtime dependencies besides the editor's: CodeMirror 6 (its @codemirror and @lezer packages,
+// MIT) and `yaml` (ISC) are the two additions, and a third package, such as a JSON Schema editor
+// binding, is a decision to make here, not a line in package.json. Every package of the CodeMirror
+// family the lockfile holds is MIT, names its licence in the lockfile, and is named in NOTICE.md; yaml
+// is ISC and has its own section; and the two files that carry their notices open with a legal comment.
+// -------------------------------------------------------------------------------------------------
+{
+  const BEFORE = ['@google/model-viewer', '@supabase/supabase-js', 'react', 'react-dom', 'uplot'];
+  const pkg = JSON.parse(read('frontend/package.json'));
+  const lock = JSON.parse(read('frontend/package-lock.json')).packages;
+  const notice = read('NOTICE.md');
+  const problems322 = [];
+  const deps = Object.keys(pkg.dependencies);
+  const family = deps.filter((d) => /^@(codemirror|lezer)\//.test(d));
+  const others = deps.filter((d) => !BEFORE.includes(d) && !family.includes(d) && d !== 'yaml');
+  if (others.length) problems322.push(`frontend/package.json adds ${others.join(', ')}: only @codemirror/*, @lezer/* and yaml were agreed for the editor (#1277)`);
+  if (family.length === 0 || !deps.includes('yaml')) problems322.push('frontend/package.json does not hold the editor\'s CodeMirror packages and yaml');
+  const start = notice.indexOf("## The Automations page's editor — CodeMirror and Lezer (MIT)");
+  const editorSection = start < 0 ? '' : notice.slice(start, notice.indexOf('\n## ', start + 1));
+  if (!editorSection) problems322.push("NOTICE.md has no section 'The Automations page's editor — CodeMirror and Lezer (MIT)'");
+  for (const name of family) {
+    // The table names a scope's packages by their short names: `@codemirror/state`, `view`, `language`.
+    if (!editorSection.includes(name) && !editorSection.includes(`\`${name.split('/')[1]}\``)) {
+      problems322.push(`NOTICE.md's editor section does not name ${name}`);
+    }
+  }
+  const installed = Object.keys(lock).filter((k) => /^node_modules\/@(codemirror|lezer)\//.test(k));
+  for (const key of [...installed, 'node_modules/style-mod', 'node_modules/w3c-keyname', 'node_modules/crelt', 'node_modules/@marijn/find-cluster-break']) {
+    if (lock[key]?.license !== 'MIT') problems322.push(`package-lock.json gives ${key} the licence ${lock[key]?.license ?? '(none)'}, not MIT, which NOTICE.md says every package of the editor has`);
+  }
+  if (lock['node_modules/yaml']?.license !== 'ISC') problems322.push(`package-lock.json gives yaml the licence ${lock['node_modules/yaml']?.license ?? '(none)'}, not ISC`);
+  if (!notice.includes("## The Automations page's YAML parser — yaml (ISC)")) problems322.push("NOTICE.md has no section 'The Automations page's YAML parser — yaml (ISC)'");
+  for (const [file, what] of [['frontend/src/components/common/AutomationEditor.jsx', "CodeMirror's and Lezer's"], ['frontend/src/utils/automationYaml.js', "yaml's"]]) {
+    if (!read(file).startsWith('/*!')) problems322.push(`${file} does not open with ${what} notice as a /*! legal comment, which the build keeps`);
+    if (!notice.includes(file)) problems322.push(`NOTICE.md does not name ${file}, where the notice is`);
+  }
+  if (problems322.length) {
+    fail(`the editor's dependencies and their notices do not match:\n${problems322.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the dashboard adds ${family.length} CodeMirror/Lezer packages and yaml to its ${BEFORE.length} other runtime dependencies, the lockfile holds ${installed.length + 4} MIT packages for the editor and yaml under ISC, and NOTICE.md names them and the two files that carry their notices`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 323. The Automations help names each control as the page labels it, and each column of the list.
+// The help is written to be followed: "select **Save**" in a page whose button says Save Changes
+// sends a reader looking for a control that is not there.
+// -------------------------------------------------------------------------------------------------
+{
+  const HELP = 'help/pages/automations.md';
+  const help = read(HELP);
+  const PAGE = 'frontend/src/components/tabs/AutomationsTab.jsx';
+  const DETAIL = 'frontend/src/components/tabs/AutomationDetail.jsx';
+  const DEVICES = 'frontend/src/components/tabs/DevicesTab.jsx';
+  const problems323 = [];
+  const labels = [
+    ['New Automation', PAGE], ['Upload', PAGE], ['Export', PAGE],
+    ['Automation', PAGE], ['Watches', PAGE], ['Enabled', PAGE], ['Firing now', PAGE], ['Last fired', PAGE], ['Applies because', PAGE],
+    ['Save', DETAIL], ['Delete', DETAIL], ['Disable', DETAIL], ['Enable', DETAIL], ['Recent firings', DETAIL], ['View Audit Trail', DETAIL],
+    ['View in Automations', DEVICES],
+  ];
+  for (const [label, file] of labels) {
+    if (!help.includes(`**${label}**`)) problems323.push(`${HELP} does not name **${label}**`);
+    if (!read(file).includes(label)) problems323.push(`${file} no longer has a control or column called ${label}, which ${HELP} names`);
+  }
+  for (const status of ['New', 'Changed', 'Unchanged', 'Refused']) {
+    if (!help.includes(`**${status}**`)) problems323.push(`${HELP} does not name the preview's **${status}**`);
+  }
+  for (const word of ['Named', 'Site-wide']) {
+    if (!help.includes(`**${word}**`) || !read('frontend/src/utils/automations.js').includes(`label: '${word}'`)) {
+      problems323.push(`${HELP} and utils/automations.js do not both say **${word}** for why an automation applies`);
+    }
+  }
+  if (problems323.length) {
+    fail(`the Automations help does not name the page's controls as the code does:\n${problems323.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the Automations help names ${labels.length} controls and columns, the 4 preview statuses and the 2 reasons, as the page labels them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 324. The editor's styles are drawn where the dashboard's Content-Security-Policy admits them. The
+// policy's style-src names no inline style (the one <style> admitted is the 3D viewer's, by hash),
+// and CodeMirror writes <style> elements into whatever document it is mounted in. So the editor
+// mounts in a shadow root, where it adopts a stylesheet, and the help for people who run the
+// dashboard behind a proxy with a policy of its own says no new style-src is needed. Here: the
+// chart's policy holds no 'unsafe-inline' for styles, the editor attaches a shadow root and gives
+// CodeMirror it as `root`, and the upgrade guide and frontend/README.md say so.
+// -------------------------------------------------------------------------------------------------
+{
+  const EDITOR = 'frontend/src/components/common/AutomationEditor.jsx';
+  const CHART = 'deploy/helm/aber/templates/apps/frontend.yaml';
+  const problems324 = [];
+  const editor = read(EDITOR);
+  const policy = read(CHART).match(/\(printf "style-src [^\n]*\)/)?.[0] ?? null;
+  if (!policy) problems324.push(`${CHART} has no style-src directive in the shape this check reads`);
+  else if (/unsafe-inline/.test(policy)) problems324.push(`${CHART}'s style-src admits 'unsafe-inline', so the shadow root is no longer what keeps the editor within the policy: re-read the editor's section of frontend/README.md`);
+  if (!/attachShadow\(\{ mode: 'open' \}\)/.test(editor) || !/root: shadow,/.test(editor)) {
+    problems324.push(`${EDITOR} does not attach a shadow root and pass it to CodeMirror as \`root\`, so its <style> elements would be refused`);
+  }
+  if (!/### The Automations editor draws in a shadow root/.test(read('frontend/README.md'))) {
+    problems324.push("frontend/README.md has no section 'The Automations editor draws in a shadow root'");
+  }
+  if (!/needs no new `style-src`/.test(read('help/site/upgrading.md'))) {
+    problems324.push("help/site/upgrading.md does not say a proxy with its own policy needs no new `style-src`");
+  }
+  if (problems324.length) {
+    fail(`the editor's styles are not drawn where the Content-Security-Policy admits them, or the docs do not say so:\n${problems324.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass("the chart's style-src admits no inline style, the editor mounts in a shadow root, and frontend/README.md and the upgrade guide say so");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 325. The Automations page has a group of its own in the sidebar, right after the Modelling group,
+// which ends with Vocabulary, and the help's contents list it there. Pages in help/README.md are "in
+// the order the sidebar lists them"; a page filed elsewhere in one of them is a contents list that
+// disagrees with the rail.
+// -------------------------------------------------------------------------------------------------
+{
+  const nav = read('frontend/src/navigation.jsx');
+  const readme = read('help/README.md');
+  const problems325 = [];
+  const filed = [...nav.matchAll(/id: '([a-z-]+)',\s+label: '[^']+',\s+group: '([a-z-]+)'/g)].map((m) => ({ id: m[1], group: m[2] }));
+  const inGroup = (group) => filed.filter((t) => t.group === group).map((t) => t.id);
+  const model = inGroup('model');
+  const automation = inGroup('automation');
+  if (model.join(',') !== 'schemas,metrics,vocabulary') {
+    problems325.push(`the sidebar's Modelling group is ${model.join(', ')}, not schemas, metrics, vocabulary`);
+  }
+  if (automation.join(',') !== 'automations') {
+    problems325.push(`the sidebar's Automation group is ${automation.join(', ') || 'empty'}, not the Automations page alone`);
+  }
+  const groupsAt = nav.indexOf('export const NAV_GROUPS');
+  const groups = [...nav.slice(groupsAt, nav.indexOf('\n]', groupsAt)).matchAll(/\{ id: '([a-z-]+)' \}/g)].map((m) => m[1]);
+  if (groups.indexOf('automation') < 0 || groups.indexOf('automation') !== groups.indexOf('model') + 1) {
+    problems325.push(`NAV_GROUPS is ${groups.join(', ')}: the automation group is not right after model`);
+  }
+  const rail = [...model, ...automation];
+  const listed = [...readme.matchAll(/\]\(pages\/([a-z-]+)\.md\)/g)].map((m) => m[1]).filter((id) => rail.includes(id));
+  if (listed.join(',') !== rail.join(',')) {
+    problems325.push(`help/README.md lists these pages as ${listed.join(', ')}, and the sidebar as ${rail.join(', ')}`);
+  }
+  if (!/export const VALID_TABS = \[[^\]]*'automations'/.test(read('frontend/src/constants.js'))) {
+    problems325.push("constants.js's VALID_TABS does not hold automations, so the router would send its address to the Site Map");
+  }
+  if (problems325.length) {
+    fail(`the Automations page's place is not the same in the sidebar and the help's contents:\n${problems325.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the sidebar's Modelling group (${model.join(', ')}) is followed by Automations in a group of its own, and help/README.md lists them in that order, and the router accepts it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 275. DeviceAlert documents platform_alerts as the migrations declare it: each column of the table
 // is a property, and a property that is no column says it is on platform_alerts_active only. The
 // columns are 0001's CREATE TABLE and any later ADD COLUMN. A column left out is one an API client
@@ -5623,9 +6547,12 @@ const OPERATOR_PAIRS = [
 // -------------------------------------------------------------------------------------------------
 // 115. GoTrue registers no OAuth client itself. auth.yaml sets
 // GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION to "false" and no other chart file names it, and
-// every client a migration writes into auth.oauth_clients is 'manual'. A token issued to any client
-// carries its person's whole role, so a client anyone could register is a consent page away from
-// one (0197). check-gateway-surface --authenticated asserts the same of a live stack.
+// every client a migration writes into auth.oauth_clients is 'manual'. A client anyone could register
+// is a consent page away from a person's approval (0197). The inserts are of two kinds and no other:
+// a seed, which pins one of the stack's four ids (c0ffee00-...0001 to 0004), and register_app() (0260),
+// the one place an Administrator adds an app, which asks for the role and a second factor first. A
+// seed of any other id fails, as does a second place that adds a client. check-gateway-surface
+// --authenticated asserts the same of a live stack.
 // -------------------------------------------------------------------------------------------------
 {
   const FLAG = 'GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION';
@@ -5638,25 +6565,164 @@ const OPERATOR_PAIRS = [
 
   const dir = 'supabase/migrations';
   const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const STACK_CLIENT_IDS = ['1', '2', '3', '4'].map((n) => `c0ffee00-0000-4000-8000-00000000000${n}`);
   const inserts = files.flatMap((f) => {
     const text = read(`${dir}/${f}`);
     const found = [];
     for (let at = text.indexOf('INSERT INTO auth.oauth_clients'); at >= 0;
       at = text.indexOf('INSERT INTO auth.oauth_clients', at + 1)) {
-      found.push({ file: f, statement: text.slice(at, text.indexOf(';', at)) });
+      // Inside a function body when the nearest CREATE OR REPLACE FUNCTION before it has no $$; between.
+      const fn = text.lastIndexOf('CREATE OR REPLACE FUNCTION public.', at);
+      const inFunction = fn >= 0 && !text.slice(fn, at).includes('\n$$;')
+        ? text.slice(fn).match(/^CREATE OR REPLACE FUNCTION public\.(\w+)/)?.[1] ?? null
+        : null;
+      const body = inFunction ? text.slice(fn, text.indexOf('\n$$;', at)) : '';
+      // A seed names its client in the DO block it sits in.
+      const pinned = text.slice(Math.max(text.lastIndexOf('DO $', at), 0), at).match(/v_client_id CONSTANT UUID := '([0-9a-f-]{36})'/)?.[1] ?? null;
+      found.push({ file: f, statement: text.slice(at, text.indexOf(';', at)), inFunction, body, pinned });
     }
     return found;
   });
   const notManual = inserts.filter((i) => !i.statement.includes("'manual'") || i.statement.includes("'dynamic'"));
+  const registrars = inserts.filter((i) => i.inFunction !== null);
+  const seeds = inserts.filter((i) => i.inFunction === null);
+  const strangers = seeds.filter((i) => !STACK_CLIENT_IDS.includes(i.pinned));
+  const registrarFaults = registrars.length !== 1 ? [`${registrars.length} functions add a client, not the one register_app()`]
+    : [registrars[0].inFunction !== 'register_app' ? `${registrars[0].file}'s ${registrars[0].inFunction}() adds a client, and only register_app() may` : null,
+      !registrars[0].body.includes("has_role(ARRAY['Administrator'])") ? 'register_app() does not ask for the Administrator role' : null,
+      !registrars[0].body.includes('PERFORM public.require_mfa();') ? 'register_app() does not ask for a second factor' : null].filter(Boolean);
 
   if (value !== '"false"') {
     fail(`${authYaml} sets ${FLAG} to ${value ?? 'nothing'}, not "false": anyone holding the publishable key can register an OAuth client and ask a person to approve it (0197)`);
   } else if (elsewhere.length) {
     fail(`${elsewhere.join(', ')} name(s) ${FLAG}: auth.yaml holds it "false", and nothing else in the chart may set it (0197)`);
-  } else if (!inserts.length || notManual.length) {
+  } else if (!seeds.length || notManual.length) {
     fail(`${notManual.length ? `${notManual.map((i) => i.file).join(', ')} write(s) an OAuth client that is not registration_type 'manual'` : 'no migration seeds an OAuth client, so this check reads nothing'}: the stack's clients are the ones its migrations seed (0197)`);
+  } else if (strangers.length) {
+    fail(`${strangers.map((i) => `${i.file} seeds ${i.pinned ?? 'a client with no pinned id'}`).join(', ')}, which is none of the stack's four (${STACK_CLIENT_IDS.map((id) => id.slice(-4)).join(', ')}): an app an Administrator adds is register_app()'s, and no migration seeds another (0260)`);
+  } else if (registrarFaults.length) {
+    fail(`an Administrator registers an app in exactly one place, register_app(), which asks for the role and a second factor first: ${registrarFaults.join('; ')} (0260)`);
   } else {
-    pass(`GoTrue registers no OAuth client itself: ${FLAG} is "false" in auth.yaml alone, and the ${inserts.length} client(s) the migrations seed are all 'manual'`);
+    pass(`GoTrue registers no OAuth client itself: ${FLAG} is "false" in auth.yaml alone, the ${seeds.length} client(s) the migrations seed are the stack's own and 'manual', and an Administrator adds one only through register_app(), which asks for the role and a second factor`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 296. GoTrue's issuer is the site's public auth address (0260). auth.yaml sets GOTRUE_JWT_ISSUER to
+// the API address with /auth/v1 after it, from the helper API_EXTERNAL_URL uses, so discovery names an
+// absolute issuer and every token carries it. No jwt_authn provider on the gateway names an issuer: a
+// token signed before the issuer was set has none, and nothing else here checks it. The author's guide
+// and the security model say so.
+// -------------------------------------------------------------------------------------------------
+{
+  const authYaml = read('deploy/helm/aber/templates/supabase/auth.yaml');
+  const envoy = read('supabase/envoy.yaml');
+  const problems296 = [];
+  const issuer = authYaml.match(/- name: GOTRUE_JWT_ISSUER\s*\n\s*value: \{\{ printf "%s\/auth\/v1" \. \| quote \}\}/);
+  const external = authYaml.match(/- name: API_EXTERNAL_URL\s*\n\s*value: \{\{ include "aber\.supabaseUrl" \. \| quote \}\}/);
+  if (!external) problems296.push('auth.yaml no longer sets API_EXTERNAL_URL from aber.supabaseUrl, which the issuer is built beside');
+  if (!issuer || !authYaml.includes('{{- with include "aber.supabaseUrl" . }}')) {
+    problems296.push('auth.yaml does not set GOTRUE_JWT_ISSUER to the aber.supabaseUrl address and /auth/v1');
+  }
+  const named = envoy.split('\n').filter((l) => !l.trim().startsWith('#') && /^\s*issuer:/.test(l));
+  if (named.length) problems296.push(`supabase/envoy.yaml names an issuer for a jwt_authn provider (${named.length}), which hides every token signed before GoTrue's issuer was set`);
+  for (const [file, pieces] of [
+    ['docs/sign-in-with-aber.md', ['/.well-known/openid-configuration', 'carries it as `iss`']],
+    ['docs/security-model.md', ['GOTRUE_JWT_ISSUER', 'Nothing on the stack checks `iss`']],
+  ]) {
+    const text = read(file);
+    for (const piece of pieces) if (!text.includes(piece)) problems296.push(`${file} does not say "${piece}"`);
+  }
+  if (problems296.length) {
+    for (const p of problems296) fail(`GoTrue's issuer: ${p}`);
+  } else {
+    pass("GoTrue's issuer is the API address and /auth/v1 (auth.yaml, beside API_EXTERNAL_URL); no jwt_authn provider names one, and the author's guide and the security model say what that means");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 297. What an outside app's token reaches (0260). The gateway's outside-apps-sign-in policy admits a
+// list of method and path pairs; the author's guide's table names each in full, and docs/gateway.md,
+// docs/security-model.md and the 0260 section count them in words. A request the gateway admits that
+// no page says, or one a page says it does not, is an app author told something false.
+// -------------------------------------------------------------------------------------------------
+{
+  const envoy = read('supabase/envoy.yaml');
+  const at = envoy.indexOf('outside-apps-sign-in:');
+  const policy = at < 0 ? '' : envoy.slice(at, envoy.indexOf('principals:', at));
+  const admitted = [...policy.matchAll(/exact: (GET|POST) \} \} \}, \{ (?:url_path: \{ path: \{ exact: "([^"]+)" \} \}|header: \{ name: ":path", string_match: \{ exact: "([^"]+)" \} \})/g)]
+    .map((m) => `${m[1]} ${m[2] ?? m[3]}`);
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  const problems297 = [];
+  if (!admitted.length) problems297.push('supabase/envoy.yaml has no outside-apps-sign-in policy this check can read');
+  const guide = read('docs/sign-in-with-aber.md');
+  const table = guide.slice(guide.indexOf('## What the app\'s token can reach'));
+  const listed = [...table.matchAll(/^\| `((?:GET|POST) \/auth\/v1\/[^`]+)` \|/gm)].map((m) => m[1]);
+  for (const r of admitted.filter((x) => !listed.includes(x))) problems297.push(`docs/sign-in-with-aber.md's table does not list ${r}, which the gateway admits`);
+  for (const r of listed.filter((x) => !admitted.includes(x))) problems297.push(`docs/sign-in-with-aber.md's table lists ${r}, which the gateway does not admit`);
+  const count = WORDS[admitted.length];
+  for (const [file, needle] of [
+    ['docs/gateway.md', `passes on ${count} sign-in requests alone`],
+    ['docs/security-model.md', `reaches ${count} sign-in\nrequests`],
+    ['supabase/README.md', `any other app's on ${count} requests`],
+  ]) {
+    if (admitted.length && !read(file).includes(needle)) problems297.push(`${file} does not say "${needle.split('\n').join(' ')}", the ${admitted.length} requests the gateway admits`);
+  }
+  if (problems297.length) {
+    for (const p of problems297) fail(`an outside app's token: ${p}`);
+  } else {
+    pass(`an outside app's token reaches ${admitted.length} requests (${admitted.map((r) => r.replace('/auth/v1', '')).join(', ')}), each in the author's guide's table, counted in words in the gateway page, the security model and the 0260 section`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 298. How many addresses an app may be registered with (0260). register_app() takes 1 to c_max_uris
+// of them; the help page, the author's guide and the dialog's hint say how many, in words.
+// -------------------------------------------------------------------------------------------------
+{
+  const migrations = readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const owner = migrations.filter((f) => read(`supabase/migrations/${f}`).includes('FUNCTION public.register_app(')).pop();
+  const max = owner ? Number(read(`supabase/migrations/${owner}`).match(/c_max_uris\s+CONSTANT integer := (\d+);/)?.[1]) : NaN;
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  const problems298 = [];
+  if (!max) problems298.push('no migration declares register_app() with c_max_uris, so this check reads nothing');
+  for (const [file, needle] of [
+    ['help/pages/access-control.md', `are one to ${WORDS[max]}, one to a line`],
+    ['docs/sign-in-with-aber.md', `One to ${WORDS[max]}, one to a line`],
+  ]) {
+    if (max && !read(file).includes(needle)) problems298.push(`${file} does not say "${needle}", the ${max} addresses register_app() takes`);
+  }
+  if (problems298.length) {
+    for (const p of problems298) fail(`app registration limits: ${p}`);
+  } else {
+    pass(`the help page and the author's guide say an app takes one to ${WORDS[max]} redirect addresses, as register_app() (${owner}) does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 299. The author's guide is where an app's author is sent, and it names no product (0260). The
+// security model and the Access Control help page link to it, and it links back to the security
+// model. It names no identity provider, sign-in library or tool: an author reads a guide that
+// belongs to Aber, whichever they build with.
+// -------------------------------------------------------------------------------------------------
+{
+  const guide = read('docs/sign-in-with-aber.md');
+  const problems299 = [];
+  for (const [file, link] of [
+    ['docs/security-model.md', /\]\(sign-in-with-aber\.md\)/],
+    ['help/pages/access-control.md', /\]\([./]*docs\/sign-in-with-aber\.md\)/],
+  ]) {
+    if (!link.test(read(file))) problems299.push(`${file} does not link to the author's guide`);
+  }
+  if (!guide.includes('(security-model.md#an-apps-token-reaches-only-its-own-routes)')) problems299.push('the guide does not link to the security model section on an app\'s token');
+  const PRODUCTS = ['Keycloak', 'Okta', 'Auth0', 'Entra', 'Azure', 'Google', 'GitHub', 'Passport', 'NextAuth', 'Authlib', 'curl', 'Postman', 'Supabase', 'GoTrue', 'Grafana', 'Node-RED', 'Gitea'];
+  const words = guide.toLowerCase().match(/[a-z0-9-]+/g) ?? [];
+  const named = PRODUCTS.filter((p) => words.includes(p.toLowerCase()));
+  if (named.length) problems299.push(`the guide names ${named.join(', ')}; it names no product`);
+  if (problems299.length) {
+    for (const p of problems299) fail(`the app author's guide: ${p}`);
+  } else {
+    pass("the app author's guide is linked from the security model and the Access Control help, links back to the security model, and names no product");
   }
 }
 
@@ -7938,6 +9004,44 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 304. The Notifications tab on Profile is named as the page draws it. navigation.jsx lists it right
+// after Appearance with its description, the search offers it, and ProfileTab.jsx labels its one row
+// "Desktop notifications" with an "Allow Notifications" button. The Profile help names the tab, the
+// row and the button, and the alert counter's help links to the section that explains them. A tab
+// renamed, or a button relabelled, leaves a help page that tells a person to select what is not there.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems304 = [];
+  const nav = read('frontend/src/navigation.jsx');
+  const tabs = nav.slice(nav.indexOf('export const PROFILE_TABS'), nav.indexOf(']', nav.indexOf('export const PROFILE_TABS')));
+  const ids = [...tabs.matchAll(/\{ id: '([a-z-]+)', label: '([^']+)', description: '[^']+'/g)].map((m) => m[1]);
+  if (ids.join() !== 'account,appearance,notifications,sessions,mfa,allowed-apps') {
+    problems304.push(`navigation.jsx's PROFILE_TABS are ${ids.join(', ') || 'unreadable'}, and the Notifications tab follows Appearance`);
+  }
+  if (!/\{ id: 'notifications', label: 'Notifications'/.test(tabs)) problems304.push("navigation.jsx's PROFILE_TABS has no Notifications tab");
+  if (!/tabCard\('profile', 'notifications'\)/.test(read('frontend/src/searchIndex.js'))) {
+    problems304.push("searchIndex.js has no card for Profile's Notifications tab");
+  }
+  const page = read('frontend/src/components/tabs/ProfileTab.jsx');
+  const row = /label="(Desktop notifications)"/.exec(page)?.[1];
+  const button = /\n\s+(Allow Notifications)\n\s+<\/button>/.exec(page)?.[1];
+  if (!row) problems304.push('ProfileTab.jsx has no Desktop notifications row');
+  if (!button) problems304.push('ProfileTab.jsx has no Allow Notifications button');
+  const help = read('help/pages/profile.md');
+  for (const phrase of ['**Notifications** tab', row && `**${row}**`, button && `**${button}**`, '## Desktop notifications'].filter(Boolean)) {
+    if (!help.includes(phrase)) problems304.push(`help/pages/profile.md does not say "${phrase}"`);
+  }
+  if (!read('help/pages/site-map.md').includes('(profile.md#desktop-notifications)')) {
+    problems304.push("help/pages/site-map.md's alert counter does not link to profile.md#desktop-notifications");
+  }
+  if (problems304.length) {
+    for (const m of problems304) fail(`check 304: ${m}.`);
+  } else {
+    pass(`Profile's Notifications tab follows Appearance, and the help names its "${row}" row and "${button}" button and links to them from the alert counter`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 20. The release workflow names every image the chart resolves from `appVersion`, and no other.
 //
 // The chart marks an image it builds here with an empty tag and resolves it to `Chart.AppVersion`
@@ -8202,6 +9306,61 @@ const OPERATOR_PAIRS = [
   for (const o of offences) fail(o);
   if (!offences.length) {
     pass(`the ${columns.length} user_settings columns admit exactly what the dashboard offers, with the same defaults`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 305. How long a desktop notification waits to name its subject. The notification names the device
+// or gateway and where it is, which takes a read; frontend/README.md says it waits at most that many
+// seconds before the Sparkplug id stands in, and SUBJECT_WAIT_MS holds the number. A README that says
+// two while the code waits ten is a notification that arrives late and a page that says it cannot.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('frontend/src/utils/desktopNotifications.js');
+  const wait = /export const SUBJECT_WAIT_MS = (\d+)/.exec(code)?.[1];
+  const said = /for at most (one|two|three|four|five|six|seven|eight|nine|ten) seconds?, and the\s+Sparkplug id stands in/.exec(read('frontend/README.md'))?.[1];
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  if (!wait || !said) {
+    fail('check 305: could not read how long a desktop notification waits for its subject from utils/desktopNotifications.js (SUBJECT_WAIT_MS) and frontend/README.md ("for at most N seconds, and the Sparkplug id stands in")');
+  } else if (words[Number(wait) / 1000] !== said) {
+    fail(`check 305: frontend/README.md says a desktop notification waits at most ${said} seconds for its subject, and SUBJECT_WAIT_MS is ${wait} ms`);
+  } else {
+    pass(`frontend/README.md says a desktop notification waits at most ${said} seconds for its subject, as SUBJECT_WAIT_MS holds it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 306. The desktop-notification setting is named the same everywhere it is written. user_settings.desktop_notifications
+// is off by default (0264); docs/openapi.yaml says so, and says the column name a client writes. The
+// browser keeps a copy under one localStorage key, which supabase/README.md and frontend/README.md
+// name as the hook holds it: a key renamed in the hook leaves a README that sends a reader looking for
+// the wrong one, and a copy that no longer follows the row.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems306 = [];
+  const chain = readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort()
+    .map((f) => read(`supabase/migrations/${f}`)).join('\n');
+  const declared = [...chain.matchAll(/ADD COLUMN IF NOT EXISTS desktop_notifications boolean DEFAULT (true|false) NOT NULL/g)].at(-1)?.[1];
+  const openapi = read('docs/openapi.yaml');
+  const schema = /\n {4}UserSettings:\n[\s\S]*?\n {4}SystemSetting:/.exec(openapi)?.[0] ?? '';
+  const documented = /\n {8}desktop_notifications:\n {10}type: boolean\n {10}default: (true|false)\n/.exec(schema)?.[1];
+  const key = /export const DESKTOP_NOTIFICATIONS_KEY = '([a-z_]+)'/.exec(read('frontend/src/hooks/useDesktopNotifications.js'))?.[1];
+  if (!declared) problems306.push('no migration adds user_settings.desktop_notifications with a default');
+  if (!documented) problems306.push("docs/openapi.yaml's UserSettings schema has no boolean desktop_notifications with a default");
+  if (declared && documented && declared !== documented) {
+    problems306.push(`docs/openapi.yaml says desktop_notifications defaults to ${documented}, and the migrations to ${declared}`);
+  }
+  if (!/desktop_notifications: \{ type: boolean \}/.test(openapi)) {
+    problems306.push("docs/openapi.yaml's /rest/v1/user_settings POST body does not offer desktop_notifications");
+  }
+  if (!key) problems306.push('could not read DESKTOP_NOTIFICATIONS_KEY from frontend/src/hooks/useDesktopNotifications.js');
+  for (const file of ['supabase/README.md', 'frontend/README.md']) {
+    if (key && !read(file).includes(`\`${key}\``)) problems306.push(`${file} does not name the browser copy, ${key}`);
+  }
+  if (problems306.length) {
+    for (const m of problems306) fail(`check 306: ${m}.`);
+  } else {
+    pass(`user_settings.desktop_notifications is off by default as docs/openapi.yaml says, and both READMEs name its browser copy, ${key}`);
   }
 }
 
@@ -9615,6 +10774,752 @@ const OPERATOR_PAIRS = [
       problems226.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`History's help orders its chart groups as GROUP_ORDER does, ${order.map((c) => types[c]).join(', ')}, then Other`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 288. History's help and both READMEs name the change read's caps as api.js holds them
+// (HISTORY_MAX_CHANGES, HISTORY_CHANGE_READINGS, HISTORY_CHANGE_SERIES), the caps past which a text
+// or flag chart shows its buckets instead of every change. Mirror check 69 holds api.js to the
+// function; a page naming another cap tells a reader when a chart falls back, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const held = Object.fromEntries([...api.matchAll(/^export const (HISTORY_MAX_CHANGES|HISTORY_CHANGE_READINGS|HISTORY_CHANGE_SERIES) = (\d+);$/gm)]
+    .map((m) => [m[1], Number(m[2])]));
+  const caps = ['HISTORY_MAX_CHANGES', 'HISTORY_CHANGE_READINGS', 'HISTORY_CHANGE_SERIES'].map((name) => [name, held[name]]);
+  const problems288 = [];
+  const [changes, readings, series] = caps.map(([, n]) => n);
+  for (const [name, n] of caps) if (!Number.isInteger(n)) problems288.push(`could not read ${name} out of frontend/src/api.js`);
+  if (!problems288.length) {
+    const words = (n) => n.toLocaleString('en-GB');
+    const claims = [
+      ['help/pages/history.md', `**More than ${words(changes)} changes**`],
+      ['help/pages/history.md', `**More than ${words(readings)} readings**`],
+      ['frontend/README.md', `\`HISTORY_MAX_CHANGES\`, ${words(changes)}`],
+      ['frontend/README.md', `\`HISTORY_CHANGE_READINGS\`, ${words(readings)}`],
+      ['frontend/README.md', `\`HISTORY_CHANGE_SERIES\` (${series})`],
+      ['supabase/README.md', `${words(changes)} unless given`],
+      ['supabase/README.md', `more than ${words(readings)} readings of one series`],
+    ];
+    for (const [file, said] of claims) if (!read(file).includes(said)) problems288.push(`${file} does not say "${said}"`);
+  }
+  if (problems288.length) {
+    fail('History\'s docs name the change read\'s caps otherwise than api.js holds them:\n' +
+      problems288.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and both READMEs name the change read's caps, ${changes} changes, ${readings} readings and ${series} series, as api.js holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 289. History's help and the 0254 section say how long raw telemetry is kept by default as the
+// chart holds it (timescaledb.retention.retainFor). Past it a text or flag chart can no longer show
+// every change, so a page naming another figure tells a reader the wrong window.
+// -------------------------------------------------------------------------------------------------
+{
+  const kept = CHART_VALUES.match(/^ {4}retainFor: "([^"]+)"$/m)?.[1];
+  const problems289 = [];
+  if (!kept) problems289.push('could not read timescaledb.retention.retainFor out of deploy/helm/aber/values.yaml');
+  else {
+    const claims = [
+      ['help/pages/history.md', `The historian keeps raw readings for ${kept} by default`],
+      ['supabase/README.md', `(${kept} by default, \`timescaledb.retention.retainFor\`)`],
+    ];
+    // Read as one line, so a rewrapped paragraph still says it.
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems289.push(`${file} does not say "${said}"`);
+  }
+  if (problems289.length) {
+    fail('History\'s docs say how long raw telemetry is kept otherwise than the chart does:\n' +
+      problems289.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and the 0254 section keep raw telemetry ${kept} by default, as values.yaml's retainFor does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 307. The Cell tab's heatmap names the window it allows as api.js holds the bound. The read refuses
+// more than HOUR_OF_DAY_MAX_ROWS hours times devices (mirror check 79), so a cell of 20 machines
+// reads at most that many hours over 20, in days. History's help says the figure, frontend/README.md
+// names the constant and the figure, and the 0265 section says the bound; a page naming another
+// tells a reader which windows the heatmap draws, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const max = Number(read('frontend/src/api.js').match(/^export const HOUR_OF_DAY_MAX_ROWS = (\d+);$/m)?.[1]);
+  const problems307 = [];
+  if (!Number.isInteger(max)) problems307.push('could not read HOUR_OF_DAY_MAX_ROWS out of frontend/src/api.js');
+  const days = Math.floor(max / 20 / 24);
+  const words = max.toLocaleString('en-GB');
+  if (!problems307.length) {
+    const claims = [
+      ['help/pages/history.md', `at most ${words} in all. For a cell of 20 machines, that is at most ${days} days`],
+      ['frontend/README.md', `\`HOUR_OF_DAY_MAX_ROWS\` (${words})`],
+      ['frontend/README.md', `for 20 machines it covers at most ${days} days`],
+      ['supabase/README.md', `more than ${words} hours times devices`],
+    ];
+    // Read as one line, so a rewrapped paragraph still says it.
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems307.push(`${file} does not say "${said}"`);
+  }
+  if (problems307.length) {
+    fail('The Cell tab\'s docs name the heatmap\'s bound otherwise than api.js holds it:\n' +
+      problems307.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and both READMEs say the heatmap reads at most ${words} hours times machines, ${days} days for a cell of 20, as api.js holds it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 308. The heatmap's shades are Overview's. App.css draws .heatmap-step-N from --coverage-N for each
+// of Overview's COVERAGE_STEPS steps and no other, and the page steps through that many
+// (HEAT_STEPS), so the ramp themeContrast.test.js holds to the ordered-ramp rule in both themes is
+// the one the heatmap is coloured with. A step the CSS lacks is a cell with no colour; a ramp of its
+// own is one nobody has checked.
+// -------------------------------------------------------------------------------------------------
+{
+  const css = read('frontend/src/App.css');
+  const history = read('frontend/src/utils/history.js');
+  const steps = Number(history.match(/^export const COVERAGE_STEPS = (\d+)$/m)?.[1]);
+  const heat = history.match(/^export const HEAT_STEPS = (\w+)$/m)?.[1];
+  const drawn = [...css.matchAll(/^\.heatmap-step-(\d+) \{ background: var\(--coverage-(\d+)\); \}$/gm)].map((m) => [Number(m[1]), Number(m[2])]);
+  const problems308 = [];
+  if (!Number.isInteger(steps)) problems308.push('could not read COVERAGE_STEPS out of frontend/src/utils/history.js');
+  if (heat !== 'COVERAGE_STEPS') problems308.push(`HEAT_STEPS is ${heat ?? 'not declared'} in frontend/src/utils/history.js, not COVERAGE_STEPS`);
+  for (let i = 1; i <= steps; i++) {
+    if (!drawn.some(([step, token]) => step === i && token === i)) problems308.push(`frontend/src/App.css has no ".heatmap-step-${i} { background: var(--coverage-${i}); }"`);
+  }
+  if (Number.isInteger(steps) && drawn.length !== steps) problems308.push(`frontend/src/App.css draws ${drawn.length} heatmap steps, Overview has ${steps}`);
+  if (problems308.length) {
+    fail('The heatmap is coloured otherwise than Overview\'s ramp:\n' + problems308.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the heatmap's ${steps} shades are Overview's --coverage-1 to --coverage-${steps}, which themeContrast.test.js holds in both themes`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 309. The Cell tab is named and reached as the Device tab is. The Cells drawer's History action has
+// the Devices drawer's label and icon, and each goes to its own tab's path; History's tabs list
+// Cell after Device with a description of its own; the search index offers it; and the help
+// page names it. A drawer that says another word for the same act is two names for one thing.
+// -------------------------------------------------------------------------------------------------
+{
+  const action = (file) => read(file).match(/label: '(View History)', icon: <(\w+) size=\{13\} \/>,\s*to: (\w+)\(/);
+  const devices = action('frontend/src/components/tabs/DevicesTab.jsx');
+  const cells = action('frontend/src/components/tabs/CellsTab.jsx');
+  const routes = read('frontend/src/routes.js');
+  const history = read('frontend/src/utils/history.js');
+  const tabs = read('frontend/src/navigation.jsx').match(/export const HISTORY_TABS = \[([\s\S]*?)\n\]/)?.[1] ?? '';
+  const ids = [...tabs.matchAll(/\{ id: '([a-z]+)', label: '([^']+)', description: ["'`]([^"'`]+)/g)];
+  const problems309 = [];
+  if (!devices) problems309.push('could not read the Devices drawer\'s View History action out of DevicesTab.jsx');
+  if (!cells) problems309.push('the Cells drawer has no View History action like the Devices drawer\'s in CellsTab.jsx (label, icon, to)');
+  if (devices && cells) {
+    if (devices[2] !== cells[2]) problems309.push(`the Cells drawer's History action draws ${cells[2]}, the Devices drawer's ${devices[2]}`);
+    if (devices[3] !== 'deviceHistoryUrl' || cells[3] !== 'cellHistoryUrl') problems309.push(`the drawers' History actions go to ${devices[3]} and ${cells[3]}, not deviceHistoryUrl and cellHistoryUrl`);
+  }
+  const cellPath = history.match(/^export const CELL_PATH = '([^']+)'$/m)?.[1];
+  if (!cellPath) problems309.push('could not read CELL_PATH out of frontend/src/utils/history.js');
+  else if (!routes.includes(`export const cellHistoryUrl = (id) => \`${cellPath}/\${encodeURIComponent(id)}\``)) {
+    problems309.push(`frontend/src/routes.js's cellHistoryUrl does not build ${cellPath}/<id>`);
+  }
+  const order = ids.map((m) => m[1]);
+  if (order.indexOf('cell') < 0 || order.indexOf('cell') <= order.indexOf('device')) problems309.push(`HISTORY_TABS lists ${order.join(', ')}; Cell goes after Device`);
+  if (!ids.find((m) => m[1] === 'cell')?.[3]) problems309.push('HISTORY_TABS gives the Cell tab no description');
+  if (!read('frontend/src/searchIndex.js').includes("...tabCard('history', 'cell')")) problems309.push('frontend/src/searchIndex.js has no card for the Cell tab');
+  const help = read('help/pages/history.md');
+  if (!help.includes('\n## The Cell tab: comparing the machines in a cell\n')) problems309.push('help/pages/history.md has no "The Cell tab" section');
+  if (!help.includes('open the cell on the Cells page and select **View History**')) problems309.push('help/pages/history.md does not say View History opens a cell from the Cells page');
+  if (problems309.length) {
+    fail('The Cell tab is named or reached otherwise than the Device tab is:\n' + problems309.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the Cells drawer says View History as the Devices drawer does, to /history/cell, and History lists, searches and documents the Cell tab after Device');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 310. The API reference describes telemetry_hour_of_day() as 0265 declares it: the arguments the
+// body requires are the function's, and a row has the columns it returns. A reader building on the
+// reference sends an argument the function does not take, or looks for a column it does not return.
+// -------------------------------------------------------------------------------------------------
+{
+  const sql = read('supabase/migrations/0265_history_averages_a_metric_by_the_hour_of_day.sql')
+    .match(/telemetry_hour_of_day\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/telemetry_hour_of_day:\n[\s\S]*?required: \[([^\]]*)\]/)?.[1];
+  const row = spec.match(/\n {4}TelemetryHourOfDayRow:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const problems310 = [];
+  if (!sql) problems310.push('could not read telemetry_hour_of_day() out of 0265');
+  if (!path) problems310.push('docs/openapi.yaml has no /rest/v1/rpc/telemetry_hour_of_day with its required arguments');
+  if (!row) problems310.push('docs/openapi.yaml has no TelemetryHourOfDayRow');
+  if (!problems310.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    const args = names(sql[1], /^\s*(\w+) [a-z]/gm);
+    const columns = names(sql[2], /^\s*(\w+) [a-z]/gm);
+    const required = names(path, /(\w+)/g);
+    const described = names(row, /^ {8}(\w+):/gm);
+    if (required !== args) problems310.push(`docs/openapi.yaml requires ${required}; telemetry_hour_of_day() takes ${args}`);
+    if (described !== columns) problems310.push(`docs/openapi.yaml's TelemetryHourOfDayRow has ${described}; the function returns ${columns}`);
+  }
+  if (problems310.length) {
+    fail('The API reference describes telemetry_hour_of_day() otherwise than 0265 declares it:\n' +
+      problems310.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments and the columns of telemetry_hour_of_day() as 0265 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 326. The four drawers' History actions are alike. The Devices, Cells, Areas and Metrics drawers each
+// say View History, with the same icon, and go to their own tab's path: deviceHistoryUrl, cellHistoryUrl,
+// areaHistoryUrl and metricHistoryUrl, whose paths are the tabs' (the Area tab's is utils/history.js's
+// AREA_PATH, the Metric tab's its METRIC_PATH). The help names the Areas drawer's action as it does the
+// Cells drawer's, and the Metrics help names the Metrics drawer's. A drawer that says another word for
+// the same act is two names for one thing.
+// -------------------------------------------------------------------------------------------------
+{
+  const action = (file) => read(file).match(/label: '(View History)', icon: <(\w+) size=\{13\} \/>,\s*to: (\w+)\(/);
+  const drawers = [
+    ['Devices', 'frontend/src/components/tabs/DevicesTab.jsx', 'deviceHistoryUrl'],
+    ['Cells', 'frontend/src/components/tabs/CellsTab.jsx', 'cellHistoryUrl'],
+    ['Areas', 'frontend/src/components/tabs/AreasTab.jsx', 'areaHistoryUrl'],
+    ['Metrics', 'frontend/src/components/tabs/MetricsTab.jsx', 'metricHistoryUrl'],
+  ];
+  const found = drawers.map(([name, file, url]) => ({ name, url, match: action(file) }));
+  const problems326 = [];
+  for (const d of found) if (!d.match) problems326.push(`the ${d.name} drawer has no View History action (label, a size-13 icon, to) in its tab`);
+  const have = found.filter((d) => d.match);
+  if (new Set(have.map((d) => d.match[2])).size > 1) {
+    problems326.push(`the drawers' History actions draw ${have.map((d) => `${d.name}: ${d.match[2]}`).join(', ')}; they draw one icon`);
+  }
+  for (const d of have) if (d.match[3] !== d.url) problems326.push(`the ${d.name} drawer's History action goes to ${d.match[3]}, not ${d.url}`);
+  const routes = read('frontend/src/routes.js');
+  const areaPath = read('frontend/src/utils/history.js').match(/^export const AREA_PATH = '([^']+)'$/m)?.[1];
+  if (!areaPath) problems326.push('could not read AREA_PATH out of frontend/src/utils/history.js');
+  else if (!routes.includes(`export const areaHistoryUrl = (id) => \`${areaPath}/\${encodeURIComponent(id)}\``)) {
+    problems326.push(`frontend/src/routes.js's areaHistoryUrl does not build ${areaPath}/<id>`);
+  }
+  const metricPath = read('frontend/src/utils/history.js').match(/^export const METRIC_PATH = '([^']+)'$/m)?.[1];
+  if (!metricPath) problems326.push('could not read METRIC_PATH out of frontend/src/utils/history.js');
+  else if (!routes.includes(`export const metricHistoryUrl = (name) => \`${metricPath}/\${encodeURIComponent(name)}\``)) {
+    problems326.push(`frontend/src/routes.js's metricHistoryUrl does not build ${metricPath}/<name>`);
+  }
+  if (!read('help/pages/history.md').includes('open the area on the Areas page and select **View History**')) {
+    problems326.push('help/pages/history.md does not say View History opens an area from the Areas page');
+  }
+  if (!read('help/pages/metrics.md').includes("**View History** opens the History page's Metric tab on the metric")) {
+    problems326.push('help/pages/metrics.md does not say View History opens the Metric tab on the metric');
+  }
+  if (problems326.length) {
+    fail('The drawers\' History actions are named or reached otherwise than each other\'s:\n' + problems326.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the Devices, Cells, Areas and Metrics drawers all say View History with one icon, each to its own tab, and the help names the Areas and Metrics drawers\'');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 327. The API reference describes telemetry_carried_by_group() as 0276 declares it: the arguments
+// the body requires are the function's, and a row has the columns it returns. A reader building on
+// the reference sends an argument the function does not take, or looks for a column it does not return.
+// -------------------------------------------------------------------------------------------------
+{
+  const sql = read('supabase/migrations/0276_history_folds_one_metric_across_the_devices_of_each_group.sql')
+    .match(/telemetry_carried_by_group\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/telemetry_carried_by_group:\n[\s\S]*?required: \[([^\]]*)\]/)?.[1];
+  const row = spec.match(/\n {4}TelemetryGroupRow:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const problems327 = [];
+  if (!sql) problems327.push('could not read telemetry_carried_by_group() out of 0276');
+  if (!path) problems327.push('docs/openapi.yaml has no /rest/v1/rpc/telemetry_carried_by_group with its required arguments');
+  if (!row) problems327.push('docs/openapi.yaml has no TelemetryGroupRow');
+  if (!problems327.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    const args = names(sql[1], /^\s*(\w+) [a-z]/gm);
+    const columns = names(sql[2], /^\s*(\w+) [a-z]/gm);
+    const required = names(path, /(\w+)/g);
+    const described = names(row, /^ {8}(\w+):/gm);
+    if (required !== args) problems327.push(`docs/openapi.yaml requires ${required}; telemetry_carried_by_group() takes ${args}`);
+    if (described !== columns) problems327.push(`docs/openapi.yaml's TelemetryGroupRow has ${described}; the function returns ${columns}`);
+  }
+  if (problems327.length) {
+    fail('The API reference describes telemetry_carried_by_group() otherwise than 0276 declares it:\n' +
+      problems327.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments and the columns of telemetry_carried_by_group() as 0276 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 328. The Metric tab's paging is described as the code holds it. History's help says how many devices
+// a page holds and the number past which the tab pages whatever the row cap carries; frontend/README.md
+// names both constants and their values; the help has a section for each of the Metric and Area tabs; and
+// the 0276 section says the bound its read is held to. A page naming another figure tells a reader how
+// many charts to expect, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const size = Number(util.match(/^export const METRIC_PAGE_SIZE = (\d+)$/m)?.[1]);
+  const draw = Number(util.match(/^export const METRIC_DRAW_MAX = (\d+)$/m)?.[1]);
+  const group = Number(read('frontend/src/api.js').match(/^export const HISTORY_GROUP_READ_ROWS = (\d+);$/m)?.[1]);
+  const problems328 = [];
+  if (!Number.isInteger(size)) problems328.push('could not read METRIC_PAGE_SIZE out of frontend/src/utils/history.js');
+  if (!Number.isInteger(draw)) problems328.push('could not read METRIC_DRAW_MAX out of frontend/src/utils/history.js');
+  if (!Number.isInteger(group)) problems328.push('could not read HISTORY_GROUP_READ_ROWS out of frontend/src/api.js');
+  if (!problems328.length) {
+    const claims = [
+      ['help/pages/history.md', `a page at a time, ${size} devices to a page`],
+      ['help/pages/history.md', `more than ${draw} devices`],
+      ['frontend/README.md', `\`METRIC_PAGE_SIZE\` (${size})`],
+      ['frontend/README.md', `\`METRIC_DRAW_MAX\` (${draw})`],
+      ['supabase/README.md', `more than ${group.toLocaleString('en-GB')} devices times buckets`],
+    ];
+    // Read as one line, so a rewrapped paragraph still says it.
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems328.push(`${file} does not say "${said}"`);
+    const help = read('help/pages/history.md');
+    for (const heading of ['The Metric tab: one metric across devices', 'The Area tab: comparing the cells in an area']) {
+      if (!help.includes(`\n## ${heading}\n`)) problems328.push(`help/pages/history.md has no "${heading}" section`);
+    }
+  }
+  if (problems328.length) {
+    fail('History\'s docs describe the Metric and Area tabs otherwise than the code holds them:\n' +
+      problems328.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and both READMEs say the Metric tab pages at ${size} devices a page and past ${draw}, and the 0276 section says its ${group.toLocaleString('en-GB')}-row bound`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 329. History's tabs are the issue's, in its order: Overview, Device, Metric, Cell, Area, Alerts. Each
+// has a description of its own and a card in the search index, and the page gives each an address
+// (TAB_PATHS in HistoryTab.jsx), so a tab the strip lists is one the page can open and the search can
+// find. A tab in one list and not another is a link that opens the Overview.
+// -------------------------------------------------------------------------------------------------
+{
+  const tabs = read('frontend/src/navigation.jsx').match(/export const HISTORY_TABS = \[([\s\S]*?)\n\]/)?.[1] ?? '';
+  const ids = [...tabs.matchAll(/\{ id: '([a-z]+)', label: '([^']+)', description: ["'`]([^"'`]+)/g)];
+  const order = ids.map((m) => m[1]);
+  const want = ['overview', 'device', 'metric', 'cell', 'area', 'alerts'];
+  const problems329 = [];
+  if (order.join(', ') !== want.join(', ')) problems329.push(`HISTORY_TABS lists ${order.join(', ')}; the issue's order is ${want.join(', ')}`);
+  for (const m of ids) if (!m[3]) problems329.push(`HISTORY_TABS gives the ${m[2]} tab no description`);
+  const search = read('frontend/src/searchIndex.js');
+  for (const id of ['overview', 'metric', 'cell', 'area', 'alerts']) {
+    if (!search.includes(`...tabCard('history', '${id}')`)) problems329.push(`frontend/src/searchIndex.js has no card for the ${id} tab`);
+  }
+  const page = read('frontend/src/components/tabs/HistoryTab.jsx');
+  const paths = page.match(/const TAB_PATHS = \{([\s\S]*?)\n\}/)?.[1] ?? '';
+  for (const key of ['overview', 'device', 'METRIC_TAB', 'CELL_TAB', 'AREA_TAB', 'ALERTS_TAB']) {
+    if (!new RegExp(`\\b${key}\\b`).test(paths)) problems329.push(`TAB_PATHS in HistoryTab.jsx gives the ${key} tab no path`);
+  }
+  const util = read('frontend/src/utils/history.js');
+  for (const [name, path] of [['METRIC_PATH', '/history/metric'], ['AREA_PATH', '/history/area']]) {
+    if (!util.includes(`export const ${name} = '${path}'`)) problems329.push(`utils/history.js's ${name} is not ${path}`);
+  }
+  if (problems329.length) {
+    fail('History\'s tabs are listed, searched or opened otherwise than the issue has them:\n' + problems329.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('History lists Overview, Device, Metric, Cell, Area and Alerts in that order, each described, searched and given an address');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 330. The longest export is named as 0278 declares it: its label, its tab, its default and its
+// range, in History's help, the Settings page's help, the upgrade guide and supabase/README.md's
+// 0278 section. A page naming another default sends a reader looking for a limit that is not there,
+// or trusting an export to cover a window the database refuses.
+// -------------------------------------------------------------------------------------------------
+{
+  const SEED = 'supabase/migrations/0278_the_longest_export_is_a_setting.sql';
+  const seed = read(SEED);
+  const declared = seed.match(/seed_setting\(\s*'history\.export_max_days',\s*to_jsonb\((\d+)\),\s*'number',\s*'([^']+)',\s*'([^']+)'/);
+  const bounds = seed.match(/SET min_value = (\d+), max_value = (\d+)\s+WHERE key = 'history\.export_max_days'/);
+  const problems330 = [];
+  if (!declared || !bounds) {
+    problems330.push(`${SEED}: could not read history.export_max_days' seed_setting() call or its bounds`);
+  } else {
+    const [, days, category, label] = declared;
+    const [, min, max] = bounds;
+    const says = (file, needles) => {
+      const text = read(file);
+      for (const needle of needles) if (!text.includes(needle)) problems330.push(`${file} does not say "${needle}"`);
+    };
+    says('help/pages/history.md', [`**A window of at most ${days} days.**`, `**over the ${days}-day export limit**`, `on the **${category}** tab`]);
+    says('help/pages/settings.md', [`**${category}** holds **${label}**`, `${days} unless you change it, from ${min} to ${max}`]);
+    says('help/site/upgrading.md', [`**${label}**`, `is ${days} unless you change it, from ${min} to ${max}`, `covers at most ${days} days`]);
+    const readme = read('supabase/README.md');
+    const zone = readme.slice(readme.indexOf('### The longest export is a setting (0278)'), readme.indexOf('### An export of readings is checked, bounded and recorded (0279)'));
+    if (!zone.includes(`in the ${category} category: ${days} days, from ${min} to ${max}`)) {
+      problems330.push(`supabase/README.md's 0278 section does not say "in the ${category} category: ${days} days, from ${min} to ${max}"`);
+    }
+  }
+  if (problems330.length) {
+    fail('the help and the README name the longest export otherwise than 0278 declares it:\n' +
+      problems330.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the help and supabase/README.md name ${declared[3]} as 0278 declares it: ${declared[1]} days, ${bounds[1]} to ${bounds[2]}, on ${declared[2]}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 331. History's help and the upgrade guide say who may export as the dashboard holds it:
+// TELEMETRY_EXPORT_ROLES' two roles in words (utils/telemetryExport.js), and the greyed button's
+// title, EXPORT_DENIED_TITLE. A help page naming another role sends a person to someone who cannot
+// export, or tells them they cannot when they can.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('frontend/src/utils/telemetryExport.js');
+  const roles = code.match(/export const TELEMETRY_EXPORT_ROLES = \[([^\]]*)\]/)?.[1];
+  const problems331 = [];
+  if (!roles) {
+    problems331.push('could not read TELEMETRY_EXPORT_ROLES out of frontend/src/utils/telemetryExport.js');
+  } else {
+    const words = [...roles.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1].replace(/_/g, ' '));
+    if (words.length !== 2) problems331.push(`TELEMETRY_EXPORT_ROLES names ${words.length} roles, and the help says two`);
+    else {
+      const [first, second] = words;
+      const history = read('help/pages/history.md');
+      if (!history.includes(`Only an **${first}** or a **${second}** can export.`)) problems331.push(`help/pages/history.md does not say "Only an **${first}** or a **${second}** can export."`);
+      if (!history.includes(`**Requires ${first} or ${second}**`)) problems331.push(`help/pages/history.md does not say "**Requires ${first} or ${second}**"`);
+      const upgrading = read('help/site/upgrading.md');
+      if (!upgrading.includes(`only an **${first}** or a **${second}** can export readings`)) problems331.push(`help/site/upgrading.md does not say "only an **${first}** or a **${second}** can export readings"`);
+      const readme = read('frontend/README.md');
+      if (!readme.includes(`"Requires ${first} or ${second}"`)) problems331.push(`frontend/README.md does not say "Requires ${first} or ${second}"`);
+    }
+  }
+  if (problems331.length) {
+    fail('the help states who may export otherwise than the dashboard holds it:\n' + problems331.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('History\'s help, the upgrade guide and frontend/README.md name the roles that may export, and the greyed button\'s title, as the dashboard holds them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 332. History's help names the export file's columns and what one export may name as the code holds
+// them: EXPORT_COLUMNS (utils/telemetryExport.js) in order, EXPORT_MAX_DEVICES and EXPORT_MAX_METRICS.
+// A reader parsing the file looks for a column that is not there, or builds a selection the dialog
+// refuses.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('frontend/src/utils/telemetryExport.js');
+  const columns = code.match(/export const EXPORT_COLUMNS = \[([^\]]*)\]/)?.[1];
+  const devices = Number(code.match(/^export const EXPORT_MAX_DEVICES = (\d+)$/m)?.[1]);
+  const metrics = Number(code.match(/^export const EXPORT_MAX_METRICS = (\d+)$/m)?.[1]);
+  const help = read('help/pages/history.md');
+  const problems332 = [];
+  if (!columns || !Number.isFinite(devices) || !Number.isFinite(metrics)) {
+    problems332.push('could not read EXPORT_COLUMNS, EXPORT_MAX_DEVICES or EXPORT_MAX_METRICS out of frontend/src/utils/telemetryExport.js');
+  } else {
+    const names = [...columns.matchAll(/'([a-z_]+)'/g)].map((m) => `**${m[1]}**`);
+    const list = `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    if (!help.includes(`its ${list}.`)) problems332.push(`help/pages/history.md does not say "its ${list}."`);
+    const most = `**At most ${devices.toLocaleString('en-GB')} devices and ${metrics.toLocaleString('en-GB')} metrics.**`;
+    if (!help.includes(most)) problems332.push(`help/pages/history.md does not say "${most}"`);
+  }
+  if (problems332.length) {
+    fail('History\'s help states the export file otherwise than the code holds it:\n' + problems332.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help names the export file's ${columns.split(',').length} columns in order and its ${devices.toLocaleString('en-GB')}-device, ${metrics}-metric limit as the code holds them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 333. An export's Audit Trail row is named as the dashboard files it: the lane (READINGS in
+// constants.js, "Readings"), the action's label ("Readings exported"), and History's help and the
+// upgrade guide naming the lane. The lane's name is what a person looks for after the toast's link.
+// -------------------------------------------------------------------------------------------------
+{
+  const constants = read('frontend/src/constants.js');
+  const lane = constants.match(/\{ kind: 'READINGS',\s+table: 'telemetry',\s+label: '([^']+)'/)?.[1];
+  const action = constants.match(/TELEMETRY_EXPORTED:\s+'([^']+)'/)?.[1];
+  const problems333 = [];
+  if (!lane || !action) {
+    problems333.push("could not read the Readings lane or TELEMETRY_EXPORTED's label out of frontend/src/constants.js");
+  } else {
+    if (!read('help/pages/history.md').includes(`in the **${lane}** lane`)) problems333.push(`help/pages/history.md does not say "in the **${lane}** lane"`);
+    if (!read('help/site/upgrading.md').includes(`in the **${lane}** lane`)) problems333.push(`help/site/upgrading.md does not say "in the **${lane}** lane"`);
+    const readme = read('frontend/README.md');
+    if (!readme.includes(`**${lane}** lane`) || !readme.includes(`**${action}** (\`TELEMETRY_EXPORTED\`)`)) {
+      problems333.push(`frontend/README.md does not name the **${lane}** lane and the action **${action}** (\`TELEMETRY_EXPORTED\`)`);
+    }
+  }
+  if (problems333.length) {
+    fail('the docs name an export\'s Audit Trail row otherwise than the dashboard files it:\n' + problems333.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the docs name an export's Audit Trail row as the dashboard files it: the ${lane} lane, the action ${action}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 334. The API reference describes export_telemetry() as 0279 declares it: the arguments the body
+// requires are the function's own, the resolution's choices are the ones it admits, and the document
+// has the keys it returns. A reader building on the reference sends an argument the function does not
+// take, or looks for a key it does not return.
+// -------------------------------------------------------------------------------------------------
+{
+  const migration = read('supabase/migrations/0279_an_export_of_readings_is_bounded_and_recorded_in_the_database.sql');
+  const sql = migration.match(/FUNCTION public\.export_telemetry\(([\s\S]*?)\) RETURNS jsonb/);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/export_telemetry:\n[\s\S]*?required: \[([^\]]*)\][\s\S]*?resolution: \{ type: string, enum: \[([^\]]*)\]/);
+  const document = spec.match(/\n {4}TelemetryExport:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const keys = migration.match(/RETURN jsonb_build_object\(([\s\S]*?)\);\nEND;/)?.[1];
+  const problems334 = [];
+  if (!sql) problems334.push('could not read export_telemetry() out of 0279');
+  if (!path) problems334.push('docs/openapi.yaml has no /rest/v1/rpc/export_telemetry with its required arguments and resolutions');
+  if (!document) problems334.push('docs/openapi.yaml has no TelemetryExport');
+  if (!keys) problems334.push('could not read the keys export_telemetry() returns out of 0279');
+  if (!problems334.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    // The arguments with no default are the required ones; resolution has one.
+    const args = names(sql[1].replace(/DEFAULT\s+'[^']*'/g, '').split('\n').filter((l) => !/resolution text/.test(l)).join('\n'), /^\s*(\w+) [a-z]/gm);
+    const required = names(path[1], /(\w+)/g);
+    const admitted = [...migration.matchAll(/NOT v_res = ANY \(ARRAY\[([^\]]*)\]\)/g)].map((m) => names(m[1], /'([^']+)'/g))[0];
+    const offered = names(path[2], /(\w+)/g);
+    const returned = names(keys, /^\s*'(\w+)',/gm);
+    const described = names(document, /^ {8}(\w+):/gm);
+    if (required !== args) problems334.push(`docs/openapi.yaml requires ${required}; export_telemetry() requires ${args}`);
+    if (offered !== admitted) problems334.push(`docs/openapi.yaml offers the resolutions ${offered}; export_telemetry() admits ${admitted}`);
+    if (described !== returned) problems334.push(`docs/openapi.yaml's TelemetryExport has ${described}; the function returns ${returned}`);
+  }
+  if (problems334.length) {
+    fail('The API reference describes export_telemetry() otherwise than 0279 declares it:\n' +
+      problems334.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments, the resolutions and the document of export_telemetry() as 0279 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 338. The API reference describes derived_series() as 0282 declares it: the arguments the body
+// requires are the function's, and a row has the columns it returns. A reader building on the reference
+// sends an argument the function does not take, or looks for a column it does not return.
+// -------------------------------------------------------------------------------------------------
+{
+  const sql = read('supabase/migrations/0282_history_draws_a_derived_metric_from_the_minutes.sql')
+    .match(/public\.derived_series\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/derived_series:\n[\s\S]*?required: \[([^\]]*)\]/)?.[1];
+  const row = spec.match(/\n {4}DerivedSeriesBucket:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const problems338 = [];
+  if (!sql) problems338.push('could not read derived_series() out of 0282');
+  if (!path) problems338.push('docs/openapi.yaml has no /rest/v1/rpc/derived_series with its required arguments');
+  if (!row) problems338.push('docs/openapi.yaml has no DerivedSeriesBucket');
+  if (!problems338.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    const args = names(sql[1], /^\s*(\w+) [a-z]/gm);
+    const columns = names(sql[2], /^\s*(\w+) [a-z]/gm);
+    const required = names(path, /(\w+)/g);
+    const described = names(row, /^ {8}(\w+):/gm);
+    if (required !== args) problems338.push(`docs/openapi.yaml requires ${required}; derived_series() takes ${args}`);
+    if (described !== columns) problems338.push(`docs/openapi.yaml's DerivedSeriesBucket has ${described}; the function returns ${columns}`);
+  }
+  if (problems338.length) {
+    fail('The API reference describes derived_series() otherwise than 0282 declares it:\n' +
+      problems338.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments and the columns of derived_series() as 0282 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 339. The API reference describes derived_current() as 0282 declares it, and says its windows as
+// derived_window_minutes() holds them: the arguments the body requires, the columns of a value, and
+// the two numbers window_minutes takes.
+// -------------------------------------------------------------------------------------------------
+{
+  const migration = read('supabase/migrations/0282_history_draws_a_derived_metric_from_the_minutes.sql');
+  const sql = migration.match(/public\.derived_current\(([^)]*)\)\s*RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/);
+  const windows = [...new Set([...migration.matchAll(/WHEN '[a-z_]+' THEN (\d+)/g)].map((m) => Number(m[1])))].sort((a, b) => b - a);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/derived_current:\n[\s\S]*?required: \[([^\]]*)\]/)?.[1];
+  const row = spec.match(/\n {4}DerivedCurrentValue:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const problems339 = [];
+  if (!sql) problems339.push('could not read derived_current() out of 0282');
+  if (windows.length === 0) problems339.push('could not read derived_window_minutes() out of 0282');
+  if (!path) problems339.push('docs/openapi.yaml has no /rest/v1/rpc/derived_current with its required arguments');
+  if (!row) problems339.push('docs/openapi.yaml has no DerivedCurrentValue');
+  if (!problems339.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    const args = names(sql[1], /(\w+) text\[\]/g);
+    const columns = names(sql[2], /^\s*(\w+) [a-z]/gm);
+    const required = names(path, /(\w+)/g);
+    const described = names(row, /^ {8}(\w+):/gm);
+    const enumerated = row.match(/window_minutes: \{[^}]*enum: \[([^\]]*)\]/)?.[1].split(',').map((n) => Number(n.trim())).sort((a, b) => b - a);
+    if (required !== args) problems339.push(`docs/openapi.yaml requires ${required}; derived_current() takes ${args}`);
+    if (described !== columns) problems339.push(`docs/openapi.yaml's DerivedCurrentValue has ${described}; the function returns ${columns}`);
+    if (String(enumerated) !== String(windows)) {
+      problems339.push(`docs/openapi.yaml's window_minutes takes ${enumerated}; derived_window_minutes() answers ${windows}`);
+    }
+  }
+  if (problems339.length) {
+    fail('The API reference describes derived_current() otherwise than 0282 declares it:\n' +
+      problems339.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments, the columns and the windows of derived_current() as 0282 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 340. The documents say a current value's window as derived_window_minutes() holds it. The automation
+// reference gives one row for each kind, an hour or the last whole minute by what the function
+// answers; the Devices help says both phrases the drawer shows. A document that says an hour where
+// the function reads a minute describes a value the alert does not compare.
+// -------------------------------------------------------------------------------------------------
+{
+  const migration = read('supabase/migrations/0282_history_draws_a_derived_metric_from_the_minutes.sql');
+  const windows = new Map([...migration.matchAll(/WHEN '([a-z_]+)' THEN (\d+)/g)].map((m) => [m[1], Number(m[2])]));
+  const automations = read('docs/automations.md').match(/### A threshold on a derived metric\n([\s\S]*?)\n### /)?.[1];
+  const devices = read('help/pages/devices.md');
+  const words = { counter_rate: 'Counter rate', time_in_state: 'Time in state', sum: 'Sum or difference' };
+  const problems340 = [];
+  if (windows.size === 0) problems340.push('could not read derived_window_minutes() out of 0282');
+  if (!automations) problems340.push('docs/automations.md has no "A threshold on a derived metric"');
+  if (!problems340.length) {
+    for (const [kind, minutes] of windows) {
+      const row = automations.match(new RegExp(`^\\| ${words[kind]} \\|(.*)\\|$`, 'm'))?.[1];
+      if (!row) {
+        problems340.push(`docs/automations.md has no row for ${words[kind]}`);
+        continue;
+      }
+      const wants = minutes === 0 ? 'last whole minute' : 'last hour';
+      if (!row.includes(wants)) problems340.push(`docs/automations.md says a ${words[kind]} is judged ${row.trim()}; derived_window_minutes() is ${minutes}, so it is the ${wants}`);
+    }
+    for (const phrase of ['over the last hour', 'at the last whole minute']) {
+      if (!devices.includes(phrase)) problems340.push(`help/pages/devices.md does not say "${phrase}", which the drawer shows`);
+    }
+  }
+  if (problems340.length) {
+    fail("The documents say a derived metric's current value otherwise than derived_window_minutes() holds it:\n" +
+      problems340.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the automation reference and the Devices help say each kind's window as derived_window_minutes() holds it (${[...windows].map(([k, m]) => `${k} ${m}`).join(', ')})`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 341. The documents name derived_series()'s limits as it declares them: the rows (the dashboard's row
+// cap), the minutes of input and the widest bucket. A reader choosing a window reads the number, and a
+// number that is not the function's is a read refused or a window left unasked.
+// -------------------------------------------------------------------------------------------------
+{
+  const def = read('supabase/migrations/0282_history_draws_a_derived_metric_from_the_minutes.sql');
+  const rows = def.match(/c_max_rows\s+CONSTANT bigint := (\d+);/)?.[1];
+  const minutes = def.match(/c_max_minutes CONSTANT bigint := (\d+);/)?.[1];
+  const bucket = def.match(/c_max_bucket\s+CONSTANT integer := (\d+);/)?.[1];
+  const problems341 = [];
+  if (!rows || !minutes || !bucket) problems341.push('could not read the limits of derived_series() out of 0282');
+  if (!problems341.length) {
+    const grouped = (n) => Number(n).toLocaleString('en-US');
+    const days = Number(bucket) / 1440;
+    const says = [
+      ['supabase/README.md', [`${grouped(rows)} devices times metrics times buckets`, `${grouped(minutes)} minutes of input`, `${days} days`]],
+      ['docs/openapi.yaml', [grouped(rows), grouped(minutes), `${days} days`]],
+    ];
+    for (const [file, phrases] of says) {
+      const text = read(file).replace(/\s+/g, ' ');
+      for (const phrase of phrases) if (!text.includes(phrase)) problems341.push(`${file} does not say ${phrase}, which derived_series() declares`);
+    }
+  }
+  if (problems341.length) {
+    fail("The documents name derived_series()'s limits otherwise than 0282 declares them:\n" +
+      problems341.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the README and the API reference name derived_series()'s limits as 0282 declares them: ${Number(rows).toLocaleString('en-US')} rows, ${Number(minutes).toLocaleString('en-US')} minutes of input, a bucket of ${Number(bucket) / 1440} days`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 342. The help says what a derived metric is and is not, as the issue settled it. History's help
+// says a time in state is resolved to the minute, a counter that resets and passes its old value inside
+// one minute is counted short, and a derived sum at a wide bucket need not equal its inputs' averages;
+// the Metrics help no longer says its values are not drawn; the upgrade guide names both calls and says
+// the automation now fires. A page that still says "not drawn in History yet" is wrong about the page
+// it describes.
+// -------------------------------------------------------------------------------------------------
+{
+  const history = read('help/pages/history.md').match(/\n## Derived metrics\n([\s\S]*?)\n## /)?.[1];
+  const metrics = read('help/pages/metrics.md');
+  const upgrading = read('help/site/upgrading.md').match(/\n### From 1\.8\.0, History draws a derived metric, and an automation can read one\n([\s\S]*?)\n### /)?.[1];
+  const problems342 = [];
+  if (!history) problems342.push('help/pages/history.md has no "Derived metrics" section');
+  if (!upgrading) problems342.push('help/site/upgrading.md has no "From 1.8.0, History draws a derived metric" section');
+  if (!problems342.length) {
+    for (const [phrase, what] of [
+      ['resolved to the minute', 'that time in state is resolved to the minute'],
+      ['counted short by that old value', 'that a counter that resets and passes its old value inside one minute is counted short'],
+      ["need not equal the sum of its inputs' averages", "that a wide bucket's derived sum need not equal the sum of its inputs' averages"],
+      ['Export CSV', 'that Export leaves a derived metric out'],
+    ]) {
+      if (!history.includes(phrase)) problems342.push(`help/pages/history.md's Derived metrics does not say ${what}`);
+    }
+    for (const call of ['derived_series', 'derived_current']) {
+      if (!upgrading.includes(call)) problems342.push(`the upgrade guide's From 1.8.0 note on derived metrics does not name ${call}`);
+    }
+    if (!/An automation on a derived metric now fires/.test(upgrading)) problems342.push('the upgrade guide does not say an automation on a derived metric now fires');
+  }
+  if (/not drawn in History yet/i.test(metrics)) problems342.push('help/pages/metrics.md still says a derived metric is not drawn in History yet');
+  if (problems342.length) {
+    fail('The help says a derived metric otherwise than the issue settled it:\n' +
+      problems342.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass("History's help says a derived metric is resolved to the minute, may count a reset short and need not equal its inputs' averages; the Metrics help no longer says it is not drawn; the upgrade guide names both calls");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 343. History's help names every tab that offers Export CSV, and no tab that does not. A tab offers
+// it when its file under components/tabs imports TelemetryExportModal; the help's step 1 of
+// *Exporting readings* says what each saves, as "On Overview, ..." or "On the Cell tab, ...". A tab
+// the help leaves out is one whose button a reader does not know to look for; a tab it names that has
+// none sends them looking for a button that is not there. A file outside History's tabs that opens
+// the dialog is not one this check can name, so it fails until the check is taught it.
+// -------------------------------------------------------------------------------------------------
+const EXPORT_ENTRY_FILES = allFiles.filter((f) => f.startsWith('frontend/src/') && /\.jsx?$/.test(f) && !f.includes('/__tests__/')
+  && f !== 'frontend/src/components/modals/TelemetryExportModal.jsx' && /from '(\.\.?\/)+modals\/TelemetryExportModal'/.test(read(f)));
+const EXPORT_ENTRY_TABS = EXPORT_ENTRY_FILES.map((f) => f.match(/^frontend\/src\/components\/tabs\/History([A-Za-z]+)\.jsx$/)?.[1]).filter(Boolean);
+{
+  const problems343 = [];
+  for (const f of EXPORT_ENTRY_FILES) {
+    if (!/^frontend\/src\/components\/tabs\/History[A-Za-z]+\.jsx$/.test(f)) problems343.push(`${f} opens the export dialog and is not a History tab, so this check cannot name it`);
+  }
+  const step = read('help/pages/history.md').match(/\n1\. Choose what to export\.([^\n]*)\n/)?.[1];
+  if (!step) {
+    problems343.push('help/pages/history.md has no "1. Choose what to export." step under Exporting readings');
+  } else {
+    const named = new Set([...step.matchAll(/\bOn the ([A-Z][a-z]+) tab\b/g)].map((m) => m[1]));
+    if (/\bOn Overview\b/.test(step)) named.add('Overview');
+    for (const tab of EXPORT_ENTRY_TABS) if (!named.has(tab)) problems343.push(`help/pages/history.md's step 1 does not say what the ${tab} tab exports ("On ${tab === 'Overview' ? 'Overview' : `the ${tab} tab`},")`);
+    for (const tab of named) if (!EXPORT_ENTRY_TABS.includes(tab)) problems343.push(`help/pages/history.md's step 1 names the ${tab} tab, which does not open the export dialog`);
+  }
+  if (problems343.length) {
+    fail('History\'s help names the tabs that offer Export CSV otherwise than the code does:\n' + problems343.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help says what Export CSV saves on each of the ${EXPORT_ENTRY_TABS.length} tabs that offer it: ${EXPORT_ENTRY_TABS.join(', ')}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 344. frontend/README.md's *History's Export* counts the places that export and names each, as the
+// code has them: one bullet with "The Device tab:", "Overview:", "The Cell tab:" and so on for every
+// tab that imports TelemetryExportModal (check 343's list), under "from <number> places". A sixth
+// entry point the section does not mention is one whose rules nobody checked against the other five.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems344 = [];
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const section = read('frontend/README.md').match(/\n### History's Export\n([\s\S]*?)\n### /)?.[1];
+  if (!section) {
+    problems344.push('frontend/README.md has no "History\'s Export" section');
+  } else {
+    const flat = section.replace(/\s+/g, ' ');
+    const count = EXPORT_ENTRY_TABS.length;
+    if (!flat.includes(`from ${words[count] ?? count} places`)) problems344.push(`frontend/README.md's History's Export does not say "from ${words[count] ?? count} places"`);
+    for (const tab of EXPORT_ENTRY_TABS) {
+      const label = tab === 'Overview' ? '**Overview:**' : `**The ${tab} tab:**`;
+      if (!flat.includes(label)) problems344.push(`frontend/README.md's History's Export does not name ${label}`);
+    }
+  }
+  if (problems344.length) {
+    fail('frontend/README.md\'s History\'s Export lists the export\'s entry points otherwise than the code has them:\n' + problems344.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`frontend/README.md's History's Export counts and names the ${EXPORT_ENTRY_TABS.length} entry points to the export dialog`);
   }
 }
 
