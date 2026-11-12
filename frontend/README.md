@@ -1345,8 +1345,8 @@ the source and fails on an outlined button written into one.
 control, at the far left, of the row above the groups. That row is `.groups-header`, which the Audit
 Trail, History, Metrics and Vocabulary all use. A line saying what is shown goes beside it, as on
 History, and a key goes at its right-hand end. The row sits outside the scroller, so it stays on
-screen. `toolbarExpandAll.test.js` reads every toolbar in the source and fails on a toggle written
-into one.
+screen. Check 371 (`scripts/check-docs-drift.mjs`) reads the source and fails on a toggle written
+into a toolbar, or anywhere but first in this row.
 
 **Refresh and its interval are one control**, `RefreshButton` (`common/RefreshButton.jsx`), as
 Grafana's refresh picker is. The filled Refresh button reads again now. The select joined to its
