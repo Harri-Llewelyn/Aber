@@ -120,7 +120,7 @@ describe('the Derived tab', () => {
     const rows = [...derived.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(td => td.textContent))
     expect(rows).toEqual([
       ['Controller/PARTS_PER_HOUR', 'Counter rate', 'rate of Controller/PART_COUNT, per hour', 'COUNT/HOUR', 'Parts an hour'],
-      ['Controller/UPTIME', 'Time in state', 'share of time Controller/EXECUTION is ACTIVE', '—', '—'],
+      ['Controller/UPTIME', 'Time in state', 'share of time Controller/EXECUTION is ACTIVE', '% of the time', '—'],
       ['Power/TOTAL', 'Sum or difference', 'Power/PHASE_A + Power/PHASE_B', 'KILOWATT', '—']
     ])
     expect(derived.querySelectorAll('td .mono').length).toBeGreaterThan(6)
@@ -153,7 +153,7 @@ describe('the Derived tab', () => {
     fireEvent.click(within(derived).getByText('Controller/UPTIME'))
     const drawer = document.querySelector('.context-panel')
     const units = () => within(drawer).getByText('Units').closest('.context-field').textContent
-    expect(units()).toContain('% of the time, shown as a percentage of the time. Stored as a fraction from 0 to 1.')
+    expect(units()).toContain('% of the time, stored as a fraction from 0 to 1')
     fireEvent.click(within(derived).getByText('Controller/PARTS_PER_HOUR'))
     expect(units()).toContain('COUNT/HOUR')
     expect(units()).not.toContain('percentage')
@@ -524,7 +524,7 @@ describe('Add Derived Metric', () => {
     it('says a share of time has none, and a sum takes the one its inputs share', async () => {
       const { dialog } = await open()
       choose(dialog, /Kind/, 'time_in_state')
-      expect(facts(dialog).textContent).toContain('None: a share of time has no unit')
+      expect(facts(dialog).textContent).toContain('% of the time, stored as a fraction from 0 to 1')
       choose(dialog, /Kind/, 'sum')
       expect(facts(dialog).textContent).toContain('The unit the inputs share')
       pick(dialog, 'Power/PHASE_A')

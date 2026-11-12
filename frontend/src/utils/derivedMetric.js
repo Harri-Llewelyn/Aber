@@ -138,11 +138,11 @@ export function derivedUnit(kind, inputRows) {
 
 /**
  * The unit a derived metric will take, in words with its reason, for the dialog's fixed Units line:
- * "COUNT/HOUR, the counter's unit per hour", "None: a share of time has no unit". Before the inputs
+ * "COUNT/HOUR, the counter's unit per hour", "% of the time, stored as a fraction from 0 to 1" (SHARE_UNIT_WORDS). Before the inputs
  * are chosen it says what the unit will follow.
  */
 export function describeUnit(kind, inputRows) {
-  if (kind === 'time_in_state') return 'None: a share of time has no unit'
+  if (kind === 'time_in_state') return SHARE_UNIT_WORDS
   if (kind === 'counter_rate') {
     const row = inputRows[0]
     if (!row) return "The counter's unit per hour"
@@ -276,6 +276,8 @@ export function derivedInputCount(names, catalog) {
  */
 export const SHARE_UNIT = '% of the time'
 export const SHARE_FRACTION_NOTE = 'a fraction from 0 to 1 (0.9 is 90%)'
+/** A time in state's unit where a dialog or a drawer says it in full, with what the data holds. */
+export const SHARE_UNIT_WORDS = `${SHARE_UNIT}, stored as a fraction from 0 to 1`
 
 /**
  * A fraction as a percentage in words: at most one decimal place, a trailing zero dropped. 0.42 is

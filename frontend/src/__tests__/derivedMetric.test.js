@@ -137,8 +137,8 @@ describe('the unit in words, with its reason', () => {
   })
 
   it('says a share of time has none', () => {
-    expect(describeUnit('time_in_state', [])).toBe('None: a share of time has no unit')
-    expect(describeUnit('time_in_state', [row('Controller/EXECUTION')])).toBe('None: a share of time has no unit')
+    expect(describeUnit('time_in_state', [])).toBe('% of the time, stored as a fraction from 0 to 1')
+    expect(describeUnit('time_in_state', [row('Controller/EXECUTION')])).toBe('% of the time, stored as a fraction from 0 to 1')
   })
 
   it('says what a sum takes, from the unit its inputs share', () => {
