@@ -8,7 +8,7 @@ Everyone who can sign in can read this page. An Administrator or a Shopfloor Man
 
 ## The list
 
-Open **Automations** in the sidebar, under **Metrics**. Each row is one automation:
+Open **Automations** in the sidebar. It has a group of its own, under **Vocabulary**. Each row is one automation:
 
 - **Automation** is its name, with its id under it. Select the name to open it.
 - **Watches** says in words what its triggers watch, such as **Spindle/BEARING_TEMPERATURE above 80 for 5 min on Lathe 3**. Two or more devices are counted, as **on 2 devices**. After two triggers it says how many more there are.
