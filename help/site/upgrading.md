@@ -1783,7 +1783,7 @@ Grafana's own alert rules are untouched.
 
 ### From 1.8.0, automations are written on the Automations page
 
-From 1.8.0 the dashboard has an **Automations** page, in the sidebar under **Metrics**. Everyone who
+From 1.8.0 the dashboard has an **Automations** page, in a group of its own in the sidebar, under **Vocabulary**. Everyone who
 signs in can read it. An Administrator or a Shopfloor Manager writes. There is nothing to run when
 you upgrade.
 
