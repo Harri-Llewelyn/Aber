@@ -86,6 +86,34 @@ export function credentialIssuedHere(gateway) {
   return gateway?.deployment === 'host' || gateway?.deployment === 'third_party'
 }
 
+// The drawer's rows, named by label, in the three groups a kind has in common.
+const FORGE_ROWS = ['Bundle', 'Committed', 'Reported']
+const HEALTH_ROWS = ['Health Reported', 'Runtime Uptime']
+const APPLIANCE_ROWS = ['CA Expires', 'Disk Free', 'Memory Available', 'Load (1m)', 'Flow', 'Platform', 'Custom']
+
+/**
+ * The drawer rows each kind of gateway can never fill, so its drawer does not show them. A row a
+ * kind could fill but has not yet is shown, and says "Not set"; one it never will would say it for
+ * good, and a Host gateway's drawer carried seven of them between its facts and its actions.
+ *
+ * Only a Remote gateway runs on an appliance of its own, which enrols, holds a forge repository and
+ * reports node_exporter's figures. A host-run gateway (Host, Simulated) runs in this stack's
+ * Node-RED, and its heartbeat reports its uptime. Playback reports no health at all: the daemon
+ * records none for a shadow gateway. A Third-party node's software is not Aber's to read.
+ */
+export const NEVER_FILLED_ROWS = Object.freeze({
+  [GATEWAY_TYPES.REMOTE]: [],
+  [GATEWAY_TYPES.HOST]: [...FORGE_ROWS, ...APPLIANCE_ROWS],
+  [GATEWAY_TYPES.SIMULATED]: [...FORGE_ROWS, ...APPLIANCE_ROWS],
+  [GATEWAY_TYPES.PLAYBACK]: [...FORGE_ROWS, ...HEALTH_ROWS, ...APPLIANCE_ROWS],
+  [GATEWAY_TYPES.THIRD_PARTY]: [...FORGE_ROWS, ...HEALTH_ROWS, ...APPLIANCE_ROWS],
+})
+
+/** Whether this gateway's drawer shows the row with this label: false for one its kind can never fill. */
+export function gatewayShowsRow(gateway, label) {
+  return !NEVER_FILLED_ROWS[gatewayType(gateway)].includes(label)
+}
+
 export function gatewayTypeLabel(type) {
   return LABELS[type] || LABELS[GATEWAY_TYPES.REMOTE]
 }
