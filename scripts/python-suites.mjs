@@ -1740,6 +1740,20 @@ export const SUITES = {
       'the first message rather than racing it. Needs the stack up and the owner connection ' +
       '(SUPABASE_DB_*); everything it made, the audit rows included, is removed.',
   },
+  'ingestion/test_a_derived_metric_is_read_stack.py': {
+    lanes: ['stack'],
+    why:
+      'THE ONLY CHECK THAT A DERIVED METRIC IS READ FROM REAL READINGS, END TO END. A fixture ' +
+      "gateway's edge node publishes a rising count for two minutes through a real broker, and a " +
+      'Shopfloor Manager reads derived_series() through PostgREST: every minute the counter rose in ' +
+      'has a positive rate that is not carried, and the minutes after the last reading count nothing ' +
+      'and say they are carried. derived_current() is the rate over the last hour, worked out in the ' +
+      'suite from the raw readings by the rule. A measured metric is refused. An automation on the ' +
+      "derived metric is applied, pg_cron's evaluator raises its alert with the value it read at a " +
+      'whole minute, and deleting the automation resolves it. Needs the stack up, the seeded ' +
+      'Shopfloor Manager and the owner connection (SUPABASE_DB_*); about six minutes; everything it ' +
+      'made, the audit rows included, is removed.',
+  },
   'test-harness/test_load_generator.py': {
     // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be
     // repeated cheaply: by the time anyone reads a load figure the stack has changed, so the

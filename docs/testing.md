@@ -293,6 +293,16 @@ python ingestion/test_recorded_capture_replay.py
 # UNS_CONTEXT_TTL_SECONDS, so the suite waits that long after adding the row. Needs the stack up and
 # the environment test_playback_replay.py reads, plus SUPABASE_DB_*; removes what it made.
 python ingestion/test_a_derived_name_is_dropped_stack.py
+# A derived metric is read from real readings, and an automation on it fires and resolves (0282,
+# 0283). Needs the stack up, the seeded Shopfloor Manager and SUPABASE_DB_*; about six minutes. It adds a
+# measured counter and a derived rate on it as the database's owner, has a fixture Host gateway's edge
+# node publish a rising count for two minutes, and after the minute that holds the last reading has
+# ended has the manager read derived_series() (every minute the counter rose in has a positive rate,
+# none carried, and the minutes after count nothing and say so) and derived_current() (the rate over
+# the last hour, worked out from the raw readings by the rule). It refuses a measured metric. The
+# manager then applies an automation on the derived metric, pg_cron's evaluator raises its alert with
+# the value it read, and deleting the automation resolves it. Removes what it made.
+python ingestion/test_a_derived_metric_is_read_stack.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
 # Deliberately narrow: the export path needs a historian, object storage and a chunk to mean

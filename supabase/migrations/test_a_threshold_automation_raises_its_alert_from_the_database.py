@@ -1019,6 +1019,26 @@ class ARealHistorian(EvaluatorBase):
         self.evaluate(120)
         self.assertEqual([a[0] for a in self.alerts(t)], ["resolved"])
 
+    def test_a_derived_metric_is_read_through_the_historian_and_fires(self):
+        counter, rate = "Test_0283/Real_Count", "Test_0283/Real_Rate"
+        self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, units) VALUES (%s, 10, 'COUNT');", (counter,))
+        self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, derivation) VALUES (%s, 10, %s);",
+                         (rate, Json({"kind": "counter_rate", "input": counter})))
+        self.apply(automation(triggers=[trigger(metric=rate, above=None, below=1000, **{"for": None})]))
+        t = self.trigger_id()
+        # A reading in each of the five whole minutes before the last, 10 more each: 40 parts over the four
+        # minutes that have one before them, 600 an hour.
+        for minutes, value in ((5, 0), (4, 10), (3, 20), (2, 30), (1, 40)):
+            self.cur.execute("INSERT INTO timescale.telemetry (time, asset_id, metric_name, val_double)"
+                             " VALUES (date_trunc('minute', now()) - make_interval(mins => %s) + interval '10 seconds', %s, %s, %s);",
+                             (minutes, self.sparkplug[DEV_A], counter, value))
+        self.cur.execute("SELECT value, breached FROM public.machine_condition_readings();")
+        self.assertEqual(self.cur.fetchall(), [(600.0, True)])
+        self.cur.execute("SELECT detail FROM public.machine_condition_rows();")
+        self.assertEqual(self.cur.fetchall(), [(f"{rate} is 600 over the last hour, below 1000",)])
+        self.evaluate(0)
+        self.assertEqual([a[0] for a in self.alerts(t, metric=rate)], ["firing"])
+
     def test_the_filter_reaches_the_historian_once_for_each_metric(self):
         self.apply(automation(triggers=[trigger(DEV_A, METRIC), trigger(DEV_B, METRIC), trigger(DEV_A, METRIC_2, above=50)]))
         self.owner()

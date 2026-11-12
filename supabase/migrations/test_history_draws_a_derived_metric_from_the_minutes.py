@@ -398,8 +398,7 @@ class Refusals(DerivedBase):
 
     def setUp(self):
         super().setUp()
-        for rollup in ("telemetry_1m", "telemetry_5m", "telemetry_1h"):
-            self.cur.execute(f"DROP TABLE timescale.{rollup};")
+        self.cur.execute("DROP TABLE timescale.telemetry_1m, timescale.telemetry_5m, timescale.telemetry_1h;")
 
     def test_bad_bounds_and_buckets_are_refused_before_any_read(self):
         for label, args in {

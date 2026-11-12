@@ -5296,13 +5296,36 @@ function is \`SECURITY DEFINER\`. These two run as the caller and read the forei
 usage and a table grant, and 0001's sweep takes back what is not listed there. A panel on a derived
 metric is a 1.9 question.
 
-**The Area tab folds in the browser.** It reads \`derived_series()\` for every machine that reports the
+**The Area tab folds in the browser.** It reads `derived_series()` for every machine that reports the
 inputs, at the finest resolution at which machines times buckets fit the row cap
-(\`pickResolution()\`), and folds each cell as \`telemetry_carried_by_group()\` does: the mean of the
+(`pickResolution()`), and folds each cell as `telemetry_carried_by_group()` does: the mean of the
 machines that have a value, and the total only where every machine has one. A group variant would
 return a fifth of the rows, but the historian reads the same minutes, and the read, not the rows, is
-what costs. It would add a second function to hold in step, for a finer bucket on the cells of an area
-of tens of machines. It is one to add if an area's cells are wanted finer.
+what costs: 20 machines over a Day read 355 ms at 1-hour buckets, which the cap picks, and 319 ms at
+5 minutes (17 machines, to stay under the cap). A variant would buy the finer bucket for the same
+time, for a second function to hold in step. It is one to add if an area's cells are wanted finer.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression policies;
+20 devices over 3 days, each a counter every 30 seconds that resets at midnight, a state that changes
+every 10 minutes and three phases every 30 seconds: 700,000 raw rows, 354,000 in `telemetry_1m`),
+through `postgres_fdw` into `supabase/postgres` 17.6.1.175, as `authenticated`, the first read then
+the median of five, on a laptop another helper shared (so a read varied by up to 2 times):
+
+| Read | Rows | Warm |
+| :--- | ---: | ---: |
+| One device, a rate, 24 hours, 5-minute buckets | 289 | 29 ms |
+| One device, a rate, a share and a sum of 3 inputs, 24 hours, 5 minutes | 867 | 109 ms |
+| One device, the same three, 72 hours, 1 hour | 219 | 245 ms |
+| 20 devices, a rate, 24 hours, 1 hour (a Cell tab) | 500 | 355 ms |
+| 20 devices, a time in state, 24 hours, 1 hour | 500 | 150 ms |
+| 20 devices, a sum of 3 inputs, 24 hours, 1 hour | 500 | 1,166 ms |
+| 20 devices, a rate, 72 hours, 1 hour (an Area tab) | 1,460 | 1,167 ms |
+| 20 devices, a rate, 72 hours, 1 day (86,400 minutes read) | 80 | 1,198 ms |
+| `derived_current()`, 20 devices: a rate, a share, a sum, all three | 20, 20, 20, 60 | 30, 13, 41, 84 ms |
+
+The cost is the minutes read: a sum of three inputs reads three, and a read of 20 devices over 72 hours
+is 86,400 for one input. `derived_current()` reads an hour, so the evaluator's cost at a few hundred
+pairs is a few hundred of those.
 
 **What is not exact, and the help says so.** Time in state is resolved to the minute: a state shorter than
 a minute counts as a whole minute or not at all, by whether it holds at the minute's end, which is
@@ -5347,7 +5370,8 @@ The columns of both functions are \`0270\`'s, because a replay runs \`0270\` aga
 is any API role's), the \`SECURITY DEFINER\` form, and that the read is still one remote query for each
 measured metric and goes through \`derived_current()\` for a derived one. The suite for \`0271\` holds the rest
 (\`DerivedMetrics\`): a rate, a share and a sum read and worded, a pair with no value, a measured pair
-beside a derived one, and an alert that fires, holds and resolves.
+beside a derived one, and an alert that fires, holds and resolves. With `ABER_TEST_HISTORIAN`, one more reads a
+derived rate through a real historian's real-time rollup and `postgres_fdw`, and fires on it.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

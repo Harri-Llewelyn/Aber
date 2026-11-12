@@ -1172,9 +1172,14 @@ export function cellMetrics(machines, schemas, catalog = null) {
   return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** The metric the tab opens on: the one most machines report, the first by name among equals. */
+/**
+ * The metric the tab opens on: the one most machines report, the first by name among equals. A
+ * measured metric is preferred to a derived one (`derived: true` on the entry), which has no hour-of-day
+ * grid and no export: a tab opens on one only when the machines report nothing else.
+ */
 export function defaultCellMetric(metrics) {
-  return metrics.reduce((best, m) => (!best || m.count > best.count ? m : best), null)?.name ?? ''
+  const measured = metrics.filter(m => !m.derived)
+  return (measured.length ? measured : metrics).reduce((best, m) => (!best || m.count > best.count ? m : best), null)?.name ?? ''
 }
 
 /** What a shared scale adds above and below the data, as a fraction of its span. */

@@ -10,7 +10,7 @@ import {
   derivedDefinitions, derivedInputCount, derivedReportedBy, derivedWindowMinutes, splitDerived,
 } from '../utils/derivedMetric'
 import {
-  cellMetrics, derivedReadProblem, deviceMetrics, foldByGroup, groupSeries, historyMetrics, metricDevices, pickGroupResolution,
+  cellMetrics, defaultCellMetric, derivedReadProblem, deviceMetrics, foldByGroup, groupSeries, historyMetrics, metricDevices, pickGroupResolution,
 } from '../utils/history'
 import { DERIVED_EXPORT_NOTE, exportableMetrics } from '../utils/telemetryExport'
 
@@ -65,6 +65,19 @@ describe('which derived metrics a device reports', () => {
     const row = historyMetrics(devices, [], catalog).find(m => m.name === 'Power/NET')
     expect(row).toEqual({ name: 'Power/NET', count: 1, unit: 'kW', kind: 'number', derived: true })
     expect(historyMetrics(devices, [], catalog).find(m => m.name === 'Power/A').derived).toBeUndefined()
+  })
+})
+
+describe('the metric a tab opens on', () => {
+  it('is the one most machines report, and never a derived one while a measured one is reported', () => {
+    const list = [
+      { name: 'A/MEASURED', count: 2 },
+      { name: 'B/DERIVED', count: 3, derived: true },
+      { name: 'C/MEASURED', count: 2 },
+    ]
+    expect(defaultCellMetric(list)).toBe('A/MEASURED')
+    expect(defaultCellMetric(list.filter(m => m.derived))).toBe('B/DERIVED')
+    expect(defaultCellMetric([])).toBe('')
   })
 })
 
