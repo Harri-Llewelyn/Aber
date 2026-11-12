@@ -4689,18 +4689,20 @@ a.chip { text-decoration: none; }
 /* The cell and area icon picker: a grid of labelled buttons rather than a <select>, because the
    operator is choosing what the pin will look like on the plan. `auto-fit` so the grid reflows at
    any modal width; each option carries its label. */
+/* The pictures alone, in square tiles: each one's name is its tooltip and its accessible name. */
 .icon-picker {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  grid-template-columns: repeat(auto-fill, 44px);
   gap: 6px;
 }
 
 .icon-picker-option {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 9px 6px;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg-base);

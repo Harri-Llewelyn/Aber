@@ -533,21 +533,23 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             </Tooltip>
           </div>
           <div className="form-group">
-            {/* A grid of buttons, not a select: the choice is visual. */}
+            {/* A grid of buttons, not a select: the choice is visual. Each picture's name is its
+                accessible name and its tooltip, so the grid shows the pictures alone. */}
             <label className="form-label">Cell Icon</label>
             <div className="icon-picker" role="radiogroup" aria-label="Cell icon" aria-describedby="cell-icon-hint">
               {CELL_ICONS.map(({ key, label, Icon }) => (
-                <button
-                  key={key}
-                  type="button"
-                  role="radio"
-                  aria-checked={(formVal.icon || DEFAULT_CELL_ICON) === key}
-                  className={`icon-picker-option ${(formVal.icon || DEFAULT_CELL_ICON) === key ? 'is-selected' : ''}`}
-                  onClick={() => setFormVal(f => ({ ...f, icon: key }))}
-                >
-                  <Icon size={20} />
-                  <span>{label}</span>
-                </button>
+                <Tooltip key={key} text={label}>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-label={label}
+                    aria-checked={(formVal.icon || DEFAULT_CELL_ICON) === key}
+                    className={`icon-picker-option ${(formVal.icon || DEFAULT_CELL_ICON) === key ? 'is-selected' : ''}`}
+                    onClick={() => setFormVal(f => ({ ...f, icon: key }))}
+                  >
+                    <Icon size={20} aria-hidden="true" />
+                  </button>
+                </Tooltip>
               ))}
             </div>
             <div className="form-hint" id="cell-icon-hint">A picture to tell this cell apart on the Site Map and in lists.</div>

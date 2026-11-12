@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
+import { Tooltip } from '../common/Tooltip'
 import { areaHistoryUrl, areaUrl, cellUrl, deviceUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
@@ -507,21 +508,23 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             />
           </div>
           <div className="form-group">
-            {/* A grid of buttons, as the cell form has: the choice is visual. */}
+            {/* A grid of buttons, as the cell form has: the choice is visual. Each picture's name is its
+                accessible name and its tooltip, so the grid shows the pictures alone. */}
             <label className="form-label">Area Icon</label>
             <div className="icon-picker" role="radiogroup" aria-label="Area icon" aria-describedby="area-icon-hint">
               {AREA_ICONS.map(({ key, label, Icon }) => (
-                <button
-                  key={key}
-                  type="button"
-                  role="radio"
-                  aria-checked={(formVal.icon || DEFAULT_AREA_ICON) === key}
-                  className={`icon-picker-option ${(formVal.icon || DEFAULT_AREA_ICON) === key ? 'is-selected' : ''}`}
-                  onClick={() => setFormVal(f => ({ ...f, icon: key }))}
-                >
-                  <Icon size={20} />
-                  <span>{label}</span>
-                </button>
+                <Tooltip key={key} text={label}>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-label={label}
+                    aria-checked={(formVal.icon || DEFAULT_AREA_ICON) === key}
+                    className={`icon-picker-option ${(formVal.icon || DEFAULT_AREA_ICON) === key ? 'is-selected' : ''}`}
+                    onClick={() => setFormVal(f => ({ ...f, icon: key }))}
+                  >
+                    <Icon size={20} aria-hidden="true" />
+                  </button>
+                </Tooltip>
               ))}
             </div>
             <div className="form-hint" id="area-icon-hint">A picture to tell this area apart on the Site Map, in the Areas list and in a cell's or device's details.</div>
