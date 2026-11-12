@@ -2479,7 +2479,9 @@ produces, and the fingerprint is half of the occurrence key.
 
 **A row from before keeps working.** All three are NULL on rows written before the upgrade.
 `grafanaAlertUrl()` (`frontend/src/constants.js`) opens `/alerting/grafana/<uid>/view` when the row
-has a uid, and otherwise Grafana's alert list searched by the rule's name, as before.
+has a uid, and otherwise Grafana's alert list searched by the rule's name, as before. An alert an
+automation raised has a `condition:` fingerprint and no rule: `grafanaAlertUrl()` answers null for
+it, and no surface links to Grafana (0271).
 
 **The shape lives in `0001`.** `0001` states `platform_alerts_active` with a column list and replays
 first on every boot. Had `0220` widened the view, `0001`'s `CREATE OR REPLACE VIEW` would have tried
@@ -3695,8 +3697,8 @@ margin covers a repeat that waits for its group's next flush or for the webhook 
 A row whose resolve never arrived is therefore reminded for at most 13 hours after Grafana stopped
 repeating it, where before it would have been reminded for ever: `prune_platform_alerts()` keeps the
 newest occurrence of a fingerprint however old it is. A fingerprint starting `condition:` is the
-evaluator's (#322), which will stamp on every run. Its arm answers no window, so no reminder, until
-the evaluator states its run interval there. A row never stamped is not reminded.
+evaluator's (#322), which stamps on every run, each minute (0271). Its arm answers five minutes, that
+interval and a margin of four. A row never stamped is not reminded.
 
 **The dispatcher is `notification-dispatch`, asked for as `sweep_forge()` asks for `forge-sweep`.**
 `request_notification_dispatch()` reads the functions' address, the publishable key and the dispatch
@@ -4324,8 +4326,8 @@ evaluating. The file format is the reference in [`docs/automations.md`](../docs/
   answers the prefix every fingerprint of that trigger starts with. `0247`'s
   `platform_alert_confirmation_window()` already tells a `condition:` row from Grafana's.
 - **Where the evaluator goes.** Its state is per (trigger, device, metric): pending since, firing
-  since, last evaluated. That is a table the evaluator adds, keyed on `automation_triggers.id` with
-  `ON DELETE CASCADE`. These tables need no reshaping for it.
+  since, last evaluated. That is `automation_trigger_states`, which 0270 adds with a foreign key to
+  `automation_triggers` and `ON DELETE CASCADE`. These tables needed no reshaping for it.
 
 The file's self-check asserts row security on all three, that `anon` holds nothing, that
 `authenticated` reads and writes nothing directly, and the fingerprint's form.
@@ -4878,6 +4880,153 @@ the figures and the reads' cost are in [the issue's spike comment](https://githu
 `test_a_derived_metric_is_a_catalogue_row.py` holds all of the above. The file's self-check asserts
 the column, the CHECK, the trigger's timing, what the shape function says of a few definitions and
 the grants, and reads no row.
+
+### A threshold automation is read against the historian (0270)
+
+An automation's `threshold` trigger names a device, a metric and a number
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)). `0270` holds the read that finds which
+of them are breaching, and the table that remembers what each run found. `0271` is the evaluator
+that uses them.
+
+- **`machine_condition_readings()` is the read.** It returns one row for each live threshold pair
+  (an enabled automation's unarchived trigger on an unarchived device) that has a latest value,
+  breached or not: the trigger, the device, the metric, the comparison and threshold, the value,
+  when it arrived and `breached`. It reads `timescale.telemetry_latest` over `postgres_fdw`. A pair
+  with no row has no value, which is no breach.
+- **`machine_condition_rows()` is the breaching ones**, in the shape `platform_health_rows()`
+  answers (`condition`, `sparkplug_id`, `subject`, `value`, `detail`) with `trigger_id`,
+  `entity_id` and `metric_name` beside them. It is a function of its own and no arm of
+  `platform_health_rows()`: `postgres_fdw` raises on connect, so a historian outage would take the
+  platform's own conditions down with it. The evaluator reads the first function and not this one,
+  because it must tell a value that stopped breaching, which resolves, from a pair with no value,
+  which does not.
+- **One remote query for each metric, carrying that metric's devices.** One query with both arrays,
+  every device and every metric, asks the historian for their cross product: 300 devices of 10
+  metrics asks for 3,000 series to find 300, and was 8 times slower in the spike. The filter on
+  asset and metric is shipped, and the historian pushes it below the view's `DISTINCT ON`, so the
+  work is one index probe for each matching series for each chunk. The newest value is compared
+  whenever it arrived: the filter has no time bound, and none comes from `now()`, which
+  `postgres_fdw` would evaluate here and ship nothing for.
+- **A value that is not a number is no reading.** That is `NULL` (the value is a flag or a text) and
+  `NaN`. Postgres sorts `NaN` above every number, so it would breach every `above`.
+- **Neither function is granted to an API role.** They run as the historian's admin mapping, which
+  is the mapping a pg_cron job has, and a browser has no reason to start a read of the historian.
+- **`automation_trigger_states`** has one row for each (trigger, device, metric): `pending_since`,
+  `firing_since` (never both), `last_evaluated_at`, `last_value`, `last_observed_at`, and the
+  comparison and threshold the row was last judged against. Every signed-in role reads it, nobody
+  writes it directly, and `anon` is revoked by name. A foreign key to `automation_triggers` with
+  `ON DELETE CASCADE` takes a trigger's rows with it. The key carries the device and the metric as
+  well as the trigger, so a trigger given another of either is another pair, and the row of the old
+  one is no longer live. `fillfactor` is 70, so the update every run makes of each row can stay on
+  its page.
+
+The file's self-check asserts row security and the grants on the table, the cascade, that neither
+function is any API role's, that each is `SECURITY DEFINER` with its path pinned, and that the read
+is still one metric at a time with each metric's devices in the filter.
+
+### A threshold automation raises its alert from the database (0271)
+
+**`evaluate_automations()` is what pg_cron runs every minute**, as it runs
+`refresh_directory_liveness()`, and the only place an automation's alert is written. It reads the
+historian through `machine_condition_readings()`, keeps what it found in
+`automation_trigger_states`, and writes `platform_alerts` as `grafana-alert-webhook` does. So
+acknowledgement, suppression and delivery read an automation's alert as they read Grafana's, and
+never ask which wrote a row. A separate worker is not needed: the spike
+([#322](https://github.com/Harri-Llewelyn/Aber/issues/322)) measured one read at 300 triggers at
+0.24 to 0.31 s, and one of every series on a 1,000-device site at 1.1 s.
+
+- **A breach fires when it has held for the trigger's `for`.** The first run that reads it breaching
+  sets `pending_since`. The first run at which `for` has passed, with it still breaching, fires: one
+  occurrence row, `status` `firing`, `starts_at` that run's time. **A hold is judged at each run, so
+  it rounds up to a run.** `for: 30s` fires at the second run, a minute after the first, and `0s`
+  at the first run that finds the breach. A breach that stops first clears `pending_since`, and the
+  next one starts the hold again. **A changed comparison or threshold starts it again** for a
+  breach that has not yet fired. A firing one stays firing while the new threshold is breached, and
+  resolves when it is not.
+- **A firing one that stops breaching resolves** at the first run that reads it back inside. That is
+  the UPDATE that sets `status` `resolved` and `ends_at`, as a resolved notification from Grafana
+  does, so a message already queued is followed by its resolve. There is one occurrence for each
+  firing: the next firing is a new row.
+- **The alert is written as the webhook writes one.** `fingerprint` is
+  `automation_alert_fingerprint()`'s (0255), `alert_name` the automation's alias, `severity` the
+  `alert` action's, `entity_type` `device` with the device's id and `sparkplug_id`, and `summary`
+  "Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m". `labels` are `severity`,
+  `entity_type`, `metric`, `automation` (the automation's key) and `trigger_id`, all strings as
+  Grafana's are. `values` are `value`, the reading that fired it, and `threshold`. `rule_uid` is
+  null, and the frontend's link to Grafana does not apply to a `condition:` row
+  (`isAutomationAlert()`, mirror check 83).
+- **Each run stamps `last_confirmed_at` on every row it holds firing**, a pair with no value
+  included, because its state still holds. A stamp changes no status, so it queues nothing. It is an
+  UPDATE, which Realtime carries: a dashboard reads again once a minute for as long as an
+  automation's alert fires, where Grafana's alerts are stamped every 12 hours.
+  **`platform_alert_confirmation_window()` (0247) gives a `condition:` fingerprint five minutes**,
+  the run interval and a margin of four, so a reminder is sent only for an alert the last run
+  confirmed. Mirror check 82 holds the window above the job's interval. The arm is edited in place
+  in `0247`, which is unreleased, and its self-check follows.
+- **No reading is not a breach.** A pair `machine_condition_readings()` returns no row for is left
+  as it was. A firing alert stays firing and is confirmed, a pending breach neither starts nor
+  clears, and a pair that never had a value has no state. Under report-by-exception the last value
+  is compared whenever it arrived, so a device silent for an hour still fires after its hold if the
+  last thing it said breaches. A series older than the historian's raw window
+  (`telemetry.retain_after`, 14 days) leaves `telemetry_latest`, and its state holds from there.
+- **A run that cannot read the historian writes nothing.** The read and the first write of what it
+  found are one statement inside its own block, so a failure rolls back what the block did. The run
+  raises **Automations Not Evaluated**: one platform alert, fingerprint `condition:not-evaluated`,
+  `entity_type` `platform`, severity `warning`, naming the SQLSTATE. It confirms that alert on each
+  run that still cannot read. The first run that reads resolves it, and so does a run with nothing
+  left to read, since an alert for a historian nobody asks anything of would never end. Nothing
+  fires and nothing resolves meanwhile: a state nobody observed is never written, the rule
+  `refresh_directory_liveness()` follows. The error's own text goes to the server's log, not to a
+  row every role reads. A foreign-key failure in that block is a trigger deleted while the run read,
+  and a deadlock or serialization failure is a person's act meeting the run. Each ends the run
+  quietly: the next one reads what is left.
+- **What is no longer live is forgotten.** The state of a disabled automation, an archived trigger
+  or device, or a trigger given another device or metric is deleted by the next run. It cannot fire
+  meanwhile, since only a live pair is read. The alerts of such a trigger are resolved by `0257`'s
+  triggers, not here.
+- **Firing is what `platform_alerts` says.** A state that claims to fire with no open occurrence (its
+  alert resolved by the lifecycle, or the automation turned off and on again within a minute)
+  starts its hold again. An open occurrence its state does not know is adopted, so there is never a
+  second open row for one fingerprint.
+- **One run at a time**, under a transaction advisory lock: a run started by hand while pg_cron's is
+  under way returns 0 at once. pg_cron itself runs one instance of a job at a time. `p_at` is the
+  instant to judge at, `now()` for the job. Only the owner may call the function.
+- **No role, no second factor.** The evaluator is the platform's act and not a person's, so it is no
+  writer `mfa-exemptions.json` lists, and it is granted to no API role.
+
+**A person can be refused with a deadlock.** Deleting or turning off an automation resolves its
+alerts (0257), which takes their rows before the trigger rows. A run that writes the same alerts
+takes the trigger rows first, through the state table's foreign key. When the two meet, Postgres
+ends one with `40P01`. If it is the run, nothing was written and no alert is raised, and the next
+minute's run reads again.
+If it is the person, the act is refused and succeeds when tried again. It needs the two to overlap
+for the length of a run, under a second at 10,000 pairs, and an automation with alerts firing.
+
+**Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression; its
+log shows one cursor for each metric, each with the filter), through `postgres_fdw` into
+`supabase/postgres` 17.6.1.175, as pg_cron runs it, each run its own transaction, on a laptop three
+helpers shared. The historian held only these readings, in three chunks, so the read is quicker than
+the spike's, which had 7.29 million raw rows over 15 chunks and took 0.24 to 0.31 s at 300 triggers.
+The writes are what this adds:
+
+| Live pairs | Firing | The read alone | A run, warm |
+| ---: | ---: | ---: | ---: |
+| 300 (30 devices of 10 metrics) | about half | 0.02 s | 0.1 to 0.15 s |
+| 10,000 (1,000 devices of 10 metrics) | 4,955 | 0.2 s | 0.7 to 1.1 s |
+
+The first run after 10,000 triggers are applied took 2.7 s: it inserts every state row and fires the
+alerts. A run is under 2% of the historian's time at one a minute. Its cost on the platform database
+is the writes: every state row is updated each run, and so is every firing alert's stamp. Both
+tables are vacuumed as they go. The sites this is built for fire a few alerts and hold a few hundred
+triggers, and the 10,000 is a file's own limit.
+
+`test_a_threshold_automation_raises_its_alert_from_the_database.py` holds every rule above with a
+local table standing in for the historian, so it needs none, and reads a real one too when
+`ABER_TEST_HISTORIAN` names it. `supabase/test_a_threshold_automation_fires_and_resolves.py` is the
+stack lane's, against pg_cron and the real link. The file's self-check asserts that no API role may
+execute the evaluator, that it is `SECURITY DEFINER` with its path pinned, that it composes
+fingerprints with `automation_alert_fingerprint()` and reads only through
+`machine_condition_readings()`, and that pg_cron runs it every minute, once.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

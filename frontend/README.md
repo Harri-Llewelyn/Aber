@@ -2432,7 +2432,8 @@ passes `{ record: false }`, as an alert's toast does.
   (`metricUrl`), a setting (`settingUrl`), a capture's subject (`captureSubjectUrl`), a backup run
   (`backupUrl`), a person or a machine identity on Access Control (`personUrl`, `identityUrl`). A
   plan attached goes to the area on the Site Map (`siteMapAreaUrl`), where it is drawn. A Grafana
-  alert goes to its rule (`grafanaAlertUrl`), a device new to the Quarantine queue to
+  alert goes to its rule (`grafanaAlertUrl`), and an automation's, which has none, to its device. A
+  device new to the Quarantine queue goes to
   `tabUrl('devices', 'quarantine')`, and an AAS export's warning about metrics with no semantic id
   to `unmappedMetricsUrl()`, which `App` passes only to a reader who has the Metrics page. An
   arrival at an archived device or gateway turns the list's lifecycle filter to All, as Cells and

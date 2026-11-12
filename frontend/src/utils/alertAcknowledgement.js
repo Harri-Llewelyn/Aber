@@ -49,7 +49,7 @@ export const mayWithdraw = (alert, role, userId) => isAcknowledged(alert) && (
 /**
  * Where a message about an alert leads, as its row in the counter does: the page alertPage() names
  * when it has one of its own (an automation's alert opens the automation), else the device or
- * gateway it is about, else its rule in Grafana.
+ * gateway it is about, else its rule in Grafana (none for an alert Aber's evaluator raised, so null).
  */
 export function alertSubjectUrl(alert) {
   const own = alertPage(alert)

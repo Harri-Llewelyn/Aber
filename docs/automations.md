@@ -92,7 +92,8 @@ Things to know:
 - **Give `above` or `below`, not both.** A number, with no unit. The value is in the metric's
   catalogue unit, which the editor shows.
 - **A hold is judged at each evaluation.** A `for` shorter than the evaluation interval fires at
-  the next evaluation that finds the breach that old.
+  the next evaluation that finds the breach that old. [How an automation is evaluated](#how-an-automation-is-evaluated)
+  says how often that is.
 
 ### The `alert` action
 
@@ -109,6 +110,59 @@ that breached. It resolves when the breach ends, or when the automation is turne
 There are none yet. A condition is a check made when a trigger fires, as in Home Assistant, and the
 first one arrives with a later release. `conditions` is accepted when it is left out or empty, so
 the shape of a file does not change when it comes.
+
+## How an automation is evaluated
+
+The platform database evaluates every enabled automation once a minute. Nothing else has to run.
+A run reads the historian, judges each device, and writes the alerts. It writes them as any other
+alert is written, so acknowledging, suppressing and sending one work as they do for the rest.
+
+- **A run reads the latest value of each metric an automation watches.** It asks the historian once
+  for each metric, and names only the devices that metric is watched on.
+- **The latest value is compared, whenever it arrived.** A device that sends a reading only when it
+  changes is compared by its last reading. A value that is a flag, a text or not a number is no
+  reading.
+- **A breach fires when it has held for `for`.** The first run that finds the value breaching
+  starts the clock. The first run at which `for` has passed, with the value still breaching, raises
+  the alert.
+- **A hold is judged at each run, so it rounds up to a run.** `for: 30s` fires at the second run,
+  about a minute after the first. `for: 5m` fires at the sixth. A `for` of `0s` fires at the first
+  run that finds the breach.
+- **An alert resolves at the first run that finds the value back inside the threshold.** A breach
+  that ends before `for` has passed raises nothing. The next breach starts the clock again.
+- **A changed threshold starts the clock again for a breach that has not yet fired.** An alert that
+  is already firing stays firing while the new threshold is breached, and resolves when it is not.
+- **No reading is not a breach.** A device with no latest value is left as it was. It may never
+  have published, or last have published longer ago than the historian keeps raw readings (14 days
+  by default). A firing alert stays firing, and a breach that is waiting to fire neither starts nor
+  clears. Silence that should raise an alert is a different rule, not this one.
+- **Each run confirms the alerts it holds.** A reminder is sent only while the last run confirmed
+  the alert, within the past five minutes.
+
+The state of each device is in `automation_trigger_states`: when its breach began, when it began to
+fire, its last value, and when that value arrived. Every signed-in role may read it at
+`/rest/v1/automation_trigger_states`. Nobody writes it but the evaluator.
+
+### When the historian cannot be read
+
+A run that cannot read the historian changes nothing. It fires no alert and resolves none, and the
+state is left as it was. It raises one platform alert instead, **Automations Not Evaluated**, with
+the fingerprint `condition:not-evaluated`. The first run that reads the historian again resolves it.
+
+Alerts that were firing stay firing meanwhile. No reminder is sent for them, because no run is
+confirming them.
+
+### What an alert holds
+
+- **The name** is the automation's `alias`, and **the severity** is the `alert` action's.
+- **The subject** is the device, so the alert opens on the Devices page and its history is the
+  device's.
+- **The summary** names the device, the metric, the value and the threshold:
+  `Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m`.
+- **The labels** are `severity`, `entity_type`, `metric`, `automation` (the automation's `id`) and
+  `trigger_id`.
+- **The values** are `value`, the reading that fired it, and `threshold`.
+- **It has no Grafana rule.** The alert counter and the device's drawer do not link to Grafana for it.
 
 ## What the database does with a file
 

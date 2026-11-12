@@ -33,6 +33,7 @@ import json
 import os
 import unittest
 import uuid
+from datetime import timedelta
 
 import psycopg2
 import psycopg2.errors
@@ -667,7 +668,7 @@ class TheFingerprint(AutomationsBase):
         self.assertEqual(full, f"condition:{trigger_id}:{entity}:Spindle/LOAD")
         self.assertEqual(prefix, f"condition:{trigger_id}:")
         self.assertTrue(full.startswith(prefix))
-        self.assertIsNone(window, "0247 expects the condition: prefix and sends no reminder for it yet")
+        self.assertEqual(window, timedelta(minutes=5), "0247 gives the condition: prefix the evaluator's interval and a margin")
 
 
 if __name__ == "__main__":

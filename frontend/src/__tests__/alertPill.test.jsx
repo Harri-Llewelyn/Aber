@@ -364,6 +364,30 @@ describe('AlertPill', () => {
       expect(onSelectGateway).not.toHaveBeenCalled()
     })
 
+    it('leaves an alert the evaluator raised about the platform inert, since Grafana has no rule for it', () => {
+      render(<AlertPill alerts={[platformAlert({
+        fingerprint: 'condition:not-evaluated', alert_name: 'Automations Not Evaluated', rule_uid: null
+      })]} />)
+      fireEvent.click(pill())
+      expect(screen.getByText('Automations Not Evaluated')).toBeInTheDocument()
+      expect(document.querySelector('a.alert-pill-item-link')).toBeNull()
+      expect(screen.getByText('Platform-wide')).toBeInTheDocument()
+    })
+
+    it("still opens an automation's device alert on the Devices page", () => {
+      const onSelectDevice = vi.fn()
+      render(<AlertPill
+        alerts={[alert({ fingerprint: 'condition:5d1f0c1e:dev22:Spindle/LOAD', rule_uid: null, alert_name: 'Spindle hot' })]}
+        onSelectDevice={onSelectDevice}
+      />)
+      fireEvent.click(pill())
+      const link = document.querySelector('a.alert-pill-item-link')
+      expect(link).toBeTruthy()
+      expect(link).not.toHaveAttribute('target')
+      fireEvent.click(link)
+      expect(onSelectDevice).toHaveBeenCalledWith('dev220000000000400080000')
+    })
+
     it('opens the rule itself when the row carries its uid', () => {
       render(<AlertPill alerts={[{ ...platformAlert(), rule_uid: 'aber-ingestion-silent' }]} />)
       fireEvent.click(pill())

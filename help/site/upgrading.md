@@ -1763,6 +1763,24 @@ you upgrade.
   styles in a shadow root, which the dashboard's policy already allows. Allowing `'unsafe-inline'`
   styles is not needed.
 
+### From 1.8.0, the database evaluates automations
+
+From 1.8.0, the platform database evaluates the automations on the Automations page. The upgrade
+adds one table and a job, `evaluate_automations`, that runs every minute. With no automation, the
+job reads nothing and changes nothing.
+
+- **An automation's alert is a platform alert.** It appears in the alert counter and in History's
+  **Alerts** tab, and it can be acknowledged, suppressed and sent to a webhook, as Grafana's alerts
+  can. It has no rule in Grafana, so the counter and the device's drawer do not link there.
+- **A breach fires after its `for`, judged once a minute.** A `for` of 30 seconds fires at the next
+  minute that finds it held. An alert resolves at the first minute the value is back inside.
+- **If the historian cannot be read, nothing is fired or resolved.** The database raises one alert,
+  **Automations Not Evaluated**, and the first minute that reads again resolves it. Alerts already
+  firing stay as they were, and get no reminder meanwhile.
+- **While an automation's alert fires,** an open dashboard reads the alert counter again each minute.
+
+There is nothing to run. Grafana's own alert rules are untouched.
+
 ### From 1.8.0, the historian counts its older readings for History's Overview
 
 History's Overview, new in 1.8.0, shows where readings arrived. It reads two new rollups on the
