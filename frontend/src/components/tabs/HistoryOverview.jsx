@@ -769,7 +769,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
           <>
             {/* The row above the lanes, as on the Device tab: Expand all or Collapse all first, then
                 what is shown, then the key at the row's end. */}
-            <div className="history-header">
+            <div className="groups-header">
               <ExpandAllToggle
                 anyOpen={allKeys.some(isOpen)}
                 onExpandAll={() => setGroupsOpen(allKeys, true)}

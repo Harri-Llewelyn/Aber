@@ -995,13 +995,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     Unmapped ({unmappedCount})
                   </button>
                 </Tooltip>
-                <ExpandAllToggle
-                  anyOpen={catalogGroups.some(g => isGroupOpen(g.label))}
-                  onExpandAll={() => setAllGroups(true)}
-                  onCollapseAll={() => setAllGroups(false)}
-                  noun="groups"
-                  disabled={catalogGroups.length === 0}
-                />
                 <div className="filter-bar-actions">
                   <ClearFilters count={catalogFilterCount} onClear={clearCatalogFilters} />
                   <ActionButton
@@ -1014,6 +1007,19 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   </ActionButton>
                 </div>
               </div>
+
+              {/* The control that acts on the groups sits at the start of the row over them, not in
+                  the toolbar. Drawn with the table: an empty list has no group to open. */}
+              {loaded && catalogGroups.length > 0 && (
+                <div className="groups-header">
+                  <ExpandAllToggle
+                    anyOpen={catalogGroups.some(g => isGroupOpen(g.label))}
+                    onExpandAll={() => setAllGroups(true)}
+                    onCollapseAll={() => setAllGroups(false)}
+                    noun="groups"
+                  />
+                </div>
+              )}
 
               {!loaded ? <LoadingState label="catalog" /> : catalogGroups.length === 0 ? (
                 <EmptyState

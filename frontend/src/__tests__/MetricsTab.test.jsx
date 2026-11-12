@@ -822,7 +822,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     await waitFor(() => expect(within(catalogTable()).getAllByRole('button', { expanded: false }).length).toBeGreaterThan(0))
   }
 
-  it('sits in the toolbar beside the search, before Expand all', async () => {
+  it('sits in the toolbar beside the search, before Clear filters and Add Metric', async () => {
     await setup()
 
     const bar = search().closest('.filter-bar')
@@ -830,7 +830,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     const at = (el) => controls.indexOf(el.closest('.filter-bar > *'))
     expect(at(standardFilter())).toBe(at(search()) + 1)
     expect(at(unmappedButton())).toBe(at(search()) + 2)
-    expect(at(screen.getByRole('button', { name: 'Expand all' }))).toBe(at(search()) + 3)
+    expect(controls[at(search()) + 3]).toHaveClass('filter-bar-actions')
     expect(standardFilter()).toHaveClass('filter-dropdown')
   })
 
@@ -1063,13 +1063,28 @@ describe('Metric Catalog — Expand all / Collapse all', () => {
   const groupToggles = () => [...catalogTable().querySelectorAll('.table-group-button')]
   const openGroups = () => groupToggles().filter(b => b.getAttribute('aria-expanded') === 'true').length
 
-  it('sits in the toolbar row and reads "Expand all" while every group is shut', async () => {
+  it('starts the row above the groups, not the toolbar, and reads "Expand all" while every group is shut', async () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
-    expect(allButton().closest('.filter-bar')).toBeTruthy()
+    const row = allButton().closest('.groups-header')
+    expect(row).toBeTruthy()
+    expect(row.firstElementChild).toContainElement(allButton())
+    expect(allButton().closest('.filter-bar')).toBeNull()
+    // Between the toolbar and the table, the table scroller beside it rather than inside it.
+    expect(row.previousElementSibling).toHaveClass('filter-bar')
+    expect(row.nextElementSibling).toHaveClass('table-wrap')
     expect(allButton().textContent).toBe('Expand all')
     expect(openGroups()).toBe(0)
+  })
+
+  it('draws no row over an empty list', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    fireEvent.change(screen.getByLabelText('Search the metric catalog'), { target: { value: 'nothing-is-called-this' } })
+    expect(screen.queryByRole('button', { name: /^(Expand|Collapse) all$/ })).toBeNull()
+    expect(document.querySelector('.groups-header')).toBeNull()
   })
 
   it('opens every group, then reads "Collapse all" and shuts them again', async () => {
