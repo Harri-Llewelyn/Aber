@@ -125,6 +125,106 @@ const gitignored = (path) => IGNORED.some((p) => p.test(path));
 }
 
 // -------------------------------------------------------------------------------------------------
+// 351. 0284's refusal of a blank device or gateway name is described as the file holds it. Each table
+// gets one CHECK, `btrim(name) <> ''`. The error that stops an upgrade on a blank row names a heading
+// of the upgrade guide (check 152 reads no .sql file), and that section's query finds the rows by the
+// negation of the CHECK, over both tables, so a site that finds none is a site the migration passes.
+// The README's section is the one the file's header cites.
+// -------------------------------------------------------------------------------------------------
+{
+  const FILE = 'supabase/migrations/0284_a_device_or_gateway_name_cannot_be_blank.sql';
+  const sql = read(FILE);
+  const guide = read('help/site/upgrading.md');
+  const problems351 = [];
+  for (const table of ['devices', 'gateways']) {
+    const add = sql.match(new RegExp(`ADD CONSTRAINT ${table}_name_not_blank CHECK \\(\\(btrim\\(name\\) <> ''::text\\)\\);`, 'g')) || [];
+    if (add.length !== 1) problems351.push(`${FILE} declares ${table}_name_not_blank ${add.length} times as btrim(name) <> '', not once`);
+  }
+  if (!sql.includes("<> 'CHECK ((btrim(name) <> ''''::text))'")) {
+    problems351.push(`${FILE}'s guard does not compare each constraint with CHECK ((btrim(name) <> ''::text))`);
+  }
+  const heading = sql.match(/help\/site\/upgrading\.md, "([^"]+)"/)?.[1];
+  const start = heading ? guide.indexOf(`\n### ${heading}\n`) : -1;
+  if (!heading) {
+    problems351.push(`${FILE} names no heading of help/site/upgrading.md in its error`);
+  } else if (start < 0) {
+    problems351.push(`${FILE} names "${heading}" in help/site/upgrading.md, which has no such heading`);
+  } else {
+    if (!heading.startsWith('From 1.9.0, ')) problems351.push(`the upgrade guide's section "${heading}" is not a "From 1.9.0, ..." section`);
+    const end = guide.indexOf('\n## ', start);
+    const nextSection = guide.indexOf('\n### ', start + 5);
+    const section = guide.slice(start, [end, nextSection].filter((n) => n > 0).sort((a, b) => a - b)[0]);
+    for (const table of ['devices', 'gateways']) {
+      if (!section.includes(`FROM public.${table} WHERE btrim(name) = ''`)) {
+        problems351.push(`"${heading}" does not find blank rows with FROM public.${table} WHERE btrim(name) = '', the negation of the CHECK`);
+      }
+    }
+    if (!section.includes('migration `0284`')) problems351.push(`"${heading}" does not name migration \`0284\``);
+    if (!/Sparkplug id/.test(sql) || !section.includes('sparkplug_id')) {
+      problems351.push(`"${heading}" and the error do not both name the Sparkplug id of each blank row`);
+    }
+  }
+  const title = sql.match(/Reasoning: supabase\/README\.md, "([^"]+)"/)?.[1];
+  if (!title || !read('supabase/README.md').includes(`\n### ${title}\n`)) {
+    problems351.push(`${FILE} cites ${title ? `"${title}"` : 'no section'} in supabase/README.md, which has no such heading`);
+  }
+  if (problems351.length) {
+    fail('0284\'s blank-name refusal is described otherwise than the file holds it:\n' +
+      problems351.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`0284 declares one btrim(name) <> '' CHECK on devices and on gateways, and "${heading}" finds the rows it stops on`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 352. The dashboard answers a refused blank name with the rule, as the guide and the README say it.
+// api.js maps devices_name_not_blank and gateways_name_not_blank, the constraints 0284 declares, to
+// "Give the device a name" and "Give the gateway a name", on the create and the update of each. The
+// upgrade guide and supabase/README.md quote both sentences and name both constraints.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const sql = read('supabase/migrations/0284_a_device_or_gateway_name_cannot_be_blank.sql');
+  const problems352 = [];
+  const sentences = [];
+  for (const [kind, table] of [['device', 'devices'], ['gateway', 'gateways']]) {
+    const mapped = api.match(new RegExp(`${kind}: \\{ constraint: /(\\w+)/, sentence: '([^']+)' \\}`));
+    if (!mapped) {
+      problems352.push(`frontend/src/api.js has no BLANK_NAME entry for a ${kind}`);
+      continue;
+    }
+    const [, constraint, sentence] = mapped;
+    sentences.push([constraint, sentence]);
+    if (constraint !== `${table}_name_not_blank` || !sql.includes(`ADD CONSTRAINT ${constraint} CHECK`)) {
+      problems352.push(`api.js answers ${constraint} for a ${kind}, which 0284 does not declare as ${table}_name_not_blank`);
+    }
+    if (sentence !== `Give the ${kind} a name`) problems352.push(`api.js says "${sentence}" for a blank ${kind} name, not "Give the ${kind} a name"`);
+    const uses = (api.match(new RegExp(`nameRefusal\\(error, '${kind}'\\)`, 'g')) || []).length;
+    if (uses !== 2) problems352.push(`api.js uses nameRefusal for a ${kind} on ${uses} writes, not the create and the update`);
+  }
+  const guide = read('help/site/upgrading.md');
+  const readme = read('supabase/README.md');
+  const from = readme.indexOf("\n### A device's name and a gateway's name cannot be blank (0284)\n");
+  const readmeSection = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 5));
+  const guideFrom = guide.indexOf('\n### From 1.9.0, a device or a gateway cannot have a blank name\n');
+  const guideSection = guideFrom < 0 ? '' : guide.slice(guideFrom, guide.indexOf('\n## ', guideFrom));
+  if (!readmeSection) problems352.push("supabase/README.md has no \"A device's name and a gateway's name cannot be blank (0284)\" section");
+  if (!guideSection) problems352.push('help/site/upgrading.md has no "From 1.9.0, a device or a gateway cannot have a blank name" section');
+  for (const [constraint, sentence] of sentences) {
+    if (guideSection && !guideSection.includes(`\`${constraint}\``)) problems352.push(`the upgrade guide's blank-name section does not name ${constraint}`);
+    if (guideSection && !guideSection.includes(`"${sentence}"`)) problems352.push(`the upgrade guide's blank-name section does not say "${sentence}"`);
+    if (readmeSection && !readmeSection.includes(`\`${constraint}\``)) problems352.push(`supabase/README.md's 0284 section does not name ${constraint}`);
+    if (readmeSection && !readmeSection.includes(`"${sentence}"`)) problems352.push(`supabase/README.md's 0284 section does not say "${sentence}"`);
+  }
+  if (problems352.length) {
+    fail('the dashboard, the upgrade guide and the README say a blank name\'s refusal differently:\n' +
+      problems352.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`api.js, the upgrade guide and supabase/README.md say "${sentences[0][1]}" and "${sentences[1][1]}" for the two constraints 0284 declares`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 177. No HS256 path comes back into the chart. SUPABASE_JWT_SECRET is read by GoTrue alone, as
 // GOTRUE_JWT_SECRET, which it requires and signs nothing with; each per-service secret
 // lib/signing-set.mjs mints is rendered from its value and read by its own service alone; and no
