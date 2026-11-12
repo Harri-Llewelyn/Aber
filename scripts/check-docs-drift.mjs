@@ -10947,11 +10947,12 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
-// 326. The three drawers' History actions are alike. The Devices, Cells and Areas drawers each say
-// View History, with the same icon, and go to their own tab's path: deviceHistoryUrl, cellHistoryUrl
-// and areaHistoryUrl, whose paths are the tabs' (the Area tab's is utils/history.js's AREA_PATH). The
-// help names the Areas drawer's action as it does the Cells drawer's. A drawer that says another word
-// for the same act is two names for one thing.
+// 326. The four drawers' History actions are alike. The Devices, Cells, Areas and Metrics drawers each
+// say View History, with the same icon, and go to their own tab's path: deviceHistoryUrl, cellHistoryUrl,
+// areaHistoryUrl and metricHistoryUrl, whose paths are the tabs' (the Area tab's is utils/history.js's
+// AREA_PATH, the Metric tab's its METRIC_PATH). The help names the Areas drawer's action as it does the
+// Cells drawer's, and the Metrics help names the Metrics drawer's. A drawer that says another word for
+// the same act is two names for one thing.
 // -------------------------------------------------------------------------------------------------
 {
   const action = (file) => read(file).match(/label: '(View History)', icon: <(\w+) size=\{13\} \/>,\s*to: (\w+)\(/);
@@ -10959,6 +10960,7 @@ const OPERATOR_PAIRS = [
     ['Devices', 'frontend/src/components/tabs/DevicesTab.jsx', 'deviceHistoryUrl'],
     ['Cells', 'frontend/src/components/tabs/CellsTab.jsx', 'cellHistoryUrl'],
     ['Areas', 'frontend/src/components/tabs/AreasTab.jsx', 'areaHistoryUrl'],
+    ['Metrics', 'frontend/src/components/tabs/MetricsTab.jsx', 'metricHistoryUrl'],
   ];
   const found = drawers.map(([name, file, url]) => ({ name, url, match: action(file) }));
   const problems326 = [];
@@ -10974,13 +10976,21 @@ const OPERATOR_PAIRS = [
   else if (!routes.includes(`export const areaHistoryUrl = (id) => \`${areaPath}/\${encodeURIComponent(id)}\``)) {
     problems326.push(`frontend/src/routes.js's areaHistoryUrl does not build ${areaPath}/<id>`);
   }
+  const metricPath = read('frontend/src/utils/history.js').match(/^export const METRIC_PATH = '([^']+)'$/m)?.[1];
+  if (!metricPath) problems326.push('could not read METRIC_PATH out of frontend/src/utils/history.js');
+  else if (!routes.includes(`export const metricHistoryUrl = (name) => \`${metricPath}/\${encodeURIComponent(name)}\``)) {
+    problems326.push(`frontend/src/routes.js's metricHistoryUrl does not build ${metricPath}/<name>`);
+  }
   if (!read('help/pages/history.md').includes('open the area on the Areas page and select **View History**')) {
     problems326.push('help/pages/history.md does not say View History opens an area from the Areas page');
   }
+  if (!read('help/pages/metrics.md').includes("**View History** opens the History page's Metric tab on the metric")) {
+    problems326.push('help/pages/metrics.md does not say View History opens the Metric tab on the metric');
+  }
   if (problems326.length) {
-    fail('The Areas drawer\'s History action is named or reached otherwise than the other two drawers\':\n' + problems326.map((p) => `        ${p}`).join('\n'));
+    fail('The drawers\' History actions are named or reached otherwise than each other\'s:\n' + problems326.map((p) => `        ${p}`).join('\n'));
   } else {
-    pass('the Devices, Cells and Areas drawers all say View History with one icon, each to its own tab, and the help names the Areas drawer\'s');
+    pass('the Devices, Cells, Areas and Metrics drawers all say View History with one icon, each to its own tab, and the help names the Areas and Metrics drawers\'');
   }
 }
 
@@ -11252,6 +11262,66 @@ const OPERATOR_PAIRS = [
       problems334.map((p) => `        ${p}`).join('\n'));
   } else {
     pass('the API reference names the arguments, the resolutions and the document of export_telemetry() as 0279 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 343. History's help names every tab that offers Export CSV, and no tab that does not. A tab offers
+// it when its file under components/tabs imports TelemetryExportModal; the help's step 1 of
+// *Exporting readings* says what each saves, as "On Overview, ..." or "On the Cell tab, ...". A tab
+// the help leaves out is one whose button a reader does not know to look for; a tab it names that has
+// none sends them looking for a button that is not there. A file outside History's tabs that opens
+// the dialog is not one this check can name, so it fails until the check is taught it.
+// -------------------------------------------------------------------------------------------------
+const EXPORT_ENTRY_FILES = allFiles.filter((f) => f.startsWith('frontend/src/') && /\.jsx?$/.test(f) && !f.includes('/__tests__/')
+  && f !== 'frontend/src/components/modals/TelemetryExportModal.jsx' && /from '(\.\.?\/)+modals\/TelemetryExportModal'/.test(read(f)));
+const EXPORT_ENTRY_TABS = EXPORT_ENTRY_FILES.map((f) => f.match(/^frontend\/src\/components\/tabs\/History([A-Za-z]+)\.jsx$/)?.[1]).filter(Boolean);
+{
+  const problems343 = [];
+  for (const f of EXPORT_ENTRY_FILES) {
+    if (!/^frontend\/src\/components\/tabs\/History[A-Za-z]+\.jsx$/.test(f)) problems343.push(`${f} opens the export dialog and is not a History tab, so this check cannot name it`);
+  }
+  const step = read('help/pages/history.md').match(/\n1\. Choose what to export\.([^\n]*)\n/)?.[1];
+  if (!step) {
+    problems343.push('help/pages/history.md has no "1. Choose what to export." step under Exporting readings');
+  } else {
+    const named = new Set([...step.matchAll(/\bOn the ([A-Z][a-z]+) tab\b/g)].map((m) => m[1]));
+    if (/\bOn Overview\b/.test(step)) named.add('Overview');
+    for (const tab of EXPORT_ENTRY_TABS) if (!named.has(tab)) problems343.push(`help/pages/history.md's step 1 does not say what the ${tab} tab exports ("On ${tab === 'Overview' ? 'Overview' : `the ${tab} tab`},")`);
+    for (const tab of named) if (!EXPORT_ENTRY_TABS.includes(tab)) problems343.push(`help/pages/history.md's step 1 names the ${tab} tab, which does not open the export dialog`);
+  }
+  if (problems343.length) {
+    fail('History\'s help names the tabs that offer Export CSV otherwise than the code does:\n' + problems343.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help says what Export CSV saves on each of the ${EXPORT_ENTRY_TABS.length} tabs that offer it: ${EXPORT_ENTRY_TABS.join(', ')}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 344. frontend/README.md's *History's Export* counts the places that export and names each, as the
+// code has them: one bullet with "The Device tab:", "Overview:", "The Cell tab:" and so on for every
+// tab that imports TelemetryExportModal (check 343's list), under "from <number> places". A sixth
+// entry point the section does not mention is one whose rules nobody checked against the other five.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems344 = [];
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const section = read('frontend/README.md').match(/\n### History's Export\n([\s\S]*?)\n### /)?.[1];
+  if (!section) {
+    problems344.push('frontend/README.md has no "History\'s Export" section');
+  } else {
+    const flat = section.replace(/\s+/g, ' ');
+    const count = EXPORT_ENTRY_TABS.length;
+    if (!flat.includes(`from ${words[count] ?? count} places`)) problems344.push(`frontend/README.md's History's Export does not say "from ${words[count] ?? count} places"`);
+    for (const tab of EXPORT_ENTRY_TABS) {
+      const label = tab === 'Overview' ? '**Overview:**' : `**The ${tab} tab:**`;
+      if (!flat.includes(label)) problems344.push(`frontend/README.md's History's Export does not name ${label}`);
+    }
+  }
+  if (problems344.length) {
+    fail('frontend/README.md\'s History\'s Export lists the export\'s entry points otherwise than the code has them:\n' + problems344.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`frontend/README.md's History's Export counts and names the ${EXPORT_ENTRY_TABS.length} entry points to the export dialog`);
   }
 }
 

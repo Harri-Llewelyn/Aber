@@ -6240,6 +6240,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .history-group-head > .group-heading { padding: 8px var(--inset); }
 /* The export dialog's first line: the device, the metrics and the window it exports. */
 .telemetry-export-what { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
+/* What the file leaves out or holds beyond the view, under the first line, closer to it than the next field. */
+.telemetry-export-note { margin: -6px 0 12px; font-size: 12px; color: var(--text-muted); }
 /* Buckets: its size in the toolbar, shaped as the Metrics dropdown beside it, and its choices a
    column in the popover. */
 .history-bucket-pick { justify-content: space-between; min-width: 0; }
