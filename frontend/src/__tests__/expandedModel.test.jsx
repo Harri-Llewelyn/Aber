@@ -1,14 +1,14 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { act, render, screen, within, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Model3DUploader } from '../components/common/Model3DUploader'
 import { START_VIEW, __resetModelViewerLoader } from '../components/common/Model3DViewer'
 
 /**
- * A device's 3D model, expanded: Expand in the drawer's viewer opens the same element in a
- * window-sized dialog, still until turned, with Reset view and a line on how to move it. jsdom
- * cannot render the custom element (`@google/model-viewer` is stubbed in src/test/setup.js), so the
- * attributes and properties the element reads are what is checked.
+ * A device's 3D model in its dialog: the window-sized view the drawer's View 3D Model opens, still
+ * until turned, with Reset view and a line on how to move it. jsdom cannot render the custom
+ * element (`@google/model-viewer` is stubbed in src/test/setup.js), so the attributes and
+ * properties the element reads are what is checked.
  */
 
 vi.mock('../api', async () => {
@@ -32,33 +32,50 @@ const dialog = () => document.querySelector('dialog[open]')
 
 beforeEach(() => {
   __resetModelViewerLoader()
+  delete self.ModelViewerElement
   global.fetch = vi.fn().mockResolvedValue({ ok: false, headers: { get: () => null } })
 })
 
-const openExpanded = async () => {
-  render(<Model3DUploader device={DEVICE} canManage={false} showToast={vi.fn()} />)
-  await screen.findByTestId('model-3d-viewer')
-  const expand = screen.getByRole('button', { name: 'Expand model: CNC_01' })
-  expand.focus()
-  fireEvent.click(expand)
-  return expand
+/** The drawer's action and the dialog it opens: closed until the button is pressed. */
+function Opener() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button onClick={() => setOpen(true)}>View 3D Model</button>
+      {open && <Model3DUploader device={DEVICE} canManage={false} showToast={vi.fn()} onClose={() => setOpen(false)} />}
+    </>
+  )
 }
 
-describe('the expanded 3D model', () => {
-  it('puts Expand over the drawer\'s viewer, and keeps the drawer\'s viewer turning', async () => {
-    render(<Model3DUploader device={DEVICE} canManage={false} showToast={vi.fn()} />)
-    const drawerViewer = await screen.findByTestId('model-3d-viewer')
-    expect(drawerViewer.getAttribute('auto-rotate')).toBe('')
-    const expand = screen.getByRole('button', { name: 'Expand model: CNC_01' })
-    const frame = drawerViewer.closest('.expand-frame')
-    expect(frame).not.toBeNull()
-    expect(expand.parentElement).toBe(frame)
-    expect(expand).toHaveClass('expand-corner')
-    expect(expand).not.toHaveAttribute('title')
+const openView = async () => {
+  render(<Opener />)
+  const opener = screen.getByRole('button', { name: 'View 3D Model' })
+  opener.focus()
+  fireEvent.click(opener)
+  return opener
+}
+
+describe('the 3D model view', () => {
+  it('loads nothing until it is opened: no viewer module, no element, no request for the file', async () => {
+    render(<Opener />)
+    await act(async () => { await Promise.resolve() })
+
+    expect(self.ModelViewerElement).toBeUndefined()
+    expect(document.querySelector('model-viewer')).toBeNull()
+    expect(screen.queryByTestId('model-3d-viewer-loading')).toBeNull()
+    expect(global.fetch).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'View 3D Model' }))
+    await within(dialog()).findByTestId('model-3d-viewer')
+
+    // The viewer's module was asked for, and its decoders pointed at the dashboard's own.
+    expect(self.ModelViewerElement).toBeDefined()
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(global.fetch.mock.calls[0][1]).toEqual({ method: 'HEAD' })
   })
 
-  it('opens the same element window-sized, titled with the device, without auto-rotate', async () => {
-    await openExpanded()
+  it('opens the element window-sized, titled with the device, still until turned', async () => {
+    await openView()
     const open = dialog()
     expect(open.querySelector('.modal')).toHaveClass('modal-full')
     expect(within(open).getByRole('heading', { name: 'CNC_01' })).toBeInTheDocument()
@@ -72,7 +89,7 @@ describe('the expanded 3D model', () => {
   })
 
   it('returns the camera to where it started on Reset view', async () => {
-    await openExpanded()
+    await openView()
     const viewer = await within(dialog()).findByTestId('model-3d-viewer')
     viewer.cameraOrbit = '90deg 30deg 2m'
     viewer.cameraTarget = '1m 0m 0m'
@@ -83,8 +100,8 @@ describe('the expanded 3D model', () => {
     expect(viewer.fieldOfView).toBe(START_VIEW.fov)
   })
 
-  it('shows the drawer\'s own message when the model cannot be shown', async () => {
-    await openExpanded()
+  it('says so when the model cannot be shown', async () => {
+    await openView()
     const viewer = await within(dialog()).findByTestId('model-3d-viewer')
     act(() => { viewer.dispatchEvent(new Event('error')) })
     const message = within(dialog()).getByTestId('model-3d-viewer-error')
@@ -92,11 +109,19 @@ describe('the expanded 3D model', () => {
     expect(within(dialog()).queryByRole('button', { name: /Reset view/ })).toBeNull()
   })
 
-  it('closes on Escape and hands focus back to Expand', async () => {
-    const expand = await openExpanded()
+  it('closes on Escape, takes the viewer with it, and hands focus back to the action', async () => {
+    const opener = await openView()
     await within(dialog()).findByTestId('model-3d-viewer')
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(dialog()).toBeNull()
-    expect(document.activeElement).toBe(expand)
+    expect(document.querySelector('model-viewer')).toBeNull()
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it('closes from its own close button', async () => {
+    await openView()
+    await within(dialog()).findByTestId('model-3d-viewer')
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+    expect(dialog()).toBeNull()
   })
 })

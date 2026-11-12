@@ -85,7 +85,9 @@ describe("the Devices drawer's View in Automations", () => {
     const panel = await open([device()])
     await panel.findByRole('link', { name: /^View in Automations/ })
     const labels = [...document.querySelectorAll('.context-panel-actions .context-action')].map(b => b.textContent.trim())
-    expect(labels.indexOf('View in Automations (0)')).toBe(labels.indexOf('View History') + 1)
+    // Only the 3D model action sits between them.
+    const history = labels.indexOf('View History')
+    expect(labels.slice(history + 1, labels.indexOf('View in Automations (0)'))).toEqual(['Add 3D Model…'])
   })
 
   it('leaves the action without a number when the read fails', async () => {

@@ -6219,6 +6219,118 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 365. The Devices drawer offers the 3D model as one action, after View History, and the help names
+// it as the drawer does. The label follows the model: View 3D Model with one attached, Add 3D
+// Model… with none. The drawer keeps no 3D Model section, so no Model3DLabel and no beforeActions.
+// The dialog it opens draws Download, Replace, Remove and a Public marker, and the viewer Reset
+// view; devices.md names each.
+// -------------------------------------------------------------------------------------------------
+{
+  const tab = read('frontend/src/components/tabs/DevicesTab.jsx');
+  const dialog = read('frontend/src/components/common/Model3DUploader.jsx');
+  const viewer = read('frontend/src/components/common/Model3DViewer.jsx');
+  const help = read('help/pages/devices.md');
+  const problems365 = [];
+  const after = tab.match(/label: 'View History', icon: <\w+ size=\{13\} \/>,\s*to: deviceHistoryUrl\([^)]*\),\s*title: [^\n]+\n\s*\},\s*(?:\/\*[\s\S]*?\*\/\s*)?\{\s*label: [^\n]*'View 3D Model'[^\n]*'Add 3D Model…'/);
+  if (!after) problems365.push("DevicesTab.jsx has no action right after View History whose label is 'View 3D Model' with a model and 'Add 3D Model…' without one");
+  if (/Model3DLabel|model-section|beforeActions=/.test(tab)) problems365.push('DevicesTab.jsx still draws a 3D Model section in the drawer (Model3DLabel, model-section or beforeActions)');
+  for (const word of ['Download', 'Replace', 'Remove', 'Public']) {
+    if (!dialog.includes(` ${word}`)) problems365.push(`Model3DUploader.jsx no longer draws "${word}"`);
+    if (!help.includes(`**${word}**`)) problems365.push(`help/pages/devices.md does not name **${word}**`);
+  }
+  if (!viewer.includes('Reset view')) problems365.push('Model3DViewer.jsx no longer draws "Reset view"');
+  for (const label of ['View 3D Model', 'Add 3D Model…', 'Reset view']) {
+    if (!help.includes(`**${label}**`)) problems365.push(`help/pages/devices.md does not name **${label}**`);
+  }
+  if (!/\*\*View 3D Model\*\*[^\n]*after \*\*View History\*\*/.test(help)) problems365.push('help/pages/devices.md does not say View 3D Model sits after View History');
+  if (/\*\*Expand\*\*/.test(help.slice(help.indexOf('**View 3D Model**'), help.indexOf('**Suppression windows**')))) {
+    problems365.push('help/pages/devices.md still sends a reader to an Expand button for the model, which the drawer no longer has');
+  }
+  if (problems365.length) {
+    fail('the Devices drawer\'s 3D model action and its help disagree:\n' + problems365.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the Devices drawer has one 3D model action after View History, View 3D Model or Add 3D Model…, and the help names it and the view\'s Download, Replace, Remove, Public and Reset view');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 366. Nothing of a device's 3D model loads until its dialog is opened. DevicesTab mounts the
+// dialog only while modelOpen is set; Model3DViewer is the one file that imports @google/model-viewer
+// and only through import(); the viewer is imported by the dialog alone and does not auto-rotate;
+// and the README and the help both say so.
+// -------------------------------------------------------------------------------------------------
+{
+  const src = allFiles.filter((f) => /^frontend\/src\/.*\.jsx?$/.test(f) && !/^frontend\/src\/(__tests__|test)\//.test(f));
+  const tab = read('frontend/src/components/tabs/DevicesTab.jsx');
+  const viewer = read('frontend/src/components/common/Model3DViewer.jsx');
+  const problems366 = [];
+  if (!/\{modelOpen && selectedDevice && \(\s*<Model3DUploader/.test(tab)) problems366.push('DevicesTab.jsx does not mount Model3DUploader only while modelOpen is set');
+  const viewerImports = [];
+  const moduleImports = [];
+  for (const f of src) {
+    const text = read(f);
+    if (/(?:from|import)\s+['"]@google\/model-viewer['"]/.test(text)) moduleImports.push(f);
+    if (/from\s+['"][./]*(?:components\/)?(?:common\/)?Model3DViewer['"]/.test(text)) viewerImports.push(f);
+  }
+  if (moduleImports.length) problems366.push(`${moduleImports.join(', ')} import @google/model-viewer statically, so the viewer loads with the page`);
+  if (!viewer.includes("import('@google/model-viewer')")) problems366.push("Model3DViewer.jsx does not load @google/model-viewer with import()");
+  if (viewerImports.some((f) => f !== 'frontend/src/components/common/Model3DUploader.jsx')) {
+    problems366.push(`${viewerImports.filter((f) => f !== 'frontend/src/components/common/Model3DUploader.jsx').join(', ')} import Model3DViewer, which only the 3D model dialog may`);
+  }
+  if (/auto-rotate/.test(viewer)) problems366.push('Model3DViewer.jsx turns the model by itself, so it keeps drawing in an open dialog');
+  const readme = read('frontend/README.md');
+  if (!readme.includes("### A device's 3D model opens on request")) problems366.push("frontend/README.md has no \"A device's 3D model opens on request\" section");
+  if (!readme.includes('**Nothing loads until it is asked for.**')) problems366.push('frontend/README.md does not say nothing of the model loads until it is asked for');
+  if (!read('help/pages/devices.md').includes('Nothing of the model loads until you open the view')) problems366.push('help/pages/devices.md does not say nothing of the model loads until the view is opened');
+  if (problems366.length) {
+    fail('the 3D model loads before it is asked for, or the docs say otherwise:\n' + problems366.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the 3D model\'s dialog is mounted only while open, @google/model-viewer is imported only through import() in the one viewer, and the README and the help say so');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 367. The help says who may do what with a 3D model as the code gates it. Viewing and Download are
+// open to every role; Add 3D Model…, Replace and Remove need device:manage. The drawer greys Add
+// out with requiresRolesTitle(DEVICE_MANAGE) (and for an archived device, which cannot take one),
+// and the dialog draws Replace and Remove only under canManage, with Download outside it.
+// -------------------------------------------------------------------------------------------------
+{
+  const tab = read('frontend/src/components/tabs/DevicesTab.jsx');
+  const dialog = read('frontend/src/components/common/Model3DUploader.jsx');
+  const help = read('help/pages/devices.md');
+  const problems367 = [];
+  if (!/disabled: !selectedDevice\.model_3d_path && \(!canManage \|\| selectedDevice\.is_archived\)/.test(tab)) {
+    problems367.push('DevicesTab.jsx does not grey Add 3D Model… out for a role that may not manage devices or for an archived device, and only then');
+  }
+  if (!/requiresRolesTitle\(PERMISSION_UUIDS\.DEVICE_MANAGE\)[\s\S]{0,200}Restore this device to attach a 3D model/.test(tab)) {
+    problems367.push("DevicesTab.jsx's Add 3D Model… does not name the roles, then the restore, as its reasons");
+  }
+  if (!/canManage=\{canManage && !selectedDevice\.is_archived\}/.test(tab.slice(tab.indexOf('<Model3DUploader')))) {
+    problems367.push('DevicesTab.jsx hands the dialog canManage without the archived check');
+  }
+  const download = dialog.indexOf('<IconDownload size={12} /> Download');
+  const gate = dialog.indexOf('{canManage && (');
+  const replace = dialog.indexOf('<IconUpload size={12} /> Replace');
+  if (download < 0 || gate < 0 || replace < 0 || !(download < gate && gate < replace)) {
+    problems367.push('Model3DUploader.jsx does not draw Download before, and outside, the canManage gate that holds Replace and Remove');
+  }
+  const bullet = help.slice(help.indexOf('**The 3D model\'s file**'), help.indexOf('**Add 3D Model…**'));
+  for (const phrase of ['**Download** saves it, and every role can use it', '**Replace** and **Remove** need permission to manage devices', '**Remove** asks first']) {
+    if (!bullet.includes(phrase)) problems367.push(`help/pages/devices.md's 3D model file bullet does not say "${phrase}"`);
+  }
+  const add = help.slice(help.indexOf('**Add 3D Model…**'), help.indexOf('**Who can open a model.**'));
+  for (const phrase of ['It needs permission to manage devices', 'greyed out', 'An archived device cannot take a new model']) {
+    if (!add.includes(phrase)) problems367.push(`help/pages/devices.md's Add 3D Model… bullet does not say "${phrase}"`);
+  }
+  if (problems367.length) {
+    fail('the 3D model\'s gating and the help disagree:\n' + problems367.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the help says Download and viewing are open to every role, and Add 3D Model…, Replace and Remove need device:manage, as the drawer and the dialog gate them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 267. The longest suppression window is named as 0002 declares it: its label, its tab, its default
 // and its range, in devices.md's Suppression windows section and the Settings page's help, and its
 // default and range in supabase/README.md's 0240 section.

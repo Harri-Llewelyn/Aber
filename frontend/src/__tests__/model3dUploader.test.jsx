@@ -2,7 +2,7 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { deviceUrl } from '../routes'
-import { Model3DUploader } from '../components/common/Model3DUploader'
+import { Model3DUploader, MODEL_STORAGE_NOTE } from '../components/common/Model3DUploader'
 import { api } from '../api'
 import { getByTooltip, queryByTooltip } from '../test/tooltips'
 
@@ -51,7 +51,14 @@ beforeEach(() => {
   })
 })
 
+/** The dialog the drawer's View 3D Model and Add 3D Model… open: a drop zone, or the model and its file. */
 describe('Model3DUploader', () => {
+  it('is one window-sized dialog, titled with the device', () => {
+    render(<Model3DUploader device={device()} canManage showToast={vi.fn()} />)
+    const dialog = screen.getByRole('dialog', { name: 'CNC_01' })
+    expect(dialog.querySelector('.modal')).toHaveClass('modal-full')
+  })
+
   it('offers a dropzone listing the accepted formats', () => {
     render(<Model3DUploader device={device()} canManage showToast={vi.fn()} />)
     expect(screen.getByText(/Drop a 3D model here/i)).toBeInTheDocument()
@@ -80,6 +87,8 @@ describe('Model3DUploader', () => {
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringContaining('not a supported format'), 'error'))
     expect(api.uploadDeviceModel).not.toHaveBeenCalled()
+    // Said in the dialog too, where a toast would be hidden behind it.
+    expect(screen.getByRole('alert')).toHaveTextContent('"drawing.step" is not a supported format')
   })
 
   it('refuses an oversized file locally rather than after a doomed upload', async () => {
@@ -101,6 +110,7 @@ describe('Model3DUploader', () => {
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringContaining('do not have permission'), 'error'))
     expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('You do not have permission to upload a 3D model for this device.')
   })
 
   it('shows the attached model with its name and size', async () => {
@@ -128,6 +138,7 @@ describe('Model3DUploader', () => {
       fireEvent.click(getByTooltip(/Detach this model/i))
       return screen.getByRole('dialog', { name: 'Remove 3D model' })
     }
+    const confirmDialog = () => screen.queryByRole('dialog', { name: 'Remove 3D model' })
 
     it('asks first, naming the device and saying the file is deleted', async () => {
       const dialog = await openRemove()
@@ -140,26 +151,34 @@ describe('Model3DUploader', () => {
 
     it('removes nothing when cancelled', async () => {
       const onChange = vi.fn()
-      const dialog = await openRemove({ onChange })
+      const onClose = vi.fn()
+      const dialog = await openRemove({ onChange, onClose })
 
       fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
 
-      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(confirmDialog()).toBeNull()
+      // The model's own dialog is still open beneath.
+      expect(screen.getByRole('dialog', { name: 'CNC_01' })).toBeInTheDocument()
       expect(api.removeDeviceModel).not.toHaveBeenCalled()
       expect(onChange).not.toHaveBeenCalled()
+      expect(onClose).not.toHaveBeenCalled()
     })
 
-    it('removes the model once, when confirmed', async () => {
+    it('removes the model once, when confirmed, and closes the dialog so the toast is in view', async () => {
       const onChange = vi.fn()
+      const onClose = vi.fn()
+      const showToast = vi.fn()
       api.removeDeviceModel.mockResolvedValue(undefined)
-      const dialog = await openRemove({ onChange })
+      const dialog = await openRemove({ onChange, onClose, showToast })
 
       fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Model' }))
 
       await waitFor(() => expect(api.removeDeviceModel).toHaveBeenCalledWith(DEVICE_ID, `${DEVICE_ID}/cnc.glb`))
       await waitFor(() => expect(onChange).toHaveBeenCalledWith(null))
       expect(api.removeDeviceModel).toHaveBeenCalledTimes(1)
-      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      expect(showToast).toHaveBeenCalledWith("3D model removed from 'CNC_01'", 'success', { to: deviceUrl(DEVICE_ID) })
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(confirmDialog()).toBeNull())
     })
 
     it('stays open on a failure, which is said in the dialog', async () => {
@@ -169,7 +188,18 @@ describe('Model3DUploader', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Model' }))
 
       expect(await within(dialog).findByRole('alert')).toHaveTextContent('The model could not be deleted from storage.')
-      expect(screen.getByRole('dialog')).toBe(dialog)
+      expect(confirmDialog()).toBe(dialog)
+    })
+
+    it('stays open after a failure, so the dialog is not closed over an unchanged model', async () => {
+      const onClose = vi.fn()
+      api.removeDeviceModel.mockRejectedValue(new Error('The model could not be deleted from storage.'))
+      const dialog = await openRemove({ onClose })
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Model' }))
+      await within(dialog).findByRole('alert')
+
+      expect(onClose).not.toHaveBeenCalled()
     })
   })
 
@@ -192,10 +222,63 @@ describe('Model3DUploader', () => {
   })
 
   // The warning is in the empty drop zone, where the decision to upload is made; with a model
-  // attached it is the "Public" marker's tip (Model3DLabel, tested in model3dLayout.test.jsx).
+  // attached it is the "Public" marker's tip, for every role.
   it('says the bucket is public on the empty drop zone', () => {
     render(<Model3DUploader device={device()} canManage showToast={vi.fn()} />)
     expect(screen.getByText(/anyone with the link can read it/i)).toBeInTheDocument()
+  })
+
+  describe('the Public marker', () => {
+    it.each([['may manage devices', true], ['may not', false]])('carries the storage note for a role that %s, and the keyboard reaches it', async (_, canManage) => {
+      render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage={canManage} showToast={vi.fn()} />)
+      await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
+
+      // Its visible word is its name.
+      const marker = screen.getByRole('button', { name: 'Public' })
+      expect(marker).toHaveClass('help-tip-text')
+      expect(marker).not.toHaveAttribute('title')
+      fireEvent.focus(marker)
+      expect(screen.getByRole('tooltip')).toHaveTextContent(MODEL_STORAGE_NOTE)
+      expect(MODEL_STORAGE_NOTE).toBe('Stored in the public asset-3d-models bucket so exported shells can be opened by any AAS viewer — anyone with the link can read it.')
+    })
+
+    it('is not printed in full beside an attached model: the marker carries it', async () => {
+      render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
+      await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
+
+      expect(screen.queryByText(/asset-3d-models/)).toBeNull()
+      expect(screen.queryByText(/anyone with the link/)).toBeNull()
+    })
+
+    it('is not on the empty drop zone, which says it in full', () => {
+      render(<Model3DUploader device={device()} canManage showToast={vi.fn()} />)
+      expect(screen.queryByRole('button', { name: 'Public' })).toBeNull()
+    })
+  })
+
+  it('says nothing about storage on the empty drop zone to someone who may not upload', () => {
+    render(<Model3DUploader device={device()} canManage={false} showToast={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /Upload a 3D model/i })).not.toHaveTextContent(/anyone with the link/)
+  })
+
+  it('turns from the drop zone to the model when the device gains one, without closing', async () => {
+    const { rerender } = render(<Model3DUploader device={device()} canManage showToast={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /Upload a 3D model/i })).toBeInTheDocument()
+
+    rerender(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
+
+    expect(await screen.findByTestId('model-3d-viewer')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'CNC_01' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Upload a 3D model/i })).toBeNull()
+  })
+
+  it('offers Replace and Remove, but nothing to drop a file on, once a model is attached', async () => {
+    render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
+
+    expect(screen.queryByRole('button', { name: /Upload a 3D model/i })).toBeNull()
+    expect(getByTooltip(/Upload a different model/i)).toHaveTextContent('Replace')
+    expect(getByTooltip(/Detach this model/i)).toHaveTextContent('Remove')
   })
 
   // Download is a button beside Replace and Remove.

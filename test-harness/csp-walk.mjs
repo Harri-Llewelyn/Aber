@@ -570,10 +570,19 @@ try {
       await visit(`/site-map?area=${fixtures.area}`, PLAN_DRAWN)
       await visit(`/areas?search=${fixtures.area}`, PLAN_DRAWN)
     }
+    // The device's drawer opens on arrival, and holds no model: the viewer, its module and the file
+    // load once View 3D Model is pressed.
     for (const id of fixtures.devices) {
       const MODEL = "document.querySelector('[data-testid=\"model-3d-viewer\"]')"
-      const shown = await visit(`/devices?search=${id}`, `${MODEL}?.loaded === true || !!document.querySelector('[data-testid="model-3d-viewer-error"]')`, 60000)
-      if (shown && !await evaluate(`${MODEL}?.loaded === true`)) {
+      const VIEW_ACTION = "[...document.querySelectorAll('.context-panel-open .context-action')].find((b) => b.textContent.trim() === 'View 3D Model')"
+      if (!await visit(`/devices?search=${id}`, `!!${VIEW_ACTION}`, 60000)) continue
+      if (await evaluate(`!!${MODEL} || !!document.querySelector('model-viewer')`)) {
+        problems.push(`/devices?search=${id}: the drawer loaded the 3D viewer before View 3D Model was pressed`)
+      }
+      await evaluate(`${VIEW_ACTION}.click()`)
+      const shown = await until(`${MODEL}?.loaded === true || !!document.querySelector('[data-testid="model-3d-viewer-error"]')`, 60000)
+      if (!shown) problems.push(`/devices?search=${id}: View 3D Model did not show the model within 60s`)
+      else if (!await evaluate(`${MODEL}?.loaded === true`)) {
         problems.push(`/devices?search=${id}: the 3D viewer shows its error instead of the model`)
       }
     }
