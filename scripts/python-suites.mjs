@@ -1520,6 +1520,15 @@ export const SUITES = {
       'Third-party ends nothing. Missing either half fails silently: a redeemable token for a ' +
       'gateway with no appliance, or a credential the dashboard no longer offers working on.',
   },
+  'supabase/migrations/test_a_failed_type_change_revocation_is_retried.py': {
+    lanes: ['db'],
+    why:
+      "0288 -- a revocation a change of type asked for and that failed is asked again by the sweep, " +
+      "with the stamp kept, until a 2xx confirms it; and never once a credential was issued or enrolled " +
+      "after the stamp, since the account name is the same before and after and a retry would disable " +
+      'the new credential. The archive path is as it was, and the helper that decides is held by its ' +
+      'truth table.',
+  },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of
     // its assertions is made AS a seeded demo account, and the db lane deliberately applies no

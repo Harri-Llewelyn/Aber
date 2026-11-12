@@ -1224,6 +1224,7 @@ function edgeFunctionNames() {
     'public.machine_condition_readings': '0283 reads a pair on a derived metric from derived_current(), which gives it a value over the last hour or at the last whole minute; 0270 reads telemetry_latest, which holds nothing under a name no device publishes. The columns are 0270\'s, since a replay runs 0270 again first. A measured metric is read as it was',
     'public.evaluate_automations': '0283 words the value and the threshold in the summary of an alert it raises through automation_value_words() and automation_threshold_words(): a derived metric\'s value rounded to three decimals with its window, a time in state as a percentage, a measured one as it printed; 0271 printed the value as the evaluator read it. Nothing else changes, and the comparison, the threshold and the values the row keeps are the numbers they were',
     'public.machine_condition_rows': '0283 says the window in the detail of a derived metric ("is 4.2 over the last hour, below 5") and rounds its value to three decimals; 0270 words every value as it was read',
+    'public.sweep_gateway_credential_revocations': '0288 asks again for a gateway that is not archived, whose change of type asked for a revocation that failed, keeping its stamp, until a 2xx confirms it or a credential issued or enrolled after the stamp replaces the one it ends; 0001 dropped the request row of every gateway that was not archived, so a failed call was never judged. An archived gateway is judged as 0001 judges it',
     'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture, and names the person who started a capture or playback job for the roles that read the jobs; 0203 had no such row and no such arm',
   };
 
@@ -3355,6 +3356,78 @@ const OPERATOR_PAIRS = [
       + places.map(([where, reserved, cap]) => `        ${where}: reserved ${reserved}; at most ${cap} characters`).join('\n'));
   } else {
     pass(`ingestion, the heartbeat gate and gateways_status_valid reserve ${places[0][1]} and cap a status at ${places[0][2]}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 361. The revocation retry's numbers are said as the migrations hold them. 0288's sweep waits five
+// minutes for a reply and asks for 200 a run, and pg_cron (0002) runs it every 15 minutes; the README's
+// 0288 section and the Gateways help say the same, so a reader waiting on a retry waits as long as
+// the sweep does.
+// -------------------------------------------------------------------------------------------------
+{
+  const SWEEP = 'supabase/migrations/0288_a_failed_type_change_revocation_is_retried.sql';
+  const sql = read(SWEEP);
+  const seed = read('supabase/migrations/0002_seed_data.sql');
+  const section = read('supabase/README.md').match(/\n### A failed revocation after a change of type is asked again \(0288\)\n([\s\S]*?)(?=\n### )/)?.[1];
+  const help = read('help/pages/gateways.md').split('\n').find((l) => l.startsWith('- **Changing a gateway\'s type**'));
+  const problems361 = [];
+  const waits = [...new Set([...sql.matchAll(/interval '(\d+) minutes'/g)].map((m) => Number(m[1])))];
+  const limits = [...new Set([...sql.matchAll(/LIMIT (\d+)/g)].map((m) => Number(m[1])))];
+  const every = seed.match(/cron\.schedule\('sweep-gateway-credential-revocations', '\*\/(\d+) \* \* \* \*'/)?.[1];
+  const words = { 5: 'five', 15: '15' };
+  if (waits.length !== 1 || limits.length !== 1 || !every) {
+    problems361.push(`could not read the sweep's wait (${waits.join(', ')}), its limit (${limits.join(', ')}) and its schedule (${every}) from ${SWEEP} and 0002`);
+  } else {
+    if (!section) problems361.push('supabase/README.md has no 0288 section');
+    else {
+      const flat = section.replace(/\s+/g, ' ');
+      if (!flat.includes(`${words[waits[0]] ?? waits[0]} minutes`)) problems361.push(`the 0288 section does not say a reply is waited for ${waits[0]} minutes`);
+      if (!flat.includes(`${limits[0]} a run`)) problems361.push(`the 0288 section does not say ${limits[0]} a run`);
+      if (!flat.includes(`every ${every} minutes`)) problems361.push(`the 0288 section does not say the sweep runs every ${every} minutes`);
+    }
+    if (!help) problems361.push("help/pages/gateways.md has no 'Changing a gateway's type' paragraph");
+    else if (!help.includes(`every ${every} minutes`)) problems361.push(`the Gateways help does not say Aber asks again every ${every} minutes`);
+  }
+  if (problems361.length) {
+    fail(`the revocation retry's numbers are not said as the migrations hold them:\n${problems361.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the 0288 section and the Gateways help say the sweep waits ${waits[0]} minutes, asks for ${limits[0]} a run and runs every ${every} minutes, as 0288 and 0002 hold`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 362. The two columns the retry reads for "a credential after the stamp" are the ones the dashboard
+// and gateway_has_broker_credential() read. 0288's helper compares enrolled_at and a CREDENTIAL_ISSUED
+// row's recorded_at with credential_revoked_at; utils/credentialState.js reads the same two against
+// the same stamp, so the drawer and the sweep agree on what outranks a revocation. And 0252's section
+// no longer says the sweep judges archived gateways alone, and points at 0288's.
+// -------------------------------------------------------------------------------------------------
+{
+  const sql = read('supabase/migrations/0288_a_failed_type_change_revocation_is_retried.sql');
+  const helper = sql.match(/FUNCTION public\.gateway_credential_was_replaced\([\s\S]*?\n\$\$;/)?.[0] ?? '';
+  const state = read('frontend/src/utils/credentialState.js');
+  const readme = read('supabase/README.md');
+  const at252 = readme.match(/\n### Changing a gateway's type cleans up after the old type \(0252\)\n([\s\S]*?)(?=\n### )/)?.[1];
+  const problems362 = [];
+  if (!helper) problems362.push('could not read gateway_credential_was_replaced() out of 0288');
+  else {
+    for (const part of ['g.enrolled_at > g.credential_revoked_at', "dt.action      = 'CREDENTIAL_ISSUED'", 'dt.recorded_at > g.credential_revoked_at']) {
+      if (!helper.includes(part)) problems362.push(`gateway_credential_was_replaced() does not compare \`${part}\``);
+    }
+    if (!/after\(gateway\.enrolled_at, revoked\)/.test(state) || !/after\(issuedAt, revoked\)/.test(state)) {
+      problems362.push("utils/credentialState.js no longer lets an enrolment or an issue after credential_revoked_at outrank the revocation, as 0288's helper reads them");
+    }
+  }
+  if (!at252) problems362.push('supabase/README.md has no 0252 section');
+  else {
+    if (/judges archived gateways\s+alone/.test(at252)) problems362.push("the 0252 section still says the revocation sweep judges archived gateways alone, which 0288 no longer does");
+    if (!at252.includes('(0288)')) problems362.push('the 0252 section does not point to 0288');
+  }
+  if (problems362.length) {
+    fail(`the revocation retry and what outranks a revocation are not described as the code reads them:\n${problems362.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass("0288's retry and utils/credentialState.js let an enrolment or a CREDENTIAL_ISSUED row after credential_revoked_at outrank a revocation, and 0252's section points to 0288");
   }
 }
 
