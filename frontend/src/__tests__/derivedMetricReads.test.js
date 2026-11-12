@@ -201,6 +201,12 @@ describe("a derived metric's Applies To line", () => {
     expect(appliesToWords(names(4), counter)).toBe('Applies to: Press 1, Press 2 and 2 more, the devices that report Controller/PART_COUNT')
   })
 
+  it('names the first two as a table sorts them, whatever order the devices were read in', () => {
+    const read = ['Press 4', 'Press 10', 'press 2', 'Press 1', 'Press 3']
+    expect(appliesToWords(read, counter)).toBe('Applies to: Press 1, press 2 and 3 more, the devices that report Controller/PART_COUNT')
+    expect(read[0]).toBe('Press 4')
+  })
+
   it('says every input of a sum', () => {
     expect(appliesToWords(names(2), power)).toBe('Applies to: Press 1 and Press 2, the devices that report Power/A and Power/B')
   })

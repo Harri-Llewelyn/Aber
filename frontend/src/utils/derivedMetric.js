@@ -273,10 +273,16 @@ const listWords = (names) => (names.length <= 1 ? names.join('') : `${names.slic
 /**
  * The derived drawer's Applies to line, as two parts: `lead`, which the drawer's field label says, and
  * `rest`. The devices that report every input (the Metric tab's rule): the first two and how many more
- * past three, then what they report. With none, it says what no device reports yet.
+ * past three, then what they report. With none, it says what no device reports yet. The names are in
+ * the order a table sorts them, so the two named are the same whichever order the devices were read in.
  */
-function appliesTo(deviceNames, derivation) {
+// The collation utils/tableSort.js gives a text column ("Press 2" before "Press 10", case aside). This
+// module imports nothing, because the mirror check loads it in Node.
+const nameOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+
+function appliesTo(names, derivation) {
   const inputs = derivationInputs(derivation)
+  const deviceNames = [...names].sort(nameOrder.compare)
   if (deviceNames.length === 0) return { lead: 'Applies to no device yet', rest: `none reports ${listWords(inputs)}` }
   const shown = deviceNames.length > 3
     ? `${deviceNames.slice(0, 2).join(', ')} and ${deviceNames.length - 2} more`
