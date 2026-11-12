@@ -1130,7 +1130,8 @@ python supabase/migrations/test_an_audit_trail_filter_takes_several_values.py
 # and the caller's policies hold. p_counts gives each class, kind and action its events under every
 # filter but its own, the search, the people and the purged rule included. A backup request's id
 # finds the backup it took, released and pruned; a cancelled request's, its own lane; another id,
-# what it did. One form is declared, with its grants and its five class indexes, after the chain
+# what it did. One form is declared, with its grants and its five class indexes (a count that
+# names a class reads its index once VACUUM has made the pages visible), after the chain
 # and after 0001's declaration and sweep, 0168, 0222, 0227 and 0228 replay over the form from
 # before. Every test rolls back.
 python supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py

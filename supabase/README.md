@@ -2973,7 +2973,8 @@ nothing chosen, before any class was computed. Three changes meet it.
   a change to its rules rebuilds them (`REINDEX INDEX`, each a statement of its own, since a
   partitioned index cannot be rebuilt inside a transaction) in the same file. Check 199
   (`scripts/check-docs-drift.mjs`) refuses a later file that redeclares it without rebuilding all
-  five.
+  five. On a busy current partition the class counts may recheck rows until autovacuum catches up,
+  which costs time and never changes an answer.
 - **`audit_trail_matching(p_class, ...)`** returns one class's rows under every filter, each with
   whether its entity is deleted. It is a SQL function with no `SET` clause, so it inlines into each
   of the page's calls with its class a constant. The page calls it once per class for the counts and
