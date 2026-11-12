@@ -7761,7 +7761,7 @@ const OPERATOR_PAIRS = [
   const lost = daemon.match(/^def _connection_lost\(exc, conn\):[\s\S]*?(?=\n\S)/m)?.[0] ?? '';
   if (!lost.includes('isinstance(exc, psycopg2.InterfaceError)')) problems356.push('_connection_lost() does not treat an InterfaceError as the connection');
   if (!/isinstance\(exc, psycopg2\.OperationalError\) and conn\.closed != 0/.test(lost)) problems356.push('_connection_lost() does not limit an OperationalError to a connection that reports itself closed');
-  const write = daemon.match(/^    def _write\(self, batch, retry=True\):[\s\S]*?(?=\n\S|\n    def |\n_writer )/m)?.[0] ?? '';
+  const write = daemon.match(/^ {4}def _write\(self, batch, retry=True\):[\s\S]*?(?=\n\S|\n {4}def |\n_writer )/m)?.[0] ?? '';
   if (!write.includes('self._write(batch, retry=False)')) problems356.push('TelemetryWriter._write() does not retry a lone message exactly once');
   if (!write.includes(`count("${flat}")`)) problems356.push(`TelemetryWriter._write() never counts ${flat}`);
   const section = readme.match(/^### Connection handling\n[\s\S]*?(?=\n---\n)/m)?.[0].replace(/\s+/g, ' ') ?? '';
