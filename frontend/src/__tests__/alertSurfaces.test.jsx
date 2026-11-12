@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ContextPanel } from '../components/common/ContextPanel'
-import { grafanaAlertUrl, GRAFANA_URL } from '../constants'
+import { grafanaAlertUrl, isAutomationAlert, GRAFANA_URL } from '../constants'
 
 /**
  * Where an active alert surfaces once Grafana has raised it. The pill has its own file; what is
@@ -100,6 +100,13 @@ describe('context drawer alert banner', () => {
       expect(href).toContain('rule%3A%22Thermal%20Excursion%22')
     })
 
+    it('is not offered for an alert an automation raised, which has no rule in Grafana', () => {
+      panel({ alert: { ...alert, fingerprint: 'condition:5d1f0c1e-0000-4000-8000-000000000001:dev22:Spindle/LOAD', rule_uid: null } })
+      expect(screen.queryByRole('link', { name: /View in Grafana/i })).not.toBeInTheDocument()
+      // Its history is the History page's, as every alert's is.
+      expect(screen.getByRole('link', { name: /Alert history/i })).toBeInTheDocument()
+    })
+
     it('is out of the tab order while the drawer is closed', () => {
       // The drawer is always mounted -- that is what makes the width transition possible -- so every
       // control in it has to be explicitly unreachable when collapsed.
@@ -135,6 +142,16 @@ describe('grafanaAlertUrl', () => {
     expect(grafanaAlertUrl({ rule_uid: null, alert_name: 'Gateway Stale' }))
       .toBe(grafanaAlertUrl({ alert_name: 'Gateway Stale' }))
     expect(new URL(grafanaAlertUrl({ rule_uid: null, alert_name: 'Gateway Stale' })).pathname).toBe('/alerting/list')
+  })
+
+  it('has no page for an alert an automation raised, whose fingerprint starts condition:', () => {
+    const automation = { fingerprint: 'condition:5d1f0c1e:dev22:Spindle/LOAD', rule_uid: null, alert_name: 'Spindle hot' }
+    expect(isAutomationAlert(automation)).toBe(true)
+    expect(grafanaAlertUrl(automation)).toBeNull()
+    // Neither the rule's name nor a uid brings it back, and Grafana's own fingerprints are no match.
+    expect(grafanaAlertUrl({ ...automation, rule_uid: 'aber-backup-stale' })).toBeNull()
+    expect(isAutomationAlert({ fingerprint: 'a3f9c2e17b', alert_name: 'Spindle hot' })).toBe(false)
+    expect(isAutomationAlert(null)).toBe(false)
   })
 
   it('escapes the uid, so it cannot leave the rule view', () => {

@@ -20,7 +20,8 @@ decide where a new feature belongs.
 - **Aber shows the site as it is now, and what changed.** The Site Map draws the present state of
   every area, cell and device. The Audit Trail records every change.
 - **Aber watches the readings and shows the alerts.** Every alert appears in Aber's dashboard.
-  Today Grafana evaluates the platform's own health rules ([`grafana/README.md`](../grafana/README.md)).
+  Aber evaluates the machine conditions a person writes as [automations](automations.md). Today
+  Grafana evaluates the platform's own health rules ([`grafana/README.md`](../grafana/README.md)).
 - **Aber hands the readings on.** An Administrator or a Shopfloor Manager exports them as files, 14 days at a
   time unless the site sets another limit, each export recorded in the Audit Trail. Other software reads them
   through [i3X](i3x-openapi.yaml). The equipment register is published as Asset Administration

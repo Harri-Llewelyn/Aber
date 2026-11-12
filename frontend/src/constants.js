@@ -456,12 +456,20 @@ export const i3xUrl = () =>
 export const FORGE_ORGANISATION = 'gateways'
 
 /**
+ * Whether Aber's own evaluator raised an alert: its fingerprint starts `condition:`, the prefix
+ * automation_alert_fingerprint() composes (0255). Grafana has no rule for one.
+ */
+export const isAutomationAlert = (alert) => String(alert?.fingerprint ?? '').startsWith('condition:')
+
+/**
  * The Grafana page for the rule that raised a `platform_alerts` row: the rule itself by its
  * `rule_uid`, which the webhook keeps. A row written before the column existed has none, and opens
  * the alert list searched by the rule's name. That search reads rule definitions, so a
- * `label:sparkplug_id=` filter (a label on evaluated series) would match nothing.
+ * `label:sparkplug_id=` filter (a label on evaluated series) would match nothing. An alert an
+ * automation raised has no rule there, and answers null.
  */
 export const grafanaAlertUrl = (alert) => {
+  if (isAutomationAlert(alert)) return null
   const { rule_uid: ruleUid, alert_name: alertName } = alert ?? {};
   if (ruleUid) return `${GRAFANA_URL}/alerting/grafana/${encodeURIComponent(ruleUid)}/view`;
   return alertName
