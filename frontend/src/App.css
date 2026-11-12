@@ -6168,11 +6168,15 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .chart-overlay { position: absolute; inset: 0; pointer-events: none; }
 /* Which alerts were firing at the pointer, at the plot's foot (alertBands.js): opaque over the
    shading, one line an alert, held inside the plot near either end as the now marker is. */
+/* Its own width, not the room between the cursor and the right edge: left alone, an absolute box is as
+   wide as that room, so near the edge it narrowed, wrapped and outgrew the chart before the transform
+   moved it back. */
 .chart-alert-readout {
   position: absolute;
   bottom: 18px;
   z-index: 2;
   transform: translateX(-50%);
+  width: max-content;
   max-width: 70%;
   padding: 2px 6px;
   border: 1px solid var(--danger);
