@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { StartPlaybackModal } from '../components/modals/StartPlaybackModal'
 import { CaptureTab } from '../components/tabs/CaptureTab'
@@ -50,7 +50,7 @@ function worker(overrides = {}) {
 async function openOn(target = TARGET) {
   api.playbackTargets.mockResolvedValue([target])
   render(<StartPlaybackModal capture={CAPTURE} onConfirm={vi.fn()} onCancel={vi.fn()} />)
-  fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: target.id } })
+  await screen.findByText(/Plays back as/)
 }
 
 vi.mock('../hooks/useRealtimeTable', () => ({ useRealtimeTable: vi.fn() }))
@@ -86,7 +86,7 @@ describe('which password the worker holds', () => {
   it('says nothing for a worker that reports no sources', async () => {
     api.playbackWorkerStatus.mockResolvedValue(worker())
     await openOn()
-    await screen.findByText(/Only the Playback gateway is listed/)
+    await screen.findByText(/Plays back as/)
     expect(screen.queryByText(/The playback worker uses/)).toBeNull()
   })
 
@@ -103,7 +103,7 @@ describe('whether the Playback gateway is publishing', () => {
 
   it('does not warn in the 90 seconds after a playback, when the NDEATH set it OFFLINE', async () => {
     await openOn({ ...TARGET, status: 'OFFLINE', last_heartbeat: new Date().toISOString() })
-    await screen.findByText(/Only the Playback gateway is listed/)
+    await screen.findByText(/Plays back as/)
     expect(screen.queryByText(/is publishing right now/)).toBeNull()
   })
 
@@ -118,7 +118,7 @@ describe('the worker during a long playback', () => {
     // The heartbeat is a timer on the worker, so a report is never older than about 30 seconds.
     api.playbackWorkerStatus.mockResolvedValue(worker({ reported_at: new Date(Date.now() - 40 * 1000).toISOString() }))
     await openOn()
-    await screen.findByText(/Only the Playback gateway is listed/)
+    await screen.findByText(/Plays back as/)
     expect(screen.queryByText(/has not reported recently/)).toBeNull()
   })
 })

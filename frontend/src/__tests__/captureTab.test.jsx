@@ -587,10 +587,10 @@ describe('deleting and downloading', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    await screen.findByLabelText('Playback gateway')
+    await screen.findByText(/Plays back as/)
     expect(screen.getByText(/stored without the list of devices it holds/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(screen.queryByLabelText('Playback gateway')).toBeNull())
+    await waitFor(() => expect(screen.queryByText(/Plays back as/)).toBeNull())
     expect(api.captureUrl).not.toHaveBeenCalled()
   })
 })
@@ -741,21 +741,22 @@ describe('playing a capture back', () => {
     const rendered = renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    await screen.findByLabelText('Playback gateway')
+    await screen.findByText(/Plays back as|Choose the Playback gateway/)
     return rendered
   }
 
-  /** Only the Playback gateway is offered: `start_playback_job()` refuses any other target. */
-  it('offers only the targets the gate will accept', async () => {
+  /** Only the Playback gateway is named: `start_playback_job()` refuses any other target. */
+  it('names only the target the gate will accept', async () => {
     await open()
-    const select = screen.getByLabelText('Playback gateway')
-    expect(within(select).getByText(/Playback Target/)).toBeInTheDocument()
-    expect(within(select).queryByText(/Line 1 Gateway/)).not.toBeInTheDocument()
+    const line = screen.getByText(/Plays back as/)
+    expect(line.textContent).toMatch(/Playback Target/)
+    expect(line.textContent).not.toMatch(/Line 1 Gateway/)
+    expect(screen.queryByLabelText('Playback gateway')).toBeNull()
     await waitFor(() => expect(api.playbackTargets).toHaveBeenCalled())
   })
 
-  // NOT VIA open(), which waits for the select: with no targets there is deliberately no select to
-  // wait for, only the explanation of why.
+  // NOT VIA open(), which waits for the gateway's line: with no targets there is deliberately none
+  // to wait for, only the explanation of why.
   it('says the Playback gateway is missing when there is no target', async () => {
     api.playbackTargets.mockResolvedValue([])
     api.listCaptures.mockResolvedValue([PLAYABLE])
@@ -774,7 +775,6 @@ describe('playing a capture back', () => {
   it('names a target that holds no broker credential, and refuses to start', async () => {
     api.playbackTargets.mockResolvedValue([{ ...TARGET, gateway_has_broker_credential: false }])
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/holds no broker credential/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
   })
@@ -785,7 +785,6 @@ describe('playing a capture back', () => {
    */
   it('builds the device map from the devices bound to the target', async () => {
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     const mapSelect = await screen.findByLabelText('Target device for dev270000000000400080000')
     expect(within(mapSelect).getByText(/Sim Spindle/)).toBeInTheDocument()
   })
@@ -800,7 +799,6 @@ describe('playing a capture back', () => {
     api.ensureShadowLanes.mockResolvedValue({ dev270000000000400080000: 'dev990000000000400080000' })
 
     const { props } = await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     await screen.findByLabelText('Target device for dev270000000000400080000')
 
     // The second resolve matters: the dropdown renders `target.devices`, read before the lane
@@ -824,14 +822,12 @@ describe('playing a capture back', () => {
     // It WRITES -- a device row appearing in the directory because someone opened a modal is the
     // kind of surprise that makes people stop trusting the table.
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     await screen.findByLabelText('Target device for dev270000000000400080000')
     expect(api.ensureShadowLanes).not.toHaveBeenCalled()
   })
 
   it('will not start while a captured device is unmapped', async () => {
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     await screen.findByLabelText('Target device for dev270000000000400080000')
     const publish = screen.getByRole('button', { name: 'Play back' })
     expect(publish).toBeDisabled()
@@ -841,7 +837,6 @@ describe('playing a capture back', () => {
   it('passes the target, the map and the speed to the gate', async () => {
     api.startPlayback.mockResolvedValue('play-1')
     const { props } = await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
     fireEvent.change(screen.getByLabelText('Speed'), { target: { value: '4' } })
@@ -884,7 +879,7 @@ describe('playing a capture back', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    await screen.findByLabelText('Playback gateway')
+    await screen.findByText(/Plays back as/)
     expect(screen.getByText(/so a playback\s+refuses it/)).toBeInTheDocument()
     expect(screen.queryByText(/will play back normally|dropped on ingest/)).toBeNull()
   })
@@ -892,7 +887,6 @@ describe('playing a capture back', () => {
   it('shows the gate refusal in the dialog', async () => {
     api.startPlayback.mockRejectedValue(new Error('gateway X is not marked simulated'))
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
     fireEvent.click(screen.getByRole('button', { name: 'Play back' }))
@@ -907,7 +901,7 @@ describe('playing a capture back', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
+    await screen.findByText(/Plays back as/)
     expect(await screen.findByText(/publishes no device-level traffic/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
   })
@@ -921,7 +915,6 @@ describe('playing a capture back', () => {
       held_edge_nodes: [], reported_at: new Date().toISOString()
     })
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
 
     expect(await screen.findByText(/was not given/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
     expect(screen.getByText(/secrets\.mqttPlaybackCredentials/)).toBeInTheDocument()
@@ -940,7 +933,6 @@ describe('playing a capture back', () => {
         issued_at: new Date().toISOString() }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
 
     expect(await screen.findByText(/was re-issued after the playback/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
@@ -954,14 +946,13 @@ describe('playing a capture back', () => {
         issued_at: new Date().toISOString() }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
 
     expect(await screen.findByText(/nothing needs\s+doing here/)).toBeInTheDocument()
     expect(screen.queryByText(/secrets\.mqttPlaybackCredentials/)).toBeNull()
   })
 
-  /** The dropdown says which state a target is in before it is chosen. */
-  it('marks a stale target in the target list', async () => {
+  /** The gateway's line says which state it is in before Play back is pressed. */
+  it('marks a stale target on its line', async () => {
     api.playbackStaleCredentials.mockResolvedValue([
       { sparkplug_id: 'gwy130000000000400080000', observed_at: null, issued_at: new Date().toISOString() }
     ])
@@ -976,7 +967,6 @@ describe('playing a capture back', () => {
   it('offers what it always did when the staleness read fails', async () => {
     api.playbackStaleCredentials.mockRejectedValue(new Error('nope'))
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
 
@@ -994,7 +984,6 @@ describe('playing a capture back', () => {
       { ...TARGET, last_heartbeat: new Date().toISOString(), status: 'ONLINE' }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/is publishing right now/)).toBeInTheDocument()
     // A warning, so the button is still reachable once the mapping is done.
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
@@ -1007,7 +996,6 @@ describe('playing a capture back', () => {
       { ...TARGET, last_heartbeat: new Date(Date.now() - 10 * 60 * 1000).toISOString(), status: 'OFFLINE' }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     expect(screen.queryByText(/is publishing right now/)).toBeNull()
   })
 
@@ -1017,7 +1005,6 @@ describe('playing a capture back', () => {
       held_edge_nodes: [], reported_at: new Date().toISOString()
     })
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/was not given its password/)).toBeInTheDocument()
     expect(screen.getByText(/secrets\.mqttPlaybackCredentials/)).toBeInTheDocument()
     expect(screen.getByText(/delivers the password to the worker automatically/)).toBeInTheDocument()
@@ -1049,7 +1036,6 @@ describe('playing a capture back', () => {
       expect(screen.getByText('playback.enabled: true')).toBeInTheDocument()
       expect(screen.queryByText(/has not reported recently/)).toBeNull()
 
-      fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
       fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
         { target: { value: 'dev310000000000400080000' } })
       const start = screen.getByRole('button', { name: 'Play back' })
@@ -1074,7 +1060,6 @@ describe('playing a capture back', () => {
     globalThis.__ABER_CONFIG__ = {}
     try {
       await open()
-      fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
       fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
         { target: { value: 'dev310000000000400080000' } })
       expect(screen.queryByText(/Turn on the playback worker first/)).toBeNull()
@@ -1091,7 +1076,6 @@ describe('playing a capture back', () => {
   it('still allows a playback when the worker status is unknown', async () => {
     api.playbackWorkerStatus.mockResolvedValue(null)
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
     expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
@@ -1541,7 +1525,7 @@ describe('playing a file', () => {
       expect.objectContaining({ subjectKind: 'gateway', subjectId: 'gw-1' })
     ))
     // …and then straight into playing it back, rather than back to the table to find it.
-    expect(await screen.findByLabelText('Playback gateway')).toBeInTheDocument()
+    expect(await screen.findByText(/Plays back as/)).toBeInTheDocument()
   })
 
   it('leaves the subject unchosen when the file names nothing this stack knows', async () => {
