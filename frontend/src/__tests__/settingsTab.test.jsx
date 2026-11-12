@@ -559,3 +559,105 @@ describe('the page frame', () => {
     expect(screen.getByText(/No settings are declared yet/).closest('.card')).toBeTruthy()
   })
 })
+
+
+/* A number setting says whether it counts whole things (system_settings.whole_number). The field
+   offers a step of 1 for one that does and any step for one that does not, and a part value in a
+   whole setting is refused in the database's words before anything is sent. */
+describe('a setting that counts whole things', () => {
+  const WHOLE = {
+    id: '10', key: 'proposals.max_open_per_person', value: 10, value_type: 'number',
+    category: 'Approvals', label: 'Open proposals allowed per person',
+    description: 'How many open proposals one person may have.',
+    fallback_source: 'ten, in enforce_open_proposal_cap()',
+    min_value: 1, max_value: 200, whole_number: true,
+    updated_at: '2026-08-22T10:00:00Z', updated_by: null
+  }
+  const PART = {
+    id: '11', key: 'site_map.min_pin_spacing', value: 0.08, value_type: 'number',
+    category: 'Site', label: 'Minimum spacing between cells on an area plan',
+    description: 'The closest two cells may sit on a plan.',
+    fallback_source: 'eight hundredths, in place_cell_in_its_area()',
+    min_value: 0, max_value: 0.5, whole_number: false,
+    updated_at: '2026-08-22T10:00:00Z', updated_by: null
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.get.mockResolvedValue([WHOLE, PART])
+    api.patchSetting.mockResolvedValue({ key: 'x', value: 1 })
+  })
+
+  const show = async () => {
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+  }
+
+  describe('coerceValue', () => {
+    const whole = { min_value: 1, max_value: 200, whole_number: true }
+
+    it('refuses a part number, before it looks at the bounds', () => {
+      expect(() => coerceValue('10.5', 'number', whole)).toThrow('Must be a whole number.')
+      expect(() => coerceValue('0.5', 'number', whole)).toThrow('Must be a whole number.')
+      expect(() => coerceValue('0', 'number', whole)).toThrow(/1 or more/)
+      expect(() => coerceValue('201', 'number', whole)).toThrow(/200 or less/)
+    })
+
+    it('takes a whole number, however it is typed', () => {
+      expect(coerceValue('10', 'number', whole)).toBe(10)
+      expect(coerceValue('10.0', 'number', whole)).toBe(10)
+      expect(coerceValue('1e1', 'number', whole)).toBe(10)
+    })
+
+    it('takes a part number where the setting does not count whole things', () => {
+      expect(coerceValue('0.08', 'number', { min_value: 0, max_value: 0.5, whole_number: false })).toBe(0.08)
+      expect(coerceValue('1.5', 'number', { min_value: 1, max_value: 90 })).toBe(1.5)
+    })
+  })
+
+  it('offers a step of 1 for a whole setting and any step for one that is not', async () => {
+    await show()
+    fireEvent.click(tabLink(/^Approvals/))
+    expect(screen.getByLabelText('Open proposals allowed per person')).toHaveAttribute('step', '1')
+    fireEvent.click(tabLink(/^Site/))
+    expect(screen.getByLabelText('Minimum spacing between cells on an area plan')).toHaveAttribute('step', 'any')
+  })
+
+  it('offers any step where the read carries no flag, as a database before the flag would', async () => {
+    api.get.mockResolvedValue([{ ...WHOLE, whole_number: undefined }])
+    await show()
+    expect(screen.getByLabelText('Open proposals allowed per person')).toHaveAttribute('step', 'any')
+  })
+
+  it('gives a step to a number field only', async () => {
+    api.get.mockResolvedValue([{ ...WHOLE, key: 'a.text', value: 'abc', value_type: 'string', whole_number: false }])
+    await show()
+    expect(screen.getByLabelText('Open proposals allowed per person')).not.toHaveAttribute('step')
+  })
+
+  it('refuses a part value on Save, says so under the field and sends nothing', async () => {
+    await show()
+    const input = screen.getByLabelText('Open proposals allowed per person')
+    fireEvent.change(input, { target: { value: '10.5' } })
+    fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
+
+    expect(await screen.findByText('Must be a whole number.')).toBeInTheDocument()
+    expect(api.patchSetting).not.toHaveBeenCalled()
+  })
+
+  it('saves a whole value', async () => {
+    await show()
+    fireEvent.change(screen.getByLabelText('Open proposals allowed per person'), { target: { value: '12' } })
+    fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
+
+    await waitFor(() => expect(api.patchSetting).toHaveBeenCalledWith('proposals.max_open_per_person', 12))
+  })
+
+  it('saves a part value in a setting that is not whole', async () => {
+    await show()
+    fireEvent.click(tabLink(/^Site/))
+    fireEvent.change(screen.getByLabelText('Minimum spacing between cells on an area plan'), { target: { value: '0.125' } })
+    fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }))
+
+    await waitFor(() => expect(api.patchSetting).toHaveBeenCalledWith('site_map.min_pin_spacing', 0.125))
+  })
+})

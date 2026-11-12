@@ -46,9 +46,12 @@ export function coerceValue(raw, valueType, bounds = {}) {
     const n = Number(raw)
     if (raw === '' || Number.isNaN(n)) throw new Error('Enter a number.')
 
+    // The database's guard comes first among its refusals too: a whole setting counts whole things.
+    const { min_value: min, max_value: max, whole_number: whole } = bounds
+    if (whole && !Number.isInteger(n)) throw new Error('Must be a whole number.')
+
     // `!= null` catches undefined as well, and deliberately admits 0 as a bound -- `if (min)`
     // would treat a floor of zero as "no floor", which is the one value a floor most needs to say.
-    const { min_value: min, max_value: max } = bounds
     if (min != null && n < Number(min)) throw new Error(`Must be ${min} or more.`)
     if (max != null && n > Number(max)) throw new Error(`Must be ${max} or less.`)
     return n
@@ -237,6 +240,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
             onChange={e => setDraft(e.target.value)}
             disabled={readOnly}
             aria-describedby={range ? rangeId : undefined}
+            {...(setting.value_type === 'number' ? { step: setting.whole_number ? 1 : 'any' } : {})}
             {...(hasMin ? { min: setting.min_value } : {})}
             {...(hasMax ? { max: setting.max_value } : {})}
           />
