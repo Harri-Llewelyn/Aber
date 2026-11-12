@@ -10,10 +10,12 @@ import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
+import { PersonName } from '../common/PersonName'
 import { RouteLink } from '../common/RouteLink'
 import { Tooltip } from '../common/Tooltip'
 import { IconAlertTriangle, IconBellOff, IconCheck } from '../common/Icons'
 import { usePolling } from '../../hooks/usePolling'
+import { useDisplayNames } from '../../hooks/useDisplayNames'
 import { useSetting } from '../../hooks/useSettings'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
@@ -25,8 +27,8 @@ import {
   DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS,
 } from '../../utils/history'
 import {
-  ALERT_RETENTION_DAYS, ALERT_SORT, acknowledgerName, alertSubject, assetOptions, lengthText, occurrenceMatches,
-  occurrenceRow, retentionWords, severityOf, subjectIndex,
+  ALERT_RETENTION_DAYS, ALERT_SORT, alertSubject, assetOptions, lengthText, occurrenceMatches,
+  occurrenceRow, retentionWords, severityOf, subjectIndex, withAcknowledgerNames,
 } from '../../utils/alertHistory'
 
 /** No asset chosen: every alert. Hoisted: useUrlList's default is compared, not copied. */
@@ -113,13 +115,19 @@ function EndedCell({ row }) {
   return <span>{formatDateTime(row.ended_at)}</span>
 }
 
-/** The Acknowledged cell: who, with a tick, then why and when, then their note; a dash for nobody. */
+/**
+ * The Acknowledged cell: who, with a tick, then why and when, then their note; a dash for nobody.
+ * The name is their display name with the email as its tooltip, or the email alone.
+ */
 function AcknowledgedCell({ row }) {
   if (!row.acknowledged_at) return <span className="cell-meta">—</span>
   return (
     <div className="alert-history-ack">
       <span className="alert-history-ack-who">
-        <IconCheck size={12} aria-hidden="true" /> <OverflowText>{acknowledgerName(row)}</OverflowText>
+        <IconCheck size={12} aria-hidden="true" />{' '}
+        <OverflowText>
+          <PersonName name={row.acknowledged_by_name} email={row.acknowledged_by_email} emailOnHover fallback="someone" />
+        </OverflowText>
       </span>
       <span className="cell-meta">{reasonLabel(row.acknowledgement_reason)} · {formatDateTime(row.acknowledged_at)}</span>
       {row.acknowledgement_note && <OverflowText className="cell-meta">{row.acknowledgement_note}</OverflowText>}
@@ -200,9 +208,12 @@ export function HistoryAlerts({ devices, win, setWin, every, setEvery, userRole,
   const live = holdsNow(win, Date.now())
   usePolling(read, every * 1000, live && every > 0)
 
+  // One read of the acknowledgers' names for the whole list.
+  const acknowledgers = useDisplayNames(useMemo(() => (reading?.rows || []).map(r => r.acknowledged_by), [reading]))
   const rows = useMemo(
-    () => (reading?.rows || []).map(r => ({ ...r, now: reading.at, subject: alertSubject(r, index) })),
-    [reading, index]
+    () => withAcknowledgerNames(reading?.rows || [], acknowledgers)
+      .map(r => ({ ...r, now: reading.at, subject: alertSubject(r, index) })),
+    [reading, index, acknowledgers]
   )
   const matching = useMemo(() => rows.filter(r => occurrenceMatches(r, r.subject, search)), [rows, search])
   const [shown, sort] = useSortableRows(matching, ALERT_SORT)

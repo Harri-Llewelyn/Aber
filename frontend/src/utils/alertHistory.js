@@ -8,6 +8,7 @@ import { alertPage } from '../routes'
 import { deviceIds, gatewaySparkplugId } from './sparkplugId'
 import { windowToQuery } from './timeWindow'
 import { DEFAULT_HISTORY_WINDOW, durationWords } from './history'
+import { personShown } from './displayName'
 
 /** The tab's id among HISTORY_TABS, and its path. */
 export const ALERTS_TAB = 'alerts'
@@ -83,11 +84,16 @@ export const SEVERITIES = [
 export const severityOf = (value) => SEVERITIES.find(s => s.value === value) ?? { value, label: String(value ?? ''), tone: 'neutral' }
 
 /**
- * Who acknowledged an occurrence, as the dashboard names them: the email their token carried. No
- * display name is readable by every role (display_names_for() answers only the people a caller
- * can already see), so every reader is shown the same thing.
+ * Who acknowledged an occurrence, as the dashboard names them: their display name when the read
+ * gave one (`acknowledged_by_name`, from display_names_for(), 0290), else the email their token
+ * carried, else "someone". Where it is drawn, PersonName puts the email in a tooltip.
  */
-export const acknowledgerName = (row) => row?.acknowledged_by_email || 'someone'
+export const acknowledgerName = (row) => personShown(row?.acknowledged_by_name, row?.acknowledged_by_email, 'someone').text
+
+/** The rows with `acknowledged_by_name` from a person id -> name map, for the rows an acknowledger is on. */
+export const withAcknowledgerNames = (rows, names) => rows.map(r => (
+  r.acknowledged_by ? { ...r, acknowledged_by_name: names.get(r.acknowledged_by) ?? null } : r
+))
 
 /**
  * Lookups from a Sparkplug id to the device or gateway it names, for the subject column, each
@@ -126,7 +132,7 @@ export function alertSubject(row, index) {
 export function occurrenceMatches(row, subject, text) {
   const needle = String(text ?? '').trim().toLowerCase()
   if (!needle) return true
-  return [row.alert_name, row.summary, subject?.name, subject?.sparkplugId, row.acknowledged_by_email, row.acknowledgement_note]
+  return [row.alert_name, row.summary, subject?.name, subject?.sparkplugId, row.acknowledged_by_name, row.acknowledged_by_email, row.acknowledgement_note]
     .some(v => String(v ?? '').toLowerCase().includes(needle))
 }
 

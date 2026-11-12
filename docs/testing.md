@@ -730,6 +730,14 @@ python supabase/migrations/test_user_settings.py
 # retirers they may already read; list_people() and list_user_accounts() carry the name; and
 # 0001 and 0166 bring a database holding the older list shapes forward. Every test rolls back.
 python supabase/migrations/test_a_person_can_have_a_display_name.py
+# An alert's acknowledger and a suppression window's author are shown by name (0290).
+# display_names_for() names the person who acknowledged an alert and the person who scheduled or
+# ended a window, for an Administrator, a Shopfloor Manager, an Operator, an Auditor and a person
+# with no role, each only for an alert or a window that role may read: a machine identity's alert is
+# an Administrator's alone, and so is its acknowledger's name. The people named are the rows each
+# role's own read of the table shows. A person with no name, or only a picture, is left out. Every
+# test rolls back.
+python supabase/migrations/test_an_acknowledger_is_shown_by_name.py
 # An Administrator ends a person's sessions and changes their email address (0207). Only an
 # Administrator ends or counts a person's sessions, never their own; every session the person
 # holds ends, nobody else's, and the API refuses the ended sessions' tokens at once; one

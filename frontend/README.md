@@ -987,7 +987,9 @@ Value, Actions), header row and all, so the two read alike.
   and the other pages that say who did something show it beside the address
   (`hooks/useDisplayNames.js`, and `personLabel()` in `utils/displayName.js` for "Name (email)").
   The email address stays the account's identifier: where a page says who someone is, the name
-  never stands without it.
+  never stands without it. Where space is short, the email is the name's tooltip
+  (`PersonName`'s `emailOnHover`), as it is for who acknowledged an alert and who scheduled a
+  suppression window (below).
 - **A person may have a picture, which only they see** (`supabase/README.md`, `0213`). Profile's
   Account tab has a Picture row (`PictureRow` in `ProfileTab.jsx`), and the account control at the
   foot of the rail shows it (`components/common/AccountAvatar.jsx`); nothing else does. With no
@@ -2046,9 +2048,13 @@ its current value; Export leaves it out. The database's rules are in
   the alert counter's crossed bell and "Suppressed", where the row's `suppression_window_id`
   (`0240`) names the window that first covered it. That stamp says neither whether a window covers
   it now nor until when, so the mark has no "until".
-- **The acknowledger is named by the email their token carried** (`acknowledgerName()`), here and
-  in the alert counter. `display_names_for()` answers only for the people a caller can already
-  see, so a name would show to some readers and not others.
+- **The acknowledger is named by display name, with their email as its tooltip** (`PersonName` with
+  `emailOnHover`), here and in the alert counter, the drawer's banner and the drawer's Suppression
+  windows. With no display name it is the email alone, and with neither "someone"
+  (`personShown()` in `utils/displayName.js`, `acknowledgerName()` for the text a sort and a search
+  read). The names are read once for the whole list through `useDisplayNames()`, and
+  `display_names_for()` answers for an alert, or a window, the reader may read (`0290`), so every
+  role that reads the alert reads its acknowledger's name.
 - **The empty states** say which: nothing fired, nothing on the assets chosen, nothing matches the
   search, or, for a role that is not an Administrator, nothing the viewer may see, since a machine
   identity's alerts reach an Administrator alone. `retentionWords()` adds that alerts are kept for
@@ -2603,10 +2609,11 @@ passes `{ record: false }`, as an alert's toast does.
   is not a click outside the list. Another person's acknowledgement arrives as an `UPDATE` on
   `platform_alerts`, which the counter's subscription already carries. The pages draw the *Alert
   acknowledged* state from `alertIndex()` (`utils/deviceAlerts.js`), where an unacknowledged alert
-  outranks any acknowledged one. The acknowledger is named by the email their token carried
-  (`acknowledgerName()`, `utils/alertHistory.js`), the same on every surface: no display name is
-  readable by every role, since `display_names_for()` answers only the people a caller can already
-  see.
+  outranks any acknowledged one. The acknowledger is named by display name with their email as its
+  tooltip, else by email (`PersonName`, `acknowledgerName()` in `utils/alertHistory.js`), the same on
+  every surface. `usePlatformAlerts` reads the names once for the whole list and gives each
+  acknowledged alert its `acknowledged_by_name`, so the counter, the banner and the Devices table
+  read the same.
 - **A suppressed alert is not counted and colours nothing** (0240). `platform_alerts_active` says
   whether a suppression window covers each alert as it is read, with the window's reason and end.
   `countedAlerts()` (`utils/alertSuppression.js`) leaves acknowledged and suppressed alerts out of

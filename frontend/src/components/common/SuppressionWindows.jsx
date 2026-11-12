@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { Badge } from './Badge'
 import { HelpTip } from './HelpTip'
 import { IconPlus } from './Icons'
+import { PersonName } from './PersonName'
+import { useDisplayNames } from '../../hooks/useDisplayNames'
 import { formatDateTime } from '../../utils/format'
 import { maySuppress, subjectUrl, windowState } from '../../utils/alertSuppression'
 import { requestAlertsRefresh } from '../../hooks/usePlatformAlerts'
@@ -14,9 +16,10 @@ const WINDOWS_HELP = 'A planned period, such as maintenance, when alerts here ar
 
 /**
  * A drawer's Suppression windows section: the current and upcoming windows on a device, a gateway
- * or a cell, each with its reason, its start and end in local time, and who scheduled it. A
- * Shopfloor Manager or an Administrator sees Schedule window…, and Change… and End now (Cancel
- * window, before it starts) on each; the database refuses everyone else as well.
+ * or a cell, each with its reason, its start and end in local time, and who scheduled it (their
+ * display name with the email as its tooltip, or the email alone). A Shopfloor Manager or an
+ * Administrator sees Schedule window…, and Change… and End now (Cancel window, before it starts) on
+ * each; the database refuses everyone else as well.
  *
  * A device's drawer passes `cell`, the cell it is in now, `{ id, name }`: that cell's windows cover
  * the device too, so they are listed, marked From cell, and changed only from the cell's drawer.
@@ -34,6 +37,8 @@ export function SuppressionWindows({ kind, subjectId, subjectName, cell = null, 
   const [ending, setEnding] = useState(null)
   const canWrite = maySuppress(userRole)
   const cellId = kind === 'device' ? (cell?.id ?? null) : null
+  // One read of the schedulers' names for the whole list.
+  const people = useDisplayNames(useMemo(() => windows.map(w => w.created_by), [windows]))
 
   const load = useCallback(async () => {
     if (!subjectId) return
@@ -112,7 +117,7 @@ export function SuppressionWindows({ kind, subjectId, subjectName, cell = null, 
                   {formatDateTime(w.starts_at)} to {formatDateTime(w.ends_at)}
                 </div>
                 <div className="suppression-window-meta">
-                  By {w.created_by_email || 'someone'}
+                  By <PersonName name={people.get(w.created_by)} email={w.created_by_email} emailOnHover fallback="someone" />
                   {fromCell && <> · From cell {cell?.name || 'its cell'}</>}
                 </div>
                 {canWrite && !fromCell && (

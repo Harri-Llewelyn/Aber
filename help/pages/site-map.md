@@ -45,7 +45,7 @@ To acknowledge an alert:
 3. Add a note if it helps. **Other** needs one. Everyone who can see the alert reads it.
 4. Select **Acknowledge alert**.
 
-The alert stays in the list, after the others, with a tick. It says who acknowledged it, when, and why. It leaves the number until it resolves. If it fires again before it resolves, it stays acknowledged. Once it resolves, the next time it fires it counts again.
+The alert stays in the list, after the others, with a tick. It says who acknowledged it, when, and why. It names the person by their display name. Point at the name to see their email address. A person with no display name shows as their email address. It leaves the number until it resolves. If it fires again before it resolves, it stays acknowledged. Once it resolves, the next time it fires it counts again.
 
 Operators, Shopfloor Managers and Administrators can acknowledge an alert. If someone else acknowledged it first, the dialog says who and when. **Withdraw**, under an acknowledged alert, puts it back in the number. The person who acknowledged it can withdraw it, and so can a Shopfloor Manager or an Administrator. Each acknowledgement and withdrawal is recorded in the Audit Trail.
 

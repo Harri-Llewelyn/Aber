@@ -42,7 +42,7 @@ The page is one card with two tabs. **Registered** lists the devices admitted to
 
 A suppression window keeps a device's alerts quiet during planned work, such as a belt change. An alert that fires during the window is still recorded. It is not counted, it colours nothing, and nothing is sent about it. The window ends by itself.
 
-The details panel lists the device's current and upcoming windows under **Suppression windows**. Each shows its reason, its start and end in your local time, and who scheduled it. **NOW** marks a window that has started. A window on the device's cell covers the device too. It is listed with **From cell** and the cell's name, and is changed from the cell's panel.
+The details panel lists the device's current and upcoming windows under **Suppression windows**. Each shows its reason, its start and end in your local time, and who scheduled it. Point at the name to see the person's email address. **NOW** marks a window that has started. A window on the device's cell covers the device too. It is listed with **From cell** and the cell's name, and is changed from the cell's panel.
 
 To schedule a window:
 
@@ -57,4 +57,4 @@ Shopfloor Managers and Administrators can schedule, change and end windows. Ever
 
 **A window lasts at most 7 days** unless an Administrator changes the limit, so a forgotten one still ends soon. The dialog names the limit under **End**. The limit is on the **Settings** page, on the **Retention** tab: **Longest suppression window (days)**, from 1 to 90. A change to a window's start or end is held to the limit too, counted from the window's own start. Lowering the limit leaves windows already scheduled as they are. Each still ends by itself.
 
-The alert at the top of the details panel says whether it is firing, acknowledged or suppressed, and since when. An acknowledged one says who acknowledged it and why. A suppressed one says until when, and the window's reason.
+The alert at the top of the details panel says whether it is firing, acknowledged or suppressed, and since when. An acknowledged one says who acknowledged it and why. Point at the name to see the person's email address. A suppressed one says until when, and the window's reason.

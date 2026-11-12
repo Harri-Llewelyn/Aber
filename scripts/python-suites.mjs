@@ -1003,6 +1003,16 @@ export const SUITES = {
       "same name none; display_names_for() answers only for people the caller already sees on " +
       'Approvals and Archived Entities; and 0001 and 0166 bring the older list shapes forward.',
   },
+  'supabase/migrations/test_an_acknowledger_is_shown_by_name.py': {
+    lanes: ['db'],
+    why:
+      "0290 -- display_names_for() names the person who acknowledged an alert, and the person who " +
+      "scheduled or ended a suppression window, to every role that may read that alert or that " +
+      "window, and to no caller who may not: a machine identity's alert is an Administrator's alone, " +
+      "so is its acknowledger's name. The people it names are the rows each role's own read of the " +
+      "table shows, a person with no name or only a picture is left out, and no API role but the " +
+      'signed-in one runs it.',
+  },
   'supabase/migrations/test_an_administrator_ends_a_person_s_sessions.py': {
     lanes: ['db'],
     why:

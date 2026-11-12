@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { useDisplayNames } from './useDisplayNames'
 import { REALTIME_ENABLED, grafanaAlertUrl } from '../constants'
 import { classifyRefreshError, FAILURE_SESSION } from '../lib/connectionState'
 import { alertPage, deviceUrl } from '../routes'
 import { isSuppressed, nextSuppressionChange } from '../utils/alertSuppression'
+import { withAcknowledgerNames } from '../utils/alertHistory'
 
 /**
  * Reconciliation interval. Detection is the socket's job; this only repairs what it missed.
@@ -76,6 +78,9 @@ export const alertToastUrl = (row) =>
  *
  * `onRead(rows)`, when given, is called with every successful read, after the toasts: it is how a
  * desktop notification (useDesktopAlerts) follows the same set the counter shows.
+ *
+ * Each acknowledged alert comes back with `acknowledged_by_name`, the acknowledger's display name
+ * when the caller may read it (display_names_for(), one call for the whole list), else null.
  */
 export function usePlatformAlerts(showToast, onRead) {
   const [active, setActive] = useState([])
@@ -211,5 +216,6 @@ export function usePlatformAlerts(showToast, onRead) {
     }
   }, [refresh])
 
-  return active
+  const names = useDisplayNames(useMemo(() => active.map(a => a.acknowledged_by), [active]))
+  return useMemo(() => withAcknowledgerNames(active, names), [active, names])
 }
