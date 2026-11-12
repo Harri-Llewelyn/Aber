@@ -1249,6 +1249,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
+| Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new`, for an automation whose id is `new` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |
@@ -1308,6 +1309,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
+| `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
@@ -1672,14 +1674,14 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   stretch are the box's devices). While it is drawn, the axis names it (`.trail-band-words`, held
   inside the track near either end, with `boxWords()`). Once released it stays, and
   `SelectionPopover` opens beside it, as on AMRC ACS's Datasets page: its words, **Chart** (the
-  Device tab for one device at the box's window, off for several with `CHART_SEVERAL_REASON` as its
-  tooltip), **Zoom** (the window as a new history entry) and **Clear**. It is portalled to
+  Device tab for one device at the box's window, and for several the Metric tab narrowed to them,
+  `chartAddress()`), **Zoom** (the window as a new history entry) and **Clear**. It is portalled to
   `<body>` and fixed, as `ToolbarPopover` is, so the card cannot clip it, below the box's visible
   part or above it where the window has no room (`placeSelection()`), with the popovers' arrow
   (*Popover arrows*, `.overview-popover::before`). The popover itself takes focus as it opens, not
   its first action, whose tooltip would cover the box; Tab reaches the actions and stays inside it. Escape, Clear, a press outside, a scroll and a resize close it and clear the
   box, and focus goes back to the box's first lane. The tick boxes (`?device=`, telemetry keys) are
-  the other way: the toolbar's **Chart**, on for exactly one, charts it at the control's window.
+  the other way: the toolbar's **Chart** charts them at the control's window.
   **Export CSV** is in the popover, after Zoom, and in the toolbar beside Chart for the devices
   ticked ([History's Export](#historys-export)). `.history-header` holds Collapse all, the status line and
   the key, with `.trail-header`'s room above and below, on Overview and the Device tab alike.
@@ -1799,6 +1801,97 @@ Metric tabs reuse: `common/SmallMultiples.jsx`, `common/HourHeatmap.jsx`, `commo
   The charts and the heatmap are two reads that refresh together and fail apart.
 - **The address** is `/history/cell/<id>` with the window's keys and `metric` (`cellAddress()`); `/history/cell` is the picker.
 
+### History's Metric tab
+
+**History's Metric tab compares one metric across every device that reports it**
+(`tabs/HistoryMetric.jsx`, `/history/metric/<name>?area=&cell=&devices=&page=`). Where the Cell tab
+groups by place, this groups by metric: "how do the bearing temperatures of all our lathes compare?",
+where the lathes sit in several areas. Its arithmetic is `utils/history.js` and `utils/historyReads.js`;
+`__tests__/historyMetricArea.test.js` holds each rule and `historyMetricPage.test.jsx` the page.
+
+- **The metric** is picked from a table at `/history/metric` (`MetricChooser` in `HistoryTab.jsx`: the
+  metric, its unit and how many devices report it, searchable and sortable as the other pickers are), or by
+  the toolbar's metric name (a `ToolbarPopover`, keeping the window and the filters), or from **Chart** in
+  Overview's selection box. The metrics offered are those some device in service reports (`historyMetrics()`:
+  `cellMetrics()` over every device, a last birth's or a schema's), with the catalog's unit and kind where it
+  has them. A metric the catalog does not know is offered all the same, with no unit: it is reported, and the
+  Cell tab charts it. A derived metric has no device reporting it, so it is not here.
+- **The name is one path segment**, `encodeURIComponent()`, so `Spindle/LOAD` is `Spindle%2FLOAD`
+  (`metricHistoryPath()`, `metricNameFrom()`). An address naming a metric no device reports says so and links
+  the picker.
+- **The devices** are those in service that report the metric (`metricDevices()`), narrowed by the Filters
+  panel's Area, Cell (listed under their areas) and Device lists, which offer only what reports the metric.
+  `area` and `cell` are ids and `devices` telemetry keys, comma-separated, as Overview's `device` is. A
+  device in no cell and no area is in none of an Area or Cell filter's choices, so any choice leaves it out.
+  A value the metric does not offer is tidied away. A new set of devices starts at the first page.
+- **One read at the finest resolution the row cap allows**, as the Cell tab has it, with the devices as the
+  series (`metricPages()`, `pickResolution()`), the status line saying which ("12 devices, in 5-minute
+  buckets"); more devices than one read carries are read in parts (`readDeviceSeries()`). A text or flag metric
+  takes `telemetry_changes()` too and draws every change per device, as the Cell tab does. Each chart's title
+  line is the device's status dot, its name as a link to its charts on the Device tab, "Offline" in words, and
+  where it sits (`place`, "Turning · Hall B", an `OverflowText`).
+- **It pages** (`page` in the address), `METRIC_PAGE_SIZE` (12) devices a page, past the number the row cap
+  can carry at the coarsest resolution, a day (`pickResolution()` giving `perRead` fewer than the devices:
+  13 for a Year of day buckets), and past `METRIC_DRAW_MAX` (200) devices where the cap would carry them all,
+  since a page of hundreds of canvases does not draw. Each page is read apart at the finest resolution its own
+  devices fit, and has its own scale ("One scale for every device on this page", `SmallMultiples`' `scope`).
+  The status line says so in words (`pagingWords()`) and a pager, Previous and Next with "Page 2 of 5", sits
+  after the scroller as `ListFoot` does. A page past the last is the last. A page of 12 is one read for any
+  window up to 416 days.
+- **The alert shading, the zoom, Refresh and the refresh timer** are the Cell tab's: `useAlertBandsFor()`
+  over the devices on the page, `useChartBand()`, and one read made again on a change of metric, filters, page
+  or window.
+
+**Chart in Overview's selection box** opens the Device tab for one device, as it did, and for several the Metric tab
+narrowed to them (`devices`), on the metric most of them report (`chartAddress()`, `defaultCellMetric()`), at the
+window the box or the time control holds; with none in common, the picker narrowed to their metrics.
+
+### History's Area tab
+
+**History's Area tab compares one metric across the cells of an area**
+(`tabs/HistoryArea.jsx`, `/history/area/<id>?metric=&agg=mean|total`): the Cell tab one level up, a chart
+for each cell where the Cell tab has one for each machine. `__tests__/historyMetricArea.test.js` holds the
+arithmetic and `historyAreaPage.test.jsx` the page.
+
+- **The area** is picked from a table at `/history/area` (`AreaPicker`: its cells and machines, searchable
+  and sortable), by the toolbar's area name, or from the Areas drawer's **View History** (`areaHistoryUrl()`,
+  worded and drawn as the Cells and Devices drawers'; drift check 326 holds the three alike). Its cells are the
+  cells in it in service (`historyAreas()`), archived ones left out. A device that is Area-Wide in it belongs
+  to no cell, so is in no chart, and the status line says how many.
+- **Each cell's chart is its mean or its total of the metric in every bucket**, which one control picks for
+  the tab (`SegmentedControl`, `agg` in the address, the mean by default). One `telemetry_carried_by_group()`
+  call (`0276`, `api.readCarriedByGroup()`) returns both for every cell, so the control draws the other without
+  a read.
+  - **The mean** is of the machines of the cell that have a value in the bucket, carried or measured.
+  - **A total is drawn only for a bucket in which every machine of the cell has a value**, since a partial
+    sum reads as a real one (`groupSeries()`). Where it was withheld the chart has no point, its head says so in
+    words ("total of 3 machines, withheld from 10:05 to 10:35, where a machine had no value"
+    (`withheldWords()`)), the pointer reads "total withheld, a machine had no value" there (`series.withheld`)
+    and a cell with none at all says it has no total. A machine counts toward its cell when it reports the metric
+    (`deviceMetrics()`): one that does not is left out of the cell's figure, and the cell's count says how many
+    there are.
+- **The browser does not fold.** A telemetry_carried() read is held to the row cap with every machine a series,
+  which would draw an area of 20 machines at 1-hour buckets for a Day and a Week and 1-day buckets for a Month.
+  The function is held to the cells times buckets it returns and the machines times buckets it reads
+  (`pickGroupResolution()`, `HISTORY_GROUP_READ_ROWS`, 50,000, mirror check 88), so it is 5 minutes, 1 hour and
+  1 hour. `supabase/README.md`, *History folds one metric across the devices of each group (0276)*, has the
+  numbers. A window too long for it even at a day says so, and reads nothing.
+- **Each chart is a cell**: its title links to that cell on the Cell tab at the same window and metric
+  (`SmallMultiples`' `to` and `linkTitle`), with its machine count after it. A cell whose machines report
+  nothing of the metric says so in words. The charts share one value scale, said in words ("One scale for every
+  cell"), the time axis, the pointer and the zoom band. A chart's alert shading is the periods an alert on any
+  machine of the cell was firing, one `alert_occurrences()` read for every machine.
+- **The heatmap has a row for each cell** (`HourHeatmap`, its `noun` "Cell"): the cell's mean at each hour of
+  the day across the window's days, in the browser's time zone. `telemetry_hour_of_day()` is read for every
+  machine, as the Cell tab reads it, and each cell's hour is the mean of its machines' that have a value
+  (`cellHourGrid()`, the hour's `machines` said in its words: "the mean of 7 days, across 5 machines"). It stays the
+  mean when the total is chosen. Its window is limited as the Cell tab's is, by `hourOfDayPlan()`, for the area's
+  machines.
+- **A text or flag metric** has no mean or total: the tab says a mean or a total needs a number, offers each
+  cell's own tab, and reads nothing.
+- **The address** is `/history/area/<id>` with the window's keys, `metric` and, for the total, `agg=total`
+  (`areaAddress()`); `/history/area` is the picker.
+
 ### History's Export
 
 Export downloads the readings a view shows, as a CSV, from three places. One dialog
@@ -1908,6 +2001,110 @@ number and flag chart through `plugins`.
   in words with a link to the Alerts tab for the device and window (`AlertKey`).
 - **A failed read shades nothing.** The charts go on, and the read's thunk lets a stub without the
   method read as no alerts. A state strip is not drawn by uPlot and is not shaded.
+
+---
+
+## Automations and its editor
+
+**The Automations page writes each automation as YAML and keeps it as rows**
+(`tabs/AutomationsTab.jsx`, `tabs/AutomationDetail.jsx`, `/automations`). The rows are the record, so
+the YAML is never stored: the page renders it from `automations_document()` and parses it back into
+one `apply_automations()` call (`0255`-`0257`). The format is `docs/automations.md`'s, and the
+page's help is `help/pages/automations.md`.
+
+- **The routes** ([Routing](#routing)): `/automations` is the list, `/automations/<id>` one automation
+  in the editor, `/automations/new` the editor on an example, and `/automations?entity=<uuid>` the list of
+  those that apply to one device. An automation whose id is `new` opens with `?open=1`, which
+  `automationUrl()` writes. `/automations?trigger=<trigger id>` is an alert's link: the fingerprint
+  names a trigger and not an automation, so the page finds the owner (`api.automationOfTrigger()`)
+  and replaces the address with its page.
+- **Who may write.** The page is ungated, since every role reads the tables. An Administrator or a
+  Shopfloor Manager writes (`AUTOMATION_WRITE_ROLES`, mirror check 85 holds it to the three
+  writers), and for anyone else each write control is greyed with that sentence in its tooltip, the
+  editor is read-only, and the list's switch is disabled. The page waits for the role (`App.jsx`),
+  as Settings does.
+- **The list** is `api.readAutomations()`: the document (alias, triggers, devices' names), each
+  automation's row and trigger ids, the alerts firing now (`platform_alerts_active`) and the newest
+  `AUTOMATION_ALERT_LIMIT` occurrences, from which each automation's last firing comes. A trigger's
+  alerts are found by the fingerprint's trigger id (`automation_alert_fingerprint()`, mirror check
+  87). Search is `search`, in the browser; the sort is `sort`. A row's switch calls
+  `set_automation_enabled()` and ends with a toast that links to the automation. The toolbar is
+  search, then **Upload**, **Export** and **New Automation** last. **Export** writes the rows ticked,
+  or every automation when none is.
+- **One automation** is the YAML in the editor, its recent firings with each alert's labels and
+  values, and a link to its history in the Audit Trail by its row's uuid. **Save** opens
+  `ApplyAutomationsModal`, which parses the text, calls `apply_automations(doc, true)` and lists each
+  automation as new, changed, unchanged or refused with every reason and its line. Its confirm repeats
+  the act and the count (**Save 1 Automation**, **Apply 3 Automations**) and applies the same document with
+  `false`, all or nothing. An upload is the same dialog on a file's text, and never deletes. The
+  dialog toasts the success itself, because it makes the call.
+- **The text is rendered, never kept.** `renderAutomationsYaml()` puts each automation's keys in
+  the order a file reads best (the database's jsonb has its own), leaves an empty `description` out, and
+  writes a comment beside each device id from the document's `devices`. The page says in one line
+  that comments typed here are not kept. A refusal's JSON path (`$[0].triggers[1].above`) is read by
+  `pathSegments()` and located in the text by `locatePath()`, through `yaml`'s node positions.
+- **A file is parsed in the browser** by `yaml` in its YAML 1.2 core schema, so `on` and `yes` stay text
+  and the database says `enabled` is true or false. A syntax error is shown with its line and the
+  database is not asked; an alias bomb is refused; a file over 2 MiB is refused before it is read.
+
+### The editor's help comes from the JSON Schema
+
+**Completion, hover and the marks are pure functions of the text, the cursor and what the site holds**
+(`utils/automationEditorHelp.js`), laid over CodeMirror by `common/AutomationEditor.jsx`. They read the
+vocabulary from the schema file the dashboard serves, imported from `public/json-schema/`, so the
+editor and the served file cannot differ. There is no third package: `codemirror-json-schema` was
+declined, since 1.8's vocabulary is one trigger and one action, and check 322 refuses any
+dependency but CodeMirror, Lezer and `yaml`.
+
+- **Context is read from the lines' indentation**, not from a parse: text being typed is not YAML.
+  It reads the block YAML the page renders; flow style is left to the database.
+- **Completion** offers an automation's, a trigger's and an action's keys (those not yet written,
+  required first, one of `above` and `below`), a new trigger or action under `triggers:` and `actions:`,
+  the type and severity values, `true` and `false`, common holds, a device by its name (completing to its
+  id and the comment the page writes beside one), and a metric from the catalogue, measured ones only,
+  those the trigger's device models first.
+- **Hover** says what a key is, from the schema; a device id's name and place; a metric's unit and the
+  valid range its devices' schemas allow (`validRanges()`, the widest across a list); and a threshold's unit.
+- **A threshold outside the valid range is a warning**, never an error: it can never fire, or is
+  always breached. The database's refusals and syntax errors are errors, on the line each names.
+  Marks are a wavy line, a gutter icon and a message, never colour alone.
+- **`conditions:` offers nothing**: this release has no condition types.
+
+### The Automations editor draws in a shadow root
+
+**CodeMirror writes `<style>` elements into the document it is mounted in, and the dashboard's
+Content-Security-Policy refuses them** ([The Content-Security-Policy names what a page may
+load](#the-content-security-policy-names-what-a-page-may-load)): `style-src` admits only the 3D viewer's
+hash. So `AutomationEditor` attaches an open shadow root and passes it to `EditorView` as `root`, where
+style-mod adopts a stylesheet instead, as the 3D viewer's components do. `style-src` stays as it is, and a
+proxy with a policy of its own needs no change. Check 324 holds the policy, the shadow root and this
+paragraph together.
+
+- **The theme is inherited.** Custom properties pass into a shadow root, so the editor's colours are
+  `var(--…)` tokens and follow the light and dark themes with no rule of its own. Its syntax colours are
+  the accent, primary text, warning and muted text tokens, which hold their contrast on the card in both.
+- **A key typed in it does not reach the page.** The document sees a key from inside a shadow root as the
+  host's, which is no text field, so `?`, `/`, `[` and `]` would open the shortcuts, focus the search box
+  and change tab. The host stops those four (`SINGLE_KEY_SHORTCUTS`), and no other key.
+- **It is not a keyboard trap.** `Tab` is not bound, so it moves on; indenting is by `Enter`'s
+  auto-indent and spaces. `Ctrl Space` asks for completion.
+- **Loaded with the page.** The editor, `yaml` and the schema are in the Automations chunk, not
+  the main bundle. Neither package's files carry a notice the build keeps, so `AutomationEditor.jsx` and
+  `utils/automationYaml.js` open with theirs as `/*!` comments (`NOTICE.md`, check 322,
+  `legalComments.test.js`).
+- **jsdom lays nothing out**, so a test of the editor stubs the two measurements CodeMirror asks a `Range`
+  for (`automationEditor.test.jsx`), and finds the view with `EditorView.findFromDOM()` in the shadow root.
+
+### An alert opens its automation, a device its automations
+
+- **An alert's link** is `alertPage()`'s: a `condition:` alert opens `/automations?trigger=<id>`, from the
+  counter (a row with a page of its own goes there, not to its device), the toast that announces it, and
+  the messages about it (`alertSubjectUrl()`). History's Alerts tab and the device drawer's alert banner
+  are unchanged: the first is about a device, and the second still links the rule where Grafana holds it.
+- **The Devices drawer's View in Automations** shows how many automations apply
+  (`api.automationsForEntity()`, each counted once) and opens `/automations?entity=<id>`. A failed read
+  leaves it without a number. The list names the entity in a chip that clears the filter, and says why
+  each applies, **Named** or **Site-wide**.
 
 ---
 

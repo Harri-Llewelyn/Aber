@@ -195,6 +195,18 @@ def constraint_violations(name, value_kind, value, constraint):
 
     return out
 
+# The finding for a reading published under the name of a derived metric, a metric Aber computes
+# from others. It comes from the catalogue, not from a schema, so process_ddata() decides it and
+# hands it to payload_violations() as a dropped metric: it holds under either policy.
+DERIVED_NAME_CODE = "derived_name"
+DERIVED_NAME_DETAIL = (
+    "this name belongs to a metric Aber computes; the device should publish under another name"
+)
+
+def derived_name_drop(name):
+    """The `dropped` entry for a reading published under a derived metric's name."""
+    return (name, DERIVED_NAME_CODE, DERIVED_NAME_DETAIL)
+
 def payload_violations(observed, dropped, modelled):
     """
     Everything wrong with one DDATA payload, as a list of audit-shaped dicts.
@@ -258,7 +270,8 @@ def enforceable_violation(violation, closed):
       * `unmodelled_metric` is enforceable only when a schema closes the set with
         `additionalProperties: false`; JSON Schema's default permits unnamed properties.
       * `schema_pattern_invalid` is never enforceable: the fault is in the stored schema.
-      * Anything already `dropped` was skipped by the loop for its own reasons.
+      * Anything already `dropped` was skipped by the loop for its own reasons: an alias nothing
+        explains, a timestamp outside the window, a derived metric's name.
     """
     if violation.get("dropped"):
         return False

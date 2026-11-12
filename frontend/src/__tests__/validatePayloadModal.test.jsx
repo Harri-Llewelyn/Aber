@@ -98,6 +98,19 @@ describe('ValidatePayloadModal', () => {
     })
   })
 
+  it("says a reading under a derived metric's name is never stored, in ingestion's words", async () => {
+    api.post.mockImplementation(async (_path, { payload }) =>
+      judgePayload(V1, payload, ['Controller/PARTS_PER_HOUR']))
+    render(<ValidatePayloadModal schemas={SCHEMAS} initialSchemaUuid="v1-uuid" onClose={vi.fn()} />)
+    fireEvent.change(payload(), { target: { value: '{ "Controller/PARTS_PER_HOUR": 12 }' } })
+    validate()
+    expect(await screen.findByText(/1 Finding:/)).toBeTruthy()
+    expect(screen.getByText('Not Stored')).toBeTruthy()
+    expect(screen.getByText('derived_name')).toBeTruthy()
+    expect(screen.getByText(/this name belongs to a metric Aber computes/)).toBeTruthy()
+    expect(screen.getByText(/1 metric is never stored, under either policy/)).toBeTruthy()
+  })
+
   it('passes a payload that leaves metrics out, and names them as not in this payload', async () => {
     answerFromDefinition()
     render(<ValidatePayloadModal schemas={SCHEMAS} initialSchemaUuid="v1-uuid" onClose={vi.fn()} />)

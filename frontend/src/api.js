@@ -245,6 +245,13 @@ export const HISTORY_CHANGE_SERIES = 50;
 export const ALERT_HISTORY_LIMIT = 1000;
 
 /**
+ * How many of the newest occurrences of automations' alerts the Automations page reads, for each
+ * automation's last firing and its recent firings. An automation whose last firing is older than the
+ * newest AUTOMATION_ALERT_LIMIT shows none: the alerts firing now are read apart, so they are never missed.
+ */
+export const AUTOMATION_ALERT_LIMIT = 2000;
+
+/**
  * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so no
  * LIMIT is involved (see TELEMETRY_MAX_ROWS). At most COVERAGE_MAX_DEVICES a read. More than
  * COVERAGE_SMALL_SELECTION devices read only the device rollups' own widths, 5 minutes and 1 hour,
@@ -262,6 +269,14 @@ export const COVERAGE_ROLLUP_MINUTES = Object.freeze([5, 60]);
  * telemetry_carried() does. The page checks the same arithmetic before it asks.
  */
 export const HOUR_OF_DAY_MAX_ROWS = 50000;
+
+/**
+ * History's group read, telemetry_carried_by_group() (0276): it reads every device's series through
+ * telemetry_carried(), which refuses more than HISTORY_GROUP_READ_ROWS buckets times devices, and
+ * returns one row per group per bucket, so the row cap (HISTORY_MAX_ROWS) holds what is returned.
+ * The page checks both before it asks.
+ */
+export const HISTORY_GROUP_READ_ROWS = 50000;
 
 /**
  * The lower time bound applied when a caller supplies none.
@@ -1451,6 +1466,34 @@ const apiMethods = {
   },
 
   /**
+   * History's Area read (0276): one numeric metric `metricName` over [from, to), one row per group
+   * per bucket of `bucketMinutes`. `assetIds[i]` is in the group `groupKeys[i]`. A row has the mean
+   * across the group's devices that have a value, and their total only where every device of the
+   * group does (null otherwise); `members` is the group's devices and `with_value` how many had
+   * one, `measured` how many had a reading rather than a carried value. A text or a flag metric has
+   * no row. `assetIds` are device UUIDs or Sparkplug ids, as the telemetry routes take them. Throws
+   * on a refusal (HISTORY_GROUP_READ_ROWS buckets times devices, two lists of another length) or a
+   * historian it cannot reach.
+   *
+   * @returns {Promise<Array<{ group_key: string, bucket_ts: string, mean_double: number,
+   *   total_double: ?number, members: number, with_value: number, measured: number }>>}
+   */
+  readCarriedByGroup: async ({ from, to, bucketMinutes, assetIds, groupKeys, metricName }, { signal } = {}) => {
+    let call = supabase.rpc('telemetry_carried_by_group', {
+      from_ts: from,
+      to_ts: to,
+      bucket: `${bucketMinutes} minutes`,
+      asset_ids: assetIds.map(toTelemetryKey),
+      group_keys: groupKeys,
+      metric_name: metricName
+    });
+    if (signal) call = call.abortSignal(signal);
+    const { data, error } = await call;
+    if (error) throw new Error(error.message || 'Could not read the readings by group');
+    return data || [];
+  },
+
+  /**
    * History's export (0279): the readings of `assetIds` (device UUIDs or Sparkplug ids) times
    * `metricNames` over [from, to) as one document, at `resolution` (raw, 1m, 5m or 1h, never one in
    * another's place). Only an Administrator or a Shopfloor Manager, for a window no longer than
@@ -2064,6 +2107,131 @@ const apiMethods = {
     const { data, error } = await supabase.rpc('end_alert_suppression_window', { p_window_id: windowId });
     if (error) throw new Error(error.message || 'Could not end the window');
     return data;
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // Automations (0255-0257): rules kept as rows, written as YAML on the Automations page. The page
+  // renders the YAML from automations_document() and parses it back into one apply_automations()
+  // call. The database's refusals are sentences, shown as they come. Each write is one Audit Trail
+  // row per automation.
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * The alerts automations raised: `active` (firing now, from platform_alerts_active) and `history`
+   * (the newest AUTOMATION_ALERT_LIMIT occurrences, newest first, from platform_alerts), each row one
+   * whose fingerprint starts `condition:`. The alerts firing now are read apart, so a long-lived one
+   * is never lost to the limit. A failed read gives its rows empty: the page lists without them.
+   */
+  readAutomationAlerts: async ({ signal } = {}) => {
+    const call = (query) => (signal ? query.abortSignal(signal) : query);
+    const [active, history] = await Promise.all([
+      call(supabase.from('platform_alerts_active')
+        .select('id, fingerprint, entity_id, sparkplug_id, alert_name, severity, summary, starts_at, labels')
+        .like('fingerprint', 'condition:%')),
+      call(supabase.from('platform_alerts')
+        .select('*')
+        .like('fingerprint', 'condition:%')
+        .order('starts_at', { ascending: false })
+        .limit(AUTOMATION_ALERT_LIMIT)),
+    ]);
+    return { active: active.error ? [] : active.data ?? [], history: history.error ? [] : history.data ?? [] };
+  },
+
+  /**
+   * What the Automations page lists, in one read: `automations` and `devices` from
+   * automations_document() (each automation in the document's shape, and the name and place of each
+   * device they name), `rows` (each automation's uuid and its trigger ids, for the alerts'
+   * fingerprints), and the alerts (readAutomationAlerts()).
+   */
+  readAutomations: async ({ signal } = {}) => {
+    const call = (query) => (signal ? query.abortSignal(signal) : query);
+    const [document, rows, alerts] = await Promise.all([
+      call(supabase.rpc('automations_document', { p_keys: null })),
+      call(supabase.from('automations').select('id, key, created_at, updated_at, automation_triggers(id, is_archived)')),
+      api.readAutomationAlerts({ signal }),
+    ]);
+    if (document.error) throw new Error(document.error.message || 'Could not read the automations');
+    if (rows.error) throw new Error(rows.error.message || 'Could not read the automations');
+    return {
+      automations: document.data?.automations ?? [],
+      devices: document.data?.devices ?? {},
+      rows: rows.data ?? [],
+      ...alerts,
+    };
+  },
+
+  /**
+   * The automations rendered as a document, all of them or the keys asked for: `{ automations,
+   * devices }`, which renderAutomationsYaml() writes as YAML. What an export and an open automation share.
+   */
+  automationsDocument: async (keys = null) => {
+    const { data, error } = await supabase.rpc('automations_document', { p_keys: keys });
+    if (error) throw new Error(error.message || 'Could not read the automations');
+    return { automations: data?.automations ?? [], devices: data?.devices ?? {} };
+  },
+
+  /**
+   * One automation's row: its uuid (the Audit Trail's key for it) and trigger ids, by its `id:`.
+   * Null when none has the key.
+   */
+  automationRow: async (key) => {
+    const { data, error } = await supabase
+      .from('automations')
+      .select('id, key, created_at, updated_at, automation_triggers(id, is_archived)')
+      .eq('key', key)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read the automation');
+    return data;
+  },
+
+  /**
+   * The automation that owns a trigger, by the trigger's id (an alert's fingerprint names it), as
+   * `{ key }`; null when the automation has gone.
+   */
+  automationOfTrigger: async (triggerId) => {
+    if (!isUuid(triggerId)) return null;
+    const { data, error } = await supabase
+      .from('automation_triggers')
+      .select('automations(key)')
+      .eq('id', triggerId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read the automation');
+    return data?.automations ? { key: data.automations.key } : null;
+  },
+
+  /**
+   * Check a parsed document, or apply it (`dryRun` false): one result per automation, `{ index, key,
+   * status, id, changes, reasons }`, status new, changed, unchanged or refused, each reason `{ path,
+   * message }`. All or nothing: with a refusal, or a dry run, nothing is written. Never deletes.
+   */
+  applyAutomations: async (document, dryRun) => {
+    const { data, error } = await supabase.rpc('apply_automations', { p_doc: document, p_dry_run: dryRun });
+    if (error) throw new Error(error.message || 'Could not apply the automations');
+    return data ?? [];
+  },
+
+  /** Enable or disable the automation with this key. Returns its row. */
+  setAutomationEnabled: async (key, enabled) => {
+    const { data, error } = await supabase.rpc('set_automation_enabled', { p_key: key, p_enabled: enabled });
+    if (error) throw new Error(error.message || 'Could not change the automation');
+    return data;
+  },
+
+  /** Delete the automation with this key, with its triggers and actions. */
+  deleteAutomation: async (key) => {
+    const { error } = await supabase.rpc('delete_automation', { p_key: key });
+    if (error) throw new Error(error.message || 'Could not delete the automation');
+  },
+
+  /**
+   * The automations that apply to a device and why, one row per reason: `{ automation_id, key, alias,
+   * enabled, reason }`, reason `named` or `site-wide` (automations_for_entity(), 0256).
+   */
+  automationsForEntity: async (entityId) => {
+    if (!isUuid(entityId)) return [];
+    const { data, error } = await supabase.rpc('automations_for_entity', { p_entity_id: entityId });
+    if (error) throw new Error(error.message || 'Could not read the automations');
+    return data ?? [];
   },
 
   // -------------------------------------------------------------------------------------------
@@ -3848,7 +4016,13 @@ const apiMethods = {
       if (error || !data || data.length === 0) {
         return { error: 'Target schema definition not found' };
       }
-      return judgePayload(data[0].schema_definition, payload);
+      // A reading under a derived metric's name is dropped whatever the schema says, so the names
+      // are read too; judging without them would pass a payload ingestion refuses.
+      const derived = await supabase.from('metric_catalog').select('name').not('derivation', 'is', null);
+      if (derived.error) {
+        return { error: 'The metric catalog could not be read, so a derived metric\'s name cannot be checked.' };
+      }
+      return judgePayload(data[0].schema_definition, payload, (derived.data || []).map((row) => row.name));
     }
 
     // Both are RPCs rather than table writes: `version` is computed from the parent and `publish`

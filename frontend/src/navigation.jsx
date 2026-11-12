@@ -21,7 +21,8 @@ import {
   IconInbox,
   IconTag,
   IconUser,
-  IconChartLine
+  IconChartLine,
+  IconZap
 } from './components/common/Icons'
 
 /*
@@ -134,7 +135,9 @@ export const SETTINGS_TABS = [
 export const HISTORY_TABS = [
   { id: 'overview', label: 'Overview', description: 'Where readings arrived over the window: a lane for each device, darker where more arrived, grouped by area and cell.' },
   { id: 'device', label: 'Device', description: "One device's metrics over the window you choose, a chart each, on one time axis." },
+  { id: 'metric', label: 'Metric', description: 'One metric across every device that reports it, a chart each on one scale, narrowed by area or cell, wherever the devices sit.' },
   { id: 'cell', label: 'Cell', description: "One metric across every machine in a cell, a chart each on one scale so the odd one stands out, and its mean at each hour of the day." },
+  { id: 'area', label: 'Area', description: "One metric across the cells of an area, a chart each of its mean or total on one scale, and each cell's mean at each hour of the day." },
   { id: 'alerts', label: 'Alerts', description: 'Every alert that fired over the window you choose, with who acknowledged it and why.' },
 ]
 
@@ -154,7 +157,8 @@ export const PROFILE_TABS = [
  *   Work           -- what is waiting for me? Approvals.
  *   Assets         -- what is out there? The physical estate.
  *   Modelling      -- what does it mean? Read down: the contract, the catalogue it is built from,
- *                     the standards the catalogue draws on. Most-worked to most-reference.
+ *                     the rules that watch what it models, the standards the catalogue draws on.
+ *                     Most-worked to most-reference.
  *   History        -- what happened? Both pages are a record of the past.
  *   Retention      -- what is kept, and how is it got back? Every page here runs a retention
  *                     timer over something and offers a way to restore from it.
@@ -205,7 +209,11 @@ export const TABS = [
   // IconTag, not IconGauge (which already means a metrology cell) and not IconActivity (which
   // means live telemetry): this page is the definitions, never the readings.
   { id: 'metrics',        label: 'Metrics',        group: 'model',   icon: <IconTag size={16} />, pageTabs: METRICS_TABS },
-  // Reference you read, where the two above are state you edit.
+  // Ungated, as Settings is: every role reads an automation (RLS), and writing one is for
+  // Administrators and Shopfloor Managers, so anyone else sees no write controls. IconZap: when this
+  // happens, do that. No tabs yet; the Blueprints and Built-in tabs are later additions.
+  { id: 'automations',    label: 'Automations',    group: 'model',   icon: <IconZap size={16} /> },
+  // Reference you read, where the three above are state you edit.
   { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} />, pageTabs: VOCABULARY_TABS },
 
   /* Gated on the permission, not on role names: the `audit_trail` SELECT policies resolve

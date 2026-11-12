@@ -1175,7 +1175,8 @@ ingestion:
   # The Unified Namespace bridge (ingestion/uns_publish.py). Off by default for the same reason:
   # every decoded reading, retained under uns/..., behind the broker's roles alone. The broker's
   # grant follows the root, so any root works. The TTL bounds how long a relocation on the
-  # dashboard takes to move a device's topic.
+  # dashboard takes to move a device's topic, and how long a derived metric added on the Metrics
+  # page takes to be dropped under, whether or not the bridge is on.
   unsMqttEnabled: false
   unsMqttTopicRoot: uns
   unsContextTtlSeconds: 60

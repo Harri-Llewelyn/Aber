@@ -20,6 +20,9 @@ export const deviceHistoryUrl = (id) => `/history/device/${encodeURIComponent(id
 /** One cell's machines compared on the History page, at the window it opens on. */
 export const cellHistoryUrl = (id) => `/history/cell/${encodeURIComponent(id)}`
 
+/** One area's cells compared on the History page, at the window it opens on. */
+export const areaHistoryUrl = (id) => `/history/area/${encodeURIComponent(id)}`
+
 /** Every device provisioned with one schema. */
 export const devicesForSchemaUrl = (uuid) => pageUrl('devices', { schema: uuid })
 
@@ -117,6 +120,22 @@ export const unmappedMetricsUrl = () => pageUrl('metrics', { unmapped: true })
 /** One tab of a page, as the search's cards and the rail's signals open it. */
 export const tabUrl = (page, tab = '') => pageUrl(page, {}, tab)
 
+/** The Automations page: the list, or one automation by its `id:` in the file. */
+export const automationsUrl = () => pageUrl('automations')
+/** `new` opens the starter, so an automation whose id is `new` opens with `?open=1` to say it is that one. */
+export const automationUrl = (key) => (key === 'new' ? `/automations/new?open=1` : `/automations/${encodeURIComponent(key)}`)
+/** Every automation that applies to one device (or any entity), and why. */
+export const automationsForEntityUrl = (id) => pageUrl('automations', { entity: id })
+/** The automation that owns a trigger, by the trigger's id: the page opens that automation. */
+export const automationForTriggerUrl = (triggerId) => pageUrl('automations', { trigger: triggerId })
+
+/**
+ * The trigger id in the fingerprint of an alert an automation raised, `condition:<trigger
+ * id>:<device id>:<metric>` (automation_alert_fingerprint(), 0255), or null for any other alert.
+ */
+export const triggerIdOfFingerprint = (fingerprint) =>
+  /^condition:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):/.exec(String(fingerprint ?? ''))?.[1] ?? null
+
 /** The capture and playback rules (0226), which name their job in the `job` label. */
 const JOB_RULES = new Set(['aber-job-failed', 'aber-job-stuck'])
 const JOB_LABEL = /^(capture|playback) job \S+$/
@@ -130,11 +149,14 @@ const JOB_LABEL = /^(capture|playback) job \S+$/
  * - A capture or playback job: the Capture page on the tab of its kind, read from the `job` label.
  *   The strip above every tab shows a job in flight, with Stop; the tab lists a failed one.
  * - The playback worker not reporting: the Playbacks tab, whose strip shows the waiting playback.
+ * - An alert an automation raised: that automation, found by the trigger id its fingerprint names.
  */
 export const alertPage = (alert) => {
   if (alert?.entity_type === 'service_identity' && alert.entity_id) {
     return { to: identityUrl(alert.entity_id), title: 'Show this machine identity on Access Control' }
   }
+  const trigger = triggerIdOfFingerprint(alert?.fingerprint)
+  if (trigger) return { to: automationForTriggerUrl(trigger), title: 'Show the automation that raised this alert' }
   if (alert?.rule_uid === 'aber-playback-worker-stale') {
     return { to: tabUrl('capture', 'playbacks'), title: 'Show the waiting playback on the Capture page' }
   }

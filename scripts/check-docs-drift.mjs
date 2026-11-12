@@ -4961,6 +4961,94 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 335. The count of readings dropped under a derived name is one series, named as the daemon exports
+// it. metrics.py maps the flat counter ingestion.py raises to a series and gives it a help text; the
+// ingestion README and the 0267 section name that series. A README naming another is a query that
+// returns nothing, and a counter with no help is one a scraper cannot read the meaning of.
+// -------------------------------------------------------------------------------------------------
+{
+  const metrics = read('ingestion/metrics.py');
+  const flat = 'metrics_dropped_derived_name';
+  const series = metrics.match(new RegExp(`"${flat}": \\("([a-z_]+)", \\{\\}\\)`))?.[1];
+  const problems335 = [];
+  if (!series) problems335.push(`could not read the series of ${flat} out of ingestion/metrics.py`);
+  else {
+    if (!metrics.includes(`"${series}":\n`)) problems335.push(`ingestion/metrics.py gives ${series} no help text`);
+    if (!/count\("metrics_dropped_derived_name"/.test(read('ingestion/ingestion.py'))) problems335.push(`ingestion/ingestion.py never counts ${flat}`);
+    for (const file of ['ingestion/README.md', 'supabase/README.md']) {
+      if (!read(file).includes(`\`${series}\``)) problems335.push(`${file} does not name \`${series}\``);
+    }
+  }
+  if (problems335.length) {
+    fail('the docs and the exporter name the derived-name drop\'s counter otherwise than metrics.py:\n' +
+      problems335.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`${series} is mapped, helped, counted and named in the ingestion README and the 0267 section`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 336. How soon a derived metric added on the Metrics page is dropped under. Ingestion reads the
+// names through the UNS bridge's cache, so the answer is that cache's freshness: UNS_CONTEXT_TTL_SECONDS,
+// which uns_publish.py defaults and the chart sets (ingestion.unsContextTtlSeconds). The ingestion
+// README and the 0267 section say the figure, and the README's variable table too; a page naming
+// another tells an operator how long readings under a new name are still stored, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const inCode = read('ingestion/uns_publish.py').match(/^UNS_CONTEXT_TTL_SECONDS = int\(os\.getenv\("UNS_CONTEXT_TTL_SECONDS", "(\d+)"\)\)$/m)?.[1];
+  const inChart = read('deploy/helm/aber/values.yaml').match(/^ {2}unsContextTtlSeconds: (\d+)$/m)?.[1];
+  const problems336 = [];
+  if (!inCode || !inChart) problems336.push('could not read the default out of ingestion/uns_publish.py and the chart\'s unsContextTtlSeconds');
+  else {
+    if (inCode !== inChart) problems336.push(`uns_publish.py defaults UNS_CONTEXT_TTL_SECONDS to ${inCode} and the chart to ${inChart}`);
+    const claims = [
+      ['ingestion/README.md', `**within \`UNS_CONTEXT_TTL_SECONDS\`**, ${inCode} seconds by default`],
+      ['ingestion/README.md', `| \`UNS_CONTEXT_TTL_SECONDS\` | \`${inCode}\` |`],
+      ['supabase/README.md', `within \`UNS_CONTEXT_TTL_SECONDS\`, ${inCode} seconds by default`],
+    ];
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems336.push(`${file} does not say "${said}"`);
+  }
+  if (problems336.length) {
+    fail('the docs say how soon a new derived metric is dropped under otherwise than the cache\'s freshness:\n' +
+      problems336.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the ingestion README and the 0267 section say a new derived metric is dropped under within ${inCode} seconds, as UNS_CONTEXT_TTL_SECONDS defaults`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 337. The finding for a derived name is written up as conformance.py codes it, and the pages that
+// said nobody publishes a derived metric say what happens when one does. The code is named in the
+// ingestion README and the 0267 section; the Devices and Metrics help each say the reading is
+// dropped; and the 0267 section no longer says ingestion is as it was.
+// -------------------------------------------------------------------------------------------------
+{
+  const code = read('ingestion/conformance.py').match(/^DERIVED_NAME_CODE = "([a-z_]+)"$/m)?.[1];
+  const problems337 = [];
+  if (!code) problems337.push('could not read DERIVED_NAME_CODE out of ingestion/conformance.py');
+  else {
+    for (const file of ['ingestion/README.md', 'supabase/README.md']) {
+      if (!read(file).includes(`\`${code}\``)) problems337.push(`${file} does not name the finding's code \`${code}\``);
+    }
+  }
+  const claims = [
+    ['help/pages/devices.md', 'a reading published under the name of a derived metric is dropped'],
+    ['help/pages/metrics.md', 'A reading a device publishes under its name is dropped'],
+    ['supabase/README.md', '**Ingestion enforces the other direction.**'],
+  ];
+  for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems337.push(`${file} does not say "${said}"`);
+  if (/The AAS export and ingestion are as they were/.test(read('supabase/README.md').replace(/\s+/g, ' '))) {
+    problems337.push('supabase/README.md still says ingestion is as it was, which the derived-name drop changed');
+  }
+  if (problems337.length) {
+    fail('the docs say what a derived name\'s reading meets otherwise than ingestion does:\n' +
+      problems337.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the finding \`${code}\` is named in the ingestion README and the 0267 section, and the Devices and Metrics help say the reading is dropped`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 14. The product does not call itself Factory+.
 //
 // Factory+ is a real external framework this stack implements, and every reference to it as a
@@ -5797,6 +5885,195 @@ const OPERATOR_PAIRS = [
     fail(`the evaluator's historian variable is not documented where it is read:\n${problems320.map((p) => `        ${p}`).join('\n')}`);
   } else {
     pass(`${VARIABLE} is read by the evaluator's suite and named by the testing document and the migrations' README`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 321. The Automations page's address is stated as the code reads it. frontend/README.md's routing
+// table names each query key the page reads and its two path forms; the page reads each key through
+// the hook that puts it in the address, and routes.js builds the links other pages send there (a
+// device's View in Automations, an alert) with the same keys. A key in the table the page does not
+// read is a link that opens the unfiltered list.
+// -------------------------------------------------------------------------------------------------
+{
+  const TAB = 'frontend/src/components/tabs/AutomationsTab.jsx';
+  const readme = read('frontend/README.md');
+  const tab = read(TAB);
+  const routes = read('frontend/src/routes.js');
+  const problems321 = [];
+  const row = readme.split('\n').find((l) => /^\| Automations \|/.test(l));
+  const reads = {
+    search: "useUrlState('search'",
+    entity: "useUrlState('entity'",
+    trigger: "params.get('trigger')",
+    sort: 'useSortableRows(',
+  };
+  if (!row) {
+    problems321.push('frontend/README.md has no Automations row in its routing table');
+  } else {
+    for (const [key, needle] of Object.entries(reads)) {
+      if (!row.includes(`\`${key}\``)) problems321.push(`the routing table's Automations row does not name \`${key}\``);
+      if (!tab.includes(needle)) problems321.push(`${TAB} does not read \`${key}\` (${needle})`);
+    }
+    for (const form of ['<id>', 'new']) {
+      if (!row.includes(`\`${form}\``)) problems321.push(`the routing table's Automations row does not name the path form \`${form}\``);
+    }
+  }
+  for (const [key, builder] of [['entity', 'automationsForEntityUrl'], ['trigger', 'automationForTriggerUrl']]) {
+    if (!new RegExp(`export const ${builder} = \\(\\w+\\) => pageUrl\\('automations', \\{ ${key}: \\w+ \\}\\)`).test(routes)) {
+      problems321.push(`routes.js's ${builder}() does not build /automations?${key}=<id> through pageUrl()`);
+    }
+  }
+  if (!/export const automationUrl = \(key\) => \(key === 'new' \? `\/automations\/new\?open=1` : `\/automations\/\$\{encodeURIComponent\(key\)\}`\)/.test(routes)) {
+    problems321.push("routes.js's automationUrl() no longer sends an automation whose id is `new` to ?open=1 or the others to /automations/<id>");
+  }
+  if (!tab.includes("params.has('open')")) problems321.push(`${TAB} does not read ?open=1, which tells an automation called \`new\` from the starter`);
+  if (problems321.length) {
+    fail(`the Automations page's address is not stated as the code reads it:\n${problems321.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`frontend/README.md's routing table gives the Automations page's ${Object.keys(reads).length} query keys and 2 path forms, each read by ${TAB}, and routes.js builds the entity, trigger and \`new\` links with them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 322. The editor's dependencies are the ones NOTICE.md names, and no others. The dashboard has
+// five runtime dependencies besides the editor's: CodeMirror 6 (its @codemirror and @lezer packages,
+// MIT) and `yaml` (ISC) are the two additions, and a third package, such as a JSON Schema editor
+// binding, is a decision to make here, not a line in package.json. Every package of the CodeMirror
+// family the lockfile holds is MIT, names its licence in the lockfile, and is named in NOTICE.md; yaml
+// is ISC and has its own section; and the two files that carry their notices open with a legal comment.
+// -------------------------------------------------------------------------------------------------
+{
+  const BEFORE = ['@google/model-viewer', '@supabase/supabase-js', 'react', 'react-dom', 'uplot'];
+  const pkg = JSON.parse(read('frontend/package.json'));
+  const lock = JSON.parse(read('frontend/package-lock.json')).packages;
+  const notice = read('NOTICE.md');
+  const problems322 = [];
+  const deps = Object.keys(pkg.dependencies);
+  const family = deps.filter((d) => /^@(codemirror|lezer)\//.test(d));
+  const others = deps.filter((d) => !BEFORE.includes(d) && !family.includes(d) && d !== 'yaml');
+  if (others.length) problems322.push(`frontend/package.json adds ${others.join(', ')}: only @codemirror/*, @lezer/* and yaml were agreed for the editor (#1277)`);
+  if (family.length === 0 || !deps.includes('yaml')) problems322.push('frontend/package.json does not hold the editor\'s CodeMirror packages and yaml');
+  const start = notice.indexOf("## The Automations page's editor — CodeMirror and Lezer (MIT)");
+  const editorSection = start < 0 ? '' : notice.slice(start, notice.indexOf('\n## ', start + 1));
+  if (!editorSection) problems322.push("NOTICE.md has no section 'The Automations page's editor — CodeMirror and Lezer (MIT)'");
+  for (const name of family) {
+    // The table names a scope's packages by their short names: `@codemirror/state`, `view`, `language`.
+    if (!editorSection.includes(name) && !editorSection.includes(`\`${name.split('/')[1]}\``)) {
+      problems322.push(`NOTICE.md's editor section does not name ${name}`);
+    }
+  }
+  const installed = Object.keys(lock).filter((k) => /^node_modules\/@(codemirror|lezer)\//.test(k));
+  for (const key of [...installed, 'node_modules/style-mod', 'node_modules/w3c-keyname', 'node_modules/crelt', 'node_modules/@marijn/find-cluster-break']) {
+    if (lock[key]?.license !== 'MIT') problems322.push(`package-lock.json gives ${key} the licence ${lock[key]?.license ?? '(none)'}, not MIT, which NOTICE.md says every package of the editor has`);
+  }
+  if (lock['node_modules/yaml']?.license !== 'ISC') problems322.push(`package-lock.json gives yaml the licence ${lock['node_modules/yaml']?.license ?? '(none)'}, not ISC`);
+  if (!notice.includes("## The Automations page's YAML parser — yaml (ISC)")) problems322.push("NOTICE.md has no section 'The Automations page's YAML parser — yaml (ISC)'");
+  for (const [file, what] of [['frontend/src/components/common/AutomationEditor.jsx', "CodeMirror's and Lezer's"], ['frontend/src/utils/automationYaml.js', "yaml's"]]) {
+    if (!read(file).startsWith('/*!')) problems322.push(`${file} does not open with ${what} notice as a /*! legal comment, which the build keeps`);
+    if (!notice.includes(file)) problems322.push(`NOTICE.md does not name ${file}, where the notice is`);
+  }
+  if (problems322.length) {
+    fail(`the editor's dependencies and their notices do not match:\n${problems322.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the dashboard adds ${family.length} CodeMirror/Lezer packages and yaml to its ${BEFORE.length} other runtime dependencies, the lockfile holds ${installed.length + 4} MIT packages for the editor and yaml under ISC, and NOTICE.md names them and the two files that carry their notices`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 323. The Automations help names each control as the page labels it, and each column of the list.
+// The help is written to be followed: "select **Save**" in a page whose button says Save Changes
+// sends a reader looking for a control that is not there.
+// -------------------------------------------------------------------------------------------------
+{
+  const HELP = 'help/pages/automations.md';
+  const help = read(HELP);
+  const PAGE = 'frontend/src/components/tabs/AutomationsTab.jsx';
+  const DETAIL = 'frontend/src/components/tabs/AutomationDetail.jsx';
+  const DEVICES = 'frontend/src/components/tabs/DevicesTab.jsx';
+  const problems323 = [];
+  const labels = [
+    ['New Automation', PAGE], ['Upload', PAGE], ['Export', PAGE],
+    ['Automation', PAGE], ['Watches', PAGE], ['Enabled', PAGE], ['Firing now', PAGE], ['Last fired', PAGE], ['Applies because', PAGE],
+    ['Save', DETAIL], ['Delete', DETAIL], ['Disable', DETAIL], ['Enable', DETAIL], ['Recent firings', DETAIL], ['View Audit Trail', DETAIL],
+    ['View in Automations', DEVICES],
+  ];
+  for (const [label, file] of labels) {
+    if (!help.includes(`**${label}**`)) problems323.push(`${HELP} does not name **${label}**`);
+    if (!read(file).includes(label)) problems323.push(`${file} no longer has a control or column called ${label}, which ${HELP} names`);
+  }
+  for (const status of ['New', 'Changed', 'Unchanged', 'Refused']) {
+    if (!help.includes(`**${status}**`)) problems323.push(`${HELP} does not name the preview's **${status}**`);
+  }
+  for (const word of ['Named', 'Site-wide']) {
+    if (!help.includes(`**${word}**`) || !read('frontend/src/utils/automations.js').includes(`label: '${word}'`)) {
+      problems323.push(`${HELP} and utils/automations.js do not both say **${word}** for why an automation applies`);
+    }
+  }
+  if (problems323.length) {
+    fail(`the Automations help does not name the page's controls as the code does:\n${problems323.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the Automations help names ${labels.length} controls and columns, the 4 preview statuses and the 2 reasons, as the page labels them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 324. The editor's styles are drawn where the dashboard's Content-Security-Policy admits them. The
+// policy's style-src names no inline style (the one <style> admitted is the 3D viewer's, by hash),
+// and CodeMirror writes <style> elements into whatever document it is mounted in. So the editor
+// mounts in a shadow root, where it adopts a stylesheet, and the help for people who run the
+// dashboard behind a proxy with a policy of its own says no new style-src is needed. Here: the
+// chart's policy holds no 'unsafe-inline' for styles, the editor attaches a shadow root and gives
+// CodeMirror it as `root`, and the upgrade guide and frontend/README.md say so.
+// -------------------------------------------------------------------------------------------------
+{
+  const EDITOR = 'frontend/src/components/common/AutomationEditor.jsx';
+  const CHART = 'deploy/helm/aber/templates/apps/frontend.yaml';
+  const problems324 = [];
+  const editor = read(EDITOR);
+  const policy = read(CHART).match(/\(printf "style-src [^\n]*\)/)?.[0] ?? null;
+  if (!policy) problems324.push(`${CHART} has no style-src directive in the shape this check reads`);
+  else if (/unsafe-inline/.test(policy)) problems324.push(`${CHART}'s style-src admits 'unsafe-inline', so the shadow root is no longer what keeps the editor within the policy: re-read the editor's section of frontend/README.md`);
+  if (!/attachShadow\(\{ mode: 'open' \}\)/.test(editor) || !/root: shadow,/.test(editor)) {
+    problems324.push(`${EDITOR} does not attach a shadow root and pass it to CodeMirror as \`root\`, so its <style> elements would be refused`);
+  }
+  if (!/### The Automations editor draws in a shadow root/.test(read('frontend/README.md'))) {
+    problems324.push("frontend/README.md has no section 'The Automations editor draws in a shadow root'");
+  }
+  if (!/needs no new `style-src`/.test(read('help/site/upgrading.md'))) {
+    problems324.push("help/site/upgrading.md does not say a proxy with its own policy needs no new `style-src`");
+  }
+  if (problems324.length) {
+    fail(`the editor's styles are not drawn where the Content-Security-Policy admits them, or the docs do not say so:\n${problems324.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass("the chart's style-src admits no inline style, the editor mounts in a shadow root, and frontend/README.md and the upgrade guide say so");
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 325. The Automations page has one place in the sidebar, after Metrics and before Vocabulary, and
+// the help's contents list it there. Pages in help/README.md are "in the order the sidebar lists
+// them"; a page filed elsewhere in one of them is a contents list that disagrees with the rail.
+// -------------------------------------------------------------------------------------------------
+{
+  const nav = read('frontend/src/navigation.jsx');
+  const readme = read('help/README.md');
+  const problems325 = [];
+  const model = [...nav.matchAll(/id: '([a-z-]+)',\s+label: '[^']+',\s+group: 'model'/g)].map((m) => m[1]);
+  if (model.join(',') !== 'schemas,metrics,automations,vocabulary') {
+    problems325.push(`the sidebar's Model group is ${model.join(', ')}, not schemas, metrics, automations, vocabulary`);
+  }
+  const listed = [...readme.matchAll(/\]\(pages\/([a-z-]+)\.md\)/g)].map((m) => m[1]).filter((id) => model.includes(id));
+  if (listed.join(',') !== model.join(',')) {
+    problems325.push(`help/README.md lists the Model group's pages as ${listed.join(', ')}, and the sidebar as ${model.join(', ')}`);
+  }
+  if (!read('frontend/src/constants.js').includes("'metrics', 'automations', 'vocabulary'")) {
+    problems325.push("constants.js's VALID_TABS does not hold automations between metrics and vocabulary, so the router would send its address to the Site Map");
+  }
+  if (problems325.length) {
+    fail(`the Automations page's place is not the same in the sidebar and the help's contents:\n${problems325.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the sidebar's Model group (${model.join(', ')}) and help/README.md list the Automations page in the same place, and the router accepts it`);
   }
 }
 
@@ -10600,7 +10877,7 @@ const OPERATOR_PAIRS = [
 // -------------------------------------------------------------------------------------------------
 // 309. The Cell tab is named and reached as the Device tab is. The Cells drawer's History action has
 // the Devices drawer's label and icon, and each goes to its own tab's path; History's tabs list
-// Cell right after Device with a description of its own; the search index offers it; and the help
+// Cell after Device with a description of its own; the search index offers it; and the help
 // page names it. A drawer that says another word for the same act is two names for one thing.
 // -------------------------------------------------------------------------------------------------
 {
@@ -10624,7 +10901,7 @@ const OPERATOR_PAIRS = [
     problems309.push(`frontend/src/routes.js's cellHistoryUrl does not build ${cellPath}/<id>`);
   }
   const order = ids.map((m) => m[1]);
-  if (order.indexOf('cell') < 0 || order.indexOf('cell') !== order.indexOf('device') + 1) problems309.push(`HISTORY_TABS lists ${order.join(', ')}; Cell goes right after Device`);
+  if (order.indexOf('cell') < 0 || order.indexOf('cell') <= order.indexOf('device')) problems309.push(`HISTORY_TABS lists ${order.join(', ')}; Cell goes after Device`);
   if (!ids.find((m) => m[1] === 'cell')?.[3]) problems309.push('HISTORY_TABS gives the Cell tab no description');
   if (!read('frontend/src/searchIndex.js').includes("...tabCard('history', 'cell')")) problems309.push('frontend/src/searchIndex.js has no card for the Cell tab');
   const help = read('help/pages/history.md');
@@ -10666,6 +10943,149 @@ const OPERATOR_PAIRS = [
       problems310.map((p) => `        ${p}`).join('\n'));
   } else {
     pass('the API reference names the arguments and the columns of telemetry_hour_of_day() as 0265 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 326. The three drawers' History actions are alike. The Devices, Cells and Areas drawers each say
+// View History, with the same icon, and go to their own tab's path: deviceHistoryUrl, cellHistoryUrl
+// and areaHistoryUrl, whose paths are the tabs' (the Area tab's is utils/history.js's AREA_PATH). The
+// help names the Areas drawer's action as it does the Cells drawer's. A drawer that says another word
+// for the same act is two names for one thing.
+// -------------------------------------------------------------------------------------------------
+{
+  const action = (file) => read(file).match(/label: '(View History)', icon: <(\w+) size=\{13\} \/>,\s*to: (\w+)\(/);
+  const drawers = [
+    ['Devices', 'frontend/src/components/tabs/DevicesTab.jsx', 'deviceHistoryUrl'],
+    ['Cells', 'frontend/src/components/tabs/CellsTab.jsx', 'cellHistoryUrl'],
+    ['Areas', 'frontend/src/components/tabs/AreasTab.jsx', 'areaHistoryUrl'],
+  ];
+  const found = drawers.map(([name, file, url]) => ({ name, url, match: action(file) }));
+  const problems326 = [];
+  for (const d of found) if (!d.match) problems326.push(`the ${d.name} drawer has no View History action (label, a size-13 icon, to) in its tab`);
+  const have = found.filter((d) => d.match);
+  if (new Set(have.map((d) => d.match[2])).size > 1) {
+    problems326.push(`the drawers' History actions draw ${have.map((d) => `${d.name}: ${d.match[2]}`).join(', ')}; they draw one icon`);
+  }
+  for (const d of have) if (d.match[3] !== d.url) problems326.push(`the ${d.name} drawer's History action goes to ${d.match[3]}, not ${d.url}`);
+  const routes = read('frontend/src/routes.js');
+  const areaPath = read('frontend/src/utils/history.js').match(/^export const AREA_PATH = '([^']+)'$/m)?.[1];
+  if (!areaPath) problems326.push('could not read AREA_PATH out of frontend/src/utils/history.js');
+  else if (!routes.includes(`export const areaHistoryUrl = (id) => \`${areaPath}/\${encodeURIComponent(id)}\``)) {
+    problems326.push(`frontend/src/routes.js's areaHistoryUrl does not build ${areaPath}/<id>`);
+  }
+  if (!read('help/pages/history.md').includes('open the area on the Areas page and select **View History**')) {
+    problems326.push('help/pages/history.md does not say View History opens an area from the Areas page');
+  }
+  if (problems326.length) {
+    fail('The Areas drawer\'s History action is named or reached otherwise than the other two drawers\':\n' + problems326.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the Devices, Cells and Areas drawers all say View History with one icon, each to its own tab, and the help names the Areas drawer\'s');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 327. The API reference describes telemetry_carried_by_group() as 0276 declares it: the arguments
+// the body requires are the function's, and a row has the columns it returns. A reader building on
+// the reference sends an argument the function does not take, or looks for a column it does not return.
+// -------------------------------------------------------------------------------------------------
+{
+  const sql = read('supabase/migrations/0276_history_folds_one_metric_across_the_devices_of_each_group.sql')
+    .match(/telemetry_carried_by_group\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/telemetry_carried_by_group:\n[\s\S]*?required: \[([^\]]*)\]/)?.[1];
+  const row = spec.match(/\n {4}TelemetryGroupRow:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const problems327 = [];
+  if (!sql) problems327.push('could not read telemetry_carried_by_group() out of 0276');
+  if (!path) problems327.push('docs/openapi.yaml has no /rest/v1/rpc/telemetry_carried_by_group with its required arguments');
+  if (!row) problems327.push('docs/openapi.yaml has no TelemetryGroupRow');
+  if (!problems327.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    const args = names(sql[1], /^\s*(\w+) [a-z]/gm);
+    const columns = names(sql[2], /^\s*(\w+) [a-z]/gm);
+    const required = names(path, /(\w+)/g);
+    const described = names(row, /^ {8}(\w+):/gm);
+    if (required !== args) problems327.push(`docs/openapi.yaml requires ${required}; telemetry_carried_by_group() takes ${args}`);
+    if (described !== columns) problems327.push(`docs/openapi.yaml's TelemetryGroupRow has ${described}; the function returns ${columns}`);
+  }
+  if (problems327.length) {
+    fail('The API reference describes telemetry_carried_by_group() otherwise than 0276 declares it:\n' +
+      problems327.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments and the columns of telemetry_carried_by_group() as 0276 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 328. The Metric tab's paging is described as the code holds it. History's help says how many devices
+// a page holds and the number past which the tab pages whatever the row cap carries; frontend/README.md
+// names both constants and their values; the help has a section for each of the Metric and Area tabs; and
+// the 0276 section says the bound its read is held to. A page naming another figure tells a reader how
+// many charts to expect, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const size = Number(util.match(/^export const METRIC_PAGE_SIZE = (\d+)$/m)?.[1]);
+  const draw = Number(util.match(/^export const METRIC_DRAW_MAX = (\d+)$/m)?.[1]);
+  const group = Number(read('frontend/src/api.js').match(/^export const HISTORY_GROUP_READ_ROWS = (\d+);$/m)?.[1]);
+  const problems328 = [];
+  if (!Number.isInteger(size)) problems328.push('could not read METRIC_PAGE_SIZE out of frontend/src/utils/history.js');
+  if (!Number.isInteger(draw)) problems328.push('could not read METRIC_DRAW_MAX out of frontend/src/utils/history.js');
+  if (!Number.isInteger(group)) problems328.push('could not read HISTORY_GROUP_READ_ROWS out of frontend/src/api.js');
+  if (!problems328.length) {
+    const claims = [
+      ['help/pages/history.md', `a page at a time, ${size} devices to a page`],
+      ['help/pages/history.md', `more than ${draw} devices`],
+      ['frontend/README.md', `\`METRIC_PAGE_SIZE\` (${size})`],
+      ['frontend/README.md', `\`METRIC_DRAW_MAX\` (${draw})`],
+      ['supabase/README.md', `more than ${group.toLocaleString('en-GB')} devices times buckets`],
+    ];
+    // Read as one line, so a rewrapped paragraph still says it.
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems328.push(`${file} does not say "${said}"`);
+    const help = read('help/pages/history.md');
+    for (const heading of ['The Metric tab: one metric across devices', 'The Area tab: comparing the cells in an area']) {
+      if (!help.includes(`\n## ${heading}\n`)) problems328.push(`help/pages/history.md has no "${heading}" section`);
+    }
+  }
+  if (problems328.length) {
+    fail('History\'s docs describe the Metric and Area tabs otherwise than the code holds them:\n' +
+      problems328.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and both READMEs say the Metric tab pages at ${size} devices a page and past ${draw}, and the 0276 section says its ${group.toLocaleString('en-GB')}-row bound`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 329. History's tabs are the issue's, in its order: Overview, Device, Metric, Cell, Area, Alerts. Each
+// has a description of its own and a card in the search index, and the page gives each an address
+// (TAB_PATHS in HistoryTab.jsx), so a tab the strip lists is one the page can open and the search can
+// find. A tab in one list and not another is a link that opens the Overview.
+// -------------------------------------------------------------------------------------------------
+{
+  const tabs = read('frontend/src/navigation.jsx').match(/export const HISTORY_TABS = \[([\s\S]*?)\n\]/)?.[1] ?? '';
+  const ids = [...tabs.matchAll(/\{ id: '([a-z]+)', label: '([^']+)', description: ["'`]([^"'`]+)/g)];
+  const order = ids.map((m) => m[1]);
+  const want = ['overview', 'device', 'metric', 'cell', 'area', 'alerts'];
+  const problems329 = [];
+  if (order.join(', ') !== want.join(', ')) problems329.push(`HISTORY_TABS lists ${order.join(', ')}; the issue's order is ${want.join(', ')}`);
+  for (const m of ids) if (!m[3]) problems329.push(`HISTORY_TABS gives the ${m[2]} tab no description`);
+  const search = read('frontend/src/searchIndex.js');
+  for (const id of ['overview', 'metric', 'cell', 'area', 'alerts']) {
+    if (!search.includes(`...tabCard('history', '${id}')`)) problems329.push(`frontend/src/searchIndex.js has no card for the ${id} tab`);
+  }
+  const page = read('frontend/src/components/tabs/HistoryTab.jsx');
+  const paths = page.match(/const TAB_PATHS = \{([\s\S]*?)\n\}/)?.[1] ?? '';
+  for (const key of ['overview', 'device', 'METRIC_TAB', 'CELL_TAB', 'AREA_TAB', 'ALERTS_TAB']) {
+    if (!new RegExp(`\\b${key}\\b`).test(paths)) problems329.push(`TAB_PATHS in HistoryTab.jsx gives the ${key} tab no path`);
+  }
+  const util = read('frontend/src/utils/history.js');
+  for (const [name, path] of [['METRIC_PATH', '/history/metric'], ['AREA_PATH', '/history/area']]) {
+    if (!util.includes(`export const ${name} = '${path}'`)) problems329.push(`utils/history.js's ${name} is not ${path}`);
+  }
+  if (problems329.length) {
+    fail('History\'s tabs are listed, searched or opened otherwise than the issue has them:\n' + problems329.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('History lists Overview, Device, Metric, Cell, Area and Alerts in that order, each described, searched and given an address');
   }
 }
 
@@ -10834,7 +11254,6 @@ const OPERATOR_PAIRS = [
     pass('the API reference names the arguments, the resolutions and the document of export_telemetry() as 0279 declares them');
   }
 }
-
 
 // -------------------------------------------------------------------------------------------------
 // 199. A change to the Audit Trail's classes rebuilds the indexes built on them (0228). Each class's

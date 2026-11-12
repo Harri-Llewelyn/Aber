@@ -164,6 +164,20 @@ export const SUITES = {
       'the Python half of test-harness/fixtures/payload-conformance.json; the JavaScript half, ' +
       "Validate Payload's copy of the rules, runs in frontend-build.",
   },
+  'ingestion/test_a_derived_name_is_dropped.py': {
+    lanes: ['unit'],
+    why:
+      "A reading under a derived metric's name, a metric Aber computes. Nothing publishes it, so a " +
+      'device that does would put a second source under the computed series: ingestion drops the ' +
+      'reading under audit as well as enforce, files a `derived_name` finding and counts it in a ' +
+      'series of its own. THE DROP IS NOT A SCHEMA FAULT, which is what the suite holds against ' +
+      'the code around it: an open schema, a closed one that models the name and no schema at all ' +
+      'drop it alike, a measured name of the same group is stored, and the schema counter that only ' +
+      'an enforcing device raises stays where it was. The names come from the catalogue through the ' +
+      "UNS bridge's TTL cache: one read per freshness, an addition takes effect when it ends, a " +
+      'failed read keeps the names last read without a read per message, and before any read ' +
+      'nothing is dropped. A fake catalogue and a fake historian connection; no broker.',
+  },
   'ingestion/test_schema_builder_contract.py': {
     lanes: ['unit'],
     why:
@@ -682,6 +696,16 @@ export const SUITES = {
       'the hour moving with the zone and with a clock change, no row for a text or a flag, an ' +
       'unknown zone, bad bounds and more than 50,000 hours times devices refused before any read, ' +
       'and it reads as the caller.',
+  },
+  'supabase/migrations/test_history_folds_one_metric_across_the_devices_of_each_group.py': {
+    lanes: ['db'],
+    why:
+      "0276's telemetry_carried_by_group(), over local tables standing in for the historian's hourly " +
+      "rollup: each group's mean across its devices that have a value in a bucket, its total only " +
+      'where every device has one (a carried value counts, a device that never reports keeps the ' +
+      'total away), how many had a reading, no row for a text or a flag, bad bounds, lists of ' +
+      'different lengths and more than 50,000 devices times buckets refused before any read, and it ' +
+      'reads as the caller.',
   },
   'supabase/migrations/test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py': {
     lanes: ['db'],
@@ -1691,6 +1715,19 @@ export const SUITES = {
       'memory.peak of each worker must stay under 60% of its limit. A third is stored and must be ' +
       'neither signed nor served to a person without issue_capture_download(), which only the ' +
       'real storage-api can show. Needs `playback.enabled`, which values-dev.yaml sets.',
+  },
+  'ingestion/test_a_derived_name_is_dropped_stack.py': {
+    lanes: ['stack'],
+    why:
+      'THE ONLY CHECK THAT A DERIVED NAME IS DROPPED THROUGH THE REAL CHAIN. The unit suite holds the ' +
+      "rule against a fake catalogue; this adds a derived metric as the database's owner, has a " +
+      "device declare and publish its name through a real broker as the Gateways page's credential " +
+      'allows, and reads the answer where it matters: the measured sibling is in the historian and ' +
+      "the derived name is not, nor in the device's parameters, and the Audit Trail holds a " +
+      '`derived_name` finding for the birth and one for the readings, not one for each message. ' +
+      'The daemon reads the catalogue through a cache, so the suite waits out its freshness before ' +
+      'the first message rather than racing it. Needs the stack up and the owner connection ' +
+      '(SUPABASE_DB_*); everything it made, the audit rows included, is removed.',
   },
   'test-harness/test_load_generator.py': {
     // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be

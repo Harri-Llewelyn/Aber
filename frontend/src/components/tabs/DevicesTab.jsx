@@ -2,7 +2,7 @@ import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts
 import { reasonLabel } from '../../utils/alertAcknowledgement'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { approvalsForUrl, areaUrl, cellUrl, deviceHistoryUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
+import { approvalsForUrl, areaUrl, automationsForEntityUrl, cellUrl, deviceHistoryUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
 import { trackRequest } from '../../lib/apiActivity'
@@ -86,7 +86,8 @@ import {
   IconRadio,
   IconLayoutDashboard,
   IconTrash,
-  IconChartLine
+  IconChartLine,
+  IconZap
 } from '../common/Icons'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
@@ -736,6 +737,20 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // and the drawer closes itself.
   const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
   const selectedIds = deviceIds(selectedDevice)
+
+  /* How many automations apply to the open device, named or site-wide (automations_for_entity()),
+     for the drawer's View in Automations. A failed read leaves the action without its count. */
+  const selectedAssetId = selectedDevice?.asset_id ?? null
+  const [automationCount, setAutomationCount] = useState(null)
+  useEffect(() => {
+    setAutomationCount(null)
+    if (!selectedAssetId) return undefined
+    let live = true
+    Promise.resolve()
+      .then(() => api.automationsForEntity(selectedAssetId))
+      .then(rows => { if (live && Array.isArray(rows)) setAutomationCount(new Set(rows.map(r => r.key)).size) }, () => {})
+    return () => { live = false }
+  }, [selectedAssetId])
 
   /* Both device lanes count: `devices` and `device_nameplate` are two kinds of change to one
      machine, keyed by the same id. */
@@ -1754,6 +1769,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             label: 'View History', icon: <IconChartLine size={13} />,
             to: deviceHistoryUrl(selectedDevice.asset_id),
             title: "Chart this device's readings over time on the History page, and export them"
+          },
+          /* Every role reads automations, so nothing here is gated. The count is what applies: the
+             automations that name the device, and the site-wide ones. */
+          !selectedDevice.shadow_of && {
+            label: automationCount === null ? 'View in Automations' : `View in Automations (${automationCount})`,
+            icon: <IconZap size={13} />,
+            to: automationsForEntityUrl(selectedDevice.asset_id),
+            title: 'Open the Automations page on the automations that apply to this device, and why'
           },
           {
             // A read of what the device declared at birth: not gated on device:manage and not

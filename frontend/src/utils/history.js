@@ -5,7 +5,7 @@
  */
 import {
   COVERAGE_LARGE_MAX_HOURS, COVERAGE_MAX_DEVICES, COVERAGE_ROLLUP_MINUTES, COVERAGE_SMALL_SELECTION, HISTORY_CHANGE_READINGS,
-  HISTORY_MAX_CHANGES, HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS, HOUR_OF_DAY_MAX_ROWS,
+  HISTORY_GROUP_READ_ROWS, HISTORY_MAX_CHANGES, HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS, HOUR_OF_DAY_MAX_ROWS,
 } from '../api'
 import { encodeList } from '../hooks/useUrlState'
 import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
@@ -258,7 +258,7 @@ export function pickedAddress(deviceId, win, { metrics = [], bucket = 'auto' } =
 
 /**
  * The devices History offers: every device but a quarantined one, whose readings are held until it
- * is approved. Each carries the names of the cell and area it sits in, and they are sorted by name.
+ * is approved. Each carries the names and ids of the cell and area it sits in, and they are sorted by name.
  */
 export function historyDevices(devices, cells, areas) {
   const cellById = new Map(cells.map(c => [c.cell_id ?? c.id, c]))
@@ -268,7 +268,10 @@ export function historyDevices(devices, cells, areas) {
     .map(d => {
       const cell = cellById.get(d.effective_cell_id) || null
       const area = areaById.get(d.effective_area_id ?? cell?.area_id) || null
-      return { ...d, cell_name: cell?.name ?? null, area_name: area?.name ?? null }
+      return {
+        ...d, cell_name: cell ? (cell.cell_name ?? cell.name ?? null) : null, area_name: area ? (area.area_name ?? area.name ?? null) : null,
+        cell_id: cell ? (cell.cell_id ?? cell.id) : null, area_id: area ? (area.area_id ?? area.id) : null,
+      }
     })
     .sort((a, b) => String(a.asset_name).localeCompare(String(b.asset_name)))
 }
@@ -1088,9 +1091,6 @@ export function coverageSummary(name, counts, stopWords) {
 export const boxWords = (count, start, end, now = Date.now()) =>
   `${count} ${count === 1 ? 'device' : 'devices'} · ${bandWords(start, end, now)}`
 
-/** Why Chart is off with several devices picked. */
-export const CHART_SEVERAL_REASON = 'Pick one device to chart it. Charting several comes with the Metric tab.'
-
 /**
  * The Overview's time axis: a calendar window's own ticks (calendarTicks()), else five evenly
  * spaced, labelled with the clock (to the second under an hour) inside a day, the date and clock up
@@ -1149,7 +1149,7 @@ export function historyCells(cells, devices, areas = []) {
     .map(c => {
       const id = c.cell_id ?? c.id
       return {
-        cell_id: id, name: String(c.cell_name ?? c.name ?? ''), area_name: areaName.get(c.area_id) ?? null,
+        cell_id: id, name: String(c.cell_name ?? c.name ?? ''), area_id: c.area_id ?? null, area_name: areaName.get(c.area_id) ?? null,
         is_archived: Boolean(c.is_archived), machines: byCell.get(id) || [],
       }
     })
@@ -1198,10 +1198,11 @@ export const silentWords = (name, metric) => `${name} does not report ${metric}.
 
 /**
  * The status line of the machines' charts: how many are charted, in which buckets, how many do not
- * report the metric, how many parts the read took, and what the text and flag charts show.
+ * report the metric, how many parts the read took, and what the text and flag charts show. `noun`
+ * is what a chart is of: the Metric tab's are devices.
  */
-export function multiplesWords({ shown, silent, resolution, reads = 1, stateLine = null }) {
-  const count = `${shown} ${shown === 1 ? 'machine' : 'machines'}`
+export function multiplesWords({ shown, silent, resolution, reads = 1, stateLine = null, noun = 'machine' }) {
+  const count = `${shown} ${shown === 1 ? noun : `${noun}s`}`
   const apart = silent ? `, ${silent} ${silent === 1 ? 'does' : 'do'} not report it` : ''
   const parts = reads > 1 ? `, read in ${reads} parts` : ''
   return `${count}, in ${resolution.words}${apart}${parts}${stateLine ? `; ${stateLine}` : ''}`
@@ -1282,10 +1283,290 @@ export const bandRangeWords = (band, unit) =>
 
 /**
  * A cell of the heatmap in words: "Lathe 3 · 14:00–15:00 · 21.3 kW, the mean of 7 days". An hour
- * with no value says so.
+ * with no value says so. A cell of the Area tab's heatmap is of several machines (`machines`), and says
+ * how many: "the mean of 7 days, across 5 machines".
  */
 export function heatCellWords(name, hour, cell, unit) {
   const head = `${name} · ${hourWords(hour)}`
   if (!cell) return `${head} · No value in this window`
-  return `${head} · ${readingWords(cell.value, unit)}, the mean of ${cell.days} ${cell.days === 1 ? 'day' : 'days'}`
+  const across = cell.machines > 1 ? `, across ${cell.machines} machines` : ''
+  return `${head} · ${readingWords(cell.value, unit)}, the mean of ${cell.days} ${cell.days === 1 ? 'day' : 'days'}${across}`
+}
+
+// ------------------------------------------------------------------------------------------------
+// The Metric tab: one metric across every device that reports it
+// ------------------------------------------------------------------------------------------------
+
+/** The Metric tab's id among History's tabs, and its path: `/history/metric` picks a metric. */
+export const METRIC_TAB = 'metric'
+export const METRIC_PATH = '/history/metric'
+
+/** The path of one metric's tab, the picker's when `name` is empty. A name holds slashes, so it is one encoded segment. */
+export const metricHistoryPath = (name) => (name ? `${METRIC_PATH}/${encodeURIComponent(name)}` : METRIC_PATH)
+
+/** The metric a path's segments name, `/history/metric/<name>`; empty for the picker and for any other path. */
+export function metricNameFrom(segments) {
+  const [, tab, name] = segments
+  if (tab !== METRIC_TAB || !name) return ''
+  try { return decodeURIComponent(name) } catch { return '' }
+}
+
+/** The window's keys as a query, for an address that adds its own. */
+function windowQuery(win) {
+  const query = new URLSearchParams()
+  for (const [k, v] of Object.entries(windowToQuery(win, DEFAULT_HISTORY_WINDOW))) if (v) query.set(k, v)
+  return query
+}
+
+/** A query as an address's tail, its lists written with their commas. */
+const queryTail = (query) => {
+  const q = query.toString().replace(/%2C/gi, ',')
+  return q ? `?${q}` : ''
+}
+
+/**
+ * The address of a metric's tab at window `win`: the devices narrowed by area (`area`) and cell
+ * (`cell`), by ids, and to a list of telemetry keys (`devices`), and the page when it is not the
+ * first. The picker's when `name` is empty.
+ */
+export function metricAddress(name, win, { areas = [], cells = [], devices = [], page = 1 } = {}) {
+  const query = windowQuery(win)
+  if (areas.length) query.set('area', encodeList(areas))
+  if (cells.length) query.set('cell', encodeList(cells))
+  if (devices.length) query.set('devices', encodeList(devices))
+  if (page > 1) query.set('page', String(page))
+  return `${metricHistoryPath(name)}${queryTail(query)}`
+}
+
+/**
+ * Each metric some device in service reports, as `{ name, count, unit, kind }`, `count` being how many
+ * devices do, in name order: cellMetrics() over every device in service, with the catalog's unit and
+ * kind (datatypeKind()), both null for a metric the catalog does not know.
+ */
+export function historyMetrics(devices, schemas, catalog) {
+  const meta = new Map((catalog || []).map(m => [m.name, m]))
+  return cellMetrics(inServiceDevices(devices), schemas).map(m => ({
+    ...m, unit: meta.get(m.name)?.units ?? null, kind: datatypeKind(meta.get(m.name)?.datatype),
+  }))
+}
+
+/**
+ * The devices in service that report `metric` (deviceMetrics()), narrowed to those in one of `areas`
+ * and in one of `cells` (ids) and named in `keys` (telemetry keys), where each is given; in the
+ * order given.
+ */
+export function metricDevices(devices, schemas, metric, { areas = [], cells = [], keys = [] } = {}) {
+  return inServiceDevices(devices).filter(d =>
+    deviceMetrics(d, schemas).includes(metric)
+    && (areas.length === 0 || areas.includes(d.area_id))
+    && (cells.length === 0 || cells.includes(d.cell_id))
+    && (keys.length === 0 || keys.includes(telemetryKey(d))))
+}
+
+/** The most devices the Metric tab draws on one page when the row cap lets one read carry them all. */
+export const METRIC_DRAW_MAX = 200
+
+/**
+ * How many devices a page holds once the Metric tab pages. Twelve at the coarsest resolution, a day,
+ * are 4,400 rows over a Year, inside HISTORY_MAX_ROWS, so a page is one read for any window up to
+ * 416 days.
+ */
+export const METRIC_PAGE_SIZE = 12
+
+/**
+ * The Metric tab's pages for `count` devices over [start, end). One page of everything while one read
+ * carries every device at some resolution (pickResolution()) and there are at most METRIC_DRAW_MAX of
+ * them. Past that, pages of METRIC_PAGE_SIZE, each read apart at the finest resolution its own devices
+ * fit. `page` is clamped into the pages there are; `from` and `to` slice the devices; `resolution` is
+ * pickResolution() for the page, null when even one device does not fit at the coarsest.
+ */
+export function metricPages(startMs, endMs, count, page = 1, { size = METRIC_PAGE_SIZE, drawMax = METRIC_DRAW_MAX } = {}) {
+  const whole = pickResolution(startMs, endMs, count)
+  if (count <= drawMax && whole && whole.perRead >= count) {
+    return { paged: false, page: 1, pages: 1, from: 0, to: count, size: count, resolution: whole }
+  }
+  const pages = Math.max(1, Math.ceil(count / size))
+  const at = Math.min(pages, Math.max(1, Math.trunc(page) || 1))
+  const from = (at - 1) * size
+  const to = Math.min(count, at * size)
+  return { paged: true, page: at, pages, from, to, size, resolution: pickResolution(startMs, endMs, Math.max(1, to - from)) }
+}
+
+/** The page the address names: a whole number above 1, else 1. */
+export const pageFrom = (raw) => {
+  const n = Number(raw)
+  return Number.isInteger(n) && n > 1 ? n : 1
+}
+
+/** Why the devices come a page at a time, and which. */
+export const pagingWords = ({ total, from, to, size }) =>
+  `${total.toLocaleString()} devices are too many to chart at once, so they come ${size} to a page: devices ${from + 1} to ${to}.`
+
+/**
+ * The Overview box's Chart for `picked` devices at window `win`: the Device tab for one, else the Metric
+ * tab narrowed to them, on the metric most of them report (defaultCellMetric()); the picker, narrowed,
+ * when none reports any.
+ */
+export function chartAddress(picked, schemas, win) {
+  if (picked.length === 1) return pickedAddress(telemetryKey(picked[0]), win)
+  const metric = defaultCellMetric(cellMetrics(picked, schemas))
+  return metricAddress(metric, win, { devices: picked.map(telemetryKey) })
+}
+
+// ------------------------------------------------------------------------------------------------
+// The Area tab: one metric across the cells of an area, a mean or a total a cell
+// ------------------------------------------------------------------------------------------------
+
+/** The Area tab's id among History's tabs, and its path: `/history/area` picks an area. */
+export const AREA_TAB = 'area'
+export const AREA_PATH = '/history/area'
+
+/** The path of one area's tab, the picker's when `areaId` is empty. */
+export const areaHistoryPath = (areaId) => (areaId ? `${AREA_PATH}/${encodeURIComponent(areaId)}` : AREA_PATH)
+
+/** The area a path's segments name, `/history/area/<id>`; empty for the picker and for any other path. */
+export function areaIdFrom(segments) {
+  const [, tab, id] = segments
+  if (tab !== AREA_TAB || !id) return ''
+  try { return decodeURIComponent(id) } catch { return '' }
+}
+
+/** What each cell's chart is: the mean across its machines, or their total. The first is the default. */
+export const AGG_MODES = Object.freeze(['mean', 'total'])
+export const DEFAULT_AGG = 'mean'
+
+/** The address of an area's tab at window `win`, with the metric chosen and the total when it is not the mean. */
+export function areaAddress(areaId, win, { metric = '', agg = DEFAULT_AGG } = {}) {
+  const query = windowQuery(win)
+  if (metric) query.set('metric', metric)
+  if (agg !== DEFAULT_AGG) query.set('agg', agg)
+  return `${areaHistoryPath(areaId)}${queryTail(query)}`
+}
+
+/**
+ * The areas the Area tab offers, archived ones too, as `{ area_id, name, is_archived, cells, machines }`:
+ * `cells` its cells in service as historyCells() gives them, `machines` all their machines. A device
+ * Area-Wide in the area belongs to no cell, so it is in neither.
+ */
+export function historyAreas(areas, cells) {
+  return (areas || [])
+    .map(a => {
+      const id = a.area_id ?? a.id
+      const own = cells.filter(c => c.area_id === id && !c.is_archived)
+      return {
+        area_id: id, name: String(a.area_name ?? a.name ?? ''), is_archived: Boolean(a.is_archived),
+        cells: own, machines: own.flatMap(c => c.machines),
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * The finest resolution at which an area's cells can be read: its `devices` fit telemetry_carried()'s
+ * bound (HISTORY_GROUP_READ_ROWS, which the function reads them under) and its `groups`, the rows
+ * returned, fit the row cap. Null when not even a day does.
+ */
+export function pickGroupResolution(startMs, endMs, devices, groups, {
+  resolutions = HISTORY_RESOLUTIONS, maxRows = HISTORY_MAX_ROWS, readRows = HISTORY_GROUP_READ_ROWS,
+} = {}) {
+  for (const r of resolutions) {
+    const buckets = bucketCount(startMs, endMs, r.minutes)
+    if (buckets * Math.max(1, groups) <= maxRows && buckets * Math.max(1, devices) <= readRows) return r
+  }
+  return null
+}
+
+/**
+ * One cell's rows of telemetry_carried_by_group() laid on `starts` as a number series, for its
+ * `agg`: the mean, or the total, which the function withholds (null) for a bucket in which a machine
+ * had no value. `withheld` is true for each such bucket, and a bucket with no row at all is empty.
+ * A bucket is carried when no machine had a reading in it. A line only: its minimum and maximum are
+ * its value.
+ */
+export function groupSeries(rows, starts, agg) {
+  const at = new Map(rows.map(r => [Math.round(Date.parse(r.bucket_ts) / 1000), r]))
+  const series = { kind: 'none', avg: [], min: [], max: [], carried: [], states: [], last: [], withheld: [] }
+  for (const x of starts) {
+    const r = at.get(x)
+    const v = !r ? null : (agg === 'total' ? r.total_double : r.mean_double) ?? null
+    series.avg.push(v)
+    series.min.push(v)
+    series.max.push(v)
+    series.last.push(v)
+    series.states.push(null)
+    series.carried.push(Boolean(r) && r.measured === 0)
+    series.withheld.push(agg === 'total' && Boolean(r) && v === null)
+  }
+  if (series.avg.some(isValue)) series.kind = 'number'
+  return series
+}
+
+/** The stretches of `withheld` flags that are true, as `{ from, to }` indexes, `to` exclusive. */
+export function withheldRuns(withheld) {
+  const runs = []
+  withheld.forEach((w, i) => {
+    const last = runs[runs.length - 1]
+    if (w && last && last.to === i) last.to = i + 1
+    else if (w) runs.push({ from: i, to: i + 1 })
+  })
+  return runs
+}
+
+/**
+ * Where a cell's total was withheld, in words: "withheld from 2 Nov 10:05 to 10:35, where a machine
+ * had no value", or how many stretches there are and the first. Null where it was not.
+ */
+export function withheldWords(withheld, starts, minutes) {
+  const runs = withheldRuns(withheld)
+  if (!runs.length) return null
+  const stretch = (r) => {
+    const from = starts[r.from] * 1000
+    const to = starts[r.to - 1] * 1000 + minutes * MINUTE
+    const sameDay = new Date(from).toDateString() === new Date(to).toDateString()
+    return `from ${momentWords(from, minutes)} to ${minutes < 1440 && sameDay ? clockWords(new Date(to)) : momentWords(to, minutes)}`
+  }
+  const [first] = runs
+  return runs.length === 1
+    ? `withheld ${stretch(first)}, where a machine had no value`
+    : `withheld in ${runs.length} stretches, the first ${stretch(first)}, where a machine had no value`
+}
+
+/** The words for a cell none of whose machines reports the metric chosen. */
+export const silentCellWords = (name, metric) => `None of the machines in ${name} reports ${metric}.`
+
+/**
+ * The status line of the cells' charts: how many cells are charted, what each is, in which buckets,
+ * how many report nothing of the metric, and the devices that sit in no cell.
+ */
+export function cellsWords({ shown, silent, agg, resolution, areaWide = 0 }) {
+  const count = `${shown} ${shown === 1 ? 'cell' : 'cells'}`
+  const what = agg === 'total' ? 'each the total of its machines, withheld where one has no value' : 'each the mean of its machines that have a value'
+  const apart = silent ? `, ${silent} ${silent === 1 ? 'does' : 'do'} not report it` : ''
+  const loose = areaWide ? `; ${areaWide} ${areaWide === 1 ? 'device is' : 'devices are'} Area-Wide, in no cell, so not charted` : ''
+  return `${count}, ${what}, in ${resolution.words}${apart}${loose}`
+}
+
+/**
+ * The heatmap's grid for an area: a row a cell, the mean of the cell's machines at each hour, from
+ * the machines' own (hourGrid()). `cells` are `{ key, keys }`, `keys` being the machines of the cell
+ * the grid was read for. A cell hour is the mean of the machines that have a value in it, `machines`
+ * how many, and `days` the most any of them spans. A cell no machine has a value for has no row.
+ * Same shape as hourGrid(): one scale across every cell.
+ */
+export function cellHourGrid(grid, cells) {
+  const out = new Map()
+  let low = Infinity
+  let high = -Infinity
+  for (const c of cells) {
+    const hours = Array.from({ length: 24 }, (_, h) => {
+      const have = c.keys.map(k => grid.cells.get(k)?.[h]).filter(Boolean)
+      if (!have.length) return null
+      const value = have.reduce((sum, v) => sum + v.value, 0) / have.length
+      low = Math.min(low, value)
+      high = Math.max(high, value)
+      return { value, days: Math.max(...have.map(v => v.days)), machines: have.length }
+    })
+    if (hours.some(Boolean)) out.set(c.key, hours)
+  }
+  return { cells: out, low: low === Infinity ? null : low, high: high === -Infinity ? null : high }
 }

@@ -1195,6 +1195,58 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 88. History's Area read, one rule in two places. telemetry_carried_by_group() (0276) reads every
+// device through telemetry_carried(), which refuses more than c_max_rows buckets times devices, and
+// api.js states the same bound for the Area tab, which keeps the finest resolution it asks for inside
+// it (pickGroupResolution()). It takes the arguments readCarriedByGroup() sends. A bound the page
+// holds and the function does not is a chart the page offers and the function refuses; an argument one
+// side names is an Area tab that draws nothing.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_carried_by_group(', '$fn$;', 'telemetry_carried_by_group()');
+  const carried = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_carried(', '$fn$;', 'telemetry_carried()');
+  const api = read('frontend/src/api.js');
+  const bound = need(api, /^export const HISTORY_GROUP_READ_ROWS = (\d+);$/m, 'HISTORY_GROUP_READ_ROWS in frontend/src/api.js');
+  // Up to the call's closing line, not the first brace: bucket is a template literal.
+  const call = need(api, /supabase\.rpc\('telemetry_carried_by_group', \{([\s\S]*?)\n\s*\}\)/, "readCarriedByGroup()'s rpc call in frontend/src/api.js");
+  if (def && carried && bound && call) {
+    const carriedBound = need(carried.body, /c_max_rows CONSTANT bigint := (\d+);/, `the row bound in ${carried.file}`);
+    const args = need(def.body, /telemetry_carried_by_group\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${def.file}`);
+    if (carriedBound && args) {
+      compare('groupRead', 'the rows one read may take, in api.js and telemetry_carried(), which telemetry_carried_by_group() reads', bound[1], carriedBound[1]);
+      const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+      compare('groupRead', 'the arguments readCarriedByGroup() sends and telemetry_carried_by_group() takes',
+        names(call[1], /^\s*(\w+):/gm), names(args[1], /^\s*(\w+) [a-z]/gm));
+    }
+  }
+}
+
+// 89. History's Area read, the columns. telemetry_carried_by_group() returns the columns
+// readCarriedByGroup() documents, and the page reads no column it does not return: groupSeries() takes
+// bucket_ts, mean_double, total_double and measured, and the Area tab files a row by group_key. A column
+// the page reads and the function does not return is a chart of nothing, and a column documented and not
+// returned sends a reader looking for it.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.telemetry_carried_by_group(', '$fn$;', 'telemetry_carried_by_group()');
+  const api = read('frontend/src/api.js');
+  const doc = need(api, /@returns \{Promise<Array<\{([^}]*)\}>>\}\s*\*\/\s*readCarriedByGroup: async/, "readCarriedByGroup()'s @returns in frontend/src/api.js");
+  const series = need(read('frontend/src/utils/history.js'), /export function groupSeries\(([\s\S]*?)\n\}\n/, 'groupSeries() in frontend/src/utils/history.js');
+  const area = read('frontend/src/components/tabs/HistoryArea.jsx');
+  if (def && doc && series) {
+    const args = need(def.body, /telemetry_carried_by_group\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${def.file}`);
+    if (args) {
+      const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort();
+      const columns = names(args[2], /^\s*(\w+) [a-z]/gm);
+      compare('groupColumns', 'the columns readCarriedByGroup() documents and telemetry_carried_by_group() returns',
+        names(doc[1], /(\w+): /g).join(', '), columns.join(', '));
+      const read = new Set([...series[1].matchAll(/\br\.(\w+)/g)].map((m) => m[1]));
+      for (const m of area.matchAll(/\brow\.(group_key)\b/g)) read.add(m[1]);
+      const missing = [...read].filter((c) => !columns.includes(c));
+      if (missing.length) problems.push(`groupColumns: the Area tab reads ${missing.join(', ')}, which telemetry_carried_by_group() does not return`);
+      else ok.push(`groupColumns: the columns the Area tab reads, ${[...read].sort().join(', ')}, are ones telemetry_carried_by_group() returns`);
+    }
+  }
+}
+
 // 56. History's Overview read, one rule in two places. telemetry_coverage() (0245) caps a read's
 // devices, lets only a small selection sum a block, reads a larger one at the device rollups' own
 // widths, and bounds the buckets it reads; api.js states the same for the page, which reads in parts
@@ -1515,6 +1567,82 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     compare('automationsVocabulary', `the keys automations_parse() admits on an automation, a trigger and an action (${parse.file}) and the schema's properties`,
       admitted.join(' | '),
       [automation, thresholdTrigger, alertAction].map((d) => Object.keys(d.properties).sort().join(', ')).join(' | '));
+  }
+}
+
+// 85. Who may write automations, in the dashboard and in the three writers (0256). The page greys
+// Save, Upload, New Automation, Delete and the switch for any other role; a list the writers do not
+// share is a button that offers an act the database refuses, or withholds one it would allow.
+{
+  const roles = need(read('frontend/src/utils/automations.js'), /export const AUTOMATION_WRITE_ROLES = \[([^\]]*)\]/,
+    'AUTOMATION_WRITE_ROLES in utils/automations.js');
+  const words = (list) => [...list.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]).join(', ');
+  for (const name of ['apply_automations', 'set_automation_enabled', 'delete_automation']) {
+    const fn = lastDefinition(`CREATE OR REPLACE FUNCTION public.${name}(`, '$$;', `${name}()`);
+    const sql = fn && need(fn.body, /has_role\(ARRAY\[([^\]]*)\]\)/, `${name}()'s has_role() list (${fn.file})`);
+    if (roles && sql) {
+      compare('automationsWriters', `the roles the page offers its write controls to and ${name}() admits (${fn.file})`,
+        words(roles[1]), words(sql[1]));
+    }
+  }
+}
+
+// 86. The patterns a file's values answer to, in the page and in the database (0255, 0256): an
+// automation's id, a hold, and the severities. The page uses them to say what a person typed is not an
+// id before asking; a pattern the table's CHECK does not share would let a refusal through, or turn
+// away an id the database keeps. Mirror check 71 holds the schema to the same SQL.
+{
+  const js = read('frontend/src/utils/automations.js');
+  const key = need(js, /export const AUTOMATION_KEY_PATTERN = \/(.+)\/$/m, 'AUTOMATION_KEY_PATTERN in utils/automations.js');
+  const hold = need(js, /export const AUTOMATION_HOLD_PATTERN = \/(.+)\/$/m, 'AUTOMATION_HOLD_PATTERN in utils/automations.js');
+  const severities = need(js, /export const AUTOMATION_SEVERITIES = \[([^\]]*)\]/, 'AUTOMATION_SEVERITIES in utils/automations.js');
+  const sqlKey = need(SCHEMA, /CONSTRAINT automations_key_format CHECK \(\(key ~ '([^']+)'::text\)\)/, 'automations_key_format in the migrations');
+  const parse = lastDefinition('CREATE OR REPLACE FUNCTION public.automations_parse(', '$$;', 'automations_parse()');
+  const sqlHold = parse && need(parse.body.split('\n').find((line) => line.trim().startsWith('c_for ')) ?? '',
+    /CONSTANT text := '([^']+)';/, `c_for in automations_parse() (${parse.file})`);
+  const sqlSeverities = need(SCHEMA, /CONSTRAINT automation_actions_alert_shape\s+CHECK \(\(\(kind <> 'alert'::text\) OR \(severity = ANY \(ARRAY\[([^\]]*)\]\)\)\)\)/,
+    'automation_actions_alert_shape in the migrations');
+  const words = (list) => [...list.matchAll(/'([a-z]+)'/g)].map((m) => m[1]).join(', ');
+  if (key && sqlKey) compare('automationsPatterns', "an automation's id pattern in the page and in the table CHECK", key[1], sqlKey[1]);
+  if (hold && sqlHold) compare('automationsPatterns', `the hold pattern in the page and in automations_parse() (${parse.file})`, hold[1], sqlHold[1]);
+  if (severities && sqlSeverities) compare('automationsPatterns', 'the severities in the page and in the actions table', words(severities[1]), words(sqlSeverities[1]));
+}
+
+// 87. What the page reads out of the database's answers, in the words the functions use (0255, 0256).
+// The fingerprint of an alert an automation raised, which the page takes the trigger out of to open
+// its automation; the reasons automations_for_entity() gives, which the list says in words; and the
+// statuses apply_automations() gives each automation, which the preview draws. A word the page does
+// not know is drawn as it came, but a fingerprint it cannot read opens nothing.
+{
+  const fingerprint = lastDefinition('CREATE OR REPLACE FUNCTION public.automation_alert_fingerprint(', '$$;', 'automation_alert_fingerprint()');
+  const sqlShape = fingerprint && need(fingerprint.body,
+    /ELSE '(condition:)' \|\| p_trigger_id::text \|\| '(:)' \|\| p_entity_id::text \|\| '(:)' \|\| p_metric_name/,
+    `automation_alert_fingerprint()'s composition (${fingerprint.file})`);
+  const routes = read('frontend/src/routes.js');
+  const jsPattern = need(routes, /export const triggerIdOfFingerprint =[\s\S]*?\/\^(condition:)\(\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{12\}\)(:)\//,
+    'triggerIdOfFingerprint() in routes.js');
+  if (sqlShape && jsPattern) {
+    compare('automationsReads', `the fingerprint of an automation's alert, up to its trigger id, in routes.js and automation_alert_fingerprint() (${fingerprint.file})`,
+      `${jsPattern[1]}<trigger>${jsPattern[2]}`, `${sqlShape[1]}<trigger>${sqlShape[2]}`);
+  }
+
+  const js = read('frontend/src/utils/automations.js');
+  const forEntity = lastDefinition('CREATE OR REPLACE FUNCTION public.automations_for_entity(', '$$;', 'automations_for_entity()');
+  const sqlReasons = forEntity && [...forEntity.body.matchAll(/'([a-z][a-z-]*)'::text/g)].map((m) => m[1]);
+  const block = need(js, /export const APPLIES_BECAUSE = \{([\s\S]*?)\n\}/, 'APPLIES_BECAUSE in utils/automations.js');
+  const jsReasons = block && [...block[1].matchAll(/^ {2}(?:'([a-z-]+)'|([a-z]+)): \{/gm)].map((m) => m[1] ?? m[2]);
+  if (sqlReasons && jsReasons) {
+    compare('automationsReads', `the reasons the list says and automations_for_entity() gives (${forEntity.file})`,
+      [...jsReasons].sort().join(', '), [...new Set(sqlReasons)].sort().join(', '));
+  }
+
+  const apply = lastDefinition('CREATE OR REPLACE FUNCTION public.apply_automations(', '$$;', 'apply_automations()');
+  const sqlStatuses = apply && [...new Set([...apply.body.matchAll(/v_status := '([a-z]+)'/g)].map((m) => m[1]))].sort();
+  const statuses = need(js, /export const RESULT_STATUSES = \[([\s\S]*?)\n\]/, 'RESULT_STATUSES in utils/automations.js');
+  const jsStatuses = statuses && [...statuses[1].matchAll(/value: '([a-z]+)'/g)].map((m) => m[1]).sort();
+  if (sqlStatuses && jsStatuses) {
+    compare('automationsReads', `the statuses the preview draws and apply_automations() gives (${apply.file})`,
+      jsStatuses.join(', '), sqlStatuses.join(', '));
   }
 }
 
@@ -1931,6 +2059,24 @@ const compare = (mirror, label, jsValue, sqlValue) => {
     compare('derivedDatatypes', `the numbers a rate and a sum read (${trigger.file})`, `${rangeJs[1]}-${rangeJs[2]}`, `${rangeSql[1]}-${rangeSql[2]}`);
     compare('derivedDatatypes', `what a time in state reads (${trigger.file})`,
       statesJs[1].replace(/\s/g, ''), statesSql[1].replace(/\s/g, ''));
+  }
+}
+
+// 93. The finding for a reading under a derived metric's name, Python and JavaScript. Ingestion
+// records code and detail (conformance.py's DERIVED_NAME_CODE and DERIVED_NAME_DETAIL); Validate
+// Payload reports the same finding from the names the catalogue holds (DERIVED_NAME in
+// utils/payloadConformance.js). A dialog saying other words than the Audit Trail row it predicts
+// describes a finding nobody will ever see recorded. The fixture holds the two to one answer for the
+// cases it lists; this holds the words themselves, which a case can leave stale.
+{
+  const py = read('ingestion/conformance.py');
+  const js = read('frontend/src/utils/payloadConformance.js');
+  const codePy = need(py, /^DERIVED_NAME_CODE = "([a-z_]+)"$/m, 'DERIVED_NAME_CODE in conformance.py');
+  const detailPy = need(py, /^DERIVED_NAME_DETAIL = \(\s*"([^"]+)"\s*\)$/m, 'DERIVED_NAME_DETAIL in conformance.py');
+  const pairJs = need(js, /^const DERIVED_NAME = \['([a-z_]+)', '([^']+)'\]$/m, 'DERIVED_NAME in utils/payloadConformance.js');
+  if (codePy && detailPy && pairJs) {
+    compare('derivedNameFinding', 'the code of the finding for a derived name (conformance.py)', pairJs[1], codePy[1]);
+    compare('derivedNameFinding', 'the words of the finding for a derived name (conformance.py)', pairJs[2], detailPy[1]);
   }
 }
 

@@ -6266,6 +6266,10 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .multiple-link { min-width: 0; color: var(--accent-text); text-decoration: none; }
 .multiple-link:hover .multiple-name-text,
 .multiple-link:focus-visible .multiple-name-text { text-decoration: underline; }
+/* Where a device sits, after its name, on the Metric tab, whose devices are in several places. */
+.multiple-place { min-width: 0; font-size: 12px; font-weight: 400; color: var(--text-muted); }
+/* The Metric tab's pager under the charts: Previous, the page, Next. It sits after the scroller. */
+.history-pager { justify-content: center; }
 /* A machine that does not report the metric: a line in words where its chart would be. */
 .multiple-absent { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--text-muted); }
 /* A section's body under its heading, and the words that open it. */
@@ -7809,6 +7813,101 @@ ol.gateway-steps {
 
 /* The schema detail dialog's five footer buttons do not fit one row at its width. */
 .modal-lg .modal-actions { flex-wrap: wrap; }
+
+/* AUTOMATIONS. The list's select and switch columns, the chip that names the entity a list is
+   narrowed to, the page of one automation, the editor's frame and the apply dialog's results. Every
+   colour is a theme token. The editor itself is drawn in a shadow root (AutomationEditor.jsx), which
+   inherits these tokens, so only its frame is styled here. */
+.automation-select { width: 36px; padding-right: 0; }
+.automation-select input,
+.automation-switch input { accent-color: var(--accent); }
+.automation-summary { max-width: 420px; }
+.automation-summary-text { display: block; min-width: 0; }
+.automation-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.automation-switch:has(input:disabled) { cursor: default; }
+.automation-reason { margin-right: 6px; }
+
+.automation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-glass);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.automation-chip strong { font-weight: 600; }
+.automation-chip-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.automation-chip-clear:hover,
+.automation-chip-clear:focus-visible { background: var(--bg-glass); color: var(--text-primary); }
+.automation-chip-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.automation-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: var(--inset);
+}
+.automation-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.automation-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
+.automation-hint,
+.automation-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.automation-note code,
+.automation-hint code { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); }
+.automation-editor {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+}
+.automation-schema-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.automation-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.automation-section-title { margin: 8px 0 0; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.automation-pairs { max-width: 260px; font-size: 12px; color: var(--text-muted); }
+.automation-trail { margin: 0; font-size: 13px; }
+
+.apply-summary { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.apply-note { margin: 0 0 8px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.apply-note-problem { color: var(--danger-text); }
+.apply-results,
+.apply-reasons { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.apply-result { display: flex; gap: 10px; font-size: 13px; line-height: 1.5; color: var(--text-primary); }
+.apply-result-block { flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-xs); }
+.apply-result-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.apply-changes { font-size: 12px; color: var(--text-muted); }
+.apply-reasons li { display: flex; gap: 10px; font-size: 12px; line-height: 1.5; }
+.apply-line { flex-shrink: 0; color: var(--text-muted); }
 
 /* VOCABULARY. `.vocab-sections` is the card's scroller (`.card-fill-scroll`). A section header reuses
    `.table-group-button` and `.table-group-label`; the strip behind it is the header colour, and pins

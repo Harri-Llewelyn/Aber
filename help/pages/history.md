@@ -2,10 +2,12 @@
 
 History shows a site's readings over a period you choose. Open it to see how a device has behaved: whether a temperature crept up overnight, when a spindle stopped, or what a reading was last Tuesday.
 
-The page opens on **Overview**, its first tab. It shows where readings arrived from every device over the window, before anything is charted. The other three tabs:
+The page opens on **Overview**, its first tab. It shows where readings arrived from every device over the window, before anything is charted. The other tabs:
 
 - **Device** draws one chart for each metric of one device, stacked down the page on the same time axis. Point at a chart to read the value at that moment; every chart shows the same moment. Otherwise each chart's title line shows its latest reading.
+- **Metric** compares one metric across every device that reports it, wherever the devices sit. See [The Metric tab](#the-metric-tab-one-metric-across-devices).
 - **Cell** compares one metric across every machine in a cell. A chart for each machine sits on the same scale, so the odd one stands out. Below them, a grid shows the metric's mean at each hour of the day. See [The Cell tab](#the-cell-tab-comparing-the-machines-in-a-cell).
+- **Area** compares one metric across the cells in an area. Each cell's chart is its mean or its total. See [The Area tab](#the-area-tab-comparing-the-cells-in-an-area).
 - **Alerts** lists every alert that fired over the window, with who acknowledged it and why. See [Alerts](#alerts).
 
 Everyone who can sign in can open History. Each lane and chart shows only what your account may read.
@@ -36,7 +38,7 @@ The part of the window after now is hatched and says **No readings yet**. A cros
 1. Press on a strip and drag across the lanes and the stretch of time you want. A box follows the pointer, and the time axis says what it holds, for example **3 devices · 10:05 – 14:20, 4 h 15 min**.
 2. Let go. The box stays, and a panel opens beside it with what it holds, **Chart**, **Zoom**, **Export CSV** and **Clear**.
 3. Select **Zoom** to show that stretch on Overview. **Back** in your browser undoes it.
-4. Or select **Chart** to open that device's charts on the Device tab, over the box's stretch. Chart takes one device. Charting several comes with the Metric tab.
+4. Or select **Chart**, over the box's stretch. For one device it opens that device's charts on the Device tab. For several it opens the [Metric tab](#the-metric-tab-one-metric-across-devices), narrowed to those devices, on the metric most of them report.
 5. Or select **Export CSV** to save the box's devices, every metric they report, over the box's stretch. [Exporting readings](#exporting-readings) says who may and how long a stretch can be.
 
 Select **Clear**, press **Escape**, or press anywhere outside the panel to clear the box. Scrolling the lanes clears it too.
@@ -223,6 +225,26 @@ Each resolution says how far back it has data, because raw readings are kept for
 
 If a second factor is required to change the platform, exporting asks for it too. Each export is recorded in the Audit Trail, in the **Readings** lane. The entry names who exported. It lists the devices and metrics, the window and the resolution. It also says how many rows left.
 
+## The Metric tab: one metric across devices
+
+The Metric tab shows one metric across every device that reports it, wherever the devices sit. Use it for a question such as "how do the bearing temperatures of all our lathes compare?", when the lathes are in several areas.
+
+1. Select the **Metric** tab under the page's name. It lists the metrics that some device in service reports, with their units and how many devices report each.
+2. Select a metric's name. Or select **Chart** after you pick several devices on Overview: the tab opens on the metric most of them report.
+3. Choose the period in the **time window**. **Zoom in**, **Zoom out** and a drag across a chart work as on the Device tab.
+4. To narrow the devices, select **Filters** and tick areas, cells or devices. Each list offers only what reports the metric. A device in no cell and no area is left out as soon as you choose any area or cell.
+5. To compare another metric, select its name in the toolbar. It keeps the window and the filters.
+
+Each device has a chart, in name order. Its title line carries the device's status dot, its name, and where it sits, for example **Turning · Hall B**. Select the name to open that device's charts on the Device tab. Every chart uses the same scale and the same time axis, as on the Cell tab. A text or flag metric is drawn as a strip for each device, showing every change. A shaded red stretch means an alert on that device was firing.
+
+The page reads every device at once, in the smallest buckets that keep the read to at most 5,000 points. The line above the charts says which, for example **20 devices, in 1-hour buckets**. A point is one bucket of one device, so more devices get larger buckets.
+
+### Many devices
+
+Sometimes one read cannot carry all the devices, even in 1-day buckets. Then the tab shows them a page at a time, 12 devices to a page. It does the same for more than 200 devices, which are too many charts for one page. The line above the charts says so, for example **57 devices are too many to chart at once, so they come 12 to a page: devices 13 to 24.** Select **Next** or **Previous** under the charts to turn the page.
+
+Each page has its own scale, and says so: **One scale for every device on this page.** To compare devices on different pages, narrow the list with **Filters** until they fit on one.
+
 ## The Cell tab: comparing the machines in a cell
 
 The Cell tab shows one metric across every machine in a cell. Use it to find the machine that behaves differently from the rest.
@@ -261,6 +283,40 @@ The grid has a row for each machine and a column for each hour, **00** to **23**
 The grid reads one hourly summary for each hour of the window for each machine, at most 50,000 in all. For a cell of 20 machines, that is at most 104 days. A longer window says so, and the charts above it are not affected. Choose a shorter window, or a cell with fewer machines.
 
 In a time zone that is offset by part of an hour, such as India's, each hourly summary starts at half past the hour. It is counted in the hour it starts in.
+
+## The Area tab: comparing the cells in an area
+
+The Area tab shows one metric across the cells in an area. It is the Cell tab one level up: a chart for each cell, not for each machine. Use it to see which cell runs harder or hotter than the others.
+
+1. Select the **Area** tab under the page's name. It lists the areas.
+2. Select an area's name. Or open the area on the Areas page and select **View History**.
+3. Choose the **metric** in the toolbar. It starts on the metric most of the area's machines report.
+4. Choose how each cell is drawn with **Mean** or **Total**, beside the metric. It starts on **Mean**.
+5. Choose the period in the **time window**. **Zoom in**, **Zoom out** and a drag across a chart work as on the Device tab.
+6. To compare another area, select its name in the toolbar. It keeps the window, the metric and the choice of mean or total.
+
+The tab has two sections. Select a section's name to close it, or **Collapse all** to close both. Both show the cells in service in the area. An archived cell is not shown. A device that is Area-Wide belongs to no cell, so it is in no chart, and the line above the charts says how many.
+
+### Over the window
+
+- **Each cell has a chart.** Its title line carries the cell's name and how many machines it has. Select the name to open that cell on the Cell tab, over the same window and metric.
+- **Mean** draws the mean of the cell's machines that have a value in each bucket.
+- **Total** draws the sum of the cell's machines, but only for a bucket in which every machine has a value. A sum of some of them would read as the real one. Where a total is withheld, the chart has no point. It says so in words, for example **total of 3 machines, withheld from 10:05 to 10:35, where a machine had no value**. A cell that never has a full set says so instead of drawing a chart.
+- **A machine counts when it reports the metric.** A machine that does not is left out of its cell's figure.
+- **Every chart uses the same scale,** said above the charts, for example **One scale for every cell: 6.6 to 56.4 kW**. Every chart shares the time axis.
+- **A cell none of whose machines reports the metric** gets a line in words instead of a chart.
+- **A text or flag metric has no mean or total.** The tab says it needs a number, and offers each cell's own tab, where it is drawn as a strip for each machine.
+- **A shaded red stretch** means an alert on any machine of the cell was firing.
+
+The page reads every machine at once. The data is combined into cells where it is kept, so the buckets can be finer than the Cell tab's for the same machines. The line above the charts says which, for example **4 cells, each the mean of its machines that have a value, in 5-minute buckets**. A window too long for the area, even in 1-day buckets, is not charted, and the page asks for a shorter one.
+
+### By hour of the day
+
+The grid has a row for each cell and a column for each hour, **00** to **23**. Each square is the cell's mean at that hour across the days in the window, in your browser's time zone. It is the mean of the cell's machines' own means, so each machine weighs the same.
+
+The key, the shades, the scale and the reading in words work as on the Cell tab. A square reads, for example, **Turning · 14:00–15:00 · 34 kW, the mean of 7 days, across 3 machines**. The grid stays the mean when you choose **Total**.
+
+The grid reads one hourly summary for each hour of the window for each machine, at most 50,000 in all. For an area of 20 machines, that is at most 104 days. A longer window says so, and the charts above it are not affected.
 
 ## Alerts
 
