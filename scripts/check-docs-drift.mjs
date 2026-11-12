@@ -6060,7 +6060,8 @@ const OPERATOR_PAIRS = [
   const nav = read('frontend/src/navigation.jsx');
   const readme = read('help/README.md');
   const problems325 = [];
-  const inGroup = (group) => [...nav.matchAll(new RegExp(`id: '([a-z-]+)',\\s+label: '[^']+',\\s+group: '${group}'`, 'g'))].map((m) => m[1]);
+  const filed = [...nav.matchAll(/id: '([a-z-]+)',\s+label: '[^']+',\s+group: '([a-z-]+)'/g)].map((m) => ({ id: m[1], group: m[2] }));
+  const inGroup = (group) => filed.filter((t) => t.group === group).map((t) => t.id);
   const model = inGroup('model');
   const automation = inGroup('automation');
   if (model.join(',') !== 'schemas,metrics,vocabulary') {
