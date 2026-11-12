@@ -1223,6 +1223,8 @@ function edgeFunctionNames() {
     'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
     'public.machine_condition_readings': '0283 reads a pair on a derived metric from derived_current(), which gives it a value over the last hour or at the last whole minute; 0270 reads telemetry_latest, which holds nothing under a name no device publishes. The columns are 0270\'s, since a replay runs 0270 again first. A measured metric is read as it was',
     'public.evaluate_automations': '0283 words the value and the threshold in the summary of an alert it raises through automation_value_words() and automation_threshold_words(): a derived metric\'s value rounded to three decimals with its window, a time in state as a percentage, a measured one as it printed; 0271 printed the value as the evaluator read it. Nothing else changes, and the comparison, the threshold and the values the row keeps are the numbers they were',
+    'public.resolve_automation_alerts': '0287 matches a firing alert by the trigger id automation_alert_trigger_id() reads out of its fingerprint, an equality that is hashed, and not by starts_with() against each id\'s prefix, which compared every alert with every id: one call for 3,000 triggers took 5 s. It returns 0 at once for no ids; 0257 scanned for them',
+    'public.automation_trigger_resolves_its_alerts': '0287 returns at once for a delete, since a statement trigger resolves the alerts of the triggers a statement deleted in one call; the update arm is 0257\'s, word for word. 0257 resolved once for each row deleted',
     'public.machine_condition_rows': '0283 says the window in the detail of a derived metric ("is 4.2 over the last hour, below 5") and rounds its value to three decimals; 0270 words every value as it was read',
     'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture, and names the person who started a capture or playback job for the roles that read the jobs; 0203 had no such row and no such arm',
   };
@@ -5888,6 +5890,80 @@ const OPERATOR_PAIRS = [
     fail(`the evaluator's historian variable is not documented where it is read:\n${problems320.map((p) => `        ${p}`).join('\n')}`);
   } else {
     pass(`${VARIABLE} is read by the evaluator's suite and named by the testing document and the migrations' README`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 359. The 0287 section names what the migration declares, and 0257's section points to it. A
+// function or a trigger added to the file and left out of the section is a reader tracing why a
+// delete resolves once, or why a row trigger that does nothing is still there, with no map.
+// -------------------------------------------------------------------------------------------------
+{
+  const MIGRATION = 'supabase/migrations/0287_deleting_an_automation_resolves_its_alerts_in_one_pass.sql';
+  const HEADING = 'Deleting an automation resolves its alerts in one pass (0287)';
+  const readme = read('supabase/README.md');
+  const sql = read(MIGRATION);
+  const problems359 = [];
+  const section = readme.match(new RegExp(`\\n### ${HEADING.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&')}\\n([\\s\\S]*?)(?=\\n### )`))?.[1];
+  const functions = [...sql.matchAll(/^CREATE OR REPLACE FUNCTION public\.([a-z_]+)\(/gm)].map((m) => m[1]);
+  const triggers = [...sql.matchAll(/^SELECT public\.replay_trigger\('public\.[a-z_]+', '([a-z_]+)'/gm)].map((m) => m[1]);
+  if (!section) problems359.push(`supabase/README.md has no section "${HEADING}"`);
+  if (functions.length < 4 || triggers.length < 1) problems359.push(`${MIGRATION}: could not read its functions (${functions.length}) and its trigger (${triggers.length})`);
+  if (section) {
+    for (const name of [...functions, ...triggers]) {
+      if (!section.includes(`\`${name}(`) && !section.includes(`\`${name}\``)) {
+        problems359.push(`the 0287 section does not name \`${name}\`, which ${MIGRATION} declares`);
+      }
+    }
+    if (!/An `AFTER DELETE` statement trigger/.test(section)) problems359.push('the 0287 section does not say the delete resolves in an AFTER DELETE statement trigger');
+    if (!/`0257`'s row trigger stays/.test(section)) problems359.push("the 0287 section does not say 0257's row trigger stays");
+  }
+  const at257 = readme.match(/\n### An automation follows the devices it names \(0257\)\n([\s\S]*?)(?=\n### )/)?.[1];
+  if (!at257) problems359.push('supabase/README.md has no 0257 section');
+  else if (!at257.includes(`*${HEADING}*`)) problems359.push(`the 0257 section does not point to *${HEADING}*`);
+  if (problems359.length) {
+    fail(`supabase/README.md does not describe 0287 as the migration declares it:\n${problems359.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the 0287 section names its ${functions.length} functions and its statement trigger, and 0257's section points to it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 360. The bound of the delete's suite is said as the suite holds it. The suite deletes an automation
+// with TRIGGERS triggers and FIRING firing alerts and allows BOUND_SECONDS; the README's 0287 section,
+// the testing document and the suite's entry in python-suites.mjs say the same numbers, so a bound
+// loosened in the suite until a return to a call for each row passes it is not left described as
+// the old one.
+// -------------------------------------------------------------------------------------------------
+{
+  const SUITE = 'supabase/migrations/test_deleting_an_automation_resolves_its_alerts_in_one_pass.py';
+  const py = read(SUITE);
+  const triggers = Number(py.match(/^TRIGGERS = (\d+)$/m)?.[1]);
+  const firing = Number(py.match(/^FIRING = (\d+)$/m)?.[1]);
+  const bound = py.match(/^BOUND_SECONDS = ([\d.]+)$/m)?.[1];
+  const problems360 = [];
+  if (!triggers || !firing || !bound) problems360.push(`could not read TRIGGERS, FIRING and BOUND_SECONDS from ${SUITE}`);
+  else {
+    const people = `${triggers.toLocaleString('en-US')} triggers and ${firing.toLocaleString('en-US')} firing alerts`;
+    const said = {
+      'supabase/README.md': read('supabase/README.md').match(/\n### Deleting an automation resolves its alerts in one pass \(0287\)\n([\s\S]*?)(?=\n### )/)?.[1] ?? '',
+      'docs/testing.md': read('docs/testing.md'),
+      'scripts/python-suites.mjs': read('scripts/python-suites.mjs'),
+    };
+    for (const [file, text] of Object.entries(said)) {
+      const flat = text.replace(/'\s*\+\s*\n\s*(?:'|")/g, '').replace(/\n#\s*/g, ' ').replace(/\s+/g, ' ');
+      const at = flat.indexOf('test_deleting_an_automation_resolves_its_alerts_in_one_pass.py');
+      const near = file === 'supabase/README.md' ? flat : flat.slice(Math.max(0, at), at + 900);
+      if (file !== 'supabase/README.md' && at < 0) { problems360.push(`${file} does not list ${SUITE}`); continue; }
+      const around = file === 'docs/testing.md' ? flat.slice(Math.max(0, at - 700), at + 100) : near;
+      if (!around.includes(people)) problems360.push(`${file} does not say the suite deletes an automation with ${people}`);
+      if (!around.includes(`under ${bound} s`)) problems360.push(`${file} does not say the delete must take under ${bound} s`);
+    }
+  }
+  if (problems360.length) {
+    fail(`the delete's bound is not said as ${SUITE} holds it:\n${problems360.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the README, the testing document and the suite list say the delete's suite deletes ${triggers.toLocaleString('en-US')} triggers with ${firing.toLocaleString('en-US')} firing alerts in under ${bound} s`);
   }
 }
 
