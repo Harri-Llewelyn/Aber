@@ -355,7 +355,8 @@ class ADerivedMetricIsRead(unittest.TestCase):
 
         # Deleting the automation resolves what it raised.
         status, body = self.rpc("delete_automation", {"p_key": self.automation_key})
-        self.assertEqual(status, 200, body)
+        # delete_automation() returns void, which PostgREST answers with 204 No Content.
+        self.assertEqual(status, 204, body)
         type(self).automation_made = False
         resolved = self.wait_for("the resolved alert", lambda: [a for a in self.alerts() if a["status"] == "resolved"])
         self.assertEqual(len(self.alerts()), 1)
