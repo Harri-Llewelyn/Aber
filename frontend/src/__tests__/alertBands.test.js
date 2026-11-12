@@ -5,6 +5,9 @@
  * names the alerts under the pointer. A stand-in plot records what the plugin draws. In London's
  * zone.
  */
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect, afterAll } from 'vitest'
 import { alertBandPalette, alertBands, alertBandsPlugin, bandText, bandsAt } from '../components/common/alertBands'
 import { occurrenceRow } from '../utils/alertHistory'
@@ -183,5 +186,18 @@ describe('the plugin', () => {
     expect(one.calls.filter(c => c[0] === 'fillRect')).toEqual([])
     run(plugin, 'drawClear', two.u)
     expect(two.calls.filter(c => c[0] === 'fillRect')).toHaveLength(2)
+  })
+})
+
+describe("the readout's size", () => {
+  // jsdom lays nothing out, so the rule is read from App.css. An absolute box with no width of its own
+  // is as wide as the room between its left and the chart's right edge: near that edge the readout
+  // narrowed, wrapped and outgrew the chart before its transform moved it back.
+  const css = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'App.css'), 'utf8')
+  const rule = css.match(/^\.chart-alert-readout \{([^}]*)\}/m)?.[1] ?? ''
+
+  it('is its own width wherever the pointer is, so it never narrows at the right edge', () => {
+    expect(rule).toMatch(/^\s*width: max-content;$/m)
+    expect(rule).toMatch(/^\s*max-width: 70%;$/m)
   })
 })
