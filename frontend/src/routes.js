@@ -20,6 +20,9 @@ export const deviceHistoryUrl = (id) => `/history/device/${encodeURIComponent(id
 /** One cell's machines compared on the History page, at the window it opens on. */
 export const cellHistoryUrl = (id) => `/history/cell/${encodeURIComponent(id)}`
 
+/** One area's cells compared on the History page, at the window it opens on. */
+export const areaHistoryUrl = (id) => `/history/area/${encodeURIComponent(id)}`
+
 /** Every device provisioned with one schema. */
 export const devicesForSchemaUrl = (uuid) => pageUrl('devices', { schema: uuid })
 

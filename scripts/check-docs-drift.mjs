@@ -10600,7 +10600,7 @@ const OPERATOR_PAIRS = [
 // -------------------------------------------------------------------------------------------------
 // 309. The Cell tab is named and reached as the Device tab is. The Cells drawer's History action has
 // the Devices drawer's label and icon, and each goes to its own tab's path; History's tabs list
-// Cell right after Device with a description of its own; the search index offers it; and the help
+// Cell after Device with a description of its own; the search index offers it; and the help
 // page names it. A drawer that says another word for the same act is two names for one thing.
 // -------------------------------------------------------------------------------------------------
 {
@@ -10624,7 +10624,7 @@ const OPERATOR_PAIRS = [
     problems309.push(`frontend/src/routes.js's cellHistoryUrl does not build ${cellPath}/<id>`);
   }
   const order = ids.map((m) => m[1]);
-  if (order.indexOf('cell') < 0 || order.indexOf('cell') !== order.indexOf('device') + 1) problems309.push(`HISTORY_TABS lists ${order.join(', ')}; Cell goes right after Device`);
+  if (order.indexOf('cell') < 0 || order.indexOf('cell') <= order.indexOf('device')) problems309.push(`HISTORY_TABS lists ${order.join(', ')}; Cell goes after Device`);
   if (!ids.find((m) => m[1] === 'cell')?.[3]) problems309.push('HISTORY_TABS gives the Cell tab no description');
   if (!read('frontend/src/searchIndex.js').includes("...tabCard('history', 'cell')")) problems309.push('frontend/src/searchIndex.js has no card for the Cell tab');
   const help = read('help/pages/history.md');
@@ -10666,6 +10666,149 @@ const OPERATOR_PAIRS = [
       problems310.map((p) => `        ${p}`).join('\n'));
   } else {
     pass('the API reference names the arguments and the columns of telemetry_hour_of_day() as 0265 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 326. The three drawers' History actions are alike. The Devices, Cells and Areas drawers each say
+// View History, with the same icon, and go to their own tab's path: deviceHistoryUrl, cellHistoryUrl
+// and areaHistoryUrl, whose paths are the tabs' (the Area tab's is utils/history.js's AREA_PATH). The
+// help names the Areas drawer's action as it does the Cells drawer's. A drawer that says another word
+// for the same act is two names for one thing.
+// -------------------------------------------------------------------------------------------------
+{
+  const action = (file) => read(file).match(/label: '(View History)', icon: <(\w+) size=\{13\} \/>,\s*to: (\w+)\(/);
+  const drawers = [
+    ['Devices', 'frontend/src/components/tabs/DevicesTab.jsx', 'deviceHistoryUrl'],
+    ['Cells', 'frontend/src/components/tabs/CellsTab.jsx', 'cellHistoryUrl'],
+    ['Areas', 'frontend/src/components/tabs/AreasTab.jsx', 'areaHistoryUrl'],
+  ];
+  const found = drawers.map(([name, file, url]) => ({ name, url, match: action(file) }));
+  const problems326 = [];
+  for (const d of found) if (!d.match) problems326.push(`the ${d.name} drawer has no View History action (label, a size-13 icon, to) in its tab`);
+  const have = found.filter((d) => d.match);
+  if (new Set(have.map((d) => d.match[2])).size > 1) {
+    problems326.push(`the drawers' History actions draw ${have.map((d) => `${d.name}: ${d.match[2]}`).join(', ')}; they draw one icon`);
+  }
+  for (const d of have) if (d.match[3] !== d.url) problems326.push(`the ${d.name} drawer's History action goes to ${d.match[3]}, not ${d.url}`);
+  const routes = read('frontend/src/routes.js');
+  const areaPath = read('frontend/src/utils/history.js').match(/^export const AREA_PATH = '([^']+)'$/m)?.[1];
+  if (!areaPath) problems326.push('could not read AREA_PATH out of frontend/src/utils/history.js');
+  else if (!routes.includes(`export const areaHistoryUrl = (id) => \`${areaPath}/\${encodeURIComponent(id)}\``)) {
+    problems326.push(`frontend/src/routes.js's areaHistoryUrl does not build ${areaPath}/<id>`);
+  }
+  if (!read('help/pages/history.md').includes('open the area on the Areas page and select **View History**')) {
+    problems326.push('help/pages/history.md does not say View History opens an area from the Areas page');
+  }
+  if (problems326.length) {
+    fail('The Areas drawer\'s History action is named or reached otherwise than the other two drawers\':\n' + problems326.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the Devices, Cells and Areas drawers all say View History with one icon, each to its own tab, and the help names the Areas drawer\'s');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 327. The API reference describes telemetry_carried_by_group() as 0276 declares it: the arguments
+// the body requires are the function's, and a row has the columns it returns. A reader building on
+// the reference sends an argument the function does not take, or looks for a column it does not return.
+// -------------------------------------------------------------------------------------------------
+{
+  const sql = read('supabase/migrations/0276_history_folds_one_metric_across_the_devices_of_each_group.sql')
+    .match(/telemetry_carried_by_group\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/);
+  const spec = read('docs/openapi.yaml');
+  const path = spec.match(/\n {2}\/rest\/v1\/rpc\/telemetry_carried_by_group:\n[\s\S]*?required: \[([^\]]*)\]/)?.[1];
+  const row = spec.match(/\n {4}TelemetryGroupRow:\n[\s\S]*?properties:\n([\s\S]*?)\n\n/)?.[1];
+  const problems327 = [];
+  if (!sql) problems327.push('could not read telemetry_carried_by_group() out of 0276');
+  if (!path) problems327.push('docs/openapi.yaml has no /rest/v1/rpc/telemetry_carried_by_group with its required arguments');
+  if (!row) problems327.push('docs/openapi.yaml has no TelemetryGroupRow');
+  if (!problems327.length) {
+    const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort().join(', ');
+    const args = names(sql[1], /^\s*(\w+) [a-z]/gm);
+    const columns = names(sql[2], /^\s*(\w+) [a-z]/gm);
+    const required = names(path, /(\w+)/g);
+    const described = names(row, /^ {8}(\w+):/gm);
+    if (required !== args) problems327.push(`docs/openapi.yaml requires ${required}; telemetry_carried_by_group() takes ${args}`);
+    if (described !== columns) problems327.push(`docs/openapi.yaml's TelemetryGroupRow has ${described}; the function returns ${columns}`);
+  }
+  if (problems327.length) {
+    fail('The API reference describes telemetry_carried_by_group() otherwise than 0276 declares it:\n' +
+      problems327.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the API reference names the arguments and the columns of telemetry_carried_by_group() as 0276 declares them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 328. The Metric tab's paging is described as the code holds it. History's help says how many devices
+// a page holds and the number past which the tab pages whatever the row cap carries; frontend/README.md
+// names both constants and their values; the help has a section for each of the Metric and Area tabs; and
+// the 0276 section says the bound its read is held to. A page naming another figure tells a reader how
+// many charts to expect, wrongly.
+// -------------------------------------------------------------------------------------------------
+{
+  const util = read('frontend/src/utils/history.js');
+  const size = Number(util.match(/^export const METRIC_PAGE_SIZE = (\d+)$/m)?.[1]);
+  const draw = Number(util.match(/^export const METRIC_DRAW_MAX = (\d+)$/m)?.[1]);
+  const group = Number(read('frontend/src/api.js').match(/^export const HISTORY_GROUP_READ_ROWS = (\d+);$/m)?.[1]);
+  const problems328 = [];
+  if (!Number.isInteger(size)) problems328.push('could not read METRIC_PAGE_SIZE out of frontend/src/utils/history.js');
+  if (!Number.isInteger(draw)) problems328.push('could not read METRIC_DRAW_MAX out of frontend/src/utils/history.js');
+  if (!Number.isInteger(group)) problems328.push('could not read HISTORY_GROUP_READ_ROWS out of frontend/src/api.js');
+  if (!problems328.length) {
+    const claims = [
+      ['help/pages/history.md', `a page at a time, ${size} devices to a page`],
+      ['help/pages/history.md', `more than ${draw} devices`],
+      ['frontend/README.md', `\`METRIC_PAGE_SIZE\` (${size})`],
+      ['frontend/README.md', `\`METRIC_DRAW_MAX\` (${draw})`],
+      ['supabase/README.md', `more than ${group.toLocaleString('en-GB')} devices times buckets`],
+    ];
+    // Read as one line, so a rewrapped paragraph still says it.
+    for (const [file, said] of claims) if (!read(file).replace(/\s+/g, ' ').includes(said)) problems328.push(`${file} does not say "${said}"`);
+    const help = read('help/pages/history.md');
+    for (const heading of ['The Metric tab: one metric across devices', 'The Area tab: comparing the cells in an area']) {
+      if (!help.includes(`\n## ${heading}\n`)) problems328.push(`help/pages/history.md has no "${heading}" section`);
+    }
+  }
+  if (problems328.length) {
+    fail('History\'s docs describe the Metric and Area tabs otherwise than the code holds them:\n' +
+      problems328.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`History's help and both READMEs say the Metric tab pages at ${size} devices a page and past ${draw}, and the 0276 section says its ${group.toLocaleString('en-GB')}-row bound`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 329. History's tabs are the issue's, in its order: Overview, Device, Metric, Cell, Area, Alerts. Each
+// has a description of its own and a card in the search index, and the page gives each an address
+// (TAB_PATHS in HistoryTab.jsx), so a tab the strip lists is one the page can open and the search can
+// find. A tab in one list and not another is a link that opens the Overview.
+// -------------------------------------------------------------------------------------------------
+{
+  const tabs = read('frontend/src/navigation.jsx').match(/export const HISTORY_TABS = \[([\s\S]*?)\n\]/)?.[1] ?? '';
+  const ids = [...tabs.matchAll(/\{ id: '([a-z]+)', label: '([^']+)', description: ["'`]([^"'`]+)/g)];
+  const order = ids.map((m) => m[1]);
+  const want = ['overview', 'device', 'metric', 'cell', 'area', 'alerts'];
+  const problems329 = [];
+  if (order.join(', ') !== want.join(', ')) problems329.push(`HISTORY_TABS lists ${order.join(', ')}; the issue's order is ${want.join(', ')}`);
+  for (const m of ids) if (!m[3]) problems329.push(`HISTORY_TABS gives the ${m[2]} tab no description`);
+  const search = read('frontend/src/searchIndex.js');
+  for (const id of ['overview', 'metric', 'cell', 'area', 'alerts']) {
+    if (!search.includes(`...tabCard('history', '${id}')`)) problems329.push(`frontend/src/searchIndex.js has no card for the ${id} tab`);
+  }
+  const page = read('frontend/src/components/tabs/HistoryTab.jsx');
+  const paths = page.match(/const TAB_PATHS = \{([\s\S]*?)\n\}/)?.[1] ?? '';
+  for (const key of ['overview', 'device', 'METRIC_TAB', 'CELL_TAB', 'AREA_TAB', 'ALERTS_TAB']) {
+    if (!new RegExp(`\\b${key}\\b`).test(paths)) problems329.push(`TAB_PATHS in HistoryTab.jsx gives the ${key} tab no path`);
+  }
+  const util = read('frontend/src/utils/history.js');
+  for (const [name, path] of [['METRIC_PATH', '/history/metric'], ['AREA_PATH', '/history/area']]) {
+    if (!util.includes(`export const ${name} = '${path}'`)) problems329.push(`utils/history.js's ${name} is not ${path}`);
+  }
+  if (problems329.length) {
+    fail('History\'s tabs are listed, searched or opened otherwise than the issue has them:\n' + problems329.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('History lists Overview, Device, Metric, Cell, Area and Alerts in that order, each described, searched and given an address');
   }
 }
 

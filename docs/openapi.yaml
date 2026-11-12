@@ -921,6 +921,46 @@ paths:
         '401': { description: 'Not authenticated; `anon` may not call it.' }
         '503': { description: 'The historian could not be reached.' }
 
+  /rest/v1/rpc/telemetry_carried_by_group:
+    post:
+      tags: [Telemetry]
+      summary: Fold one numeric metric across the devices of each group, a mean and a total a bucket
+      description: |
+        What the History page's Area tab reads for its cells (`0276`). For each group of devices, one
+        row per bucket: the mean of one metric across the group's devices that have a value in the
+        bucket, and their total, which is there only where EVERY device of the group has a value, since a
+        partial sum reads as a real one. It reads `/rest/v1/rpc/telemetry_carried` for every device in
+        one call, so a quiet bucket counts as the value carried into it, and folds the rows where the read
+        is made: what returns is groups times buckets, not devices times buckets.
+
+        `asset_ids[i]` is in the group `group_keys[i]`. `members` is the group's devices as asked for,
+        `with_value` how many had a value in the bucket and `measured` how many had a reading rather
+        than a carried value. A device that never reports the metric keeps its group from ever having a
+        total, so name only the devices that report it. A text or a flag metric has no row.
+        `SECURITY INVOKER`, so it reads what the caller may read through the telemetry views.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_ts, to_ts, bucket, asset_ids, group_keys, metric_name]
+              properties:
+                from_ts: { type: string, format: date-time }
+                to_ts: { type: string, format: date-time, description: 'After `from_ts`. May be after now.' }
+                bucket: { type: string, example: 5 minutes, description: 'A whole number of minutes, at least one, no months.' }
+                asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000, dev220000000000400080001], description: 'Device Sparkplug IDs (devices.sparkplug_id). Devices times buckets is at most 50,000.' }
+                group_keys: { type: array, items: { type: string }, example: [cell-1, cell-2], description: 'The group of each device, as long as `asset_ids`: `asset_ids[i]` is in `group_keys[i]`.' }
+                metric_name: { type: string, example: Spindle/LOAD, description: 'One metric.' }
+      responses:
+        '200':
+          description: One row per group per bucket that has a value, ordered by group and bucket.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryGroupRow' } }
+        '400': { description: 'Bounds out of order, a bad bucket, a list or the metric missing, lists of different lengths, or more than 50,000 devices times buckets, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   /rest/v1/rpc/telemetry_coverage:
     post:
       tags: [Telemetry]
@@ -7326,6 +7366,19 @@ components:
         hour_of_day: { type: integer, minimum: 0, maximum: 23, description: 'The hour in the time zone asked for: 14 is 14:00 to 15:00.' }
         mean_value: { type: number, format: double, description: 'The mean of that hour across the window''s days.' }
         days: { type: integer, description: 'How many local dates the mean spans.' }
+
+    TelemetryGroupRow:
+      type: object
+      description: |
+        One group's mean and total in one bucket, from `/rest/v1/rpc/telemetry_carried_by_group`.
+      properties:
+        group_key: { type: string, example: cell-1, description: 'The group the devices were named under.' }
+        bucket_ts: { type: string, format: date-time, description: 'Start of the bucket, on the epoch grid.' }
+        mean_double: { type: number, format: double, description: "The mean of the group's devices that have a value in the bucket, carried or measured." }
+        total_double: { type: number, format: double, nullable: true, description: 'Their total, only where every device of the group has a value; null otherwise.' }
+        members: { type: integer, description: "The group's devices, as asked for." }
+        with_value: { type: integer, description: 'How many of them have a value in the bucket. The total is there exactly when this equals `members`.' }
+        measured: { type: integer, description: 'How many of them had a reading in the bucket, not a carried value.' }
 
     TelemetryCoverageRow:
       type: object

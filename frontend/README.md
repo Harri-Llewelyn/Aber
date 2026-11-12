@@ -1676,14 +1676,14 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   stretch are the box's devices). While it is drawn, the axis names it (`.trail-band-words`, held
   inside the track near either end, with `boxWords()`). Once released it stays, and
   `SelectionPopover` opens beside it, as on AMRC ACS's Datasets page: its words, **Chart** (the
-  Device tab for one device at the box's window, off for several with `CHART_SEVERAL_REASON` as its
-  tooltip), **Zoom** (the window as a new history entry) and **Clear**. It is portalled to
+  Device tab for one device at the box's window, and for several the Metric tab narrowed to them,
+  `chartAddress()`), **Zoom** (the window as a new history entry) and **Clear**. It is portalled to
   `<body>` and fixed, as `ToolbarPopover` is, so the card cannot clip it, below the box's visible
   part or above it where the window has no room (`placeSelection()`), with the popovers' arrow
   (*Popover arrows*, `.overview-popover::before`). The popover itself takes focus as it opens, not
   its first action, whose tooltip would cover the box; Tab reaches the actions and stays inside it. Escape, Clear, a press outside, a scroll and a resize close it and clear the
   box, and focus goes back to the box's first lane. The tick boxes (`?device=`, telemetry keys) are
-  the other way: the toolbar's **Chart**, on for exactly one, charts it at the control's window.
+  the other way: the toolbar's **Chart** charts them at the control's window.
   Export CSV is the Device tab's alone. `.history-header` holds Collapse all, the status line and
   the key, with `.trail-header`'s room above and below, on Overview and the Device tab alike.
 - **The address** is `/history/overview` with the window's keys and `device`; bare `/history` opens
@@ -1801,6 +1801,97 @@ Metric tabs reuse: `common/SmallMultiples.jsx`, `common/HourHeatmap.jsx`, `commo
   104 days", while the charts go on. A text or flag metric has no mean: the heatmap says it needs a number and reads nothing.
   The charts and the heatmap are two reads that refresh together and fail apart.
 - **The address** is `/history/cell/<id>` with the window's keys and `metric` (`cellAddress()`); `/history/cell` is the picker.
+
+### History's Metric tab
+
+**History's Metric tab compares one metric across every device that reports it**
+(`tabs/HistoryMetric.jsx`, `/history/metric/<name>?area=&cell=&devices=&page=`). Where the Cell tab
+groups by place, this groups by metric: "how do the bearing temperatures of all our lathes compare?",
+where the lathes sit in several areas. Its arithmetic is `utils/history.js` and `utils/historyReads.js`;
+`__tests__/historyMetricArea.test.js` holds each rule and `historyMetricPage.test.jsx` the page.
+
+- **The metric** is picked from a table at `/history/metric` (`MetricChooser` in `HistoryTab.jsx`: the
+  metric, its unit and how many devices report it, searchable and sortable as the other pickers are), or by
+  the toolbar's metric name (a `ToolbarPopover`, keeping the window and the filters), or from **Chart** in
+  Overview's selection box. The metrics offered are those some device in service reports (`historyMetrics()`:
+  `cellMetrics()` over every device, a last birth's or a schema's), with the catalog's unit and kind where it
+  has them. A metric the catalog does not know is offered all the same, with no unit: it is reported, and the
+  Cell tab charts it. A derived metric has no device reporting it, so it is not here.
+- **The name is one path segment**, `encodeURIComponent()`, so `Spindle/LOAD` is `Spindle%2FLOAD`
+  (`metricHistoryPath()`, `metricNameFrom()`). An address naming a metric no device reports says so and links
+  the picker.
+- **The devices** are those in service that report the metric (`metricDevices()`), narrowed by the Filters
+  panel's Area, Cell (listed under their areas) and Device lists, which offer only what reports the metric.
+  `area` and `cell` are ids and `devices` telemetry keys, comma-separated, as Overview's `device` is. A
+  device in no cell and no area is in none of an Area or Cell filter's choices, so any choice leaves it out.
+  A value the metric does not offer is tidied away. A new set of devices starts at the first page.
+- **One read at the finest resolution the row cap allows**, as the Cell tab has it, with the devices as the
+  series (`metricPages()`, `pickResolution()`), the status line saying which ("12 devices, in 5-minute
+  buckets"); more devices than one read carries are read in parts (`readDeviceSeries()`). A text or flag metric
+  takes `telemetry_changes()` too and draws every change per device, as the Cell tab does. Each chart's title
+  line is the device's status dot, its name as a link to its charts on the Device tab, "Offline" in words, and
+  where it sits (`place`, "Turning · Hall B", an `OverflowText`).
+- **It pages** (`page` in the address), `METRIC_PAGE_SIZE` (12) devices a page, past the number the row cap
+  can carry at the coarsest resolution, a day (`pickResolution()` giving `perRead` fewer than the devices:
+  13 for a Year of day buckets), and past `METRIC_DRAW_MAX` (200) devices where the cap would carry them all,
+  since a page of hundreds of canvases does not draw. Each page is read apart at the finest resolution its own
+  devices fit, and has its own scale ("One scale for every device on this page", `SmallMultiples`' `scope`).
+  The status line says so in words (`pagingWords()`) and a pager, Previous and Next with "Page 2 of 5", sits
+  after the scroller as `ListFoot` does. A page past the last is the last. A page of 12 is one read for any
+  window up to 416 days.
+- **The alert shading, the zoom, Refresh and the refresh timer** are the Cell tab's: `useAlertBandsFor()`
+  over the devices on the page, `useChartBand()`, and one read made again on a change of metric, filters, page
+  or window.
+
+**Chart in Overview's selection box** opens the Device tab for one device, as it did, and for several the Metric tab
+narrowed to them (`devices`), on the metric most of them report (`chartAddress()`, `defaultCellMetric()`), at the
+window the box or the time control holds; with none in common, the picker narrowed to their metrics.
+
+### History's Area tab
+
+**History's Area tab compares one metric across the cells of an area**
+(`tabs/HistoryArea.jsx`, `/history/area/<id>?metric=&agg=mean|total`): the Cell tab one level up, a chart
+for each cell where the Cell tab has one for each machine. `__tests__/historyMetricArea.test.js` holds the
+arithmetic and `historyAreaPage.test.jsx` the page.
+
+- **The area** is picked from a table at `/history/area` (`AreaPicker`: its cells and machines, searchable
+  and sortable), by the toolbar's area name, or from the Areas drawer's **View History** (`areaHistoryUrl()`,
+  worded and drawn as the Cells and Devices drawers'; drift check 326 holds the three alike). Its cells are the
+  cells in it in service (`historyAreas()`), archived ones left out. A device that is Area-Wide in it belongs
+  to no cell, so is in no chart, and the status line says how many.
+- **Each cell's chart is its mean or its total of the metric in every bucket**, which one control picks for
+  the tab (`SegmentedControl`, `agg` in the address, the mean by default). One `telemetry_carried_by_group()`
+  call (`0276`, `api.readCarriedByGroup()`) returns both for every cell, so the control draws the other without
+  a read.
+  - **The mean** is of the machines of the cell that have a value in the bucket, carried or measured.
+  - **A total is drawn only for a bucket in which every machine of the cell has a value**, since a partial
+    sum reads as a real one (`groupSeries()`). Where it was withheld the chart has no point, its head says so in
+    words ("total of 3 machines, withheld from 10:05 to 10:35, where a machine had no value"
+    (`withheldWords()`)), the pointer reads "total withheld, a machine had no value" there (`series.withheld`)
+    and a cell with none at all says it has no total. A machine counts toward its cell when it reports the metric
+    (`deviceMetrics()`): one that does not is left out of the cell's figure, and the cell's count says how many
+    there are.
+- **The browser does not fold.** A telemetry_carried() read is held to the row cap with every machine a series,
+  which would draw an area of 20 machines at 1-hour buckets for a Day and a Week and 1-day buckets for a Month.
+  The function is held to the cells times buckets it returns and the machines times buckets it reads
+  (`pickGroupResolution()`, `HISTORY_GROUP_READ_ROWS`, 50,000, mirror check 88), so it is 5 minutes, 1 hour and
+  1 hour. `supabase/README.md`, *History folds one metric across the devices of each group (0276)*, has the
+  numbers. A window too long for it even at a day says so, and reads nothing.
+- **Each chart is a cell**: its title links to that cell on the Cell tab at the same window and metric
+  (`SmallMultiples`' `to` and `linkTitle`), with its machine count after it. A cell whose machines report
+  nothing of the metric says so in words. The charts share one value scale, said in words ("One scale for every
+  cell"), the time axis, the pointer and the zoom band. A chart's alert shading is the periods an alert on any
+  machine of the cell was firing, one `alert_occurrences()` read for every machine.
+- **The heatmap has a row for each cell** (`HourHeatmap`, its `noun` "Cell"): the cell's mean at each hour of
+  the day across the window's days, in the browser's time zone. `telemetry_hour_of_day()` is read for every
+  machine, as the Cell tab reads it, and each cell's hour is the mean of its machines' that have a value
+  (`cellHourGrid()`, the hour's `machines` said in its words: "the mean of 7 days, across 5 machines"). It stays the
+  mean when the total is chosen. Its window is limited as the Cell tab's is, by `hourOfDayPlan()`, for the area's
+  machines.
+- **A text or flag metric** has no mean or total: the tab says a mean or a total needs a number, offers each
+  cell's own tab, and reads nothing.
+- **The address** is `/history/area/<id>` with the window's keys, `metric` and, for the total, `agg=total`
+  (`areaAddress()`); `/history/area` is the picker.
 
 ### History's Alerts tab
 

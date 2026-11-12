@@ -47,7 +47,7 @@ describe('the groups', () => {
     expect(history.permission).toBeUndefined()
     expect(history.role).toBeUndefined()
     expect(tabIsVisible(history, () => false, 'Operator')).toBe(true)
-    expect(history.pageTabs.map(t => t.id)).toEqual(['overview', 'device', 'cell', 'alerts'])
+    expect(history.pageTabs.map(t => t.id)).toEqual(['overview', 'device', 'metric', 'cell', 'area', 'alerts'])
   })
 
   /**

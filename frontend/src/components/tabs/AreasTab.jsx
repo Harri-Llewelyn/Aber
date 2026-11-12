@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { areaUrl, cellUrl, deviceUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
+import { areaHistoryUrl, areaUrl, cellUrl, deviceUrl, gatewayUrl, siteMapAreaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -53,7 +53,8 @@ import {
   IconShieldAlert,
   IconRadio,
   IconCpu,
-  IconMap
+  IconMap,
+  IconChartLine
 } from '../common/Icons'
 
 /**
@@ -656,6 +657,13 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               : !canManage
                 ? requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)
                 : 'Rename or describe this area'
+          },
+          {
+            // Ungated, as the History page is: the cells of this area compared over time, one metric on
+            // one scale, each its mean or total, and their hours of the day.
+            label: 'View History', icon: <IconChartLine size={13} />,
+            to: areaHistoryUrl(selectedArea.area_id),
+            title: "Compare this area's cells over time on the History page"
           },
           canReadTrail && {
             label: 'View Audit Trail', icon: <IconHistory size={13} />,

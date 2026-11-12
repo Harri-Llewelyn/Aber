@@ -683,6 +683,16 @@ export const SUITES = {
       'unknown zone, bad bounds and more than 50,000 hours times devices refused before any read, ' +
       'and it reads as the caller.',
   },
+  'supabase/migrations/test_history_folds_one_metric_across_the_devices_of_each_group.py': {
+    lanes: ['db'],
+    why:
+      "0276's telemetry_carried_by_group(), over local tables standing in for the historian's hourly " +
+      "rollup: each group's mean across its devices that have a value in a bucket, its total only " +
+      'where every device has one (a carried value counts, a device that never reports keeps the ' +
+      'total away), how many had a reading, no row for a text or a flag, bad bounds, lists of ' +
+      'different lengths and more than 50,000 devices times buckets refused before any read, and it ' +
+      'reads as the caller.',
+  },
   'supabase/migrations/test_history_counts_where_readings_arrived.py': {
     lanes: ['db'],
     why:

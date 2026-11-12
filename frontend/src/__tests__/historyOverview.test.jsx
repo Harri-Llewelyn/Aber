@@ -19,7 +19,7 @@ import { deviceHistoryUrl } from '../routes'
 import { groupDevicesByCell, SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED } from '../utils/cellResolution'
 import { pathSegments } from '../hooks/useUrlState'
 import {
-  AREA_WIDE_GROUP, CHART_SEVERAL_REASON, COVERAGE_KEY, DEFAULT_HISTORY_WINDOW, OVERVIEW_GROUPS_KEY, OVERVIEW_OPEN_LANES_MAX,
+  AREA_WIDE_GROUP, COVERAGE_KEY, DEFAULT_HISTORY_WINDOW, OVERVIEW_GROUPS_KEY, OVERVIEW_OPEN_LANES_MAX,
   TOO_LONG_FOR_MANY, UNFILED_GROUP, boxWords, coverageBlock, coverageCounts, coverageRuns, coverageSteps, groupIsOpen,
   historyPath, overviewAddress, overviewGroups, readOverviewGroups, readingsStopWords, telemetryKey, uncountedStretches,
   intervalMinutes, readWidth, uncountedWords, writeOverviewGroups,
@@ -274,7 +274,7 @@ describe("History's Overview", () => {
   it('is the first tab and the default, and reads every device in service', async () => {
     await visit('/history?span=day&at=2026-11-02')
     const tabs = screen.getByRole('navigation', { name: 'History' })
-    expect(within(tabs).getAllByRole('link').map(a => a.textContent)).toEqual(['Overview', 'Device', 'Cell', 'Alerts'])
+    expect(within(tabs).getAllByRole('link').map(a => a.textContent)).toEqual(['Overview', 'Device', 'Metric', 'Cell', 'Area', 'Alerts'])
     expect(within(tabs).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page')
     expect(within(tabs).getByRole('link', { name: 'Device' })).toHaveAttribute('href', '/history/device')
     const asked = api.readCoverage.mock.calls[0][0]
@@ -303,18 +303,26 @@ describe("History's Overview", () => {
     expect(lanes()).toHaveLength(8)
   })
 
-  it('charts one ticked device from the toolbar, and says why several cannot be', async () => {
+  it('charts one ticked device from the toolbar on the Device tab, and several on the Metric tab', async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
     expect(new URLSearchParams(search()).get('device')).toBe(telemetryKey(LATHE))
     const chart = toolbarChart()
     expect(chart).not.toHaveAttribute('aria-disabled')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Mill 2' }))
-    const several = toolbarChart()
-    expect(several).toHaveAttribute('aria-disabled', 'true')
-    fireEvent.focus(several)
-    await waitFor(() => expect(screen.getByText(CHART_SEVERAL_REASON)).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Mill 2' }))
+    // Two devices open the Metric tab on the metric both report, narrowed to them, at the window shown.
+    expect(toolbarChart()).not.toHaveAttribute('aria-disabled')
+    fireEvent.click(toolbarChart())
+    expect(window.location.pathname).toBe('/history/metric/Spindle%2FLOAD')
+    const asked = new URLSearchParams(search())
+    expect(asked.get('span')).toBe('day')
+    expect(asked.get('at')).toBe('2026-11-02')
+    expect(asked.get('devices').split(',').sort()).toEqual([LATHE, MILL].map(telemetryKey).sort())
+  })
+
+  it('charts one ticked device on the Device tab', async () => {
+    await visit('/history/overview?span=day&at=2026-11-02')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
     fireEvent.click(toolbarChart())
     expect(window.location.pathname).toBe(`/history/device/${telemetryKey(LATHE)}`)
     expect(search()).toBe('?span=day&at=2026-11-02')
@@ -343,8 +351,7 @@ describe("History's Overview", () => {
     // The row above the lanes keeps its status line, and no block is read out under the popover.
     expect(document.querySelector('.history-header .history-meta')).toBeInTheDocument()
     expect(document.querySelector('.overview-readout')).toBeNull()
-    const chart = within(popover).getByRole('button', { name: /Chart/ })
-    expect(chart).toHaveAttribute('aria-disabled', 'true')
+    expect(within(popover).getByRole('button', { name: /Chart/ })).not.toHaveAttribute('aria-disabled')
     // The popover itself takes the focus, so no action's tooltip opens over the box.
     await waitFor(() => expect(popover).toHaveFocus())
     // Escape closes it and clears the box, and focus goes back to the box's first lane.
