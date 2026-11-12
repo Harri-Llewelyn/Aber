@@ -7,6 +7,7 @@ import { TimeWindowControl } from '../common/TimeWindowControl'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { RouteLink } from '../common/RouteLink'
+import { DerivedTag } from '../common/DerivedTag'
 import { SortHeader } from '../common/SortHeader'
 import { IconChartLine, IconCpu, IconFactory, IconLayoutDashboard } from '../common/Icons'
 import { HISTORY_TABS } from '../../navigation'
@@ -188,6 +189,7 @@ function MetricChooser({ devices, schemas, catalog, search, win }) {
                 <RouteLink to={metricAddress(m.name, win, { devices: keys })} className="count-link" title={`Compare ${m.name} across the devices that report it`}>
                   {m.name}
                 </RouteLink>
+                {m.derived && <> <DerivedTag /></>}
               </td>
               <td className="cell-meta">{m.unit ?? '—'}</td>
               <td className="cell-meta">{m.count}</td>
@@ -383,6 +385,7 @@ export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGatewa
                 metric={metricName}
                 devices={loaded.devices}
                 schemas={loaded.schemas}
+                catalog={loaded.catalog}
                 metrics={metrics}
                 areas={areas}
                 cells={cells}

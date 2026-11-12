@@ -172,6 +172,80 @@ describe('the Derived tab', () => {
   })
 })
 
+describe("a derived metric's Applies To line", () => {
+  const press = (n, metrics) => ({ asset_id: 'p' + n, asset_name: 'Press ' + n, last_birth_metrics: metrics, status: 'ONLINE', location_source: 'inherited' })
+  const serve = (devices) => api.get.mockImplementation((path) => {
+    if (path.startsWith('/api/v1/devices')) return Promise.resolve(devices)
+    const key = Object.keys(routes).find(r => path.startsWith(r))
+    return Promise.resolve(key ? routes[key] : [])
+  })
+  const open = async (name) => {
+    const derived = await openTab('Derived')
+    fireEvent.click(within(derived).getByText(name))
+    const drawer = document.querySelector('.context-panel')
+    expect(drawer.getAttribute('aria-hidden')).toBe('false')
+    return drawer
+  }
+  const line = (drawer) => within(drawer).getByText('Applies To').closest('.context-field').textContent
+
+  it('names the devices that report every input', async () => {
+    serve([press(1, ['Controller/PART_COUNT']), press(2, ['Controller/PART_COUNT', 'Other/X']), press(3, ['Other/X'])])
+    renderTab()
+    const drawer = await open('Controller/PARTS_PER_HOUR')
+    expect(line(drawer)).toContain('Press 1 and Press 2, the devices that report Controller/PART_COUNT')
+  })
+
+  it('says how many more when it is more than three, and uses the Metric tab rule: every input', async () => {
+    serve([1, 2, 3, 4, 5].map(n => press(n, ['Controller/PART_COUNT'])))
+    renderTab()
+    const drawer = await open('Controller/PARTS_PER_HOUR')
+    expect(line(drawer)).toContain('Press 1, Press 2 and 3 more, the devices that report Controller/PART_COUNT')
+  })
+
+  it('needs every input of a sum, not one', async () => {
+    serve([press(1, ['Power/PHASE_A']), press(2, ['Power/PHASE_A', 'Power/PHASE_B'])])
+    renderTab()
+    const drawer = await open('Power/TOTAL')
+    expect(line(drawer)).toContain('Press 2, the device that reports Power/PHASE_A and Power/PHASE_B')
+  })
+
+  it('says no device reports the inputs yet, and what they are', async () => {
+    serve([press(1, ['Other/X'])])
+    renderTab()
+    const drawer = await open('Controller/UPTIME')
+    expect(line(drawer)).toContain('No device yet: none reports Controller/EXECUTION')
+  })
+
+  it('leaves a device out that is not in service', async () => {
+    serve([{ ...press(1, ['Controller/PART_COUNT']), is_archived: true }, press(2, ['Controller/PART_COUNT'])])
+    renderTab()
+    const drawer = await open('Controller/PARTS_PER_HOUR')
+    expect(line(drawer)).toContain('Press 2, the device that reports Controller/PART_COUNT')
+  })
+
+  it('says nothing when the devices could not be read', async () => {
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/devices')) return Promise.reject(new Error('down'))
+      const key = Object.keys(routes).find(r => path.startsWith(r))
+      return Promise.resolve(key ? routes[key] : [])
+    })
+    renderTab()
+    const drawer = await open('Controller/PARTS_PER_HOUR')
+    expect(within(drawer).queryByText('Applies To')).toBeNull()
+  })
+
+  it('is not on a measured metric', async () => {
+    serve([press(1, ['Controller/PART_COUNT'])])
+    renderTab()
+    await waitFor(() => expect(queryTabLink('Metric Catalog')).toBeTruthy())
+    fireEvent.click(queryTabLink('Metric Catalog'))
+    fireEvent.click(await screen.findByRole('button', { name: /Expand all/ }))
+    fireEvent.click(await screen.findByText('Power/PHASE_A'))
+    const drawer = document.querySelector('.context-panel')
+    expect(within(drawer).queryByText('Applies To')).toBeNull()
+  })
+})
+
 describe('Add Derived Metric', () => {
   const open = async (props) => {
     const showToast = vi.fn()

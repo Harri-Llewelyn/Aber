@@ -10,16 +10,17 @@ import { inReads } from './history'
  * `metric` for `keys` (telemetry keys) over [startMs, endMs) at `resolution` (pickResolution()'s
  * answer, whose `perRead` is how many devices one read carries): `byAsset`, each device's carried
  * rows, `changes`, each device's change row (only with `stateKind`, a text or a flag), and `reads`,
- * how many parts the carried read took. Throws what the API throws.
+ * how many parts the carried read took. A `derived` metric is read by derived_series() instead, which
+ * returns its rows in the same shape. Throws what the API throws.
  */
-export async function readDeviceSeries({ keys, metric, startMs, endMs, resolution, stateKind = false, signal }) {
+export async function readDeviceSeries({ keys, metric, startMs, endMs, resolution, stateKind = false, derived = false, signal }) {
   const bounds = {
     from: new Date(startMs).toISOString(), to: new Date(endMs).toISOString(), bucketMinutes: resolution.minutes, metricNames: [metric],
   }
   const parts = inReads(keys, resolution.perRead)
   const changeParts = stateKind ? inReads(keys, HISTORY_CHANGE_SERIES) : []
   const [rows, changeRows] = await Promise.all([
-    Promise.all(parts.map(assetIds => api.readCarriedTelemetry({ ...bounds, assetIds }, { signal }))),
+    Promise.all(parts.map(assetIds => (derived ? api.readDerivedSeries : api.readCarriedTelemetry)({ ...bounds, assetIds }, { signal }))),
     Promise.all(changeParts.map(assetIds => api.readTelemetryChanges({ ...bounds, assetIds }, { signal }))),
   ])
   const byAsset = new Map()

@@ -13,6 +13,7 @@ import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
 import { AlertKey } from '../common/AlertKey'
+import { DerivedTag } from '../common/DerivedTag'
 import { SmallMultiples } from '../common/SmallMultiples'
 import { HourHeatmap } from '../common/HourHeatmap'
 import { alertBandsPlugin } from '../common/alertBands'
@@ -24,11 +25,13 @@ import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import { navigate, useUrlState } from '../../hooks/useUrlState'
 import { areaWideInService } from '../../utils/inService'
+import { DERIVED_MAX_ROWS, derivedDefinitions } from '../../utils/derivedMetric'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   AGG_MODES, DEFAULT_AGG, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS,
   areaAddress, bucketStarts, browserTimeZone, cellAddress, cellHourGrid, cellMetrics, cellsWords, datatypeKind, defaultCellMetric,
-  deviceMetrics, groupSeries, hourGrid, hourOfDayPlan, pickGroupResolution, silentCellWords, telemetryKey, withheldWords,
+  derivedReadProblem, deviceMetrics, foldByGroup, groupSeries, hourGrid, hourOfDayPlan, pickGroupResolution, silentCellWords,
+  telemetryKey, withheldWords,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -93,16 +96,17 @@ function AreaSwitcher({ area, areas, win, metric, agg }) {
 
 /** The toolbar's metric: its name, opening the metrics the area's machines report, each with how many do. */
 function MetricSwitcher({ area, metrics, metric, win, agg, total }) {
+  const derived = metrics.find(m => m.name === metric)?.derived
   const [search, setSearch] = useState('')
   const needle = search.trim().toLowerCase()
   const shown = metrics.filter(m => !needle || m.name.toLowerCase().includes(needle))
   return (
     <ToolbarPopover
       label="Choose a metric"
-      buttonLabel={`Metric: ${metric}`}
+      buttonLabel={`Metric: ${metric}${derived ? ' (derived)' : ''}`}
       buttonClass="btn btn-sm btn-ghost control-md history-device-pick"
       tip="Compare another metric across these cells"
-      button={<OverflowText>{metric}</OverflowText>}
+      button={<><OverflowText>{metric}</OverflowText>{derived && <DerivedTag />}</>}
     >
       {({ close }) => (
         <>
@@ -119,6 +123,7 @@ function MetricSwitcher({ area, metrics, metric, win, agg, total }) {
                     onNavigate={() => { close(); navigate(to) }}
                   >
                     <OverflowText>{m.name}</OverflowText>
+                    {m.derived && <DerivedTag />}
                     <span className="history-device-place">{`${m.count} of ${plural(total, 'machine', 'machines')}`}</span>
                   </RouteLink>
                 </li>
@@ -158,7 +163,10 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
   const now = Date.now()
   const cells = area.cells
   const machines = area.machines
-  const metricList = useMemo(() => cellMetrics(machines, schemas), [machines, schemas])
+  const metricList = useMemo(() => {
+    const derivedMetrics = derivedDefinitions(catalog)
+    return cellMetrics(machines, schemas, catalog).map(m => ({ ...m, derived: derivedMetrics.has(m.name) }))
+  }, [machines, schemas, catalog])
   const metricNames = useMemo(() => metricList.map(m => m.name), [metricList])
   const [chosen, setChosen] = useUrlState('metric', '', { allowed: metricNames })
   const [agg, setAgg] = useUrlState('agg', DEFAULT_AGG, { allowed: AGG_MODES })
@@ -167,11 +175,13 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
   const unit = units.get(metric) ?? null
   const kind = useMemo(() => datatypeKind((catalog || []).find(m => m.name === metric)?.datatype), [catalog, metric])
   const stateKind = kind === 'text' || kind === 'flag'
+  // A derived metric is computed from the minutes by derived_series(), and no device publishes it.
+  const derived = metricList.find(m => m.name === metric)?.derived ?? false
 
-  // Who reports the metric, cell by cell: charted and read. The rest are named in words.
+  // Who reports the metric (a derived one: all its inputs), cell by cell: charted and read. The rest are named in words.
   const byCell = useMemo(
-    () => cells.map(c => ({ cell: c, keys: c.machines.filter(d => deviceMetrics(d, schemas).includes(metric)).map(telemetryKey) })),
-    [cells, schemas, metric]
+    () => cells.map(c => ({ cell: c, keys: c.machines.filter(d => deviceMetrics(d, schemas, catalog).includes(metric)).map(telemetryKey) })),
+    [cells, schemas, catalog, metric]
   )
   const assetKeys = useMemo(() => byCell.flatMap(c => c.keys), [byCell])
   const groupKeys = useMemo(() => byCell.flatMap(c => c.keys.map(() => c.cell.cell_id)), [byCell])
@@ -199,22 +209,33 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
       setReading({ needsNumber: true })
       return
     }
-    const resolution = assetKeys.length ? pickGroupResolution(start.getTime(), end.getTime(), assetKeys.length, reporting.length) : null
+    // A derived metric is read per machine and folded here, so its machines times buckets are the rows one read carries.
+    const resolution = assetKeys.length
+      ? pickGroupResolution(start.getTime(), end.getTime(), assetKeys.length, reporting.length, derived ? { readRows: DERIVED_MAX_ROWS } : {})
+      : null
     if (assetKeys.length && !resolution) {
       setReading({ problem: `This window is too long to chart. At 1-day buckets, the ${plural(assetKeys.length, 'machine', 'machines')} in this area would need more rows than one read may carry. Choose a shorter window.` })
       return
     }
-    const span = { start: start.getTime(), end: end.getTime(), resolution, at, metric, unit, windowText: windowWords(win, at) }
+    const tooLong = derived && resolution ? derivedReadProblem(start.getTime(), end.getTime(), resolution.minutes, assetKeys.length, [metric], catalog) : null
+    if (tooLong) {
+      setReading({ problem: tooLong })
+      return
+    }
+    const span = { start: start.getTime(), end: end.getTime(), resolution, at, metric, unit, derived, windowText: windowWords(win, at) }
     if (assetKeys.length === 0) {
       setReading({ ...span, byCell: new Map() })
       return
     }
     setReading(r => ({ ...(r?.byCell ? r : {}), loading: true }))
     try {
-      const rows = await api.readCarriedByGroup(
-        { from: start.toISOString(), to: end.toISOString(), bucketMinutes: resolution.minutes, assetIds: assetKeys, groupKeys, metricName: metric },
-        { signal }
-      )
+      const bounds = { from: start.toISOString(), to: end.toISOString(), bucketMinutes: resolution.minutes, assetIds: assetKeys }
+      const rows = derived
+        ? foldByGroup(
+          await api.readDerivedSeries({ ...bounds, metricNames: [metric] }, { signal }),
+          byCell.map(c => ({ key: c.cell.cell_id, keys: c.keys }))
+        )
+        : await api.readCarriedByGroup({ ...bounds, groupKeys, metricName: metric }, { signal })
       if (id !== latestRead.current) return
       const grouped = new Map()
       for (const row of rows) {
@@ -231,7 +252,7 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
     }
     // The window, the metric and the machines by value: a new object of the same is the same read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [area.area_id, metric, keysKey, windowKey, stateKind])
+  }, [area.area_id, metric, keysKey, windowKey, stateKind, derived])
 
   const readHeat = useCallback(async (signal) => {
     const id = ++latestHeat.current
@@ -243,6 +264,10 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
     }
     if (stateKind) {
       setHeat({ needsNumber: true, metric, unit })
+      return
+    }
+    if (derived) {
+      setHeat({ derived: true, metric, unit })
       return
     }
     const plan = hourOfDayPlan(start.getTime(), end.getTime(), assetKeys.length)
@@ -267,7 +292,7 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [area.area_id, metric, keysKey, windowKey, stateKind])
+  }, [area.area_id, metric, keysKey, windowKey, stateKind, derived])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -436,6 +461,7 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
                         syncKey={`history-area-${area.area_id}`}
                         band={band}
                         noun="cell"
+                        derived={reading.derived}
                       />
                     </div>
                   )
@@ -473,6 +499,7 @@ function HeatBody({ heat, rows, cells, win }) {
   const { metric, unit } = heat ?? {}
   if (!heat || (heat.loading && !heat.grid)) return <LoadingState label="the hours of the day" />
   if (heat.needsNumber) return <NeedsNumber metric={metric} cells={cells} win={win} />
+  if (heat.derived) return <p className="cell-note">{`${metric} is a derived metric, computed over a stretch of time, so it has no mean at each hour of the day. It is charted above.`}</p>
   if (heat.problem) return <p className="cell-note">{heat.problem}</p>
   if (heat.error) return <div className="callout callout-danger">{`The hours of the day could not be read: ${heat.error}`}</div>
   if (heat.grid.low === null) {

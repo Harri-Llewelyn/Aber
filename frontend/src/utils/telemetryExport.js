@@ -9,6 +9,7 @@
  */
 
 import { dayWords } from './alertSuppression'
+import { splitDerived } from './derivedMetric'
 
 /**
  * Who may export readings, as export_telemetry() admits them (mirror check 90). Operators read the
@@ -59,6 +60,20 @@ export function exportWindowProblem(startMs, endMs, maxDays) {
   if (!overExportLimit(startMs, endMs, maxDays)) return null
   const days = Math.ceil((endMs - startMs) / DAY_MS)
   return `An export can cover at most ${dayWords(maxDays)}, set on ${EXPORT_MAX_DAYS_PLACE}. This window is ${days} days.`
+}
+
+/** What an export says where a derived metric is among the metrics chosen. */
+export const DERIVED_EXPORT_NOTE = 'A derived metric is computed when it is drawn, and is not exported. Export its inputs.'
+
+/**
+ * The metrics an export names: `names` less the derived ones, which are computed when drawn and
+ * hold no reading to export (`left`, said with DERIVED_EXPORT_NOTE). export_telemetry() is as it was.
+ * One rule, for every place that offers Export: pass `names` and the catalog, name `names` in the
+ * export and say `left` where it is not empty.
+ */
+export function exportableMetrics(names, catalog) {
+  const { measured, derived } = splitDerived(names, catalog)
+  return { names: measured, left: derived }
 }
 
 /** The most devices and metrics one export may name, as export_telemetry() holds them (mirror check 92). */

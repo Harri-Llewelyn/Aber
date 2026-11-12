@@ -15,6 +15,7 @@ import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
 import { AlertKey } from '../common/AlertKey'
+import { DerivedTag } from '../common/DerivedTag'
 import { SmallMultiples } from '../common/SmallMultiples'
 import { HourHeatmap } from '../common/HourHeatmap'
 import { IconChartLine, IconCpu, IconDownload, IconLayoutDashboard } from '../common/Icons'
@@ -23,16 +24,18 @@ import { usePolling } from '../../hooks/usePolling'
 import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
+import { derivedDefinitions } from '../../utils/derivedMetric'
 import {
-  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem, mayExportReadings,
+  DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem,
+  exportableMetrics, mayExportReadings,
 } from '../../utils/telemetryExport'
 import { navigate, useUrlState } from '../../hooks/useUrlState'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, bucketStarts, browserTimeZone,
-  cellAddress, cellMetrics, changeSeries, chartSeries, datatypeKind, defaultCellMetric, deviceMetrics, hourGrid,
-  hourOfDayPlan, inReads, markBuckets, multiplesWords, pickedAddress, pickResolution, readWords, silentWords, stateReadLine,
-  telemetryKey, validRanges,
+  cellAddress, cellMetrics, changeSeries, chartSeries, datatypeKind, defaultCellMetric, derivedReadProblem, deviceMetrics,
+  hourGrid, hourOfDayPlan, inReads, markBuckets, multiplesWords, pickedAddress, pickResolution, readWords, silentWords,
+  stateReadLine, telemetryKey, validRanges,
 } from '../../utils/history'
 
 /** How often the page looks at the clock, so the now marker follows it. */
@@ -89,16 +92,17 @@ function CellSwitcher({ cell, cells, win, metric }) {
 
 /** The toolbar's metric: its name, opening the metrics the cell's machines report, each with how many do. */
 function MetricSwitcher({ cell, metrics, metric, win, total }) {
+  const derived = metrics.find(m => m.name === metric)?.derived
   const [search, setSearch] = useState('')
   const needle = search.trim().toLowerCase()
   const shown = metrics.filter(m => !needle || m.name.toLowerCase().includes(needle))
   return (
     <ToolbarPopover
       label="Choose a metric"
-      buttonLabel={`Metric: ${metric}`}
+      buttonLabel={`Metric: ${metric}${derived ? ' (derived)' : ''}`}
       buttonClass="btn btn-sm btn-ghost control-md history-device-pick"
       tip="Compare another metric across these machines"
-      button={<OverflowText>{metric}</OverflowText>}
+      button={<><OverflowText>{metric}</OverflowText>{derived && <DerivedTag />}</>}
     >
       {({ close }) => (
         <>
@@ -115,6 +119,7 @@ function MetricSwitcher({ cell, metrics, metric, win, total }) {
                     onNavigate={() => { close(); navigate(to) }}
                   >
                     <OverflowText>{m.name}</OverflowText>
+                    {m.derived && <DerivedTag />}
                     <span className="history-device-place">{`${m.count} of ${total} ${total === 1 ? 'machine' : 'machines'}`}</span>
                   </RouteLink>
                 </li>
@@ -152,7 +157,10 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const machines = cell.machines
-  const metricList = useMemo(() => cellMetrics(machines, schemas), [machines, schemas])
+  const metricList = useMemo(() => {
+    const derivedMetrics = derivedDefinitions(catalog)
+    return cellMetrics(machines, schemas, catalog).map(m => ({ ...m, derived: derivedMetrics.has(m.name) }))
+  }, [machines, schemas, catalog])
   const metricNames = useMemo(() => metricList.map(m => m.name), [metricList])
   const [chosen, setChosen] = useUrlState('metric', '', { allowed: metricNames })
   const metric = chosen || defaultCellMetric(metricList)
@@ -160,9 +168,11 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
   const unit = units.get(metric) ?? null
   const kind = useMemo(() => datatypeKind((catalog || []).find(m => m.name === metric)?.datatype), [catalog, metric])
   const stateKind = kind === 'text' || kind === 'flag'
+  // A derived metric is computed from the minutes by derived_series(), and no device publishes it.
+  const derived = metricList.find(m => m.name === metric)?.derived ?? false
 
-  // Who reports the metric: charted and read. The rest are named in words.
-  const reporters = useMemo(() => machines.filter(d => deviceMetrics(d, schemas).includes(metric)), [machines, schemas, metric])
+  // Who reports the metric (a derived one: reports all its inputs): charted and read. The rest are named in words.
+  const reporters = useMemo(() => machines.filter(d => deviceMetrics(d, schemas, catalog).includes(metric)), [machines, schemas, catalog, metric])
   const keys = useMemo(() => reporters.map(telemetryKey), [reporters])
   const keysKey = keys.join('\n')
 
@@ -190,7 +200,12 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
       return
     }
     const resolution = picked ?? pickResolution(start.getTime(), end.getTime(), 1)
-    const span = { start: start.getTime(), end: end.getTime(), resolution, at, keys, metric, unit, kind, windowText: windowWords(win, at) }
+    const tooLong = derived && keys.length ? derivedReadProblem(start.getTime(), end.getTime(), resolution.minutes, keys.length, [metric], catalog) : null
+    if (tooLong) {
+      setReading({ problem: tooLong })
+      return
+    }
+    const span = { start: start.getTime(), end: end.getTime(), resolution, at, keys, metric, unit, kind, derived, windowText: windowWords(win, at) }
     if (keys.length === 0) {
       setReading({ ...span, byAsset: new Map(), changes: new Map(), reads: 0 })
       return
@@ -201,7 +216,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
     const changeParts = stateKind ? inReads(keys, HISTORY_CHANGE_SERIES) : []
     try {
       const [rows, changeRows] = await Promise.all([
-        Promise.all(parts.map(assetIds => api.readCarriedTelemetry({ ...bounds, assetIds }, { signal }))),
+        Promise.all(parts.map(assetIds => (derived ? api.readDerivedSeries : api.readCarriedTelemetry)({ ...bounds, assetIds }, { signal }))),
         Promise.all(changeParts.map(assetIds => api.readTelemetryChanges({ ...bounds, assetIds }, { signal }))),
       ])
       if (id !== latestRead.current) return
@@ -220,7 +235,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
     }
     // The window, the metric and the machines by value: a new object of the same is the same read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cell.cell_id, metric, keysKey, windowKey, stateKind])
+  }, [cell.cell_id, metric, keysKey, windowKey, stateKind, derived])
 
   const readHeat = useCallback(async (signal) => {
     const id = ++latestHeat.current
@@ -232,6 +247,10 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
     }
     if (stateKind) {
       setHeat({ needsNumber: true, metric, unit, keys })
+      return
+    }
+    if (derived) {
+      setHeat({ derived: true, metric, unit, keys })
       return
     }
     const plan = hourOfDayPlan(start.getTime(), end.getTime(), keys.length)
@@ -255,7 +274,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cell.cell_id, metric, keysKey, windowKey, stateKind])
+  }, [cell.cell_id, metric, keysKey, windowKey, stateKind, derived])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -329,15 +348,18 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
   const { start: shownStart, end: shownEnd } = windowBounds(win, now)
+  // A derived metric is computed when drawn and holds no reading to export.
+  const exportable = exportableMetrics(metric ? [metric] : [], catalog)
   const exportBlocked = !metric ? 'This cell has no metric to export.'
-    : reporters.length === 0 ? `None of the machines in ${cell.name} reports ${metric}, so there is nothing to export.`
-      : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
+    : exportable.left.length ? DERIVED_EXPORT_NOTE
+      : reporters.length === 0 ? `None of the machines in ${cell.name} reports ${metric}, so there is nothing to export.`
+        : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
   /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
   const openExport = () => {
     const at = Date.now()
     const { start, end } = windowBounds(win, at)
     setExporting({
-      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: [metric],
+      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: exportable.names, left: exportable.left,
       from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
     })
   }
@@ -361,6 +383,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
   const shownMetric = reading?.metric ?? metric
   const shownUnit = reading ? reading.unit : unit
   const heading = shownUnit ? `${shownMetric} (${shownUnit})` : shownMetric
+  const shownDerived = reading?.derived ?? derived
 
   return (
     <>
@@ -440,6 +463,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
                         syncKey={`history-cell-${cell.cell_id}`}
                         band={band}
                         stateLine={stateLine?.words ?? null}
+                        derived={shownDerived}
                       />
                     </div>
                   )
@@ -457,6 +481,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
         <TelemetryExportModal
           devices={exporting.devices}
           metricNames={exporting.names}
+          left={exporting.left}
           from={exporting.from}
           to={exporting.to}
           windowWords={exporting.windowWords}
@@ -473,6 +498,7 @@ function HeatBody({ heat, rows }) {
   const { metric, unit } = heat ?? {}
   if (!heat || (heat.loading && !heat.grid)) return <LoadingState label="the hours of the day" />
   if (heat.needsNumber) return <p className="cell-note">{`The heatmap needs a number. ${metric} is text or a flag, so it is charted above by its changes, not averaged.`}</p>
+  if (heat.derived) return <p className="cell-note">{`${metric} is a derived metric, computed over a stretch of time, so it has no mean at each hour of the day. It is charted above.`}</p>
   if (heat.problem) return <p className="cell-note">{heat.problem}</p>
   if (heat.error) return <div className="callout callout-danger">{`The hours of the day could not be read: ${heat.error}`}</div>
   if (heat.grid.low === null) {

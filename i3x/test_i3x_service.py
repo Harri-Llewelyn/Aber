@@ -3211,6 +3211,19 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
         self.assertEqual(objects["dev-two/Axes/X/POSITION"]["typeElementId"],
                          metric["typeElementId"])
 
+    def test_a_derived_metric_has_no_type_since_no_device_carries_it(self):
+        rows = _metric_rows()
+        rows["metric_catalog"].append(
+            {"name": "Axes/X/POSITION_RATE", "datatype": 10, "description": None, "units": "MILLIMETER/HOUR",
+             "standard": None, "deprecated": False, "semantic_id": None,
+             "derivation": {"kind": "counter_rate", "input": "Axes/X/POSITION"}})
+        _, objects, types = self.space(rows)
+        names = {t["elementId"] for t in types}
+        self.assertNotIn("i3x:type:metric:Axes/X/POSITION_RATE", names)
+        # The measured metric it is built on keeps its type, and no object is typed by the derived one.
+        self.assertIn("i3x:type:metric:Axes/X/POSITION", names)
+        self.assertFalse([o for o in objects.values() if o.get("typeElementId") == "i3x:type:metric:Axes/X/POSITION_RATE"])
+
     def test_an_uncatalogued_metric_takes_its_birth_datatype_else_unknown_type(self):
         _, objects, types = self.space()
         types = {t["elementId"]: t for t in types}

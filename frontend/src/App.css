@@ -5035,6 +5035,11 @@ a.chip { text-decoration: none; }
   margin-top: 4px;
 }
 
+/* The Devices drawer's derived metrics: a name, its tag, and its value with the window it is over. */
+.derived-values { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.derived-values li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.derived-value { font-weight: 600; color: var(--text-primary); }
+
 /* Archive and its kin. Separated from the reads above it rather than tinted red on arrival: this
    is a list someone scans, and a permanently red row teaches people to ignore red. The colour
    arrives on hover, when the pointer is already on it. The separation is a gap above the button,

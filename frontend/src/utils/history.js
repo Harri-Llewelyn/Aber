@@ -14,6 +14,7 @@ import { modelledConstraints } from './payloadConformance'
 import { deviceIdentifiers, deviceIds } from './sparkplugId'
 import { SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell } from './cellResolution'
 import { areaWideInService, inServiceDevices } from './inService'
+import { DERIVED_MAX_MINUTES, derivedInputCount, derivedReportedBy } from './derivedMetric'
 import {
   SPAN_IDS, TIME_PRESETS, bandWords, calendarTicks, clockWords, localDay, rollingWindow, windowToQuery,
 } from './timeWindow'
@@ -286,12 +287,16 @@ export function deviceMatches(device, text) {
 
 /**
  * The metrics a device reports: those its last birth declared and those its schemas model, by
- * name. A metric it stopped declaring is still charted while a schema models it.
+ * name. A metric it stopped declaring is still charted while a schema models it. With the `catalog`,
+ * each derived metric whose inputs it reports is among them too, all of them (a derived metric applies
+ * to every device that reports all its inputs); nothing else changes.
  */
-export function deviceMetrics(device, schemas) {
+export function deviceMetrics(device, schemas, catalog = null) {
   const declared = Array.isArray(device?.last_birth_metrics) ? device.last_birth_metrics : []
   const modelled = modelledMetricsAcross(schemasForDevice(device, schemas)) || new Set()
-  return [...new Set([...declared, ...modelled])].filter(Boolean).sort((a, b) => a.localeCompare(b))
+  const measured = [...new Set([...declared, ...modelled])].filter(Boolean)
+  const derived = catalog ? derivedReportedBy(new Set(measured), catalog) : []
+  return [...new Set([...measured, ...derived])].sort((a, b) => a.localeCompare(b))
 }
 
 /**
@@ -709,8 +714,8 @@ export const chartTitle = (metric, unit) => (unit ? `${metric} (${unit})` : metr
  * where the schema declares one. `span` (`{ start, end, now }`, in milliseconds) places a state's
  * runs.
  */
-export function chartSummary({ metric, unit, windowText, resolution, series, validRange, starts, span, read = null }) {
-  const head = `${chartTitle(metric, unit)}, ${windowText}, ${series.runs ? 'every change' : read ?? `in ${resolution.words}`}.`
+export function chartSummary({ metric, unit, windowText, resolution, series, validRange, starts, span, read = null, derived = false }) {
+  const head = `${chartTitle(metric, unit)}${derived ? ', a derived metric' : ''}, ${windowText}, ${series.runs ? 'every change' : read ?? `in ${resolution.words}`}.`
   const shown = series.avg.map((v, i) => i).filter(i => series.avg[i] !== null)
   if (series.kind === 'none' || (series.kind !== 'state' && shown.length === 0)) {
     return `${head} No readings in this window, and none before it.`
@@ -1161,9 +1166,9 @@ export function historyCells(cells, devices, areas = []) {
  * order. A machine reports a metric when its last birth declared it or a schema of it models it
  * (deviceMetrics()).
  */
-export function cellMetrics(machines, schemas) {
+export function cellMetrics(machines, schemas, catalog = null) {
   const counts = new Map()
-  for (const d of machines) for (const m of deviceMetrics(d, schemas)) counts.set(m, (counts.get(m) || 0) + 1)
+  for (const d of machines) for (const m of deviceMetrics(d, schemas, catalog)) counts.set(m, (counts.get(m) || 0) + 1)
   return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -1206,6 +1211,59 @@ export function multiplesWords({ shown, silent, resolution, reads = 1, stateLine
   const apart = silent ? `, ${silent} ${silent === 1 ? 'does' : 'do'} not report it` : ''
   const parts = reads > 1 ? `, read in ${reads} parts` : ''
   return `${count}, in ${resolution.words}${apart}${parts}${stateLine ? `; ${stateLine}` : ''}`
+}
+
+// ------------------------------------------------------------------------------------------------
+// Derived metrics: computed from the minutes (derived_series(), 0282)
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * Why `devices` devices of the derived metrics `names` cannot be read over [startMs, endMs) at
+ * `minutes`-minute buckets, or null. A derived series is read from the minutes at every bucket width, so
+ * what it costs is the window and the devices, not the bucket: past DERIVED_MAX_MINUTES minutes of input
+ * (devices times inputs times the window's minutes) the database refuses it before reading anything.
+ */
+export function derivedReadProblem(startMs, endMs, minutes, devices, names, catalog) {
+  const inputs = derivedInputCount(names, catalog)
+  if (!inputs || !devices) return null
+  const window = bucketCount(startMs, endMs, minutes) * minutes
+  if (devices * inputs * window <= DERIVED_MAX_MINUTES) return null
+  return `A derived metric is computed from the minutes, and this window has too many of them for ${devices === 1 ? 'it' : `${devices.toLocaleString()} devices`}. Choose a shorter window${devices === 1 ? '' : ' or fewer devices'}.`
+}
+
+/**
+ * Each group's rows of derived_series() folded as telemetry_carried_by_group() folds them, so
+ * groupSeries() draws both: the mean of the group's devices that have a value in a bucket, their total
+ * only where EVERY device of the group has one, and how many had a reading and not a carried value.
+ * `groups` are `{ key, keys }`, `keys` being the group's devices as they were asked for; `rows` carry
+ * the device in `asset_id`. Rows come back in the shape that function returns, in bucket order.
+ */
+export function foldByGroup(rows, groups) {
+  const groupOf = new Map()
+  for (const g of groups) for (const k of g.keys) groupOf.set(k, g.key)
+  const sizes = new Map(groups.map(g => [g.key, g.keys.length]))
+  const cells = new Map()
+  for (const r of rows) {
+    const key = groupOf.get(r.asset_id)
+    if (key === undefined || r.avg_double === null || r.avg_double === undefined) continue
+    const id = `${key}\n${r.bucket_ts}`
+    if (!cells.has(id)) cells.set(id, { group_key: key, bucket_ts: r.bucket_ts, sum: 0, with_value: 0, measured: 0 })
+    const c = cells.get(id)
+    c.sum += r.avg_double
+    c.with_value += 1
+    if (!r.is_carried) c.measured += 1
+  }
+  return [...cells.values()]
+    .sort((a, b) => (a.group_key < b.group_key ? -1 : a.group_key > b.group_key ? 1 : Date.parse(a.bucket_ts) - Date.parse(b.bucket_ts)))
+    .map(c => ({
+      group_key: c.group_key,
+      bucket_ts: c.bucket_ts,
+      mean_double: c.sum / c.with_value,
+      total_double: c.with_value === sizes.get(c.group_key) ? c.sum : null,
+      members: sizes.get(c.group_key),
+      with_value: c.with_value,
+      measured: c.measured,
+    }))
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1345,19 +1403,20 @@ export function metricAddress(name, win, { areas = [], cells = [], devices = [],
  */
 export function historyMetrics(devices, schemas, catalog) {
   const meta = new Map((catalog || []).map(m => [m.name, m]))
-  return cellMetrics(inServiceDevices(devices), schemas).map(m => ({
-    ...m, unit: meta.get(m.name)?.units ?? null, kind: datatypeKind(meta.get(m.name)?.datatype),
+  return cellMetrics(inServiceDevices(devices), schemas, catalog).map(m => ({
+    ...m, unit: meta.get(m.name)?.units ?? null, kind: datatypeKind(meta.get(m.name)?.datatype), ...(meta.get(m.name)?.derivation ? { derived: true } : {}),
   }))
 }
 
 /**
  * The devices in service that report `metric` (deviceMetrics()), narrowed to those in one of `areas`
  * and in one of `cells` (ids) and named in `keys` (telemetry keys), where each is given; in the
- * order given.
+ * order given. With the `catalog`, a derived metric is reported by the devices that report all its
+ * inputs.
  */
-export function metricDevices(devices, schemas, metric, { areas = [], cells = [], keys = [] } = {}) {
+export function metricDevices(devices, schemas, metric, { areas = [], cells = [], keys = [], catalog = null } = {}) {
   return inServiceDevices(devices).filter(d =>
-    deviceMetrics(d, schemas).includes(metric)
+    deviceMetrics(d, schemas, catalog).includes(metric)
     && (areas.length === 0 || areas.includes(d.area_id))
     && (cells.length === 0 || cells.includes(d.cell_id))
     && (keys.length === 0 || keys.includes(telemetryKey(d))))

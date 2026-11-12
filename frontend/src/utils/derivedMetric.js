@@ -208,3 +208,90 @@ export function stateOptions(metric) {
   if (metric.datatype === 11) return ['true', 'false']
   return metric.permitted_values?.length ? metric.permitted_values : null
 }
+
+// ------------------------------------------------------------------------------------------------
+// Reading a derived metric: derived_series() and derived_current() (0282)
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * What one derived_series() call may take, as the function holds it (mirror check 95): at most
+ * DERIVED_MAX_ROWS devices times metrics times buckets, which is the dashboard's row cap, and at most
+ * DERIVED_MAX_MINUTES minutes of input (devices times inputs times the window's minutes), and a bucket
+ * of at most DERIVED_MAX_BUCKET_MINUTES.
+ */
+export const DERIVED_MAX_ROWS = 5000
+export const DERIVED_MAX_MINUTES = 250000
+export const DERIVED_MAX_BUCKET_MINUTES = 5760
+
+/**
+ * How many minutes before the last whole minute a derived metric's current value looks, as
+ * derived_window_minutes() says (mirror check 94): 60 for a counter rate and a time in state, 0 for a
+ * sum, which is its value at the last whole minute. Null for a definition of another kind.
+ */
+export function derivedWindowMinutes(derivation) {
+  if (derivation?.kind === 'counter_rate' || derivation?.kind === 'time_in_state') return 60
+  if (derivation?.kind === 'sum') return 0
+  return null
+}
+
+/** The window of a current value in words, after "is 4.2": "over the last hour", "at the last whole minute". */
+export const currentWords = (derivation) => (derivedWindowMinutes(derivation) === 0 ? 'at the last whole minute' : 'over the last hour')
+
+/** The derived metrics of a catalog as a Map of name to definition. */
+export function derivedDefinitions(catalog) {
+  return new Map((catalog || []).filter(isDerived).map(m => [m.name, m.derivation]))
+}
+
+/**
+ * The derived metrics whose inputs are all among `reported`, a device's metric names (what it declared
+ * and what its schemas model: "reports"), by name in name order. A derived metric applies to every
+ * device that reports all its inputs, and an input that is itself derived does not count: none can be.
+ */
+export function derivedReportedBy(reported, catalog) {
+  const has = reported instanceof Set ? reported : new Set(reported)
+  return [...derivedDefinitions(catalog)]
+    .filter(([, def]) => derivationInputs(def).every(input => has.has(input)))
+    .map(([name]) => name)
+    .sort((a, b) => a.localeCompare(b))
+}
+
+/** `names` split into the measured ones and the derived ones, each in the order given. */
+export function splitDerived(names, catalog) {
+  const derived = derivedDefinitions(catalog)
+  return { measured: names.filter(n => !derived.has(n)), derived: names.filter(n => derived.has(n)) }
+}
+
+/** How many inputs the derived metrics among `names` read: a minute of each is a minute of input. */
+export function derivedInputCount(names, catalog) {
+  const derived = derivedDefinitions(catalog)
+  return names.reduce((sum, n) => sum + (derived.has(n) ? derivationInputs(derived.get(n)).length : 0), 0)
+}
+
+/** A list of names as the dashboard says one: "A", "A and B", "A, B and C". */
+const listWords = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`)
+
+/**
+ * The derived drawer's Applies to line, as two parts: `lead`, which the drawer's field label says, and
+ * `rest`. The devices that report every input (the Metric tab's rule): the first two and how many more
+ * past three, then what they report. With none, it says what no device reports yet.
+ */
+function appliesTo(deviceNames, derivation) {
+  const inputs = derivationInputs(derivation)
+  if (deviceNames.length === 0) return { lead: 'Applies to no device yet', rest: `none reports ${listWords(inputs)}` }
+  const shown = deviceNames.length > 3
+    ? `${deviceNames.slice(0, 2).join(', ')} and ${deviceNames.length - 2} more`
+    : listWords(deviceNames)
+  return { lead: 'Applies to', rest: `${shown}, ${deviceNames.length === 1 ? 'the device that reports' : 'the devices that report'} ${listWords(inputs)}` }
+}
+
+/** The whole line: "Applies to: Press 1, Press 2 and 3 more, the devices that report Controller/PART_COUNT". */
+export function appliesToWords(deviceNames, derivation) {
+  const { lead, rest } = appliesTo(deviceNames, derivation)
+  return `${lead}: ${rest}`
+}
+
+/** What the drawer's Applies To field holds beside its label: the line without "Applies to". */
+export function appliesToValue(deviceNames, derivation) {
+  const { rest } = appliesTo(deviceNames, derivation)
+  return deviceNames.length === 0 ? `No device yet: ${rest}` : rest
+}

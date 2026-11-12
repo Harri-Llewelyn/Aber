@@ -2062,6 +2062,100 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// 94. How far back a derived metric's current value looks, SQL and JavaScript (0282).
+// derived_window_minutes() is the one place the rule is written: an hour for a counter rate and a
+// time in state, none for a sum, which is its value at the last whole minute. The Devices drawer words
+// it (currentWords()) from derivedWindowMinutes(). A window the drawer says and the evaluator does not
+// read is a value on the page that is not the one in the alert. Compared kind by kind.
+{
+  const fn = lastDefinition('CREATE OR REPLACE FUNCTION public.derived_window_minutes(', '$$;', 'derived_window_minutes()');
+  const { derivedWindowMinutes } = await import(pathToFileURL(join(ROOT, 'frontend/src/utils/derivedMetric.js')).href);
+  if (fn) {
+    const sql = [...fn.body.matchAll(/WHEN '([a-z_]+)' THEN (\d+)/g)].map((m) => [m[1], Number(m[2])]);
+    if (sql.length === 0) problems.push('derivedWindow: could not find the kinds in derived_window_minutes() -- the file\'s shape changed');
+    for (const [kind, minutes] of sql) {
+      compare('derivedWindow', `the window of a ${kind} in the dashboard and in derived_window_minutes() (${fn.file})`, derivedWindowMinutes({ kind }), minutes);
+    }
+    compare('derivedWindow', 'the kinds that have a window, in the dashboard and in derived_window_minutes()',
+      ['counter_rate', 'time_in_state', 'sum'].filter((k) => derivedWindowMinutes({ kind: k }) !== null).sort().join(', '),
+      sql.map(([k]) => k).sort().join(', '));
+  }
+}
+
+// 95. What one derived_series() read may take, SQL and JavaScript (0282). The function refuses more
+// than c_max_rows devices times metrics times buckets, more than c_max_minutes minutes of input, and a
+// bucket over c_max_bucket minutes; the page checks the same arithmetic before it asks
+// (DERIVED_MAX_ROWS, DERIVED_MAX_MINUTES, derivedReadProblem()), and the rows are the page's own row
+// cap, TELEMETRY_MAX_ROWS. A bound the page holds and the function does not is a read the function
+// refuses; a bucket History offers that the function refuses is a chart of nothing.
+{
+  const def = lastDefinition('CREATE OR REPLACE FUNCTION public.derived_series(', '$fn$;', 'derived_series()');
+  const js = read('frontend/src/utils/derivedMetric.js');
+  const api = read('frontend/src/api.js');
+  const rowsJs = need(js, /export const DERIVED_MAX_ROWS = (\d+)/, 'DERIVED_MAX_ROWS in utils/derivedMetric.js');
+  const minutesJs = need(js, /export const DERIVED_MAX_MINUTES = (\d+)/, 'DERIVED_MAX_MINUTES in utils/derivedMetric.js');
+  const bucketJs = need(js, /export const DERIVED_MAX_BUCKET_MINUTES = (\d+)/, 'DERIVED_MAX_BUCKET_MINUTES in utils/derivedMetric.js');
+  const cap = need(api, /^const TELEMETRY_MAX_ROWS = (\d+);$/m, 'TELEMETRY_MAX_ROWS in frontend/src/api.js');
+  const widths = need(api, /export const HISTORY_RESOLUTIONS = Object\.freeze\(\[([\s\S]*?)\]\);/, 'HISTORY_RESOLUTIONS in frontend/src/api.js');
+  if (def && rowsJs && minutesJs && bucketJs && cap && widths) {
+    const rowsSql = need(def.body, /c_max_rows\s+CONSTANT bigint := (\d+);/, `derived_series()'s row bound (${def.file})`);
+    const minutesSql = need(def.body, /c_max_minutes CONSTANT bigint := (\d+);/, `derived_series()'s minutes bound (${def.file})`);
+    const bucketSql = need(def.body, /c_max_bucket\s+CONSTANT integer := (\d+);/, `derived_series()'s widest bucket (${def.file})`);
+    if (rowsSql && minutesSql && bucketSql) {
+      compare('derivedRead', 'the rows one derived_series() call may return, in the dashboard and in the function', rowsJs[1], rowsSql[1]);
+      compare('derivedRead', "the rows one derived_series() call may return and the page's row cap, TELEMETRY_MAX_ROWS", rowsJs[1], cap[1]);
+      compare('derivedRead', 'the minutes of input one derived_series() call may read, in the dashboard and in the function', minutesJs[1], minutesSql[1]);
+      compare('derivedRead', 'the widest bucket derived_series() takes, in minutes, in the dashboard and in the function', bucketJs[1], bucketSql[1]);
+      const wide = [...widths[1].matchAll(/minutes: (?:TELEMETRY_RESOLUTIONS\['\w+'\]\.bucketMinutes|(\d+))/g)].map((m) => m[1]).filter(Boolean).map(Number);
+      const refused = wide.filter((minutes) => minutes > Number(bucketSql[1]));
+      if (refused.length) problems.push(`derivedRead: History offers ${refused.join(', ')}-minute buckets, which derived_series() refuses`);
+      else ok.push(`derivedRead: derived_series() takes each of History's literal bucket widths (${wide.join(', ')} minutes) and the rollups'`);
+    }
+  }
+}
+
+// 96. What History reads of a derived metric, SQL and JavaScript (0282). derived_series() takes the
+// arguments readDerivedSeries() sends and returns the columns it documents and chartSeries() reads;
+// derived_current() takes what readDerivedCurrent() sends and returns what the Devices drawer reads. A
+// column the page reads and the function does not return is a chart or a line of nothing; an argument
+// one side names is a read that fails.
+{
+  const series = lastDefinition('CREATE OR REPLACE FUNCTION public.derived_series(', '$fn$;', 'derived_series()');
+  const current = lastDefinition('CREATE OR REPLACE FUNCTION public.derived_current(', '$fn$;', 'derived_current()');
+  const api = read('frontend/src/api.js');
+  const chart = need(read('frontend/src/utils/history.js'), /export function chartSeries\(([\s\S]*?)\n\}\n/, 'chartSeries() in frontend/src/utils/history.js');
+  const drawer = read('frontend/src/components/common/DeviceDerivedValues.jsx');
+  const seriesCall = need(api, /supabase\.rpc\('derived_series', \{([\s\S]*?)\n\s*\}\)/, "readDerivedSeries()'s rpc call in frontend/src/api.js");
+  const currentCall = need(api, /supabase\.rpc\('derived_current', \{([\s\S]*?)\n\s*\}\)/, "readDerivedCurrent()'s rpc call in frontend/src/api.js");
+  const seriesDoc = need(api, /@returns \{Promise<Array<\{([^}]*)\}>>\}\s*\*\/\s*readDerivedSeries: async/, "readDerivedSeries()'s @returns in frontend/src/api.js");
+  const currentDoc = need(api, /@returns \{Promise<Array<\{([^}]*)\}>>\}\s*\*\/\s*readDerivedCurrent: async/, "readDerivedCurrent()'s @returns in frontend/src/api.js");
+  const names = (text, re) => [...text.matchAll(re)].map((m) => m[1]).sort();
+  if (series && current && seriesCall && currentCall && seriesDoc && currentDoc) {
+    const sq = need(series.body, /derived_series\(([\s\S]*?)\) RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${series.file}`);
+    const cq = need(current.body, /derived_current\(([^)]*)\)\s*RETURNS TABLE \(([\s\S]*?)\)\s+LANGUAGE/, `the signature in ${current.file}`);
+    if (sq && cq) {
+      compare('derivedColumns', 'the arguments readDerivedSeries() sends and derived_series() takes',
+        names(seriesCall[1], /^\s*(\w+):/gm).join(', '), names(sq[1], /^\s*(\w+) [a-z]/gm).join(', '));
+      compare('derivedColumns', 'the arguments readDerivedCurrent() sends and derived_current() takes',
+        names(currentCall[1], /^\s*(\w+):/gm).join(', '), names(cq[1], /(\w+) text\[\]/g).join(', '));
+      const seriesColumns = names(sq[2], /^\s*(\w+) [a-z]/gm);
+      const currentColumns = names(cq[2], /^\s*(\w+) [a-z]/gm);
+      compare('derivedColumns', 'the columns readDerivedSeries() documents and derived_series() returns', names(seriesDoc[1], /(\w+): /g).join(', '), seriesColumns.join(', '));
+      compare('derivedColumns', 'the columns readDerivedCurrent() documents and derived_current() returns', names(currentDoc[1], /(\w+): /g).join(', '), currentColumns.join(', '));
+      // The columns the chart reads of any row it is given, and those a row of derived_series() lacks by design.
+      const read = new Set([...chart[1].matchAll(/\br\.(\w+)/g)].map((m) => m[1]));
+      const lacks = ['last_string', 'last_bool'];
+      const missing = [...read].filter((c) => !seriesColumns.includes(c) && !lacks.includes(c));
+      if (missing.length) problems.push(`derivedColumns: chartSeries() reads ${missing.join(', ')}, which derived_series() does not return`);
+      else ok.push(`derivedColumns: chartSeries() reads ${[...read].sort().join(', ')}; derived_series() returns all but ${lacks.join(' and ')}, which a number has none of`);
+      const drawn = new Set([...drawer.matchAll(/\brow\.(\w+)/g)].map((m) => m[1]));
+      const absent = [...drawn].filter((c) => !currentColumns.includes(c));
+      if (absent.length) problems.push(`derivedColumns: the Devices drawer reads ${absent.join(', ')}, which derived_current() does not return`);
+      else ok.push(`derivedColumns: the Devices drawer reads ${[...drawn].sort().join(', ')}, which derived_current() returns`);
+    }
+  }
+}
+
 // 93. The finding for a reading under a derived metric's name, Python and JavaScript. Ingestion
 // records code and detail (conformance.py's DERIVED_NAME_CODE and DERIVED_NAME_DETAIL); Validate
 // Payload reports the same finding from the names the catalogue holds (DERIVED_NAME in

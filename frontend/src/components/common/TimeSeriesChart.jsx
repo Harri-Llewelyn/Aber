@@ -28,6 +28,7 @@ import { createPortal } from 'react-dom'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { OverflowText } from './OverflowText'
+import { DerivedTag } from './DerivedTag'
 import { clockWords } from '../../utils/timeWindow'
 import {
   chartPalette, chartTitle, latestWords, markWords, markedStretches, momentWords, nowFraction, readingWords, runNear,
@@ -284,7 +285,7 @@ function StateKey({ stateKey: key, carried, mixed }) {
  * charts that share one (sharedScale()); it too is the same array while it is the same. `label`
  * names the chart in place of its metric and unit, and `head` is what the title line shows in place
  * of that name (a link, a status dot), so a machine's chart is named by the machine: the figure
- * keeps `label` as its name.
+ * keeps `label` as its name. `derived` marks a derived metric's chart with a DerivedTag beside its title.
  *
  * Colours and the axis font are the theme's tokens, read again on a theme switch. The figure is
  * named by its title, and `summary` (chartSummary(), utils/history.js) is its text for a screen
@@ -295,7 +296,7 @@ function StateKey({ stateKey: key, carried, mixed }) {
  */
 export function TimeSeriesChart({
   metric, unit, starts, series, start, end, now, minutes, validRange = null, summary, syncKey, band = null, height = 140,
-  plugins = NO_PLUGINS, note = null, yRange = null, label = null, head = null,
+  plugins = NO_PLUGINS, note = null, yRange = null, label = null, head = null, derived = false,
 }) {
   const id = useId()
   const boxRef = useRef(null)
@@ -382,6 +383,7 @@ export function TimeSeriesChart({
     <figure className="history-chart" {...named}>
       <figcaption className="history-chart-head">
         {head ?? <span className="history-chart-title" id={`${id}-title`}>{title}</span>}
+        {derived && !head && <DerivedTag />}
         {range && <span className="history-chart-range">{range}</span>}
         {note && <span className="history-chart-read">{note}</span>}
         <span className="history-chart-hover" aria-hidden="true">{headWords}</span>

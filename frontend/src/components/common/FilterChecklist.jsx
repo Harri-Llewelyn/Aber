@@ -49,7 +49,7 @@ function GroupHeading({ id, label, options, chosen, onSet }) {
  * in the options' order. ↑ and ↓ move between the checkboxes, and from the search box into them;
  * Space ticks one. While a search is typed, a heading chooses or clears the values it shows.
  *
- * `options` are `{ value, label, group?, note? }`. `note` says why a value cannot occur with what else
+ * `options` are `{ value, label, group?, note?, tag? }`; `tag` is an element after the name, such as a DerivedTag. `note` says why a value cannot occur with what else
  * is chosen ("not with Cells"); a page keeps such a value listed only while it is chosen. `plural`
  * names the values in the search box ("statuses").
  */
@@ -99,6 +99,7 @@ export function FilterChecklist({ label, options, value = NONE, onChange, counts
     <label key={o.value} className={`filter-checklist-option${o.note ? ' filter-checklist-option-noted' : ''}`}>
       <input type="checkbox" value={o.value} checked={chosen.has(o.value)} onChange={() => toggle(o.value)} />
       <span className="filter-checklist-label">{o.label}</span>
+      {o.tag && <>{' '}{o.tag}</>}
       {/* Why a value cannot occur with what else is chosen, in the row's name too, so a value kept
           only because it is chosen says so. */}
       {o.note && <>{' '}<span className="filter-checklist-note">{o.note}</span></>}

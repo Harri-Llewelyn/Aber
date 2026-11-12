@@ -148,7 +148,19 @@ Each chart is titled with the metric's name, with its unit in brackets when the 
 - **A shaded red stretch** means an alert on the device was firing then. A solid line marks where it started and where it ended, when that is inside the window. Its name is written inside the stretch when there is room. Point at it to read which alert it was, its severity and when it fired. Several alerts at once shade the same stretch more deeply.
 - **The line above the charts** then also says how many alerts fired in the window, for example **Shaded while an alert was firing: 2 alerts in this window**. Select it to list them on the [Alerts](#alerts) tab. A state's strip is not shaded.
 
-A chart with nothing to draw says **No readings in this window, and none before it**. A metric is listed when the device declared it the last time it started, or when one of its schemas includes it.
+A chart with nothing to draw says **No readings in this window, and none before it**.
+
+## Derived metrics
+
+A derived metric is one Aber computes from others, such as parts per hour. Its chart, and its name wherever you choose a metric, carry a **Derived** tag. No machine sent its values, so you will not find them in an export.
+
+- **Which devices.** The Device, Cell, Metric and Area tabs offer a derived metric on every device that reports all its inputs. The Metric tab's list counts those devices.
+- **How it is drawn.** A rate is how many the counter grew by in an hour. A time in state is the share of the bucket spent in its states. A sum adds its inputs minute by minute, and the bucket is the average of those minutes.
+- **A device that lacks an input has no value.** No partial sum is drawn. The Area tab's cells follow its rule: a cell's total is drawn only where every machine has a value.
+- **It is read from the minutes.** Time in state is resolved to the minute. A counter that resets and then climbs back past its old value inside one minute is counted short by that old value.
+- **A wide bucket's sum need not equal the sum of its inputs' averages.** An input's average weighs its readings, and a quiet input has few of them. A derived sum weighs every minute alike.
+- **A long window can be too long.** A derived metric is read from the minutes, so a window of many months, or of many devices, is refused. The chart says so. Choose a shorter window or fewer devices.
+- **Two things do not apply.** The hour-of-day grids read measured metrics, so they say so for a derived one. **Export CSV** leaves a derived metric out and says why. Export its inputs. A metric is listed when the device declared it the last time it started, or when one of its schemas includes it.
 
 ## Which bucket size you see
 

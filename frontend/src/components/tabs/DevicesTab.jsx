@@ -57,6 +57,7 @@ import {
 import { AreaIcon } from '../../utils/areaIcon'
 import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
 import { unsTopicField, UnsRenameNote } from '../common/UnsPlace'
+import { derivedValuesField } from '../common/DeviceDerivedValues'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import {
   unmodelledMetrics, schemaIdsForDevice, schemasForDevice, deviceTagList, availableTags, UNMODELLED_TAG,
@@ -1699,6 +1700,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             full: true,
             help: "Derived from the metric groups this device's schema models, plus any live findings."
           },
+          // Each derived metric its inputs make possible, with its current value and its window.
+          ...[derivedValuesField({ device: selectedDevice, schemas, catalog })].filter(Boolean),
           /* Connection method is not shown: nothing writes it and nothing acts on it. The column
              stays; this is a UI omission. */
           {

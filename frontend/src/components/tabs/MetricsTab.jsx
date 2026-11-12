@@ -26,8 +26,9 @@ import {
 } from '../../utils/semanticIdSources'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import {
-  DERIVED_DATATYPE, describeDerivation, isDerived, kindLabel, matchesDerivedSearch, derivationText
+  DERIVED_DATATYPE, appliesToValue, describeDerivation, isDerived, kindLabel, matchesDerivedSearch, derivationText
 } from '../../utils/derivedMetric'
+import { metricDevices } from '../../utils/history'
 import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
 import {
   conceptByName, ashrae223Prefill, ashrae223Sections, metricConcepts
@@ -38,6 +39,7 @@ import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
+import { DerivedTag } from '../common/DerivedTag'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
@@ -211,6 +213,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // Read for the usage count on a deprecation or a semantic id edit and nothing else -- how many
   // schemas model the metric is the impact warning on either act.
   const [schemas, setSchemas]         = useState([])
+  // The devices, for a derived metric's Applies To line; null until read, and when the read fails.
+  const [devices, setDevices]         = useState(null)
   const [vocabulary, setVocabulary]   = useState([])
   const [isoVocabulary, setIsoVocabulary]     = useState([])
   const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
@@ -292,12 +296,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const load = useCallback(async () => {
     loadUncatalogued()
     try {
-      const [cat, grp, sch] = await Promise.all([
+      const [cat, grp, sch, dev] = await Promise.all([
         api.get('/api/v1/metric-catalog'),
         api.get('/api/v1/metric-groups'),
         api.get('/api/v1/schemas'),
+        api.get('/api/v1/devices').catch(() => null),
       ])
-      setCatalog(cat); setGroups(grp); setSchemas(sch)
+      setCatalog(cat); setGroups(grp); setSchemas(sch); setDevices(dev)
     } finally { setLoaded(true) }
   }, [loadUncatalogued])
 
@@ -860,7 +865,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       {/* The catalog lists measured metrics only; Deprecated lists both, so a derived one says so. */}
       <td>
         <span className="mono">{m.name}</span>
-        {isDerived(m) && <> <Badge tone="neutral" size="sm" title="Aber computes this metric from others. Its drawer has the definition.">Derived</Badge></>}
+        {isDerived(m) && <> <DerivedTag /></>}
       </td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
       <td className="cell-meta">{m.standard || LOCAL_EXTENSION_LABEL}</td>
@@ -1296,6 +1301,16 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             value: <Definition derivation={selected.derivation} />,
             full: true,
             help: 'How Aber computes it from other metrics. It cannot be changed: a different definition is a new derived metric.'
+          },
+          // The devices in service that report every input: the ones the Metric tab compares it across.
+          isDerived(selected) && devices && {
+            label: 'Applies To',
+            value: appliesToValue(
+              metricDevices(devices, schemas, selected.name, { catalog }).map(d => d.asset_name),
+              selected.derivation
+            ),
+            full: true,
+            help: 'Every device in service that reports all its inputs. Nothing is stored: the value is computed when it is drawn.'
           },
           !isDerived(selected) && { label: 'Standard', value: selected.standard || LOCAL_EXTENSION_LABEL },
           !isDerived(selected) && { label: 'Category', value: selected.category || null },
