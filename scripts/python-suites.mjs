@@ -707,6 +707,17 @@ export const SUITES = {
       'different lengths and more than 50,000 devices times buckets refused before any read, and it ' +
       'reads as the caller.',
   },
+  'supabase/migrations/test_history_draws_a_derived_metric_from_the_minutes.py': {
+    lanes: ['db'],
+    why:
+      "0282's derived_series() and derived_current(), over local tables standing in for the " +
+      "historian's one-minute rollup: a counter rate is the increase per hour with a reset counting " +
+      'its new value, a time in state is the share of the bucket\'s minutes with a state carried ' +
+      'across a quiet stretch, a sum is the time-average of the per-minute signed sum and a device ' +
+      'missing an input has no row, a window of more than one chunk answers as one would (whole ' +
+      'buckets, and the devices of a wide bucket), only whole minutes are read, every refusal comes ' +
+      'before any read, each kind has its current value by one rule, and anon may call neither.',
+  },
   'supabase/migrations/test_an_export_of_readings_is_bounded_and_recorded_in_the_database.py': {
     lanes: ['db'],
     why:

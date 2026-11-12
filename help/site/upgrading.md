@@ -1537,6 +1537,23 @@ Check any client that reads the catalog from `/rest/v1/metric_catalog`:
   metrics. No device publishes a derived metric, and it has no semantic id. The dashboard's schema
   builder already leaves them out.
 
+### From 1.8.0, History draws a derived metric, and an automation can read one
+
+From 1.8.0, Aber computes a derived metric when it is read. The upgrade adds three functions and changes
+no row.
+
+- **History** offers each derived metric on a device that reports all its inputs, and draws it with a
+  *derived* tag. The Devices drawer lists its current value.
+- **Export leaves it out.** A derived metric is not a reading. Export its inputs.
+- **An automation on a derived metric now fires.** Before, a file could name one and it never fired.
+  The first evaluation after the upgrade judges each such automation. Check the Automations page.
+- **A client that reads the AAS export** now finds each derived metric a device reports the inputs of.
+  It has no `semanticId`, and the export counts it as unmapped.
+- **New API calls** are `/rest/v1/rpc/derived_series` and `/rest/v1/rpc/derived_current`, for every
+  signed-in role. Grafana cannot call them.
+
+The i3X service serves no derived metric.
+
 ### From 1.8.0, `cells.grafana_url` is removed
 
 1.7.0 deprecated a cell's `grafana_url` (see

@@ -1221,6 +1221,8 @@ function edgeFunctionNames() {
     'public.end_person_sessions': '0212 refuses your own sessions by naming Sign Out of All Other Sessions on the Profile page\'s Sessions tab, since Sign Out ends only the browser in use; 0207 named Sign Out. Nothing else changes',
     'public.set_display_name': '0213 keeps the row when it clears the name of a person who has a picture, since the picture is its owner\'s alone to clear; 0203 deleted the row, which would have let an Administrator remove another person\'s picture',
     'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
+    'public.machine_condition_readings': '0283 reads a pair on a derived metric from derived_current(), which gives it a value over the last hour or at the last whole minute; 0270 reads telemetry_latest, which holds nothing under a name no device publishes. The columns are 0270\'s, since a replay runs 0270 again first. A measured metric is read as it was',
+    'public.machine_condition_rows': '0283 says the window in the detail of a derived metric ("is 4.2 over the last hour, below 5") and rounds its value to three decimals; 0270 words every value as it was read',
     'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture, and names the person who started a capture or playback job for the roles that read the jobs; 0203 had no such row and no such arm',
   };
 

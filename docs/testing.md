@@ -661,6 +661,18 @@ python supabase/migrations/test_history_averages_a_metric_by_the_hour_of_day.py
 # and it reads as the caller. Every test rolls back.
 python supabase/migrations/test_history_folds_one_metric_across_the_devices_of_each_group.py
 
+# History draws a derived metric from the minutes (0282). derived_series() and derived_current(),
+# over local tables standing in for the historian's one-minute rollup. A counter rate is the increase
+# per hour, a reset counting its new value; a time in state is the share of the bucket's minutes, a
+# state carried across a quiet stretch and a flag read as true or false; a sum is the time-average of
+# the per-minute signed sum, and a device missing an input, or late with it, has no value for the
+# minutes before. A window of 35 days answers as one chunk would, and so do 9 devices of a 4-day
+# bucket, against a reference written from the rule. Only whole minutes are read. Each refusal comes
+# before any read (the rollups' tables are gone in those tests): a metric that is not derived, bad
+# bounds and buckets, more than 5,000 rows, more than 250,000 minutes of input. Each kind has its
+# current value by one rule, and anon may call neither. Every test rolls back.
+python supabase/migrations/test_history_draws_a_derived_metric_from_the_minutes.py
+
 # An export of readings is checked, bounded and recorded in the database (0278, 0279).
 # history.export_max_days is a History setting from 1 to 366, 14 unless an Administrator changes it.
 # export_telemetry() refuses, before any read (the historian's relations are gone in those tests):

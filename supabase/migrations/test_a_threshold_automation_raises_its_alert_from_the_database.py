@@ -30,6 +30,10 @@ What is held here:
   * The state table: every role reads it, nobody writes it, anon touches nothing.
   * The job: scheduled once, every minute, and the confirmation window of a condition: fingerprint
     is the interval and a margin.
+  * A derived metric (0283). A pair on one is read from derived_current() and not from
+    telemetry_latest: a counter rate and a time in state over the last hour, a sum at the last whole
+    minute, observed_at the minute that window ends at. The detail says the window, a hold and an
+    alert work as for any metric, and a measured pair beside it is read as before.
 """
 import json
 import os
@@ -39,7 +43,7 @@ from decimal import Decimal
 
 import psycopg2
 import psycopg2.errors
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
@@ -832,6 +836,135 @@ class TheJob(EvaluatorBase):
         finally:
             other.rollback()
             other.close()
+
+
+class DerivedMetrics(Standing):
+    """A pair on a derived metric, against local tables for the telemetry_1m the current value reads."""
+
+    RATE = "Test_0283/Parts_Per_Hour"
+    COUNT = "Test_0283/Part_Count"
+    UPTIME = "Test_0283/Uptime"
+    STATE = "Test_0283/Execution"
+    POWER = "Test_0283/Power"
+    PHASE_A = "Test_0283/Phase_A"
+    PHASE_B = "Test_0283/Phase_B"
+
+    def setUp(self):
+        super().setUp()
+        self.owner()
+        for rollup in ("telemetry_1m", "telemetry_5m", "telemetry_1h"):
+            self.cur.execute(
+                f"DROP FOREIGN TABLE timescale.{rollup} CASCADE;"
+                f"CREATE TABLE timescale.{rollup} (bucket timestamptz NOT NULL, asset_id text NOT NULL,"
+                " metric_name text NOT NULL, sum_double double precision, n_double bigint, min_double double precision,"
+                " max_double double precision, last_double double precision, last_string text, last_bool boolean,"
+                " n_rows bigint);")
+        for name, datatype, units in ((self.COUNT, 10, "COUNT"), (self.STATE, 12, None),
+                                      (self.PHASE_A, 10, "KILOWATT"), (self.PHASE_B, 10, "KILOWATT")):
+            self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, units) VALUES (%s, %s, %s);",
+                             (name, datatype, units))
+        for name, derivation in (
+                (self.RATE, {"kind": "counter_rate", "input": self.COUNT}),
+                (self.UPTIME, {"kind": "time_in_state", "input": self.STATE, "states": ["ACTIVE"]}),
+                (self.POWER, {"kind": "sum", "inputs": [{"metric": self.PHASE_A, "sign": 1}, {"metric": self.PHASE_B, "sign": 1}]})):
+            self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, derivation) VALUES (%s, 10, %s);",
+                             (name, Json(derivation)))
+        self.cur.execute("SELECT date_trunc('minute', now());")
+        self.end = self.cur.fetchone()[0]
+
+    def counts(self, per_minute, minutes=120, device=DEV_A):
+        """A counter rising by per_minute in each of the minutes before the last whole minute."""
+        self.owner()
+        self.cur.execute("DELETE FROM timescale.telemetry_1m WHERE asset_id = %s AND metric_name = %s;",
+                         (self.sparkplug[device], self.COUNT))
+        execute_values(self.cur,
+                       "INSERT INTO timescale.telemetry_1m (bucket, asset_id, metric_name, sum_double, n_double,"
+                       " min_double, max_double, last_double, n_rows) VALUES %s",
+                       [(self.end - timedelta(minutes=minutes - i), self.sparkplug[device], self.COUNT, v, 1, v, v, v, 1)
+                        for i, v in enumerate(range(0, per_minute * minutes, per_minute))])
+
+    def phase(self, metric, value, device=DEV_A):
+        self.owner()
+        self.cur.execute("INSERT INTO timescale.telemetry_1m (bucket, asset_id, metric_name, sum_double, n_double,"
+                         " min_double, max_double, last_double, n_rows) VALUES (%s, %s, %s, %s, 1, %s, %s, %s, 1);",
+                         (self.end - timedelta(minutes=10), self.sparkplug[device], metric, value, value, value, value))
+
+    def test_a_pair_on_a_derived_metric_is_read_from_its_current_value(self):
+        self.apply(automation(triggers=[trigger(metric=self.RATE, above=None, below=100, **{"for": None})]))
+        self.counts(1)
+        self.cur.execute("SELECT value, observed_at, breached FROM public.machine_condition_readings();")
+        # One part a minute is 60 an hour, over the last hour that ends at the last whole minute.
+        self.assertEqual(self.cur.fetchall(), [(60.0, self.end, True)])
+        self.cur.execute("SELECT detail, value FROM public.machine_condition_rows();")
+        self.assertEqual(self.cur.fetchall(), [(f"{self.RATE} is 60 over the last hour, below 100", Decimal("60"))])
+
+    def test_a_pair_that_does_not_breach_is_read_and_is_no_row(self):
+        self.apply(automation(triggers=[trigger(metric=self.RATE, above=None, below=100, **{"for": None})]))
+        self.counts(3)
+        self.cur.execute("SELECT value, breached FROM public.machine_condition_readings();")
+        self.assertEqual(self.cur.fetchall(), [(180.0, False)])
+        self.cur.execute("SELECT count(*) FROM public.machine_condition_rows();")
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_a_time_in_state_is_the_share_of_the_last_hour_and_a_sum_the_value_now(self):
+        self.apply(automation(key="uptime", triggers=[trigger(metric=self.UPTIME, above=None, below=0.5, **{"for": None})]),
+                   automation(key="power", triggers=[trigger(metric=self.POWER, above=5, **{"for": None})]))
+        self.owner()
+        self.cur.execute("INSERT INTO timescale.telemetry_1m (bucket, asset_id, metric_name, last_string, n_rows)"
+                         " VALUES (%s, %s, %s, 'ACTIVE', 1), (%s, %s, %s, 'READY', 1);",
+                         (self.end - timedelta(minutes=60), self.sparkplug[DEV_A], self.STATE,
+                          self.end - timedelta(minutes=40), self.sparkplug[DEV_A], self.STATE))
+        self.phase(self.PHASE_A, 4)
+        self.phase(self.PHASE_B, 3)
+        self.cur.execute("SELECT metric_name, value, observed_at FROM public.machine_condition_readings() ORDER BY metric_name;")
+        rows = self.cur.fetchall()
+        self.assertEqual([r[0] for r in rows], [self.POWER, self.UPTIME])
+        self.assertEqual(rows[0][1:], (7.0, self.end))
+        self.assertAlmostEqual(rows[1][1], 20 / 60)
+        self.cur.execute("SELECT metric_name, detail FROM public.machine_condition_rows() ORDER BY metric_name;")
+        self.assertEqual(self.cur.fetchall(), [
+            (self.POWER, f"{self.POWER} is 7, above 5"),
+            (self.UPTIME, f"{self.UPTIME} is 0.333 over the last hour, below 0.5")])
+
+    def test_a_pair_with_no_value_has_no_row(self):
+        self.apply(automation(triggers=[trigger(metric=self.RATE, above=None, below=100, **{"for": None})]))
+        self.cur.execute("SELECT count(*) FROM public.machine_condition_readings();")
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+    def test_a_measured_pair_beside_it_is_read_from_the_historian_as_before(self):
+        self.apply(automation(triggers=[trigger(metric=self.RATE, above=None, below=100, **{"for": None}), trigger(DEV_B)]))
+        self.counts(1)
+        self.reading(91, DEV_B)
+        self.cur.execute("SELECT entity_id::text, metric_name, value FROM public.machine_condition_readings() ORDER BY metric_name;")
+        self.assertEqual(self.cur.fetchall(), [(DEV_B, METRIC, 91.0), (DEV_A, self.RATE, 60.0)])
+
+    def test_it_fires_and_resolves_as_any_metric_does(self):
+        self.apply(automation(triggers=[trigger(metric=self.RATE, above=None, below=100, **{"for": None})]))
+        t = self.trigger_id()
+        self.counts(1)
+        self.evaluate(0)
+        self.assertEqual([a[0] for a in self.alerts(t, metric=self.RATE)], ["firing"])
+        self.assertEqual(self.state(t, metric=self.RATE)[3:5], (60.0, self.end))
+        # Three a minute is 180 an hour: back above the threshold, so the alert resolves.
+        self.counts(3)
+        self.evaluate(60)
+        self.assertEqual([a[0] for a in self.alerts(t, metric=self.RATE)], ["resolved"])
+
+    def test_its_hold_works_as_for_any_metric(self):
+        self.apply(automation(triggers=[trigger(metric=self.RATE, above=None, below=100, **{"for": "5m"})]))
+        t = self.trigger_id()
+        self.counts(1)
+        self.evaluate(0)
+        self.assertEqual(self.alerts(t, metric=self.RATE), [])
+        self.assertIsNotNone(self.state(t, metric=self.RATE)[0])
+        self.evaluate(300)
+        self.assertEqual([a[0] for a in self.alerts(t, metric=self.RATE)], ["firing"])
+
+    def test_it_is_not_granted_to_an_api_role(self):
+        for fn in ("public.machine_condition_readings()", "public.machine_condition_rows()"):
+            self.cur.execute("SELECT has_function_privilege('anon', %s, 'EXECUTE') OR has_function_privilege('authenticated', %s, 'EXECUTE');",
+                             (fn, fn))
+            self.assertFalse(self.cur.fetchone()[0], fn)
 
 
 # ---- a real historian ------------------------------------------------------------------------
