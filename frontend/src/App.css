@@ -2610,10 +2610,13 @@ main:focus { outline: none; }
   .modal-full { width: calc(100% - 16px); height: calc(100% - 16px); padding: 12px; }
 }
 
+/* The title takes the rest of the row and wraps inside its own column, so the controls stay top-right
+   on the title's first line. The row wraps only for controls too wide to leave the title 12ch
+   (the Site Map's legend): they drop below it, as the title's basis tells the row. */
 .modal-header-row {
   flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
@@ -2631,14 +2634,25 @@ main:focus { outline: none; }
 /* The title <h2> that `<Modal>` renders inside the header row: the row supplies the spacing, so the
    standalone margin goes, and an icon sits before the text. */
 .modal-header-row .modal-title {
+  flex: 1 1 12ch;
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 0;
   min-width: 0;
+  /* As tall as the close button, so a one-line title sits level with it. */
+  min-height: 28px;
+  /* A title is wrapped, never cut: the end of a file name is the part that tells two apart. */
+  overflow-wrap: anywhere;
 }
 
+.modal-header-row .modal-title > span { min-width: 0; }
+
+/* Controls keep their size and stay at the row's top. `max-width` lets a wide set (the legend)
+   narrow to the row, wrapping inside itself. */
 .modal-header-controls {
+  flex: none;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
