@@ -174,7 +174,7 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
               : entries.length === 0 ? 'There is no automation to export' : `Download every automation as ${AUTOMATIONS_FILE_NAME}. Tick some to export only those`}
             onClick={() => onExport(picked.length ? picked : null)}
           >
-            <IconDownload size={13} aria-hidden="true" /> {picked.length ? `Export ${picked.length}` : 'Export'}
+            <IconDownload size={13} aria-hidden="true" /> {picked.length ? `Export (${picked.length})` : 'Export'}
           </ActionButton>
           <ActionButton
             className="btn btn-primary btn-sm"
