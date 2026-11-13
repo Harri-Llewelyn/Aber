@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: The daemon-side recording engine -- subject matching, the caps, the manifest, a buffer that
+#     is the file's own bytes and is uploaded with no second copy, and the finish path, where a
+#     failed step must leave the stored capture whole. The manifest is what ensure_shadow_devices()
+#     reads to mint replay lanes, so an error here surfaces much later, as a playback naming devices
+#     this stack does not know.
+
 """
 Unit tests for the daemon-side capture engine (capture_worker.py).
 

@@ -1,3 +1,15 @@
+# suite:
+#   lanes: db
+#   why: 0270 and 0271 -- the read (the breaching pairs in the shape of platform_health_rows(), no
+#     reading is no breach, NaN and a flag are no reading, only a live pair is read); the hold
+#     (fires after `for` and not before, rounds up to the next run, a stopped breach never fires, a
+#     changed threshold starts it again); the alert (one occurrence with its fingerprint, labels,
+#     values and no rule, confirmed by every run, resolved with its ends_at, never two open rows);
+#     silence (a pair with no value is left as it was); the lifecycle (a disabled automation, an
+#     archived trigger, a changed device or metric); a historian outage (one platform alert and
+#     nothing else written, resolved at the first run that reads); the state table by role; and the
+#     job, scheduled once. Reads a real historian too when ABER_TEST_HISTORIAN names one.
+
 """
 A threshold automation raises its alert from the database (0270, 0271).
 

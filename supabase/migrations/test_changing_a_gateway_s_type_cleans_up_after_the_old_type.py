@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: A type change across Remote's boundary (0252) burns the setup token, revokes the credential
+#     the old type held and leaves the gateway OFFLINE; a change among Host, Simulated and
+#     Third-party ends nothing. Missing either half fails silently: a redeemable token for a gateway
+#     with no appliance, or a credential the dashboard no longer offers working on.
+
 """
 Changing a gateway's type cleans up after the old type (0252).
 

@@ -1,3 +1,12 @@
+# suite:
+#   lanes: stack
+#   why: Aber's dispatcher end to end (0247, 0248): a firing alert written with psql reaches a
+#     receiver pod signed with the Standard Webhooks headers; an acknowledgement before the reminder
+#     stops it, an unacknowledged alert is reminded, a resolve follows its firing message, and an
+#     address whose host is not allowed is refused before anything is posted. Configures the webhook
+#     as the database owner and puts back what the stack held. Needs kubectl, the functions image
+#     with notification-dispatch, and NetworkPolicies off.
+
 """
 Aber's dispatcher (0247, 0248), against the live stack: an alert reaches a webhook, signed.
 

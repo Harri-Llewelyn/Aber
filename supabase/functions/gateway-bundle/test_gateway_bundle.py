@@ -1,3 +1,9 @@
+# suite:
+#   lanes: stack
+#   why: The downloadable bundle -- role gating (Operator and Auditor get 403 and no token is
+#     minted), ZIP integrity, and that the embedded token is the one the database will accept. SKIPS
+#     ALL FIFTEEN CHECKS without a stack.
+
 """
 Integration tests for the gateway-bundle edge function.
 

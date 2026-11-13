@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0265's telemetry_hour_of_day(), over local tables standing in for the historian's hourly
+#     rollup: each device's mean at each hour of the day in the zone asked for, across the window's
+#     days, a quiet hour counted as the value carried into it, every hour weighed alike, the hour
+#     moving with the zone and with a clock change, no row for a text or a flag, an unknown zone,
+#     bad bounds and more than 50,000 hours times devices refused before any read, and it reads as
+#     the caller.
+
 """
 History averages a metric by the hour of the day (0265).
 

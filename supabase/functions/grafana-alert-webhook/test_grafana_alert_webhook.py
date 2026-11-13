@@ -1,3 +1,9 @@
+# suite:
+#   lanes: unit
+#   why: The webhook that turns a Grafana alert into a platform_alerts row. Pure payload mapping, so
+#     it needs nothing -- and it is the only thing standing between a renamed Grafana field and a
+#     pill that silently stops appearing.
+
 """
 Unit tests for the grafana-alert-webhook Edge Function.
 

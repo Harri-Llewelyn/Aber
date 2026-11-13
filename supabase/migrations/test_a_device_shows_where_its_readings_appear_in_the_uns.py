@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0214 -- that device_uns_paths answers each device's path below the Unified Namespace root
+#     at the levels it occupies, under the group its gateway publishes under, or the one reason the
+#     bridge skips it for, in the bridge's order; that it runs as its caller; and that a person and
+#     the ingestion principal read it and anon does not. The bridge publishes these rows, so a wrong
+#     answer is a wrong topic.
+
 """
 Each device shows its place in the Unified Namespace, or why it has none (0214).
 

@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0026's two halves: causation grouping, and -- the security one -- that `service_role` can
+#     no longer INSERT into audit_trail directly. That key is in the release Secret and is held by
+#     the daemon and every edge function; while it could insert, any holder could forge an audit row
+#     naming an operator who was not there. A later migration re-granting INSERT would restore that
+#     silently and nothing else here would notice.
+
 """
 PostgreSQL integration tests for `0026_digital_thread_causation_and_ingestion_rejections.sql`.
 

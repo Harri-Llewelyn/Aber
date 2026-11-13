@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0098's plan and places, and 0113's retirement of the floor. Three properties nothing else
+#     would notice losing: a place belongs to ONE area's plan, so moving the cell drops it unless
+#     the same write names a new one, which is the half a refactor silently undoes; the spacing
+#     between two cells on one plan is refused BY THE DATABASE, because an approved proposal writes
+#     the same columns as the picker that refuses the click; and the floor table stays gone, which
+#     db-init replaying the whole chain on every boot with no ledger is what makes worth asserting.
+
 """
 Plans and places (`0098`, `0113`): an area carries one plan, a cell takes a place on it, and the
 places on one plan keep their distance.

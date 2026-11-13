@@ -1,3 +1,8 @@
+# suite:
+#   lanes: stack
+#   why: Background worker sizing. A pool too small for the continuous aggregates does not error --
+#     the aggregates just stop refreshing, and every dashboard reading them goes quietly stale.
+
 """
 The historian's worker pool is large enough for the workers it may launch.
 

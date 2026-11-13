@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0083's gate on the replay lane. A device could be assigned to the Playback gateway from
+#     three separate pickers in the dashboard (#144), which minted a shadow device with no
+#     `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid
+#     creating", in 0060’s own words. The pickers no longer offer it; this asserts the database
+#     refuses it anyway, which is the half that holds for a PostgREST caller the dashboard never
+#     sees.
+
 """
 A device cannot be posted onto the replay lane by hand (0083, issue #144).
 

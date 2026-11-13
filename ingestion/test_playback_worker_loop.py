@@ -1,3 +1,13 @@
+# suite:
+#   lanes: unit
+#   why: The playback worker as a Sparkplug edge node, against a fake broker and PostgREST: the NCMD
+#     subscription and the rebirth answer, the wait for the STATE of the primary host and the end of
+#     a job when it goes offline, Stop and a dropped connection inside a long gap, the retried
+#     finish and startup sweep, and the heartbeat thread. A message counts only once paho accepted
+#     it on a connection that has not dropped: before this, a replay whose credential was re-issued
+#     at message 8 ended COMPLETED with all 41 counted and 7 in the historian. A capture is read
+#     from a temporary file a message at a time, in flat memory.
+
 """
 The playback worker as a Sparkplug edge node, and what it reports about a job.
 

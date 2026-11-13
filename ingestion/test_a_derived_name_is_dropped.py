@@ -1,3 +1,16 @@
+# suite:
+#   lanes: unit
+#   why: A reading under a derived metric's name, a metric Aber computes. Nothing publishes it, so a
+#     device that does would put a second source under the computed series: ingestion drops the
+#     reading under audit as well as enforce, files a `derived_name` finding and counts it in a
+#     series of its own. THE DROP IS NOT A SCHEMA FAULT, which is what the suite holds against the
+#     code around it: an open schema, a closed one that models the name and no schema at all drop it
+#     alike, a measured name of the same group is stored, and the schema counter that only an
+#     enforcing device raises stays where it was. The names come from the catalogue through the UNS
+#     bridge's TTL cache: one read per freshness, an addition takes effect when it ends, a failed
+#     read keeps the names last read without a read per message, and before any read nothing is
+#     dropped. A fake catalogue and a fake historian connection; no broker.
+
 """
 Unit tests for a reading published under a derived metric's name (a metric Aber computes).
 

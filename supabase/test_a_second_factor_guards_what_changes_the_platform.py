@@ -1,3 +1,13 @@
+# suite:
+#   lanes: stack
+#   why: With MFA required, a manager's change to the platform needs a session that gave its code
+#     (0251), which only the running gateway, GoTrue and the edge runtime show together. A throwaway
+#     Shopfloor Manager, made with the secret key, enrols a TOTP factor: the consent step refuses
+#     its aal1 session on both of Node-RED's consent calls and admits its aal2 session, Grafana's
+#     sign-in passes at aal1, gateway-bundle refuses aal1 before it reads a gateway, and turning the
+#     switch on ends its Node-RED session while its Grafana session refreshes. The switch goes back
+#     to what it was and the person is deleted.
+
 """
 With MFA required, a manager's change to the platform needs a session that gave its code, against a
 running stack (0251).

@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0225 -- that a read of a service's logs on the System page writes one SERVICE_LOGS_READ row
+#     in the service's lane of the security domain, naming the Administrator and the read's service,
+#     level, filter and range; that the database, not the caller, decides a row is due: one on the
+#     first load and on each change, none on a refresh or a repeated direct call, and another
+#     person's reads are not the caller's; that only an Administrator may write one; and that a
+#     parameter outside the function's rule is refused with no row.
+
 """
 Reading a service's logs is recorded in the Audit Trail (0225).
 

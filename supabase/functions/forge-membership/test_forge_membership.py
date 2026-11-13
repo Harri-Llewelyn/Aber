@@ -1,3 +1,17 @@
+# suite:
+#   lanes: stack
+#   why: The forge's door, end to end: the gateway's redirect, the password grant, the consent
+#     endpoint, the callback and the cookies, for each seeded persona -- then what the forge did
+#     with them. Administrator and Shopfloor_Manager land in their teams; an Operator completes the
+#     whole flow and meets the 403; a forged identity header from outside is not a login; and a role
+#     removed from user_roles mid-session is refused and unseated on the next request; a session
+#     ended elsewhere is sent back through the door; and Gitea's own sign-out link ends the door's
+#     session alone and sends the browser to the dashboard's /sign-out, while the same person's
+#     session in another browser is still served; and end_my_door_sessions() (0208), the dashboard's
+#     Sign Out, ends the door's session and leaves the dashboard's own served. Needs the stack, the
+#     forge, the seeded personas AND the gateways organisation (one enrolment creates it), and skips
+#     without any of them.
+
 """
 The forge's door, end to end, and the room behind it.
 

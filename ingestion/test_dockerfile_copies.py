@@ -1,3 +1,9 @@
+# suite:
+#   lanes: unit
+#   why: Every sibling module ingestion.py imports, directly or through another, must be copied in
+#     by ingestion/Dockerfile, which lists files one by one; a module left off is a crash loop on
+#     the first boot. File inspection only.
+
 """
 Every sibling module ingestion.py imports has to be COPY'd into the image: the Dockerfile lists
 files one by one, and a module left off the list is a crash loop on the first boot

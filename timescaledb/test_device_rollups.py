@@ -1,3 +1,10 @@
+# suite:
+#   lanes: stack
+#   why: History's Overview counts from two device rollups, 5 minutes from telemetry_1m and an hour
+#     from telemetry_1h, each materialised only, reconciled once, kept as long as its width's series
+#     rollup, and filled back a chunk a run to its own source's oldest bucket; fdw_reader reads what
+#     they hold.
+
 """
 History's Overview counts each device's readings in two rollups of their own (aggregates.sql):
 telemetry_device_5m from telemetry_1m and telemetry_device_1h from telemetry_1h. Both are

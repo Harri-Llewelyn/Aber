@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0179's stat strip on the Backups page. backup_summary() is an Administrator's and answers
+#     403 to anybody else; successes count the runs that ended in 30 days and not a cancelled one,
+#     the median is of the last 14 completed runs and no older one, the newest copy off site is at
+#     the current destination once one is set; and the service's report is a backup_* gate no API
+#     role reaches, one row, with a figure statfs could not give left NULL.
+
 """
 The Backups page's stat strip (0179): backup_summary() and the backup service's report.
 

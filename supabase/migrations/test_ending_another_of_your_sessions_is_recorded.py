@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0211 -- that ending one of your own sessions, or all but the one in use, writes one
+#     SESSIONS_ENDED row naming you; that Sign Out of All Other Sessions ends what GoTrue's
+#     scope=others ended, services and doors included, with their refresh tokens, and no other
+#     person's; and that a token naming no session of yours ends nothing.
+
 """
 Ending another of your own sessions is recorded (0211).
 

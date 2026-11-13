@@ -1,3 +1,8 @@
+# suite:
+#   lanes: unit
+#   why: The archived-gateway path, which #102 found broken in production. Nothing else looks at it:
+#     an archived gateway is by definition one nobody is watching.
+
 """
 Unit tests for refusing traffic from an ARCHIVED edge node (`resolve_gateway` in ingestion.py), and
 for accepting a live one that publishes under another Sparkplug group (GroupMismatchTests).

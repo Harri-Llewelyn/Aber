@@ -1,3 +1,7 @@
+# suite:
+#   lanes: db
+#   why: That a minted credential is recorded, and recorded once, wherever it was minted from.
+
 """
 The machine-path credential recorder (0062), and the boundary it must not cross.
 

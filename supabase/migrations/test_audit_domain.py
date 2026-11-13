@@ -1,3 +1,7 @@
+# suite:
+#   lanes: db
+#   why: The audit domain's shape -- which event types exist and what each one must carry.
+
 """
 The audit trail's security lane, and the acts that make one necessary (archived migration 0070).
 

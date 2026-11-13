@@ -1,3 +1,17 @@
+# suite:
+#   lanes: stack
+#   why: Broker credential issuance -- needs the stack up AND the service's own bearer token, which
+#     the dev loop reads out of the release Secret. The exposure tests are the ones that matter most
+#     and are invisible anywhere else: this service can issue a Mosquitto account for ANY edge node,
+#     and the gateway's role turns an account into the ability to publish telemetry as that gateway
+#     -- so "it is not published on the host" is a security boundary, not a deployment detail, and
+#     nothing else checks it. Revocation and the inventory are asserted here too, against the
+#     running plugin.
+#
+# NEEDS MQTT_CREDENTIAL_SERVICE_TOKEN PROVISIONED, and skips all thirteen checks without it --
+# a green step over nothing. test_enroll_gateway.py needs the same token, so a stack lane that
+# runs either has to provide it; 13/13 against a provisioned stack.
+
 """
 Contract tests for the broker credential service.
 

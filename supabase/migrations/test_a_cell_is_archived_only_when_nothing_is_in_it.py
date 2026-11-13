@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0198. A cell is not archived while any device resolves to it, whatever its lifecycle, or
+#     any gateway is filed in it; nothing is filed in an archived cell and no device is assigned to
+#     an archived gateway, by any writer. Without it an archived cell kept its devices, and the UNS,
+#     i3X and the Site Map each put them somewhere different. Unchanged writes, Restore and a second
+#     boot pass.
+
 """
 A cell is archived only when nothing is in it (0198).
 

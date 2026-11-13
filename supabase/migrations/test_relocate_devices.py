@@ -1,3 +1,13 @@
+# suite:
+#   lanes: db
+#   why: 0033's batch relocation, and the property it defends is NOT "an admin can move devices". It
+#     is that one rearrangement is ONE transaction, so six machines reassigned in one gesture carry
+#     one causation_id instead of six -- a property that does not live in 0033 at all, but in
+#     log_audit_trail_event() stamping txid_current(). The other half is the hole atomicity opens:
+#     the RPC is SECURITY DEFINER, so RLS does not apply inside it and `devices_update_privileged`
+#     never runs. If its own has_role() check were dropped, ANY authenticated user could relocate
+#     the whole shopfloor and no policy anywhere would refuse.
+
 """
 Tests for public.relocate_devices() (archived migration 0033).
 

@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0202 moves each cell's grafana_url web address into Attached Links and clears it, on every
+#     boot. Its faults are silent ones: an address linked twice, a Dashboard link somebody deleted
+#     coming back at the next restart, a value that is not a web address cleared without a word, or
+#     an archived cell left out. Also holds that grafana_url is no longer proposable.
+
 """
 A cell's dashboard address is one of its links (0202).
 

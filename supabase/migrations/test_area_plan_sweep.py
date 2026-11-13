@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0199 -- a plan no area names is swept from storage. Each failure here is silent: a purged
+#     area's drawing of the site left in the bucket for ever, readable by every signed-in role; an
+#     upload swept before its area records it, which the page reports as a plan that vanished; or a
+#     policy that lets the sweep delete the plan an area still shows. Runs the area-plans policies
+#     and their self-check verbatim on a stand-in, and needs supabase_admin to stand in for
+#     storage.objects, as test_capture_retention.py does.
+
 """
 A plan no area names is swept from storage (0199).
 

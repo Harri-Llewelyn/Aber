@@ -1,3 +1,8 @@
+# suite:
+#   lanes: unit
+#   why: The per-gateway health gauges. These are what the alert rules read, so a gauge that stops
+#     being exported does not fire an alert about itself -- it silently removes the alert.
+
 """
 Unit tests for appliance health metrics on the gateway heartbeat (`extract_gateway_health` and its
 use in `process_node_message`, both in ingestion.py).

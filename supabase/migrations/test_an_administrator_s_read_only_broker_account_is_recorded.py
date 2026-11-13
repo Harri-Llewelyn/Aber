@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0218 -- that creating and deleting a read-only broker account each write one row in the
+#     broker_accounts lane of the security domain, naming the Administrator and what the account is
+#     for, under one entity id; that only an Administrator may write either; and that a username
+#     outside the subscriber scheme, or a name or description outside the credential service's rule,
+#     is refused with no row.
+
 """
 An Administrator's read-only broker account is recorded in the Audit Trail (0218).
 

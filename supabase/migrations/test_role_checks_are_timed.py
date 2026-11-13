@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: Prints what has_role() and has_authority() cost per call, and the plan of a read their
+#     policy guards, so a change to either is measured before and after on the same database; and
+#     what they cost for an app's token, which holds nothing (0235), and beside the MFA predicate a
+#     write policy adds (0251). Fails only on a wrong answer, never on a number.
+
 """
 The role checks every request makes are timed, and the numbers printed (no assertion on them).
 

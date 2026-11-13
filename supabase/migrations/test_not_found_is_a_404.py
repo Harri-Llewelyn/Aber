@@ -1,3 +1,8 @@
+# suite:
+#   lanes: db
+#   why: raise_not_found() (0165) raises the shape PostgREST answers 404 with, and no API role may
+#     call it. A body PostgREST cannot parse would answer 500, the fault 0165 exists to remove.
+
 """
 A function that finds nothing answers 404 through the API (0165).
 

@@ -1,3 +1,14 @@
+# suite:
+#   lanes: db
+#   why: Walking the trail to its end (0077), saying how far the end is (0115) and deciding what
+#     counts as deleted (0117). Paging that loses or repeats a row across a page boundary corrupts
+#     an append-only audit read without failing anything; a total counted over the page instead of
+#     the match, or a search that cannot reach a deleted entity, misreports how much of the record
+#     the reader has seen; and a purge rule that misses a table the page can probe draws lanes it
+#     marks deleted and cannot hide. The two SECURITY DEFINER matchers (0115, 0118) are asserted by
+#     shape here because a migration carries no JWT: without the first keyword each answers an empty
+#     array to every search, which reads exactly like no match.
+
 """
 The Audit Trail's keyset cursor (0077), and how far it has to walk (0115).
 

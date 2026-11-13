@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0254's telemetry_changes(), over local tables standing in for raw telemetry and the
+#     rollups: a state held for seconds inside one minute is returned with its times, a refresh of
+#     an unchanged value collapses, the value in force at the start is carried in, past either cap
+#     it says so and marks each bucket that held more than one value, a window whose raw readings
+#     were dropped says so, bad bounds are refused before any read, and it reads as the caller.
+
 """
 History reads every change of a text or a flag (0254).
 

@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0182's shadow exclusion in platform_health's gateway_stale arm, the row Grafana's Gateway
+#     Stale rule fires on. A redeclaration lost it once and the rule fired after every replay; this
+#     pins both directions, a shadow gateway never listed and an ordinary one that died still
+#     listed, and that grafana_reader still reads the view. And 0185: replay lanes never counted in
+#     expected_publishers, which gates the critical Ingestion Consuming Nothing, and a real device
+#     still counted.
+
 """
 A shadow gateway is never reported as gateway_stale; any other gateway still is (0182). Its devices,
 the replay lanes, are never counted in expected_publishers; any other device still is (0185).

@@ -1,3 +1,13 @@
+# suite:
+#   lanes: unit
+#   why: The Directory's MQTT half. THE PROPERTY IT GUARDS IS AN ABSENCE, which is why a suite is
+#     needed at all: the Directory is DERIVED from the enrolment records, and issue #64 proposed
+#     accumulating it from NBIRTH/DBIRTH instead -- which would make a device that has never been
+#     enrolled resolvable by publishing one. Nothing enforces an absence, so the suite reads the
+#     source and fails if a birth ever appears in it. It also holds the placement of the
+#     local-namespace qualification on all four documents (check-mirror-drift.mjs holds the
+#     wording), and the off-by-default, which is an exposure decision rather than a setting.
+
 """
 Unit tests for the Directory's MQTT half (`ingestion/directory_publish.py`).
 

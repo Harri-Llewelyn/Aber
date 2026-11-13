@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0245's telemetry_coverage(), over local tables standing in for the historian's device
+#     rollups: one row per device, its counts an array with a 0 for a block with none, read unsummed
+#     at the rollups' own widths and summed from the widest that divides a wider block for 40
+#     devices or fewer, what the rollup has counted on every row, bad bounds refused before any
+#     read, and it reads as the caller.
+
 """
 History counts where readings arrived (0245).
 

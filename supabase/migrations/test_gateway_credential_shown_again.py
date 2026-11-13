@@ -1,3 +1,8 @@
+# suite:
+#   lanes: db
+#   why: Who may keep and show a Host gateway's credential, that each showing is recorded without
+#     the password, and that the copy goes when the broker account does.
+
 """
 An Administrator can show a Host gateway's broker credential again (0164).
 

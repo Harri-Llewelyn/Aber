@@ -1,3 +1,10 @@
+# suite:
+#   lanes: stack
+#   why: A service token used through the i3X server shows when it was last used (0209). Only a
+#     running stack has the whole path: the server accepting the token, its recorder thread calling
+#     PostgREST as the caller, and the hook and the function behind it. Issues a token, uses it,
+#     reads the hour back as an Administrator, then revokes it.
+
 """
 A service token used through the i3X server shows when it was last used, against a running stack
 (0209).

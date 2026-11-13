@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: The playback worker's Sparkplug session: the NDEATH Will registered at CONNECT, the NDEATH
+#     published before DISCONNECT at the end of every job, and the bdSeq the replayed NBIRTH and
+#     both deaths share. Without the death the Playback gateway kept its stored ONLINE after every
+#     replay and went STALE 90 seconds later; with a bdSeq the NBIRTH does not carry, the daemon
+#     ignores the death as an earlier session's and the same thing happens.
+
 """
 The playback worker's Sparkplug session: its Will, its bdSeq, and the NDEATH that ends every job.
 

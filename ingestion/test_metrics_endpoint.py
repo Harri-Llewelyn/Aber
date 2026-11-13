@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: The Prometheus endpoint and the sequence-gap counters (issues #22, #24). ONE ASSERTION IN
+#     IT READS ingestion.py's SOURCE: every `count("dropped_*")` must have a mapping in metrics.py,
+#     or the drop would be counted and never exported. That is the acceptance criterion from #22
+#     expressed as a test rather than as a review step.
+
 """
 The Prometheus exposition endpoint (issue #22) and the sequence-gap counters (issue #24).
 

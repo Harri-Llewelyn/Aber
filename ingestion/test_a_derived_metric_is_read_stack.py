@@ -1,3 +1,16 @@
+# suite:
+#   lanes: stack
+#   why: THE ONLY CHECK THAT A DERIVED METRIC IS READ FROM REAL READINGS, END TO END. A fixture
+#     gateway's edge node publishes a rising count for two minutes through a real broker, and a
+#     Shopfloor Manager reads derived_series() through PostgREST: every minute the counter rose in
+#     has a positive rate that is not carried, and the minutes after the last reading count nothing
+#     and say they are carried. derived_current() is the rate over the last hour, worked out in the
+#     suite from the raw readings by the rule. A measured metric is refused. An automation on the
+#     derived metric is applied, pg_cron's evaluator raises its alert with the value it read at a
+#     whole minute, and deleting the automation resolves it. Needs the stack up, the seeded
+#     Shopfloor Manager and the owner connection (SUPABASE_DB_*); about six minutes; everything it
+#     made, the audit rows included, is removed.
+
 """
 A derived metric is read from real readings, and an automation on it fires and resolves (0282, 0283).
 

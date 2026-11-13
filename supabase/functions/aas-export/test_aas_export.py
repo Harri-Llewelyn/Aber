@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit, stack
+#   why: In the no-stack job this covers the role gate as index.ts states it and the Sparkplug ->
+#     XSD mapper parity guard, and its live export checks skip themselves. In e2e it composes a
+#     shell for the subject it provisions and validates the emitted document against the vendored
+#     official IDTA schema -- which is the half that caught three real metamodel violations that
+#     hand-written structural assertions had passed.
+
 """
 Tests for the aas-export Edge Function.
 

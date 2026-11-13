@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0193 -- each capture and playback act writes one Audit Trail row naming who did it and what
+#     it acted on, a gateway a playback names cannot be deleted, and the end of a playback sets the
+#     Playback gateway OFFLINE when the broker sent no Will. A missing row is silent: the trail
+#     simply holds nothing about who replayed what. Needs supabase_admin to stand in for
+#     storage.objects in the upload tests.
+
 """
 Captures and replays leave an audit trail, and a playback's history outlives its target (0193).
 

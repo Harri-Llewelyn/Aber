@@ -1,3 +1,8 @@
+# suite:
+#   lanes: db
+#   why: The partitioning behind the trail (0079). A partition that stops being created is not an
+#     error until the first write that has nowhere to go.
+
 """
 PostgreSQL integration tests for the monthly partitioning of `public.audit_trail`
 (`0079_the_thread_stops_growing_without_end.sql`).

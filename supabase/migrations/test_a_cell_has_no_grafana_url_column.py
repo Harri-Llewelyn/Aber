@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0219 drops cells.grafana_url on the first boot of an upgrade, once, and an empty database
+#     never meets that boot, so the suite rebuilds 1.7.0's column. Its faults are a lost value and a
+#     failed boot: an address written since 0202 not moved, a value that is not a web address
+#     dropped without a NOTICE or an audit row, or a second boot, 0202 or a function still naming
+#     the column.
+
 """
 A cell has no grafana_url column (0219).
 

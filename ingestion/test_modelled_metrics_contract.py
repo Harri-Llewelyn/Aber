@@ -1,3 +1,12 @@
+# suite:
+#   lanes: unit
+#   why: The Python half of the modelled-metrics contract; the JavaScript half runs in
+#     frontend-build. Both assert test-harness/fixtures/modelled-metrics.json, because the rule is
+#     BEHAVIOUR and neither language can import the other -- grepping both files for `required`
+#     would prove they spell it, not that they agree about a schema whose `required` is a string.
+#     Writing the pair found a live divergence: for `properties: ['A','B']` the JS returned the
+#     array INDICES as metric names while the Python returned None.
+
 """
 The Python half of the modelled-metrics contract.
 

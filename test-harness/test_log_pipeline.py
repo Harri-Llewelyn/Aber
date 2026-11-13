@@ -1,3 +1,28 @@
+# suite:
+#   lanes: stack
+#   why: THE ONLY CHECK THAT A DROP IS COUNTABLE AND READABLE AT THE SAME TIME. It publishes a DDATA
+#     for a randomly generated unregistered device, then asserts BOTH that
+#     aber_ingestion_messages_dropped_total{reason="quarantined_or_unregistered"} increased AND that
+#     a line carrying that same reason and THAT device id arrived in Loki. Prometheus cannot name
+#     the device -- its endpoint is unauthenticated and carries no device data by design -- so this
+#     is the assertion that the other half of the instrument exists at all. THE RANDOM ID IS LOAD
+#     BEARING: the daemon caches negative resolutions, so a fixed id is answered from cache on a
+#     second run and drops nothing, and the suite would pass while testing nothing. WHY IT IS NOT
+#     COVERED BY THE STATIC SUITE: the first live run of this pipeline had the socket proxy refuse
+#     one API path, discovery fail WHOLESALE and nothing collected at all -- while the container
+#     stayed healthy, `alloy validate` passed and every static check in this repository reported
+#     PASS. Where observability.alloy.logForward is on, it also checks that a forward to the
+#     in-cluster Loki delivers a second, labelled copy, and that a forward nothing answers does not
+#     stop lines reaching the in-cluster store. The same drop is read back through service-logs, as
+#     the System page's Logs tab reads it: an Administrator's read finds the device's line with its
+#     fields, an Operator's is refused, and the read is one Audit Trail row however often it
+#     repeats.
+#
+# STACK ONLY, AND IT CANNOT BE ANYTHING ELSE. Every assertion here is about four processes
+# and two independent stores agreeing at run time -- broker, daemon, collector, store. The
+# static half is already covered by ingestion/test_structured_logging.py in the unit lane,
+# and duplicating it here would only make this suite slower to fail.
+
 """
 The log pipeline, end to end, against a running stack.
 

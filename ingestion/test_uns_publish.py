@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: Pure-logic tests of the Unified Namespace bridge: the topic is the root, the message's
+#     group and the path device_uns_paths answers, read once per device per TTL, and a device the
+#     view skips is skipped and counted under its reason rather than filled with a placeholder. A
+#     fake query builder and a fake client; no broker, no database.
+
 """
 Unit tests for the Unified Namespace bridge (`ingestion/uns_publish.py`).
 

@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: Readings an edge node replays after an outage, and the outage report it sends. A replay
+#     must reach the historian under its own age bound on both encodings, and must not set a device
+#     ONLINE, overwrite the UNS's retained current values, or read as a sequence gap; a refusal and
+#     a lossy outage must be counted where the alerts read them. Each of these fails silently: data
+#     missing or mis-filed with nothing reporting it.
+
 """
 Unit tests for readings an edge node replays after an outage, and for the outage report it sends.
 

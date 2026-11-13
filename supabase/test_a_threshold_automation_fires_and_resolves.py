@@ -1,3 +1,13 @@
+# suite:
+#   lanes: stack
+#   why: A threshold automation fires and resolves (0270, 0271), which only the running stack shows
+#     end to end: pg_cron's evaluator in the platform database, its postgres_fdw read of the
+#     historian and the Row Level Security PostgREST applies. A seeded Shopfloor Manager applies an
+#     automation on a device the suite makes, a breaching reading is written into the historian, and
+#     the suite waits for the alert (its fingerprint, name, labels, values and no Grafana rule), for
+#     a later run to confirm it, and for the run that resolves it after a normal reading. Removes
+#     everything it made.
+
 """
 A threshold automation fires and resolves against the running stack (0270, 0271).
 

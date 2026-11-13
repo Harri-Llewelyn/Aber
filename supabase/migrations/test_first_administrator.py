@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: 0163's first administrator: created once, as a person holding Administrator, and never
+#     touched by a later run, so a password or role the site changed stays changed; and executable
+#     by no API role, since it writes a password.
+
 """
 A site's first administrator (0163).
 

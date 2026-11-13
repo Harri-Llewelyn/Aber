@@ -1,3 +1,8 @@
+# suite:
+#   lanes: stack
+#   why: The historian's role grants. RUNS ZERO CHECKS without a historian, so the unit lane would
+#     be a green step asserting literally nothing.
+
 """
 Integration tests for `ingest_writer` and `fdw_reader`.
 

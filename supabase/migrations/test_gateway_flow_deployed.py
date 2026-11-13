@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0100's two halves: a heartbeat that only moves the health readings writes no audit row (it
+#     used to write one every thirty seconds per appliance), and an appliance reporting a different
+#     flow hash writes exactly one FLOW_DEPLOYED row, pinned to ingestion and to no user, carrying
+#     the digest before and after and whether it matched the forge's main.
+
 """
 PostgreSQL integration tests for `0100_a_deployed_flow_is_an_event_and_a_reading_is_not.sql`.
 

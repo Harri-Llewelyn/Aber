@@ -1,3 +1,10 @@
+# suite:
+#   lanes: stack
+#   why: The one-liner -- the command is minted by role and names the token, the pin and the
+#     installer; the installer, the playbook and the .env are served against the token in a header
+#     and refused without it; and none of those fetches consumes the token, which enrolment then
+#     redeems. Skips without a stack.
+
 """
 The one-liner, against the live stack.
 

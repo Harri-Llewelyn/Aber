@@ -1,3 +1,7 @@
+# suite:
+#   lanes: db
+#   why: The role table's RLS -- who may read and who may grant.
+
 """
 PostgreSQL Integration test suite for public.user_roles Row-Level Security (RLS) policy.
 Genuinely exercises the deployed SQL policy 'user_roles_select_own_or_privileged'

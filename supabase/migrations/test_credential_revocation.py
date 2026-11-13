@@ -1,3 +1,8 @@
+# suite:
+#   lanes: db
+#   why: Revocation actually revokes. A revocation path that silently no-ops leaves a credential the
+#     dashboard reports as withdrawn and the broker still accepts.
+
 """
 Revocation reaches a host-run gateway (0063), and still cannot invent an account (0040's guarantee).
 

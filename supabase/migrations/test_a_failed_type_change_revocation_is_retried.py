@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0288 -- a revocation a change of type asked for and that failed is asked again by the
+#     sweep, with the stamp kept, until a 2xx confirms it; and never once a credential was issued or
+#     enrolled after the stamp, since the account name is the same before and after and a retry
+#     would disable the new credential. The archive path is as it was, and the helper that decides
+#     is held by its truth table.
+
 """
 A failed revocation after a change of a gateway's type is asked again (0252, 0288).
 

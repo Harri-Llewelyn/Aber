@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: What `anon` may reach before any policy is consulted. The Supabase default ACL grants
+#     broadly on new public tables, so this is the check that notices a table arriving accidentally
+#     readable rather than deliberately so.
+
 """
 `anon` holds EXECUTE on nothing in `public` except PostgREST's pre-request hook.
 

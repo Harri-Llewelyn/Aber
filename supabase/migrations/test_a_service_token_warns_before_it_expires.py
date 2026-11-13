@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0204. Runs the Service Token Expiring rule's own query: a 7-, 30- and 90-day token fires
+#     inside its window and not before, and a revoked token, a withdrawn or deleted identity and an
+#     expired token never do. grafana_reader reads the view and nothing behind it. platform_alerts
+#     takes a service_identity alert, a replay of 0001 keeps both widened CHECKs over one, and only
+#     an Administrator reads it.
+
 """
 A service token warns before it expires (0204).
 

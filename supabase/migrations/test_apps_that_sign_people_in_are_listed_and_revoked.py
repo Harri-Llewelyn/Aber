@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0217 -- that an Administrator lists every app and who allows it, and a person only their
+#     own approvals; that revoking one ends that app's sessions for that person alone, with their
+#     refresh tokens; that the stack's own apps cannot be removed and another's removal ends every
+#     approval and session; and that each act, by the dashboard or by GoTrue itself, writes its row
+#     naming who did it, while a boot's re-seed writes none.
+
 """
 Apps that sign people in are listed, and an approval or an app can be taken back (0217).
 

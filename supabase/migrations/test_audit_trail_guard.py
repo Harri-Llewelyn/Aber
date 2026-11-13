@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: THE AUDIT SUPPRESSION RULES. Archived migration 0005 suppresses the no-op UPDATE and the
+#     heartbeat-only UPDATE, and ingestion.py relies on that being true -- a regression here does
+#     not fail anything, it just resumes writing an audit row per heartbeat until the table is
+#     mostly noise.
+
 """
 PostgreSQL integration tests for the Audit Trail's no-op guard in
 `0005_digital_thread_signal_and_attribution.sql`.

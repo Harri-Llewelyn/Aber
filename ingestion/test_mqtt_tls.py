@@ -1,3 +1,12 @@
+# suite:
+#   lanes: unit
+#   why: The daemon's MQTTS configuration. EVERY WAY THIS FUNCTION CAN BREAK IS A BREAK TOWARD A
+#     CONNECTION THAT LOOKS ENCRYPTED AND VERIFIES NOTHING -- which is indistinguishable, from the
+#     daemon's side, from a successful interception. There is no error, no log line and no metric;
+#     telemetry keeps arriving. None of it is visible in a passing end-to-end run against a stack
+#     whose broker happens to be plaintext, which is why it is asserted on the ARGUMENTS PASSED
+#     rather than on a live connection.
+
 """
 Unit tests for the ingestion daemon's MQTTS configuration (`configure_mqtt_tls` in ingestion.py).
 

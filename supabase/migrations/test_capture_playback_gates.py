@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0184 -- the capture and playback helpers answer only a caller who could read the job. An
+#     Operator learns nothing; the readers, the two machine principals and service_role get what
+#     they did; and the broker-captures storage policies, run verbatim on a stand-in table, still
+#     admit exactly what storage-policies.sql says for every role and principal.
+
 """
 The capture and playback helpers answer only a caller who could read the job (0184).
 

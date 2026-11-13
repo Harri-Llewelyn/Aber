@@ -1,3 +1,9 @@
+# suite:
+#   lanes: unit
+#   why: The sign-in every stack suite uses. The lane signs in from one address, so a 429 depends on
+#     the suites before it: one not waited out fails a suite the next second would pass, and one
+#     read as missing seed accounts skips the suite or blames the wrong thing.
+
 """
 The stack lane's sign-in helper in stack_sign_in.py, with no stack.
 

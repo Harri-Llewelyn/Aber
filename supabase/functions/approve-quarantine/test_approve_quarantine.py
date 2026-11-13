@@ -1,3 +1,8 @@
+# suite:
+#   lanes: unit
+#   why: The quarantine approval path and the role gate in front of it, read from index.ts and the
+#     baseline migration on disk, so it needs no database.
+
 """
 Unit test suite for the approve-quarantine Supabase Edge Function.
 

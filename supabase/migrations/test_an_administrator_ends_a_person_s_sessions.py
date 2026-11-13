@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0207's People acts. Only an Administrator ends a person's sessions or counts them, never
+#     their own; every session the person holds ends and the API refuses its token; one
+#     SESSIONS_ENDED row; and an email change is decided before GoTrue, recorded only once the
+#     account holds the new address, and ends the sessions in the same transaction.
+
 """
 An Administrator ends a person's sessions, and changes their email address (0207).
 

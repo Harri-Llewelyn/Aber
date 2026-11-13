@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0114 asks forge-sweep for a pass as an archive lands, and the three gates on that ask. The
+#     one worth a CI job is the TRANSITION guard: `UPDATE OF is_archived` fires on the column
+#     appearing in a SET list, not on its value changing, so losing it would make every ordinary
+#     edit to an archived gateway walk the whole forge -- an outcome visible only as somebody else's
+#     API rate limit. Also the sweep lease (0156): two simultaneous claims have one winner, a lapsed
+#     lease is taken over, and a pass that outlived its lease cannot end its successor's.
+
 """
 Archiving a gateway asks the forge to follow (0114), and asking is gated where it should be; and
 one forge sweep runs at a time (0156).

@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: The historian writer -- the queue between the callback thread and TimescaleDB, and the
+#     thread that drains it. Several messages become one transaction, and the suite pins what must
+#     not change with that: row order, one asset tuple per asset, and that one bad message still
+#     loses one message. A widened blast radius would show up as lost readings from healthy devices,
+#     silently.
+
 """
 The historian writer: the queue between the paho callback thread and TimescaleDB, and the thread
 that drains it.

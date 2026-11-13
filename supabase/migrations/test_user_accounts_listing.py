@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: The read surface over auth.users that names a person in the audit trail (0116). Every
+#     property that makes it safe is in the function body rather than in a grant, so a gate that
+#     stops working fails open, silently, with the page looking exactly as it should.
+
 """
 Naming a person in the audit trail (0116).
 

@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0247 to 0250 -- that an alert is queued once as it starts firing and once as it resolves,
+#     and never on a repeat upsert or a stamp; every arm of the send decision, and that a suppressed
+#     alert is held until its window ends; that reminders stop when the alert is acknowledged,
+#     resolved or no longer confirmed by its writer; the Notifications settings, their rules and who
+#     writes them; the webhook's address, signing key and test by role; and that no machine
+#     identity's alert is ever selected for the webhook.
+
 """
 Aber queues each alert for the channels that carry it, decides each message as it is sent, and
 reminds while an alert fires unacknowledged (0247, 0248, 0249, 0250).

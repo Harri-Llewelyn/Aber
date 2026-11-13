@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: The verdict the stack suites read a broker credential from. A timeout read as a refusal
+#     passes a revocation that never happened, and one read as an answer fails a working credential
+#     on a slow runner; "connection refused" is printed for a refused TCP connection too, so
+#     matching it would do the first.
+
 """
 The broker-verdict helper in stack_exec.py, and its read of the playback worker's credential file,
 with no stack.

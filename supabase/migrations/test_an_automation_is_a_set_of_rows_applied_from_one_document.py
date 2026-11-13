@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0255, 0256 and 0257 -- the three tables (every role reads, nobody writes directly, anon
+#     touches nothing, the CHECKs); who writes (a Shopfloor Manager and an Administrator, the second
+#     factor); apply_automations() (a dry run and a refusal write nothing, new, changed and
+#     unchanged, a re-upload keeps the rows that fit, a document never deletes, the round trip); the
+#     audit rows; a device archived, restored or deleted and the alerts that end with a trigger; and
+#     automations_for_entity().
+
 """
 An automation is a set of rows, applied from one document (0255, 0256, 0257).
 

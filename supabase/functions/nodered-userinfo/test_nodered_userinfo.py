@@ -1,3 +1,8 @@
+# suite:
+#   lanes: unit
+#   why: Node-RED's authorization: an unmapped or revoked role must yield NO `permissions` key,
+#     because settings.js keys its refusal on the key's absence. Read from source.
+
 """
 Unit test suite for the nodered-userinfo Supabase Edge Function.
 

@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0209. A call made as PostgREST makes it records a minted token's use to the hour, and a
+#     second call in the same hour writes nothing, not even a row lock. A jti with no mint, another
+#     identity's token, a person's session, a key and anon record nothing. The hook refuses a
+#     revoked token first. Only an Administrator or an Auditor reads it, and a replay keeps it.
+
 """
 A service token shows when it was last used (0209).
 

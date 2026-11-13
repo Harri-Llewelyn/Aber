@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0223's figures on the System page, against answers filed in net._http_response by hand: a
+#     200 writes each figure it carries and NULL for the rest, and a non-200, no answer yet,
+#     unparseable content or no Prometheus at all clears every figure rather than leaving the last
+#     value; each run fires the next query to directory_prometheus_url(), which liveness reads too,
+#     and liveness sets a scraped service UNKNOWN when a probe fails. Every signed-in user reads the
+#     figures and no role writes them; the gateway count stands when the historian is out.
+
 """
 The System page shows what the stack is doing (0223).
 

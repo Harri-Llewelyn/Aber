@@ -1,3 +1,11 @@
+# suite:
+#   lanes: stack
+#   why: The forge's push webhook: an unsigned or mis-signed delivery is refused and writes nothing;
+#     a signed push to main lands on the right gateway with the right fields; pushes to other
+#     branches, repositories that are not a gateway's, deleted branches and unknown gateways are
+#     ignored with a 200; and Gitea's own test delivery for a freshly enrolled gateway arrives
+#     signed over the forge network and records the real head of main.
+
 """
 The forge's push webhook, against the live stack.
 

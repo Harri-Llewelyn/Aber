@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: The example metrics' PROVENANCE, and that db-init replaying them changes nothing. A metric
+#     registered with a missing or wrong semantic id breaks nothing at runtime -- it asserts an
+#     interoperability claim that is simply untrue, which no other check would notice.
+
 """
 The example metrics: `supabase/example-metrics.sql`, the starter catalog db-init applies only with
 dbInit.exampleMetrics on, applied here to a migrated database inside a transaction that is rolled

@@ -1,3 +1,14 @@
+# suite:
+#   lanes: unit
+#   why: Payload conformance -- the SCHEMA_REJECTION half of the audit trail. THE DEDUPLICATION IS
+#     WHAT THIS IS FOR. These rows go into `audit_trail`, which is append-only to every application
+#     role and which the application cannot prune at all. DDATA arrives continuously, so a
+#     regression that writes one row per message does not degrade -- it fills the disk.
+#     Archived migration 0005 gave the audit TRIGGER a guard against exactly this; the RPC these
+#     rows go through is not a trigger, so the only guard is in Python. It also holds the Python
+#     half of test-harness/fixtures/payload-conformance.json; the JavaScript half, Validate
+#     Payload's copy of the rules, runs in frontend-build.
+
 """
 Unit tests for payload conformance auditing -- the SCHEMA_REJECTION half of the audit trail.
 

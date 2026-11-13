@@ -1,3 +1,13 @@
+# suite:
+#   lanes: db
+#   why: 0282's derived_series() and derived_current(), over local tables standing in for the
+#     historian's one-minute rollup: a counter rate is the increase per hour with a reset counting
+#     its new value, a time in state is the share of the bucket's minutes with a state carried
+#     across a quiet stretch, a sum is the time-average of the per-minute signed sum and a device
+#     missing an input has no row, a window of more than one chunk answers as one would (whole
+#     buckets, and the devices of a wide bucket), only whole minutes are read, every refusal comes
+#     before any read, each kind has its current value by one rule, and anon may call neither.
+
 """
 History draws a derived metric from the minutes (0282).
 

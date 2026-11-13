@@ -1,3 +1,11 @@
+# suite:
+#   lanes: stack
+#   why: A read-only broker account through the path the Access Control page takes: an Administrator
+#     creates one and a Shopfloor Manager cannot; connected with the password shown, it receives a
+#     Sparkplug and a UNS message, and its own publishes reach nobody; deleting it drops the live
+#     session and refuses the next CONNECT; and each act is one Audit Trail row. All of it is silent
+#     at QoS 0, so it is asserted by delivery. Skips without a stack.
+
 """
 A read-only broker account, through the path the Access Control page takes, on a running stack.
 

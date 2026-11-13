@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0257 and 0287 -- that deleting an automation with 2,000 triggers and 1,000 firing alerts
+#     updates platform_alerts in ONE statement and in under 1.5 s; that a delete resolves the alerts
+#     of the triggers it removes (one, several, a whole automation, a device's) and no others; that
+#     the update arm is as it was (archived, moved, a new threshold); that
+#     automation_alert_trigger_id() reads what automation_alert_fingerprint() composes; that no API
+#     role runs the functions; and a manager deleting through delete_automation().
+
 """
 Deleting an automation resolves its alerts in one pass (0257, 0287).
 

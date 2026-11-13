@@ -1,3 +1,14 @@
+# suite:
+#   lanes: unit
+#   why: The i3X subscription engine and address-space projection. NOT A SUBSTITUTE FOR THE
+#     CONFORMANCE SUITE and not substituted by it: CESMII's own suite is the arbiter of whether this
+#     server is i3X 1.0, but it SKIPPED SUB-07 and SUB-13 on the live run -- the MUSTs protecting a
+#     client's unprocessed updates -- reporting "no updates were observed on the subscription",
+#     because a demo device publishing every five seconds does not reliably produce one inside the
+#     window. Those are covered here or nowhere. Queue overflow needs I3X_SUBSCRIPTION_QUEUE_LIMIT
+#     (500) undelivered batches and TTL expiry needs minutes of wall clock, neither of which a live
+#     run reaches.
+
 """
 Unit tests for the i3X subscription engine and address-space projection.
 

@@ -1,3 +1,13 @@
+# suite:
+#   lanes: db
+#   why: 0124, and the four things in it that fail silently. An archived area that MOVED its cells
+#     would rename every uns/ topic beneath it with nothing logged, so the view is asserted
+#     unchanged across the archive. The purge job is one transaction: an areas DELETE refused by an
+#     Area-Wide asset would roll back the three deletes above it every night, so the guard is
+#     asserted in the job text and exercised. A lane that did not follow its original stayed live on
+#     the playback gateway, visible only as a replay that succeeded. And a tombstone whose trail_id
+#     is NULL means the two AFTER triggers fired in the wrong order, which no page would show.
+
 """
 Archiving an asset is a lifecycle rather than a flag (0124).
 

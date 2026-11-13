@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0230 -- that a read of a service's logs names a rolling range or a fixed window's two ends:
+#     a fixed window's row records its ends in UTC to the millisecond, one row for each new window
+#     and none for a repeat, whatever offset or session time zone the ends arrive in; a range or two
+#     ends, never both, in order and at most 169 hours apart; and one six-argument form after 0225
+#     and 0230 replay over the four-argument one.
+
 """
 A read of a service's logs names a rolling range or a fixed window's two ends (0230).
 

@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0216 -- that Reset MFA's database half decides before GoTrue and writes nothing then, and
+#     afterwards writes one MFA_RESET row in the person's lane naming the Administrator and how many
+#     factors went; that only an Administrator may call it; and that your own account, an unknown
+#     person, a machine identity and a missing count are refused with no row, while a removed
+#     person's factors may be reset and no session ends.
+
 """
 An Administrator resets a person's second factor, recorded in their lane (0216).
 

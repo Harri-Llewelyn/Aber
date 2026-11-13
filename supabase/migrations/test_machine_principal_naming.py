@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0125 -- that a principal created from the page carries the name it was given, in the same
+#     transaction as the identity; that the two-argument form is gone rather than overloaded, which
+#     is what keeps the RPC unambiguous; that the name table is readable by the two roles that label
+#     the audit lane and by nobody else; and (0126) that a name can be changed again through one RPC
+#     that refuses a pinned identity and records what it replaced.
+
 """
 A machine has a name an operator gave it (0125), and holds what a machine may (0146).
 

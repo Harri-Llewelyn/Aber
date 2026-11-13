@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0240 and 0241 -- that a Shopfloor Manager and an Administrator schedule, change and end a
+#     suppression window and every other role is refused; the CHECKs; that a window covers its
+#     device, its gateway's own alerts, or each device in its cell when the alert is read, and never
+#     a platform or machine identity alert; that platform_alerts_active says suppressed before,
+#     during and after it and keeps its columns; that an occurrence records the window that first
+#     covered it and nothing clears it; and the audit rows in the subject's lane.
+
 """
 An alert stays quiet during planned work: a suppression window on a device, a gateway or a cell
 (0240, 0241).

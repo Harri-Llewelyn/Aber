@@ -1,3 +1,10 @@
+# suite:
+#   lanes: stack
+#   why: Sign Out ends one session, and the API refuses its token at once (0205), through the
+#     gateway and PostgREST: the db lane can show the hook raising, but only PostgREST turns the
+#     raise into the 401 and the code the dashboard signs in again on. The other session must still
+#     read.
+
 """
 Signing out ends one session, and the API refuses that session's token at once, against a running
 stack (0205).

@@ -1,3 +1,9 @@
+# suite:
+#   lanes: unit
+#   why: The JSON Sparkplug encoding the appliance template publishes. A metric's own timestamp must
+#     survive parse_sparkplug_payload() as it does on the protobuf path, or a report-by-exception
+#     refresh and a batched reading are filed at the time the message was built.
+
 """
 The JSON encoding of a Sparkplug payload, as parse_sparkplug_payload() reads it.
 

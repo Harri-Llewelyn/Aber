@@ -1,3 +1,9 @@
+# suite:
+#   lanes: unit
+#   why: Birth-metric observation. Runs in the no-stack job rather than in e2e because the suite
+#     stubs protobuf/MQTT/psycopg2 before importing ingestion.py, so a pure-logic test does not
+#     depend on `protoc` being installed or on Docker being up.
+
 """
 Unit tests for the ingestion daemon's birth-metric observation
 (`extract_declared_metrics` / `record_declared_metrics`), its Sparkplug B alias resolution, the

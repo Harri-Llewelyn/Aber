@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: The delivery half of 0078. The worker must never mint its own; a delivered credential is
+#     the only one the broker will accept, and getting this wrong shows up as CONNACK rc=5 with
+#     nothing naming the cause.
+
 """
 The delivery gate on broker-credential issuance (archived migration 0078; 0183).
 

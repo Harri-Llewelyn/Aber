@@ -1,3 +1,17 @@
+# suite:
+#   lanes: stack
+#   why: Enrolment-token secrecy: that the raw token is never stored, that RLS is on with no
+#     policies, and that not even an Administrator can SELECT claim material. Every one of those
+#     assertions needs a seeded account, which only e2e has -- and there `REQUIRE_SEEDED_ACCOUNTS=1`
+#     turns a missing seed into a failure rather than a green tick, on the suite covering a secrecy
+#     boundary where "not checked" and "not broken" look identical from outside.
+#
+# STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THE RULE IN scripts/python-suites.mjs. Every one of
+# its assertions is made AS a seeded demo account, and the db lane deliberately applies no
+# seed.sql, so that run reported `Ran 0 tests` and exited 0. A step asserting nothing is the
+# thing the vacuous-green note in scripts/python-suites.mjs exists to forbid, and putting a suite in a second lane
+# "for coverage" is precisely how one gets written.
+
 """
 Integration tests for 0025_physical_gateway_enrollment.sql.
 
