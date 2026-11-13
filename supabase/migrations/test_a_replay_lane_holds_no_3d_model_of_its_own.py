@@ -45,6 +45,7 @@ from pathlib import Path
 
 import psycopg2
 import psycopg2.errors as pg_errors
+from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
@@ -60,12 +61,19 @@ CONSTRAINT = "devices_a_replay_lane_has_no_model"
 WANT = "CHECK (((shadow_of IS NULL) OR (model_3d_path IS NULL)))"
 PROBE = "asset_3d_models_lane_probe"
 
+DROP_CHECK = "ALTER TABLE public.devices DROP CONSTRAINT devices_a_replay_lane_has_no_model;"
+
 PEOPLE = {
     "Administrator": "a0d17294-0000-4000-8000-0000000294a1",
     "Shopfloor_Manager": "a0d17294-0000-4000-8000-0000000294a2",
     "Auditor": "a0d17294-0000-4000-8000-0000000294a3",
     "Operator": "a0d17294-0000-4000-8000-0000000294a4",
 }
+
+
+def probe(statement):
+    """`statement` with {t} standing for the stand-in table and {s} for its schema, composed, not formatted."""
+    return sql.SQL(statement).format(t=sql.Identifier(PROBE, "objects"), s=sql.Identifier(PROBE))
 
 
 def get_connection():
@@ -178,8 +186,9 @@ class TestTheCheck(LaneBase):
         self.cur.execute("UPDATE public.devices SET model_3d_path = %s WHERE id = %s;",
                          (self.model_path(self.machine), self.machine))
         self.assertEqual(self.path_of(self.machine), self.model_path(self.machine))
-        for column in ("description", "name"):
-            self.cur.execute(f"UPDATE public.devices SET {column} = 'Kept' WHERE id = %s;", (self.lane,))
+        for statement in ("UPDATE public.devices SET description = 'Kept' WHERE id = %s;",
+                          "UPDATE public.devices SET name = 'Kept' WHERE id = %s;"):
+            self.cur.execute(statement, (self.lane,))
             self.assertEqual(self.cur.rowcount, 1)
         # A model path under a lane's id is the machine's to hold: the shape check admits it.
         self.cur.execute("UPDATE public.devices SET model_3d_path = %s WHERE id = %s;",
@@ -237,7 +246,7 @@ class TestTheFile(LaneBase):
     """The migration's file, run inside the transaction against the database as 1.8.0 left it."""
 
     def drop_the_check(self):
-        self.cur.execute(f"ALTER TABLE public.devices DROP CONSTRAINT {CONSTRAINT};")
+        self.cur.execute(DROP_CHECK)
 
     def run_file(self):
         self.cur.execute(MIGRATION.read_text(encoding="utf-8"))
@@ -368,7 +377,7 @@ class TestTheFile(LaneBase):
 
     def test_a_not_valid_check_is_validated(self):
         self.drop_the_check()
-        self.cur.execute(f"ALTER TABLE public.devices ADD CONSTRAINT {CONSTRAINT}"
+        self.cur.execute("ALTER TABLE public.devices ADD CONSTRAINT devices_a_replay_lane_has_no_model"
                          " CHECK (((shadow_of IS NULL) OR (model_3d_path IS NULL))) NOT VALID;")
         self.run_file()
         self.cur.execute("SELECT convalidated FROM pg_constraint WHERE conname = %s;", (CONSTRAINT,))
@@ -376,7 +385,7 @@ class TestTheFile(LaneBase):
 
     def test_a_different_definition_under_the_name_is_put_back(self):
         self.drop_the_check()
-        self.cur.execute(f"ALTER TABLE public.devices ADD CONSTRAINT {CONSTRAINT} CHECK (true);")
+        self.cur.execute("ALTER TABLE public.devices ADD CONSTRAINT devices_a_replay_lane_has_no_model CHECK (true);")
         self.run_file()
         self.cur.execute("SELECT public.live_constraint_definition(conrelid, conname) FROM pg_constraint"
                          " WHERE conname = %s;", (CONSTRAINT,))
@@ -450,22 +459,22 @@ class TheBucketPolicies(LaneBase):
 
     def setUp(self):
         super().setUp()
-        self.cur.execute(f"CREATE SCHEMA {PROBE};")
-        self.cur.execute(f"CREATE TABLE {PROBE}.objects (bucket_id text NOT NULL, name text NOT NULL);")
-        self.cur.execute(f"ALTER TABLE {PROBE}.objects ENABLE ROW LEVEL SECURITY;")
-        self.cur.execute(f"GRANT USAGE ON SCHEMA {PROBE} TO authenticated;")
-        self.cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {PROBE}.objects TO authenticated;")
+        self.cur.execute(probe("CREATE SCHEMA {s};"))
+        self.cur.execute(probe("CREATE TABLE {t} (bucket_id text NOT NULL, name text NOT NULL);"))
+        self.cur.execute(probe("ALTER TABLE {t} ENABLE ROW LEVEL SECURITY;"))
+        self.cur.execute(probe("GRANT USAGE ON SCHEMA {s} TO authenticated;"))
+        self.cur.execute(probe("GRANT SELECT, INSERT, UPDATE, DELETE ON {t} TO authenticated;"))
         self.cur.execute(self.section())
 
     def put(self, name):
         """An object as the owner, which no policy governs."""
-        self.cur.execute(f"INSERT INTO {PROBE}.objects (bucket_id, name) VALUES ('asset-3d-models', %s);", (name,))
+        self.cur.execute(probe("INSERT INTO {t} (bucket_id, name) VALUES ('asset-3d-models', %s);"), (name,))
 
     def writes(self, caller, name):
         self.cur.execute("SAVEPOINT writes;")
         try:
             self.as_caller("authenticated", PEOPLE[caller])
-            self.cur.execute(f"INSERT INTO {PROBE}.objects (bucket_id, name) VALUES ('asset-3d-models', %s);", (name,))
+            self.cur.execute(probe("INSERT INTO {t} (bucket_id, name) VALUES ('asset-3d-models', %s);"), (name,))
             return True
         except pg_errors.InsufficientPrivilege:
             return False
@@ -479,7 +488,7 @@ class TheBucketPolicies(LaneBase):
         self.cur.execute("SAVEPOINT updates;")
         try:
             self.as_caller("authenticated", PEOPLE[caller])
-            self.cur.execute(f"UPDATE {PROBE}.objects SET name = %s WHERE bucket_id = 'asset-3d-models' AND name = %s;",
+            self.cur.execute(probe("UPDATE {t} SET name = %s WHERE bucket_id = 'asset-3d-models' AND name = %s;"),
                              (set_name, name))
             return self.cur.rowcount
         except pg_errors.InsufficientPrivilege:
@@ -493,7 +502,7 @@ class TheBucketPolicies(LaneBase):
         self.cur.execute("SAVEPOINT deletes;")
         try:
             self.as_caller("authenticated", PEOPLE[caller])
-            self.cur.execute(f"DELETE FROM {PROBE}.objects WHERE bucket_id = 'asset-3d-models' AND name = %s;", (name,))
+            self.cur.execute(probe("DELETE FROM {t} WHERE bucket_id = 'asset-3d-models' AND name = %s;"), (name,))
             return self.cur.rowcount
         finally:
             self.cur.execute("ROLLBACK TO SAVEPOINT deletes;")

@@ -30,7 +30,12 @@ export default function check() {
     problems387.push('0294 does not leave is_replay_lane_model_path(text) to authenticated alone');
   }
   const refusal = 'AND NOT public.is_replay_lane_model_path(storage.objects.name)';
-  const policy = (name) => policies.match(new RegExp(`CREATE POLICY "${name}" ON storage\\.objects[\\s\\S]*?\\);\\n`))?.[0] ?? '';
+  // From the policy's own line to the first closing ");" at the end of a line.
+  const policy = (name) => {
+    const from = policies.indexOf(`CREATE POLICY "${name}" ON storage.objects`);
+    const to = from < 0 ? -1 : policies.indexOf(');\n', from);
+    return to < 0 ? '' : policies.slice(from, to + 2);
+  };
   const count = (text) => text.split(refusal).length - 1;
   for (const [name, want] of [['asset_3d_models_insert_privileged', 1], ['asset_3d_models_update_privileged', 2],
     ['asset_3d_models_select_privileged', 0], ['asset_3d_models_delete_privileged', 0]]) {
