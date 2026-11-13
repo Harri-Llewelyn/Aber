@@ -611,6 +611,19 @@ python supabase/migrations/test_platform_alerts_retention.py
 # days with the setting gone. Every test rolls back.
 python supabase/migrations/test_alert_history_is_kept_for_90_days.py
 python supabase/migrations/test_system_settings_rls.py
+# A number setting says whether it counts whole things (0285), and a part value never stops a proposal
+# (0286). Every number setting is listed with the reader that decided it, and a new one fails the suite
+# until it is decided. system_settings.whole_number is true for nine and false for the fraction, and
+# only a number can be whole. A whole setting refuses 1.5 and 0.5 as "<key> must be a whole number",
+# with of hours, of days or of seconds after it by the key's last word, for an Administrator and for the
+# service role, on an insert as on an update; the fraction accepts 0.125. The guard looks at a row only
+# when its value or its flag changes. The reminder interval keeps 0248's sentence and
+# notification_setting_guard() its other arms. 0285's file runs in the transaction over a database as
+# 1.8.0 left it: each stored part value is rounded down with a NOTICE and an Audit Trail row, a floor
+# is never undercut, and a replay writes nothing. A stored part day is its whole days for a suppression
+# window and an export. A stored 10.5 in the proposal cap admits ten and refuses the eleventh with the
+# cap's sentence. Every test rolls back.
+python supabase/migrations/test_a_number_setting_says_whether_it_counts_whole_things.py
 # The site's Sparkplug group (0131), which is DISPLAYED and not editable. An Administrator holds
 # GRANT UPDATE (value) on system_settings, so a direct PostgREST write is admitted by RLS and only
 # the trigger refuses it -- a read-only control in the browser alone would be a suggestion. Also

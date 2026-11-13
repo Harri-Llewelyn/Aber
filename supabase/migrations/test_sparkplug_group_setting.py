@@ -103,7 +103,9 @@ class TestSparkplugGroupSetting(unittest.TestCase):
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT key FROM public.system_settings"
-                " WHERE NOT read_only AND value_type = 'number' LIMIT 1"
+                " WHERE NOT read_only AND value_type = 'number'"
+                "   AND coalesce(min_value, 1) <= 1 AND coalesce(max_value, 1) >= 1"
+                " ORDER BY key LIMIT 1"
             )
             row = cur.fetchone()
             self.assertIsNotNone(row, "no editable numeric setting to test against")

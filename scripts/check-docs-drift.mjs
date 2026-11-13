@@ -1279,7 +1279,10 @@ function edgeFunctionNames() {
     'public.notification_channel_is_configured': '0262 adds the email arm, which is configured once a role is told; 0247 declares the webhook alone, so it stands where email is not applied',
     'public.queue_platform_alert_notifications': '0262 queues an email beside the webhook when the email route carries the alert; 0247 queues the webhook alone',
     'public.queue_platform_alert_reminders': '0262 reminds only on a channel that still carries the alert, through notification_channel_reaches(), where 0247 named the webhook and a machine identity',
-    'public.notification_setting_guard': '0262 adds the two email settings, and makes the guard SECURITY DEFINER because no API role may run its helpers and Postgres checks EXECUTE on every function an expression names; 0248 declares the webhook settings alone',
+    'public.notification_setting_guard': '0262 adds the two email settings, and makes the guard SECURITY DEFINER because no API role may run its helpers and Postgres checks EXECUTE on every function an expression names; 0248 declares the webhook settings alone. 0285 takes the arm for the reminder interval out, since system_settings_whole_number_guard() holds it with every other whole-number setting, and keeps every other arm',
+    'public.check_alert_suppression_window_length': '0285 takes a stored part day as its whole days and words the refusal in whole days, since alerts.suppression_max_days now counts whole things; 0240 took a part day as it was and could say "1.5 days"',
+    'public.telemetry_export_max_days': '0285 takes a stored part day as its whole days, since history.export_max_days now counts whole things; 0278 took a part day as it was',
+    'public.enforce_open_proposal_cap': '0286 reads the cap as floor(...::numeric)::integer, so a stored part value is its floor and never stops a proposal; the baseline cast it to an integer, which a part value failed',
     'public.refresh_directory_liveness': '0223 takes Prometheus\'s address from directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares first, so the baseline\'s copy never names it during a replay. It also counts content that is not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the baseline raised on such content without firing the next probe, and left every scraped service at its last ACTIVE when a probe failed',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
@@ -11732,6 +11735,138 @@ const OPERATOR_PAIRS = [
       problems330.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`the help and supabase/README.md name ${declared[3]} as 0278 declares it: ${declared[1]} days, ${bounds[1]} to ${bounds[2]}, on ${declared[2]}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 353. The settings that count whole things are named as 0285 flags them. The upgrade guide's
+// section lists each of the nine by the label its seed gives, says how many there are, and names
+// the one number setting that takes a fraction; the Settings help names the one that is a count of
+// proposals and the one that is a fraction, and says days, hours and seconds. A page naming a
+// setting 0285 leaves part tells a person a value will be refused that the database accepts.
+// -------------------------------------------------------------------------------------------------
+{
+  const SQL = 'supabase/migrations/0285_a_number_setting_says_whether_it_counts_whole_things.sql';
+  const chain = allFiles.filter((f) => /^supabase\/migrations\/\d{4}_[^/]*\.sql$/.test(f)).sort().map(read).join('\n');
+  const flagged = [...(read(SQL).match(/v_whole text\[\] := ARRAY\[([^\]]*)\]/)?.[1] || '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const labels = new Map();
+  for (const m of chain.matchAll(/seed_setting\(\s*'([a-z_.]+)',\s*to_jsonb\([^)]*\),\s*'number',\s*'[^']*',\s*'((?:[^']|'')*)'/g)) {
+    labels.set(m[1], m[2].replace(/''/g, "'"));
+  }
+  const problems353 = [];
+  if (flagged.length === 0) problems353.push(SQL + ': could not read the settings it flags whole_number');
+  const parts = [...labels.keys()].filter((k) => !flagged.includes(k));
+  for (const key of flagged) if (!labels.has(key)) problems353.push(SQL + ' flags ' + key + ', which no migration seeds as a number');
+  if (parts.length === 0) problems353.push('every number setting is flagged whole in ' + SQL + ', so the guide has no fraction to name');
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  const guide = read('help/site/upgrading.md');
+  const at = guide.indexOf('\n### From 1.9.0, a setting that counts days, hours or seconds takes whole numbers\n');
+  const section = at < 0 ? '' : guide.slice(at, guide.indexOf('\n## ', at));
+  if (!section) {
+    problems353.push('help/site/upgrading.md has no "From 1.9.0, a setting that counts days, hours or seconds takes whole numbers" section');
+  } else {
+    const count = words[flagged.length] ?? String(flagged.length);
+    const lead = count[0].toUpperCase() + count.slice(1) + ' number settings now take whole numbers only';
+    if (!section.includes('\n' + lead)) problems353.push('the upgrade guide does not say "' + lead + '"');
+    for (const key of flagged) {
+      const label = labels.get(key);
+      if (label && !section.includes('**' + label + '**')) problems353.push('the upgrade guide does not name **' + label + '**, which 0285 flags whole');
+      if (!section.includes("'" + key + "'")) problems353.push("the upgrade guide's query does not name '" + key + "'");
+    }
+    for (const key of parts) {
+      const label = labels.get(key);
+      if (!section.includes('**' + label + '**')) problems353.push('the upgrade guide does not name **' + label + '**, which stays a fraction');
+    }
+  }
+  const help = read('help/pages/settings.md');
+  for (const needle of ['takes a whole number', 'every setting counted in days, hours or seconds']) {
+    if (!help.includes(needle)) problems353.push('help/pages/settings.md does not say "' + needle + '"');
+  }
+  for (const key of ['proposals.max_open_per_person', ...parts]) {
+    const label = labels.get(key);
+    if (label && !help.includes('**' + label + '**')) problems353.push('help/pages/settings.md does not name **' + label + '**');
+  }
+  if (problems353.length) {
+    fail('the upgrade guide and the Settings help name the whole-number settings otherwise than 0285 flags them:\n' +
+      problems353.map((p) => '        ' + p).join('\n'));
+  } else {
+    pass('the upgrade guide names the ' + flagged.length + ' settings 0285 flags whole and the ' + parts.length + ' that stays a fraction, and the Settings help says what they take');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 354. supabase/README.md's table of the number settings says what 0285 does: a row for every number
+// setting the chain seeds, "whole" for each key 0285 flags and "part" for the others, and the counts
+// in its sentence. A table that calls a setting part which the file flags whole sends a reader to
+// a reader that no longer decides it.
+// -------------------------------------------------------------------------------------------------
+{
+  const SQL = 'supabase/migrations/0285_a_number_setting_says_whether_it_counts_whole_things.sql';
+  const chain = allFiles.filter((f) => /^supabase\/migrations\/\d{4}_[^/]*\.sql$/.test(f)).sort().map(read).join('\n');
+  const flagged = [...(read(SQL).match(/v_whole text\[\] := ARRAY\[([^\]]*)\]/)?.[1] || '').matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+  const seeded = [...new Set([...chain.matchAll(/seed_setting\(\s*'([a-z_.]+)',\s*to_jsonb\([^)]*\),\s*'number'/g)].map((m) => m[1]))].sort();
+  const readme = read('supabase/README.md');
+  const from = readme.indexOf('\n### A number setting says whether it counts whole things (0285)\n');
+  const section = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 5));
+  const rows = new Map([...section.matchAll(/^\s*\| `([a-z_.]+)` \| (whole|part) \|/gm)].map((m) => [m[1], m[2]]));
+  const problems354 = [];
+  if (!section) problems354.push('supabase/README.md has no "A number setting says whether it counts whole things (0285)" section');
+  if (flagged.length === 0) problems354.push(SQL + ': could not read the settings it flags whole_number');
+  for (const key of seeded) {
+    const want = flagged.includes(key) ? 'whole' : 'part';
+    if (section && rows.get(key) !== want) problems354.push('the 0285 table says ' + key + ' is ' + (rows.get(key) ?? 'missing') + ', and 0285 makes it ' + want);
+  }
+  for (const key of rows.keys()) if (!seeded.includes(key)) problems354.push('the 0285 table lists ' + key + ', which no migration seeds as a number');
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  const parts = seeded.length - flagged.length;
+  const lead = (words[flagged.length] ?? String(flagged.length)).replace(/^./, (c) => c.toUpperCase());
+  const says = '**' + lead + ' settings are whole, and ' + (words[parts] ?? parts) + (parts === 1 ? ' is not' : ' are not') + '.**';
+  if (section && !section.replace(/\s+/g, ' ').includes(says)) problems354.push('the 0285 section does not say ' + says);
+  if (problems354.length) {
+    fail("supabase/README.md's table of whole-number settings says otherwise than 0285 does:\n" +
+      problems354.map((p) => '        ' + p).join('\n'));
+  } else {
+    pass('supabase/README.md lists each of the ' + seeded.length + ' number settings as 0285 leaves it: ' + flagged.length + ' whole, ' + parts + ' part');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 355. Nothing says a part day is taken as it is, and the upgrade guide quotes the line 0285 logs.
+// The suppression and export readers took a part day until 0285; the prose that said so is gone, the
+// refusal no longer words a part day (no trim_scale in its redeclaration), and the guide's line,
+// "0285: <key> held 1.5 and now holds 1", and the grep in its After-an-upgrade table are the
+// NOTICE the file raises.
+// -------------------------------------------------------------------------------------------------
+{
+  const SQL = 'supabase/migrations/0285_a_number_setting_says_whether_it_counts_whole_things.sql';
+  const sql = read(SQL);
+  const problems355 = [];
+  for (const file of allFiles.filter((f) => f.endsWith('.md') && !gitignored(f))) {
+    if (read(file).includes('part day is taken as it is')) problems355.push(file + ' still says a part day is taken as it is');
+  }
+  const fn = sql.indexOf('CREATE OR REPLACE FUNCTION public.check_alert_suppression_window_length(');
+  if (fn < 0 || sql.slice(fn, sql.indexOf('$;', fn + 80)).includes('trim_scale')) {
+    problems355.push(SQL + ' does not redeclare check_alert_suppression_window_length() without trim_scale');
+  }
+  const guide = read('help/site/upgrading.md');
+  if (!/RAISE NOTICE '0285: % held % and now holds %;/.test(sql)) {
+    problems355.push(SQL + ' raises no NOTICE of the form "0285: <key> held <old> and now holds <new>"');
+  } else {
+    if (!guide.includes('`0285: <key> held 1.5 and now holds 1`')) problems355.push('the upgrade guide does not quote "0285: <key> held 1.5 and now holds 1"');
+    if (!guide.includes("grep '0285:'")) problems355.push("the upgrade guide's After-an-upgrade table does not grep for '0285:'");
+  }
+  const readme = read('supabase/README.md');
+  for (const [what, title, next] of [
+    ['0240', '### An alert stays quiet during planned work (0240)', "### The Audit Trail files a suppression window's acts (0241)"],
+    ['0278', '### The longest export is a setting (0278)', '### An export of readings is checked, bounded and recorded (0279)'],
+  ]) {
+    const zone = readme.slice(readme.indexOf(title), readme.indexOf(next));
+    if (!zone.includes('whole days (`0285`)')) problems355.push("supabase/README.md's " + what + ' section does not say a part day is its whole days (0285)');
+  }
+  if (problems355.length) {
+    fail('the part-day prose or the rounding line is stale against 0285:\n' + problems355.map((p) => '        ' + p).join('\n'));
+  } else {
+    pass('no document says a part day is taken as it is, the suppression refusal words whole days, and the guide quotes the NOTICE 0285 raises');
   }
 }
 
