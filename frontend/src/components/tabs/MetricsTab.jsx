@@ -30,6 +30,7 @@ import {
   unitOf,
 } from '../../utils/derivedMetric'
 import { metricDevices } from '../../utils/history'
+import { unitAndCode } from '../../utils/units'
 import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
 import {
   conceptByName, ashrae223Prefill, ashrae223Sections, metricConcepts
@@ -149,6 +150,7 @@ const CATALOG_SORT = {
   name: { type: 'text', value: m => m.name },
   standard: { type: 'text', value: m => m.standard || LOCAL_EXTENSION_LABEL },
   category: { type: 'text', value: m => m.category },
+  // Units sorts on the code, so one unit's rows stay together whatever its symbol.
   units: { type: 'text', value: m => unitOf(m) },
   datatype: { type: 'text', value: m => (m.datatype === null || m.datatype === undefined ? null : datatypeLabel(m.datatype)) },
   semantic_id: { type: 'text', value: m => m.semantic_id },
@@ -877,7 +879,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
       <td className="cell-meta">{m.standard || LOCAL_EXTENSION_LABEL}</td>
       <td className="cell-meta">{m.category || '—'}</td>
-      <td className="cell-meta">{unitOf(m) || '—'}</td>
+      <td className="cell-meta">{unitAndCode(unitOf(m)) || '—'}</td>
       <td className="cell-meta">{datatypeLabel(m.datatype)}</td>
       {/* Cut in the middle: the ids share a long prefix, and the end tells two apart. */}
       <td>
@@ -995,13 +997,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     Unmapped ({unmappedCount})
                   </button>
                 </Tooltip>
-                <ExpandAllToggle
-                  anyOpen={catalogGroups.some(g => isGroupOpen(g.label))}
-                  onExpandAll={() => setAllGroups(true)}
-                  onCollapseAll={() => setAllGroups(false)}
-                  noun="groups"
-                  disabled={catalogGroups.length === 0}
-                />
                 <div className="filter-bar-actions">
                   <ClearFilters count={catalogFilterCount} onClear={clearCatalogFilters} />
                   <ActionButton
@@ -1014,6 +1009,19 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   </ActionButton>
                 </div>
               </div>
+
+              {/* The control that acts on the groups sits at the start of the row over them, not in
+                  the toolbar. Drawn with the table: an empty list has no group to open. */}
+              {loaded && catalogGroups.length > 0 && (
+                <div className="groups-header">
+                  <ExpandAllToggle
+                    anyOpen={catalogGroups.some(g => isGroupOpen(g.label))}
+                    onExpandAll={() => setAllGroups(true)}
+                    onCollapseAll={() => setAllGroups(false)}
+                    noun="groups"
+                  />
+                </div>
+              )}
 
               {!loaded ? <LoadingState label="catalog" /> : catalogGroups.length === 0 ? (
                 <EmptyState
@@ -1123,7 +1131,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                           <td><span className="mono">{m.name}</span></td>
                           <td className="cell-meta">{kindLabel(m.derivation.kind)}</td>
                           <td><Definition derivation={m.derivation} /></td>
-                          <td className="cell-meta">{unitOf(m) || '—'}</td>
+                          <td className="cell-meta">{unitAndCode(unitOf(m)) || '—'}</td>
                           <td className="cell-meta">{m.description || '—'}</td>
                         </tr>
                       ))}
@@ -1324,7 +1332,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           // A time in state has no unit of its own: it is a fraction, shown as a percentage of the time.
           isShare(selected.derivation)
             ? { label: 'Units', value: SHARE_UNIT_WORDS, full: true }
-            : { label: 'Units', value: selected.units || null },
+            : { label: 'Units', value: unitAndCode(selected.units) || null },
           { label: 'Datatype', value: datatypeLabel(selected.datatype) },
           !isDerived(selected) && { label: 'Semantic ID', value: selected.semantic_id || null, mono: true, copyable: true, full: true },
           !isDerived(selected) && { label: 'Reference Type', value: selected.semantic_id ? selected.semantic_id_type || null : null },

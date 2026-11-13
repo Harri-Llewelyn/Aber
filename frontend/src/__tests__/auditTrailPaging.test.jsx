@@ -226,11 +226,11 @@ describe('AuditTrailTab paging', () => {
     respond(() => pending)
     render(<AuditTrailTab />)
     expect(await screen.findByText('Loading the Audit Trail…')).toBeInTheDocument()
-    expect(document.querySelector('.trail-header .trail-legend')).toBeTruthy()
+    expect(document.querySelector('.groups-header .trail-legend')).toBeTruthy()
     expect(document.querySelector('.list-foot')).toBeNull()
     release(page([], { nextCursor: null, totalMatching: 0 }))
     await waitFor(() => expect(screen.queryByText('Loading the Audit Trail…')).toBeNull())
-    expect(document.querySelector('.trail-header .trail-legend')).toBeTruthy()
+    expect(document.querySelector('.groups-header .trail-legend')).toBeTruthy()
     expect(document.querySelector('.list-foot')).toBeNull()
     expect(screen.queryByText(/All \d+ shown/)).toBeNull()
   })
@@ -407,7 +407,7 @@ describe('AuditTrailTab total', () => {
     expect(await screen.findByText('2 of 467')).toBeInTheDocument()
     // Once: not again above the timeline, where it used to sit beside the key.
     expect(screen.getAllByText(/2 of 467/)).toHaveLength(1)
-    expect(document.querySelector('.trail-header').textContent).not.toMatch(/\d/)
+    expect(document.querySelector('.groups-header').textContent).not.toMatch(/\d/)
     expect(screen.getByRole('button', { name: /Show \d+ more/ })).toBeInTheDocument()
   })
 
@@ -423,7 +423,7 @@ describe('AuditTrailTab total', () => {
     expect(count.nextElementSibling).toHaveTextContent(/Show \d+ more/)
     // The row above the timeline holds Collapse all and, at its right-hand end, the key, with the
     // scroller directly under it.
-    const header = document.querySelector('.trail-header')
+    const header = document.querySelector('.groups-header')
     expect(header.children).toHaveLength(2)
     expect(header.children[0]).toHaveTextContent('Collapse all')
     expect(header.children[1]).toHaveClass('trail-legend')

@@ -1587,6 +1587,23 @@ a generous one stalls the whole fleet behind one unreachable database.
 A connection dropped by the server still reports `closed == 0` and fails on first use, which is what
 the writer's exception handler and the next call through here cover.
 
+**The message in hand is written again on a fresh connection.** A write failed for the
+connection's sake when it raised `psycopg2.InterfaceError`, or an `OperationalError` after which the
+connection reports itself closed. The writer then closes a connection that still reads open and
+calls `get_timescaledb_connection()` once. The bounded retry above is the only wait. Then it writes
+the message once more. That covers a historian that restarted: an upgrade, a node reboot, a pod
+moved.
+
+If the second write fails, or no connection can be opened, the message is dropped as before. It is
+counted by `write_failures_total`, or by `messages_dropped_total{reason="db_unavailable"}`. A message
+the retry saved is counted by `write_retries_saved_total`. A transaction of several messages that
+fails is split and each message is written alone, so each takes that retry too. Any other error is
+the message's own fault: it is counted and dropped without a retry.
+
+Nothing is written twice. The telemetry insert is `ON CONFLICT DO NOTHING`, so a commit whose
+acknowledgement was lost leaves the retry nothing to add. The UNS republish and the conformance
+record run only after the write that succeeded.
+
 A separate healer thread retries, off the message path and every `DB_HEAL_INTERVAL_SECONDS`, the two startup
 steps a dependency that was not up yet can prevent: the historian connection and `capture_worker.reconcile()`.
 It opens a connection with the lock released and only takes `_ts_conn_lock` to publish the result, so a
@@ -2405,6 +2422,7 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_rollup_windows_failed_total` | — | Such hours that could not be recorded. **The readings are stored but missing from the rollups** until the hour is refreshed by hand ([Loss model](#loss-model)). |
 | `aber_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
 | `aber_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
+| `aber_ingestion_write_retries_saved_total` | — | A message held alone whose write failed on a lost connection and was written on a fresh one ([*Connection handling*](#connection-handling)). Each would otherwise be in `write_failures_total`. |
 | `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `audit_trail` (archived migration 0026). The telemetry was still written. |
 | `aber_ingestion_capture_jobs_total` | `outcome` | Capture jobs the recorder ended: `completed` (stored), `failed` (including the jobs the startup sweep failed) or `discarded` (ended on the page, or deleted, while it recorded). A failure is counted once it is written. The *Capture or Playback Failed* alert reads the database rather than this ([Recording from the dashboard](#recording-from-the-dashboard)). |
 | `aber_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |

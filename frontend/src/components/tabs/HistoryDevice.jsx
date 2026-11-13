@@ -464,7 +464,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
           {/* One row above the charts, as the Audit Trail has above its sections: the control that
               opens or closes every group first, over the group headings it acts on, then the line
               saying what is shown. */}
-          <div className="history-header">
+          <div className="groups-header">
             <ExpandAllToggle
               anyOpen={groups.some(g => !closedGroups.has(g.key))}
               onExpandAll={() => setGroupsOpen(groups.map(g => g.key), true)}
