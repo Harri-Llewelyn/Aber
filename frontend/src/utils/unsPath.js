@@ -25,9 +25,10 @@ export const unsTopicOf = (row) => (row?.uns_path ? `${unsTopicRoot()}/${row.uns
 const UNSAFE = /[/+#]/
 
 /**
- * Why an area or a cell cannot be saved under `name`, or null. areas_name_topic_safe and
- * cells_name_topic_safe refuse an empty name and these three characters; mirror check 64 holds the
- * characters to both CHECKs. `noun` is 'area' or 'cell'.
+ * Why an area or a cell cannot be saved under `name`, or null. areas_name_not_blank and
+ * cells_name_not_blank refuse a name of nothing or of spaces; areas_name_topic_safe and
+ * cells_name_topic_safe refuse these three characters, and mirror check 64 holds them to both.
+ * `noun` is 'area' or 'cell'.
  */
 export const placeNameProblem = (name, noun) => (!(name || '').trim() ? `Give the ${noun} a name`
   : UNSAFE.test(name) ? 'The name cannot contain / + or #'
