@@ -272,8 +272,9 @@ HELP = {
         "after an outage\").",
     "aber_ingestion_write_queue_depth":
         "DDATA messages decided by the callback thread and not yet written. THE SATURATION SIGNAL: "
-        "it grows only while the writer is behind the fleet, and a full queue drops with "
-        "reason=\"write_queue_full\".",
+        "it grows while the writer is behind the fleet, and while the historian is down, when it is the "
+        "readings the queue holds. A full queue drops with reason=\"write_queue_full\", or at once with "
+        "reason=\"db_unavailable\" while the historian is down.",
     "aber_ingestion_write_failures_total":
         "Historian writes that raised. Telemetry from these is lost.",
     "aber_ingestion_uns_published_total":
@@ -299,7 +300,9 @@ HELP = {
         "Messages the writer held alone whose write failed because the historian connection had gone, "
         "and was written on a fresh one. Each would otherwise have been lost and counted by "
         "aber_ingestion_write_failures_total.",
-    "aber_ingestion_db_connect_failures_total": "Failed attempts to open the historian connection.",
+    "aber_ingestion_db_connect_failures_total":
+        "Failed attempts to open the historian connection. A historian that is down adds one for each "
+        "attempt of each pass the writer makes at it.",
     "aber_ingestion_db_heals_total":
         "Times the background recovery loop opened the historian connection the daemon should "
         "already have been holding. NON-ZERO MEANS A STARTUP ORDERING RACE WAS LOST: the daemon "
@@ -307,9 +310,9 @@ HELP = {
         "daemon restart. Nothing was dropped -- this counts a repair, not a loss.",
     "aber_ingestion_db_heal_failures_total":
         "Failed attempts by the background recovery loop. DISTINCT FROM "
-        "aber_ingestion_db_connect_failures_total, which counts a connection a MESSAGE needed and "
-        "therefore telemetry dropped. This one drops nothing: it is a daemon with no traffic "
-        "waiting for a historian, and only says how long it has been waiting.",
+        "aber_ingestion_db_connect_failures_total, which counts a connection the writer needed for "
+        "a message, so readings were held or dropped. This one drops nothing: it is a daemon with no "
+        "traffic waiting for a historian, and only says how long it has been waiting.",
     "aber_ingestion_gateway_heartbeats_total": "Gateway heartbeat stamps written.",
     "aber_ingestion_gateway_status_transitions_total": "Gateway status changes recorded.",
     "aber_ingestion_gateway_status_reserved_rejected_total":
@@ -345,10 +348,12 @@ HELP = {
         "at 1 the writer is saturated and aber_ingestion_write_queue_depth grows. Committed writes only "
         "-- a transaction that raised is counted by aber_ingestion_write_failures_total and excluded, so "
         "a p99 spike unambiguously means a slow database and never an absent one. Observations at or "
-        "above 0.25s are the bounded reconnect running, not the INSERT.",
+        "above 0.25s are the bounded reconnect running, not the INSERT. The writer's waits for a "
+        "historian that is down are not counted.",
     "aber_ingestion_up": "1 while the daemon is serving this endpoint.",
     "aber_ingestion_db_connected":
-        "1 when the historian connection is open. 0 means telemetry is being dropped now.",
+        "1 when the historian connection is open. 0 means the historian is unreachable: telemetry is "
+        "queued now, and dropped once the queue is full.",
     "aber_ingestion_mqtt_connected":
         "1 when the daemon is subscribed to spBv1.0/#. THE SUBSCRIPTION, NOT THE CONNECTION: a "
         "connected client that has not subscribed receives nothing, and that is the state worth "

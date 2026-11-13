@@ -248,9 +248,10 @@ class DropPairTestCase(unittest.TestCase):
 
     def test_a_throttled_site_throttles_the_log_and_never_the_counter(self):
         """
-        THE ONE ASYMMETRY, AND IT IS DELIBERATE. Six sites suppress their warning because the
+        THE ONE ASYMMETRY, AND IT IS DELIBERATE. Eight sites suppress their warning. Six because the
         traffic arrives on its own cadence -- a heartbeat every 30s, or a retired machine that
-        was never unplugged -- and the log would be unreadable. The COUNTER must still fire
+        was never unplugged -- and the log would be unreadable. Two because a historian outage
+        drops a whole queue: the writer logs a batch once, and a full queue once per outage. The COUNTER must still fire
         per message, or the metric reports one drop per throttle window instead of one per
         message -- so `emit_log` gates the line only, and this asserts no site can quietly
         throttle by skipping the count instead.
@@ -261,7 +262,7 @@ class DropPairTestCase(unittest.TestCase):
         self.assertTrue(calls, "found no drop() calls -- this check has gone stale")
         throttled = [c for c in calls if any(kw.arg == "emit_log" for kw in c.keywords)]
         self.assertEqual(
-            6, len(throttled),
+            8, len(throttled),
             "the number of throttled drop sites changed; confirm the counter still fires per "
             "message at the new one before updating this number",
         )
