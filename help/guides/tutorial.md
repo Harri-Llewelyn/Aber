@@ -106,9 +106,10 @@ A name the catalog does not have is shown as plain text and exported without a s
 
 ### 7. Create the device
 
-Open **Devices** and choose **New Device**. Choose the gateway from step 3, the cell from step 2 and
-the schema from step 6. **Copy the Sparkplug ID it shows**: `dev` followed by 21 characters, made the
-same way as the gateway's.
+Open **Devices** and choose **New Device**. Choose the gateway from step 3. Under **Location**, choose
+**In a cell** and the cell from step 2: a new device follows its gateway, and this gateway has no cell.
+Then choose the schema from step 6. **Copy the Sparkplug ID it shows**: `dev` followed by 21
+characters, made the same way as the gateway's.
 
 You can skip this step too. Send messages under any well-formed `dev` id you make up, and the device
 waits in [quarantine](glossary.md#quarantine) for you to approve it. See

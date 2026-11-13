@@ -7411,8 +7411,8 @@ never turned, and a **shadow** spindle reporting 4000 RPM *did* turn, on a real 
 the capture was recorded. Both are "not a machine running right now", and they give opposite answers
 to *is this number true* — which is the question being asked at the moment anyone consults a lane.
 
-Precedence is `shadow > simulated > site_wide > area_wide > explicit > inherited > unassigned`,
-most specific first: both flags are true of a shadow device, so without an explicit order it lands in
+Precedence is `shadow > simulated > site_wide > area_wide > followed_site / followed_area /
+followed_cell > explicit > inherited > unassigned` (the followed arms are `0293`'s), most specific first: both flags are true of a shadow device, so without an explicit order it lands in
 Simulated and
 the more informative lane is silently unreachable. `device_locations` computes it and
 `utils/cellResolution.js` mirrors it, with `check-mirror-drift.mjs` pinning the label list literally

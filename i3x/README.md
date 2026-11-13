@@ -317,8 +317,9 @@ The mappings that are decisions rather than mechanics:
     came from a source in quarantine. A test holds ingestion to that premise.
 
 A device's place is what the `device_locations` view resolves, keyed by `device_id`: its lane
-(`location_source`), else `effective_cell_id`, else `effective_area_id`, so an explicit cell and one
-inherited from the gateway resolve the way the Directory resolves them. A gateway inherits nothing
+(`location_source`), else `effective_cell_id`, else `effective_area_id`, so a device's own cell and one
+it takes from its gateway resolve the way the Directory resolves them. A device that follows a
+Site-Wide gateway (`followed_site`) is filed under the site, as a Site-Wide one is. A gateway inherits nothing
 and is placed by its own columns in the view's order. The root's `displayName` is the `site.name`
 setting the UNS bridge publishes under, and `Site` while it is empty; the setting is not sensitive,
 so every authenticated caller reads it. An object's
