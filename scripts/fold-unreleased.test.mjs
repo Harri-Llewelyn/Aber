@@ -16,12 +16,12 @@ const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'fold-unreleased.mj
 
 const FILES = {
   'help/site/upgrading.md': '# Upgrading\n\n### From 1.8.0, old\n\nOld.\n\n## Backups\n\nText.\n',
-  'supabase/README.md': '# Migrations\n\n### Old (0001)\n\nOld.\n\n### Migrations that must run once, and the ledger\n\nLedger.\n',
-  'docs/page.md': 'The note is [here](../unreleased/migrations/0002.md) and [there](../unreleased/upgrading/new.md#part).\n',
+  'supabase/README.md': '# Migrations\n\n### Old (9901)\n\nOld.\n\n### Migrations that must run once, and the ledger\n\nLedger.\n',
+  'docs/page.md': 'The note is [here](../unreleased/migrations/9902.md) and [there](../unreleased/upgrading/new.md#part).\n',
   'unreleased/upgrading/README.md': '# Upgrade notes\n',
   'unreleased/migrations/README.md': '# Migration notes\n',
-  'unreleased/upgrading/new.md': '### From 1.9.0, new\n\nNew. See [the migration](../migrations/0002.md).\n',
-  'unreleased/migrations/0002.md': '### New (0002)\n\nNew.\n',
+  'unreleased/upgrading/new.md': '### From 1.9.0, new\n\nNew. See [the migration](../migrations/9902.md).\n',
+  'unreleased/migrations/9902.md': '### New (9902)\n\nNew.\n',
 }
 
 function copy () {
@@ -43,7 +43,7 @@ test('--check says what it would do, exits 1 and changes nothing', () => {
     assert.match(r.stdout, /Would fold 2 note\(s\)/)
     assert.match(r.stdout, /unreleased\/upgrading\/new\.md -> help\/site\/upgrading\.md "From 1\.9\.0, new"/)
     assert.equal(text(root, 'supabase/README.md'), FILES['supabase/README.md'])
-    assert.ok(existsSync(join(root, 'unreleased/migrations/0002.md')))
+    assert.ok(existsSync(join(root, 'unreleased/migrations/9902.md')))
   } finally { rmSync(root, { recursive: true }) }
 })
 
@@ -52,10 +52,10 @@ test('it folds the notes, rewrites the links to them, deletes them and keeps the
   try {
     const r = run(root)
     assert.equal(r.status, 0, r.stdout + r.stderr)
-    assert.ok(text(root, 'help/site/upgrading.md').includes('Old.\n\n### From 1.9.0, new\n\nNew. See [the migration](../../supabase/README.md#new-0002).\n\n## Backups'))
-    assert.ok(text(root, 'supabase/README.md').includes('Old.\n\n### New (0002)\n\nNew.\n\n### Migrations that must run once'))
-    assert.equal(text(root, 'docs/page.md'), 'The note is [here](../supabase/README.md#new-0002) and [there](../help/site/upgrading.md#part).\n')
-    assert.equal(existsSync(join(root, 'unreleased/migrations/0002.md')), false)
+    assert.ok(text(root, 'help/site/upgrading.md').includes('Old.\n\n### From 1.9.0, new\n\nNew. See [the migration](../../supabase/README.md#new-9902).\n\n## Backups'))
+    assert.ok(text(root, 'supabase/README.md').includes('Old.\n\n### New (9902)\n\nNew.\n\n### Migrations that must run once'))
+    assert.equal(text(root, 'docs/page.md'), 'The note is [here](../supabase/README.md#new-9902) and [there](../help/site/upgrading.md#part).\n')
+    assert.equal(existsSync(join(root, 'unreleased/migrations/9902.md')), false)
     assert.equal(existsSync(join(root, 'unreleased/upgrading/new.md')), false)
     assert.ok(existsSync(join(root, 'unreleased/upgrading/README.md')) && existsSync(join(root, 'unreleased/migrations/README.md')))
   } finally { rmSync(root, { recursive: true }) }
@@ -79,9 +79,9 @@ test('a second run does nothing, and --check on a folded tree reports nothing to
 test('a name of a note in text that is not a link is listed, not rewritten', () => {
   const root = copy()
   try {
-    writeFileSync(join(root, 'docs/code.md'), 'See unreleased/migrations/0002.md in a comment.\n')
+    writeFileSync(join(root, 'docs/code.md'), 'See unreleased/migrations/9902.md in a comment.\n')
     const r = run(root)
-    assert.match(r.stdout, /not a link, change by hand: docs\/code\.md names unreleased\/migrations\/0002\.md/)
-    assert.equal(text(root, 'docs/code.md'), 'See unreleased/migrations/0002.md in a comment.\n')
+    assert.match(r.stdout, /not a link, change by hand: docs\/code\.md names unreleased\/migrations\/9902\.md/)
+    assert.equal(text(root, 'docs/code.md'), 'See unreleased/migrations/9902.md in a comment.\n')
   } finally { rmSync(root, { recursive: true }) }
 })
