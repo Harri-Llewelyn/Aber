@@ -1,3 +1,13 @@
+# suite:
+#   lanes: db
+#   why: 0267 -- a derived metric is a catalogue row: each of the three kinds saves and takes its
+#     unit from its inputs; every refusal of the save gives its reason (an input missing, derived or
+#     of the wrong datatype, a sum of unlike units, a state the input cannot report, a name a device
+#     declares, a semantic id, a standard or permitted values, a malformed definition); a measured
+#     metric cannot become derived, a definition or unit cannot change, nor the unit of a metric a
+#     rate or a sum is built on; only an Administrator writes, behind the second factor; and the
+#     Audit Trail files the save.
+
 """
 A derived metric is a catalogue row (0267).
 

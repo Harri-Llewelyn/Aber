@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0226's three platform_health arms, each through the query of the Grafana rule that reads
+#     it: a failed job for an hour and then gone, a job stuck five minutes past its own limits and
+#     not before, and a silent playback worker only while a playback waits. The last is the one that
+#     would page for ever: the heartbeat is seeded at 'epoch', and a site without the worker never
+#     reports, so the suite holds it silent with nothing queued.
+
 """
 A failed or stuck capture or playback, and a playback worker that stops reporting while a playback
 waits, are platform conditions (0226).

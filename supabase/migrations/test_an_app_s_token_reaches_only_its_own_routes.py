@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0235 -- that a token GoTrue issued to an app, which carries a client_id, is refused by
+#     auth_pre_request() before any other arm and holds no role or permission in has_role() and
+#     has_authority(), so a row a role gates is closed to it; and that a token with no client_id is
+#     served and answered as before: a false refusal here is the whole API down.
+
 """
 A token GoTrue issued to an app reaches no role and no part of the API (0235).
 

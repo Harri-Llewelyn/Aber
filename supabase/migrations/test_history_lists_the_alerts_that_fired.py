@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0243 -- that alert_occurrences() lists each occurrence overlapping the window, at its edges
+#     too; that a firing occurrence a later one replaced ends where that one starts; newest first,
+#     filtered by asset and bounded; each row the whole occurrence; and that the select policy
+#     decides the rows, a machine identity's alert reaching an Administrator alone.
+
 """
 History lists the alerts that fired (0243): alert_occurrences(), the read behind History's Alerts
 tab and the shading of firing periods on its charts.

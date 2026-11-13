@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: 0189 -- what the Metrics page lists as uncatalogued: a declared name no catalog row has,
+#     deprecated rows counting as catalogued; archived devices, replay lanes and Sparkplug control
+#     metrics left out; and the caller's RLS applying through the view, which anon cannot read.
+
 """
 The metric names devices declare that no catalog row describes (0189).
 

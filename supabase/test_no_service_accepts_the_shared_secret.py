@@ -1,3 +1,13 @@
+# suite:
+#   lanes: stack
+#   why: No service accepts a token signed with the shared secret (secrets.jwtSecret), which only
+#     the running services can show: each verifies with its own configuration, and the chart's
+#     render proves only what it hands them. The seeded Administrator's ES256 session is served by
+#     PostgREST, GoTrue, a Realtime channel join, Storage, the Node-RED admin API and an edge
+#     function; the same claims signed HS256 with the shared secret are refused by each, as is a
+#     service_role token signed with it, and signed with Realtime's or Storage's own secret they are
+#     refused by every service but that one. Writes nothing.
+
 """
 No service accepts a token signed with the shared secret, against a running stack.
 

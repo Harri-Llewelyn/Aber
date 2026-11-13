@@ -1,3 +1,17 @@
+# suite:
+#   lanes: stack
+#   why: The backup service (0101): an Operator cannot ask and cannot read the tables; the service's
+#     gates answer no PostgREST role; a backup an Administrator asks for is taken, with the files
+#     where the row says, as big as it says, with the digests it says, a manifest
+#     restore-databases.sh can read and a forge archive carrying the host keys; the trail names who
+#     asked and that the service wrote it; a queued request refuses a twin, can be cancelled and
+#     says why; a pinned backup is released once; the prune after a failed job leaves the newest
+#     three; and a backup reaches a MinIO encrypted, decrypts to its digest, and a pruned one takes
+#     its copy with it; a service started after a missed scheduled slot queues it once, and does not
+#     retry it before the next slot when it fails; and after a backup the service reports df's
+#     figures for its volume and its schedule (0179), which backup_summary() returns. Stops the
+#     service container briefly.
+
 """
 The backup service (0101), against the live stack.
 

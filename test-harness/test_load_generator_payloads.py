@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: The load generator's Sparkplug payloads, built with the real protobuf module and read back:
+#     the NBIRTH carries the CONNECT's bdSeq and Node Control/Rebirth, the NDEATH carries bdSeq and
+#     no seq, every metric is timestamped, and a replay flags is_historical. The generator stands in
+#     for a conformant edge node in every restart run, so a payload that is not one would measure
+#     something other than what the platform meets.
+
 """
 The load generator's Sparkplug payloads, built with the real protobuf module and read back.
 

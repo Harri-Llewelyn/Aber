@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: A Third-party gateway (0196) may be minted a credential and shown it again, cannot be
+#     issued a bundle, and counts as holding an account once issued, so archiving disables it;
+#     Remote and Host answer as before, and a replay of 0001 keeps the widened CHECK.
+
 """
 A Third-party gateway is issued its broker credential in the dashboard (0196).
 

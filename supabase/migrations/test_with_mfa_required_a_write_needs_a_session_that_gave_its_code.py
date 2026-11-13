@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0251 -- that with security.require_mfa_for_managers on, every write policy and function
+#     that calls require_mfa() refuses an Administrator or a Shopfloor Manager at aal1 and admits
+#     them at aal2, federated or with the switch off; that an Operator and a machine identity are
+#     never asked; that every has_role() site naming a covered role asks or is in
+#     supabase/mfa-exemptions.json; and that turning it on, or granting a covered role while it is
+#     on, ends the app sessions Grafana's excepted, with one SESSIONS_ENDED row per person.
+
 """
 With MFA required, a manager's or an Administrator's change to the platform needs a session that
 gave its code (0251).

@@ -1,3 +1,8 @@
+# suite:
+#   lanes: db
+#   why: 0069 -- the two roles stop being the same. The failure mode is a privilege quietly
+#     reattaching to both, which no page would look different for.
+
 """
 The Administrator / Shopfloor_Manager split (archived migration 0069).
 

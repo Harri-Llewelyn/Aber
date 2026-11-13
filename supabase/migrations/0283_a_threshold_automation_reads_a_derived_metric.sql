@@ -29,6 +29,20 @@
 --
 -- Reasoning: supabase/README.md, "A threshold automation reads a derived metric (0283)", and the
 -- section for 0270. Idempotent.
+--
+-- Redefines public.evaluate_automations: 0283 words the value and the threshold in the summary of
+--   an alert it raises through automation_value_words() and automation_threshold_words(): a derived
+--   metric's value rounded to three decimals with its window, a time in state as a percentage, a
+--   measured one as it printed; 0271 printed the value as the evaluator read it. Nothing else
+--   changes, and the comparison, the threshold and the values the row keeps are the numbers they
+--   were
+-- Redefines public.machine_condition_readings: 0283 reads a pair on a derived metric from
+--   derived_current(), which gives it a value over the last hour or at the last whole minute; 0270
+--   reads telemetry_latest, which holds nothing under a name no device publishes. The columns are
+--   0270's, since a replay runs 0270 again first. A measured metric is read as it was
+-- Redefines public.machine_condition_rows: 0283 says the window in the detail of a derived metric
+--   ("is 4.2 over the last hour, below 5") and rounds its value to three decimals; 0270 words every
+--   value as it was read
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The read

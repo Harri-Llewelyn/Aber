@@ -1,3 +1,11 @@
+# suite:
+#   lanes: stack
+#   why: A second factor works end to end against the chart's GoTrue: the GOTRUE_MFA_* settings,
+#     GoTrue's factor API through the gateway, and manage-people's reset-mfa with the secret key. A
+#     throwaway Auditor enrols a TOTP factor, signs in again at aal1 and reaches aal2 with a code
+#     computed here (RFC 6238), and an Administrator resets it, which leaves one MFA_RESET row and
+#     the session signed in. Phone and WebAuthn enrolment are refused.
+
 """
 A person enrols a second factor, signs in with its code, and an Administrator resets it, against a
 running stack (0216).

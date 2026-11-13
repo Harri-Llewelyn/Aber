@@ -21,6 +21,13 @@
 --     delivered one.
 --
 -- The redeclared functions keep 0001's signatures, return types and grants.
+--
+-- Redefines public.playback_progress: 0191 stamps progress_reported_at, which
+--   request_playback_stop() reads to tell a stalled job; the baseline kept no time of the last
+--   report
+-- Redefines public.playback_reconcile_jobs: 0191 words each swept job by what happened (never
+--   started, nothing published, or the count reached); the baseline said "publishing stopped
+--   partway" of all three
 
 -- -------------------------------------------------------------------------------------------------
 -- When the worker last reported

@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: How a playback ends (0191). Stop on a job whose worker has been silent for a minute ends it
+#     as CANCELLED, so a stalled worker cannot hold the Playback gateway until it restarts, and the
+#     worker coming back is told to stop and changes nothing.
+
 """
 How a playback ends: Stop, a stalled worker, and the record it leaves (0191).
 

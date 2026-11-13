@@ -18,6 +18,21 @@
 --
 -- Reasoning: supabase/README.md, "A replay lane stands in for every id its device publishes (0201)".
 -- Idempotent.
+--
+-- Redefines public.ensure_shadow_devices: 0165 answers 404 for not found through raise_not_found();
+--   the baseline raises no_data_found, which PostgREST answers 500. 0187 words that message and the
+--   lookup comment for the one Playback gateway. 0190 words the 404 for a device capture holding
+--   none of its device's messages, and the refusal of a device from another site. 0193 no longer
+--   tells an operator to restore the Playback gateway from Archived Entities, since it can be
+--   neither archived nor deleted. 0201 resolves each recorded id through captured_device_id(), so a
+--   device recorded under its own id or its UUID gets its lane rather than a refusal
+-- Redefines public.start_playback_job: 0187 refuses a device map that names anything but the replay
+--   lane of the device its key names, so a replay never publishes as a real device; the baseline
+--   checked only that the target belonged to the gateway. 0193 writes a PLAYBACK_STARTED audit row
+--   naming the capture and the target, and no longer says a credential is issued to obtain the
+--   worker's password, which the platform delivers. 0201 resolves each map key as
+--   captured_device_id() does, so a device recorded under its own id or its UUID is checked against
+--   its own lane
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The device a recorded id names

@@ -1,3 +1,10 @@
+# suite:
+#   lanes: stack
+#   why: The historian backup sidecar took a full backup, recorded it where the Historian Backup
+#     Stale alert reads, and a WAL segment switched now reaches the repository. Skips when physical
+#     backup is off; the dev loop turns it on with a posix repository. The minute loop rules (a
+#     missed slot is taken late, once; an overdue full) run either way.
+
 """
 The historian's physical backup is running: a backup was taken and WAL reaches the repository.
 

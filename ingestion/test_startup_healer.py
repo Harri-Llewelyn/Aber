@@ -1,3 +1,14 @@
+# suite:
+#   lanes: unit
+#   why: Nothing orders the daemon after the historian at boot, so a restart can start ingestion
+#     before the historian -- measured at 453ms on a development stack. The daemon then reached its
+#     MQTT loop having done none of the startup work that needed a database and retried none of it,
+#     and BOTH CONSEQUENCES WERE SILENT IN OPPOSITE DIRECTIONS: the historian gauge read 0 for ever
+#     against a historian that was reachable throughout (a false alarm that never clears is the one
+#     an operator learns to close), and capture reconciliation never ran, which leaves every future
+#     capture on the stack refused with nothing to point at -- invisible until somebody presses the
+#     button.
+
 """
 The startup recovery loop: the work a dependency that was not up yet prevented, retried.
 

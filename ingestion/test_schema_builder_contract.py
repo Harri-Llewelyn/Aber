@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: The ingestion half of the schema-builder contract: conformance.py reads the `enum`,
+#     `minimum` and `maximum` the dashboard's two schema builders write, in the shape and JSON types
+#     they write them, and finds what a device set to Enforce drops. Both halves assert
+#     test-harness/fixtures/schema-builder-output.json; the JavaScript half, which builds the
+#     definition through both builders, runs in frontend-build.
+
 """
 The ingestion half of the schema-builder contract.
 

@@ -1,3 +1,11 @@
+# suite:
+#   lanes: stack
+#   why: Revoking a person's approval of an app ends the app's access (0217): a seeded account
+#     completes Grafana's authorization-code flow, the app's refresh token works, then the person
+#     revokes through GoTrue and an Administrator revokes through the dashboard's call, and each
+#     time the refresh token is refused. Only GoTrue itself can show that its token endpoint honours
+#     the ended session.
+
 """
 Revoking a person's approval of an app ends the app's access, against a running stack (0217).
 

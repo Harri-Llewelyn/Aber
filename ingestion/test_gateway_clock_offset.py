@@ -1,3 +1,12 @@
+# suite:
+#   lanes: unit
+#   why: The appliance clock offset, and the edge_node label on the timestamp rejection counter. THE
+#     FAULT THIS GUARDS PASSES EVERY OTHER CHECK IN THE STACK: a gateway a few minutes fast is
+#     ONLINE, drops nothing, skips no sequence numbers and verifies its certificate perfectly,
+#     because TLS validity is measured in months and this is measured in minutes. So a regression
+#     here does not break a test elsewhere -- it silently returns the platform to filing telemetry
+#     at times that never happened, with every number on the page plausible.
+
 """
 Unit tests for the appliance clock offset measured on the gateway heartbeat
 (`record_gateway_clock_offset` and its use in `process_node_message`, both in ingestion.py), and

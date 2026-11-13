@@ -1,3 +1,19 @@
+# suite:
+#   lanes: unit
+#   why: The load generator's arithmetic, which decides what a run REPORTS. Two conclusions here are
+#     wrong in a believable direction if the code is: a write-latency quantile taken over
+#     Prometheus's CUMULATIVE buckets answers for every write since the daemon started, so a long
+#     ramp reports a healthy p95 for the step that was not healthy; and a saturated stack and a
+#     generator that cannot push hard enough BOTH show as a shortfall against target, so reading the
+#     queue is the only thing that tells them apart -- and getting it backwards inverts the finding
+#     from "the stack broke here" to "we could not push it that hard". Also holds the per-device
+#     millisecond rule: telemetry is keyed (time, asset_id, metric_name) ON CONFLICT DO NOTHING, so
+#     a repeated stamp loses its rows while the write path still counts them.
+#
+# UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be
+# repeated cheaply: by the time anyone reads a load figure the stack has changed, so the
+# reduction from counters to a verdict has to be right before the run, not after it.
+
 """
 Unit tests for the load generator's arithmetic -- the parts that decide what a run REPORTS.
 

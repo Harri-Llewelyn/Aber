@@ -1,3 +1,17 @@
+# suite:
+#   lanes: unit, stack
+#   why: The Factory+ Directory adapter, and above all the reverse schema lookup. Six of its
+#     twenty-seven checks run offline: that the registry entry still grants no service-role key -- a
+#     Directory is a live read over the WHOLE address space, so the key would hand every
+#     authenticated user a view their policies do not grant -- and that the bearer check still
+#     precedes routing, which is the entire boundary in front of these key-auth-exempt routes. THE
+#     REST NEED THE STACK, and two of them are the reason the suite exists: /v1/device and
+#     /v1/schema/{uuid} answer the same question from opposite ends, composed by different queries,
+#     and a disagreement is a 200 at both endpoints. The live layer provisions a second device
+#     attached through set_device_schemas(), the Devices page's writer, beside the shared fixture's,
+#     so the reverse lookup is asserted over a set. Every route answers the Read-only API client's
+#     token as it answers a person, and refuses it once revoked.
+
 """
 Tests for the fplus-directory Edge Function, and above all for its reverse schema lookup.
 

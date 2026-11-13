@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: The playback worker's metrics endpoint: one series, aber_playback_jobs_total{outcome}, with
+#     failed, cancelled and completed at zero from startup and no other label value, so an
+#     unauthenticated port carries no id. Each outcome is counted once the finish is recorded, as
+#     playback_finish() ranks them, and the startup sweep counts what it failed. Without it a failed
+#     playback leaves no trace in Prometheus.
+
 """
 The playback worker's metrics endpoint, and the outcome count it serves.
 

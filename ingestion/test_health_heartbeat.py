@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: The Kubernetes liveness probe reads nothing but this file's age, so the heartbeat's
+#     behaviour IS the health signal. Every property it pins would break in the same direction --
+#     toward a daemon that looks healthy while its MQTT loop is dead (writing regardless of
+#     connection state), or one restarted while it is fine (crashing on a write error). Neither is
+#     visible from outside the daemon.
+
 """
 Unit tests for the ingestion daemon's liveness heartbeat (`start_health_heartbeat` in ingestion.py).
 

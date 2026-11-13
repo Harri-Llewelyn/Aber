@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0186's clean-up of the health a replay left on the Playback gateway: another machine's
+#     disk, CA date and agent version on the Fleet Health dashboard, and Gateway CA Expiring firing
+#     for it. The chain leaves a shadow gateway no reading, the migration clears the columns and
+#     nothing else and changes nothing on a second boot, a heartbeat without health records none and
+#     no FLOW_DEPLOYED row, and the role the daemon uses can read the is_shadow column it tests.
+
 """
 A shadow gateway holds no health (0186): the Playback gateway carries none after the chain, the
 migration clears what earlier replays left on it and nothing else, and the daemon's role reads the

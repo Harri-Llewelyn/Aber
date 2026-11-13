@@ -1,3 +1,8 @@
+# suite:
+#   lanes: stack
+#   why: The read-only BI role. Four of its five checks skip without a historian; the point of it is
+#     that a reporting credential cannot write, which only means anything against a real one.
+
 """
 Integration tests for the read-only BI role created by timescaledb/roles.sql.
 

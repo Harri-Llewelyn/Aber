@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: Who may add people, set their roles and passwords, and remove their access (0166, 0167):
+#     Administrator only, never a machine identity, never your own, never the last Administrator who
+#     can sign in, one role row per person, every act attributed in the security lane, and no role
+#     for a self-registered account.
+
 """
 An Administrator adds people, sets their roles and passwords, and removes their access (0166, 0167,
 0170).

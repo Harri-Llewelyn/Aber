@@ -27,6 +27,17 @@
 --
 -- Reasoning: supabase/README.md, "A number setting says whether it counts whole things (0285)".
 -- Idempotent.
+--
+-- Redefines public.check_alert_suppression_window_length: 0285 takes a stored part day as its whole
+--   days and words the refusal in whole days, since alerts.suppression_max_days now counts whole
+--   things; 0240 took a part day as it was and could say "1.5 days"
+-- Redefines public.notification_setting_guard: 0262 adds the two email settings, and makes the
+--   guard SECURITY DEFINER because no API role may run its helpers and Postgres checks EXECUTE on
+--   every function an expression names; 0248 declares the webhook settings alone. 0285 takes the
+--   arm for the reminder interval out, since system_settings_whole_number_guard() holds it with
+--   every other whole-number setting, and keeps every other arm
+-- Redefines public.telemetry_export_max_days: 0285 takes a stored part day as its whole days, since
+--   history.export_max_days now counts whole things; 0278 took a part day as it was
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The flag

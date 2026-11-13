@@ -1,3 +1,13 @@
+# suite:
+#   lanes: stack
+#   why: The dispatcher's email end to end (0262, 0263): a firing alert written with psql reaches a
+#     relay pod addressed to the roles told, with its facts and link, the envelope alone naming the
+#     people; a resolve follows in the same thread, an acknowledgement before the reminder stops it,
+#     an unacknowledged alert is reminded, a machine identity's alert goes to Administrators only, a
+#     test goes to the person who asked, and the log keeps counts and no address. Needs the
+#     functions pod to send through aber-test-smtp (supabaseAuth.smtp.host), kubectl and
+#     NetworkPolicies off; skips, saying so, on any other relay.
+
 """
 Aber's dispatcher emails an alert (0262, 0263), against the live stack: an alert written to
 platform_alerts reaches a mail relay, addressed to the people whose roles the route names.

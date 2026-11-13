@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0208 -- that end_my_door_sessions() ends the caller's Studio and forge door sessions and no
+#     other: the caller's dashboard, Grafana and Node-RED sessions and other people's door sessions
+#     survive, the dashboard token is still served, and a machine identity, a token naming nobody,
+#     anon and service_role are refused.
+
 """
 Signing out ends the person's Studio and forge door sessions (0208).
 

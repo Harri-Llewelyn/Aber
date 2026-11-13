@@ -1,3 +1,13 @@
+# suite:
+#   lanes: db
+#   why: 0260 -- that an Administrator registers an app the way 0002 registers the stack's own
+#     (manual, the code and refresh grants, the secret kept as GoTrue's SHA-256 hash) and gets a
+#     confidential app's secret once and a public app none; that nobody else may, and a second
+#     factor is asked first while Settings requires one; that a bad name, type or address is refused
+#     in words that name it, an address by the fixture the dialog's rule shares, and a name already
+#     held whatever its case or "Aber " prefix; and that the registration is one row naming the
+#     Administrator with neither the secret nor its hash.
+
 """
 An Administrator registers an app that signs people in with Aber (0260).
 

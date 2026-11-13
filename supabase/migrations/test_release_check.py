@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0181's release check row, which the account menu reads. One row replaced by each check, a
+#     failed check keeping only its reason, a gate that refuses a version, a link or a `newer` the
+#     menu could not show safely, and Service_ReleaseCheck the only caller, not even service_role,
+#     with a key that reaches nothing else -- so "Aber X.Y.Z is available" is only ever what the
+#     daily check found.
+
 """
 The release check's one row (0181), which the account menu reads, and the principal that writes it.
 

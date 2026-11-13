@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: 0244 and 0002's block -- that a fresh install seeds 90 days, that a site still at 1.7's 7
+#     moves to 90 once and a site at 30 keeps 30, each across two boots, that a 7 chosen after the
+#     upgrade stays, and that the prune falls back to 90 days.
+
 """
 Alert history is kept for 90 days, and a site still at 7 moves to 90 once (0244, with 0001's prune
 and 0002's seed).

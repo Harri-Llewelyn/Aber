@@ -1,3 +1,9 @@
+# suite:
+#   lanes: unit
+#   why: The directory refresher: one request per table per pass instead of one per device per cache
+#     TTL. The keys and identity sources must be the ones the per-entity path produces, or
+#     resolution changes meaning depending on which path filled the cache.
+
 """
 The directory refresher: one request per table per pass, instead of one per entity per cache TTL.
 

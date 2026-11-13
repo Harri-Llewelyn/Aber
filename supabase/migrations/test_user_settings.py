@@ -1,3 +1,13 @@
+# suite:
+#   lanes: db
+#   why: 0188's per-person preferences, which the Profile page and the account menu write. A person
+#     reads, creates and changes their own row and nobody else's, an Administrator included, and
+#     cannot hand it to someone else; anon and service_role hold nothing; the CHECKs refuse a value
+#     the dashboard does not know, and single-key shortcuts (0194) start on and desktop
+#     notifications (0264) off, neither ever null; the first sign-in's seed never overwrites a row
+#     another tab created, and a one-column save leaves the other column alone; and the row goes
+#     with the account, unaudited.
+
 """
 A person's own preferences (0188, 0194, 0264): `user_settings`, one row per person, read and written by
 that person alone.

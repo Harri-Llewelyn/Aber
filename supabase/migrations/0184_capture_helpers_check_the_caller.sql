@@ -11,6 +11,15 @@
 -- role the tables' RLS admits, or a role RLS does not apply to. Each storage policy ANDs the
 -- predicate with that same machine principal's check, so no policy's outcome changes. Signatures,
 -- return types and grants are 0001's; the bodies move to plpgsql, as a "may this caller" answer must.
+--
+-- Redefines public.is_active_capture_object: 0184 answers false unless the caller could read the
+--   capture job: the ingestion daemon, a role capture_jobs' RLS admits, or one RLS does not apply
+--   to; the baseline answered any signed-in account
+-- Redefines public.is_active_playback_capture: 0184 answers false unless the caller could read the
+--   playback job: the playback worker, a role playback_jobs' RLS admits, or one RLS does not apply
+--   to; the baseline answered any signed-in account
+-- Redefines public.playback_stale_credentials: 0184 returns no rows to a caller playback_jobs' RLS
+--   refuses; the baseline told any signed-in account when playback credentials were issued
 
 -- -------------------------------------------------------------------------------------------------
 -- The capture the ingestion daemon is recording

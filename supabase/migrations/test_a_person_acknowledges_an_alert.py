@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0231 and 0232 -- that an Operator, a Shopfloor Manager and an Administrator acknowledge a
+#     firing alert they may read, with a reason from the closed set, and that a resolved, superseded
+#     or acknowledged one, Other without a note and every other role are refused; who withdraws;
+#     that a new occurrence inherits the acknowledgement until the fingerprint resolves; and the
+#     audit rows, their lane, their class and who reads them.
+
 """
 A person acknowledges an alert, with a reason, and the acknowledgement holds until it resolves
 (0231, 0232).

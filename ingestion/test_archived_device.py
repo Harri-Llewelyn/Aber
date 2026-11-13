@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: The same blind spot one level down, and a worse one: a device has no broker account to
+#     revoke, so nothing but this refusal stops a decommissioned machine writing telemetry through a
+#     gateway that is still in service. Pins the DBIRTH case too, where refusing by answering None
+#     would quarantine a second row for a device the stack already holds.
+
 """
 Unit tests for refusing traffic for an ARCHIVED device (`resolve_device` in ingestion.py).
 

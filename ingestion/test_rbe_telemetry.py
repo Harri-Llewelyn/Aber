@@ -1,3 +1,12 @@
+# suite:
+#   lanes: unit
+#   why: Report-by-exception. Both halves are invisible to an end-to-end run, which is why they are
+#     pinned here: a timer-driven flow and an RBE flow both look like "telemetry is arriving", and a
+#     sequence gap looks like nothing at all. SPARSE DDATA IS COMPLETE -- a payload carrying one
+#     metric is a device saying one thing moved, not a payload that lost five. A DROPPED MESSAGE IS
+#     THE LOST CHANGE -- under a timer the next tick restated everything and a drop self-healed;
+#     under RBE, lose the DDATA that said INTERRUPTED and every consumer holds ACTIVE forever.
+
 """
 Unit tests for report-by-exception telemetry handling in ingestion.py.
 

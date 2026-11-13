@@ -12,6 +12,10 @@
 --
 -- Reasoning: supabase/README.md, "A part value in the proposal cap never stops a proposal (0286)".
 -- Idempotent.
+--
+-- Redefines public.enforce_open_proposal_cap: 0286 reads the cap as floor(...::numeric)::integer,
+--   so a stored part value is its floor and never stops a proposal; the baseline cast it to an
+--   integer, which a part value failed
 
 CREATE OR REPLACE FUNCTION public.enforce_open_proposal_cap() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER

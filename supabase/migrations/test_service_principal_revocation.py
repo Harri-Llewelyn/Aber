@@ -1,3 +1,7 @@
+# suite:
+#   lanes: db
+#   why: 0076 -- that a principal can be put beyond use, and stays beyond use.
+
 """
 0076 -- revoking a whole service PRINCIPAL, rather than one of its tokens.
 

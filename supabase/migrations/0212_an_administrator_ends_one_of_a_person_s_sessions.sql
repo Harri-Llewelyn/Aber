@@ -18,6 +18,10 @@
 --
 -- Reasoning: supabase/README.md, "An Administrator ends one of a person's sessions (0212)".
 -- Idempotent.
+--
+-- Redefines public.end_person_sessions: 0212 refuses your own sessions by naming Sign Out of All
+--   Other Sessions on the Profile page's Sessions tab, since Sign Out ends only the browser in use;
+--   0207 named Sign Out. Nothing else changes
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. Listing a person's sessions

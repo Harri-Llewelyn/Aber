@@ -10,6 +10,11 @@
 --
 -- Reasoning: supabase/README.md, "The API refuses a token whose session has ended (0205)".
 -- Idempotent.
+--
+-- Redefines public.auth_pre_request: 0170 also refuses a subject in access_removals, so a removed
+--   person's unexpired token is refused at PostgREST; the baseline refused by subject only a
+--   withdrawn service principal. 0205 also refuses a token whose GoTrue session has ended, with 401
+--   session_not_found, so a Sign Out or a new password ends the token at PostgREST at once
 
 -- -------------------------------------------------------------------------------------------------
 -- auth_pre_request(): the arm for an ended session

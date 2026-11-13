@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0213 -- that a person's picture is theirs alone: only they set or clear avatar_path, an
+#     Administrator naming them never touches it, a picture writes no rename row and tells
+#     display_names_for() nothing, Remove Access alone forgets it as service_role, and the avatars
+#     policies, run verbatim on a stand-in table, admit the owner to their own <id>/avatar and
+#     nobody else, with a self-check that refuses a wider arm.
+
 """
 A person can put a picture on their own account, and nobody else sees it (0213).
 

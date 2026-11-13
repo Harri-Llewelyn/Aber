@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: An NDEATH whose bdSeq names an earlier session of the same edge node, a Last Will the
+#     broker delivered after the node was born again. Applied, it reads a live gateway and its
+#     devices OFFLINE until their next data message, and nothing reports it: the gateway is
+#     publishing and every other check passes.
+
 """
 Unit tests for an NDEATH from an earlier session of the same edge node, in ingestion.py.
 

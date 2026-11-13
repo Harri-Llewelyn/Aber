@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0212 -- that an Administrator lists a person's sessions with the columns the person's own
+#     list has, but which one is in use, and ends one: that session and its refresh tokens go, the
+#     person's others and other people's stay, and one SESSIONS_ENDED row names the Administrator
+#     and the session; and that another person's session, a missing one and your own are refused
+#     with no row.
+
 """
 An Administrator sees which sessions a person holds, and ends one of them (0212).
 

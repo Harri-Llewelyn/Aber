@@ -1,3 +1,14 @@
+# suite:
+#   lanes: stack
+#   why: An app an Administrator registers signs people in (0260): the seeded Administrator
+#     registers a confidential and a public app with register_app(), and a seeded Shopfloor Manager
+#     completes each one's authorization-code flow with PKCE. Discovery names an absolute issuer,
+#     the access and ID tokens carry it, and the ID token verifies against the key set. The access
+#     token reaches user-info, GET /auth/v1/user, its refresh and its own local logout and is
+#     refused with the gateway's 403 on PUT /auth/v1/user, the factor routes, the approvals,
+#     PostgREST, Storage and every function; revoking the approval ends its session; and a removed
+#     app cannot start a sign-in. Only GoTrue issues these tokens and only the gateway refuses them.
+
 """
 An app an Administrator registers signs people in with Aber, against a running stack (0260).
 

@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0030's retention window. THE INVARIANT IS THAT A LONG-FIRING ALERT SURVIVES THE PRUNE:
+#     `recorded_at` is stamped on the first write and never refreshed, so an alert firing for longer
+#     than the window has one row, older than the cutoff, and a flat age cutoff deletes the current
+#     state of a live alert -- the pill disappears while Grafana still has it firing. The suite also
+#     runs the naive predicate against the same fixture and asserts it DOES destroy the row, so the
+#     other cases cannot pass vacuously.
+
 """
 PostgreSQL integration tests for `0030_platform_alerts_retention.sql`.
 

@@ -1,3 +1,12 @@
+# suite:
+#   lanes: unit
+#   why: How the daemon connects and leaves, as a Sparkplug 3.0.0 host application, read off a local
+#     socket as the bytes the broker acts on: a clean session with no expiry, a retained QoS 1 death
+#     certificate with NO Will Delay Interval, a QoS 1 subscription; and a shutdown that publishes
+#     the death certificate first and keeps receiving until the stream is quiet. A regression is
+#     silent: a dead daemon reads as alive, or a restart loses what edge nodes sent before they
+#     heard it.
+
 """
 Unit tests for how the daemon connects to the broker and how it leaves, as a Sparkplug 3.0.0 host
 application.

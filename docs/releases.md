@@ -112,6 +112,33 @@ deprecation path is what a minor release buys; skipping it does not make the cha
 
 ---
 
+## Folding the unreleased notes into a release
+
+A pull request writes its upgrade note and its migration note as files in
+[`unreleased/`](../unreleased/upgrading/README.md), not in the documents they end up in. Two pull
+requests then never edit the same lines.
+
+On the release commit, before the tag:
+
+1. Run `node scripts/fold-unreleased.mjs`.
+2. Read the diff. Each upgrade note is after the last `### From ` section of
+   [`help/site/upgrading.md`](../help/site/upgrading.md). Each migration note is in
+   [`supabase/README.md`](../supabase/README.md), in number order, before *Migrations that must run
+   once*.
+3. Change by hand each name the script lists as "not a link". It rewrites every Markdown link to a
+   note, and leaves other text alone.
+4. Run `node scripts/check-docs-drift.mjs`.
+5. Commit, and tag that commit.
+
+Running the script again does nothing. `node scripts/fold-unreleased.mjs --check` says what it
+would do, and exits 1 if there is anything.
+
+**The release workflow refuses a tag whose commit still has a note in `unreleased/`.** Its
+*Verify The Unreleased Notes Are Folded In* step runs `--check` in `prepare-release`, beside the
+other pre-flight checks. Only the folders' `README.md` files may be left. A dry run warns and goes on.
+
+---
+
 ## Finding out whether a release matters to you
 
 **Every `v*` tag gets a GitHub Release, and its notes are written for an operator** rather than

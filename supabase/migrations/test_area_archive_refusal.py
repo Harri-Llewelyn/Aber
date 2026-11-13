@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: 0199 -- an area is archived only when nothing is Area-Wide in it, and nothing is made
+#     Area-Wide in an archived one. The nightly purge skips an area an asset names, because the key
+#     has no ON DELETE action and one refused DELETE would abort the whole job, so without this rule
+#     an archived area could keep its Auto-purge date for ever with nothing saying why. Holds each
+#     kind of asset that refuses the archive, the cells that do not, the writes that pass, and a
+#     replay that re-creates no trigger.
+
 """
 An area is archived only when nothing is Area-Wide in it, and nothing is made Area-Wide in an
 archived area (0199).

@@ -1,3 +1,14 @@
+# suite:
+#   lanes: unit
+#   why: The bounded entity caches (issue #23). THE EVICTION TESTS ARE NOT THE POINT OF RUNNING THIS
+#     IN CI. Bounding a cache is easy; the two contracts it can break are silent. `get` must return
+#     the STORED OBJECT rather than a copy, because process_dbirth() and record_declared_metrics()
+#     mutate the cached row in place so the next lookup inside the TTL sees the change -- a copying
+#     cache would resurrect the duplicate UPDATE and duplicate audit_trail row that the
+#     write-only-what-moved work exists to prevent, and nothing would point at the cache. And `get`
+#     must distinguish a cached `None` (the NEGATIVE entry) from a miss, or negative caching quietly
+#     stops working and every message from an unregistered device costs a directory round trip.
+
 """
 Unit tests for TTLCache -- the bounded LRU that replaced the unbounded resolution dicts (#23).
 

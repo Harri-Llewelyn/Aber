@@ -1,3 +1,14 @@
+# suite:
+#   lanes: db
+#   why: 0278's history.export_max_days and 0279's export_telemetry(), over local tables standing in
+#     for the historian's relations: each refusal comes before any read (an Operator, an Auditor, a
+#     machine identity, anon, a manager without the second factor, a window over the limit, an
+#     unknown resolution, none or too many devices and metrics), a window of exactly the limit is
+#     allowed, a row is one reading with its unit, raw is the default and a rollup is never read in
+#     its place, the rows stop at 50,000 on a minute and say where, raw is read from where it
+#     begins, and one TELEMETRY_EXPORTED row in the asset lane names who exported what, and none for
+#     a refusal or an export with no rows.
+
 """
 An export of readings is checked, bounded and recorded in the database (0278, 0279).
 

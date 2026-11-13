@@ -1,3 +1,14 @@
+# suite:
+#   lanes: db
+#   why: 0285's whole_number flag and 0286's proposal cap. Every number setting is listed with the
+#     reader that decided it, so a new one is decided when it is added; a whole setting refuses 1.5
+#     in its own words, for an Administrator and for the service role, and the fraction takes it;
+#     the guard looks at a row only when its value or flag changes, so seed_setting()'s label
+#     refresh survives a stored part value. The upgrade is 0285's file run over a database as 1.8.0
+#     left it: each part value rounded down with a NOTICE and an Audit Trail row, a replay silent.
+#     The cap admits a proposal at the floor of a stored 10.5, with the cap's sentence and never a
+#     cast error, which is what stopped every proposal before.
+
 """
 A number setting says whether it counts whole things (0285), and a part value never stops a
 proposal (0286).

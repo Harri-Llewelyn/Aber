@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: Pure-logic tests of the Sparkplug primary-host STATE certificates: the birth and the death
+#     carry the SAME timestamp (the pairing rule in 3.0.0), the will is retained at QoS 1, a host id
+#     that is not one topic level is refused rather than published where nothing is granted, and the
+#     shutdown publish never raises on the signal path. A fake client; no broker.
+
 """
 Unit tests for the Sparkplug primary-host STATE certificates (`ingestion/primary_host.py`).
 

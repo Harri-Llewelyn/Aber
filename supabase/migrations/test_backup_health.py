@@ -1,3 +1,13 @@
+# suite:
+#   lanes: db
+#   why: 0144's clock for the Backup Stale rule. No row while no job exists, or every stack without
+#     the backup service alerts 36 hours after install; the first job recorded until one succeeds,
+#     so a service that never ran what it queued is reported; the last success after that, unmoved
+#     by later failures; and no browser role reads it, since it runs past the Administrator-only RLS
+#     on backup_jobs. And the two things that keep the last good backups: 0150's floor, the newest
+#     three never prunable, and 0151's off-site copy, whose destination is refused a value the
+#     service could not use and whose view counts how long the newest backup has gone without one.
+
 """
 How long since the platform backup last succeeded (0144).
 

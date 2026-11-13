@@ -13,6 +13,10 @@
 --
 -- Reasoning: supabase/README.md, "0078 makes issuing a playback credential also deliver it".
 -- Idempotent.
+--
+-- Redefines public.gateway_is_playback_delivery_target: 0183 answers is_shadow on an unarchived
+--   gateway, the target a playback may have; the baseline answers is_simulated, which delivered
+--   every simulator's password to the playback worker
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The predicate

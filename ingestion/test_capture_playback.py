@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: Broker capture and playback -- identity rewriting, timestamp rebasing and the wire
+#     encodings. A capture cannot be republished under the identity it was recorded from, so every
+#     replayed frame passes through a rewrite; getting that wrong produces a job that reports
+#     success while publishing under an edge node nothing is bound to. The plan read from a file a
+#     message at a time must be the same plan, with the same refusals, in flat memory.
+
 """
 Unit tests for broker capture and playback (capture.py).
 

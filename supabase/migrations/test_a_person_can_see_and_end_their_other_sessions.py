@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: 0206 -- that a person lists and ends their own sessions and nobody else's, that the session
+#     in use is refused, that another person's session is answered as a missing one, that an ended
+#     session's token is then refused, and that no machine identity may call either.
+
 """
 A person can see and end their other sessions (0206).
 

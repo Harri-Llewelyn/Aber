@@ -1,3 +1,19 @@
+# suite:
+#   lanes: stack
+#   why: THE ONLY CHECK THAT A CAPTURE RECORDED FROM THE BROKER REACHES STORAGE AND REPLAYS.
+#     test_playback_replay.py replays a file it uploaded, so the recording half ran in no suite: the
+#     daemon claiming the job and asking the edge node to rebirth, the upload to broker-captures as
+#     the daemon, and the captures row with the manifest ensure_shadow_devices() reads. A recording
+#     that never reached storage left every suite green, and so did a file the daemon writes that
+#     playback cannot read. A fixture Host gateway, its credential issued as the Gateways page
+#     issues it, publishes live from the suite and answers the rebirth; an Administrator records it
+#     with start_capture_job() and stops it; the file and the row are checked against what was
+#     published; and that file is replayed into the historian under the replay lane and nowhere
+#     else. A second subject is recorded to the 50 MiB size cap and replayed, and the cgroup
+#     memory.peak of each worker must stay under 60% of its limit. A third is stored and must be
+#     neither signed nor served to a person without issue_capture_download(), which only the real
+#     storage-api can show. Needs `playback.enabled`, which values-dev.yaml sets.
+
 """
 A capture recorded from the live broker reaches storage, and replays into the historian.
 

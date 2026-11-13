@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0233's telemetry_carried(), over local tables standing in for the historian's rollups: a
+#     quiet bucket carries the last value and says so, a bucket with readings has their average,
+#     minimum and maximum from the widest rollup that divides it, each series is seeded from the
+#     rollups before the window, a series silent longer than raw retention still seeds, nothing is
+#     carried past now, bad bounds are refused before any read, and it reads as the caller.
+
 """
 History reads each series carried forward (0233).
 

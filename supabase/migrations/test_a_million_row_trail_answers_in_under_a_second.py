@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0228's target -- that on a trail of a million rows audit_trail_page() answers a page, its
+#     total and its counts in under a second with a class chosen, as an Administrator with the
+#     policies on, and that its totals are exact. It attaches ten months of 2001 and drops them, so
+#     it belongs on a throwaway database and nowhere else.
+
 """
 A million-row Audit Trail answers a class-filtered page in under a second (0228).
 

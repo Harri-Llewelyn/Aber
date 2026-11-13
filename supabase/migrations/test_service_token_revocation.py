@@ -1,3 +1,7 @@
+# suite:
+#   lanes: db
+#   why: 0074 -- that a token can finally be taken back.
+
 """
 0074 -- revocation for the long-lived service tokens 0043 records.
 

@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0256 -- every fixture in supabase/automations-fixtures/ through the JSON Schema the
+#     dashboard serves (jsonschema) and through apply_automations(..., true): both accept each valid
+#     one, both refuse each invalid one, or the schema accepts what only the database can know.
+#     Every field of the schema is described and every object closed.
+
 """
 The automations JSON Schema and apply_automations() agree (0256).
 

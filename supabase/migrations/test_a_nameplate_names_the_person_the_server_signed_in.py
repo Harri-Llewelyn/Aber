@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0210 -- that a nameplate written through the API records the caller and the database's
+#     time, whatever the request names: a Shopfloor Manager's and an Administrator's insert, update
+#     and upsert naming another person and a past time are stored as theirs, now, and service_role's
+#     store NULL. An approval still records the proposer, and the owner's session keeps what it
+#     writes. A wrong value here is silent: the record names somebody who never touched the asset.
+
 """
 A nameplate names the person the server signed in, at the time the server wrote it (0210).
 

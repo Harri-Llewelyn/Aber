@@ -27,6 +27,13 @@
 -- partial index on the acknowledged rows, which are few, makes it 4 ms. Idempotent.
 --
 -- Reasoning: supabase/README.md, "An acknowledger is shown by name (0290)".
+--
+-- Redefines public.display_names_for: 0213 leaves out a row with no name, which holds only a
+--   picture, so the answer says nothing about a picture, and names the person who started a capture
+--   or playback job for the roles that read the jobs; 0203 had no such row and no such arm. 0290
+--   also names the person who acknowledged an alert, for an alert the caller may read (an alert
+--   about a machine identity is for an Administrator alone), and the person who scheduled or ended
+--   a suppression window, which every signed-in role reads; every arm 0213 gave it is as it was
 
 CREATE INDEX IF NOT EXISTS idx_platform_alerts_acknowledged_by
     ON public.platform_alerts USING btree (acknowledged_by) WHERE (acknowledged_by IS NOT NULL);

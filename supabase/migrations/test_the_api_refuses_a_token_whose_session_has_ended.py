@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: 0205 -- that a token whose session has ended is refused with the 401 the dashboard signs in
+#     again on, and that every token naming a live session, or none, is still served: a false
+#     refusal here is the whole API down.
+
 """
 The API refuses a token whose session has ended (0205).
 

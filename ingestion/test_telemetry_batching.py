@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: The batched telemetry write in process_ddata(). The row tuple is positional, six columns
+#     wide, and three of its columns are mutually-exclusive nullable value slots -- so a
+#     transposition (val_string into val_bool, say) would not raise. It would write NULLs, silently,
+#     on the hottest path in the system. The tuples are asserted element by element rather than by
+#     count, which is only worth anything if the suite runs.
+
 """
 Unit tests for the batched telemetry write in process_ddata().
 

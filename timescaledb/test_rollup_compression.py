@@ -1,3 +1,9 @@
+# suite:
+#   lanes: stack
+#   why: The rollups are compressed by series, on their own chunk spans, after the late-data window.
+#     Uncompressed they were most of the historian and filled its default volume in two months
+#     (#415).
+
 """
 The rollups are compressed: each has the columnstore segmented by series, its own chunk span, and a
 compression policy outside the late-data window.

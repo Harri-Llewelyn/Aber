@@ -1,3 +1,14 @@
+# suite:
+#   lanes: db
+#   why: 0031's settings plane, and NONE OF THE INTERESTING TESTS ARE "an admin can edit a setting".
+#     Two properties are: the key set is CLOSED -- enforced by the ABSENCE of INSERT and DELETE
+#     policies, so a later migration could reopen it without failing anything else -- and
+#     `updated_by` cannot be supplied by the client. That second one was BROKEN when the migration
+#     was first applied: this database carries a Supabase default ACL granting every privilege on
+#     every new public table to authenticated, so the `GRANT UPDATE (value)` meant to confine an
+#     admin's write landed on top of a table-level UPDATE already held and did nothing. The settings
+#     page would have worked perfectly while provenance was forgeable.
+
 """
 RLS and grant tests for public.system_settings (archived migration 0031).
 

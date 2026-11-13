@@ -1,3 +1,11 @@
+# suite:
+#   lanes: unit
+#   why: Audit blocker B1. A sparkplug_id is an identifier, not a secret, so before the binding
+#     check any credentialed edge node could publish under another device's id -- forging telemetry,
+#     forging ONLINE state, or forcing a healthy device into quarantine (a denial of service against
+#     a production asset). Also pins the telemetry sanity window and that the historian insert stays
+#     DO NOTHING rather than DO UPDATE.
+
 """
 Unit tests for the gateway<->device binding check (audit blocker B1).
 

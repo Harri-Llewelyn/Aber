@@ -1,3 +1,12 @@
+# suite:
+#   lanes: db
+#   why: user_roles.user_id is a uuid with a foreign key to auth.users, so a role for an id with no
+#     account is refused and goes with its account; that 0001's head converts 1.7.0's text column
+#     once, deleting and counting the rows that name no account, and a second boot changes nothing;
+#     and that a sign-in, Add Person, a role change, has_role() and the machine guard answer as
+#     before after each boot. An empty database never meets the conversion, so the suite rebuilds
+#     1.7.0's column.
+
 """
 user_roles names its person by uuid, with a foreign key to auth.users (0001, 0165, 0166, 0177).
 

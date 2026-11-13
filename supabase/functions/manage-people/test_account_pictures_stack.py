@@ -1,3 +1,11 @@
+# suite:
+#   lanes: stack
+#   why: A person's picture through the real Storage API (0213), which the db lane has none of: the
+#     owner uploads, replaces, downloads and deletes their own <id>/avatar; every seeded role reads,
+#     lists, signs, overwrites and deletes none of it and the public URL serves nothing; the bucket
+#     refuses SVG, GIF and HTML and holds its 512 KiB limit; and Remove Access deletes the object
+#     and clears the column. Adds and deletes its own throwaway person.
+
 """
 A person's picture through the real Storage API, and Remove Access deleting it (0213).
 

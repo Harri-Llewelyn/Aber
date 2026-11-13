@@ -1,3 +1,8 @@
+# suite:
+#   lanes: stack
+#   why: That the TimescaleDB extension in the running database is the version the schema was
+#     written against. A mismatch surfaces as a policy silently not applying.
+
 """
 The installed TimescaleDB extension matches the version the image ships.
 

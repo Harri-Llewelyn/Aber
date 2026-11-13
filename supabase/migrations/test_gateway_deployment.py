@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: 0064's `deployment` column and the cross-column CHECK beside it -- `NOT is_simulated OR
+#     deployment = host` -- which is what makes the dashboard’s single gateway-type control honest
+#     rather than a collapse of two independent facts.
+
 """
 `gateways.deployment`: the constraints on it, and the view that has to be rebuilt when a gateways
 column moves. `gateways.status`: the CHECK 0147 adds.

@@ -1,3 +1,16 @@
+# suite:
+#   lanes: stack
+#   why: The forge's fifteen-minute sweep (0099): a call without the secret is refused; a role
+#     changed in user_roles behind the door is unseated by one sweep and seated again when it
+#     returns; a member seated by hand is left alone; a gateway repository whose push webhook was
+#     deleted gets it back; a repository made by hand in the organisation has main protected without
+#     the incident template; and the database's sweep_forge() answers true. It also covers the two
+#     repositories the platform publishes into its own organisation: the playbook, tagged per
+#     version, and the custom example, marked as a template and never tagged because it is copied
+#     rather than converged to. One pass at a time (0156): a call meeting a held lease does nothing
+#     and answers 200, and every test holds the lease so the report it reads is its own pass's.
+#     Needs the stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.
+
 """
 The forge sweep (0099), against the live stack.
 

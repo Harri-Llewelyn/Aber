@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0112, and the reason it is a test rather than a comment: the retention timer is the one
+#     promise this platform makes about destruction, and a FK that cascades breaks it silently -- a
+#     gateway marked Permanent was deleted by its CELL's timer, with nothing to read afterwards but
+#     an audit row. Asserts the catalogue fact over every child of cells, not just the one that was
+#     wrong.
+
 """
 Deleting a cell un-files what was in it (0112), rather than deleting it on the cell's timer.
 

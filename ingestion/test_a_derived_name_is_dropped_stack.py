@@ -1,3 +1,15 @@
+# suite:
+#   lanes: stack
+#   why: THE ONLY CHECK THAT A DERIVED NAME IS DROPPED THROUGH THE REAL CHAIN. The unit suite holds
+#     the rule against a fake catalogue; this adds a derived metric as the database's owner, has a
+#     device declare and publish its name through a real broker as the Gateways page's credential
+#     allows, and reads the answer where it matters: the measured sibling is in the historian and
+#     the derived name is not, nor in the device's parameters, and the Audit Trail holds a
+#     `derived_name` finding for the birth and one for the readings, not one for each message. The
+#     daemon reads the catalogue through a cache, so the suite waits out its freshness before the
+#     first message rather than racing it. Needs the stack up and the owner connection
+#     (SUPABASE_DB_*); everything it made, the audit rows included, is removed.
+
 """
 A reading under a derived metric's name never reaches the historian, and leaves a finding.
 

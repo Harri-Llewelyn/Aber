@@ -23,6 +23,11 @@
 --
 -- Reasoning: supabase/README.md, "A cell's dashboard address is one of its links (0202)".
 -- Idempotent.
+--
+-- Redefines public.proposable_columns: 0202 dropped cells.grafana_url from the cell lane when its
+--   values moved to Attached Links. It declares it as the baseline now does, in its final form,
+--   since 0219 drops the column, and restates 0176's search_path pin, which the redeclaration would
+--   otherwise clear
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. grafana_url is not proposable

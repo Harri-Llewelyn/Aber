@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: Pins the invariant that the daemon never writes an asset's location. devices.cell_id is
+#     NULL-means-inherit with no column default (archived migration 0036), which only holds while
+#     nothing writes a value on an operator's behalf -- and a regression here would be silent:
+#     devices would simply stop inheriting and the Unassigned queue would stop filling.
+
 """
 Unit tests pinning ONE invariant: the ingestion daemon never writes an asset's location.
 

@@ -18,6 +18,18 @@
 --
 -- Reasoning: supabase/README.md, "An alert reaches the roles its email route names (0262)".
 -- Idempotent.
+--
+-- Redefines public.notification_channel_is_configured: 0262 adds the email arm, which is configured
+--   once a role is told; 0247 declares the webhook alone, so it stands where email is not applied
+-- Redefines public.platform_alert_send_decision: 0250 holds a firing message or a reminder while a
+--   suppression window (0240) covers its alert, in the place 0247 marked for it, so 0247 stands
+--   alone where 0240 is not applied. 0262 asks notification_channel_reaches() whether the channel
+--   may carry the alert, where 0247 and 0250 named the webhook and a machine identity
+-- Redefines public.queue_platform_alert_notifications: 0262 queues an email beside the webhook when
+--   the email route carries the alert; 0247 queues the webhook alone
+-- Redefines public.queue_platform_alert_reminders: 0262 reminds only on a channel that still
+--   carries the alert, through notification_channel_reaches(), where 0247 named the webhook and a
+--   machine identity
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The channel

@@ -1,3 +1,13 @@
+# suite:
+#   lanes: unit
+#   why: The JSON log formatter and the drop pair. THE ASSERTION THAT EARNS ITS PLACE IN CI IS
+#     test_the_logged_field_and_the_prometheus_label_are_the_same_string: it reads every
+#     `drop("<reason>")` out of ingestion.py and requires the logged `reason` field to equal the
+#     `reason` LABEL metrics.py exports for it. That is the drill-down contract -- a spike on a
+#     dashboard panel is only a link into the logs if both halves spell the reason identically --
+#     and nothing else in the stack would notice them diverging, because each half stays internally
+#     consistent while meaning different things.
+
 """
 Structured logging, and the drop pair it exists to make queryable.
 

@@ -1,3 +1,11 @@
+# suite:
+#   lanes: stack
+#   why: Each app's token reaches only its own routes (0235): a seeded account completes each of the
+#     four apps' authorization-code flows, and each app's token reaches GoTrue and its own userinfo
+#     function and is refused with the gateway's 403 on PostgREST, Storage and every other function,
+#     while the person's dashboard token reaches them all. Only GoTrue can issue a token that names
+#     an app, and only the gateway decides on it.
+
 """
 Each app's token reaches only its own routes, against a running stack (0235).
 

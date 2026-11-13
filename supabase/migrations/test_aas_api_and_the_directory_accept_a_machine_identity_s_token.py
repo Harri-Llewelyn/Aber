@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0224. auth_probe(), called as PostgREST calls it, answers a machine identity's token, which
+#     carries no aud, and a person's session. The hook refuses a revoked token, a withdrawn
+#     identity, a removed person and an ended session first. anon and service_role may not run it,
+#     even through a plan prepared for authenticated, and a replay keeps its grants.
+
 """
 aas-api and the Factory+ Directory accept a machine identity's token (0224).
 

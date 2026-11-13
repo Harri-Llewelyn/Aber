@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0222 -- that audit_trail_page(p_changed_by) returns one person's or machine identity's rows
+#     and counts only those, under the caller's own policies; that a decision stamps the decider's
+#     address from their token, keeps it after the address changes, and that an expiry, a decision
+#     from before 0222 and a client write leave none; and that the function is declared once, with
+#     p_changed_by last, however 0168 and 0222 replay over it.
+
 """
 A decision keeps the address its decider signed in with, and the Audit Trail finds what one person
 or machine identity changed (0222).

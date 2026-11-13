@@ -6,6 +6,17 @@
 -- writes `device_submodels` through set_device_schemas(), and `device_submodels` is audited now,
 -- so a schema change stays in the audit trail. 0175 removed the column; the declarations below are
 -- in their final form, so a replay never names it.
+--
+-- Redefines public.audit_trail_page: 0168 probed device_submodels rows for deletion beside
+--   device_nameplate, both keyed by their device; since 0228 both declare the same body, the purged
+--   kinds being audit_trail_matching()'s. Both declare p_changed_by after p_search, and 0222 drops
+--   the ten-argument form; p_entity_type, p_action and p_changed_by as lists, and 0227 drops the
+--   single-value form (check 195); p_class and p_counts after them, and 0228 drops the form without
+--   them
+-- Redefines public.record_ingestion_rejection: 0168 records every schema the device is judged
+--   against, read through device_schemas; the baseline records the first alone
+-- Redefines public.reject_archived_schema_assignment: 0168 declares it as the baseline does, in its
+--   final form, so neither names devices.schema_id (0175)
 
 -- -------------------------------------------------------------------------------------------------
 -- The view: one row per (device, schema)

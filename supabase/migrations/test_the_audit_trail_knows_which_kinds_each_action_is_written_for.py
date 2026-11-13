@@ -1,3 +1,9 @@
+# suite:
+#   lanes: db
+#   why: 0229 -- that audit_trail_action_kinds() names every (action, kind) pair the trail's writers
+#     can produce, read from the catalog, and no other, and that each pair carries the classes
+#     audit_event_class() answers for it. The Audit Trail narrows its filters by its mirror.
+
 """
 The Audit Trail knows which kinds each action is written for (0229).
 

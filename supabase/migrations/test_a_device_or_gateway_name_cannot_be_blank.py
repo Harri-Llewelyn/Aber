@@ -1,3 +1,13 @@
+# suite:
+#   lanes: db
+#   why: 0284's two CHECKs: an empty name and a name of spaces are refused on an insert and an
+#     update of a device and of a gateway, by an Administrator through the API role, by the service
+#     role and by an approved proposal, which aborts and leaves the row named. The file is run in
+#     the transaction over a database holding blank rows: it names each with its Sparkplug id,
+#     renames none, scans only the table whose CHECK is missing, and passes once they are named.
+#     Each of those writers reaches the table without the dashboard's dialogs, which is why the
+#     CHECK is the rule and the dialogs are not.
+
 """
 A device's name and a gateway's name cannot be blank (0284).
 

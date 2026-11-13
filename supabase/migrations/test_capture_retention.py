@@ -1,3 +1,13 @@
+# suite:
+#   lanes: db
+#   why: 0190 -- a stored capture is never lost, orphaned or taken on trust. Each failure here is
+#     silent: a row describing a file that was overwritten, a refused upload that already replaced
+#     the stored bytes, a browser-reported size of 900 TB, or a deleted subject whose recording
+#     stays in the bucket and in every backup. And 0195 -- a person reads a stored capture's file
+#     only through issue_capture_download(), whose Audit Trail row is otherwise missing without
+#     anything failing. Needs supabase_admin to stand in for storage.objects, which only storage-api
+#     creates.
+
 """
 A stored capture is never lost, never orphaned, and never taken on trust (0190), and is read only
 through the audited download (0195).

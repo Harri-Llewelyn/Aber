@@ -1,3 +1,11 @@
+# suite:
+#   lanes: db
+#   why: 0002 -- that Studio's client block, run as db-init's psql runs it, says Studio is off in a
+#     NOTICE and never a WARNING; that it removes a client an earlier boot registered, approvals and
+#     sessions with it, recorded once and not on the next boot, and restores it when Studio is on
+#     again; that Studio on without its secret warns naming the login and the secret to set; and
+#     that an unset value is today's behaviour and never removes.
+
 """
 With Studio off, db-init says so without a warning, and Studio's client goes (0002).
 

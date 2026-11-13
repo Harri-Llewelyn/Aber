@@ -1,3 +1,10 @@
+# suite:
+#   lanes: db
+#   why: 0178's one writer and one probe for the foreign credentials a page sets. Administrator
+#     only, refused with the code PostgREST answers 403; the probe answers whether and never what;
+#     no API role reads a value back or calls either helper, so no page can name a stack-internal
+#     secret; and a rotation is in place, read by the backup service's next call.
+
 """
 The foreign credentials' one writer and one probe (0178).
 

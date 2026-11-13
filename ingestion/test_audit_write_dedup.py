@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: The daemon-side half of the audit suppression rules. Archived migration 0005 suppresses the
+#     no-op and heartbeat-only UPDATEs in the trigger; this asserts the daemon does not defeat that
+#     from the other side. A regression fails nothing -- it just resumes writing an audit row per
+#     heartbeat into an append-only table until it is mostly noise.
+
 """
 Unit tests for ingestion's write deduplication on the DBIRTH and node-heartbeat paths.
 

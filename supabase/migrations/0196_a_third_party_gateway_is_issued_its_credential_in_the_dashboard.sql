@@ -17,6 +17,16 @@
 --
 -- Reasoning: supabase/README.md, "A Third-party gateway is issued its credential in the dashboard
 -- (0196)". Idempotent.
+--
+-- Redefines public.authorize_host_gateway_credential: 0196 mints for a Third-party gateway as for a
+--   Host one, since neither can enrol; the baseline refused every gateway but Host
+-- Redefines public.gateway_has_broker_credential: 0196 counts a Third-party gateway's
+--   CREDENTIAL_ISSUED row as a Host gateway's, so archiving it disables its account; the baseline
+--   counted Host alone
+-- Redefines public.issue_gateway_enrollment_token: 0196 refuses a Third-party gateway as it refuses
+--   a Host one, because a bundle enrols Aber's gateway appliance; the baseline refused Host alone
+-- Redefines public.keep_gateway_credential: 0196 keeps the copy of a Third-party gateway's password
+--   too, so an Administrator can show it again; 0164 kept a Host or Simulated gateway's alone
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The mint admits it

@@ -1,3 +1,9 @@
+# suite:
+#   lanes: stack
+#   why: A replay written days late reaches the rollups: the window ingestion records is refreshed
+#     by the historian job, as ingest_writer can record it and read nothing. The policies reach back
+#     25 hours, so without the job the rollups show the outage as a gap the raw table does not have.
+
 """
 A replay written later than the rollups' refresh policies reach back still reaches the rollups:
 ingestion records its hour in rollup_refresh_requests, and the job refresh_requested_rollups()

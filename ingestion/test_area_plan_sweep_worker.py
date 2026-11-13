@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: The hourly area-plan sweep (0199): the bucket it deletes from, the batches it asks for, a
+#     refused batch it does not ask for again, and a run without the ingestion key that says so.
+#     Each failure leaves a purged area's drawing of the site in the bucket, readable by every
+#     signed-in role, with nothing erroring.
+
 """
 Unit tests for the area-plan sweep (area_plan_sweep.py), the hourly CronJob that deletes the plans
 no area names any more.

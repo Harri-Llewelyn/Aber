@@ -1,3 +1,10 @@
+# suite:
+#   lanes: unit
+#   why: The request the two capture stack suites delete their stored file with. It once carried a
+#     JSON content type and no body, Storage answered 400, nothing checked the status, and every run
+#     left its capture in broker-captures. The stack lane cannot see that from inside a passing run,
+#     so the request shape is held here.
+
 """
 The request the capture stack suites clean up with, checked without a stack.
 
