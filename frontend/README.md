@@ -487,19 +487,20 @@ Three kinds of dialog explain themselves another way:
 - **A role that may not act** sees `permitted={false}`, with the roles that may in the tooltip
   ([Permission gating](#permission-gating)).
 
-### A plan and a 3D model open expanded
+### A plan opens expanded
 
-An area's plan (on a Site Map card, and in the Areas and Cells panels) and a device's 3D model (in
-its drawer) each have an Expand button (`common/ExpandButton.jsx`). It opens `Modal` at size
-`full`, the window less a 24px margin, with `fill`. The button's hover text is the shared tooltip
-(`common/TipButton.jsx`), and the dialog hands focus back to it on close.
+An area's plan (on a Site Map card, and in the Areas and Cells panels) has an Expand button
+(`common/ExpandButton.jsx`). It opens `Modal` at size `full`, the window less a 24px margin, with
+`fill`. The button's hover text is the shared tooltip (`common/TipButton.jsx`), and the dialog hands
+focus back to it on close. A device's 3D model opens in the same kind of dialog, from an action in
+its drawer ([A device's 3D model opens on request](#a-devices-3d-model-opens-on-request)).
 
 - **Where the button sits.** In the top-right corner of what it enlarges, so nobody misses it: one
   rule, `.expand-corner`, inside an `.expand-frame` that holds the view and the button side by side.
   On a Site Map card the frame is the space under the header (`.expand-frame-fill`), which the plan
   is centred in. In the panels it is `.plan-card`, which draws the frame the plan used to draw,
-  across the panel, because the preview is a link and a button cannot sit inside one. On the model
-  it is the viewer's box. The button is above the pins, inside the plan's margin where the plan
+  across the panel, because the preview is a link and a button cannot sit inside one. The button is
+  above the pins, inside the plan's margin where the plan
   fills the frame's width: it covers at most 16 by 5px of the drawing, at three columns. A pin
   placed on the drawing's top-right corner has the upper part of its disc under the button; the
   rest of the pin, and its label, can still be clicked.
@@ -527,9 +528,32 @@ its drawer) each have an Expand button (`common/ExpandButton.jsx`). It opens `Mo
   page's legend is repeated in the dialog's header. The dialog is rendered outside the grid and the
   cards, whose click and `--pin-size` are not its own. The Areas and Cells dialogs draw the
   preview's marks (`previewPins` in `AreaPlanPreview.jsx`) at full size.
-- **The 3D model** is the same `<model-viewer>` in `Model3DViewer`'s `expanded` mode: no
-  auto-rotate, and the camera's start (`START_VIEW`, the element's defaults) set as attributes so
-  Reset view can set them again. The element animates to a camera property set to its own value.
+
+### A device's 3D model opens on request
+
+The device drawer shows no model. One action after View History opens it in a full-window dialog
+(`Model3DUploader`, which is that dialog): **View 3D Model** when a model is attached, **Add 3D
+Model…** when none is. Both open the same dialog. With a model it holds the viewer, the file's name
+and size, a **Public** marker, **Download** (every role), and **Replace** and **Remove** (permission
+to manage devices; Remove asks first, and closes the dialog once the model is gone, so its toast is
+in view). With none it holds the drop zone, and a model dropped on it appears in the same dialog
+when the page reloads the device.
+
+- **Nothing loads until it is asked for.** The dialog is mounted only while it is open
+  (`modelOpen` in `DevicesTab`), so the viewer, `@google/model-viewer` (a dynamic import in
+  `Model3DViewer`, which no other file imports), the model file and the size lookup all start when
+  it opens and stop when it closes. A drawer that held the viewer loaded the file, started a WebGL
+  context and turned the model for as long as it was open, so moving between devices that had
+  models lagged (#1380).
+- **The viewer keeps still.** `<model-viewer>` has no auto-rotate, so it draws only while someone
+  moves it. The camera's start (`START_VIEW`, the element's defaults) is set as attributes so Reset
+  view can set it again. The element animates to a camera property set to its own value.
+- **Add is offered but off for a role that may not manage devices**, with the roles in its tooltip,
+  as the drawer's other gated actions are. It is also off for an archived device, which can be
+  viewed but not given a model. View 3D Model has no permission: reading a public-read object is
+  not a write.
+- **The file's row wraps**, with the name and size on the left and the buttons on the right, and a
+  long name wraps rather than being cut. The dialog has the width, so the buttons keep their words.
 
 ### An area's plan turns in quarter turns
 
@@ -643,17 +667,12 @@ height is not known, and above the actions it could push Edit Details off the dr
 - **The actions are two to a row** in a drawer wide enough for two 200px columns, about 440px and
   up, and one to a row below that. The first primary action and a danger action take the whole row.
   Eight actions one to a row took 331px of a 1080 screen's drawer; two to a row they take 220px.
-- **A section of fixed height can sit above the actions**, in `beforeActions`. The device's 3D
-  model is one. As the last tool it started 747px down a drawer body that shows 754px at
-  1920×1080, so some people did not know a device could have a model (#1061). A tile beside the
-  device's facts then fitted the whole drawer in 715px, but a 180px viewer in half the drawer's
-  width was cramped (#1070). It is now a section of its own after the fields, ruled off as the
-  actions are. The viewer takes the drawer's width at 16:9, and the empty drop zone has the same
-  shape, so the section cannot grow into the actions. At 1920×1080 the viewer is wholly in view
-  when the drawer opens (434px to 718px of the 754px body) and the actions start just below it.
-- **Download, Replace and Remove share the section's width.** In a drawer too narrow for the three
-  words, a container query (`.model-section`) leaves the buttons their icons, and each word stays as
-  the button's name, hidden but read.
+- **A drawer holds no tool that loads or draws as it opens.** The device's 3D model was the
+  example: it sat as a section between the fields and the actions, then loaded its file and turned
+  for as long as the drawer was open. It is one action now
+  ([A device's 3D model opens on request](#a-devices-3d-model-opens-on-request)), and the drawer
+  is the fields, then the actions. A section of fixed height can still sit above the actions, in
+  `beforeActions`, when it is a fact about the entity.
 
 ### What the modelled-metrics fixture caught, twice
 

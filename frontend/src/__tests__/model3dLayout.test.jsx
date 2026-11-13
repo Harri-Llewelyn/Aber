@@ -1,17 +1,16 @@
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { declaration } from '../test/themeColours'
-import { Model3DUploader, Model3DLabel, MODEL_STORAGE_NOTE } from '../components/common/Model3DUploader'
+import { Model3DUploader } from '../components/common/Model3DUploader'
 
 /**
- * Where the Expand button and the model's buttons sit. Expand is in the top-right corner of what
- * it enlarges, wherever that is (one rule, `.expand-corner`); Download, Replace and Remove share
- * the section's width in equal columns; the public-bucket note is the "Public" marker's tip on the
- * section label once a model is attached, and is said in full on the empty drop zone. jsdom lays
- * nothing out, so the geometry is read from App.css.
+ * Where the Expand button and the 3D model dialog's parts sit. Expand is in the top-right corner of
+ * the plan it enlarges (one rule, `.expand-corner`); the dialog's file row holds the name and size
+ * on the left and Download, Replace and Remove on the right; the viewer and the empty drop zone
+ * take the dialog's body. jsdom lays nothing out, so the geometry is read from App.css.
  */
 
 vi.mock('../api', async () => {
@@ -61,25 +60,26 @@ describe('the Expand button\'s corner', () => {
   })
 })
 
-describe('the attached model\'s buttons', () => {
-  it('share the section\'s width in equal columns, one per button', () => {
-    expect(prop('.model-file-actions', 'display')).toBe('grid')
-    expect(prop('.model-file-actions', 'grid-auto-flow')).toBe('column')
-    expect(prop('.model-file-actions', 'grid-auto-columns')).toBe('minmax(0, 1fr)')
-    expect(prop('.model-file-actions > .btn', 'justify-content')).toBe('center')
+describe('the file row', () => {
+  it('puts the name and size on the left and the buttons on the right, and wraps in a narrow window', () => {
+    expect(prop('.model-file', 'display')).toBe('flex')
+    expect(prop('.model-file', 'justify-content')).toBe('space-between')
+    expect(prop('.model-file', 'flex-wrap')).toBe('wrap')
+    expect(prop('.model-file-actions', 'display')).toBe('flex')
+    expect(prop('.model-file-actions', 'flex-wrap')).toBe('wrap')
   })
 
-  it('keep their icons and drop their words in a section too narrow for three, the word kept as the name', () => {
-    expect(prop('.model-section', 'container')).toBe('model-section / inline-size')
-    const narrow = APP_CSS.match(/@container model-section \(max-width: (\d+)px\) \{\s*([^{]+)\{([^}]*)\}/)
-    expect(narrow).not.toBeNull()
-    expect(narrow[2].trim()).toBe('.model-file-actions:has(> :nth-child(3)) .model-file-action-word')
-    // Visually hidden, not display:none, so the word is still each button's accessible name.
-    expect(narrow[3]).toMatch(/clip-path:\s*inset\(50%\)/)
-    expect(narrow[3]).not.toMatch(/display:\s*none/)
+  it('wraps a long name rather than cutting it, so no tooltip or slide is needed to read it', () => {
+    expect(prop('.model-file-name-text', 'overflow-wrap')).toBe('anywhere')
+    expect(declaration(APP_CSS, '.model-file-name-text', 'text-overflow')).toBeNull()
   })
 
-  it('are Download, Replace and Remove, in that row', async () => {
+  it('shows every button\'s word: the dialog has the width, so no container query hides them', () => {
+    expect(APP_CSS).not.toMatch(/@container model-section/)
+    expect(APP_CSS).not.toMatch(/model-file-action-word/)
+  })
+
+  it('is Download, Replace and Remove, in that row, for a role that may change the model', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, headers: { get: () => null } })
     render(<Model3DUploader device={DEVICE} canManage showToast={vi.fn()} />)
     const row = (await screen.findByRole('link', { name: /Download/ })).parentElement
@@ -88,69 +88,46 @@ describe('the attached model\'s buttons', () => {
   })
 })
 
-describe('the 3D Model label', () => {
-  it('carries the public-bucket note on a "Public" marker once a model is attached, which the keyboard reaches', () => {
-    render(<Model3DLabel attached />)
-    expect(screen.getByText('3D Model')).toBeInTheDocument()
-    // Its visible word is its name.
-    const marker = screen.getByRole('button', { name: 'Public' })
-    expect(marker).toHaveClass('help-tip-text')
-    expect(marker).not.toHaveAttribute('title')
-    fireEvent.focus(marker)
-    expect(screen.getByRole('tooltip')).toHaveTextContent(MODEL_STORAGE_NOTE)
-    expect(MODEL_STORAGE_NOTE).toBe('Stored in the public asset-3d-models bucket so exported shells can be opened by any AAS viewer — anyone with the link can read it.')
-  })
-
-  it('has no marker while nothing is attached: the drop zone says it', () => {
-    render(<Model3DLabel />)
-    expect(screen.getByText('3D Model')).toBeInTheDocument()
-    expect(screen.queryByRole('button')).toBeNull()
-  })
-
-  it('sits the marker at the label\'s right, in the label\'s size but not its capitals', () => {
-    expect(prop('.help-tip.help-tip-text', 'margin-left')).toBe('auto')
+describe('the word-trigger tip', () => {
+  it('is small, and not in capitals, wherever it sits', () => {
     expect(prop('.help-tip.help-tip-text', 'text-transform')).toBe('none')
     expect(prop('.help-tip.help-tip-text', 'width')).toBe('auto')
-  })
-
-  it('leaves the note off the attached model\'s section: the marker carries it', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, headers: { get: () => null } })
-    render(<Model3DUploader device={DEVICE} canManage showToast={vi.fn()} />)
-    await screen.findByRole('link', { name: /Download/ })
-    expect(screen.queryByText(/asset-3d-models/)).toBeNull()
-    expect(screen.queryByText(/anyone with the link/)).toBeNull()
+    expect(declaration(APP_CSS, '.help-tip.help-tip-text', 'margin-left')).toBeNull()
   })
 })
 
 describe('the empty drop zone', () => {
   const EMPTY = { asset_id: 'dev-1', asset_name: 'CNC_01', model_3d_path: null }
 
-  it('says where models are kept, in full, to someone who may upload one', () => {
+  it('says where models are kept, in full, to someone who may upload one', async () => {
+    const { MODEL_STORAGE_NOTE } = await import('../components/common/Model3DUploader')
     render(<Model3DUploader device={EMPTY} canManage showToast={vi.fn()} />)
     const zone = screen.getByRole('button', { name: /Upload a 3D model/i })
     expect(zone).toHaveTextContent(MODEL_STORAGE_NOTE)
   })
 
-  it('says nothing about storage to someone who may not upload', () => {
-    render(<Model3DUploader device={EMPTY} canManage={false} showToast={vi.fn()} />)
-    expect(screen.getByRole('button', { name: /Upload a 3D model/i })).not.toHaveTextContent(/anyone with the link/)
-  })
-
-  it('is the viewer\'s shape, so the section keeps its height with and without a model', () => {
-    expect(prop('.model-drop', 'aspect-ratio')).toBe(prop('.model-viewer-frame', 'aspect-ratio'))
+  it('takes the dialog\'s body, as the viewer does, rather than keeping a preview\'s shape', () => {
+    expect(screen.queryByRole('button', { name: /Upload a 3D model/i })).toBeNull()
+    render(<Model3DUploader device={EMPTY} canManage showToast={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /Upload a 3D model/i })).toHaveClass('modal-fill')
+    expect(declaration(APP_CSS, '.model-drop', 'aspect-ratio')).toBeNull()
   })
 })
 
-/* A 180px viewer in half the drawer was cramped (#1070): it takes the drawer's width now, and its
-   height follows. Expanded, it takes the window's height instead. */
+/* The viewer was a 16:9 preview as wide as the drawer, always drawn (#1070, #1380). It is the
+   dialog's view only, and takes the height the dialog leaves. */
 describe('the viewer', () => {
-  it('fills the section\'s width at 16:9', () => {
+  it('takes the dialog\'s width and the height the file row and the hint leave', () => {
     expect(prop('.model-viewer-frame', 'width')).toBe('100%')
-    expect(prop('.model-viewer-frame', 'aspect-ratio')).toBe('16 / 9')
-    expect(declaration(APP_CSS, '.model-viewer-frame', 'height')).toBeNull()
+    expect(declaration(APP_CSS, '.model-viewer-frame', 'aspect-ratio')).toBeNull()
+    expect(prop('.model-viewer-expanded > .model-viewer-frame', 'flex')).toBe('1 1 auto')
+    expect(prop('.model-viewer-expanded > .model-viewer-frame', 'min-height')).toBe('0')
   })
 
-  it('drops the ratio when expanded, where the space is the window\'s', () => {
-    expect(prop('.model-viewer-expanded > .model-viewer-frame-full', 'aspect-ratio')).toBe('auto')
+  it('has one box for the viewer, its loading line and its failure line', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, headers: { get: () => null } })
+    render(<Model3DUploader device={DEVICE} canManage showToast={vi.fn()} />)
+    expect(screen.getByTestId('model-3d-viewer-loading')).toHaveClass('model-viewer-frame')
+    expect((await screen.findByTestId('model-3d-viewer')).parentElement).toHaveClass('model-viewer-frame')
   })
 })

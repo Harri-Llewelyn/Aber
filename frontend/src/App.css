@@ -4531,15 +4531,13 @@ a.chip { text-decoration: none; }
 }
 .overview-popover-over::before { display: none; }
 
-/* The 3D model preview in the device drawer's model section: the drawer's width, and 16:9 so it
-   grows with the drawer (about 290px tall at 1080p). One class on all three states (the
-   element, the loading line and the error line) so the panel does not resize as the viewer loads or
-   fails. `--bg-base` rather than the card surface, so a pale model does not disappear into the
-   panel. The empty drop zone (`.model-drop`) has the same shape. */
+/* The 3D model's box in its dialog: it takes the height the dialog leaves (`.model-viewer-expanded`).
+   One class on all three states (the element, the loading line and the error line) so the dialog
+   does not resize as the viewer loads or fails. `--bg-base` rather than the card surface, so a pale
+   model does not disappear into the dialog. */
 .model-viewer-frame {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-base);
@@ -4548,7 +4546,7 @@ a.chip { text-decoration: none; }
 
 /* The custom element fills the frame rather than carrying it; see Model3DViewer.jsx for why the
    class cannot go on the element. `touch-action: none` makes drag-to-orbit work on a touchscreen,
-   scoped so the drawer still scrolls. */
+   scoped to the viewer so the rest of the page still scrolls. */
 .model-viewer-frame > model-viewer {
   display: block;
   width: 100%;
@@ -4559,7 +4557,7 @@ a.chip { text-decoration: none; }
 
 /* The loading and failure states, sharing the frame's box so neither changes the layout. Centred
    rather than top-aligned: these replace a picture, and a sentence pinned to the top-left of an
-   otherwise empty 200px box reads as a broken render rather than a message. */
+   otherwise empty box reads as a broken render rather than a message. */
 .model-viewer-message {
   display: flex;
   align-items: center;
@@ -4572,8 +4570,8 @@ a.chip { text-decoration: none; }
   color: var(--text-muted);
 }
 
-/* The expanded views (PlanViewer.jsx, Model3DViewer's `expanded`) and the Expand button that opens
-   them (ExpandButton.jsx). The button sits in the top-right corner of what it enlarges: an
+/* The expanded plan (PlanViewer.jsx) and the Expand button that opens it (ExpandButton.jsx). The
+   button sits in the top-right corner of what it enlarges: an
    `.expand-frame` holds the view and the button side by side, so the button is never inside the
    preview's link. Above the pins (z-index 2). Compounded with .btn-icon, so its ground and border
    hold under .btn-icon:hover. */
@@ -4600,56 +4598,37 @@ a.chip { text-decoration: none; }
 }
 .plan-card .area-plan { border: 0; border-radius: 0; background: none; }
 
-/* The device drawer's 3D Model section, after the fields and above the actions (ContextPanel's
-   `beforeActions`), ruled off as the actions are: with `.context-panel-facts`' 12px, 16px above the
-   rule. A container, so the file's buttons can drop their words in the narrowest drawer. */
-.model-section {
-  container: model-section / inline-size;
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+/* The attached file's row, above the viewer in the 3D model dialog: its name, size and "Public" marker
+   on the left, Download, Replace and Remove on the right. They wrap onto two lines in a narrow
+   window. A long name wraps rather than being cut. */
+.model-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 10px;
 }
-.model-section > .context-panel-section-label { margin-bottom: 6px; }
-
-/* The attached file, under the viewer: its name and size on one line, then its buttons. */
-.model-file { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
-.model-file-name { display: flex; gap: 6px; min-width: 0; font-size: 11px; color: var(--text-muted); }
+.model-file-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 .model-file-name-text {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   font-weight: 600;
   color: var(--text-primary);
 }
-.model-file-size { flex-shrink: 0; }
+.model-file-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
-/* Download, Replace and Remove: equal columns across the section, one per button, so a reader's
-   Download alone takes the width. */
-.model-file-actions {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  gap: 4px;
-}
-.model-file-actions > .btn { justify-content: center; gap: 4px; padding: 5px 6px; font-size: 12px; }
-
-/* Too narrow for the three words: the icons stay, and each word is kept as its button's name. */
-@container model-section (max-width: 249px) {
-  .model-file-actions:has(> :nth-child(3)) .model-file-action-word {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-}
-
-/* No model yet: the drop zone, the viewer's shape. It grows only if its words need more. The
-   border's colour, the ground and the cursor change with dragging and permission, inline. */
+/* No model yet: the drop zone, which takes the dialog's whole body, as the viewer does. The border's
+   colour, the ground and the cursor change with dragging and permission, inline. */
 .model-drop {
-  aspect-ratio: 16 / 9;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4702,9 +4681,9 @@ a.chip { text-decoration: none; }
 .plan-viewer-controls .btn-icon { width: 32px; height: 32px; }
 .plan-viewer-controls .btn-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* The 3D model, expanded: the viewer takes the height, the line under it says how to move it. */
+/* The 3D model's dialog: the viewer takes the height, the line under it says how to move it. */
 .model-viewer-expanded { display: flex; flex-direction: column; gap: 8px; }
-.model-viewer-expanded > .model-viewer-frame-full { flex: 1 1 auto; min-height: 0; aspect-ratio: auto; }
+.model-viewer-expanded > .model-viewer-frame { flex: 1 1 auto; min-height: 0; }
 
 .expanded-view-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .expanded-view-hint { margin: 0; font-size: 12px; color: var(--text-muted); }
@@ -5086,17 +5065,9 @@ a.chip { text-decoration: none; }
    above but not ruled off from them: a rule would read as a change of subject. */
 .context-panel-facts { margin-top: 12px; }
 
-/* A section label with an icon beside it -- the 3D model section, where the icon is what the
-   uploader lost when its own two-row heading was removed. */
-.context-panel-section-label-icon {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 /* Page-supplied TOOLS. After the actions, so a section of unknown height cannot push the action
-   list off the bottom of the drawer. A section of fixed height can go above the actions instead, as
-   the device's 3D model does (`.model-section`). */
+   list off the bottom of the drawer. A section of fixed height can go above the actions instead
+   (`beforeActions`). */
 .context-panel-extras {
   margin-top: 14px;
   padding-top: 12px;
@@ -7314,13 +7285,12 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .help-tip-pinned { color: var(--accent); }
 .help-tip:focus-visible { color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* A tip whose trigger is a word, not the "?": the 3D Model label's "Public". At the label's right,
-   in the label's size but not its capitals. */
+/* A tip whose trigger is a word, not the "?": the 3D model dialog's "Public". Small, and not in
+   capitals. */
 .help-tip.help-tip-text {
   width: auto;
   height: auto;
   gap: 3px;
-  margin-left: auto;
   padding: 0 2px;
   border-radius: var(--radius-sm);
   font: inherit;
