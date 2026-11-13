@@ -15,6 +15,7 @@ import { deviceIdentifiers, deviceIds } from './sparkplugId'
 import { SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell } from './cellResolution'
 import { areaWideInService, inServiceDevices } from './inService'
 import { DERIVED_MAX_MINUTES, SHARE_UNIT, derivedInputCount, derivedReportedBy, percentWords, unitOf } from './derivedMetric'
+import { unitSticks, unitSymbol, withUnit } from './units'
 import {
   SPAN_IDS, TIME_PRESETS, bandWords, calendarTicks, clockWords, localDay, rollingWindow, windowToQuery,
 } from './timeWindow'
@@ -671,21 +672,21 @@ export function nowFraction(startMs, endMs, nowMs) {
 const NUMBER = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 4 })
 
 /**
- * A reading in words: four significant figures, with the unit after it. A time in state's unit
- * (SHARE_UNIT) says it as a percentage instead, "42%", with one decimal at most.
+ * A reading in words: four significant figures, with the unit's symbol after it ("18.8 °C" for
+ * CELSIUS: units.js). A time in state's unit (SHARE_UNIT) says it as a percentage instead, "42%",
+ * with one decimal at most.
  */
 export function readingWords(value, unit) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
   if (unit === SHARE_UNIT) return percentWords(value)
-  const text = NUMBER.format(value)
-  return unit ? `${text} ${unit}` : text
+  return withUnit(NUMBER.format(value), unit)
 }
 
 /**
- * The first of a range, "0 to 120 kW": no unit, which the end carries, except a percentage, whose sign
- * each end says ("0% to 50%").
+ * The first of a range, "0 to 120 kW": no unit, which the end carries, except a percentage or a
+ * degree, whose sign each end says ("0% to 50%").
  */
-export const lowWords = (value, unit) => readingWords(value, unit === SHARE_UNIT ? unit : undefined)
+export const lowWords = (value, unit) => readingWords(value, unit === SHARE_UNIT || unitSticks(unit) ? unit : undefined)
 
 /** A value as its chart says it: a reading with its unit, true or false, or a state's text. */
 export function valueWords(kind, value, unit) {
@@ -714,8 +715,8 @@ export function latestWords(series, starts, minutes, unit) {
   return `Latest ${valueWords(series.kind, latest.value, unit)} · ${momentWords(starts[latest.i] * 1000, minutes)}`
 }
 
-/** The chart's title: the metric's name, then its unit in brackets when it has one. */
-export const chartTitle = (metric, unit) => (unit ? `${metric} (${unit})` : metric)
+/** The chart's title: the metric's name, then its unit's symbol in brackets when it has one. */
+export const chartTitle = (metric, unit) => (unit ? `${metric} (${unitSymbol(unit)})` : metric)
 
 /**
  * The text a screen reader is given for a chart: the metric, the window, the resolution, the

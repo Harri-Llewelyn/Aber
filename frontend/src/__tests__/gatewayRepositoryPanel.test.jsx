@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
-import { getByTooltip, queryByTooltip } from '../test/tooltips'
+import { getByTooltip, queryByTooltip, helpTipText } from '../test/tooltips'
 
 vi.mock('../constants', () => ({
   GITEA_URL: 'http://forge.plant.local',
@@ -9,6 +9,12 @@ vi.mock('../constants', () => ({
 }))
 
 const { GatewayRepositoryPanel, gatewayRepositoryUrl, gatewayCompareUrl } = await import('../components/common/GatewayRepositoryPanel')
+
+/** The reason a repository is missing, as the label's help tip says it. */
+const reasonOf = (container) => helpTipText('What Repository means', container)
+/** The one line the field shows in its place. */
+const lineOf = (container) => container.querySelector('.context-field-value').textContent
+const wordsIn = (text) => text.trim().split(/\s+/).length
 
 const GATEWAY = {
   gateway_id: '2a000000-0000-4000-8000-000000000001',
@@ -78,8 +84,9 @@ describe('GatewayRepositoryPanel — before enrolment', () => {
   it("offers no link for a remote gateway that has never enrolled", () => {
     // enroll-gateway creates the repository from the key the appliance sends; until then every
     // address the panel derives answers 404.
-    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, enrolled_at: null, status: 'PENDING_ENROLLMENT' }} canOpenForge />)
-    expect(screen.getByText(/has not enrolled yet/i)).toBeInTheDocument()
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, enrolled_at: null, status: 'PENDING_ENROLLMENT' }} canOpenForge />)
+    expect(lineOf(container)).toBe('None until it enrols')
+    expect(reasonOf(container)).toMatch(/has not enrolled yet/i)
     expect(screen.queryAllByRole("link")).toHaveLength(0)
   })
 
@@ -103,14 +110,15 @@ describe('GatewayRepositoryPanel — enrolled, with no repository', () => {
    * non-fatal when it fails -- so `enrolled_at` alone would offer four links that answer 404.
    */
   it('offers no link where enrolment never reached the forge', () => {
-    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, forge_repository_at: null }} canOpenForge />)
-    expect(screen.getByText(/enrolled but has no repository/i)).toBeInTheDocument()
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, forge_repository_at: null }} canOpenForge />)
+    expect(lineOf(container)).toBe('None: not created')
+    expect(reasonOf(container)).toMatch(/It enrolled, but no repository was created/i)
     expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
 
   it('does not tell an enrolled gateway it has never enrolled', () => {
-    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, forge_repository_at: null }} canOpenForge />)
-    expect(screen.queryByText(/has not enrolled yet/i)).toBeNull()
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, forge_repository_at: null }} canOpenForge />)
+    expect(reasonOf(container)).not.toMatch(/has not enrolled yet/i)
   })
 
   it('withholds the compare view too, even where the appliance branch was once reported', () => {
@@ -141,36 +149,85 @@ describe('GatewayRepositoryPanel — enrolled, with no repository', () => {
 
 describe('GatewayRepositoryPanel — host-run gateways', () => {
   it('explains that there is no repository, and offers no link', () => {
-    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
-    expect(screen.getByText(/has no repository of its own/i)).toBeInTheDocument()
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
+    expect(lineOf(container)).toBe('None: edit it in Node-RED')
+    expect(reasonOf(container)).toMatch(/^A host-run gateway has no repository\./)
     expect(screen.queryByRole('link', { name: /Open in the forge/ })).toBeNull()
     expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
 
   it('never calls it virtual', () => {
-    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
-    expect(screen.queryByText(/virtual/i)).toBeNull()
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
+    expect(container.textContent).not.toMatch(/virtual/i)
+    expect(reasonOf(container)).not.toMatch(/virtual/i)
   })
 
   // Each type gets its own sentence: a Simulated gateway's readings need not come from Node-RED.
   it('says a simulated gateway is simulated, without claiming Node-RED runs it', () => {
-    render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host', is_simulated: true }} canOpenForge />)
-    expect(screen.getByText(/A simulated gateway has no repository of its own/i)).toBeInTheDocument()
-    expect(screen.queryByText(/Its connector runs in this stack's own/i)).toBeNull()
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host', is_simulated: true }} canOpenForge />)
+    expect(lineOf(container)).toBe('None: generated in this stack')
+    expect(reasonOf(container)).toMatch(/^A simulated gateway has no repository\./)
+    expect(reasonOf(container)).not.toMatch(/Its connector runs in this stack's/i)
     expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
 
   it('says playback publishes as a shadow gateway, which is also simulated', () => {
-    render(
+    const { container } = render(
       <GatewayRepositoryPanel
         gateway={{ ...GATEWAY, deployment: 'host', is_simulated: true, is_shadow: true }}
         canOpenForge
       />
     )
-    expect(screen.getByText(/A shadow gateway has no repository of its own/i)).toBeInTheDocument()
-    expect(screen.getByText(/Playback publishes as it/i)).toBeInTheDocument()
-    expect(screen.queryByText(/simulated gateway/i)).toBeNull()
+    expect(lineOf(container)).toBe('None: it replays a capture')
+    expect(reasonOf(container)).toMatch(/^The Playback gateway has no repository\./)
+    expect(reasonOf(container)).toMatch(/Playback publishes as it/i)
+    expect(reasonOf(container)).not.toMatch(/simulated gateway/i)
     expect(screen.queryAllByRole('link')).toHaveLength(0)
+  })
+})
+
+describe('GatewayRepositoryPanel — one line and a tip, for every case with no repository', () => {
+  const CASES = [
+    ['a host-run gateway', { deployment: 'host' }, 'None: edit it in Node-RED'],
+    ['a simulated gateway', { deployment: 'host', is_simulated: true }, 'None: generated in this stack'],
+    ['the Playback gateway', { deployment: 'host', is_simulated: true, is_shadow: true }, 'None: it replays a capture'],
+    ['a Third-party gateway', { deployment: 'third_party' }, 'None: not managed by Aber'],
+    ['a gateway that has not enrolled', { enrolled_at: null }, 'None until it enrols'],
+    ['a gateway that enrolled with no repository', { forge_repository_at: null }, 'None: not created'],
+  ]
+
+  it.each(CASES)('says %s in one line under the Repository label, and nothing else', (_, overrides, line) => {
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, ...overrides }} canOpenForge />)
+
+    expect(container.querySelector('.context-field-label').firstChild.textContent).toBe('Repository')
+    expect(lineOf(container)).toBe(line)
+    // The label, its tip and the line: no paragraph and no link.
+    expect(container.querySelectorAll('.context-field-value')).toHaveLength(1)
+    expect(container.querySelector('p')).toBeNull()
+    expect(screen.queryAllByRole('link')).toHaveLength(0)
+    expect(container.textContent).toBe(`Repository${line}`)
+  })
+
+  it.each(CASES)('keeps the reason for %s in the label\'s help tip, within about 35 words', (_, overrides) => {
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, ...overrides }} canOpenForge />)
+
+    const reason = reasonOf(container)
+    expect(reason).toMatch(/repository/i)
+    expect(wordsIn(reason)).toBeLessThanOrEqual(35)
+  })
+
+  it.each(CASES)('shows %s nothing to a role the forge would refuse', (_, overrides) => {
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, ...overrides }} canOpenForge={false} />)
+
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('is the drawer\'s own field shape, so it reads as the rows above it do', () => {
+    const { container } = render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
+
+    expect(container.firstChild).toHaveClass('context-field')
+    expect(container.querySelector('.context-field-label')).toBeTruthy()
+    expect(container.querySelector('.context-field-value.context-field-empty')).toBeTruthy()
   })
 })
 

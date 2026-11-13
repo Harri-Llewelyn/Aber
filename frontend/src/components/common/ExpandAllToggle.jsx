@@ -5,7 +5,8 @@ import { Tooltip } from './Tooltip'
 /**
  * One button that opens or closes every collapsible section or group of a list. It reads
  * "Collapse all" while any of them is open and "Expand all" otherwise, so a click always does what
- * the label says. It sits in the tab's `.filter-bar`, after the search.
+ * the label says. It is the first control of the row above the groups (`.groups-header`), never in
+ * the toolbar.
  *
  * Collapsing has to win over a search: a list that opens the sections a search matched must close
  * them when `onCollapseAll` runs, so record each one as closed rather than clearing the state.

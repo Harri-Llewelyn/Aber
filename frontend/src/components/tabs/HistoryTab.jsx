@@ -15,6 +15,7 @@ import { navigate, pathSegments, useUrl, useUrlList, useUrlState } from '../../h
 import { useTimeWindow } from '../../hooks/useTimeWindow'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { deviceIdentifiers } from '../../utils/sparkplugId'
+import { unitSymbol } from '../../utils/units'
 import {
   AREA_PATH, AREA_TAB, CELL_PATH, CELL_TAB, DEFAULT_HISTORY_WINDOW, HISTORY_RANGES, HISTORY_SPANS, METRIC_PATH, METRIC_TAB, OVERVIEW_PATH,
   areaAddress, areaIdFrom, cellAddress, cellIdFrom, deviceHistoryPath, deviceMatches, historyAreas, historyCells, historyDevices,
@@ -191,7 +192,7 @@ function MetricChooser({ devices, schemas, catalog, search, win }) {
                 </RouteLink>
                 {m.derived && <> <DerivedTag /></>}
               </td>
-              <td className="cell-meta">{m.unit ?? '—'}</td>
+              <td className="cell-meta">{unitSymbol(m.unit) ?? '—'}</td>
               <td className="cell-meta">{m.count}</td>
             </tr>
           ))}

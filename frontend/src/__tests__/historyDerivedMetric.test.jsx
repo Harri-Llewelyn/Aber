@@ -128,7 +128,7 @@ afterEach(() => {
 describe('the Device tab', () => {
   it('draws each derived metric the device reports the inputs of, tagged, read by derived_series()', async () => {
     await visit(`/history/device/${PRESS1}?range=24h`)
-    const figure = await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (COUNT/HOUR)' })
+    const figure = await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (count/h)' })
     expect(within(figure).getByText('Derived')).toBeInTheDocument()
     expect(screen.getByRole('figure', { name: 'Controller/UPTIME (% of the time)' })).toBeInTheDocument()
     expect(api.readDerivedSeries).toHaveBeenCalledTimes(1)
@@ -139,7 +139,7 @@ describe('the Device tab', () => {
     expect(asked).not.toContain(RATE)
     expect(asked).not.toContain(UPTIME)
     // A measured metric carries no tag.
-    expect(within(screen.getByRole('figure', { name: 'Controller/PART_COUNT (COUNT)' })).queryByText('Derived')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('figure', { name: 'Controller/PART_COUNT (count)' })).queryByText('Derived')).not.toBeInTheDocument()
   })
 
   it('draws a time in state as a percentage: the axis, the latest reading, the hover and the summary', async () => {
@@ -154,13 +154,13 @@ describe('the Device tab', () => {
     expect(plot).toBeTruthy()
     expect(plot.opts.axes[1].values(null, [0, 0.25, 0.5, 0.125, 1])).toEqual(['0%', '25%', '50%', '12.5%', '100%'])
     // A rate is as it always was.
-    const rate = within(screen.getByRole('figure', { name: 'Controller/PARTS_PER_HOUR (COUNT/HOUR)' }))
-    expect(rate.getByText(/^Latest 50 COUNT[/]HOUR · /)).toBeInTheDocument()
+    const rate = within(screen.getByRole('figure', { name: 'Controller/PARTS_PER_HOUR (count/h)' }))
+    expect(rate.getByText(/^Latest 50 count[/]h · /)).toBeInTheDocument()
   })
 
   it('offers only the derived metrics whose inputs the device reports', async () => {
     await visit(`/history/device/${PRESS2}?range=24h`)
-    await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (COUNT/HOUR)' })
+    await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (count/h)' })
     expect(screen.queryByRole('figure', { name: /^Controller[/]UPTIME/ })).not.toBeInTheDocument()
     expect(api.readDerivedSeries.mock.calls[0][0].metricNames).toEqual([RATE])
   })
@@ -183,8 +183,8 @@ describe('the Device tab', () => {
 
   it('says a window too long for a derived metric in its chart, and still draws the measured ones', async () => {
     await visit(`/history/device/${PRESS1}?span=year&at=2025-01-01`)
-    await screen.findByRole('figure', { name: 'Controller/PART_COUNT (COUNT)' })
-    const figure = screen.getByRole('figure', { name: 'Controller/PARTS_PER_HOUR (COUNT/HOUR)' })
+    await screen.findByRole('figure', { name: 'Controller/PART_COUNT (count)' })
+    const figure = screen.getByRole('figure', { name: 'Controller/PARTS_PER_HOUR (count/h)' })
     expect(within(figure).getByText(/computed from the minutes, and this window has too many of them/)).toBeInTheDocument()
     expect(api.readDerivedSeries).not.toHaveBeenCalled()
   })
@@ -204,7 +204,7 @@ describe('the Device tab', () => {
 
   it('has nothing to export when only a derived metric is chosen', async () => {
     await visit(`/history/device/${PRESS2}?range=24h&metric=${encodeURIComponent(RATE)}`)
-    await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (COUNT/HOUR)' })
+    await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (count/h)' })
     const button = screen.getByRole('button', { name: /Export CSV/ })
     expect(button).toBeDisabled()
     expect(button).toHaveAccessibleDescription(DERIVED_EXPORT_NOTE)
@@ -267,8 +267,8 @@ describe('the Metric tab', () => {
     const rows = within(table).getAllByRole('row').slice(1).map(r => [...r.querySelectorAll('td')].map(c => c.textContent))
     expect(rows).toEqual([
       ['Controller/EXECUTION', '—', '1'],
-      ['Controller/PART_COUNT', 'COUNT', '2'],
-      ['Controller/PARTS_PER_HOUR Derived', 'COUNT/HOUR', '2'],
+      ['Controller/PART_COUNT', 'count', '2'],
+      ['Controller/PARTS_PER_HOUR Derived', 'count/h', '2'],
       ['Controller/UPTIME Derived', '% of the time', '1'],
       ['Spindle/LOAD', 'kW', '1'],
     ])

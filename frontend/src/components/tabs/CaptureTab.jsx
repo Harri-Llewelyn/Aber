@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { captureSubjectUrl, schemaUrl, tabUrl } from '../../routes'
+import { captureJobUrl, captureSubjectUrl, schemaUrl } from '../../routes'
 import { api, isMachineMetric } from '../../api'
 import { playbackWorkerDeployed } from '../../config'
 import { REALTIME_ENABLED } from '../../constants'
@@ -55,6 +55,16 @@ const JOB_KINDS = { captures: 'capture', playbacks: 'playback' }
 const SUBJECT_FILTERS = ['stored', 'search']
 
 /**
+ * The query keys a tab opens with. The search stays between the two subject tabs, and between the
+ * two job tabs; the stored filter is the subject tabs'. Every other key is left behind, so a tab
+ * opens on its own defaults, a `job` narrowing included.
+ */
+const keptOnTabChange = (from, to) => {
+  if (SUBJECT_KINDS.includes(to)) return SUBJECT_KINDS.includes(from) ? SUBJECT_FILTERS : []
+  return JOB_KINDS[to] && JOB_KINDS[from] ? ['search'] : []
+}
+
+/**
  * Recording the broker, and playing a recording back.
  *
  * Nothing on this page records or plays back: a browser cannot open an MQTT subscription, so the
@@ -77,16 +87,12 @@ const STORED_OPTIONS = [
 const NONE = Object.freeze([])
 const STORED_ALIASES = Object.freeze({ all: NONE })
 
-/** Where a capture or a recording job is about: its subject, with its captures open. */
-const subjectUrlOf = (record) =>
-  captureSubjectUrl(record.subject_kind, record.subject_kind === 'device' ? record.device_id : record.gateway_id)
-
 export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // The tab, in the path: `/capture` (gateways), `/capture/device`, `/capture/captures` or
-  // `/capture/playbacks`. The stored filter and the search belong to the subject tables, so they
-  // stay in the address between those two tabs and are left behind on the other two.
+  // `/capture/playbacks`. The search stays between the two tabs of a kind, and the stored filter
+  // between the two subject tabs (keptOnTabChange).
   const [view, setView, viewHref] = useUrlTab('capture', VIEWS.map(v => v.id), 'gateway',
-    { keep: next => (SUBJECT_KINDS.includes(next) ? SUBJECT_FILTERS : []) })
+    { keep: next => keptOnTabChange(view, next) })
   // The subject kind the open tab lists, or null on a tab of finished jobs; and the job kind.
   const subjectKind = SUBJECT_KINDS.includes(view) ? view : null
   const jobKind = JOB_KINDS[view] || null
@@ -112,6 +118,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const [storedFilter, setStoredFilter] = useUrlList('stored', NONE, { allowed: ['with', 'without'], aliases: STORED_ALIASES })
   const [gatewayFilter, setGatewayFilter] = useUrlList('gateway', NONE, { allowed: loading ? null : gateways.map(g => g.id) })
   const [search, setSearch] = useUrlState('search')
+  // The one job a Captures or Playbacks tab lists, as a notification opens it. Typing a search
+  // leaves it: that is a person looking for something else.
+  const [jobId, setJobId] = useUrlState('job')
+  const onSearch = (text) => { setSearch(text); if (jobId) setJobId('') }
   const [draggingPlay, setDraggingPlay] = useState(false)
   // Set when a file comes in through "Play a file…" or a drop on the card: once it has been stored,
   // the playback dialog opens on the capture it produced rather than sending the operator back to
@@ -278,12 +288,12 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
   // A filter counts only on a tab that shows it -- otherwise switching tabs with one set would show
   // "Clear filters (1)" for a control that is not on screen. The gateway filter is on Devices only.
-  const activeFilterCount = !subjectKind ? 0 : (
+  const activeFilterCount = subjectKind ? (
     (storedFilter.length ? 1 : 0)
     + (search.trim() ? 1 : 0)
     + (subjectKind === 'device' && gatewayFilter.length ? 1 : 0)
-  )
-  const clearFilters = () => { setStoredFilter([]); setSearch(''); setGatewayFilter([]) }
+  ) : jobKind ? (search.trim() ? 1 : 0) + (jobId ? 1 : 0) : 0
+  const clearFilters = () => { setStoredFilter([]); setSearch(''); setGatewayFilter([]); setJobId('') }
 
   /** Every subject the upload dialog can file a capture against, both tabs at once. */
   const allSubjects = useMemo(() => ([
@@ -320,9 +330,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // Actions
   const onStart = async ({ note, seconds, replace }) => {
     const row = startFor
-    await api.startCapture({ subjectKind: row.kind, subjectId: row.id, note, seconds, replace })
+    const job = await api.startCapture({ subjectKind: row.kind, subjectId: row.id, note, seconds, replace })
     setStartFor(null)
-    showToast(`Recording ${row.name}…`, 'success', { to: captureSubjectUrl(row.kind, row.id) })
+    showToast(`Recording ${row.name}…`, 'success', { to: captureJobUrl('capture', job) })
     await refreshAll()
   }
 
@@ -330,7 +340,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     try {
       const stopped = await api.stopCapture(activeJob.id)
       showToast(stopped ? 'Stopping. The recorder finishes within a second or two.' : 'That capture had already finished.', 'success',
-        { to: subjectUrlOf(activeJob) })
+        { to: captureJobUrl('capture', activeJob.id) })
       await refreshAll()
     } catch (err) {
       showToast(err.message, 'error')
@@ -338,17 +348,16 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   })
 
   const onPlay = async ({ targetGatewayId, deviceMap, speed }) => {
-    await api.startPlayback({ captureId: playFor.id, targetGatewayId, deviceMap, speed })
+    const job = await api.startPlayback({ captureId: playFor.id, targetGatewayId, deviceMap, speed })
     setPlayFor(null)
-    // A playback is started from a subject's drawer, so that subject is what it is about.
-    showToast('Playing back the capture…', 'success', { to: selected ? captureSubjectUrl(selected.kind, selected.id) : tabUrl('capture') })
+    showToast('Playing back the capture…', 'success', { to: captureJobUrl('playback', job) })
     await refreshAll()
   }
 
   const onStopPlayback = () => runStopPlay(async () => {
     try {
       const stopped = await api.stopPlayback(activePlayback.id)
-      showToast(stopped ? 'Stopping the playback.' : 'That playback had already finished.', 'success', { to: tabUrl('capture') })
+      showToast(stopped ? 'Stopping the playback.' : 'That playback had already finished.', 'success', { to: captureJobUrl('playback', activePlayback.id) })
       await refreshAll()
     } catch (err) {
       showToast(err.message, 'error')
@@ -362,7 +371,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       // A signed URL in a new tab rather than a fetch-and-blob: the bucket is private, the link is
       // short-lived, and the browser's own download handling is what an operator expects.
       window.open(url, '_blank', 'noopener')
-      showToast(`Downloading the capture of ${subject.name}…`, 'success')
+      showToast(`Downloading the capture of ${subject.name}…`, 'success', { to: captureSubjectUrl(subject.kind, subject.id) })
     } catch (err) {
       showToast(err.message, 'error')
     } finally {
@@ -511,17 +520,19 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           />
 
           {/* Play a file… is the page's, on every tab; the filters are the subject tables'. The
-              finished jobs have none: they are read a page at a time, newest first. */}
+              search is on every tab: the finished jobs are read a page at a time, newest first, and
+              a search reads on through the older ones. */}
           <div className="filter-bar">
+            {(subjectKind || jobKind) && (
+              <SearchInput
+                value={search}
+                onChange={onSearch}
+                placeholder={subjectKind ? 'Search name or Sparkplug ID…' : 'Search note, subject, person or status…'}
+                ariaLabel={subjectKind ? 'Search subjects' : `Search ${view}`}
+              />
+            )}
             {subjectKind && (
               <>
-                <SearchInput
-                  value={search}
-                  onChange={setSearch}
-                  placeholder="Search name or Sparkplug ID…"
-                  ariaLabel="Search subjects"
-                />
-
                 <FilterDropdown
                   label="Capture"
                   noun="subject"
@@ -593,6 +604,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               kind={jobKind}
               refreshKey={finishedKey(jobKind === 'capture' ? recentJobs : recentPlaybacks)}
               subjectName={subjectName}
+              search={search}
+              jobId={jobId}
+              onShowAll={() => setJobId('')}
             />
           ) : loading ? (
             <LoadingState label="captures" />

@@ -20,7 +20,7 @@ import sys
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 INGESTION_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, INGESTION_DIR)
@@ -38,7 +38,15 @@ def _stub(name, **attrs):
     return module
 
 
-_stub("psycopg2", connect=lambda *a, **k: None)
+# The write path tells a lost connection from a bad message by the first two classes; DataError is
+# a bad message.
+_stub(
+    "psycopg2",
+    connect=lambda *a, **k: None,
+    InterfaceError=type("InterfaceError", (Exception,), {}),
+    OperationalError=type("OperationalError", (Exception,), {}),
+    DataError=type("DataError", (Exception,), {}),
+)
 _stub("psycopg2.extras", execute_values=lambda *a, **k: None)
 _stub("sparkplug_b_pb2", Payload=object)
 _stub("paho")
@@ -265,6 +273,221 @@ class TestFailure(WriterTestCase):
         self.writer.flush()
         self.assertEqual(registry.counter_snapshot().get("dropped_db_unavailable"), 3)
         self.assertEqual(self.execute_values.call_args_list, [])
+
+
+psycopg2 = sys.modules["psycopg2"]
+
+
+def server_closed(conn):
+    """What psycopg2 does when the server went away: the connection now says so."""
+    conn.closed = 2
+    return psycopg2.OperationalError("server closed the connection unexpectedly")
+
+
+def interface_error(conn):
+    """An InterfaceError on a connection that still reads open."""
+    return psycopg2.InterfaceError("connection already closed")
+
+
+def statement_timeout(conn):
+    """An OperationalError from a healthy connection: the statement's fault, not the link's."""
+    return psycopg2.OperationalError("canceling statement due to statement timeout")
+
+
+class FakeConnection:
+    """A historian connection that commits what its transaction inserted, or rolls it back."""
+
+    def __init__(self, historian):
+        self.historian = historian
+        self.closed = 0
+        self.inserted = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.closed:
+            # The rollback psycopg2 attempts on a dead connection, which replaces the real error.
+            raise psycopg2.InterfaceError("connection already closed")
+        if exc_type is None:
+            self.historian.committed.extend(self.inserted)
+        self.inserted = []
+        return False
+
+    def cursor(self):
+        return self
+
+    def close(self):
+        self.closed = 1
+
+
+class FakeHistorian:
+    """The server: the rows it committed, the connections it handed out, and its scripted faults."""
+
+    def __init__(self):
+        self.committed = []
+        self.opened = []
+        self.attempts = 0
+        self.faults = []
+        self.poison = set()
+
+    def open(self):
+        conn = FakeConnection(self)
+        self.opened.append(conn)
+        return conn
+
+    def execute_values(self, cur, sql, rows, **kwargs):
+        if "INSERT INTO telemetry" not in sql:
+            return
+        self.attempts += 1
+        if self.faults:
+            raise self.faults.pop(0)(cur)
+        if any(r[2] in self.poison for r in rows):
+            raise psycopg2.DataError("value out of range")
+        cur.inserted.extend((r[1], r[2]) for r in rows)
+
+
+class TestConnectionLost(WriterTestCase):
+    """
+    The historian dropped the connection between two messages. The daemon's connection still read
+    open, so the next write failed on first use. A lone message used to be lost there; now it is
+    written once more on a fresh connection, and every message is written exactly once.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.historian = FakeHistorian()
+        # The real get_timescaledb_connection, over connections that can fail.
+        ingestion.get_timescaledb_connection = self._real["get_timescaledb_connection"]
+        ingestion.execute_values = self.historian.execute_values
+        for name, value in (("_open_timescaledb_connection", self.historian.open),
+                            ("_ts_conn", None)):
+            patcher = patch.object(ingestion, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def snapshot(self):
+        return registry.counter_snapshot()
+
+    def submit(self, *items):
+        for item in items:
+            self.writer.submit(item)
+        self.writer.flush()
+
+    def test_a_lone_message_is_written_on_a_fresh_connection(self):
+        self.submit(pending(DEV_A, [("T", 1.0)]))  # opens the connection, writes, commits
+        self.historian.committed.clear()
+        self.historian.faults.append(server_closed)
+
+        self.submit(pending(DEV_B, [("T", 2.0)]))
+
+        self.assertEqual(self.historian.committed, [(DEV_B, "T")])
+        self.assertEqual(len(self.historian.opened), 2)
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot.get("write_retries_saved"), 1)
+        self.assertEqual(snapshot.get("db_reconnects"), 1)
+        self.assertEqual(snapshot.get("write_failures"), 0)
+        self.assertEqual(snapshot.get("written_messages"), 2)
+
+    def test_the_message_is_published_and_recorded_once(self):
+        self.historian.faults.append(interface_error)
+        self.submit(pending(DEV_A, [("T", 1.0)]))
+        self.assertEqual([c[0][2]["sparkplug_id"] for c in self.publish.call_args_list], [DEV_A])
+        self.assertEqual(self.record_violations.call_count, 1)
+
+    def test_an_interface_error_on_a_connection_that_reads_open_still_reconnects(self):
+        """get_timescaledb_connection() only reopens a connection that says it is closed."""
+        self.historian.faults.append(interface_error)
+        self.submit(pending(DEV_A, [("T", 1.0)]))
+
+        self.assertEqual(self.historian.committed, [(DEV_A, "T")])
+        self.assertEqual(len(self.historian.opened), 2)
+        self.assertNotEqual(self.historian.opened[0].closed, 0)
+        self.assertEqual(self.snapshot().get("write_retries_saved"), 1)
+
+    def test_a_batch_of_several_writes_every_message_once(self):
+        self.historian.faults.append(server_closed)
+        self.submit(pending(DEV_A, [("T", 1.0)]),
+                    pending(DEV_B, [("T", 2.0)]),
+                    pending(DEV_C, [("T", 3.0)]))
+
+        self.assertEqual(sorted(self.historian.committed),
+                         [(DEV_A, "T"), (DEV_B, "T"), (DEV_C, "T")])
+        self.assertEqual(len(self.historian.opened), 2)
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot.get("write_batch_failures"), 1)
+        self.assertEqual(snapshot.get("write_failures"), 0)
+        self.assertEqual(snapshot.get("written_messages"), 3)
+        self.assertEqual(sorted(c[0][2]["sparkplug_id"] for c in self.publish.call_args_list),
+                         [DEV_A, DEV_B, DEV_C])
+
+    def test_a_connection_that_fails_again_loses_the_message_after_one_retry(self):
+        self.historian.faults.extend([server_closed, server_closed])
+        self.submit(pending(DEV_A, [("T", 1.0)]))
+
+        self.assertEqual(self.historian.attempts, 2)
+        self.assertEqual(self.historian.committed, [])
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot.get("write_failures"), 1)
+        self.assertEqual(snapshot.get("write_retries_saved"), 0)
+        self.assertEqual(self.publish.call_count, 0)
+
+    def test_no_connection_to_retry_on_drops_the_message_as_unavailable(self):
+        self.submit(pending(DEV_A, [("T", 1.0)]))
+        self.historian.faults.append(server_closed)
+
+        def refuse():
+            raise psycopg2.OperationalError("connection refused")
+        patcher = patch.object(ingestion, "_open_timescaledb_connection", refuse)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = patch.object(ingestion, "DB_CONNECT_MAX_ATTEMPTS", 1)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        self.submit(pending(DEV_B, [("T", 2.0)]))
+
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot.get("dropped_db_unavailable"), 1)
+        self.assertEqual(snapshot.get("write_failures"), 0)
+        self.assertEqual(snapshot.get("write_retries_saved"), 0)
+        self.assertEqual(self.historian.committed, [(DEV_A, "T")])
+
+    def test_an_error_from_a_healthy_connection_is_not_retried(self):
+        self.historian.faults.append(statement_timeout)
+        self.submit(pending(DEV_A, [("T", 1.0)]))
+
+        self.assertEqual(self.historian.attempts, 1)
+        self.assertEqual(len(self.historian.opened), 1)
+        self.assertEqual(self.snapshot().get("write_failures"), 1)
+        self.assertEqual(self.snapshot().get("write_retries_saved"), 0)
+
+    def test_a_data_error_drops_that_message_alone_and_counts_it(self):
+        self.historian.poison.add("POISON")
+        self.submit(pending(DEV_A, [("T", 1.0)]),
+                    pending(DEV_B, [("POISON", 2.0)]),
+                    pending(DEV_C, [("T", 3.0)]))
+
+        self.assertEqual(sorted(self.historian.committed), [(DEV_A, "T"), (DEV_C, "T")])
+        self.assertEqual(len(self.historian.opened), 1, "the connection was never the fault")
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot.get("write_failures"), 1)
+        self.assertEqual(snapshot.get("write_batch_failures"), 1)
+        self.assertEqual(snapshot.get("write_retries_saved"), 0)
+        self.assertEqual(snapshot.get("db_reconnects", 0), 0)
+
+    def test_a_lone_data_error_is_counted_and_written_once_at_most(self):
+        self.historian.poison.add("POISON")
+        self.submit(pending(DEV_A, [("POISON", 1.0)]))
+
+        self.assertEqual(self.historian.attempts, 1)
+        self.assertEqual(self.historian.committed, [])
+        self.assertEqual(self.snapshot().get("write_failures"), 1)
+        self.assertEqual(self.snapshot().get("write_retries_saved"), 0)
+
+    def test_the_saved_writes_are_exported_under_their_own_name(self):
+        registry.count("write_retries_saved", 2)
+        self.assertIn("aber_ingestion_write_retries_saved_total 2.0", registry.render())
 
 
 class TestQueue(WriterTestCase):
