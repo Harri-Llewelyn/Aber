@@ -596,6 +596,24 @@ height is not known, and above the actions it could push Edit Details off the dr
 - **An entity's own page is one action away**, named for the page: "View in Devices" (`entityUrl`).
   The Audit Trail offers it for a device, gateway, cell, area or schema its lookups still hold, so a
   deleted entity gets none.
+- **A row the item's kind can never fill is not shown. A row it could fill, but has not yet, says
+  *Not set*.** A Host gateway has no appliance, so a CA expiry, a disk, memory, load, a flow hash, a
+  platform tag and a custom playbook can never be reported for it. Its drawer drew all seven, each
+  reading *Not set* for good, and its first action started at 1,073px, where a 1920×1080 screen
+  leaves 865px. The Gateways drawer keeps the rule in one table, `NEVER_FILLED_ROWS` in
+  `utils/gatewayType.js`, keyed on the gateway's kind and read by `gatewayShowsRow()`, so a row is
+  hidden by listing its label there, not by a condition beside the row.
+  - **Host and Simulated** keep Health Reported and Runtime Uptime, which a heartbeat fills, and
+    lose the seven appliance rows and the three forge rows (Bundle, Committed, Reported).
+  - **Playback** loses the health rows too: the ingestion daemon records none for a shadow gateway.
+  - **Third-party** loses every one of them, and says so in a Not Provided row.
+  - **Remote** loses none. Where it has not reported a figure the row says *Not set*. Its three
+    forge rows show only once they hold a value: as *Not set* on a new appliance they would add
+    three rows to its drawer.
+- **A missing repository is one line.** `GatewayRepositoryPanel` draws the drawer's field shape:
+  the label *Repository* with a help tip, then one muted line such as *None: edit it in Node-RED*.
+  The reason is in the tip, in about 35 words. Every case without a repository does the same:
+  Host, Simulated, Playback, Third-party, not yet enrolled, and enrolled with none created.
 
 - **The actions are two to a row** in a drawer wide enough for two 200px columns, about 440px and
   up, and one to a row below that. The first primary action and a danger action take the whole row.

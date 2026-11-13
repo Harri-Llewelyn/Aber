@@ -11053,6 +11053,88 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 368. The Gateways drawer shows only the rows a gateway's kind can fill, and the documents say
+// which. utils/gatewayType.js holds the rule once, as NEVER_FILLED_ROWS keyed on the kind: a Remote
+// gateway hides nothing, a Host or Simulated one hides the seven appliance rows and the three forge
+// rows, Playback and Third-party hide the health rows too. Every label in it is a row the drawer
+// draws, GatewaysTab filters its fields through it, and no condition on the Third-party kind sits
+// beside a row any more. The help names the two rows a Host gateway keeps, and the README names the
+// table.
+// -------------------------------------------------------------------------------------------------
+{
+  const { NEVER_FILLED_ROWS, GATEWAY_TYPES } = await import((await import('node:url')).pathToFileURL(join(REPO, 'frontend/src/utils/gatewayType.js')).href);
+  const tab = read('frontend/src/components/tabs/GatewaysTab.jsx');
+  const help = read('help/pages/gateways.md');
+  const readme = read('frontend/README.md');
+  const problems368 = [];
+  const APPLIANCE = ['CA Expires', 'Disk Free', 'Memory Available', 'Load (1m)', 'Flow', 'Platform', 'Custom'];
+  const FORGE = ['Bundle', 'Committed', 'Reported'];
+  const HEALTH = ['Health Reported', 'Runtime Uptime'];
+  const same = (a, b) => a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
+  const expected = {
+    [GATEWAY_TYPES.REMOTE]: [],
+    [GATEWAY_TYPES.HOST]: [...FORGE, ...APPLIANCE],
+    [GATEWAY_TYPES.SIMULATED]: [...FORGE, ...APPLIANCE],
+    [GATEWAY_TYPES.PLAYBACK]: [...FORGE, ...HEALTH, ...APPLIANCE],
+    [GATEWAY_TYPES.THIRD_PARTY]: [...FORGE, ...HEALTH, ...APPLIANCE],
+  };
+  for (const [kind, rows] of Object.entries(expected)) {
+    if (!NEVER_FILLED_ROWS[kind] || !same(NEVER_FILLED_ROWS[kind], rows)) {
+      problems368.push(`NEVER_FILLED_ROWS for ${kind} is [${(NEVER_FILLED_ROWS[kind] ?? []).join(', ')}], not [${rows.join(', ')}]`);
+    }
+  }
+  const drawn = new Set([...tab.matchAll(/^\s*label: '([^']+)',?$/gm)].map((m) => m[1]));
+  for (const label of new Set(Object.values(NEVER_FILLED_ROWS).flat())) {
+    if (!drawn.has(label)) problems368.push(`NEVER_FILLED_ROWS names "${label}", which GatewaysTab.jsx no longer draws as a row`);
+  }
+  if (!/\]\.filter\(f => gatewayShowsRow\(selected, f\.label\)\) : \[\]\}/.test(tab)) problems368.push('GatewaysTab.jsx does not filter its drawer fields through gatewayShowsRow()');
+  if (/THIRD_PARTY \? \[\] : \[/.test(tab) || /health_reported_at && gatewayType\(selected\) !== GATEWAY_TYPES\.THIRD_PARTY/.test(tab)) {
+    problems368.push('GatewaysTab.jsx tests the Third-party kind beside a row again: the rule is NEVER_FILLED_ROWS alone');
+  }
+  const drawer = help.slice(help.indexOf('- **The drawer** opens'), help.indexOf('- **Publishes under group X'));
+  if (!drawer.includes('A Host or Simulated gateway has no appliance, so once it reports it shows only **Health Reported** and **Runtime Uptime**.')) {
+    problems368.push('help/pages/gateways.md does not say a Host or Simulated gateway shows only Health Reported and Runtime Uptime');
+  }
+  if (!drawer.includes('The Playback gateway shows neither.')) problems368.push('help/pages/gateways.md does not say the Playback gateway shows neither health row');
+  if (!readme.includes('`NEVER_FILLED_ROWS`') || !readme.includes('`gatewayShowsRow()`')) problems368.push('frontend/README.md does not name NEVER_FILLED_ROWS and gatewayShowsRow()');
+  if (!readme.includes('A row the item\'s kind can never fill is not shown.')) problems368.push('frontend/README.md does not state the rule beside the drawer\'s other rules');
+  if (problems368.length) {
+    fail('the Gateways drawer\'s rows by kind and the documents disagree:\n' + problems368.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Gateways drawer hides the ${NEVER_FILLED_ROWS[GATEWAY_TYPES.HOST].length} rows a Host or Simulated gateway can never fill and the ${NEVER_FILLED_ROWS[GATEWAY_TYPES.THIRD_PARTY].length} a Playback or Third-party one cannot, from one table, and the help and the README say so`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 369. A gateway with no repository says so in one line, and the reason is in the label's help tip
+// within the short-tooltip rule. GatewayRepositoryPanel draws one NoRepository for each of the six
+// cases, the Host's reading "None: edit it in Node-RED", and every reason is at most 35 words. The
+// help says the Repository row reads None, and the README says so beside the drawer's rules.
+// -------------------------------------------------------------------------------------------------
+{
+  const panel = read('frontend/src/components/common/GatewayRepositoryPanel.jsx');
+  const help = read('help/pages/gateways.md');
+  const readme = read('frontend/README.md');
+  const problems369 = [];
+  const cases = [...panel.matchAll(/<NoRepository\s+value="([^"]+)"\s+reason="([^"]+)"/g)];
+  if (cases.length !== 6) problems369.push(`GatewayRepositoryPanel.jsx draws ${cases.length} NoRepository cases, not the 6 a gateway can be in without a repository`);
+  if (!cases.some((m) => m[1] === 'None: edit it in Node-RED')) problems369.push('GatewayRepositoryPanel.jsx has no host-run case reading "None: edit it in Node-RED"');
+  for (const [, value, reason] of cases) {
+    const words = reason.trim().split(/\s+/).length;
+    if (words > 35) problems369.push(`the reason for "${value}" is ${words} words; a tooltip stays within about 35`);
+    if (value.length > 40) problems369.push(`"${value}" is too long for one line of a drawer`);
+  }
+  if (!panel.includes('<HelpTip text={reason} label="What Repository means"')) problems369.push('GatewayRepositoryPanel.jsx does not put the reason in the label\'s help tip');
+  if (!help.includes('its **Repository** row reads **None**, and the **?** beside the label gives the reason')) problems369.push('help/pages/gateways.md does not say the Repository row reads None, with the reason under the ?');
+  if (!readme.includes('**A missing repository is one line.**')) problems369.push('frontend/README.md does not say a missing repository is one line');
+  if (problems369.length) {
+    fail('a gateway\'s missing repository is said otherwise than the documents say it:\n' + problems369.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`a gateway with no repository says so in one line in each of ${cases.length} cases, with its reason in the label's help tip within 35 words`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 327. The API reference describes telemetry_carried_by_group() as 0276 declares it: the arguments
 // the body requires are the function's, and a row has the columns it returns. A reader building on
 // the reference sends an argument the function does not take, or looks for a column it does not return.
