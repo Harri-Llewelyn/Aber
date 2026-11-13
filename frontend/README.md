@@ -555,6 +555,11 @@ when the page reloads the device.
   not a write.
 - **The file's row wraps**, with the name and size on the left and the buttons on the right, and a
   long name wraps rather than being cut. The dialog has the width, so the buttons keep their words.
+- **A replay lane shows its machine's model, read-only.** The lane holds none of its own, and the
+  database keeps its `model_3d_path` NULL, so the drawer reads the machine's. `DevicesTab` hands the
+  dialog that machine as `modelOf`. The dialog then reads its path, says "<machine>'s model" in place
+  of **Public**, and draws no Replace, Remove, drop zone or file input. A lane whose machine has no
+  model gets no 3D action, neither View nor Add, and a dialog open when the model goes closes.
 
 ### An area's plan turns in quarter turns
 

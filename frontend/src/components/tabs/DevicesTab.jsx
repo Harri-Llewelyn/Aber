@@ -742,8 +742,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // and the drawer closes itself.
   const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
   const selectedIds = deviceIds(selectedDevice)
-  // The model's dialog belongs to the device it was opened on.
+  /* A replay lane holds no model of its own: it shows its machine's, read-only. A lane whose
+     machine has none, or is not in the list, has nothing to show and the drawer offers no action. */
+  const laneMachine = selectedDevice?.shadow_of
+    ? assets.find(a => a.asset_id === selectedDevice.shadow_of) || null
+    : null
+  const modelPath = (selectedDevice?.shadow_of ? laneMachine : selectedDevice)?.model_3d_path || null
+  // The model's dialog belongs to the device it was opened on, and closes with the model it shows.
   useEffect(() => { setModelOpen(false) }, [selectedId])
+  const laneHasNoModel = !!selectedDevice?.shadow_of && !modelPath
+  useEffect(() => { if (laneHasNoModel) setModelOpen(false) }, [laneHasNoModel])
 
   /* How many automations apply to the open device, named or site-wide (automations_for_entity()),
      for the drawer's View in Automations. A failed read leaves the action without its count. */
@@ -1552,6 +1560,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       {modelOpen && selectedDevice && (
         <Model3DUploader
           device={selectedDevice}
+          modelOf={laneMachine}
           canManage={canManage && !selectedDevice.is_archived}
           showToast={showToast}
           onChange={() => loadAll()}
@@ -1777,13 +1786,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             title: "Chart this device's readings over time on the History page, and export them"
           },
           /* One action that follows the model: View when one is attached, Add when none is. Viewing
-             needs no permission; attaching does, and an archived device cannot take a new one. */
-          {
-            label: selectedDevice.model_3d_path ? 'View 3D Model' : 'Add 3D Model…',
+             needs no permission; attaching does, and an archived device cannot take a new one. A
+             replay lane views its machine's model and is never offered Add. */
+          (!selectedDevice.shadow_of || modelPath) && {
+            label: modelPath ? 'View 3D Model' : 'Add 3D Model…',
             icon: <IconCube size={13} />,
             onClick: () => setModelOpen(true),
-            disabled: !selectedDevice.model_3d_path && (!canManage || selectedDevice.is_archived),
-            title: selectedDevice.model_3d_path
+            disabled: !modelPath && (!canManage || selectedDevice.is_archived),
+            title: selectedDevice.shadow_of
+              ? `Turn and zoom the 3D model of ${laneMachine.asset_name}, which this replay lane shows`
+              : modelPath
               ? "Turn and zoom this device's 3D model, and download its file"
               : !canManage
                 ? requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)
