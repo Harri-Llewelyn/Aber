@@ -12,6 +12,14 @@ import { locateReasons, parseAutomationsYaml } from './automationYaml'
  * the cursor and those facts, so each is unit-tested without an editor. components/common/
  * AutomationEditor.jsx lays them over CodeMirror.
  *
+ * The JSON Schema is a parameter. modelOf() reads a schema into a model, the kinds of map a file of
+ * it holds and which list holds which, and each function takes the model last, the automations' by
+ * default. A schema that is not the automations' gets what the schema itself says: its keys and which
+ * are required, the values of an `enum` or a `const`, a boolean's two, every property's description
+ * on hover, and the catalogue's metrics for a property marked `"x-completes": "metric"`. What is
+ * special to a threshold trigger (its devices, metrics with units, hold, valid ranges) is the
+ * automations' model's alone.
+ *
  * The context of a cursor is read from the lines' indentation, not from a parse: the text is being
  * typed, and a half-written key is not YAML. The files this page renders are block YAML, so that is
  * the shape it reads; flow style (`[a, b]`) is left to the database, which checks the whole file.
@@ -19,31 +27,80 @@ import { locateReasons, parseAutomationsYaml } from './automationYaml'
 
 const DEFS = SCHEMA.$defs
 
-/** The three kinds of map an automation file holds, each with its schema's keys. */
-export const KINDS = {
-  automation: { definition: DEFS.automation, label: 'automation' },
-  trigger: { definition: DEFS.thresholdTrigger, label: 'trigger' },
-  action: { definition: DEFS.alertAction, label: 'action' },
+const refName = (ref) => String(ref).split('/').pop()
+
+/** A schema node with its `$ref` followed. */
+const deref = (schema, node) => (node?.$ref ? schema.$defs?.[refName(node.$ref)] ?? node : node)
+
+/** A kind's name for a person: `deviceSchema` is "device schema". */
+const spoken = (name) => name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()
+
+/**
+ * A JSON Schema read into what the editor needs of it, by walking it from the list a file is: the
+ * kinds of map it holds, each with its definition (`kinds`: the file's own maps first, named for the
+ * definition it points at, then each list's items, named for the key in the singular), and the kind
+ * each list's items are (`itemKind`: `triggers` holds `trigger`s). `automations` is true for the
+ * automations' model alone, which also has `snippets` (the item a list offers whole, by the key it sits
+ * under) and the hold `examples`; every other schema's lists offer an item written from its required keys.
+ */
+export function modelOf(schema, { automations = false, snippets = {} } = {}) {
+  const kinds = {}
+  const itemKind = {}
+  const add = (name, definition) => {
+    kinds[name] = { definition, label: spoken(name) }
+    return name
+  }
+  const walk = (name) => {
+    for (const [key, p] of Object.entries(kinds[name].definition.properties || {})) {
+      const items = p.type === 'array' ? deref(schema, p.items) : null
+      if (items?.type !== 'object' && !items?.properties) continue
+      const child = key.replace(/s$/, '')
+      if (!kinds[child]) {
+        add(child, items)
+        walk(child)
+      }
+      itemKind[key] = child
+    }
+  }
+  const root = deref(schema, schema.items)
+  const rootKind = root ? add(schema.items?.$ref ? refName(schema.items.$ref) : 'item', root) : null
+  if (rootKind) walk(rootKind)
+  return { schema, kinds, itemKind, rootKind, automations, snippets }
 }
 
-/** The key a kind of list sits under, and what its items are: `triggers:` holds triggers. */
-const ITEM_KIND = { triggers: 'trigger', actions: 'action' }
+/** Common holds to offer after `for:`. The schema's pattern says what is accepted, not what is usual. */
+export const HOLD_EXAMPLES = ['0s', '30s', '5m', '1h']
+
+/** The automations' model: its three kinds, and the items of its two lists written whole. */
+export const AUTOMATIONS_MODEL = modelOf(SCHEMA, {
+  automations: true,
+  snippets: {
+    triggers: {
+      label: '- trigger: threshold', detail: 'a new trigger', info: DEFS.thresholdTrigger.description,
+      apply: (pad) => `- trigger: threshold\n${pad}  device: \n${pad}  metric: \n${pad}  above: `, caret: 'device',
+    },
+    actions: {
+      label: '- action: alert', detail: 'a new action', info: DEFS.alertAction.description,
+      apply: (pad) => `- action: alert\n${pad}  severity: warning`,
+    },
+  },
+})
+
+/** The three kinds of map an automation file holds, each with its schema's keys. */
+export const KINDS = AUTOMATIONS_MODEL.kinds
 
 /** A property's schema, or undefined. */
-const propertyOf = (kind, key) => KINDS[kind]?.definition.properties?.[key]
+const propertyOf = (kind, key, model = AUTOMATIONS_MODEL) => model.kinds[kind]?.definition.properties?.[key]
 
 /** The values a key may be given, from its schema: a `const`, an `enum`, or true and false. */
-export function schemaValues(kind, key) {
-  const p = propertyOf(kind, key)
+export function schemaValues(kind, key, model = AUTOMATIONS_MODEL) {
+  const p = propertyOf(kind, key, model)
   if (!p) return []
   if ('const' in p) return [String(p.const)]
   if (Array.isArray(p.enum)) return p.enum.map(String)
   if (p.type === 'boolean') return ['true', 'false']
   return []
 }
-
-/** Common holds to offer after `for:`. The schema's pattern says what is accepted, not what is usual. */
-export const HOLD_EXAMPLES = ['0s', '30s', '5m', '1h']
 
 const MEASURED = (datatype) => datatype >= 1 && datatype <= 10
 
@@ -60,6 +117,7 @@ export function buildFacts({ devices = [], schemas = [], catalog = [], documentD
     // The symbol, as a chart says it: a threshold is a number in the catalogue's unit.
     unit: m.derivation?.kind === 'time_in_state' ? SHARE_FRACTION_NOTE : unitSymbol(m.units || null),
     measured: MEASURED(m.datatype),
+    derived: Boolean(m.derivation),
   }]))
   const byId = new Map()
   for (const d of devices) {
@@ -190,13 +248,13 @@ function openingLine(lines, L) {
   return -1
 }
 
-/** Which kind of map line `L` is in: automation, trigger or action; null for another or an unknown one. */
-function mapKindAt(lines, L) {
+/** Which kind of map line `L` is in: the file's own, or the items of a list the model names; null for another or an unknown one. */
+function mapKindAt(lines, L, model) {
   const D = openingLine(lines, L)
   if (D < 0) return null
   const parent = listParentKey(lines, D)
-  if (parent === '') return 'automation'
-  return ITEM_KIND[parent] ?? null
+  if (parent === '') return model.rootKind
+  return model.itemKind[parent] ?? null
 }
 
 /** The keys the map that opens at `D` already has, apart from the line `skip`. */
@@ -249,9 +307,9 @@ function cursorLine(text, pos) {
 // Completion
 // ------------------------------------------------------------------------------------------------
 
-const describe = (kind, key) => propertyOf(kind, key)?.description
+const describe = (kind, key, model) => propertyOf(kind, key, model)?.description
 
-const requiredOf = (kind) => new Set(KINDS[kind].definition.required || [])
+const requiredOf = (kind, model) => new Set(model.kinds[kind].definition.required || [])
 
 /** How well typed text matches a candidate: every word of it must be in the candidate. */
 const matches = (typed, haystack) => {
@@ -269,9 +327,9 @@ const byStart = (typed) => (a, b) => {
 /** The most options one list offers. A site has many devices and metrics, and the person is typing to narrow them. */
 export const MOST_OPTIONS = 50
 
-function keyOptions(kind, siblings, typed) {
-  const props = KINDS[kind].definition.properties
-  const required = requiredOf(kind)
+function keyOptions(kind, siblings, typed, model) {
+  const props = model.kinds[kind].definition.properties
+  const required = requiredOf(kind, model)
   const present = new Set(siblings)
   return Object.keys(props)
     .filter(key => !present.has(key))
@@ -282,51 +340,62 @@ function keyOptions(kind, siblings, typed) {
       label: key,
       type: 'property',
       detail: required.has(key) ? 'required' : key === 'above' || key === 'below' ? 'one of above, below' : undefined,
-      info: describe(kind, key),
+      info: describe(kind, key, model),
       apply: `${key}: `,
       boost: required.has(key) ? 10 - i * 0.01 : 0 - i * 0.01,
     }))
 }
 
-function valueOptions(kind, key, typed, facts, object) {
-  if (kind === 'trigger' && key === 'device') {
+function valueOptions(kind, key, typed, facts, object, model) {
+  if (model.automations && kind === 'trigger' && key === 'device') {
     const taken = new Set(devicesOf(object))
     return facts.devices
       .filter(d => !d.archived && !taken.has(d.id) && matches(typed, `${d.name} ${d.place ?? ''} ${d.id}`))
       .map(d => ({ label: d.name, type: 'variable', detail: d.place ?? undefined, info: d.id, device: d }))
   }
-  if (kind === 'trigger' && key === 'metric') {
+  if (model.automations && kind === 'trigger' && key === 'metric') {
     const reported = devicesOf(object).reduce((all, id) => new Set([...all, ...facts.modelledOf(id)]), new Set())
     return [...facts.metrics.values()]
       .filter(m => m.measured && matches(typed, m.name))
       .map(m => ({ label: m.name, type: 'constant', detail: m.unit ?? undefined, boost: reported.has(m.name) ? 99 : 0 }))
   }
-  if (kind === 'trigger' && key === 'for') {
+  if (model.automations && kind === 'trigger' && key === 'for') {
     return HOLD_EXAMPLES.filter(h => h.startsWith(typed)).map(h => ({ label: h, type: 'text', detail: h === '0s' ? 'the default' : undefined }))
   }
-  const own = schemaValues(kind, key)
-  const info = kind === 'trigger' && key === 'trigger' ? DEFS.thresholdTrigger.description
-    : kind === 'action' && key === 'action' ? DEFS.alertAction.description : describe(kind, key)
+  // A property the schema marks as naming a catalogue metric: any the site holds but a derived one,
+  // which nothing publishes.
+  if (propertyOf(kind, key, model)?.['x-completes'] === 'metric') {
+    return [...facts.metrics.values()]
+      .filter(m => !m.derived && matches(typed, m.name))
+      .map(m => ({ label: m.name, type: 'constant', detail: m.unit ?? undefined }))
+  }
+  const own = schemaValues(kind, key, model)
+  const info = model.automations && kind === 'trigger' && key === 'trigger' ? DEFS.thresholdTrigger.description
+    : model.automations && kind === 'action' && key === 'action' ? DEFS.alertAction.description : describe(kind, key, model)
   // In the schema's order: severities run from the most serious down, and true comes before false.
   return own.map((v, i) => ({ label: v, type: 'enum', info, boost: -i })).filter(o => o.label.startsWith(typed))
 }
 
-/** A whole new list item, offered under `triggers:` and `actions:`, written at the item's indent. */
-function itemOptions(parentKey, indent) {
+/**
+ * A whole new list item, offered under a key that holds a list of maps, written at the item's indent:
+ * the model's own snippet for the key, or the item's required keys, the first with its `const` value.
+ */
+function itemOptions(parentKey, indent, model) {
   const pad = ' '.repeat(indent)
-  if (parentKey === 'triggers') {
-    return [{
-      label: '- trigger: threshold', type: 'keyword', detail: 'a new trigger', info: DEFS.thresholdTrigger.description,
-      apply: `- trigger: threshold\n${pad}  device: \n${pad}  metric: \n${pad}  above: `, caret: 'device',
-    }]
+  const snippet = model.snippets[parentKey]
+  if (snippet) {
+    return [{ label: snippet.label, type: 'keyword', detail: snippet.detail, info: snippet.info, apply: snippet.apply(pad), caret: snippet.caret }]
   }
-  if (parentKey === 'actions') {
-    return [{
-      label: '- action: alert', type: 'keyword', detail: 'a new action', info: DEFS.alertAction.description,
-      apply: `- action: alert\n${pad}  severity: warning`,
-    }]
-  }
-  return []
+  const definition = model.kinds[model.itemKind[parentKey]]?.definition
+  if (!definition) return []
+  const keys = (definition.required || []).filter(k => k in (definition.properties || {}))
+  if (keys.length === 0) return []
+  const first = definition.properties[keys[0]]
+  const lines = keys.map((k, i) => `${i === 0 ? '- ' : `${pad}  `}${k}: ${i === 0 && 'const' in (first || {}) ? first.const : ''}`)
+  return [{
+    label: `- ${keys[0]}:`, type: 'keyword', detail: `a new ${model.itemKind[parentKey]}`, info: definition.description,
+    apply: lines.join('\n'), caret: keys.length > 1 ? keys[0] : undefined,
+  }]
 }
 
 /**
@@ -335,7 +404,7 @@ function itemOptions(parentKey, indent) {
  * `from` to `to` (the label when it has none), and a device's option puts its id, with the comment
  * the page writes beside an id. The list is already narrowed to what was typed and capped.
  */
-export function completionsAt(text, pos, facts) {
+export function completionsAt(text, pos, facts, model = AUTOMATIONS_MODEL) {
   const { lines, L, start, col } = cursorLine(text, pos)
   const raw = lines[L].raw
   const before = raw.slice(0, col)
@@ -349,19 +418,19 @@ export function completionsAt(text, pos, facts) {
     if (before.length === colon + 1) return null
     const spaces = /^ */.exec(before.slice(colon + 1))[0].length
     const from = start + colon + 1 + spaces
-    const kind = mapKindAt(lines, L)
+    const kind = mapKindAt(lines, L, model)
     if (!kind) return null
     const typed = text.slice(from, pos)
     const restOfValue = after.replace(/\s+#.*$/, '').trimEnd()
     const D = openingLine(lines, L)
-    const options = valueOptions(kind, b.key, typed, facts, mapObject(lines, D))
+    const options = valueOptions(kind, b.key, typed, facts, mapObject(lines, D), model)
     return finish(options, from, pos + restOfValue.length, typed, /\s#/.test(after))
   }
 
   // A list item that is a device: `- 3f1c|` under `device:`.
   if (b.dash && b.key === null && /^[\w-]*$/.test(b.rest) && listParentKey(lines, L) === 'device') {
     const from = pos - b.rest.length
-    const options = valueOptions('trigger', 'device', b.rest, facts, ownerOfDeviceList(lines, L))
+    const options = valueOptions('trigger', 'device', b.rest, facts, ownerOfDeviceList(lines, L), model)
     return finish(options, from, pos + after.replace(/\s+#.*$/, '').trimEnd().length, b.rest, /\s#/.test(after))
   }
 
@@ -371,16 +440,16 @@ export function completionsAt(text, pos, facts) {
     const from = pos - b.rest.length
     const to = pos + word.length
     const previous = (() => { for (let i = L - 1; i >= 0; i--) if (!isSkipped(lines[i])) return lines[i]; return null })()
-    // Under `triggers:` or `actions:` with nothing written yet: a whole new item.
-    if (!b.dash && previous && previous.key !== null && previous.value === '' && ITEM_KIND[previous.key] && b.indent >= previous.indent) {
-      const items = itemOptions(previous.key, b.indent).filter(o => o.label.startsWith(`- ${b.rest}`) || b.rest === '')
+    // Under a key that holds a list of maps (`triggers:`) with nothing written yet: a whole new item.
+    if (!b.dash && previous && previous.key !== null && previous.value === '' && model.itemKind[previous.key] && b.indent >= previous.indent) {
+      const items = itemOptions(previous.key, b.indent, model).filter(o => o.label.startsWith(`- ${b.rest}`) || b.rest === '')
       if (items.length) return { from, to, options: items }
     }
-    const kind = mapKindAt(lines, L)
+    const kind = mapKindAt(lines, L, model)
     if (!kind) return null
     const D = openingLine(lines, L)
     const siblings = siblingKeys(lines, D, L)
-    const options = keyOptions(kind, siblings, b.rest).map(o => (after.startsWith(':') ? { ...o, apply: o.label } : o))
+    const options = keyOptions(kind, siblings, b.rest, model).map(o => (after.startsWith(':') ? { ...o, apply: o.label } : o))
     return options.length ? { from, to, options } : null
   }
   return null
@@ -426,7 +495,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * is; a type says what it does; a device's id says which device; a metric says its unit and valid
  * range on the trigger's devices; a threshold says the unit it is in and the same range.
  */
-export function hoverAt(text, pos, facts) {
+export function hoverAt(text, pos, facts, model = AUTOMATIONS_MODEL) {
   const { lines, L, start, col } = cursorLine(text, pos)
   const line = lines[L]
   if (line.comment || line.blank) return null
@@ -443,17 +512,18 @@ export function hoverAt(text, pos, facts) {
   }
   if (line.key === null) return null
 
-  const kind = mapKindAt(lines, L)
+  const kind = mapKindAt(lines, L, model)
   if (!kind) return null
   const keyFrom = line.keyCol
   const keyTo = keyFrom + line.key.length
   if (col >= keyFrom && col <= keyTo) {
-    const p = propertyOf(kind, line.key)
+    const p = propertyOf(kind, line.key, model)
     if (!p) {
-      const article = kind === 'trigger' ? 'a' : 'an'
-      return { from: start + keyFrom, to: start + keyTo, title: line.key, lines: [`Not a key ${article} ${kind} takes. The database refuses it.`] }
+      const label = model.kinds[kind].label
+      const article = /^[aeiou]/.test(label) ? 'an' : 'a'
+      return { from: start + keyFrom, to: start + keyTo, title: line.key, lines: [`Not a key ${article} ${label} takes. The database refuses it.`] }
     }
-    const required = requiredOf(kind).has(line.key)
+    const required = requiredOf(kind, model).has(line.key)
     return { from: start + keyFrom, to: start + keyTo, title: `${line.key}${required ? ' (required)' : ''}`, lines: [p.description] }
   }
 
@@ -466,9 +536,10 @@ export function hoverAt(text, pos, facts) {
   const D = openingLine(lines, L)
   const object = mapObject(lines, D)
 
-  if (kind === 'trigger' && line.key === 'device') return deviceHover(value, facts, span.from, span.to)
-  if (kind === 'trigger' && line.key === 'metric') return { ...span, ...metricHover(value, facts, devicesOf(object)) }
-  if (kind === 'trigger' && (line.key === 'above' || line.key === 'below')) {
+  if (model.automations && kind === 'trigger' && line.key === 'device') return deviceHover(value, facts, span.from, span.to)
+  if (model.automations && kind === 'trigger' && line.key === 'metric') return { ...span, ...metricHover(value, facts, devicesOf(object)) }
+  if (propertyOf(kind, line.key, model)?.['x-completes'] === 'metric') return { ...span, ...catalogueMetricHover(value, facts) }
+  if (model.automations && kind === 'trigger' && (line.key === 'above' || line.key === 'below')) {
     const ids = devicesOf(object)
     const metric = typeof object.metric === 'string' ? object.metric : null
     const info = metric ? facts.metrics.get(metric) : null
@@ -478,11 +549,21 @@ export function hoverAt(text, pos, facts) {
     if (range?.bounded) out.push(`Valid range on ${range.where}: ${rangeWords(range, info?.unit)}.`)
     return { ...span, title: `${line.key} ${value}`, lines: out }
   }
-  if (kind === 'trigger' && line.key === 'for') return { ...span, title: `for ${value}`, lines: [propertyOf('trigger', 'for').description] }
-  if (kind === 'trigger' && line.key === 'trigger') return { ...span, title: value, lines: [DEFS.thresholdTrigger.description] }
-  if (kind === 'action' && line.key === 'action') return { ...span, title: value, lines: [DEFS.alertAction.description] }
-  if (kind === 'action' && line.key === 'severity') return { ...span, title: value, lines: [propertyOf('action', 'severity').description] }
-  return null
+  if (model.automations && kind === 'trigger' && line.key === 'for') return { ...span, title: `for ${value}`, lines: [propertyOf('trigger', 'for').description] }
+  if (model.automations && kind === 'trigger' && line.key === 'trigger') return { ...span, title: value, lines: [DEFS.thresholdTrigger.description] }
+  if (model.automations && kind === 'action' && line.key === 'action') return { ...span, title: value, lines: [DEFS.alertAction.description] }
+  if (model.automations && kind === 'action' && line.key === 'severity') return { ...span, title: value, lines: [propertyOf('action', 'severity').description] }
+  // In another schema a value says what its key is, from the schema; the automations' have said all they have to.
+  const description = model.automations ? null : describe(kind, line.key, model)
+  return description ? { ...span, title: `${line.key} ${value}`, lines: [description] } : null
+}
+
+/** A catalogue metric a schema names: its unit, and what a schema cannot do with it. */
+function catalogueMetricHover(name, facts) {
+  const info = facts.metrics.get(name)
+  if (!info) return { title: name, lines: ['Not in the metric catalogue. Register it on the Metrics page first.'] }
+  if (info.derived) return { title: name, lines: ['A derived metric. Nothing publishes it, so a schema cannot model it.'] }
+  return { title: name, lines: [info.unit ? `Unit: ${info.unit}` : 'No unit in the catalogue.'] }
 }
 
 function deviceHover(token, facts, from, to) {
@@ -568,8 +649,9 @@ export function syntaxMarks(text) {
 }
 
 /** Every mark for the text: a syntax error stands alone (nothing else can be read), else the range warnings and the refusals. */
-export function marksFor(text, facts, reasons) {
+export function marksFor(text, facts, reasons, model = AUTOMATIONS_MODEL) {
   const syntax = syntaxMarks(text)
   if (syntax.length) return syntax
-  return [...refusalMarks(text, reasons), ...(facts ? rangeWarnings(text, facts) : [])]
+  // A threshold's range is the automations' alone: no other file has a trigger to compare it with.
+  return [...refusalMarks(text, reasons), ...(facts && model.automations ? rangeWarnings(text, facts) : [])]
 }

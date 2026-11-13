@@ -31,7 +31,7 @@ const TRIGGER_KEYS = ['trigger', 'device', 'metric', 'above', 'below', 'for']
 const ACTION_KEYS = ['action', 'severity']
 
 /** `source`'s keys in `order`, then any it has beyond them, so a key a later release adds is not lost. */
-const ordered = (source, order) => {
+export const ordered = (source, order) => {
   const out = {}
   for (const key of order) if (key in source) out[key] = source[key]
   for (const key of Object.keys(source)) if (!(key in out)) out[key] = source[key]

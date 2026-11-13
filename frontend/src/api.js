@@ -2270,6 +2270,28 @@ const apiMethods = {
     return data ?? [];
   },
 
+  /**
+   * Check a parsed document of device schemas, or apply it (`dryRun` false): one result per schema,
+   * `{ index, name, status, id, version, schema_name, changes, metrics, reasons }`, status new, changed
+   * (a new draft version), unchanged or refused, each reason `{ path, message }`. All or nothing: with a
+   * refusal, or a dry run, nothing is written. Never deletes, and never edits a published version.
+   */
+  applyDeviceSchemas: async (document, dryRun) => {
+    const { data, error } = await supabase.rpc('apply_device_schemas', { p_doc: document, p_dry_run: dryRun });
+    if (error) throw new Error(error.message || 'Could not apply the schemas');
+    return data ?? [];
+  },
+
+  /**
+   * The schemas in force as a document, all of them or those of the lineages the schema ids belong to:
+   * a list that renderDeviceSchemasYaml() writes as YAML. A draft is not in it.
+   */
+  deviceSchemasDocument: async (ids = null) => {
+    const { data, error } = await supabase.rpc('device_schemas_document', { p_ids: ids });
+    if (error) throw new Error(error.message || 'Could not read the schemas');
+    return data ?? [];
+  },
+
   /** Enable or disable the automation with this key. Returns its row. */
   setAutomationEnabled: async (key, enabled) => {
     const { data, error } = await supabase.rpc('set_automation_enabled', { p_key: key, p_enabled: enabled });

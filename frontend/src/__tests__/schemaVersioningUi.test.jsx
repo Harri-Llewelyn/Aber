@@ -259,19 +259,23 @@ describe('Downloading a version definition', () => {
 
   const downloadedText = () => captured[0].text()
 
+  // The definition as JSON is the detail dialog's button: the drawer's one export is the YAML file.
   const clickRowDownload = async (name) => {
-    fireEvent.click(panelFor(name).getByText('Download JSON'))
+    fireEvent.click(panelFor(name).getByText(/^(View Schema Detail|Edit Draft)$/))
+    fireEvent.click(within(document.querySelector('.modal')).getByText('Download JSON'))
   }
 
-  it('offers the download from the context panel, not from the row', async () => {
-    // The download is a direct panel action rather than the only item behind a More menu.
+  it('offers the one export from the context panel as YAML, not from the row', async () => {
+    // The export is a direct panel action rather than the only item behind a More menu.
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
     const row = rowFor('Robot_Arm_Schema')
-    expect(within(row).queryByText(/Download/i)).toBeNull()
+    expect(within(row).queryByText(/Download|Export/i)).toBeNull()
     expect(within(row).queryByTitle('More')).toBeNull()
-    expect(panelFor('Robot_Arm_Schema').getByText('Download JSON')).toBeTruthy()
+    const panel = panelFor('Robot_Arm_Schema')
+    expect(panel.getByText('Export YAML')).toBeTruthy()
+    expect(panel.queryByText('Download JSON')).toBeNull()
   })
 
   it('writes the stored definition verbatim, with no injected wrapper or title', async () => {
@@ -334,7 +338,8 @@ describe('Downloading a version definition', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    const item = panelFor('Robot_Arm_Schema').getByText('Download JSON').closest('button')
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
+    const item = within(document.querySelector('.modal')).getByText('Download JSON').closest('button')
     expect(item.disabled).toBe(true)
     expect(tooltipOf(item)).toBe('This version has no definition to download')
   })
