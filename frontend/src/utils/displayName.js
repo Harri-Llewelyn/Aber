@@ -39,6 +39,15 @@ export function displayNameProblem(value) {
 }
 
 /**
+ * A person as one piece of text and its tooltip: the display name with the email as its tooltip, or
+ * the email alone, with none, when there is no name, or `fallback` when there is neither. For text
+ * that is sorted, searched or read as a string; PersonName draws the same thing with `emailOnHover`.
+ */
+export function personShown(name, email, fallback = '') {
+  return { text: name || email || fallback, title: name && email ? email : null }
+}
+
+/**
  * How a person is written in one line: "Name (email)" when they have a name, the email alone when
  * not, and the id when there is neither. For toasts, dialog titles and exports; a page that can
  * draw the two parts apart uses PersonName instead.

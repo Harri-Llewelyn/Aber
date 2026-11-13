@@ -349,7 +349,7 @@ Each row says:
 - **Subject**: the device or gateway it was about. Select it to open its panel on the Devices or Gateways page. An alert about the whole platform says **Platform-wide**.
 - **Started** and **Ended**: when it started and stopped firing. **Firing** means it still is.
 - **Duration**: how long it fired, or how long so far.
-- **Acknowledged**: who acknowledged it, the reason, when, and their note. A dash means nobody did. Acknowledging is done from the alert counter: see [The alert counter](site-map.md#the-alert-counter).
+- **Acknowledged**: who acknowledged it, the reason, when, and their note. Point at the name to see the person's email address. A dash means nobody did. Acknowledging is done from the alert counter: see [The alert counter](site-map.md#the-alert-counter).
 
 A few things to know:
 

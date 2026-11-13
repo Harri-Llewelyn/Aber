@@ -10,6 +10,7 @@ import { formatDateTime, formatRelative } from '../../utils/format'
 import { isAcknowledged, reasonLabel } from '../../utils/alertAcknowledgement'
 import { isSuppressed } from '../../utils/alertSuppression'
 import { ALERTS_PATH, alertsAddress } from '../../utils/alertHistory'
+import { PersonName } from './PersonName'
 import { DEFAULT_HISTORY_WINDOW } from '../../utils/history'
 
 /**
@@ -254,7 +255,8 @@ function AlertBanner({ alert, open }) {
           <div className="context-alert-state">
             <IconCheck size={12} aria-hidden="true" />
             <span>
-              Acknowledged by {alert.acknowledged_by_email || 'someone'},{' '}
+              Acknowledged by{' '}
+              <PersonName name={alert.acknowledged_by_name} email={alert.acknowledged_by_email} emailOnHover fallback="someone" />,{' '}
               <Tooltip text={formatDateTime(alert.acknowledged_at)}>
                 <span tabIndex={open ? 0 : -1}>{formatRelative(alert.acknowledged_at)}</span>
               </Tooltip>

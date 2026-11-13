@@ -41,7 +41,7 @@ vi.mock('uplot', () => {
 // line saying more fired, and six rows show it. No other test here reads more than four.
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, ALERT_HISTORY_LIMIT: 5, api: { get: vi.fn(), readCarriedTelemetry: vi.fn(), readAlertOccurrences: vi.fn() } }
+  return { ...actual, ALERT_HISTORY_LIMIT: 5, api: { get: vi.fn(), readCarriedTelemetry: vi.fn(), readAlertOccurrences: vi.fn(), displayNamesFor: vi.fn() } }
 })
 
 const LATHE = '2b3e0c4a-1111-4000-8000-000000000001'
@@ -182,10 +182,49 @@ describe('the Alerts tab', () => {
     expect(onSelectGateway).toHaveBeenCalledWith(GATEWAY_ID)
   })
 
-  it('names the acknowledger by the email every reader sees', async () => {
+  it('names the acknowledger by the email when there is no display name to read', async () => {
     await visit('/history/alerts')
     const [, , gateway] = await bodyRows()
+    await waitFor(() => expect(api.displayNamesFor).toHaveBeenCalled())
     expect(within(gateway).getByText('op@aber.local')).toBeInTheDocument()
+    expect(tooltipOf(gateway.querySelector('.person-name'))).toBeNull()
+  })
+
+  it('names the acknowledger by display name, with the email as its tooltip, from one read for the list', async () => {
+    api.displayNamesFor.mockResolvedValue(new Map([['u1', 'Olwen Operator']]))
+    api.readAlertOccurrences.mockResolvedValue([
+      ...ROWS,
+      occurrence('again', { starts_at: '2026-11-02T08:30:00Z', acknowledged_at: '2026-11-02T08:35:00Z', acknowledged_by: 'u1',
+        acknowledged_by_email: 'op@aber.local', acknowledgement_reason: 'known_cause' }, { ended_at: '2026-11-02T09:00:00Z' }),
+    ])
+    await visit('/history/alerts')
+    const rows = await bodyRows()
+    await waitFor(() => expect(within(rows[2]).getByText('Olwen Operator')).toBeInTheDocument())
+    expect(within(rows[4]).getByText('Olwen Operator')).toBeInTheDocument()
+    expect(tooltipOf(rows[2].querySelector('.person-name'))).toBe('op@aber.local')
+    expect(api.displayNamesFor).toHaveBeenCalledTimes(1)
+    expect(api.displayNamesFor).toHaveBeenCalledWith(['u1'])
+  })
+
+  it('says someone for an acknowledgement that names nobody', async () => {
+    api.readAlertOccurrences.mockResolvedValue([
+      occurrence('nobody', { acknowledged_at: '2026-11-02T09:45:00Z', acknowledged_by: 'u2', acknowledgement_reason: 'other' },
+        { ended_at: '2026-11-02T10:15:00Z' }),
+    ])
+    await visit('/history/alerts')
+    const [row] = await bodyRows()
+    expect(row.querySelector('.alert-history-ack-who')).toHaveTextContent('someone')
+  })
+
+  it('finds an occurrence by the display name of who acknowledged it, and sorts by it', async () => {
+    api.displayNamesFor.mockResolvedValue(new Map([['u1', 'Olwen Operator']]))
+    await visit('/history/alerts')
+    const rows = await bodyRows()
+    await waitFor(() => expect(within(rows[2]).getByText('Olwen Operator')).toBeInTheDocument())
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'olwen' } })
+    const found = await bodyRows()
+    expect(found).toHaveLength(1)
+    expect(found[0]).toHaveTextContent('Gateway Stale')
   })
 
   it('sorts by a column, and goes back to newest first', async () => {

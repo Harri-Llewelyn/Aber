@@ -8,11 +8,15 @@ import { Tooltip } from './Tooltip'
  * of its own. With no name, the email alone, and with neither, the id.
  *
  * The name is in a `bdi`, so text in another direction cannot reorder the email beside it.
+ *
+ * `fallback` is the word for a person with neither a name nor an email, such as "someone", shown
+ * instead of an id the reader never asked for.
  */
-export function PersonName({ name, email, id, emailOnHover = false, stacked = false, className = '' }) {
+export function PersonName({ name, email, id, emailOnHover = false, stacked = false, className = '', fallback }) {
   const classes = ['person-name', stacked && 'person-name-stacked', className].filter(Boolean).join(' ')
   if (!name) {
     if (email) return <span className={classes}>{email}</span>
+    if (fallback !== undefined) return <span className={classes}>{fallback}</span>
     return <span className={`${classes} mono`}>{id ? String(id) : ''}</span>
   }
   if (!email) {

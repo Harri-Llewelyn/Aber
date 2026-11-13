@@ -3081,7 +3081,8 @@ write here is, so it goes through a function and the Audit Trail records it.
   backup's note is in the dashboard, and `other` needs one (`platform_alerts_acknowledgement_note_valid`).
   `platform_alerts_acknowledgement_is_whole` keeps the time, the person and the reason together.
 - **The email is stamped from the token**, as `0222` stamps a decider's. Every reader of the alert
-  sees who acknowledged it, and `display_names_for()` names nobody for this.
+  sees who acknowledged it. `display_names_for()` named nobody for this until `0290`, which names
+  the acknowledger of an alert the caller may read.
 - **An Operator's second write.** Filing a proposal was the first ([The approvals queue](#the-approvals-queue-and-the-first-write-an-operator-has-ever-had-archived-migration-0086)),
   and this is not a write to an asset table either: it marks an alert, through one function, and
   every asset table's write policies are unchanged.
@@ -4051,7 +4052,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `delete_automation()` | `0256` | yes | Deletes an automation |
 | `describe_machine_principal()` | `0001` | yes | Renames a machine identity |
 | `discard_schema_draft()` | `0165` | yes | Discards a schema draft (schema:manage) |
-| `display_names_for()` | `0213` | no | A read: the names the dashboard shows. |
+| `display_names_for()` | `0290` | no | A read: the names the dashboard shows. |
 | `end_alert_suppression_window()` | `0240` | yes | Ends or cancels a suppression window |
 | `end_my_other_sessions()` | `0211` | no | A person's own sessions, in any role. |
 | `end_my_session()` | `0211` | no | A person's own session, in any role. |
@@ -5655,6 +5656,59 @@ running after a credential issued or an enrolment after the stamp, over several 
 credential comes after a retry; a credential before the stamp, another gateway's and another
 action's stopping nothing; the archive path as it was, and a restore ending the request; the stamp
 with no row asked for nothing; and the helper's truth table.
+
+### An acknowledger is shown by name (0290)
+
+The alert counter, the drawer's banner and History's Alerts tab named who acknowledged an alert by the
+email their token carried, and a suppression window's row in a drawer said "By" and an email. No
+display name was readable by every role: `display_names_for()` answered for the caller and for the
+people tied to them by a proposal, a retirement or a job. So an Operator read `j.smith@site.local`
+where the rest of the dashboard says "Jane Smith".
+
+**`display_names_for()` answers for two links more, each only for what the caller may read.**
+
+| Arm | Names | For a caller who may read |
+| --- | --- | --- |
+| An alert's acknowledger | `platform_alerts.acknowledged_by` | the alert: every alert but a machine identity's, which only an Administrator reads (`platform_alerts_select_authenticated`, `0204`) |
+| A window's author | `alert_suppression_windows.created_by` and `ended_by` | the window: every window, to every signed-in role (`alert_suppression_windows_select_authenticated`, `0001`) |
+
+So an Operator, an Auditor, a Shopfloor Manager and a person with no role read the name of whoever
+acknowledged an alert they can see, and of whoever scheduled or ended a window. Only an Administrator
+reads the name of whoever acknowledged an alert about a machine identity, since only an Administrator
+reads the alert. A person with no name, or only a picture, is left out as before, so the answer says
+nothing about a picture.
+
+**Each arm states its read policy's predicate, because the function cannot borrow the policy.** It is
+`SECURITY DEFINER`, so row security does not apply inside it, and a `SECURITY INVOKER` helper called from
+it would run as the function's owner too. The proposer and job arms of `0213` do the same, with
+`has_role()` for each table's policy. Two things hold the copy to its original. The suite for `0290`
+reads each table as each role through row security, and asserts that the people the function names
+are those rows' people. Check 363 of `check-docs-drift.mjs` reads the last declaration of each policy
+and the arm's own text, and fails when they stop saying the same.
+
+**An index makes the acknowledger arm cheap.** It asks `platform_alerts` about each person it is given,
+and nothing indexed `acknowledged_by`: 39 people over 200,000 alerts, 2,000 of them acknowledged,
+took 700 ms, 19 of the 39 reading the whole table each. `idx_platform_alerts_acknowledged_by` is
+partial, on the acknowledged rows, and the same call takes 4 ms. The evaluator's update of an alert's
+`last_confirmed_at` changes neither the column nor the predicate, so it stays a heap-only update.
+The windows are few, and have no index.
+
+**Everything `0213` declares is as it was**, word for word: the caller's own name, the proposer, the
+retirer, the person who started a capture or playback job, and the rule that a row with no name is left
+out. The grants are `0203`'s, for the signed-in role alone, and `0290`'s self-check asserts them, the
+`SECURITY DEFINER` form with its search path pinned, and that every arm is still in the body.
+
+**The dashboard reads the names once for each list** (`frontend/README.md`, *The acknowledger is named by
+display name*). `usePlatformAlerts` asks for the acknowledgers of the whole counter list, History's
+Alerts tab for those of the page of occurrences, and a drawer's Suppression windows for those of its
+windows. `PersonName` draws the name with the email as its tooltip, the email alone for a person with no
+name, and "someone" for a row that names nobody.
+
+`test_an_acknowledger_is_shown_by_name.py` holds, for an Administrator, a Shopfloor Manager, an
+Operator, an Auditor and a person with no role: the name of who acknowledged an alert each may read,
+the refusal of the name of who acknowledged a machine identity's alert to every role but an
+Administrator, the name of who scheduled or ended a window, the people named being the rows each role
+reads, a person with no name or only a picture left out, and the grants.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

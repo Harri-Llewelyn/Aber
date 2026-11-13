@@ -14,7 +14,8 @@ import {
 } from '../../utils/alertAcknowledgement'
 import { countedAlerts, isSuppressed } from '../../utils/alertSuppression'
 import { AcknowledgeAlertModal, WithdrawAcknowledgementModal } from '../modals/AcknowledgeAlertModal'
-import { ALERTS_PATH, acknowledgerName } from '../../utils/alertHistory'
+import { ALERTS_PATH } from '../../utils/alertHistory'
+import { PersonName } from './PersonName'
 
 /**
  * The top bar's alert counter, and the list behind it.
@@ -314,13 +315,13 @@ function AcknowledgementLine({ alert, canAcknowledge, canWithdraw, onAcknowledge
       </div>
     )
   }
-  const who = acknowledgerName(alert)
   return (
     <div className="alert-pill-ack">
       <div className="alert-pill-ack-words">
         <IconCheck size={12} className="alert-pill-ack-tick" aria-hidden="true" />
         <span>
-          Acknowledged by {who},{' '}
+          Acknowledged by{' '}
+          <PersonName name={alert.acknowledged_by_name} email={alert.acknowledged_by_email} emailOnHover fallback="someone" />,{' '}
           <Tooltip text={formatDateTime(alert.acknowledged_at)}>
             <span tabIndex={0}>{formatRelative(alert.acknowledged_at)}</span>
           </Tooltip>

@@ -1,5 +1,6 @@
 import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
 import { reasonLabel } from '../../utils/alertAcknowledgement'
+import { acknowledgerName } from '../../utils/alertHistory'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
 import { approvalsForUrl, areaUrl, automationsForEntityUrl, cellUrl, deviceHistoryUrl, deviceUrl, gatewayUrl, schemaRejectionsUrl, schemaUrl, trailUrl } from '../../routes'
@@ -1086,7 +1087,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                                       size="sm"
                                       className="badge-acknowledged"
                                       icon={<IconCheck size={11} />}
-                                      title={`${alert.alert_name} — acknowledged by ${alert.acknowledged_by_email || 'someone'}: ${reasonLabel(alert.acknowledgement_reason)}`}
+                                      title={`${alert.alert_name} — acknowledged by ${acknowledgerName(alert)}: ${reasonLabel(alert.acknowledgement_reason)}`}
                                     >
                                       ACKNOWLEDGED
                                     </Badge>
