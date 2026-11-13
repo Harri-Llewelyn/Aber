@@ -15,6 +15,11 @@
 --
 -- Reasoning: supabase/README.md, "A capture is downloaded only through the audited call (0195)".
 -- Idempotent.
+--
+-- Redefines public.issue_capture_download: 0195 also opens the 60-second grant in capture_downloads
+--   that the broker-captures read policy admits a person by, so a capture file is read only through
+--   this audited call; 0193 recorded the download and the bucket admitted every reader role to
+--   every file
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The grants a download opens

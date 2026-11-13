@@ -31,6 +31,10 @@
 --
 -- Nothing is reset: a gateway that is already is_shadow keeps the flag, and the release notes say
 -- how to find one. Signatures, return types and grants are 0001's and 0165's.
+--
+-- Redefines public.refuse_archiving_the_last_shadow_gateway: 0187 words the refusal for the one
+--   Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the
+--   API now refuses (the logic is unchanged)
 
 -- -------------------------------------------------------------------------------------------------
 -- The flag is set by the seed alone

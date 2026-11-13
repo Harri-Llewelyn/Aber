@@ -23,6 +23,30 @@
 --     Playback gateway from Archived Entities: it can be neither archived nor deleted.
 --
 -- Reasoning: supabase/README.md, "Captures and replays leave an audit trail (0193)". Idempotent.
+--
+-- Redefines public.ingest_finalise_capture: 0190 answers a repeated call for a job it completed
+--   with that capture, so the daemon can retry it; the baseline refused it as not RECORDING. 0193
+--   writes a CAPTURE_RECORDED audit row and tells the replaced capture's CAPTURE_DELETED what
+--   replaced it
+-- Redefines public.playback_finish: 0193 sets the Playback gateway and its replay lanes OFFLINE
+--   when it ends a RUNNING job, as an applied NDEATH does, because a session the broker cut sends
+--   no Will; the baseline recorded only the outcome
+-- Redefines public.register_uploaded_capture: 0190 registers only a path begin_capture_upload()
+--   issued the caller, refuses a subject being recorded, a shadow subject and a capture stored
+--   since the upload began, records the object's own size, bounds the message count by it and caps
+--   the manifest; the baseline took the browser's word for all of them, after the file had already
+--   overwritten the stored one. 0193 writes a CAPTURE_UPLOADED audit row and tells the replaced
+--   capture's CAPTURE_DELETED what replaced it
+-- Redefines public.request_capture_stop: 0190 ends a RECORDING job its daemon has not reported on
+--   for two minutes, as CANCELLED with nothing stored; the baseline only set a flag nothing was
+--   reading. 0193 writes a CAPTURE_STOPPED audit row for each stop that changes the job
+-- Redefines public.request_playback_stop: 0191 ends a RUNNING job whose worker has not reported for
+--   a minute as CANCELLED, so a stalled worker cannot hold the target; the baseline only set the
+--   flag. 0193 writes a PLAYBACK_STOPPED audit row for each stop that changes the job
+-- Redefines public.start_capture_job: 0190 records to <subject>/<job id>.json, so a recording never
+--   writes over the capture it may replace, and refuses the Playback gateway and its replay lanes
+--   as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a
+--   CAPTURE_STARTED audit row
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. Who wrote a row, and the subject it names

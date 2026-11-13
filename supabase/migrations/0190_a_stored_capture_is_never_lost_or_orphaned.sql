@@ -23,6 +23,10 @@
 --     the previous release. request_capture_stop() ends a recording whose progress went stale.
 --
 -- Reasoning: supabase/README.md, "A stored capture is never lost or orphaned (0190)". Idempotent.
+--
+-- Redefines public.ingest_reconcile_capture_jobs: 0190 says a swept PENDING job never started, and
+--   spares a job that went quiet less than 45 s ago; the baseline swept every job in flight and
+--   said its recording did not survive
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. Uploads begun and not yet registered

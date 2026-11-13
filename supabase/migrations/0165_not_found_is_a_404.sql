@@ -4,6 +4,23 @@
 -- as a server fault. raise_not_found() raises PostgREST's custom error instead: the response keeps
 -- the code P0002 and the message, with status 404. Any other caller (psql, a test) sees SQLSTATE
 -- PGRST, with that JSON body as the message and {"status": 404, "headers": {}} as the detail.
+--
+-- Redefines public.approve_proposal: 0165 answers 404 for not found through raise_not_found(); the
+--   baseline raises no_data_found, which PostgREST answers 500
+-- Redefines public.approve_quarantined_device: 0165 answers 404 for not found through
+--   raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500
+-- Redefines public.discard_schema_draft: 0165 answers 404 for not found through raise_not_found();
+--   the baseline raises no_data_found, which PostgREST answers 500
+-- Redefines public.fork_schema: 0165 answers 404 for not found through raise_not_found(); the
+--   baseline raises no_data_found, which PostgREST answers 500
+-- Redefines public.publish_schema_version: 0165 answers 404 for not found through
+--   raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500
+-- Redefines public.reject_proposal: 0165 answers 404 for not found through raise_not_found(); the
+--   baseline raises no_data_found, which PostgREST answers 500
+-- Redefines public.relocate_devices: 0165 answers 404 for not found through raise_not_found(); the
+--   baseline raises no_data_found, which PostgREST answers 500
+-- Redefines public.withdraw_proposal: 0165 answers 404 for not found through raise_not_found(); the
+--   baseline raises no_data_found, which PostgREST answers 500
 
 CREATE OR REPLACE FUNCTION public.raise_not_found(p_message text)
 RETURNS void

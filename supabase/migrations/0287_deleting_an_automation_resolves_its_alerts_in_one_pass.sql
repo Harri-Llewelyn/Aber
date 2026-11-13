@@ -24,6 +24,14 @@
 --
 -- Reasoning: supabase/README.md, "Deleting an automation resolves its alerts in one pass (0287)".
 -- Idempotent.
+--
+-- Redefines public.automation_trigger_resolves_its_alerts: 0287 returns at once for a delete, since
+--   a statement trigger resolves the alerts of the triggers a statement deleted in one call; the
+--   update arm is 0257's, word for word. 0257 resolved once for each row deleted
+-- Redefines public.resolve_automation_alerts: 0287 matches a firing alert by the trigger id
+--   automation_alert_trigger_id() reads out of its fingerprint, an equality that is hashed, and not
+--   by starts_with() against each id's prefix, which compared every alert with every id: one call
+--   for 3,000 triggers took 5 s. It returns 0 at once for no ids; 0257 scanned for them
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The trigger an alert's fingerprint names

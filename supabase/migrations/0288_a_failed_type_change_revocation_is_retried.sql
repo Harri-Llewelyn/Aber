@@ -28,6 +28,12 @@
 --
 -- Reasoning: supabase/README.md, "A failed revocation after a change of type is asked again (0288)".
 -- Idempotent.
+--
+-- Redefines public.sweep_gateway_credential_revocations: 0288 asks again for a gateway that is not
+--   archived, whose change of type asked for a revocation that failed, keeping its stamp, until a
+--   2xx confirms it or a credential issued or enrolled after the stamp replaces the one it ends;
+--   0001 dropped the request row of every gateway that was not archived, so a failed call was never
+--   judged. An archived gateway is judged as 0001 judges it
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. A credential that came after the stamp

@@ -21,6 +21,13 @@
 --
 -- Reasoning: supabase/README.md, "Changing a gateway's type cleans up after the old type (0252)".
 -- Idempotent.
+--
+-- Redefines public.consume_gateway_enrollment_token: 0252 refuses a gateway that is not Remote,
+--   with the no rows an archived one gets, so a token issued before a change of type cannot enrol
+--   an appliance as the new type; the baseline checked archiving alone
+-- Redefines public.peek_gateway_enrollment_token: 0252 refuses a gateway that is not Remote, as the
+--   consumer it is the read-only twin of now does, so the installer is served only for a token
+--   enrolment would redeem
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. Redeeming a token refuses a gateway that is not Remote

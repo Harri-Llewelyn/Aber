@@ -14,6 +14,13 @@
 --     every boot, and the last declaration stands.
 --
 -- Reasoning: supabase/README.md, "The Audit Trail files a webhook's signing key (0249)". Idempotent.
+--
+-- Redefines public.audit_trail_action_kinds: 0232 lists ALERT_ACKNOWLEDGED and
+--   ALERT_ACKNOWLEDGEMENT_WITHDRAWN on platform_alerts and service_principals, the two lanes
+--   acknowledge_alert() and withdraw_alert_acknowledgement() (0231) write. 0241 lists the four
+--   SUPPRESSION_WINDOW_ actions on devices, gateways and cells, the subjects' lanes 0240's window
+--   writers write. 0249 lists SIGNING_KEY_ISSUED on notification_channels, the webhook's lane, and
+--   carries 0241's rows, since the last declaration stands
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The map of kinds

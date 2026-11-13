@@ -26,6 +26,16 @@
 --
 -- Reasoning: supabase/README.md, "The Audit Trail files an alert's acknowledgement (0232)".
 -- Idempotent.
+--
+-- Redefines public.audit_domain_for: 0168 files device_submodels in the asset lane, now that the
+--   Devices page writes it and the table is audited. 0193 files captures, capture_jobs and
+--   playback_jobs there too, read by the roles that read those tables. 0232 files platform_alerts
+--   there, the lane of an alert's acknowledgement, which an Operator, a Shopfloor Manager or an
+--   Administrator makes
+-- Redefines public.audit_event_class: 0232 answers operational for ALERT_ACKNOWLEDGED and
+--   ALERT_ACKNOWLEDGEMENT_WITHDRAWN before the security lane's rule, so a machine identity's alert
+--   acknowledged in that identity's lane is the same class as any other; it rebuilds the class
+--   indexes while a row they could hold wrongly exists (check 199)
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The lane

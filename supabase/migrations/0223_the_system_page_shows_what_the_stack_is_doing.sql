@@ -16,6 +16,13 @@
 --
 -- Reasoning: supabase/README.md, "The System page shows what the stack is doing (0223)".
 -- Idempotent.
+--
+-- Redefines public.refresh_directory_liveness: 0223 takes Prometheus's address from
+--   directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares
+--   first, so the baseline's copy never names it during a replay. It also counts content that is
+--   not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the
+--   baseline raised on such content without firing the next probe, and left every scraped service
+--   at its last ACTIVE when a probe failed
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. Where Prometheus answers

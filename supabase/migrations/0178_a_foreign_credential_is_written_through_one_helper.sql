@@ -7,6 +7,15 @@
 -- their names, signatures and grants. Neither helper is callable through PostgREST: a page reaches
 -- a credential only through that credential's own writer, so no page can name a stack-internal
 -- secret. The readers stay per consumer (cold_archive_destination(), backup_offsite_destination()).
+--
+-- Redefines public.archive_credential_is_set: 0178 asks foreign_credential_is_set(), the one probe
+--   every foreign credential shares; the baseline carried its own copy
+-- Redefines public.backup_offsite_credential_is_set: 0178 asks foreign_credential_is_set(), the one
+--   probe every foreign credential shares; the baseline carried its own copy
+-- Redefines public.set_archive_credential: 0178 writes through set_foreign_credential(), the one
+--   writer every foreign credential shares; the baseline carried its own copy
+-- Redefines public.set_backup_offsite_credential: 0178 writes through set_foreign_credential(), the
+--   one writer every foreign credential shares; the baseline carried its own copy
 
 -- The writer. Runs with its caller's rights, which are the definer's of the wrapper that calls it:
 -- granted to nobody, so it cannot be reached directly, and a stray grant would still meet the

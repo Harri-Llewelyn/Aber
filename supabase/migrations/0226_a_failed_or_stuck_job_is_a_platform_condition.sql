@@ -20,6 +20,13 @@
 --
 -- Reasoning: supabase/README.md, "A failed or stuck capture or playback reaches someone (0226)".
 -- Idempotent.
+--
+-- Redefines public.platform_health_rows: 0182 puts back the shadow-gateway exclusion
+--   archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the
+--   expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71).
+--   0226 adds a capture or playback job that failed in the last hour, one stuck past its own
+--   limits, and a playback worker silent while a playback waits, which the Grafana rules read
+--   (check 191)
 
 -- -------------------------------------------------------------------------------------------------
 -- platform_health_rows(): three more arms

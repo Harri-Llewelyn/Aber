@@ -19,6 +19,10 @@
 --   * The Audit Trail's search finds a person by name as well as by email.
 --
 -- Reasoning: supabase/README.md, "A person can have a display name (0203)". Idempotent.
+--
+-- Redefines public.audit_trail_user_ids_matching: 0203 matches a person's display name as well as
+--   their email, since the Audit Trail labels a person's lane with the name; the baseline matches
+--   the email alone. It restates 0176's search_path pin
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The table

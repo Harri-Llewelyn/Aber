@@ -18,6 +18,13 @@
 --     display_names_for() leaves it out, so nobody learns from it that a picture exists.
 --
 -- Reasoning: supabase/README.md, "A person can put a picture on their account (0213)". Idempotent.
+--
+-- Redefines public.log_display_name_change: 0213 writes nothing when the name did not change, so a
+--   row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert
+--   and delete
+-- Redefines public.set_display_name: 0213 keeps the row when it clears the name of a person who has
+--   a picture, since the picture is its owner's alone to clear; 0203 deleted the row, which would
+--   have let an Administrator remove another person's picture
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. The column

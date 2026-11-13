@@ -17,6 +17,9 @@
 --     refused. Sign Out writes no row: it ends the session in the browser in use.
 --
 -- Reasoning: supabase/README.md, "Ending another of your sessions is recorded (0211)". Idempotent.
+--
+-- Redefines public.end_my_session: 0211 writes a SESSIONS_ENDED row in the caller's lane, with the
+--   session as list_my_sessions() returned it, in the delete's transaction; 0206 wrote none
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. Ending one of them, recorded
