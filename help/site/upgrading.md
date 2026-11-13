@@ -2078,6 +2078,27 @@ stopped every proposal in 1.8.x. It becomes 10.
 An API client that writes a part value to one of them now gets HTTP 400, with `<key> must be a whole
 number`.
 
+### From 1.9.0, a credential revoked by a change of a gateway's type is asked for again
+
+Changing a gateway's type to or from Remote disables the broker credential the old type held. On
+1.8.x, if the credential service could not be reached at that moment, nothing asked again. The
+broker account stayed enabled, and the dashboard still said **Revoked**. Anything that held the old
+password could still connect as that gateway.
+
+From 1.9.0, Aber asks again every 15 minutes until the broker confirms. It stops if the gateway has
+been issued a new credential, or has enrolled, since the change, so the new credential is never
+disabled. Nothing needs setting.
+
+Aber does not go back to a change made on 1.8.x, because nothing recorded whether its call landed.
+To check a gateway whose type you changed:
+
+1. Open **Access Control** and its **Broker credentials** tab.
+2. Find the gateway. If **Credential** says **Revoked** and **Broker** says **Active**, the old
+   account still works.
+3. Issue the gateway a new credential. Use **Generate Broker Credential** on Gateways for a Host,
+   Simulated or Third-party gateway, or **Set Up Gateway** for a Remote one. The new password
+   replaces the old.
+
 ## Backups
 
 `backup.enabled=true` turns backups on, in one of two ways depending on a second setting. Both write

@@ -1553,6 +1553,15 @@ export const SUITES = {
       "those writers reaches the table without the dashboard's dialogs, which is why the CHECK is " +
       'the rule and the dialogs are not.',
   },
+  'supabase/migrations/test_a_failed_type_change_revocation_is_retried.py': {
+    lanes: ['db'],
+    why:
+      "0288 -- a revocation a change of type asked for and that failed is asked again by the sweep, " +
+      "with the stamp kept, until a 2xx confirms it; and never once a credential was issued or enrolled " +
+      "after the stamp, since the account name is the same before and after and a retry would disable " +
+      'the new credential. The archive path is as it was, and the helper that decides is held by its ' +
+      'truth table.',
+  },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of
     // its assertions is made AS a seeded demo account, and the db lane deliberately applies no

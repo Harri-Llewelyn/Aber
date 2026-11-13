@@ -4194,10 +4194,9 @@ issued under, and revoking on a guess could cut off a gateway that works.
   appliance registered. Archiving archives the repository and removes the key; a type change does
   neither, so the old appliance can still read its repository until the key is removed in the
   forge.
-- **The revocation sweep judges archived gateways alone.** Its first statement drops the request
-  row of a gateway that is not archived, so a type change's stamp is never judged and a failed call
-  is not asked again. Retrying it as the sweep retries an archive is not safe as it stands: a
-  credential issued to the new type since, under the same account name, would be disabled.
+- **A failed revocation was not asked again.** The sweep judged archived gateways alone, and a type
+  change's stamp was never judged. `0288` asks again, and stops when a credential issued or enrolled
+  since replaces the one it ends (*A failed revocation after a change of type is asked again (0288)*).
 - **`enrolled_at` is kept** when a gateway leaves Remote. The dashboard reads a revocation after it
   as no enrolment standing (`enrolmentStands()` in `utils/credentialState.js`), and a credential
   issued or enrolled after the stamp as the one the gateway holds.
@@ -5594,6 +5593,68 @@ composes; and that a manager deletes through `delete_automation()`.
 The file's self-check asserts that none of its functions is any API role's, that the two functions
 agree on the fingerprint, that the resolve matches by trigger id, and that the statement trigger is
 in place, enabled, and over the deleted rows.
+
+### A failed revocation after a change of type is asked again (0288)
+
+Changing a gateway's type across Remote's boundary revokes the credential the old type held (`0252`).
+`revoke_gateway_credential()` asks the credential service through `pg_net`, which answers after the
+transaction commits, so the stamp `credential_revoked_at` is written as the call is queued. For an
+archived gateway the sweep reads the reply and asks again when the call failed. For a gateway that
+was not archived it did not: its first statement dropped the request row of every gateway that was
+not archived, so a failed call was never judged. The stamp stayed, the dashboard called the
+credential revoked, and the broker account still worked for whoever held the old password.
+
+**The sweep tells the two cases apart, by `is_archived`.**
+
+| | Archived gateway (as `0001`) | Gateway not archived, asked by a change of type |
+| --- | --- | --- |
+| A 2xx to its own request | the stamp stays, the row goes | the same |
+| Any other reply, or none in five minutes | the stamp is cleared, and the same run asks again | the stamp stays, and the run asks again |
+| Asked again | for an archived gateway that holds a credential and has no stamp, 200 a run | for each row that failed, oldest first, 200 a run |
+| A credential issued or enrolled after the stamp | the archive's rule, unchanged | the row is dropped and nothing is asked |
+| The stamp is cleared (a restore) | the row goes | the row goes |
+
+**A retry must never disable a newer credential.** After a type change the gateway can be issued a
+credential for its new type under the same broker account name, the Sparkplug ID. A retry after that
+issue would disable it. `gateway_credential_was_replaced()` answers whether the gateway enrolled
+after its stamp (`enrolled_at`), or was issued a credential after it (a `CREDENTIAL_ISSUED` row in
+the Audit Trail with a later `recorded_at`). It is checked in the statement that drops settled rows
+and again in the query of the retry, and a gateway it answers for is not asked: the row is dropped
+and the credential service is not called. No column of `gateways` records when a Host or Third-party
+credential was issued, so the audit row is the one record of it, the one `gateway_has_broker_credential()`
+and `credentialState()` read. An appliance's enrolment is `enrolled_at`.
+
+**The stamp is kept through a retry.** Writing it again would add a `gateways` audit row for every
+retry while the credential service is down, and the stamp's meaning, that the platform asked, does
+not change. The retry replaces the request row: `revoke_gateway_credential()` writes the new request
+id over it, so the next run judges the new call. When it declines, because the revoke secret is not
+in the Vault, the old row stays and the next run asks again.
+
+**What it does not reach.**
+
+- **A call is checked when it is asked, not when `pg_net` sends it.** A credential issued in the
+  second or so between the two is disabled. A type change's own call has the same window; a retry
+  runs it again for each run that finds the call before it failed.
+- **A credential made on the host with `mosquitto-provision-gateway.mjs` leaves no record**, so a
+  retry cannot know it replaced the old one.
+- **A type change on 1.8.0 that failed left a stamp and no request row.** Nothing records whether
+  its call landed, so nothing is asked for it. The Broker column on Access Control shows an account
+  still Active that should be Disabled, and issuing the gateway a credential replaces its password.
+- **A gateway archived while its type change's call is unanswered** is judged by the archive's rule.
+- **The drawer says Revoked as soon as the call is queued**, for an archive as for a type change.
+  The Broker column on Access Control is the live answer. `utils/credentialState.js` is unchanged.
+
+The file's self-check asserts that no API role may run the helper, that no browser-facing role may run
+the sweep, and that the sweep checks for a newer credential before it asks again and still reads
+`gateway_has_broker_credential()` for an archived gateway. The sweep runs every 15 minutes; a request
+without a reply is judged after five minutes.
+`test_a_failed_type_change_revocation_is_retried.py` holds a call asked again after a reply that is
+not a 2xx and after five minutes with none, with the stamp kept; a young request waiting; a 2xx never
+asked again; asking until one succeeds; the run that cannot ask leaving the row; the retry never
+running after a credential issued or an enrolment after the stamp, over several runs and when the
+credential comes after a retry; a credential before the stamp, another gateway's and another
+action's stopping nothing; the archive path as it was, and a restore ending the request; the stamp
+with no row asked for nothing; and the helper's truth table.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

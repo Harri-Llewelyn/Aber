@@ -953,6 +953,12 @@ python supabase/migrations/test_changing_a_gateway_s_type_cleans_up_after_the_ol
 # renamed, only the table missing its CHECK is scanned, and it passes once they are named. Every test
 # rolls back.
 python supabase/migrations/test_a_device_or_gateway_name_cannot_be_blank.py
+# A failed revocation after a change of type is asked again (0288). The sweep asks again for a call
+# that got no 2xx, or no reply in five minutes, and keeps the stamp, until a 2xx confirms it. It never
+# asks once a credential was issued or enrolled after the stamp, over several runs: the broker account
+# has the same name before and after, so a retry would disable the new credential. The archive path is
+# as it was, and a restore ends the request. Every test rolls back.
+python supabase/migrations/test_a_failed_type_change_revocation_is_retried.py
 python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.
