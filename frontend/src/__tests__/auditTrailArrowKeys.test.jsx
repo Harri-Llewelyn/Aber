@@ -64,7 +64,7 @@ const press = (key, target = document, init = {}) => fireEvent.keyDown(target, {
 /** A key that steps, pressed after one that should have done nothing: the drawer is on the second change only if that one left it where it was. */
 const thenStepTo = (key, event) => {
   press(key)
-  return waitFor(() => expect(position()).toMatch(new RegExp(`^Event ${event} of 3`)))
+  return waitFor(() => expect(position().split(' · ')[0]).toBe(`Event ${event} of 3`))
 }
 
 
