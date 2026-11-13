@@ -551,7 +551,8 @@ describe("History's Overview", () => {
   it('reads a long window only for a small selection, and says why otherwise', async () => {
     fleet = Array.from({ length: 60 }, (_, i) => place(100 + i, `Press ${String(i).padStart(2, '0')}`, inCell(i < 30 ? 'c1' : 'c2')))
     await visit('/history/overview?span=month&at=2026-11-02')
-    expect(screen.getByText(TOO_LONG_FOR_MANY)).toBeInTheDocument()
+    // In the page, once, as the time control's tooltips hold the same sentence out of sight.
+    expect(document.querySelector('.empty-state')).toHaveTextContent(TOO_LONG_FOR_MANY)
     expect(api.readCoverage).not.toHaveBeenCalled()
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Turning' } })
     await waitFor(() => expect(api.readCoverage).toHaveBeenCalled(), { timeout: 2000 })
