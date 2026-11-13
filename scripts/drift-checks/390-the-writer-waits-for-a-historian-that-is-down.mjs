@@ -13,7 +13,7 @@ export default function check() {
   const problems390 = [];
   const daemon = read('ingestion/ingestion.py');
   const readme = read('ingestion/README.md');
-  const config = (name) => daemon.match(new RegExp(`^${name} = (?:int|float)\\(os\\.getenv\\("${name}", "([0-9.]+)"\\)\\)`, 'm'))?.[1];
+  const config = (name) => (daemon.split('\n').find((l) => l.startsWith(`${name} = `)) ?? '').match(/, "([0-9.]+)"\)\)$/)?.[1];
   const start = Number(config('DB_OUTAGE_RETRY_START_SECONDS'));
   const max = Number(config('DB_OUTAGE_RETRY_MAX_SECONDS'));
   const queue = Number(config('TELEMETRY_QUEUE_MAX_MESSAGES'));
