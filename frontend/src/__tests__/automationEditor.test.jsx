@@ -1,5 +1,5 @@
 import React from 'react'
-import { act, render } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
 import { startCompletion, currentCompletions } from '@codemirror/autocomplete'
@@ -100,8 +100,8 @@ describe('the automation editor', () => {
     const { container } = render(<AutomationEditor value={text} onChange={() => {}} facts={facts} />)
     const view = viewOf(container)
     act(() => { view.dispatch({ selection: { anchor: view.state.doc.length } }) })
-    await act(async () => { startCompletion(view); await new Promise(r => setTimeout(r, 30)) })
-    expect(currentCompletions(view.state).map(c => c.label)).toEqual(['Spindle/BEARING_TEMPERATURE'])
+    await act(async () => { startCompletion(view) })
+    await waitFor(() => expect(currentCompletions(view.state).map(c => c.label)).toEqual(['Spindle/BEARING_TEMPERATURE']))
   })
 
   it('marks a syntax error on the editor, and a refusal on the line it names', async () => {

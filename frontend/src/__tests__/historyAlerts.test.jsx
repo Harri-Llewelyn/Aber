@@ -37,9 +37,11 @@ vi.mock('uplot', () => {
   return { default: FakePlot }
 })
 
+// A limit of 5 in place of 1,000: the rule is one more than the limit read, the limit shown and a
+// line saying more fired, and six rows show it. No other test here reads more than four.
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), readCarriedTelemetry: vi.fn(), readAlertOccurrences: vi.fn() } }
+  return { ...actual, ALERT_HISTORY_LIMIT: 5, api: { get: vi.fn(), readCarriedTelemetry: vi.fn(), readAlertOccurrences: vi.fn() } }
 })
 
 const LATHE = '2b3e0c4a-1111-4000-8000-000000000001'
@@ -227,12 +229,22 @@ describe('its filters and address', () => {
     expect(window.location.pathname).toBe('/history/alerts')
   })
 
+  const ended = (count) => Array.from({ length: count }, (_, i) =>
+    occurrence(`o${i}`, { starts_at: new Date(Date.parse('2026-11-02T11:00:00Z') - i * 1000).toISOString() }, { ended_at: '2026-11-02T11:30:00Z' }))
+
   it('says when the limit held some back', async () => {
-    api.readAlertOccurrences.mockResolvedValue(Array.from({ length: ALERT_HISTORY_LIMIT + 1 }, (_, i) =>
-      occurrence(`o${i}`, { starts_at: new Date(Date.parse('2026-11-02T11:00:00Z') - i * 1000).toISOString() }, { ended_at: '2026-11-02T11:30:00Z' })))
+    api.readAlertOccurrences.mockResolvedValue(ended(ALERT_HISTORY_LIMIT + 1))
     await visit('/history/alerts')
     expect(await bodyRows()).toHaveLength(ALERT_HISTORY_LIMIT)
-    expect(screen.getByText(/The newest 1,000 alerts in this window\. More fired/)).toBeInTheDocument()
+    expect(screen.getByText(/The newest 5 alerts in this window\. More fired/)).toBeInTheDocument()
+  })
+
+  it('does not say more fired when the read returned exactly the limit', async () => {
+    api.readAlertOccurrences.mockResolvedValue(ended(ALERT_HISTORY_LIMIT))
+    await visit('/history/alerts')
+    expect(await bodyRows()).toHaveLength(ALERT_HISTORY_LIMIT)
+    expect(screen.getByText('5 alerts in this window')).toBeInTheDocument()
+    expect(screen.queryByText(/More fired/)).not.toBeInTheDocument()
   })
 })
 
