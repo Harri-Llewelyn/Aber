@@ -176,7 +176,7 @@ describe('a closed section', () => {
 describe('Expand all and Collapse all', () => {
   it('closes every section, then opens every one, with the toggle Metrics and Vocabulary use', async () => {
     await show()
-    const control = within(document.querySelector('.trail-header')).getByRole('button', { name: /Collapse all/ })
+    const control = within(document.querySelector('.groups-header')).getByRole('button', { name: /Collapse all/ })
     // Outlined: a filter control, as on Metrics and Vocabulary.
     expect(control).toHaveClass('btn-ghost')
     fireEvent.click(control)
@@ -185,7 +185,7 @@ describe('Expand all and Collapse all', () => {
     }
     expect(document.querySelectorAll('.trail-lane:not(.trail-axis)')).toHaveLength(0)
 
-    fireEvent.click(within(document.querySelector('.trail-header')).getByRole('button', { name: /Expand all/ }))
+    fireEvent.click(within(document.querySelector('.groups-header')).getByRole('button', { name: /Expand all/ }))
     for (const name of ['Gateways', 'Devices', 'Device nameplates']) {
       expect(heading(name)).toHaveAttribute('aria-expanded', 'true')
     }
@@ -195,7 +195,7 @@ describe('Expand all and Collapse all', () => {
   it('reads Collapse all while any section is open', async () => {
     await show()
     toggle('Devices')
-    expect(within(document.querySelector('.trail-header')).getByRole('button', { name: /Collapse all/ })).toBeInTheDocument()
+    expect(within(document.querySelector('.groups-header')).getByRole('button', { name: /Collapse all/ })).toBeInTheDocument()
   })
 })
 

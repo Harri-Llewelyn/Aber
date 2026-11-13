@@ -469,12 +469,13 @@ describe('a firing platform alert', () => {
     }
     const firing = await mountAlerts([failed])
     const link = screen.getByRole('link', { name: /Capture or Playback Failed/ })
-    expect(link).toHaveAttribute('href', '/capture/playbacks')
+    const job = '7d2c0000-0000-4000-8000-000000000002'
+    expect(link).toHaveAttribute('href', `/capture/playbacks?job=${job}`)
     expect(link).not.toHaveAttribute('target')
 
     await firing([])
-    expect(hook.toasts.find(t => t.msg === 'Resolved — Capture or Playback Failed').to).toBe('/capture/playbacks')
-    expect(alertToastUrl({ ...failed, labels: { job: 'capture job 7d2c' } })).toBe('/capture/captures')
+    expect(hook.toasts.find(t => t.msg === 'Resolved — Capture or Playback Failed').to).toBe(`/capture/playbacks?job=${job}`)
+    expect(alertToastUrl({ ...failed, labels: { job: 'capture job 7d2c' } })).toBe('/capture/captures?job=7d2c')
     expect(alertToastUrl({ ...failed, rule_uid: 'aber-playback-worker-stale', labels: {} })).toBe('/capture/playbacks')
     // A row written before 0220 has no labels, and its link stays the rule's.
     expect(alertToastUrl({ ...failed, labels: null })).toBe(grafanaAlertUrl(failed))

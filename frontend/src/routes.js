@@ -91,6 +91,9 @@ export const metricUrl = (uuid, deprecated = false, derived = false) =>
 /** A gateway or a device on the Capture page, with its captures open. */
 export const captureSubjectUrl = (kind, id) => pageUrl('capture', { subject: id }, kind === 'device' ? 'device' : '')
 
+/** One recording or playback (`kind` 'capture' or 'playback') on its tab of the Capture page: the only job listed there. */
+export const captureJobUrl = (kind, id) => pageUrl('capture', { job: id }, `${kind}s`)
+
 /** One backup run on the Backups page, or the page itself. */
 export const backupUrl = (runId = '') => pageUrl('backups', { run: runId })
 
@@ -143,7 +146,7 @@ export const triggerIdOfFingerprint = (fingerprint) =>
 
 /** The capture and playback rules (0226), which name their job in the `job` label. */
 const JOB_RULES = new Set(['aber-job-failed', 'aber-job-stuck'])
-const JOB_LABEL = /^(capture|playback) job \S+$/
+const JOB_LABEL = /^(capture|playback) job (\S+)$/
 
 /**
  * The page in the dashboard for a Grafana alert whose subject has one, as `{ to, title }`, or null
@@ -151,8 +154,9 @@ const JOB_LABEL = /^(capture|playback) job \S+$/
  * both link by this, so they agree.
  *
  * - A machine identity's token: the identity on Access Control, where a new token is issued.
- * - A capture or playback job: the Capture page on the tab of its kind, read from the `job` label.
- *   The strip above every tab shows a job in flight, with Stop; the tab lists a failed one.
+ * - A capture or playback job: the Capture page on the tab of its kind, narrowed to that job, both
+ *   read from the `job` label. The strip above every tab shows a job in flight, with Stop; the tab
+ *   lists a failed one.
  * - The playback worker not reporting: the Playbacks tab, whose strip shows the waiting playback.
  * - An alert an automation raised: that automation, found by the trigger id its fingerprint names.
  */
@@ -165,7 +169,8 @@ export const alertPage = (alert) => {
   if (alert?.rule_uid === 'aber-playback-worker-stale') {
     return { to: tabUrl('capture', 'playbacks'), title: 'Show the waiting playback on the Capture page' }
   }
-  const kind = JOB_RULES.has(alert?.rule_uid) && JOB_LABEL.exec(alert.labels?.job ?? '')?.[1]
-  if (!kind) return null
-  return { to: tabUrl('capture', `${kind}s`), title: `Show this ${kind} on the Capture page` }
+  const job = JOB_RULES.has(alert?.rule_uid) ? JOB_LABEL.exec(alert.labels?.job ?? '') : null
+  if (!job) return null
+  const [, kind, id] = job
+  return { to: captureJobUrl(kind, id), title: `Show this ${kind} on the Capture page` }
 }

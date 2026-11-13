@@ -1,6 +1,7 @@
 import React from 'react'
 import { FORGE_ORGANISATION, GITEA_URL } from '../../constants'
 import { IconAlertCircle, IconBookOpen, IconExternalLink, IconGitBranch, IconGitCompare } from './Icons'
+import { HelpTip } from './HelpTip'
 import { Tooltip } from './Tooltip'
 
 /**
@@ -20,6 +21,23 @@ export function gatewayCompareUrl(gateway) {
   return `${gatewayRepositoryUrl(gateway)}/compare/main..appliance`
 }
 
+/**
+ * The row a gateway with no repository gets: the drawer's field shape, one line, with the reason in
+ * the label's help tip. A person who may open the forge looks here for a link, and one line says
+ * there is none.
+ */
+function NoRepository({ value, reason }) {
+  return (
+    <div className="context-field">
+      <div className="context-field-label">
+        Repository
+        <HelpTip text={reason} label="What Repository means" size={11} />
+      </div>
+      <div className="context-field-value context-field-empty">{value}</div>
+    </div>
+  )
+}
+
 export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
   // Nothing for a role the forge would refuse, rather than a disabled link.
   if (!canOpenForge) return null
@@ -27,38 +45,27 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
   // A host-run gateway has no repository: one is created only when an appliance enrols. The Playback
   // gateway is tested first because it is also simulated.
   if (gateway?.deployment === 'host') {
-    let reason
     if (gateway.is_shadow) {
-      reason = (
-        <>
-          A shadow gateway has no repository of its own. Playback publishes as it, replaying a
-          capture, so there is no flow to edit.
-        </>
+      return (
+        <NoRepository
+          value="None: it replays a capture"
+          reason="The Playback gateway has no repository. Playback publishes as it, replaying a capture, so there is no flow to edit."
+        />
       )
-    } else if (gateway.is_simulated) {
-      reason = (
-        <>
-          A simulated gateway has no repository of its own. Its readings are generated inside this
-          stack rather than by an appliance. If a flow in this stack's own Node-RED generates them,
-          edit it in the Node-RED editor.
-        </>
-      )
-    } else {
-      reason = (
-        <>
-          A host-run gateway has no repository of its own. Its connector runs in this stack's own
-          Node-RED, which several host gateways can share — one <span className="mono">flows.json</span> is
-          that whole instance. Edit it in the Node-RED editor instead.
-        </>
+    }
+    if (gateway.is_simulated) {
+      return (
+        <NoRepository
+          value="None: generated in this stack"
+          reason="A simulated gateway has no repository. Its readings are generated inside this stack, not by an appliance. If a flow in this stack's Node-RED generates them, edit it in the Node-RED editor."
+        />
       )
     }
     return (
-      <div>
-        <div className="form-label" style={{ margin: 0 }}>Repository</div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-          {reason}
-        </div>
-      </div>
+      <NoRepository
+        value="None: edit it in Node-RED"
+        reason="A host-run gateway has no repository. Its connector runs in this stack's Node-RED, which several host gateways can share, so its flow is edited in the Node-RED editor."
+      />
     )
   }
 
@@ -66,27 +73,20 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
   // software it runs.
   if (gateway?.deployment === 'third_party') {
     return (
-      <div>
-        <div className="form-label" style={{ margin: 0 }}>Repository</div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-          A Third-party gateway has no repository of its own. Aber does not manage the software on
-          its machine, so there is no flow here to propose a change to. Change the node on the node
-          itself.
-        </div>
-      </div>
+      <NoRepository
+        value="None: not managed by Aber"
+        reason="A Third-party gateway has no repository. Aber does not manage the software on its machine, so there is no flow here to propose a change to. Change the node itself."
+      />
     )
   }
 
   // Not enrolled yet: the repository is created when the appliance enrols, so every address 404s.
   if (!gateway?.enrolled_at) {
     return (
-      <div>
-        <div className="form-label" style={{ margin: 0 }}>Repository</div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-          This gateway has not enrolled yet, so it has no repository. One is created in the forge
-          when the appliance enrols and sends the key it will read the repository with.
-        </div>
-      </div>
+      <NoRepository
+        value="None until it enrols"
+        reason="This gateway has not enrolled yet. Its repository is created in the forge when the appliance enrols and sends the key it will read the repository with."
+      />
     )
   }
 
@@ -94,14 +94,10 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
   // usable key) or fail, and `forge_repository_at` records that it happened.
   if (!gateway.forge_repository_at) {
     return (
-      <div>
-        <div className="form-label" style={{ margin: 0 }}>Repository</div>
-        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-          This gateway enrolled but has no repository in the forge. Either this deployment has no
-          forge, or the appliance sent no key to read one with. Its flow is whatever was on the
-          appliance when it enrolled, and nothing here can propose a change to it.
-        </div>
-      </div>
+      <NoRepository
+        value="None: not created"
+        reason="It enrolled, but no repository was created: this deployment has no forge, or the appliance sent no key to read one with. Nothing here can propose a change to its flow."
+      />
     )
   }
 
@@ -113,7 +109,7 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
 
   return (
     <div>
-      <div className="form-label" style={{ margin: 0 }}>Repository</div>
+      <div className="context-field-label">Repository</div>
       {archivedInForge ? (
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
           This gateway is archived, and so is its repository: the forge holds it read-only, badged

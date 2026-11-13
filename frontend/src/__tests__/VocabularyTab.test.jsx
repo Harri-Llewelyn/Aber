@@ -377,14 +377,14 @@ describe('Vocabulary page — one card: heading, tabs, toolbar, sections', () =>
     expect(screen.queryByRole('button', { name: /^About the .* vocabulary$/ })).toBeNull()
   })
 
-  it('keeps the toolbar row under the tabs for the search and Expand all, with no "?" in it', async () => {
+  it('keeps the toolbar row under the tabs for the search alone, with no "?" in it', async () => {
     renderTab()
     await ready()
 
     const bar = document.querySelector('.card > .tab-strip + .filter-bar')
     expect(bar).toBeTruthy()
     expect(within(bar).getByLabelText('Search the MTConnect vocabulary')).toBeTruthy()
-    expect(within(bar).getByRole('button', { name: /^(Expand|Collapse) all$/ })).toBeTruthy()
+    expect(within(bar).queryByRole('button', { name: /^(Expand|Collapse) all$/ })).toBeNull()
     expect(bar.querySelector('.help-tip')).toBeNull()
   })
 
@@ -461,13 +461,28 @@ describe('Vocabulary page — Expand all / Collapse all', () => {
   const openCount = () => toggles().filter(b => b.getAttribute('aria-expanded') === 'true').length
   const allButton = () => screen.getByRole('button', { name: /^(Expand|Collapse) all$/ })
 
-  it('sits in the toolbar row and reads "Expand all" while every section is shut', async () => {
+  it('starts the row over the sections, not the toolbar, and reads "Expand all" while every section is shut', async () => {
     renderTab()
     await ready()
 
-    expect(allButton().closest('.filter-bar')).toBeTruthy()
+    const row = allButton().closest('.groups-header')
+    expect(row).toBeTruthy()
+    expect(row.firstElementChild).toContainElement(allButton())
+    expect(allButton().closest('.filter-bar')).toBeNull()
+    expect(row.previousElementSibling).toHaveClass('filter-bar')
+    expect(row.nextElementSibling).toHaveClass('vocab-sections')
     expect(allButton().textContent).toBe('Expand all')
     expect(openCount()).toBe(0)
+  })
+
+  it('is over the sections of every standard', async () => {
+    renderTab()
+    await ready()
+
+    for (const name of [/ISO 22400/, /^MTConnect/]) {
+      fireEvent.click(standardTab(name))
+      expect(allButton().closest('.groups-header').nextElementSibling).toHaveClass('vocab-sections')
+    }
   })
 
   it('opens every section, then reads "Collapse all" and shuts them again', async () => {

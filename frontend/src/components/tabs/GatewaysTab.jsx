@@ -16,7 +16,7 @@ import { gatewaySparkplugId, sparkplugGroupProblem } from '../../utils/sparkplug
 import {
   GATEWAY_TYPES, SELECTABLE_TYPES, LISTED_TYPES, gatewayType, gatewayTypeFields,
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone, credentialIssuedHere,
-  gatewayTypeChange, gatewayTypeChangeHint,
+  gatewayTypeChange, gatewayTypeChangeHint, gatewayShowsRow,
 } from '../../utils/gatewayType'
 import { enrolmentStands } from '../../utils/credentialState'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags } from '../../utils/deviceStatus'
@@ -1004,8 +1004,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               + 'looks after those.'
           }] : []),
           // What enrolment and the forge write, so none waits for a health report: each shows
-          // whenever it has a value. Never for a Third-party node, which has no bundle or repository.
-          ...(gatewayType(selected) === GATEWAY_TYPES.THIRD_PARTY ? [] : [
+          // whenever it has a value.
+          ...[
             {
               label: 'Bundle',
               value: selected.agent_version || null,
@@ -1044,11 +1044,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 + 'approved deploy overwrites that. The repository panel links the forge\'s diff '
                 + 'between the two branches. Shown once the appliance has pushed to its branch.'
             },
-          ].filter(f => f.value !== null)),
+          ].filter(f => f.value !== null),
           // What the appliance reports about itself, once `health_reported_at` is set: a gateway that
           // never reported would show a dozen rows of dashes. Current values only; the trend is in
-          // Grafana's Gateway Fleet Health dashboard. Never for a Third-party node, which has none.
-          ...(selected.health_reported_at && gatewayType(selected) !== GATEWAY_TYPES.THIRD_PARTY ? [
+          // Grafana's Gateway Fleet Health dashboard.
+          ...(selected.health_reported_at ? [
             {
               label: 'Health Reported',
               value: formatHeartbeat(selected.health_reported_at),
@@ -1166,7 +1166,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             full: true,
             help: "Operator note. Shown here, and served by i3X as the gateway's description; nothing acts on it."
           },
-        ] : []}
+          // A row this kind of gateway can never fill is not shown (NEVER_FILLED_ROWS): a Host
+          // gateway has no appliance to report a disk, and a Third-party node reports no health.
+        ].filter(f => gatewayShowsRow(selected, f.label)) : []}
         actions={selected ? [
           // Ask the node to republish its birth certificate (`Node Control/Rebirth`): the only command
           // this dashboard sends. Not on an archived gateway, nor the Playback gateway, which hears an

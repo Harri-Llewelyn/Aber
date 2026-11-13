@@ -44,7 +44,13 @@ def _stub(name, **attrs):
     return module
 
 
-_stub("psycopg2", connect=lambda *a, **k: None)
+# The write path tells a lost connection from a bad message by these two classes.
+_stub(
+    "psycopg2",
+    connect=lambda *a, **k: None,
+    InterfaceError=type("InterfaceError", (Exception,), {}),
+    OperationalError=type("OperationalError", (Exception,), {}),
+)
 _stub("psycopg2.extras", execute_values=lambda *a, **k: None)
 _stub("sparkplug_b_pb2", Payload=object)
 _stub("paho")

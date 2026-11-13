@@ -1791,6 +1791,10 @@ tbody tr:hover { background: var(--bg-glass); }
    The top margin stays, as the gap above. */
 .card-body > .callout, .modal .callout { margin-inline: 0; }
 
+/* A callout in a dialog's body is set off from what follows it (a table, a list, a form) by the gap
+   it leaves above itself, 12px. Another callout after it already has that gap as its own top margin. */
+.modal-body > .callout:has(+ :not(.callout)) { margin-bottom: 12px; }
+
 /* The page banner: a callout above a page's first card, as `callout callout-warning callout-page`
    with an icon element first and ONE body element (a div or span) after it. Full width, wraps, and
    the icon centres against the text. AFTER `.callout`, not before: equal specificity, so the later
@@ -2618,10 +2622,13 @@ main:focus { outline: none; }
   .modal-full { width: calc(100% - 16px); height: calc(100% - 16px); padding: 12px; }
 }
 
+/* The title takes the rest of the row and wraps inside its own column, so the controls stay top-right
+   on the title's first line. The row wraps only for controls too wide to leave the title 12ch
+   (the Site Map's legend): they drop below it, as the title's basis tells the row. */
 .modal-header-row {
   flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
@@ -2639,14 +2646,25 @@ main:focus { outline: none; }
 /* The title <h2> that `<Modal>` renders inside the header row: the row supplies the spacing, so the
    standalone margin goes, and an icon sits before the text. */
 .modal-header-row .modal-title {
+  flex: 1 1 12ch;
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 0;
   min-width: 0;
+  /* As tall as the close button, so a one-line title sits level with it. */
+  min-height: 28px;
+  /* A title is wrapped, never cut: the end of a file name is the part that tells two apart. */
+  overflow-wrap: anywhere;
 }
 
+.modal-header-row .modal-title > span { min-width: 0; }
+
+/* Controls keep their size and stay at the row's top. `max-width` lets a wide set (the legend)
+   narrow to the row, wrapping inside itself. */
 .modal-header-controls {
+  flex: none;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -5587,11 +5605,14 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   flex: 0 1 auto;
 }
 
-/* The row above the timeline, holding the key and Expand all, inset as a card body is. */
-.trail-header {
+/* The row above a page's groups: the control that acts on them first, at the far left over the
+   headings, then what the page puts beside it (a status line, a key). The Audit Trail, History,
+   Metrics and Vocabulary draw it with this one class, inset as a card body is and with the same
+   room above and below; what follows it adds none of its own. A page's key that sits at the row's
+   right-hand end takes `margin-left: auto`, as .trail-legend does. */
+.groups-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
   gap: 6px 16px;
   padding: 10px var(--inset);
@@ -6031,16 +6052,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     color-mix(in srgb, var(--text-dim) 30%, transparent) 0 1px, transparent 1px 7px);
 }
 
-/* The row above the charts and Overview's lanes: Expand all or Collapse all at its start, as
-   .trail-header has it, then the line saying what is shown. The same room above and below as
-   .trail-header, so the three pages' rows read alike; what follows it adds none of its own. */
-.history-header {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  padding: 10px var(--inset);
-}
+/* The line saying what is shown, beside Expand all in .groups-header above the charts and
+   Overview's lanes. */
 .history-meta {
   margin: 0;
   font-size: 12px;
@@ -6240,7 +6253,7 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .alert-history-ack-who { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--text-primary); }
 .alert-history-ack-who svg { flex-shrink: 0; color: var(--success-text); }
 /* What the device page shows under its toolbar; its width sets the text charts' buckets. It is the
-   card's .card-fill-scroll.trail-timeline, so .history-header stays and .trail-scroll holds the
+   card's .card-fill-scroll.trail-timeline, so .groups-header stays and .trail-scroll holds the
    groups; a chart takes that scroller's width, less its scrollbar. */
 .history-body { min-width: 0; }
 /* The charts in groups by datatype, each under a heading strip that opens and closes it, as the
@@ -7730,19 +7743,19 @@ ol.gateway-steps {
 /* The Metrics tables: one fixed column set (MetricsTab's colgroup), so opening a group cannot move a
    column and the two tabs line up. Description takes what is left; under the min-width, which keeps
    it legible, the table scrolls sideways. Each width holds its header on one line. */
-.metric-table { table-layout: fixed; min-width: 1050px; }
-.metric-table-deprecated { min-width: 1270px; }
+.metric-table { table-layout: fixed; min-width: 1090px; }
+.metric-table-deprecated { min-width: 1310px; }
 .metric-table td { overflow-wrap: anywhere; }
 .metric-col-name { width: 200px; }
 .metric-col-standard { width: 124px; }
 .metric-col-category { width: 112px; }
-.metric-col-units { width: 112px; }
+.metric-col-units { width: 152px; }
 .metric-col-datatype { width: 112px; }
 /* The chip keeps the id's last 24 characters (CopyableId truncate="start") at this width. */
 .metric-col-semantic-id { width: 252px; }
 .metric-col-superseded { width: 220px; }
 /* Derived: Definition takes what is left, which is why it is the one column with no width. */
-.metric-table-derived { min-width: 900px; }
+.metric-table-derived { min-width: 940px; }
 .metric-col-kind { width: 140px; }
 .metric-col-description { width: 240px; }
 /* Uncatalogued: Declared By takes what is left, and its chips wrap within it. */
@@ -8078,6 +8091,8 @@ ol.gateway-steps {
 .capture-card-drop { border-color: var(--accent); }
 /* A failed job's message on the Captures and Playbacks tabs (CaptureHistory). */
 .capture-history-failure { min-width: 240px; font-size: 12px; color: var(--danger-text); }
+/* The line saying a tab lists one job: the sentence takes the room, and the way out stays at the end. */
+.capture-job-line > :not(.callout-icon):not(.btn) { flex: 1; min-width: 0; }
 .capture-drop-overlay {
   position: absolute;
   inset: 0;
