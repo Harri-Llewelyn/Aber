@@ -4969,7 +4969,8 @@ never ask which wrote a row. A separate worker is not needed: the spike
 - **The alert is written as the webhook writes one.** `fingerprint` is
   `automation_alert_fingerprint()`'s (0255), `alert_name` the automation's alias, `severity` the
   `alert` action's, `entity_type` `device` with the device's id and `sparkplug_id`, and `summary`
-  "Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m". `labels` are `severity`,
+  "Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5 °C, above 80 °C for 5m" (the unit is `0292`'s; a metric
+  with none reads "is 82.5, above 80"). `labels` are `severity`,
   `entity_type`, `metric`, `automation` (the automation's key) and `trigger_id`, all strings as
   Grafana's are. `values` are `value`, the reading that fired it, and `threshold`. `rule_uid` is
   null, and the frontend's link to Grafana does not apply to a `condition:` row
@@ -5371,12 +5372,14 @@ reads again, after `derived_current()`, and the evaluator with one change, the w
   saved.
 - **A value is said in one place, `automation_value_words(metric, value)`.** A derived metric's value is
   rounded to three decimals and followed by its window, "4.167 over the last hour" or "7 at the last
-  whole minute"; any other value is printed as it was, so a measured alert reads as it did. **A time in
+  whole minute"; any other value is printed as it was, and `0292` follows a measured metric's with its
+  unit. **A time in
   state is a percentage in words**, "42% over the last hour", with one decimal at most and a trailing
   zero dropped, because it reads better so. It is still a fraction from 0 to 1 as data: the value
   the function returns, `platform_alerts.values`, the threshold in a file (`below: 0.9` is 90%) and
   what is compared. `automation_threshold_words(metric, threshold)` words the threshold beside it, "90%"
-  for a time in state and as printed for any other. `machine_condition_rows()` words its detail with
+  for a time in state and as printed for any other, with the unit `0292` gives a measured metric's.
+  `machine_condition_rows()` words its detail with
   both ("Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5"), and so does the alert's
   summary. The browser says a share with `percentWords()`, and one table of fractions and their words
   is held by this suite and by `derivedMetricReads.test.js`.
