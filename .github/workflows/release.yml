@@ -131,6 +131,22 @@ jobs:
         with:
           node-version: '24'
 
+      # A release commit has folded the notes in unreleased/ into help/site/upgrading.md and
+      # supabase/README.md (docs/releases.md): only the two folders' README files may be left. The
+      # artefacts do not carry the notes, so a dry run only warns.
+      - name: Verify The Unreleased Notes Are Folded In
+        env:
+          PUSH: ${{ steps.resolve.outputs.push }}
+        run: |
+          set -eu
+          if node scripts/fold-unreleased.mjs --check; then exit 0; fi
+          msg="unreleased/ still holds notes. Run node scripts/fold-unreleased.mjs on the release commit and tag that commit (docs/releases.md)."
+          if [ "$PUSH" = "true" ]; then
+            echo "::error::$msg"
+            exit 1
+          fi
+          echo "::warning::$msg"
+
       # The database images' written offers link the release that mirrors their GPL and LGPL source
       # (gpl-sources.yml). Read only: the release must be published and hold every archive
       # licenses/supabase-postgres/sources.json pins, at its SHA-256. A dry run publishes no image,
