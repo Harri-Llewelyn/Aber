@@ -2951,16 +2951,19 @@ const apiMethods = {
    * finishes meanwhile does not shift a page. `before` is the last row of the page before, its
    * created_at exactly as read: a Date would drop the microseconds and skip or repeat a row.
    * Resolves to `{ rows, remaining, more }`: `remaining` counts this page and every older row, and
-   * `more` says a row follows it. Read under the tables' own SELECT policies.
+   * `more` says a row follows it. `job` reads that one job alone, by its id: a finished job, or no
+   * row (an id that is no job's, or a job still in progress). Read under the tables' own SELECT policies.
    */
-  jobHistory: async (kind, { before = null, limit = 20 } = {}) => {
+  jobHistory: async (kind, { before = null, limit = 20, job = null } = {}) => {
     const playback = kind === 'playback';
+    if (job !== null && !JOB_HISTORY_ID.test(job)) return { rows: [], remaining: 0, more: false };
     let query = supabase
       .from(playback ? 'playback_jobs' : 'capture_jobs')
       .select(playback
         ? '*, gateways(name, sparkplug_id), captures(note, subject_sparkplug_id)'
         : '*, gateways(name, sparkplug_id), devices(name, sparkplug_id)', { count: 'exact' })
       .in('status', ['COMPLETED', 'FAILED', 'CANCELLED']);
+    if (job !== null) query = query.eq('id', job);
     if (before) {
       // Both halves go into the filter's text, so each must be what the database wrote.
       if (!JOB_HISTORY_STAMP.test(before.created_at || '') || !JOB_HISTORY_ID.test(before.id || '')) {
