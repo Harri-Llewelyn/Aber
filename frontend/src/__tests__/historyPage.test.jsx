@@ -684,6 +684,7 @@ describe("a text chart's buckets under Auto", () => {
     if (originalWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalWidth)
     else delete HTMLElement.prototype.clientWidth
     delete window.ResizeObserver
+    vi.useRealTimers()
   })
   /** Every chart box `px` wide, and the page 32 px wider, as its insets make it. */
   const widthIs = (px) => Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
@@ -715,14 +716,20 @@ describe("a text chart's buckets under Auto", () => {
     await screen.findByText('2 metrics, in 1-minute buckets')
     const before = api.readCarriedTelemetry.mock.calls.length
     const page = watchers.find(w => w.cb)
+    // From here the settle timer is moved on by hand. A waitFor or a findBy waits on a timer of its
+    // own, so the clock is real again before the test waits for the page.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const settle = () => act(async () => { vi.advanceTimersByTime(1000) })
     // The same width settles: the buckets stay, so nothing is read.
     act(() => { watchers.forEach(w => w.cb([])) })
-    await new Promise(r => setTimeout(r, 400))
+    await settle()
     expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(before)
     // Narrower, in three steps: one read, of the text, at 5 minutes, once the steps settle.
     widthIs(150)
     act(() => { page.cb([]); page.cb([]); watchers.forEach(w => w.cb([])) })
     expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(before)
+    await settle()
+    vi.useRealTimers()
     await waitFor(() => expect(screen.getByText('2 metrics, in 1-minute buckets; text in 5-minute buckets')).toBeInTheDocument())
     expect(readsOf().slice(before)).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 5]])
   })

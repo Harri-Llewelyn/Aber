@@ -6,7 +6,7 @@
  * nothing stops the loop, and a page asked for under an older filter is dropped when it lands.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AuditTrailTab, WINDOW_EVENT_CAP } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
@@ -80,7 +80,8 @@ afterEach(() => {
 
 const trailCalls = () => api.get.mock.calls.map(c => String(c[0])).filter(u => u.includes('/audit-trail'))
 const pagedCalls = () => trailCalls().filter(u => u.includes('before_id'))
-const settle = () => new Promise(r => setTimeout(r, 30))
+/** Runs what is already queued, so a page the loader should not ask for has had its chance to be asked for. */
+const settle = () => act(async () => {})
 const show = async (search) => {
   window.history.replaceState(null, '', `/audit-trail${search}`)
   render(<AuditTrailTab />)

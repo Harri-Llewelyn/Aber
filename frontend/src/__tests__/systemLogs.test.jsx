@@ -105,6 +105,8 @@ describe('the first read', () => {
 })
 
 describe('the toolbar', () => {
+  afterEach(() => { vi.useRealTimers() })
+
   it('puts the search box first, then the time control, the service and the level', async () => {
     render(<SystemLogs showToast={vi.fn()} />)
     await waitFor(() => expect(table()).toBeTruthy())
@@ -118,8 +120,14 @@ describe('the toolbar', () => {
     render(<SystemLogs showToast={vi.fn()} />)
     await waitFor(() => expect(reads()).toHaveLength(1))
     const box = screen.getByRole('searchbox', { name: /find text/i })
+    // The settle timer is moved on by hand. A waitFor waits on a timer of its own, so the clock is
+    // real again before the test waits for the page.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     for (const text of ['d', 'de', 'dev', 'dev0', 'dev01']) fireEvent.change(box, { target: { value: text } })
-    await act(() => new Promise(r => setTimeout(r, FILTER_SETTLE_MS + 200)))
+    act(() => { vi.advanceTimersByTime(FILTER_SETTLE_MS - 1) })
+    expect(reads()).toHaveLength(1)
+    await act(async () => { vi.advanceTimersByTime(1) })
+    vi.useRealTimers()
     await waitFor(() => expect(reads()).toHaveLength(2))
     expect(reads()[1]).toMatchObject({ service: 'ingestion', filter: 'dev01' })
     expect(window.location.search).toBe('?search=dev01')

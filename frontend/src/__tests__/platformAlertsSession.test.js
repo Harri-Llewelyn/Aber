@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 /**
@@ -7,12 +7,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
  */
 
 let outcome
+let reads
 
 vi.mock('../lib/supabaseClient', () => ({
   supabase: {
     auth: { getSession: () => Promise.resolve({ data: { session: { access_token: 't' } } }) },
     from: () => ({
-      select: () => ({ order: () => Promise.resolve(outcome) })
+      select: () => ({ order: () => { reads += 1; return Promise.resolve(outcome) } })
     }),
     channel: () => ({ on() { return this }, subscribe() { return this } }),
     removeChannel: () => {}
@@ -29,10 +30,11 @@ describe('usePlatformAlerts on a failed read', () => {
 
   const refreshWith = async (error) => {
     outcome = { data: null, error }
-    const { result } = renderHook(() => usePlatformAlerts(vi.fn()))
-    await waitFor(() => expect(result.current).toEqual([]))
-    // Let the read settle before asserting on what it logged.
-    await new Promise((r) => setTimeout(r, 20))
+    reads = 0
+    renderHook(() => usePlatformAlerts(vi.fn()))
+    await waitFor(() => expect(reads).toBeGreaterThan(0))
+    // Let the read's answer be handled before asserting on what it logged.
+    await act(async () => {})
   }
 
   it.each([

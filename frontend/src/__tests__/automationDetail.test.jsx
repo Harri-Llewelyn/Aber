@@ -1,5 +1,5 @@
 import React from 'react'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
 import { diagnosticCount } from '@codemirror/lint'
@@ -281,8 +281,7 @@ describe('Save', () => {
     expect(confirm).toHaveClass('btn-disabled')
     // Closing it leaves the marks on the lines the refusal named.
     fireEvent.click(d.getByRole('button', { name: 'Cancel' }))
-    await act(async () => { await new Promise(r => setTimeout(r, 400)) })
-    expect(diagnosticCount(editorView().state)).toBe(2)
+    await waitFor(() => expect(diagnosticCount(editorView().state)).toBe(2))
     expect(api.applyAutomations).toHaveBeenCalledTimes(1)
   })
 

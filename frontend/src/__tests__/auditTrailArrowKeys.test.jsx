@@ -5,7 +5,7 @@
  * filter bar's selects and date inputs consume arrow keys natively.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AuditTrailTab } from '../components/tabs/AuditTrailTab'
 import { filterList } from '../test/listFilters'
@@ -61,6 +61,11 @@ const selectOldest = async () => {
 
 const position = () => document.querySelector('.trail-drawer-nav-pos')?.textContent ?? ''
 const press = (key, target = document, init = {}) => fireEvent.keyDown(target, { key, ...init })
+/** A key that steps, pressed after one that should have done nothing: the drawer is on the second change only if that one left it where it was. */
+const thenStepTo = (key, event) => {
+  press(key)
+  return waitFor(() => expect(position()).toMatch(new RegExp(`^Event ${event} of 3`)))
+}
 
 
 describe('the arrow keys step the drawer', () => {
@@ -84,14 +89,12 @@ describe('the arrow keys step the drawer', () => {
     await selectOldest()
 
     press('ArrowLeft')
-    await new Promise(r => setTimeout(r, 20))
-    expect(position()).toMatch(/^Event 1 of 3/)
+    await thenStepTo('ArrowRight', 2)
 
-    press('ArrowRight'); press('ArrowRight'); press('ArrowRight')
+    press('ArrowRight')
     await waitFor(() => expect(position()).toMatch(/^Event 3 of 3/))
     press('ArrowRight')
-    await new Promise(r => setTimeout(r, 20))
-    expect(position()).toMatch(/^Event 3 of 3/)
+    await thenStepTo('ArrowLeft', 2)
   })
 
   it('stands down inside an input, where the key moves the caret', async () => {
@@ -101,8 +104,7 @@ describe('the arrow keys step the drawer', () => {
     const search = screen.getByPlaceholderText('Search a name or any ID…')
     search.focus()
     press('ArrowRight', search)
-    await new Promise(r => setTimeout(r, 20))
-    expect(position()).toMatch(/^Event 1 of 3/)
+    await thenStepTo('ArrowRight', 2)
   })
 
   it('stands down inside the Filters panel, where the arrow keys move between its checkboxes', async () => {
@@ -113,7 +115,8 @@ describe('the arrow keys step the drawer', () => {
     const kind = within(filterList('Entity')).getAllByRole('checkbox')[0]
     kind.focus()
     press('ArrowRight', kind)
-    await new Promise(r => setTimeout(r, 20))
+    // The panel is a dialog, so no key steps the drawer while it is open: nothing to press after.
+    await act(async () => {})
     expect(position()).toMatch(/^Event 1 of 3/)
   })
 
@@ -124,15 +127,14 @@ describe('the arrow keys step the drawer', () => {
     press('ArrowRight', document, { ctrlKey: true })
     press('ArrowRight', document, { altKey: true })
     press('ArrowRight', document, { metaKey: true })
-    await new Promise(r => setTimeout(r, 20))
-    expect(position()).toMatch(/^Event 1 of 3/)
+    await thenStepTo('ArrowRight', 2)
   })
 
   it('does nothing while no event is selected', async () => {
     await show()
 
     press('ArrowRight')
-    await new Promise(r => setTimeout(r, 20))
+    await act(async () => {})
     expect(document.querySelector('.context-panel-open')).toBeNull()
   })
 
