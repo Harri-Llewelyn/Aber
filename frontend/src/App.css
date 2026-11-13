@@ -1948,6 +1948,14 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 .backup-files .mono { min-width: 0; overflow-wrap: anywhere; }
 
+/* A value nobody can change, set where a field would be: plain text in the form's own size, with no
+   box, so it does not read as a control that is switched off. */
+.form-static {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
 /* The note under a form field: muted, small, and a fixed 4px below the control. */
 .form-hint {
   font-size: 11px;

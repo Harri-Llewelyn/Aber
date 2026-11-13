@@ -90,14 +90,17 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
   // Such a capture cannot be mapped here, and ensure_shadow_devices() makes it no lanes.
   const capturedDevices = Array.isArray(capture?.manifest?.device_ids) ? capture.manifest.device_ids : null
 
+  // A site has one Playback gateway, so it is named and used rather than chosen. With two (a
+  // replacement being swapped in) the person chooses, and nothing is chosen for them.
+  const only = targets?.length === 1 ? targets[0] : null
   const target = useMemo(
-    () => (targets || []).find(t => t.id === targetId) || null,
-    [targets, targetId]
+    () => only || (targets || []).find(t => t.id === targetId) || null,
+    [only, targets, targetId]
   )
 
   // Reset the map whenever the target changes: a device id from the previous gateway is what
   // `start_playback_job()` refuses.
-  useEffect(() => { setDeviceMap({}) }, [targetId])
+  useEffect(() => { setDeviceMap({}) }, [target?.id])
 
   /**
    * Is the worker running, and can it publish as this target? Stale is treated as down: the worker
@@ -122,6 +125,26 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
   const passwordInUse = target && workerHolds(target)
     ? describeWorkerPassword(worker?.credential_sources?.[target.sparkplug_id])
     : null
+  /**
+   * What keeps a gateway from publishing, if anything: `note` is said beside its name, `reason` is
+   * why Play back is held. Null when the gateway holds a credential the worker holds as well.
+   */
+  const credentialState = (t) => {
+    if (!t.gateway_has_broker_credential) {
+      return { note: 'no broker credential', reason: 'The Playback gateway holds no broker credential' }
+    }
+    if (workerLive && !workerHolds(t)) {
+      return { note: 'worker has no password', reason: 'The playback worker was not given this gateway’s password' }
+    }
+    if (workerLive && !workerHoldsCurrent(t)) {
+      return {
+        note: 'worker still has the old password',
+        reason: 'This credential was re-issued after the worker last picked one up — wait about a minute'
+      }
+    }
+    return null
+  }
+  const held = target ? credentialState(target) : null
 
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
   // A lane stands in for a device this site has; one recorded elsewhere has none to stand in for,
@@ -156,22 +179,21 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
   const ready = deployed
     && capturedDevices !== null
     && !!target
-    && target.gateway_has_broker_credential
-    && (worker === undefined || !workerLive || workerHoldsCurrent(target))
+    && !held
     && unmapped.length === 0
 
-  // Why Play back is off, where no callout above says so already: those name a missing worker, a
-  // capture with no device list, a gateway with no credential and a worker without it.
+  // Why Play back is off, where no callout above says so already: those name a missing worker and
+  // a capture with no device list.
   const problem = ready || !deployed || capturedDevices === null ? null
     : !target ? 'Choose the Playback gateway'
-      : !target.gateway_has_broker_credential || (workerLive && !workerHoldsCurrent(target)) ? null
+      : held ? held.reason
         : unmapped.length > 0 ? `${plural(unmapped.length, 'device')} still to map`
           : null
 
   const submit = () => run(async () => {
     setError(null)
     try {
-      await onConfirm({ targetGatewayId: targetId, deviceMap, speed })
+      await onConfirm({ targetGatewayId: target.id, deviceMap, speed })
     } catch (err) {
       setError(err.message)
     }
@@ -204,12 +226,8 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
               !deployed ? 'The playback worker is not deployed on this site (playback.enabled)'
                 : capturedDevices === null ? 'This capture holds no list of its devices. Download it, then play it with Play a file…'
                   : !target ? 'Choose the Playback gateway'
-                    : !target.gateway_has_broker_credential ? 'The Playback gateway holds no broker credential'
-                      : (workerLive && !workerHolds(target))
-                        ? 'The playback worker was not given this gateway’s password'
-                        : (workerLive && !workerHoldsCurrent(target))
-                          ? 'This credential was re-issued after the worker last picked one up — wait about a minute'
-                          : `${plural(unmapped.length, 'device')} still to map`
+                    : held ? held.reason
+                      : `${plural(unmapped.length, 'device')} still to map`
             )}
             onClick={submit}
           >
@@ -257,7 +275,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
       )}
 
       <div className="form-group">
-        <label className="form-label" htmlFor="playback-target">Playback gateway <RequiredMark /></label>
+        {!only && <label className="form-label" htmlFor="playback-target">Playback gateway <RequiredMark /></label>}
         {targets === null && <p className="form-hint">Loading the Playback gateway…</p>}
         {targets !== null && targets.length === 0 && (
           <div className="callout callout-warning">
@@ -269,7 +287,20 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
             </div>
           </div>
         )}
-        {targets !== null && targets.length > 0 && (
+        {only && (
+          <>
+            <p className="form-static">
+              Plays back as <strong>{only.name}</strong> (<span className="mono">{only.sparkplug_id}</span>)
+              {held && ` — ${held.note}`}
+            </p>
+            <p className="form-hint">
+              A capture is played back only on the Playback gateway: nothing else publishes as it, so
+              a playback never shares a live publisher's sequence numbers.
+            </p>
+            {passwordInUse && <p className="form-hint">{passwordInUse}</p>}
+          </>
+        )}
+        {targets !== null && targets.length > 1 && (
           <>
             <select
               id="playback-target"
@@ -280,15 +311,14 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
               aria-required="true"
             >
               <option value="">Choose the Playback gateway…</option>
-              {targets.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.name} ({t.sparkplug_id})
-                  {!t.gateway_has_broker_credential
-                    ? ' — no broker credential'
-                    : (workerLive && !workerHolds(t) ? ' — worker has no password'
-                      : (workerLive && !workerHoldsCurrent(t) ? ' — worker still has the old password' : ''))}
-                </option>
-              ))}
+              {targets.map(t => {
+                const state = credentialState(t)
+                return (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.sparkplug_id}){state && ` — ${state.note}`}
+                  </option>
+                )
+              })}
             </select>
             <p className="form-hint">
               Only the Playback gateway is listed: nothing else publishes as it, so a playback never
@@ -383,7 +413,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
         <div className="form-group">
           <label className="form-label">Device mapping</label>
           <p className="form-hint">
-            Every device in the capture plays back as its replay lane, a device of {target.name}
+            Every device in the capture plays back as its replay lane, a device of {target.name}{' '}
             that stands in for it. A playback with a device left unmapped is refused.
           </p>
           {/* The button writes: it creates one replay lane per captured device and returns the map
