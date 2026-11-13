@@ -1,0 +1,8 @@
+{
+  "about": "A text where a schema is expected.",
+  "path": "$[0]",
+  "database": false,
+  "document": [
+    "Robot_Arm_Schema"
+  ]
+}

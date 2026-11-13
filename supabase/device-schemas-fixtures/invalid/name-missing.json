@@ -1,0 +1,14 @@
+{
+  "about": "No name.",
+  "path": "$[0].name",
+  "database": false,
+  "document": [
+    {
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

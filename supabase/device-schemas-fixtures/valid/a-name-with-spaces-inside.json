@@ -1,0 +1,13 @@
+{
+  "about": "Spaces inside a name are allowed.",
+  "document": [
+    {
+      "name": "Robot arm, six axes",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

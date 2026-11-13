@@ -1,0 +1,14 @@
+{
+  "about": "A metric's semantic id, the catalogue's.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "semantic_id": "@SEMANTIC_ID@"
+        }
+      ]
+    }
+  ]
+}

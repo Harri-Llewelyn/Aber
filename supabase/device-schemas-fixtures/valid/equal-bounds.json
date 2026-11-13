@@ -1,0 +1,15 @@
+{
+  "about": "A minimum equal to the maximum is a range of one value.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "minimum": 5,
+          "maximum": 5
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "about": "A type that is not one of the three.",
+  "path": "$[0].semantic_id_type",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "semantic_id": "urn:x",
+      "semantic_id_type": "URL"
+    }
+  ]
+}

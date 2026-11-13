@@ -1,0 +1,30 @@
+{
+  "about": "The example in docs/device-schemas.md.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "description": "What a six-axis robot arm publishes. The range is the sensor's.",
+      "semantic_id": "https://admin-shell.io/idta/nameplate/3/0/Nameplate",
+      "semantic_id_type": "IRI",
+      "change_description": "Added the spindle load and a range for the temperature",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "minimum": -40,
+          "maximum": 120,
+          "semantic_id": "@SEMANTIC_ID@"
+        },
+        {
+          "name": "@METRIC_NUMBER_2@",
+          "minimum": 0
+        },
+        {
+          "name": "@METRIC_TEXT@"
+        },
+        {
+          "name": "@METRIC_BOOL@"
+        }
+      ]
+    }
+  ]
+}

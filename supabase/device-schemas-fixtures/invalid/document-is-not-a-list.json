@@ -1,0 +1,8 @@
+{
+  "about": "A mapping where a list is expected.",
+  "path": "$",
+  "database": false,
+  "document": {
+    "name": "Robot_Arm_Schema"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "about": "A type with no id.",
+  "path": "$[0].semantic_id_type",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "semantic_id_type": "IRI"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "about": "Two schemas in one file.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    },
+    {
+      "name": "Conveyor_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER_2@"
+        }
+      ]
+    }
+  ]
+}

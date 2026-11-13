@@ -1,0 +1,16 @@
+{
+  "about": "A change description of 1,001 characters.",
+  "path": "$[0].change_description",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "change_description": "@X1001@"
+    }
+  ]
+}

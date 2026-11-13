@@ -1,0 +1,16 @@
+{
+  "about": "A semantic id the catalogue does not give the metric.",
+  "path": "$[0].metrics[0].semantic_id",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "semantic_id": "https://example.test/not-this-one"
+        }
+      ]
+    }
+  ]
+}

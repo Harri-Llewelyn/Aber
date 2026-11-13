@@ -1,0 +1,16 @@
+{
+  "about": "A unit written into a bound.",
+  "path": "$[0].metrics[0].minimum",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "minimum": "-40 C"
+        }
+      ]
+    }
+  ]
+}

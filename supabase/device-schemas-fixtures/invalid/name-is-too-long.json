@@ -1,0 +1,15 @@
+{
+  "about": "A name of 121 characters.",
+  "path": "$[0].name",
+  "database": false,
+  "document": [
+    {
+      "name": "@X121@",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

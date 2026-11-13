@@ -1,0 +1,16 @@
+{
+  "about": "true for a bound.",
+  "path": "$[0].metrics[0].maximum",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "maximum": true
+        }
+      ]
+    }
+  ]
+}

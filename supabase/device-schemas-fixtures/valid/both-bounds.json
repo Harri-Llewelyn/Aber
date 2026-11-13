@@ -1,0 +1,15 @@
+{
+  "about": "A number with a minimum and a maximum.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "minimum": 0,
+          "maximum": 100
+        }
+      ]
+    }
+  ]
+}

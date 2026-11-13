@@ -1,0 +1,11 @@
+{
+  "about": "A text for the metrics.",
+  "path": "$[0].metrics",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": "@METRIC_NUMBER@"
+    }
+  ]
+}

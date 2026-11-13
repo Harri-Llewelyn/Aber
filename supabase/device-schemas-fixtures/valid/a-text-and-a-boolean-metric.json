@@ -1,0 +1,16 @@
+{
+  "about": "A metric that is not a number takes no range.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_TEXT@"
+        },
+        {
+          "name": "@METRIC_BOOL@"
+        }
+      ]
+    }
+  ]
+}
