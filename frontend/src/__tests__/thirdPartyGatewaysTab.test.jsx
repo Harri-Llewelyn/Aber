@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { pick, valuesShown } from '../test/listFilters'
+import { helpTipText } from '../test/tooltips'
 import { api } from '../api'
 
 /**
@@ -166,7 +167,10 @@ describe("a Third-party gateway's drawer", () => {
 
   it('gives the reason it has no repository', async () => {
     await show()
-    expect(openDrawer().getByText(/A Third-party gateway has no repository of its own/)).toBeTruthy()
+    const panel = openDrawer()
+    const field = panel.getByText('Repository').closest('.context-field')
+    expect(field.querySelector('.context-field-value').textContent).toBe('None: not managed by Aber')
+    expect(helpTipText('What Repository means', field)).toMatch(/^A Third-party gateway has no repository\./)
   })
 
   it('is placed in its cell, as a Remote gateway is', async () => {

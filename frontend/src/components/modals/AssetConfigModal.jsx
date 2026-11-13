@@ -2,13 +2,16 @@ import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { SPARKPLUG_TYPES } from '../../constants'
 import { modelledMetricsAcross, schemasForDevice } from '../../utils/deviceTags'
-import { IconFileText, IconShieldAlert, IconClipboardList, IconCheck, IconAlertTriangle } from '../common/Icons'
+import { IconFileText, IconShieldAlert, IconClipboardList, IconCheck, IconAlertTriangle, IconInfo } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
+import { RouteLink } from '../common/RouteLink'
 import { formatDateTime } from '../../utils/format'
 import { isNeverSeen } from '../../utils/deviceProvisioning'
+import { isShadowDevice } from '../../utils/fleetCounts'
+import { gatewayUrl } from '../../routes'
 import { SortHeader } from '../common/SortHeader'
 import { useLocalSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
@@ -53,6 +56,14 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
   }
 
   const isOffline = asset.status === 'OFFLINE'
+  // A replay lane is offline between playbacks by design, so it is explained rather than warned of.
+  const isLane = isShadowDevice(asset)
+  // The gateway by the name the device's row carries; its short id in mono when the row has none.
+  const gatewayLink = asset.active_gateway_id ? (
+    <RouteLink to={gatewayUrl(asset.active_gateway_id)} title="Open this gateway on the Gateways page">
+      {asset.gateway_name || <span className="mono">{String(asset.active_gateway_id).slice(0, 8)}</span>}
+    </RouteLink>
+  ) : '—'
   // Every schema attached to the device, one per device_submodels row.
   const attachedSchemas = schemasForDevice(asset, schemas)
 
@@ -99,7 +110,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
     /* Wide: a five-column table, and a narrower one clips the middle of a Sparkplug path, the part
        that distinguishes `Axes/X/...` from `Axes/Y/...`. */
     <Modal
-      title={<>Device Configuration Parameters — <span className="mono">{asset.asset_id}</span></>}
+      title={`Device Configuration Parameters — ${asset.asset_name || asset.asset_id}`}
       icon={<IconFileText size={18} />}
       size="wide"
       onClose={onClose}
@@ -115,12 +126,22 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
         </div>
       )}
 
-      {isOffline && (
+      {isOffline && isLane && (
+        <div className="callout callout-info">
+          <IconInfo size={13} className="callout-icon" />
+          <span>
+            A replay lane publishes only while a playback runs.{' '}
+            {isNeverSeen(asset) ? 'No playback has run on it yet.' : 'Its last values are from the last playback.'}
+          </span>
+        </div>
+      )}
+
+      {isOffline && !isLane && (
         <div className="callout callout-warning">
           <IconShieldAlert size={16} className="callout-icon" />
           {isNeverSeen(asset)
             ? <span><strong>Awaiting first birth</strong> — this device has not published yet.</span>
-            : <span><strong>Device Offline (DDEATH Received):</strong> This device received a Sparkplug B disconnect payload via gateway <strong>{asset.active_gateway_id || '—'}</strong>. Telemetry ingestion is suspended.</span>}
+            : <span><strong>Device Offline (DDEATH Received):</strong> This device received a Sparkplug B disconnect payload via gateway <strong>{gatewayLink}</strong>. Telemetry ingestion is suspended.</span>}
         </div>
       )}
 

@@ -959,7 +959,7 @@ describe("the charts' groups", () => {
     await screen.findAllByRole('figure')
     // At the start of the row above the charts, as on the Audit Trail, and not in the toolbar.
     const toggle = screen.getByRole('button', { name: /Collapse all/ })
-    expect(document.querySelector('.history-header').firstElementChild).toContainElement(toggle)
+    expect(document.querySelector('.groups-header').firstElementChild).toContainElement(toggle)
     expect(document.querySelector('.filter-bar')).not.toContainElement(toggle)
     fireEvent.click(toggle)
     expect(screen.queryAllByRole('figure')).toHaveLength(0)
@@ -1022,19 +1022,19 @@ describe('more charts than the card holds', () => {
     expect(body).toHaveClass('card-fill-scroll', 'trail-timeline')
     expect(body.parentElement).toHaveClass('card-fill')
     const scroller = body.querySelector(':scope > .trail-scroll')
-    expect([...body.children].map(c => c.className)).toEqual(['history-header', 'trail-scroll'])
+    expect([...body.children].map(c => c.className)).toEqual(['groups-header', 'trail-scroll'])
     // Each chart's screen-reader summary sits inside its chart, which positions it (App.css).
     expect(scroller.querySelectorAll('.history-chart > .sr-only')).toHaveLength(12)
 
     // Every chart and every group heading scrolls; the toolbar and the header row do not.
     for (const figure of screen.getAllByRole('figure')) expect(scroller).toContainElement(figure)
     expect([...scroller.querySelectorAll('.history-group-head')]).toHaveLength(2)
-    expect(scroller).not.toContainElement(document.querySelector('.history-header'))
+    expect(scroller).not.toContainElement(document.querySelector('.groups-header'))
     expect(scroller).not.toContainElement(screen.getByRole('button', { name: /Collapse all/ }))
     const status = document.querySelector('.history-meta')
     expect(status).toHaveTextContent(/^12 metrics, in /)
     expect(scroller).not.toContainElement(status)
-    expect(document.querySelector('.history-header')).not.toContainElement(document.querySelector('.filter-bar'))
+    expect(document.querySelector('.groups-header')).not.toContainElement(document.querySelector('.filter-bar'))
     expect(body).not.toContainElement(document.querySelector('.filter-bar'))
   })
 

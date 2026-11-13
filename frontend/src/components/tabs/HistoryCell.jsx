@@ -430,7 +430,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
           <LoadingState label="readings" />
         ) : (
           <>
-            <div className="history-header">
+            <div className="groups-header">
               <ExpandAllToggle
                 anyOpen={SECTIONS.some(k => !closed.has(k))}
                 onExpandAll={() => setOpen(SECTIONS, true)}

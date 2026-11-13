@@ -1520,6 +1520,17 @@ export const SUITES = {
       'Third-party ends nothing. Missing either half fails silently: a redeemable token for a ' +
       'gateway with no appliance, or a credential the dashboard no longer offers working on.',
   },
+  'supabase/migrations/test_a_device_or_gateway_name_cannot_be_blank.py': {
+    lanes: ['db'],
+    why:
+      "0284's two CHECKs: an empty name and a name of spaces are refused on an insert and an update " +
+      'of a device and of a gateway, by an Administrator through the API role, by the service role ' +
+      'and by an approved proposal, which aborts and leaves the row named. The file is run in the ' +
+      'transaction over a database holding blank rows: it names each with its Sparkplug id, renames ' +
+      'none, scans only the table whose CHECK is missing, and passes once they are named. Each of ' +
+      "those writers reaches the table without the dashboard's dialogs, which is why the CHECK is " +
+      'the rule and the dialogs are not.',
+  },
   'supabase/migrations/test_a_failed_type_change_revocation_is_retried.py': {
     lanes: ['db'],
     why:

@@ -119,9 +119,9 @@ describe('the Derived tab', () => {
     const derived = await openTab('Derived')
     const rows = [...derived.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(td => td.textContent))
     expect(rows).toEqual([
-      ['Controller/PARTS_PER_HOUR', 'Counter rate', 'rate of Controller/PART_COUNT, per hour', 'COUNT/HOUR', 'Parts an hour'],
+      ['Controller/PARTS_PER_HOUR', 'Counter rate', 'rate of Controller/PART_COUNT, per hour', 'count/h (COUNT/HOUR)', 'Parts an hour'],
       ['Controller/UPTIME', 'Time in state', 'share of time Controller/EXECUTION is ACTIVE', '% of the time', '—'],
-      ['Power/TOTAL', 'Sum or difference', 'Power/PHASE_A + Power/PHASE_B', 'KILOWATT', '—']
+      ['Power/TOTAL', 'Sum or difference', 'Power/PHASE_A + Power/PHASE_B', 'kW (KILOWATT)', '—']
     ])
     expect(derived.querySelectorAll('td .mono').length).toBeGreaterThan(6)
   })

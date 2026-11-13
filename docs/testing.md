@@ -932,6 +932,14 @@ python supabase/migrations/test_third_party_gateway.py
 # unspent. The one-off clean-up leaves a Remote gateway alone and changes nothing a second time.
 # Every test rolls back.
 python supabase/migrations/test_changing_a_gateway_s_type_cleans_up_after_the_old_type.py
+# A device's name and a gateway's name cannot be blank (0284). devices_name_not_blank and
+# gateways_name_not_blank refuse an empty name and a name of spaces, on an insert and an update, and
+# accept a real name; an Administrator through the API's role, the service role and an approved
+# proposal are held alike, and the approval aborts and leaves the row named. The migration's file runs
+# in the transaction over blank rows: one error names each with its table, id and Sparkplug id, none is
+# renamed, only the table missing its CHECK is scanned, and it passes once they are named. Every test
+# rolls back.
+python supabase/migrations/test_a_device_or_gateway_name_cannot_be_blank.py
 # A failed revocation after a change of type is asked again (0288). The sweep asks again for a call
 # that got no 2xx, or no reply in five minutes, and keeps the stamp, until a 2xx confirms it. It never
 # asks once a credential was issued or enrolled after the stamp, over several runs: the broker account
