@@ -52,7 +52,8 @@ describe('Model3DViewer', () => {
     // than truthiness, because React stringifying a boolean prop into "true" would also pass a
     // loose check.
     expect(el.getAttribute('camera-controls')).toBe('')
-    expect(el.getAttribute('auto-rotate')).toBe('')
+    // Still until turned: nothing draws while the dialog is left alone.
+    expect(el.hasAttribute('auto-rotate')).toBe(false)
     expect(el.getAttribute('shadow-intensity')).toBe('1')
   })
 

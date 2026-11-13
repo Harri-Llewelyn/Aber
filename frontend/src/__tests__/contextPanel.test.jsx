@@ -9,8 +9,7 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
-import { getByTooltip, helpTipText, tooltipOf } from '../test/tooltips'
-import { declaration } from '../test/themeColours'
+import { getByTooltip, helpTipText } from '../test/tooltips'
 import { deviceSummaries } from '../test/deviceSummary'
 
 /**
@@ -1037,33 +1036,11 @@ describe('Context panel layout invariants', () => {
     expect(helpTipText('What Sparkplug Topic Path means', panel())).toMatch(/No Sparkplug group is recorded/)
   })
 
-  it('labels the 3D model section with its icon and nothing else', async () => {
-    // The uploader carried its own two-row heading -- a title plus a line about AAS submodels --
-    // above a dropzone in a 360px column, restating the label beside it.
-    render(
-      <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
-    )
-    await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
-
-    fireEvent.click(list().getByText('Simulated_CNC_01'))
-    await waitFor(() => expect(isOpen()).toBe(true))
-
-    const p = within(panel())
-    const label = p.getByText('3D Model').closest('.context-panel-section-label')
-    expect(label.querySelector('svg')).toBeTruthy()
-
-    expect(p.queryByText('3D Visual Model')).toBeNull()
-    expect(p.queryByText(/Exported as an AAS/)).toBeNull()
-    // The AAS fact is not lost -- it moved onto the dropzone it describes.
-    expect(tooltipOf(p.getByRole('button', { name: /Upload a 3D model/i })))
-      .toMatch(/VisualRepresentation submodel/)
-  })
-
   /* The model was the last section, after the actions, and on a 1080 screen it started below the
-     fold (#1061). A tile beside the device's facts fitted, but cramped it (#1070). It is a section
-     of its own, the drawer's width, after the fields and before the actions. */
-  it('puts the 3D model in a section of its own, after the fields and above the actions', async () => {
+     fold (#1061). It then took a section of its own, the drawer's width, between the fields and the
+     actions, and every drawer load and turned it (#1380). It is now one action, which opens the
+     model in a dialog: the drawer is the fields, then the actions, and loads nothing of the model. */
+  it('has no 3D model section: the fields run into the actions, and the model is one action', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
@@ -1081,27 +1058,24 @@ describe('Context panel layout invariants', () => {
       'Serving Gateway', 'Location', 'Unified Namespace Topic', 'Schema', 'Classification', 'Description'
     ])
 
-    const section = panel().querySelector('.context-panel-body > .context-panel-facts > .model-section')
-    expect(within(section).getByText('3D Model')).toBeInTheDocument()
-    expect(within(section).getByTestId('model-3d-input')).toBeInTheDocument()
-
-    // After the fields, before the actions. After the actions is one tool, the Suppression windows,
-    // whose height is not known.
+    // Nothing between the fields and the actions, and nothing of the model in the drawer.
+    expect(panel().querySelector('.context-panel-facts')).toBeNull()
+    expect(within(panel()).queryByText('3D Model')).toBeNull()
+    expect(within(panel()).queryByTestId('model-3d-input')).toBeNull()
+    expect(panel().querySelector('.model-viewer-frame, model-viewer')).toBeNull()
     const actions = panel().querySelector('.context-panel-actions')
-    expect(fields[0].compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(section.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(fields[0].compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(actions).getByRole('button', { name: /3D Model/ })).toBeInTheDocument()
+
+    // After the actions is one tool, the Suppression windows, whose height is not known.
     const tools = panel().querySelector('.context-panel-extras')
     expect([...tools.children].map(c => c.className)).toEqual(['suppression-windows'])
   })
 
-  it('rules the 3D model off as the actions are, as far below the fields', () => {
-    const prop = (selector, name) => declaration(APP_CSS, selector, name)
-    for (const name of ['padding-top', 'border-top']) {
-      expect(prop('.model-section', name)).toBe(prop('.context-panel-actions', name))
+  it('leaves no rule for the 3D model section it no longer has', () => {
+    for (const gone of [/\.model-section(?![\w-])/, /@container model-section/, /\.context-panel-section-label-icon(?![\w-])/]) {
+      expect(APP_CSS).not.toMatch(gone)
     }
-    // The section sits in `.context-panel-facts`, whose margin adds to its own.
-    const px = (selector) => parseInt(prop(selector, 'margin-top'), 10)
-    expect(px('.context-panel-facts') + px('.model-section')).toBe(px('.context-panel-actions'))
   })
 })
 

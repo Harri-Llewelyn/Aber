@@ -457,10 +457,27 @@ class TheLongestWindow(WindowsBase):
         self.set_limit(1)
         self.assertTooLong("A window can last at most 1 day, set on Settings › Retention.",
                            self.schedule, MANAGER_ID, "device", self.device, ends="+25 hours")
+        self.set_limit(2)
+        self.schedule(MANAGER_ID, "device", self.device, ends="+48 hours")
+        self.assertTooLong("A window can last at most 2 days, set on Settings › Retention.",
+                           self.schedule, MANAGER_ID, "device", self.device, ends="+48 hours 1 minute")
+
+    def test_a_stored_part_day_is_its_whole_days(self):
+        # The setting counts whole days and refuses a part one (0285). One written before that, or
+        # with the guard's trigger off, is read as its whole days, and the sentence says whole days.
+        self.cur.execute("ALTER TABLE public.system_settings DISABLE TRIGGER system_settings_whole_number_trg;")
         self.set_limit(1.5)
-        self.schedule(MANAGER_ID, "device", self.device, ends="+36 hours")
-        self.assertTooLong("A window can last at most 1.5 days, set on Settings › Retention.",
-                           self.schedule, MANAGER_ID, "device", self.device, ends="+36 hours 1 minute")
+        self.cur.execute("ALTER TABLE public.system_settings ENABLE TRIGGER system_settings_whole_number_trg;")
+        self.schedule(MANAGER_ID, "device", self.device, ends="+24 hours")
+        self.assertTooLong("A window can last at most 1 day, set on Settings › Retention.",
+                           self.schedule, MANAGER_ID, "device", self.device, ends="+24 hours 1 minute")
+
+    def test_the_setting_refuses_a_part_day(self):
+        self.cur.execute("SAVEPOINT part_day;")
+        with self.assertRaises(psycopg2.errors.CheckViolation) as caught:
+            self.set_limit(1.5)
+        self.cur.execute("ROLLBACK TO SAVEPOINT part_day;")
+        self.assertEqual(caught.exception.diag.message_primary, LIMIT_KEY + " must be a whole number of days")
 
     def test_a_change_is_measured_from_the_window_s_own_start(self):
         sentence = "A window can last at most 7 days, set on Settings › Retention."
@@ -477,7 +494,7 @@ class TheLongestWindow(WindowsBase):
         self.assertTooLong(sentence, self.change, MANAGER_ID, upcoming, starts="-1 hour")
 
     def test_the_setting_is_held_to_1_to_90_and_only_an_administrator_changes_it(self):
-        for days in (0, 0.5, 91):
+        for days in (0, -1, 91):
             with self.subTest(days=days):
                 self.cur.execute("SAVEPOINT limit_bound;")
                 with self.assertRaises(psycopg2.errors.CheckViolation):

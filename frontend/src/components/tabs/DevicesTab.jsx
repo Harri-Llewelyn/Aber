@@ -27,7 +27,7 @@ import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
-import { Model3DUploader, Model3DLabel } from '../common/Model3DUploader'
+import { Model3DUploader } from '../common/Model3DUploader'
 import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { SuppressionWindows } from '../common/SuppressionWindows'
@@ -79,6 +79,7 @@ import {
   IconHistory,
   IconClipboardList,
   IconBookOpen,
+  IconCube,
   IconAlertTriangle,
   IconPlay,
   IconAlertCircle,
@@ -191,6 +192,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [view, setView, viewHref] = useUrlTab('devices', VIEWS.map(v => v.id), 'registered')
   // The device whose export dialog is open, or null.
   const [exportFor, setExportFor] = useState(null)
+  // Whether the open device's 3D model dialog is open. Nothing of the model loads until it is.
+  const [modelOpen, setModelOpen] = useState(false)
   // Each device's place in the Unified Namespace (utils/unsPath.js): undefined while the bridge is
   // off or before the first read, null when the read failed.
   const [unsPaths, setUnsPaths] = useState(undefined)
@@ -738,6 +741,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // and the drawer closes itself.
   const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
   const selectedIds = deviceIds(selectedDevice)
+  // The model's dialog belongs to the device it was opened on.
+  useEffect(() => { setModelOpen(false) }, [selectedId])
 
   /* How many automations apply to the open device, named or site-wide (automations_for_entity()),
      for the drawer's View in Automations. A failed read leaves the action without its count. */
@@ -1541,6 +1546,17 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           unmappedMetricsTo={unmappedMetricsTo}
         />
       )}
+      {/* The device row itself, not a copy: an upload reloads it, and the dialog turns from the
+          drop zone to the viewer. An archived device's model can be seen but not changed. */}
+      {modelOpen && selectedDevice && (
+        <Model3DUploader
+          device={selectedDevice}
+          canManage={canManage && !selectedDevice.is_archived}
+          showToast={showToast}
+          onChange={() => loadAll()}
+          onClose={() => setModelOpen(false)}
+        />
+      )}
       </div>
 
       <ContextPanel
@@ -1711,20 +1727,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             help: "Operator note. Shown here, and served by i3X as the device's description; nothing acts on it."
           },
         ] : []}
-        /* The 3D model, the drawer's width and ruled off, after the fields and above the actions.
-           Its height follows the drawer's width whatever the state, so it cannot grow into the
-           actions. onChange reloads so model_3d_path cannot go stale. */
-        beforeActions={selectedDevice && (
-          <div className="model-section">
-            <Model3DLabel attached={Boolean(selectedDevice.model_3d_path)} />
-            <Model3DUploader
-              device={selectedDevice}
-              canManage={canManage && !selectedDevice.is_archived}
-              showToast={showToast}
-              onChange={() => loadAll()}
-            />
-          </div>
-        )}
         actions={selectedDevice ? [
           selectedDevice.is_archived ? {
             label: 'Restore Device', icon: <IconRefreshCw size={13} />,
@@ -1772,6 +1774,21 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             label: 'View History', icon: <IconChartLine size={13} />,
             to: deviceHistoryUrl(selectedDevice.asset_id),
             title: "Chart this device's readings over time on the History page, and export them"
+          },
+          /* One action that follows the model: View when one is attached, Add when none is. Viewing
+             needs no permission; attaching does, and an archived device cannot take a new one. */
+          {
+            label: selectedDevice.model_3d_path ? 'View 3D Model' : 'Add 3D Model…',
+            icon: <IconCube size={13} />,
+            onClick: () => setModelOpen(true),
+            disabled: !selectedDevice.model_3d_path && (!canManage || selectedDevice.is_archived),
+            title: selectedDevice.model_3d_path
+              ? "Turn and zoom this device's 3D model, and download its file"
+              : !canManage
+                ? requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)
+                : selectedDevice.is_archived
+                  ? 'Restore this device to attach a 3D model'
+                  : "Attach a 3D model to this device. It is exported in the device's AAS"
           },
           /* Every role reads automations, so nothing here is gated. The count is what applies: the
              automations that name the device, and the site-wide ones. */
