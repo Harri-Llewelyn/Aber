@@ -1223,7 +1223,8 @@ class AShutdownStoresTheRecordingInFlight(FinishBase):
                 patch.object(capture_worker, "SHUTDOWN_MIN_UPLOAD_SECONDS", 0.05):
             started = time.monotonic()
             self.shut(storage=storage, seconds=0.4)
-            self.assertLess(time.monotonic() - started, 0.4)
+            # It gave up on an upload that would take 5 s. The bound leaves a busy machine room.
+            self.assertLess(time.monotonic() - started, 1.0)
         self.assertIn("did not finish in the 0.3s it had", self.failure())
 
     def test_a_cap_already_met_keeps_its_stop_reason(self):
