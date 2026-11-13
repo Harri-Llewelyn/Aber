@@ -2964,8 +2964,16 @@ A test waits for the condition it checks, not for a time. Use `waitFor` or a `fi
 `setTimeout` wait passes on a quiet machine and fails on a busy one, and one long enough for the
 busiest machine slows every run. When the rule under test is about a limit the page reads from
 `../api`, mock the limit small in that test, as `historyAlerts.test.jsx` does for
-`ALERT_HISTORY_LIMIT`, so the test does not render a thousand rows to check a line of text. Some
-older tests still wait for a time. Change each to a condition when you touch it.
+`ALERT_HISTORY_LIMIT`, so the test does not render a thousand rows to check a line of text. No test
+waits for a time now. A `setTimeout` or `setImmediate` in `src/__tests__/` fails the docs drift
+check unless that check lists it with its reason.
+
+Three cases come up. To check that nothing happened, follow the step that should do nothing with
+one that does something, or run what is queued with `await act(async () => {})`. Where the test is
+about a delay, fake the timer with `vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })`,
+move it on with `vi.advanceTimersByTime()`, and use real timers again before a `waitFor`, which
+waits on a timer of its own. A page that `App.jsx` opens with `lazy()` is imported in `beforeAll`,
+so compiling it is not a second for a `findBy` to wait out.
 
 ---
 
