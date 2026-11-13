@@ -352,7 +352,7 @@ describe("History's Overview", () => {
     expect(popover.closest('.card')).toBeNull()
     expect(within(popover).getByRole('status')).toHaveTextContent('3 devices · 10:00 – 14:00, 4 h')
     // The row above the lanes keeps its status line, and no block is read out under the popover.
-    expect(document.querySelector('.history-header .history-meta')).toBeInTheDocument()
+    expect(document.querySelector('.groups-header .history-meta')).toBeInTheDocument()
     expect(document.querySelector('.overview-readout')).toBeNull()
     expect(within(popover).getByRole('button', { name: /Chart/ })).not.toHaveAttribute('aria-disabled')
     // The popover itself takes the focus, so no action's tooltip opens over the box.
@@ -413,7 +413,7 @@ describe("History's Overview", () => {
     expect(document.querySelector('.overview-box')).toBeNull()
 
     draw()
-    fireEvent.mouseDown(document.querySelector('.history-header'))
+    fireEvent.mouseDown(document.querySelector('.groups-header'))
     expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
     expect(document.querySelector('.overview-box')).toBeNull()
 
@@ -428,7 +428,7 @@ describe("History's Overview", () => {
     const grid = document.querySelector('.trail-swimlanes')
     // The grid is what scrolls, as the Audit Trail's is; the row above it stays.
     expect(grid.parentElement).toHaveClass('trail-scroll')
-    expect(document.querySelector('.history-header').closest('.trail-scroll')).toBeNull()
+    expect(document.querySelector('.groups-header').closest('.trail-scroll')).toBeNull()
     const rows = [...grid.querySelectorAll('.trail-lane, .trail-section')]
     // The axis row first, its label an empty corner; then a section row a group, a lane a device.
     expect(rows[0]).toHaveClass('trail-axis')
@@ -510,16 +510,13 @@ describe("History's Overview", () => {
 
   it("keeps the row above the lanes to Collapse all, the status line and the key, with the trail's room above and below", async () => {
     await visit('/history/overview?span=day&at=2026-11-02')
-    const header = document.querySelector('.history-header')
+    const header = document.querySelector('.groups-header')
     expect([...header.children].map(c => c.className)).toEqual([
       expect.stringContaining('btn'), 'history-meta', 'overview-key',
     ])
     expect(within(header).getAllByRole('button').map(b => b.textContent)).toEqual(['Collapse all'])
-    // One rule for Overview and the Device tab, with .trail-header's padding: the same above and below.
-    const historyPadding = APP_CSS.match(/\n\.history-header \{[^}]*?padding: ([^;]+);/)?.[1]
-    const trailPadding = APP_CSS.match(/\n\.trail-header \{[^}]*?padding: ([^;]+);/)?.[1]
-    expect(historyPadding).toBe('10px var(--inset)')
-    expect(historyPadding).toBe(trailPadding)
+    // One rule for the row on every page that has one: the same room above and below.
+    expect(APP_CSS.match(/\n\.groups-header \{[^}]*?padding: ([^;]+);/)?.[1]).toBe('10px var(--inset)')
   })
 
   it("re-reads on the refresh timer, and the control's Zoom works here", async () => {

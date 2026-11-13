@@ -320,7 +320,8 @@ cut before the name is (`OverflowText`): a Filters panel's section says what is 
 - **Which groups are closed belongs to the viewer, in this browser.** The Audit Trail keeps its
   closed sections in localStorage (`aber_audit_trail_closed_sections`, read and written inside
   `try`), not in the address, so a shared link opens every section. Expand all and Collapse all
-  (`ExpandAllToggle`, outlined) sit at the end of the key's row.
+  (`ExpandAllToggle`, outlined) sit at the start of the row above the sections
+  ([The toolbar](#the-toolbar) says why it is not in it).
 
 ### Cut text slides on hover or focus
 
@@ -1357,13 +1358,21 @@ is below it. A page or tab with nothing to filter and no buttons draws no toolba
 **Actions are filled, filter controls are outlined.** Every action in `.filter-bar-actions` is
 `btn-primary`: New Device, Export CSV, Play a file…, Take a backup, a destination button. A filter
 control is `btn-ghost`, because it changes what the page shows rather than doing something: Clear
-filters, Filters (n), Expand all, and an on/off toggle such as Needs attention, which is filled
+filters, Filters (n), and an on/off toggle such as Needs attention, which is filled
 only while it is on, so its look says whether it is. **Amber (`btn-warning`) marks a destination
 that needs finishing**: Set a destination and Complete the destination. Backups shows two filled
 buttons side by side, Change destination and Take a backup, with the main one still last. Only the
 toolbar follows this rule: a side panel keeps exactly one primary action, and Discard stays
 outlined beside Save. `toolbarActionsFilled.test.js` reads every `.filter-bar-actions` group in
 the source and fails on an outlined button written into one.
+
+**A control for a page's groups sits over them, not in the toolbar.** Expand all and Collapse all
+(`ExpandAllToggle`) act on the groups the page draws, not on what it filters, so they are the first
+control, at the far left, of the row above the groups. That row is `.groups-header`, which the Audit
+Trail, History, Metrics and Vocabulary all use. A line saying what is shown goes beside it, as on
+History, and a key goes at its right-hand end. The row sits outside the scroller, so it stays on
+screen. Check 371 (`scripts/check-docs-drift.mjs`) reads the source and fails on a toggle written
+into a toolbar, or anywhere but first in this row.
 
 **Refresh and its interval are one control**, `RefreshButton` (`common/RefreshButton.jsx`), as
 Grafana's refresh picker is. The filled Refresh button reads again now. The select joined to its
@@ -1614,7 +1623,7 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   Metrics page names the type (`datatypeLabel()`) and in `GROUP_ORDER`: Double, Float, the
   integers, Boolean, String, Text, any other type by its code, then Other for a metric the catalog
   does not know. Each group is a `GroupHeading` with its count, which opens and closes it, and
-  `ExpandAllToggle` does every group from the start of the row above the charts (`history-header`), as the Audit Trail has it over its sections. A closed
+  `ExpandAllToggle` does every group from the start of the row above the charts (`groups-header`), as the Audit Trail has it over its sections. A closed
   group only unmounts its charts: the reads, the row cap and the Metrics filter are unchanged. Which
   are closed is kept in this browser (`CLOSED_GROUPS_KEY`, localStorage, by datatype code, read and
   written in try/catch), not in the address. The Metrics dropdown's options carry the same
@@ -1709,8 +1718,8 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   box, and focus goes back to the box's first lane. The tick boxes (`?device=`, telemetry keys) are
   the other way: the toolbar's **Chart** charts them at the control's window.
   **Export CSV** is in the popover, after Zoom, and in the toolbar beside Chart for the devices
-  ticked ([History's Export](#historys-export)). `.history-header` holds Collapse all, the status line and
-  the key, with `.trail-header`'s room above and below, on Overview and the Device tab alike.
+  ticked ([History's Export](#historys-export)). `.groups-header` holds Collapse all, the status line and
+  the key, on Overview and the Device tab alike.
 - **The address** is `/history/overview` with the window's keys and `device`; bare `/history` opens
   Overview too (`historyPath()`, `overviewAddress()`), and `/history/device` is the picker.
 

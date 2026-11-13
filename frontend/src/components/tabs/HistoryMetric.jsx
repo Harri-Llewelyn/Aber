@@ -339,7 +339,7 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
           <LoadingState label="readings" />
         ) : (
           <>
-            <div className="history-header">
+            <div className="groups-header">
               <p className="history-meta" role="status">
                 {multiplesWords({ shown: keys.length, silent: 0, resolution: reading.resolution, reads: reading.reads, stateLine: stateLine?.line ?? null, noun: 'device' })}
                 {reading.loading && ' · reading again…'}

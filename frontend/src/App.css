@@ -5597,11 +5597,14 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   flex: 0 1 auto;
 }
 
-/* The row above the timeline, holding the key and Expand all, inset as a card body is. */
-.trail-header {
+/* The row above a page's groups: the control that acts on them first, at the far left over the
+   headings, then what the page puts beside it (a status line, a key). The Audit Trail, History,
+   Metrics and Vocabulary draw it with this one class, inset as a card body is and with the same
+   room above and below; what follows it adds none of its own. A page's key that sits at the row's
+   right-hand end takes `margin-left: auto`, as .trail-legend does. */
+.groups-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
   gap: 6px 16px;
   padding: 10px var(--inset);
@@ -6041,16 +6044,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     color-mix(in srgb, var(--text-dim) 30%, transparent) 0 1px, transparent 1px 7px);
 }
 
-/* The row above the charts and Overview's lanes: Expand all or Collapse all at its start, as
-   .trail-header has it, then the line saying what is shown. The same room above and below as
-   .trail-header, so the three pages' rows read alike; what follows it adds none of its own. */
-.history-header {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  padding: 10px var(--inset);
-}
+/* The line saying what is shown, beside Expand all in .groups-header above the charts and
+   Overview's lanes. */
 .history-meta {
   margin: 0;
   font-size: 12px;
@@ -6250,7 +6245,7 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .alert-history-ack-who { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--text-primary); }
 .alert-history-ack-who svg { flex-shrink: 0; color: var(--success-text); }
 /* What the device page shows under its toolbar; its width sets the text charts' buckets. It is the
-   card's .card-fill-scroll.trail-timeline, so .history-header stays and .trail-scroll holds the
+   card's .card-fill-scroll.trail-timeline, so .groups-header stays and .trail-scroll holds the
    groups; a chart takes that scroller's width, less its scrollbar. */
 .history-body { min-width: 0; }
 /* The charts in groups by datatype, each under a heading strip that opens and closes it, as the
