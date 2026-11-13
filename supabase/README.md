@@ -5394,6 +5394,49 @@ evaluator word their value and threshold with `automation_value_words()` and `au
 beside a derived one, and an alert that fires, holds and resolves. With `ABER_TEST_HISTORIAN`, one more reads a
 derived rate through a real historian's real-time rollup and `postgres_fdw`, and fires on it.
 
+### A device's name and a gateway's name cannot be blank (0284)
+
+`devices.name` and `gateways.name` were `NOT NULL` and nothing more, so `''` and a name of spaces were
+stored. A write reached them from the API, PostgREST, an approved proposal, a machine identity that may
+write, an import or a script, none of which passes through the dashboard's dialogs. The row then showed
+as a blank line on its page, a blank pin label on the Site Map and a blank entry in the search and the
+i3X address space.
+
+- **Two CHECKs, `devices_name_not_blank` and `gateways_name_not_blank`: `btrim(name) <> ''`.** Each is
+  declared as `0001` declares a constraint, compared by `live_constraint_definition()` and added only
+  where it is missing, so a replay scans nothing and keeps the constraint's oid. `btrim` removes
+  spaces only: a name of tabs or line breaks is still stored. The areas' and cells' own CHECKs
+  (`areas_name_topic_safe`, `cells_name_topic_safe`) refuse an empty name and do not trim it, so a
+  name of spaces is a name there.
+- **A row that is already blank is named, never renamed.** Adding a CHECK scans the table and fails on
+  such a row with a message that names none. So the file looks first, in each table whose CHECK is not
+  there yet, and raises one error that names every blank row: its table, id, Sparkplug id and what
+  the name holds. db-init stops there, so no migration after `0284` is applied, and the upgrade guide
+  (`help/site/upgrading.md`, *From 1.9.0, a device or a gateway cannot have a blank name*) gives the
+  query that finds them beforehand. An operator decides what each one is called, or deletes it. A
+  fresh install and the dev stack have none.
+- **Nothing in the platform writes a blank name.** `ingest_register_quarantined_device()` refuses an
+  empty `p_name`, `approve_quarantined_device()` keeps the current name when it is given a blank one,
+  and a replay lane's device is named after its original.
+- **Every way in is held, and says so differently.** A write through the API or the service role
+  fails with SQLSTATE 23514 naming the constraint, which PostgREST answers with HTTP 400. The
+  dashboard's `api.js` turns that into "Give the device a name" or "Give the gateway a name" on the
+  four writes (create and update, for each), where it already does so for `gateways_sparkplug_group_format`.
+  Any other error comes back as it came. An approved proposal that carries a blank name fails inside
+  the approver's transaction, as an icon nobody drew does for an area: the proposal stays open and
+  the row keeps its name. Filing the proposal is not refused, so the person who decides is the one
+  told.
+- **The dialogs are unchanged.** The New Device and Register Gateway dialogs already hold Save until
+  there is a name, and the database's refusal is the backstop for every other writer. Check 352 of
+  `scripts/check-docs-drift.mjs` holds the two sentences, the constraints they answer and the guide's
+  words together.
+
+`test_a_device_or_gateway_name_cannot_be_blank.py` holds each CHECK on both tables (an empty name, a
+name of spaces and a real name, on an insert and on an update), the Administrator's write through the
+API's role, the service role and an approved proposal, and the file itself run inside a transaction:
+every blank row named with its Sparkplug id and nothing renamed, only the table without its CHECK
+scanned, and the upgrade passing once the rows are named.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

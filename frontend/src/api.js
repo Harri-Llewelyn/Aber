@@ -120,6 +120,18 @@ async function loadDeviceLocations() {
 // submits exactly that.
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
 
+// devices_name_not_blank and gateways_name_not_blank refuse a name of nothing or of spaces. The
+// constraint's name says nothing to the person who typed it, so a refusal by either says the rule;
+// any other error comes back as it was. Mirror: supabase/migrations/0284.
+const BLANK_NAME = {
+  device: { constraint: /devices_name_not_blank/, sentence: 'Give the device a name' },
+  gateway: { constraint: /gateways_name_not_blank/, sentence: 'Give the gateway a name' }
+};
+const nameRefusal = (error, kind) =>
+  error?.code === '23514' && BLANK_NAME[kind].constraint.test(error.message || '')
+    ? new Error(BLANK_NAME[kind].sentence)
+    : error;
+
 // gateways_deployment_valid's three values. Anything else reads as 'remote', the type that needs an
 // appliance, so a gateway is never created that quietly gets no hardware.
 const deploymentFrom = (v) => (v === 'host' || v === 'third_party' ? v : 'remote');
@@ -3981,7 +3993,7 @@ const apiMethods = {
         status: body.status || 'OFFLINE',
         ...locationFieldsFrom(body)
       }).select();
-      if (error) throw error;
+      if (error) throw nameRefusal(error, 'gateway');
       return data?.[0] || {};
     }
 
@@ -4000,7 +4012,7 @@ const apiMethods = {
         // means "inherit from the gateway".
         ...locationFieldsFrom(body)
       }).select();
-      if (error) throw error;
+      if (error) throw nameRefusal(error, 'device');
       return data?.[0] || {};
     }
 
@@ -4349,7 +4361,7 @@ const apiMethods = {
         if (error.code === '23514' && /gateways_sparkplug_group_format/.test(error.message || '')) {
           throw new Error(sparkplugGroupProblem(patch.sparkplug_group) || 'That Sparkplug group was refused.');
         }
-        throw error;
+        throw nameRefusal(error, 'gateway');
       }
       return data[0];
     }
@@ -4420,7 +4432,7 @@ const apiMethods = {
       // data-path change and must not silently relocate the asset.
       Object.assign(patch, locationFieldsFrom(body));
       const { data, error } = await supabase.from('devices').update(patch).eq('id', id).select();
-      if (error) throw error;
+      if (error) throw nameRefusal(error, 'device');
       return data[0];
     }
 
