@@ -762,7 +762,7 @@ supabaseStorage:
   enabled: true
   image:
     repository: supabase/storage-api
-    tag: v1.81.0
+    tag: v1.90.0
     pullPolicy: IfNotPresent
   # One replica on the file backend (a single-writer ReadWriteOnce PVC). s3 lifts that.
   replicas: 1
