@@ -998,8 +998,9 @@ groups:
           entity_type: platform
         annotations:
           summary: >-
-            The ingestion daemon cannot reach TimescaleDB while telemetry is arriving. Readings are
-            being dropped for as long as this lasts and will not be restated.
+            The ingestion daemon cannot reach TimescaleDB while telemetry is arriving. Readings wait
+            in the daemon's queue until it is full, and are dropped after that; a dropped reading is
+            not restated.
         data:
           - refId: A
             relativeTimeRange:
