@@ -13,7 +13,7 @@ import { allFiles, fail, isDriftCheck, pass, read } from './lib.mjs';
 // target for the platform, so the phrases below are the ones that assert one.
 //
 // The three documents that carry the comparison as history are exempt, each opening with a note
-// saying so, and this file is exempt because it has to name the phrases to look for them.
+// saying so. The drift checks are exempt, because this one has to name the phrases to look for them.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
   const HISTORY = [

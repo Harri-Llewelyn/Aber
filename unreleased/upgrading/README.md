@@ -7,7 +7,8 @@ release folds them into [the upgrade guide](../../help/site/upgrading.md).
 
 1. Create `unreleased/upgrading/<name>.md`. The name is lower case, with hyphens.
 2. Write one whole section and nothing else. Its first line is `### From X.Y.Z, <what changes>`,
-   where X.Y.Z is the release the site upgrades from. Use `####` for its parts.
+   where X.Y.Z is the release that brings the change, for example `### From 1.9.0, ...`. Use `####`
+   for its parts.
 3. Write each link relative to this file. The release rewrites it for the guide, and a link to
    another note here becomes a link to that note's section.
 4. Run `node scripts/check-docs-drift.mjs`. The checks read the guide as it will be after the

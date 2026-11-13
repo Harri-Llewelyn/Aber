@@ -73,8 +73,8 @@ export default function check() {
     let claims = 0;
     for (const f of allFiles) {
       if (RECORD.test(f) || !SURFACE.test(f)) continue;
-      // This file states both fixtures above as literals, which are the pattern's test data and
-      // not a claim about what the chart pins.
+      // The drift checks are skipped: this one states both fixtures above as literals, which are
+      // the pattern's test data and not a claim about what the chart pins.
       if (isDriftCheck(f)) continue;
       const body = read(f);
       if (declaresItselfHistorical(body)) continue;

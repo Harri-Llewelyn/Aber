@@ -44,7 +44,7 @@
  *   * pytest is not a dependency of this repository. It is installed in CI for exactly ONE suite
  *     -- ingestion/test_cold_archive.py, which is written in its style and declares
  *     `runner: pytest` in its header -- and making it the runner for everything would mean the two
- *     problems above, for the other fifty-two, to buy nothing they need.
+ *     problems above, for every other suite, to buy nothing they need.
  *
  * One process per suite keeps today's semantics precisely and buys discovery anyway. The startup
  * cost is about 300ms a suite, against a CI job measured in minutes.
