@@ -1791,6 +1791,10 @@ tbody tr:hover { background: var(--bg-glass); }
    The top margin stays, as the gap above. */
 .card-body > .callout, .modal .callout { margin-inline: 0; }
 
+/* A callout in a dialog's body is set off from what follows it (a table, a list, a form) by the gap
+   it leaves above itself, 12px. Another callout after it already has that gap as its own top margin. */
+.modal-body > .callout:has(+ :not(.callout)) { margin-bottom: 12px; }
+
 /* The page banner: a callout above a page's first card, as `callout callout-warning callout-page`
    with an icon element first and ONE body element (a div or span) after it. Full width, wraps, and
    the icon centres against the text. AFTER `.callout`, not before: equal specificity, so the later

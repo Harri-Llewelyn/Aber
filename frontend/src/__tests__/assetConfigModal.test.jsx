@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AssetConfigModal } from '../components/modals/AssetConfigModal'
 import { api } from '../api'
+import { gatewayUrl } from '../routes'
 
 /**
  * Device Configuration Parameters: a five-column table whose metric names are paths that differ in
@@ -252,5 +253,145 @@ describe('Configuration Parameters: sorting by a column (#801)', () => {
     sortBy('Datatype')
     expect(names()).toEqual(['Controller/EMERGENCY_STOP', 'Axes/X/DISPLACEMENT', 'Axes/Y/DISPLACEMENT'])
     expect(window.location.pathname + window.location.search).toBe('/devices?sort=-name')
+  })
+})
+
+describe('Configuration Parameters: what the dialog names, and how it says a device is offline', () => {
+  const DEVICE_UUID = '9b0c5d5e-1a2b-4c3d-8e4f-000000000042'
+  const GATEWAY_UUID = '16000000-0000-4000-8000-000000000001'
+  /** A device that has published before and is now offline, behind a gateway the row names. */
+  const offline = (over = {}) => asset({
+    asset_id: DEVICE_UUID,
+    asset_name: 'Assembly Device',
+    status: 'OFFLINE',
+    first_dbirth_at: '2026-08-01T08:00:00Z',
+    active_gateway_id: GATEWAY_UUID,
+    gateway_name: 'Playback',
+    ...over
+  })
+  const lane = (over = {}) => offline({ asset_name: 'Assembly Device (replay)', shadow_of: 'dev-1', ...over })
+  const open = async (a) => {
+    render(<AssetConfigModal asset={a} schemas={[]} onClose={vi.fn()} />)
+    await screen.findByText('Axes/X/DISPLACEMENT')
+  }
+  const callouts = () => [...document.querySelectorAll('.modal-body .callout')]
+  const rule = (selector) => {
+    const at = APP_CSS.indexOf(`\n${selector} {`)
+    return at < 0 ? '' : APP_CSS.slice(at, APP_CSS.indexOf('}', at))
+  }
+
+  describe('the gap under a callout', () => {
+    it('is the gap a callout leaves above itself, for what follows it in a dialog body', () => {
+      const above = Number(rule('.callout').match(/margin:\s*(\d+)px/)?.[1])
+      const below = rule('.modal-body > .callout:has(+ :not(.callout))')
+      expect(above).toBe(12)
+      expect(below).toMatch(new RegExp(`margin-bottom:\\s*${above}px`))
+    })
+
+    it('leaves a callout followed by another to the gap that one already has', () => {
+      expect(rule('.modal-body > .callout:has(+ :not(.callout))')).not.toMatch(/margin-top/)
+    })
+
+    it('stacks the offline callout directly above the table, in the dialog body', async () => {
+      await open(offline())
+      const banner = callouts().find(c => c.classList.contains('callout-warning'))
+      expect(banner.parentElement).toHaveClass('modal-body')
+      expect(banner.nextElementSibling).toHaveClass('table-wrap')
+    })
+  })
+
+  describe('the title', () => {
+    it('names the device by its name, with no id', async () => {
+      await open(offline({ asset_name: 'Assembly Device (replay)' }))
+      const dialog = screen.getByRole('dialog', { name: 'Device Configuration Parameters — Assembly Device (replay)' })
+      expect(dialog).toBeInTheDocument()
+      expect(dialog.querySelector('.modal-title')).not.toHaveTextContent(DEVICE_UUID)
+      expect(dialog.querySelector('.modal-title .mono')).toBeNull()
+    })
+
+    it('shows no UUID of the device anywhere in the dialog', async () => {
+      await open(offline())
+      expect(screen.getByRole('dialog').textContent).not.toContain(DEVICE_UUID)
+    })
+  })
+
+  describe('the gateway in the offline callout', () => {
+    it('is named, as a link to its drawer, and the UUID is not shown', async () => {
+      await open(offline({ asset_name: 'Press 4', gateway_name: 'Line 1 Gateway' }))
+      const [banner] = callouts()
+      const link = within(banner).getByRole('link', { name: 'Line 1 Gateway' })
+      expect(link).toHaveAttribute('href', gatewayUrl(GATEWAY_UUID))
+      expect(banner.textContent).toMatch(/via gateway Line 1 Gateway\. Telemetry ingestion is suspended\./)
+      expect(banner.textContent).not.toContain(GATEWAY_UUID)
+    })
+
+    it('is blue text with no underline at rest, as a link in a callout is', () => {
+      const link = APP_CSS.match(/\n\.callout a,\n\.empty-state a \{([^}]*)\}/)?.[1] ?? ''
+      expect(link).toMatch(/color:\s*var\(--accent-text\)/)
+      expect(link).toMatch(/text-decoration:\s*none/)
+    })
+
+    it('shows its short id in mono when the row carries no name, and is still a link', async () => {
+      await open(offline({ gateway_name: null }))
+      const [banner] = callouts()
+      const link = within(banner).getByRole('link')
+      expect(link).toHaveAttribute('href', gatewayUrl(GATEWAY_UUID))
+      expect(link.querySelector('.mono')).toHaveTextContent('16000000')
+      expect(banner.textContent).not.toContain(GATEWAY_UUID)
+    })
+
+    it('says a dash when the device has no gateway', async () => {
+      await open(offline({ active_gateway_id: null, gateway_name: null }))
+      const [banner] = callouts()
+      expect(within(banner).queryByRole('link')).toBeNull()
+      expect(banner.textContent).toMatch(/via gateway —\./)
+    })
+  })
+
+  describe('a replay lane that is offline', () => {
+    it('gets an info callout saying why, not the DDEATH warning', async () => {
+      await open(lane())
+      const [banner] = callouts()
+      expect(banner).toHaveClass('callout-info')
+      expect(banner).not.toHaveClass('callout-warning')
+      expect(banner).toHaveTextContent('A replay lane publishes only while a playback runs. Its last values are from the last playback.')
+      expect(screen.getByRole('dialog').textContent).not.toMatch(/DDEATH|Telemetry ingestion is suspended/)
+      expect(document.querySelector('.callout-warning')).toBeNull()
+    })
+
+    it('says no playback has run on it yet, when it has never published', async () => {
+      await open(lane({ first_dbirth_at: null }))
+      const [banner] = callouts()
+      expect(banner).toHaveClass('callout-info')
+      expect(banner).toHaveTextContent('A replay lane publishes only while a playback runs. No playback has run on it yet.')
+      expect(banner.textContent).not.toMatch(/Its last values/)
+    })
+
+    it('says nothing while a playback is running on it', async () => {
+      await open(lane({ status: 'ONLINE' }))
+      expect(document.querySelector('.callout-info, .callout-warning')).toBeNull()
+    })
+  })
+
+  describe('a machine that is offline', () => {
+    it('keeps the DDEATH warning and its wording', async () => {
+      await open(offline())
+      const [banner] = callouts()
+      expect(banner).toHaveClass('callout-warning')
+      expect(banner).toHaveTextContent('Device Offline (DDEATH Received): This device received a Sparkplug B disconnect payload via gateway Playback. Telemetry ingestion is suspended.')
+      expect(document.querySelector('.callout-info')).toBeNull()
+    })
+
+    it('keeps the awaiting-first-birth warning for one that has never published', async () => {
+      await open(offline({ first_dbirth_at: null }))
+      const [banner] = callouts()
+      expect(banner).toHaveClass('callout-warning')
+      expect(banner).toHaveTextContent('Awaiting first birth — this device has not published yet.')
+    })
+
+    it('says nothing for one that is online', async () => {
+      await open(offline({ status: 'ONLINE' }))
+      expect(callouts()).toHaveLength(0)
+    })
   })
 })
