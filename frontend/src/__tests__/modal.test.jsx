@@ -171,6 +171,45 @@ describe('Modal', () => {
     expect(within(row).getByRole('button', { name: 'Export' })).toBeTruthy()
     expect(within(row).getByRole('button', { name: 'Close' })).toBeTruthy()
   })
+
+  describe('a long title wraps beside the close button', () => {
+    const css = fs.readFileSync(path.resolve(__dirname, '..', 'App.css'), 'utf8')
+    // jsdom lays nothing out, so the rules the header rests on are read from App.css.
+    const rule = selector => {
+      const at = css.indexOf(`\n${selector} {`)
+      return at < 0 ? '' : css.slice(at, css.indexOf('}', at))
+    }
+    const LONG = 'Play back capture — gwya271dfb9f7af449e987b7.capture.json'
+
+    it('draws the title first and the controls, header actions then the close, after it in the row', () => {
+      render(<Modal title={LONG} onClose={vi.fn()} headerActions={<button>Export</button>} />)
+      const row = document.querySelector('.modal-header-row')
+      expect([...row.children].map(c => c.className)).toEqual(['modal-title', 'modal-header-controls'])
+      expect(row.firstElementChild).toHaveTextContent(LONG)
+      const controls = [...row.lastElementChild.querySelectorAll('button')].map(b => b.textContent || b.getAttribute('aria-label'))
+      expect(controls).toEqual(['Export', 'Close'])
+    })
+
+    it('gives the title the rest of the row, wrapping inside its own column and never cut', () => {
+      const title = rule('.modal-header-row .modal-title')
+      expect(title).toMatch(/flex:\s*1 1 12ch/)
+      expect(title).toMatch(/min-width:\s*0/)
+      expect(title).toMatch(/overflow-wrap:\s*anywhere/)
+      expect(title).not.toMatch(/text-overflow|white-space:\s*nowrap|overflow:\s*hidden/)
+      expect(rule('.modal-header-row .modal-title > span')).toMatch(/min-width:\s*0/)
+    })
+
+    it('keeps the controls their size and the row top-aligned, so the close stays on the first line', () => {
+      expect(rule('.modal-header-controls')).toMatch(/flex:\s*none/)
+      expect(rule('.modal-header-row')).toMatch(/align-items:\s*flex-start/)
+    })
+
+    it('lets a wide set of controls narrow to the row and wrap inside itself', () => {
+      expect(rule('.modal-header-controls')).toMatch(/max-width:\s*100%/)
+      expect(rule('.modal-header-row')).toMatch(/flex-wrap:\s*wrap/)
+      expect(rule('.shopfloor-legend')).toMatch(/flex-wrap:\s*wrap/)
+    })
+  })
 })
 
 describe('ConfirmModal on the shell', () => {

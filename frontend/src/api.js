@@ -120,6 +120,18 @@ async function loadDeviceLocations() {
 // submits exactly that.
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
 
+// devices_name_not_blank and gateways_name_not_blank refuse a name of nothing or of spaces. The
+// constraint's name says nothing to the person who typed it, so a refusal by either says the rule;
+// any other error comes back as it was. Mirror: supabase/migrations/0284.
+const BLANK_NAME = {
+  device: { constraint: /devices_name_not_blank/, sentence: 'Give the device a name' },
+  gateway: { constraint: /gateways_name_not_blank/, sentence: 'Give the gateway a name' }
+};
+const nameRefusal = (error, kind) =>
+  error?.code === '23514' && BLANK_NAME[kind].constraint.test(error.message || '')
+    ? new Error(BLANK_NAME[kind].sentence)
+    : error;
+
 // gateways_deployment_valid's three values. Anything else reads as 'remote', the type that needs an
 // appliance, so a gateway is never created that quietly gets no hardware.
 const deploymentFrom = (v) => (v === 'host' || v === 'third_party' ? v : 'remote');
@@ -2951,16 +2963,19 @@ const apiMethods = {
    * finishes meanwhile does not shift a page. `before` is the last row of the page before, its
    * created_at exactly as read: a Date would drop the microseconds and skip or repeat a row.
    * Resolves to `{ rows, remaining, more }`: `remaining` counts this page and every older row, and
-   * `more` says a row follows it. Read under the tables' own SELECT policies.
+   * `more` says a row follows it. `job` reads that one job alone, by its id: a finished job, or no
+   * row (an id that is no job's, or a job still in progress). Read under the tables' own SELECT policies.
    */
-  jobHistory: async (kind, { before = null, limit = 20 } = {}) => {
+  jobHistory: async (kind, { before = null, limit = 20, job = null } = {}) => {
     const playback = kind === 'playback';
+    if (job !== null && !JOB_HISTORY_ID.test(job)) return { rows: [], remaining: 0, more: false };
     let query = supabase
       .from(playback ? 'playback_jobs' : 'capture_jobs')
       .select(playback
         ? '*, gateways(name, sparkplug_id), captures(note, subject_sparkplug_id)'
         : '*, gateways(name, sparkplug_id), devices(name, sparkplug_id)', { count: 'exact' })
       .in('status', ['COMPLETED', 'FAILED', 'CANCELLED']);
+    if (job !== null) query = query.eq('id', job);
     if (before) {
       // Both halves go into the filter's text, so each must be what the database wrote.
       if (!JOB_HISTORY_STAMP.test(before.created_at || '') || !JOB_HISTORY_ID.test(before.id || '')) {
@@ -3978,7 +3993,7 @@ const apiMethods = {
         status: body.status || 'OFFLINE',
         ...locationFieldsFrom(body)
       }).select();
-      if (error) throw error;
+      if (error) throw nameRefusal(error, 'gateway');
       return data?.[0] || {};
     }
 
@@ -3997,7 +4012,7 @@ const apiMethods = {
         // means "inherit from the gateway".
         ...locationFieldsFrom(body)
       }).select();
-      if (error) throw error;
+      if (error) throw nameRefusal(error, 'device');
       return data?.[0] || {};
     }
 
@@ -4346,7 +4361,7 @@ const apiMethods = {
         if (error.code === '23514' && /gateways_sparkplug_group_format/.test(error.message || '')) {
           throw new Error(sparkplugGroupProblem(patch.sparkplug_group) || 'That Sparkplug group was refused.');
         }
-        throw error;
+        throw nameRefusal(error, 'gateway');
       }
       return data[0];
     }
@@ -4417,7 +4432,7 @@ const apiMethods = {
       // data-path change and must not silently relocate the asset.
       Object.assign(patch, locationFieldsFrom(body));
       const { data, error } = await supabase.from('devices').update(patch).eq('id', id).select();
-      if (error) throw error;
+      if (error) throw nameRefusal(error, 'device');
       return data[0];
     }
 

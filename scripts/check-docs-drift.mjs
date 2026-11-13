@@ -12,7 +12,7 @@
  * No YAML dependency: this runs in CI before any `npm install`, and the shapes it reads are narrow.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve, normalize, posix } from 'node:path';
 
 import { LANES, SUITES, auditSuites, suitesInLane } from './python-suites.mjs';
@@ -122,6 +122,106 @@ const gitignored = (path) => IGNORED.some((p) => p.test(path));
   for (const r of missing) fail(`${r.file} names "${r.heading}" in ${GUIDE}, which has no such heading`);
   if (!refs.length) fail(`check 152 found no reference to a heading of ${GUIDE}, so it compares nothing`);
   else if (!missing.length) pass(`the ${refs.length} references to a heading of ${GUIDE} outside markdown name one`);
+}
+
+// -------------------------------------------------------------------------------------------------
+// 351. 0284's refusal of a blank device or gateway name is described as the file holds it. Each table
+// gets one CHECK, `btrim(name) <> ''`. The error that stops an upgrade on a blank row names a heading
+// of the upgrade guide (check 152 reads no .sql file), and that section's query finds the rows by the
+// negation of the CHECK, over both tables, so a site that finds none is a site the migration passes.
+// The README's section is the one the file's header cites.
+// -------------------------------------------------------------------------------------------------
+{
+  const FILE = 'supabase/migrations/0284_a_device_or_gateway_name_cannot_be_blank.sql';
+  const sql = read(FILE);
+  const guide = read('help/site/upgrading.md');
+  const problems351 = [];
+  for (const table of ['devices', 'gateways']) {
+    const add = sql.match(new RegExp(`ADD CONSTRAINT ${table}_name_not_blank CHECK \\(\\(btrim\\(name\\) <> ''::text\\)\\);`, 'g')) || [];
+    if (add.length !== 1) problems351.push(`${FILE} declares ${table}_name_not_blank ${add.length} times as btrim(name) <> '', not once`);
+  }
+  if (!sql.includes("<> 'CHECK ((btrim(name) <> ''''::text))'")) {
+    problems351.push(`${FILE}'s guard does not compare each constraint with CHECK ((btrim(name) <> ''::text))`);
+  }
+  const heading = sql.match(/help\/site\/upgrading\.md, "([^"]+)"/)?.[1];
+  const start = heading ? guide.indexOf(`\n### ${heading}\n`) : -1;
+  if (!heading) {
+    problems351.push(`${FILE} names no heading of help/site/upgrading.md in its error`);
+  } else if (start < 0) {
+    problems351.push(`${FILE} names "${heading}" in help/site/upgrading.md, which has no such heading`);
+  } else {
+    if (!heading.startsWith('From 1.9.0, ')) problems351.push(`the upgrade guide's section "${heading}" is not a "From 1.9.0, ..." section`);
+    const end = guide.indexOf('\n## ', start);
+    const nextSection = guide.indexOf('\n### ', start + 5);
+    const section = guide.slice(start, [end, nextSection].filter((n) => n > 0).sort((a, b) => a - b)[0]);
+    for (const table of ['devices', 'gateways']) {
+      if (!section.includes(`FROM public.${table} WHERE btrim(name) = ''`)) {
+        problems351.push(`"${heading}" does not find blank rows with FROM public.${table} WHERE btrim(name) = '', the negation of the CHECK`);
+      }
+    }
+    if (!section.includes('migration `0284`')) problems351.push(`"${heading}" does not name migration \`0284\``);
+    if (!/Sparkplug id/.test(sql) || !section.includes('sparkplug_id')) {
+      problems351.push(`"${heading}" and the error do not both name the Sparkplug id of each blank row`);
+    }
+  }
+  const title = sql.match(/Reasoning: supabase\/README\.md, "([^"]+)"/)?.[1];
+  if (!title || !read('supabase/README.md').includes(`\n### ${title}\n`)) {
+    problems351.push(`${FILE} cites ${title ? `"${title}"` : 'no section'} in supabase/README.md, which has no such heading`);
+  }
+  if (problems351.length) {
+    fail('0284\'s blank-name refusal is described otherwise than the file holds it:\n' +
+      problems351.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`0284 declares one btrim(name) <> '' CHECK on devices and on gateways, and "${heading}" finds the rows it stops on`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 352. The dashboard answers a refused blank name with the rule, as the guide and the README say it.
+// api.js maps devices_name_not_blank and gateways_name_not_blank, the constraints 0284 declares, to
+// "Give the device a name" and "Give the gateway a name", on the create and the update of each. The
+// upgrade guide and supabase/README.md quote both sentences and name both constraints.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const sql = read('supabase/migrations/0284_a_device_or_gateway_name_cannot_be_blank.sql');
+  const problems352 = [];
+  const sentences = [];
+  for (const [kind, table] of [['device', 'devices'], ['gateway', 'gateways']]) {
+    const mapped = api.match(new RegExp(`${kind}: \\{ constraint: /(\\w+)/, sentence: '([^']+)' \\}`));
+    if (!mapped) {
+      problems352.push(`frontend/src/api.js has no BLANK_NAME entry for a ${kind}`);
+      continue;
+    }
+    const [, constraint, sentence] = mapped;
+    sentences.push([constraint, sentence]);
+    if (constraint !== `${table}_name_not_blank` || !sql.includes(`ADD CONSTRAINT ${constraint} CHECK`)) {
+      problems352.push(`api.js answers ${constraint} for a ${kind}, which 0284 does not declare as ${table}_name_not_blank`);
+    }
+    if (sentence !== `Give the ${kind} a name`) problems352.push(`api.js says "${sentence}" for a blank ${kind} name, not "Give the ${kind} a name"`);
+    const uses = (api.match(new RegExp(`nameRefusal\\(error, '${kind}'\\)`, 'g')) || []).length;
+    if (uses !== 2) problems352.push(`api.js uses nameRefusal for a ${kind} on ${uses} writes, not the create and the update`);
+  }
+  const guide = read('help/site/upgrading.md');
+  const readme = read('supabase/README.md');
+  const from = readme.indexOf("\n### A device's name and a gateway's name cannot be blank (0284)\n");
+  const readmeSection = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 5));
+  const guideFrom = guide.indexOf('\n### From 1.9.0, a device or a gateway cannot have a blank name\n');
+  const guideSection = guideFrom < 0 ? '' : guide.slice(guideFrom, guide.indexOf('\n## ', guideFrom));
+  if (!readmeSection) problems352.push("supabase/README.md has no \"A device's name and a gateway's name cannot be blank (0284)\" section");
+  if (!guideSection) problems352.push('help/site/upgrading.md has no "From 1.9.0, a device or a gateway cannot have a blank name" section');
+  for (const [constraint, sentence] of sentences) {
+    if (guideSection && !guideSection.includes(`\`${constraint}\``)) problems352.push(`the upgrade guide's blank-name section does not name ${constraint}`);
+    if (guideSection && !guideSection.includes(`"${sentence}"`)) problems352.push(`the upgrade guide's blank-name section does not say "${sentence}"`);
+    if (readmeSection && !readmeSection.includes(`\`${constraint}\``)) problems352.push(`supabase/README.md's 0284 section does not name ${constraint}`);
+    if (readmeSection && !readmeSection.includes(`"${sentence}"`)) problems352.push(`supabase/README.md's 0284 section does not say "${sentence}"`);
+  }
+  if (problems352.length) {
+    fail('the dashboard, the upgrade guide and the README say a blank name\'s refusal differently:\n' +
+      problems352.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`api.js, the upgrade guide and supabase/README.md say "${sentences[0][1]}" and "${sentences[1][1]}" for the two constraints 0284 declares`);
+  }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -4117,6 +4217,83 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 371. A control for a page's groups is over them, not in the toolbar, as frontend/README.md says.
+// Every ExpandAllToggle is the first child of the row `.groups-header` and in no `.filter-bar`; the
+// row is one rule in App.css, and the two names it replaced (`.trail-header`, `.history-header`)
+// are in no document and no stylesheet. The README states the rule where it states the toolbar's.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems371 = [];
+  const ROW = '<div className="groups-header">';
+  const files = allFiles.filter((f) => /^frontend\/src\/components\/(tabs|common)\/[^/]+\.jsx$/.test(f));
+  const users = [];
+  let toggles = 0;
+  for (const file of files) {
+    const src = read(file);
+    // A JSX tag starts its line; the same words in a comment's example start with a `*`.
+    const tags = [...src.matchAll(/^[ \t]*<ExpandAllToggle\b/gm)];
+    if (!tags.length) continue;
+    users.push(file.replace(/^.*\//, ''));
+    for (const tag of tags) {
+      toggles += 1;
+      const row = src.lastIndexOf(ROW, tag.index);
+      if (row < 0 || src.slice(row + ROW.length, tag.index).trim() !== '') {
+        problems371.push(`${file}:${src.slice(0, tag.index).split('\n').length + 1} draws Expand all anywhere but first in a ${ROW}`);
+      }
+    }
+    for (const bar of src.matchAll(/<div className="filter-bar"[\s>]/g)) {
+      const body = src.slice(bar.index, bar.index + 20000);
+      const end = body.search(/\n\s*<\/div>\n\s*\n/);
+      if (/^[ \t]*<ExpandAllToggle\b/m.test(end < 0 ? body : body.slice(0, end))) {
+        problems371.push(`${file}:${src.slice(0, bar.index).split('\n').length} has Expand all in its toolbar`);
+      }
+    }
+  }
+  for (const page of ['AuditTrailTab.jsx', 'HistoryDevice.jsx', 'MetricsTab.jsx', 'VocabularyPanel.jsx']) {
+    if (!users.includes(page)) problems371.push(`${page} no longer draws ExpandAllToggle, so this check is checking less than it says`);
+  }
+  if ((read('frontend/src/App.css').match(/\n\.groups-header \{/g) || []).length !== 1) {
+    problems371.push('frontend/src/App.css does not have exactly one `.groups-header` rule');
+  }
+  for (const f of [...MARKDOWN, 'frontend/src/App.css']) {
+    if (/\.(trail|history)-header\b/.test(read(f))) problems371.push(`${f} names \`.trail-header\` or \`.history-header\`, which \`.groups-header\` replaced`);
+  }
+  const readme = read('frontend/README.md').replace(/\s+/g, ' ');
+  for (const phrase of ["A control for a page's groups sits over them, not in the toolbar", '`.groups-header`']) {
+    if (!readme.includes(phrase)) problems371.push(`frontend/README.md does not say "${phrase}"`);
+  }
+  if (problems371.length) {
+    fail('a control for a page\'s groups is not over them, or the README states it otherwise:\n'
+      + problems371.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`all ${toggles} Expand all buttons, in ${users.length} files, start a .groups-header and none is in a toolbar, and the README states the rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 372. The help says where Expand all is on each page that has it: at the start of the line above the
+// groups (check 371). The Audit Trail, History, Metrics and Vocabulary help pages each say so beside
+// the button's name, and none puts it in the toolbar.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems372 = [];
+  for (const page of ['audit-trail', 'history', 'metrics', 'vocabulary']) {
+    const named = read(`help/pages/${page}.md`).split('\n').filter((l) => /\*\*(Expand|Collapse) all\*\*/.test(l));
+    if (!named.some((l) => /at the start of the [^.]*?\b(line|row)\b/.test(l))) {
+      problems372.push(`help/pages/${page}.md never says Expand all is at the start of the line or row above the groups`);
+    }
+    for (const l of named.filter((l) => /toolbar/i.test(l))) {
+      problems372.push(`help/pages/${page}.md puts a button in the toolbar that is over the groups: ${l.slice(0, 80)}`);
+    }
+  }
+  if (problems372.length) {
+    fail('the help does not say where Expand all is as the code draws it:\n' + problems372.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the Audit Trail, History, Metrics and Vocabulary help each place Expand all at the start of the line above the groups');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 194. The Audit Trail's help names its filters' groups as constants.js holds them. The kind
 // filter's groups are AUDIT_TRAIL_ENTITY_GROUPS, each named on the page; the action groups the
 // page gives as examples are AUDIT_TRAIL_ACTION_GROUPS labels. A group renamed in the code and not
@@ -5229,6 +5406,41 @@ const OPERATOR_PAIRS = [
     fail("History's Alerts tab and its help disagree:\n" + problems240.map((p) => `      - ${p}`).join('\n'));
   } else {
     pass(`History's help says the Alerts tab lists at most ${Number(limit).toLocaleString('en-GB')} alerts, kept for ${days} days, as the upgrade guide does`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 358. Two dashboard tests wait for what they check. The History Alerts test of the limit's rule
+// mocks ALERT_HISTORY_LIMIT small, so it renders a handful of rows where the page's limit is a
+// thousand and its cost does not depend on the machine. The editor's completion test waits for the
+// completion with waitFor, not for 30 ms. frontend/README.md's Testing section gives the rule. A
+// test that rendered the real limit, or slept for the completion, fails on a busy machine for
+// nothing it checks.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems358 = [];
+  const alerts = read('frontend/src/__tests__/historyAlerts.test.jsx');
+  const real = Number(read('frontend/src/api.js').match(/^export const ALERT_HISTORY_LIMIT = (\d+);$/m)?.[1]);
+  const small = Number(alerts.match(/vi\.mock\('\.\.\/api', async \(\) => \{[\s\S]*?ALERT_HISTORY_LIMIT: (\d+),/)?.[1]);
+  if (!(real > 0)) problems358.push('could not read ALERT_HISTORY_LIMIT in frontend/src/api.js');
+  if (!(small > 0)) problems358.push("historyAlerts.test.jsx does not mock ALERT_HISTORY_LIMIT in its vi.mock of '../api'");
+  else if (real > 0 && !(small <= 10 && small < real)) problems358.push(`historyAlerts.test.jsx mocks ALERT_HISTORY_LIMIT as ${small}: a handful of rows, well under the page's ${real}`);
+  if (!alerts.includes('ended(ALERT_HISTORY_LIMIT + 1)')) problems358.push('the limit test of historyAlerts.test.jsx does not read one more than the limit, as the page asks for');
+  const editor = read('frontend/src/__tests__/automationEditor.test.jsx');
+  const completes = editor.match(/ {2}it\('completes a metric from the catalogue where the cursor is'[\s\S]*?(?=\n {2}it\()/)?.[0] ?? '';
+  if (!completes) problems358.push('automationEditor.test.jsx has no test "completes a metric from the catalogue where the cursor is"');
+  else {
+    if (!completes.includes('await waitFor(() => expect(currentCompletions(')) problems358.push("the editor's completion test does not wait for the completion with waitFor");
+    if (/setTimeout/.test(completes)) problems358.push("the editor's completion test waits for a time");
+  }
+  const testing = read('frontend/README.md').replace(/\s+/g, ' ').match(/\n?## Testing ([\s\S]*?)(?= --- ## )/)?.[1] ?? '';
+  if (!testing.includes('A test waits for the condition it checks, not for a time.')) problems358.push("frontend/README.md's Testing section does not say a test waits for its condition");
+  if (!testing.includes('mock the limit small')) problems358.push("frontend/README.md's Testing section does not say to mock a limit small");
+  if (problems358.length) {
+    fail('two dashboard tests and the Testing section disagree about what a test waits for:\n' +
+      problems358.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`historyAlerts.test.jsx mocks the limit as ${small} (the page's is ${real}), the editor's completion test uses waitFor, and the Testing section says a test waits for its condition`);
   }
 }
 
@@ -6545,6 +6757,71 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 376. The Captures and Playbacks search is stated as CaptureHistory.jsx holds it. The search reads
+// on through the older jobs, SEARCH_ROWS at most, and the help page's section on those tabs says that
+// number; it names each thing the search matches, as jobSearchText() lists them, and says the search
+// lives in the address and that `/` reaches it.
+// -------------------------------------------------------------------------------------------------
+{
+  const history = read('frontend/src/components/tabs/CaptureHistory.jsx');
+  const limit = Number(history.match(/^export const SEARCH_ROWS = (\d+)$/m)?.[1]);
+  const section = read('help/pages/capture.md').match(/^## The Captures and Playbacks tabs\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? '';
+  const problems376 = [];
+  if (!limit) problems376.push('CaptureHistory.jsx declares no SEARCH_ROWS');
+  if (!section) problems376.push('help/pages/capture.md has no "## The Captures and Playbacks tabs" section');
+  const flat = section.replace(/\s+/g, ' ');
+  if (limit && !flat.includes(`up to the newest ${limit.toLocaleString('en-GB')}`)) {
+    problems376.push(`help/pages/capture.md's Captures and Playbacks section does not say "up to the newest ${limit.toLocaleString('en-GB')}"`);
+  }
+  for (const piece of ['the note or the file name', "the subject's name and Sparkplug ID", 'who started the job', 'why it failed', "the job's ID", 'The address keeps the search', 'Press **/**']) {
+    if (section && !flat.includes(piece)) problems376.push(`help/pages/capture.md's Captures and Playbacks section does not say "${piece}"`);
+  }
+  // What jobSearchText() reads, field by field: the help's list is that list.
+  const text = history.match(/export function jobSearchText[\s\S]*?\n}\n/)?.[0] ?? '';
+  for (const field of ['note', 'storage_path', 'subject_sparkplug_id', 'requested_by', 'status', 'error', 'job.id']) {
+    if (text && !text.includes(field)) problems376.push(`jobSearchText() no longer reads ${field}, which the help says the search matches`);
+  }
+  if (!text) problems376.push('CaptureHistory.jsx declares no jobSearchText()');
+  if (problems376.length) {
+    for (const p of problems376) fail(`capture job search: ${p}`);
+  } else {
+    pass(`the Captures and Playbacks search reads on through the newest ${limit.toLocaleString('en-GB')} jobs and matches the fields its help names`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 377. A capture or playback job has one address, captureJobUrl() in routes.js, and the page reads
+// the parameter it writes. alertPage() links a job's alert by it, the Capture page's toasts do, the
+// tab reads `job` from the address and passes it to api.jobHistory(), and frontend/README.md's routing
+// table lists `job` for Capture.
+// -------------------------------------------------------------------------------------------------
+{
+  const routes = read('frontend/src/routes.js');
+  const tab = read('frontend/src/components/tabs/CaptureTab.jsx');
+  const api = read('frontend/src/api.js');
+  const history = read('frontend/src/components/tabs/CaptureHistory.jsx');
+  const problems377 = [];
+  const param = routes.match(/export const captureJobUrl = \(kind, id\) => pageUrl\('capture', \{ (\w+): id \}, `\$\{kind\}s`\)/)?.[1];
+  if (!param) problems377.push('routes.js declares no captureJobUrl(kind, id) in the shape this check reads');
+  if (param && !tab.includes(`useUrlState('${param}'`)) problems377.push(`CaptureTab.jsx does not read the "${param}" captureJobUrl() writes`);
+  if (param && !/\bjob = null\b/.test(api) && !api.includes(`${param} = null`)) problems377.push(`api.jobHistory() takes no "${param}"`);
+  if (param && !history.includes(`jobHistory(kind, { ${param}: jobId`)) problems377.push(`CaptureHistory.jsx does not read the one job through jobHistory(kind, { ${param} })`);
+  const alertPage = routes.match(/export const alertPage = [\s\S]*?\n}\n/)?.[0] ?? '';
+  if (!alertPage.includes('captureJobUrl(')) problems377.push('alertPage() does not link a job alert by captureJobUrl()');
+  if (/tabUrl\('capture', `\$\{kind\}s`\)/.test(alertPage)) problems377.push('alertPage() still opens the whole tab for a job alert');
+  const row = read('frontend/README.md').split('\n').find((l) => l.startsWith('| Capture |')) ?? '';
+  if (param && !row.includes(`\`${param}\``)) problems377.push(`frontend/README.md's routing table does not list \`${param}\` for Capture`);
+  for (const piece of ["captureJobUrl('capture'", "captureJobUrl('playback'"]) {
+    if (!tab.includes(piece)) problems377.push(`CaptureTab.jsx no longer links a toast by ${piece}`);
+  }
+  if (problems377.length) {
+    for (const p of problems377) fail(`capture job address: ${p}`);
+  } else {
+    pass(`a capture or playback job has one address, captureJobUrl(), written by the alert and the toasts and read as ?${param}= by the tab`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 115. GoTrue registers no OAuth client itself. auth.yaml sets
 // GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION to "false" and no other chart file names it, and
 // every client a migration writes into auth.oauth_clients is 'manual'. A client anyone could register
@@ -6899,6 +7176,43 @@ const OPERATOR_PAIRS = [
   } else {
     pass(`gateways.is_shadow is written by ${writers[0]} alone and devices.shadow_of by ${LANE_WRITERS[0]}() alone, `
       + `both refused to the API (${flagGuard[0]}, ${laneGuard[0]}) and never sent by the dashboard`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 349. A callout in a dialog is set off from what follows it by the gap it leaves above itself, and
+// an offline replay lane is explained rather than warned of, as frontend/README.md's *Words and
+// rules* says. App.css gives a `.callout` followed by anything but another callout, in a dialog
+// body, a bottom margin equal to the callout's own top margin; the README states that gap in
+// pixels. The Device Configuration Parameters dialog tells a replay lane by isShadowDevice(), the
+// predicate every page uses, and draws it an info callout beside the machine's warning.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems349 = [];
+  const css = read('frontend/src/App.css').replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
+  const above = Number(css.match(/\n\.callout \{[^}]*\bmargin:\s*(\d+)px\b/)?.[1]);
+  const below = Number(css.match(/\n\.modal-body > \.callout:has\(\+ :not\(\.callout\)\) \{[^}]*\bmargin-bottom:\s*(\d+)px\b/)?.[1]);
+  if (!Number.isInteger(above)) problems349.push('frontend/src/App.css has no ".callout" rule with a "margin: <N>px" top margin');
+  if (!Number.isInteger(below)) problems349.push('frontend/src/App.css has no ".modal-body > .callout:has(+ :not(.callout))" rule with a margin-bottom');
+  else if (Number.isInteger(above) && below !== above) problems349.push(`a callout in a dialog leaves ${below}px under it and ${above}px above it`);
+  const rule = read('frontend/README.md').match(/\n- \*\*Callouts in a dialog\.\*\*([\s\S]*?)\n- \*\*/)?.[1]?.replace(/\s+/g, ' ');
+  if (!rule) problems349.push('frontend/README.md has no "Callouts in a dialog." rule under Words and rules');
+  else {
+    if (Number.isInteger(above) && !rule.includes(`(${above}px)`)) problems349.push(`frontend/README.md's Callouts in a dialog does not say the gap is (${above}px), as App.css has it`);
+    if (!/offline replay lane|replay lane that is offline/.test(rule) || !/info callout/.test(rule)) problems349.push('frontend/README.md\'s Callouts in a dialog does not say an offline replay lane gets an info callout');
+  }
+  const modal = read('frontend/src/components/modals/AssetConfigModal.jsx');
+  for (const [piece, what] of [
+    ['isShadowDevice', 'tells a replay lane with isShadowDevice()'],
+    ['callout callout-info', 'draws a replay lane an info callout'],
+    ['callout callout-warning', 'keeps the warning for a machine'],
+  ]) {
+    if (!modal.includes(piece)) problems349.push(`AssetConfigModal.jsx no longer ${what} (${piece})`);
+  }
+  if (problems349.length) {
+    fail('A dialog\'s callouts are drawn otherwise than frontend/README.md says:\n' + problems349.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`a callout in a dialog leaves ${above}px under it as above it, and the Configuration Parameters dialog explains an offline replay lane in an info callout`);
   }
 }
 
@@ -7735,6 +8049,46 @@ const OPERATOR_PAIRS = [
     for (const p of problems166) fail(`shutdown budget: ${p}`);
   } else {
     pass(`a shutdown stores a capture in what the ${grace} s grace period leaves, at least ${left} s with ${upload} s for the upload, and the ingestion pod is given the grace the daemon assumes; the startup sweep spares a job quiet for under ${spare} s and the worker sweeps again after ${resweep} s`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 356. A message held alone is written once more when the connection was the fault. ingestion.py
+// tells a lost connection (an InterfaceError, or an OperationalError after which the connection
+// reports itself closed) from a bad message, retries once on a fresh connection and counts the save;
+// metrics.py maps and helps that counter, and the README's Connection handling and metrics table say
+// the same. A README that promised the retry of a code that dropped the message would send an
+// operator to the wrong counter.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems356 = [];
+  const daemon = read('ingestion/ingestion.py');
+  const metrics = read('ingestion/metrics.py');
+  const readme = read('ingestion/README.md');
+  const flat = 'write_retries_saved';
+  const series = metrics.match(new RegExp(`"${flat}": \\("([a-z_]+)", \\{\\}\\)`))?.[1];
+  if (!series) problems356.push(`could not read the series of ${flat} out of ingestion/metrics.py`);
+  else {
+    if (!metrics.includes(`"${series}":\n`)) problems356.push(`ingestion/metrics.py gives ${series} no help text`);
+    if (!readme.includes(`| \`${series}\` |`)) problems356.push(`ingestion/README.md's metrics table has no row for \`${series}\``);
+  }
+  const lost = daemon.match(/^def _connection_lost\(exc, conn\):[\s\S]*?(?=\n\S)/m)?.[0] ?? '';
+  if (!lost.includes('isinstance(exc, psycopg2.InterfaceError)')) problems356.push('_connection_lost() does not treat an InterfaceError as the connection');
+  if (!/isinstance\(exc, psycopg2\.OperationalError\) and conn\.closed != 0/.test(lost)) problems356.push('_connection_lost() does not limit an OperationalError to a connection that reports itself closed');
+  const write = daemon.match(/^ {4}def _write\(self, batch, retry=True\):[\s\S]*?(?=\n\S|\n {4}def |\n_writer )/m)?.[0] ?? '';
+  if (!write.includes('self._write(batch, retry=False)')) problems356.push('TelemetryWriter._write() does not retry a lone message exactly once');
+  if (!write.includes(`count("${flat}")`)) problems356.push(`TelemetryWriter._write() never counts ${flat}`);
+  const section = readme.match(/^### Connection handling\n[\s\S]*?(?=\n---\n)/m)?.[0].replace(/\s+/g, ' ') ?? '';
+  if (!section) problems356.push('ingestion/README.md has no "Connection handling" section');
+  for (const piece of ['`psycopg2.InterfaceError`', 'an `OperationalError` after which the connection reports itself closed',
+    '`get_timescaledb_connection()` once', 'once more', series && `\`${series.replace(/^aber_ingestion_/, '')}\``, '`write_failures_total`',
+    '`messages_dropped_total{reason="db_unavailable"}`', '`ON CONFLICT DO NOTHING`'].filter(Boolean)) {
+    if (section && !section.includes(piece)) problems356.push(`ingestion/README.md's Connection handling does not say ${piece}`);
+  }
+  if (problems356.length) {
+    fail('the writer retry and its documents disagree:\n' + problems356.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`a lone message that fails on a lost connection is written once more on a fresh one, counted by ${series}, and the Connection handling section and the metrics table say so`);
   }
 }
 
@@ -11016,6 +11370,88 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 368. The Gateways drawer shows only the rows a gateway's kind can fill, and the documents say
+// which. utils/gatewayType.js holds the rule once, as NEVER_FILLED_ROWS keyed on the kind: a Remote
+// gateway hides nothing, a Host or Simulated one hides the seven appliance rows and the three forge
+// rows, Playback and Third-party hide the health rows too. Every label in it is a row the drawer
+// draws, GatewaysTab filters its fields through it, and no condition on the Third-party kind sits
+// beside a row any more. The help names the two rows a Host gateway keeps, and the README names the
+// table.
+// -------------------------------------------------------------------------------------------------
+{
+  const { NEVER_FILLED_ROWS, GATEWAY_TYPES } = await import((await import('node:url')).pathToFileURL(join(REPO, 'frontend/src/utils/gatewayType.js')).href);
+  const tab = read('frontend/src/components/tabs/GatewaysTab.jsx');
+  const help = read('help/pages/gateways.md');
+  const readme = read('frontend/README.md');
+  const problems368 = [];
+  const APPLIANCE = ['CA Expires', 'Disk Free', 'Memory Available', 'Load (1m)', 'Flow', 'Platform', 'Custom'];
+  const FORGE = ['Bundle', 'Committed', 'Reported'];
+  const HEALTH = ['Health Reported', 'Runtime Uptime'];
+  const same = (a, b) => a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
+  const expected = {
+    [GATEWAY_TYPES.REMOTE]: [],
+    [GATEWAY_TYPES.HOST]: [...FORGE, ...APPLIANCE],
+    [GATEWAY_TYPES.SIMULATED]: [...FORGE, ...APPLIANCE],
+    [GATEWAY_TYPES.PLAYBACK]: [...FORGE, ...HEALTH, ...APPLIANCE],
+    [GATEWAY_TYPES.THIRD_PARTY]: [...FORGE, ...HEALTH, ...APPLIANCE],
+  };
+  for (const [kind, rows] of Object.entries(expected)) {
+    if (!NEVER_FILLED_ROWS[kind] || !same(NEVER_FILLED_ROWS[kind], rows)) {
+      problems368.push(`NEVER_FILLED_ROWS for ${kind} is [${(NEVER_FILLED_ROWS[kind] ?? []).join(', ')}], not [${rows.join(', ')}]`);
+    }
+  }
+  const drawn = new Set([...tab.matchAll(/^\s*label: '([^']+)',?$/gm)].map((m) => m[1]));
+  for (const label of new Set(Object.values(NEVER_FILLED_ROWS).flat())) {
+    if (!drawn.has(label)) problems368.push(`NEVER_FILLED_ROWS names "${label}", which GatewaysTab.jsx no longer draws as a row`);
+  }
+  if (!/\]\.filter\(f => gatewayShowsRow\(selected, f\.label\)\) : \[\]\}/.test(tab)) problems368.push('GatewaysTab.jsx does not filter its drawer fields through gatewayShowsRow()');
+  if (/THIRD_PARTY \? \[\] : \[/.test(tab) || /health_reported_at && gatewayType\(selected\) !== GATEWAY_TYPES\.THIRD_PARTY/.test(tab)) {
+    problems368.push('GatewaysTab.jsx tests the Third-party kind beside a row again: the rule is NEVER_FILLED_ROWS alone');
+  }
+  const drawer = help.slice(help.indexOf('- **The drawer** opens'), help.indexOf('- **Publishes under group X'));
+  if (!drawer.includes('A Host or Simulated gateway has no appliance, so once it reports it shows only **Health Reported** and **Runtime Uptime**.')) {
+    problems368.push('help/pages/gateways.md does not say a Host or Simulated gateway shows only Health Reported and Runtime Uptime');
+  }
+  if (!drawer.includes('The Playback gateway shows neither.')) problems368.push('help/pages/gateways.md does not say the Playback gateway shows neither health row');
+  if (!readme.includes('`NEVER_FILLED_ROWS`') || !readme.includes('`gatewayShowsRow()`')) problems368.push('frontend/README.md does not name NEVER_FILLED_ROWS and gatewayShowsRow()');
+  if (!readme.includes('A row the item\'s kind can never fill is not shown.')) problems368.push('frontend/README.md does not state the rule beside the drawer\'s other rules');
+  if (problems368.length) {
+    fail('the Gateways drawer\'s rows by kind and the documents disagree:\n' + problems368.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the Gateways drawer hides the ${NEVER_FILLED_ROWS[GATEWAY_TYPES.HOST].length} rows a Host or Simulated gateway can never fill and the ${NEVER_FILLED_ROWS[GATEWAY_TYPES.THIRD_PARTY].length} a Playback or Third-party one cannot, from one table, and the help and the README say so`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 369. A gateway with no repository says so in one line, and the reason is in the label's help tip
+// within the short-tooltip rule. GatewayRepositoryPanel draws one NoRepository for each of the six
+// cases, the Host's reading "None: edit it in Node-RED", and every reason is at most 35 words. The
+// help says the Repository row reads None, and the README says so beside the drawer's rules.
+// -------------------------------------------------------------------------------------------------
+{
+  const panel = read('frontend/src/components/common/GatewayRepositoryPanel.jsx');
+  const help = read('help/pages/gateways.md');
+  const readme = read('frontend/README.md');
+  const problems369 = [];
+  const cases = [...panel.matchAll(/<NoRepository\s+value="([^"]+)"\s+reason="([^"]+)"/g)];
+  if (cases.length !== 6) problems369.push(`GatewayRepositoryPanel.jsx draws ${cases.length} NoRepository cases, not the 6 a gateway can be in without a repository`);
+  if (!cases.some((m) => m[1] === 'None: edit it in Node-RED')) problems369.push('GatewayRepositoryPanel.jsx has no host-run case reading "None: edit it in Node-RED"');
+  for (const [, value, reason] of cases) {
+    const words = reason.trim().split(/\s+/).length;
+    if (words > 35) problems369.push(`the reason for "${value}" is ${words} words; a tooltip stays within about 35`);
+    if (value.length > 40) problems369.push(`"${value}" is too long for one line of a drawer`);
+  }
+  if (!panel.includes('<HelpTip text={reason} label="What Repository means"')) problems369.push('GatewayRepositoryPanel.jsx does not put the reason in the label\'s help tip');
+  if (!help.includes('its **Repository** row reads **None**, and the **?** beside the label gives the reason')) problems369.push('help/pages/gateways.md does not say the Repository row reads None, with the reason under the ?');
+  if (!readme.includes('**A missing repository is one line.**')) problems369.push('frontend/README.md does not say a missing repository is one line');
+  if (problems369.length) {
+    fail('a gateway\'s missing repository is said otherwise than the documents say it:\n' + problems369.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`a gateway with no repository says so in one line in each of ${cases.length} cases, with its reason in the label's help tip within 35 words`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 327. The API reference describes telemetry_carried_by_group() as 0276 declares it: the arguments
 // the body requires are the function's, and a row has the columns it returns. A reader building on
 // the reference sends an argument the function does not take, or looks for a column it does not return.
@@ -11524,6 +11960,88 @@ const EXPORT_ENTRY_TABS = EXPORT_ENTRY_FILES.map((f) => f.match(/^frontend\/src\
 }
 
 // -------------------------------------------------------------------------------------------------
+// 373. A unit is read as a symbol and exchanged as a code (frontend/README.md's rule of that name). The files
+// that put a reading's unit before a person say it with utils/units.js, and the Add Metric dialog's
+// Units list stays the codes it stores. The files that write data out never import it, so the CSV
+// export, the AAS exports and the API keep the catalogue's code, which other programs read.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems373 = [];
+  const READ_BY_A_PERSON = [
+    'frontend/src/utils/history.js',
+    'frontend/src/utils/automationEditorHelp.js',
+    'frontend/src/components/tabs/HistoryTab.jsx',
+    'frontend/src/components/tabs/MetricsTab.jsx',
+  ];
+  const LEAVES_ABER = [
+    'frontend/src/api.js',
+    'frontend/src/utils/telemetryExport.js',
+    'frontend/src/utils/downloadCSV.js',
+    'frontend/src/components/modals/TelemetryExportModal.jsx',
+  ];
+  const importsUnits = (src) => /^import [^;\n]* from '[^']*\/units(?:\.js)?'/m.test(src);
+  for (const file of READ_BY_A_PERSON) {
+    if (!importsUnits(read(file))) problems373.push(`${file} prints a unit to a person and does not import utils/units.js`);
+  }
+  for (const file of LEAVES_ABER) {
+    if (importsUnits(read(file))) problems373.push(`${file} writes data out and imports utils/units.js: an export keeps the catalogue's code`);
+  }
+  if (!/<option key=\{u\} value=\{u\}>\{u\}<\/option>/.test(read('frontend/src/components/tabs/MetricsTab.jsx'))) {
+    problems373.push("MetricsTab.jsx's Add Metric Units list no longer offers each code as it is stored");
+  }
+  const readme = read('frontend/README.md').replace(/\s+/g, ' ');
+  for (const phrase of ['A unit is a symbol where it is read, and a code where it is exchanged', '`unitAndCode()`', '`unitSymbol()`']) {
+    if (!readme.includes(phrase)) problems373.push(`frontend/README.md does not say "${phrase}"`);
+  }
+  if (problems373.length) {
+    fail('a unit is not read as a symbol and exchanged as a code, as the README says:\n' + problems373.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`${READ_BY_A_PERSON.length} files print a unit as its symbol, ${LEAVES_ABER.length} files that write data out keep the code, and the Add Metric list stays the codes`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 374. The documents name a unit's symbol as utils/units.js holds it. A pair is written "**°C** for
+// CELSIUS", or "**°C (CELSIUS)**" where the Metrics page says both; each must be the pair UNIT_SYMBOLS
+// has. History's help says the symbol is the title's, the Metrics help says both, the README states
+// both, and the Devices help's "count/h" is what a rate of COUNT reads as.
+// -------------------------------------------------------------------------------------------------
+{
+  const { UNIT_SYMBOLS, unitSymbol } = await import(pathToFileURL(join(REPO, 'frontend/src/utils/units.js')).href);
+  const problems374 = [];
+  const CODE = '[A-Z][A-Z0-9_]*(?:[/^][A-Z0-9_]+)*';
+  const FOR = new RegExp(`(?:\\*\\*|\`)([^*\`\\n]{1,12})(?:\\*\\*|\`) for \`?(${CODE})\`?`, 'g');
+  const BOTH = new RegExp(`(?:\\*\\*|\`)([^*\`()\\n]{1,12}) \\((${CODE})\\)(?:\\*\\*|\`)`, 'g');
+  const DOCS = {
+    'help/pages/history.md': 'for',
+    'help/pages/metrics.md': 'both',
+    'help/pages/vocabulary.md': 'both',
+    'frontend/README.md': 'for',
+  };
+  let pairs = 0;
+  for (const [file, form] of Object.entries(DOCS)) {
+    const text = read(file);
+    const found = [...text.matchAll(FOR), ...text.matchAll(BOTH)];
+    if (!found.some((m) => (form === 'for' ? / for /.test(m[0]) : m[0].includes('('))) ) {
+      problems374.push(`${file} names no unit pair as "${form === 'for' ? '**°C** for CELSIUS' : '**°C (CELSIUS)**'}"`);
+    }
+    for (const [, symbol, code] of found) {
+      pairs += 1;
+      if (UNIT_SYMBOLS[code] !== symbol) problems374.push(`${file} gives ${code} the symbol ${symbol}; UNIT_SYMBOLS has ${UNIT_SYMBOLS[code]}`);
+    }
+  }
+  const rate = unitSymbol('COUNT/HOUR');
+  if (!read('help/pages/devices.md').includes(`**12 ${rate}**`)) {
+    problems374.push(`help/pages/devices.md does not show a derived rate of COUNT as "12 ${rate}", as the dashboard says it`);
+  }
+  if (problems374.length) {
+    fail('the documents name a unit\'s symbol otherwise than utils/units.js holds it:\n' + problems374.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`the ${pairs} unit pairs the help and the README name are the symbols UNIT_SYMBOLS holds, and the Devices help's rate reads "${rate}"`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 199. A change to the Audit Trail's classes rebuilds the indexes built on them (0228). Each class's
 // partial index keeps the class audit_event_class() gave a row when the index was built, and CREATE
 // OR REPLACE FUNCTION does not rebuild it. So a file after 0228 that redeclares the function also
@@ -11557,6 +12075,49 @@ const EXPORT_ENTRY_TABS = EXPORT_ENTRY_FILES.map((f) => f.match(/^frontend\/src\
       problems199.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`audit_event_class() comes with its ${classes.length} class indexes in 0228, and no later file changes it without rebuilding them`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 345. A dialog's title wraps beside its close button, as frontend/README.md's *A dialog keeps its
+// buttons in view* says. App.css gives `.modal-header-row .modal-title` the rest of the row
+// (`flex: 1 1 <N>ch`), `overflow-wrap: anywhere` and no ellipsis, and `.modal-header-controls`
+// `flex: none`; the section names that N in "<N> characters", the room the title keeps before
+// controls too wide for it wrap below. A title cut with an ellipsis hides the end of a file name,
+// and controls that shrink let a long title push the close button onto a line of its own.
+// -------------------------------------------------------------------------------------------------
+{
+  const css = read('frontend/src/App.css').replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
+  // The body of the rule that starts a line with `selector`, found as text, not as a built pattern.
+  const ruleBody = (selector) => {
+    const head = `\n${selector} {`;
+    const at = css.indexOf(head);
+    if (at === -1) return undefined;
+    const end = css.indexOf('}', at + head.length);
+    return end === -1 ? undefined : css.slice(at + head.length, end);
+  };
+  const problems345 = [];
+  const title = ruleBody('.modal-header-row .modal-title');
+  const controls = ruleBody('.modal-header-controls');
+  const room = Number(title?.match(/flex:\s*1 1 (\d+)ch\b/)?.[1]);
+  if (title === undefined) problems345.push('frontend/src/App.css has no ".modal-header-row .modal-title" rule');
+  else {
+    if (!Number.isInteger(room)) problems345.push('".modal-header-row .modal-title" in frontend/src/App.css is not "flex: 1 1 <N>ch"');
+    if (!/overflow-wrap:\s*anywhere/.test(title)) problems345.push('".modal-header-row .modal-title" does not wrap a long unbroken word (overflow-wrap: anywhere)');
+    if (/text-overflow|white-space:\s*nowrap/.test(title)) problems345.push('".modal-header-row .modal-title" cuts or holds its text on one line; a dialog title wraps');
+  }
+  if (controls === undefined) problems345.push('frontend/src/App.css has no ".modal-header-controls" rule');
+  else if (!/(?:^|[;\s])flex:\s*none\b/.test(controls)) problems345.push('".modal-header-controls" is not "flex: none", so a long title can shrink the close button');
+  const section = read('frontend/README.md').match(/\n### A dialog keeps its buttons in view\n([\s\S]*?)\n### /)?.[1]?.replace(/\s+/g, ' ');
+  if (!section) problems345.push('frontend/README.md has no "A dialog keeps its buttons in view" section');
+  else {
+    if (Number.isInteger(room) && !section.includes(`leave the title ${room} characters`)) problems345.push(`frontend/README.md's A dialog keeps its buttons in view does not say "leave the title ${room} characters", as App.css keeps for the title`);
+    if (!/never cut with an ellipsis/.test(section)) problems345.push('frontend/README.md\'s A dialog keeps its buttons in view does not say the title is "never cut with an ellipsis"');
+  }
+  if (problems345.length) {
+    fail('A dialog\'s title and its close button are laid out otherwise than frontend/README.md says:\n' + problems345.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass(`a dialog's title wraps and is never cut, the controls keep their size, and a title keeps ${room} characters before wide controls wrap below it`);
   }
 }
 

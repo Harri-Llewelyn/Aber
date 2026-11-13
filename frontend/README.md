@@ -70,6 +70,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/sparkplugDatatype.js` | `functions/_shared/aas/sparkplugToXsd.ts` |
 | `utils/model3d.js` | `functions/_shared/aas/model3dContentType.ts` |
 | `utils/standards.js` (`mtconnectSemanticId()`) | `mtconnect_vocabulary.semantic_id`, as `0002` seeds it |
+| `utils/units.js` (`UNIT_SYMBOLS`) | the units the Add Metric dialog's list offers, which `0002` seeds as the MTConnect `UNIT` and `NATIVE_UNIT` rows, the units the ISO 22400 and OPC UA rows prefill, and the example metrics' units (mirror checks 102 and 103) |
 | `utils/ashrae223.js` (`ASHRAE223_GROUP`) | the one metric group registered under ASHRAE 223P, and the group its seeded metrics file under |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
@@ -320,7 +321,8 @@ cut before the name is (`OverflowText`): a Filters panel's section says what is 
 - **Which groups are closed belongs to the viewer, in this browser.** The Audit Trail keeps its
   closed sections in localStorage (`aber_audit_trail_closed_sections`, read and written inside
   `try`), not in the address, so a shared link opens every section. Expand all and Collapse all
-  (`ExpandAllToggle`, outlined) sit at the end of the key's row.
+  (`ExpandAllToggle`, outlined) sit at the start of the row above the sections
+  ([The toolbar](#the-toolbar) says why it is not in it).
 
 ### Cut text slides on hover or focus
 
@@ -340,6 +342,29 @@ slides back when they leave.
 
 The Audit Trail's lane names use it first. The dashboard's other cut lines move onto it with
 [#1219](https://github.com/Harri-Llewelyn/Aber/issues/1219).
+
+### A unit is a symbol where it is read, and a code where it is exchanged
+
+The catalogue holds MTConnect's unit names, and a person reads `°C` for `CELSIUS`: `unitSymbol()`,
+`withUnit()` and `unitAndCode()` in `utils/units.js`, from the one map `UNIT_SYMBOLS`.
+
+- **A symbol is read** in History's chart titles, heads, ticks, ranges and heat maps, the Metric tab's
+  list, the Devices drawer's derived values and the Automations editor's help. The words functions in
+  `utils/history.js` (`readingWords()`, `chartTitle()`) say it, so a chart cannot print a code.
+- **A code is exchanged.** The export's CSV, the AAS exports and the APIs keep the catalogue's code,
+  which other programs read. The data in the page's state is the code too: the symbol is made where
+  it is printed.
+- **The Metrics page says both**, `°C (CELSIUS)` (`unitAndCode()`), in its Units column and its
+  drawer, because it is where a code is chosen. The Add Metric and Add Derived Metric dialogs, the
+  metric picker and the vocabulary pages show the code.
+- **A code with no symbol shows as it is.** A derived rate takes its counter's symbol per hour
+  (`kW/h`). `%` and `°` stand against the number (`42%`, `90°`) and any other symbol follows a space
+  (`18.8 °C`), so a range says them at each end (`0% to 50%`). A time in state is `SHARE_UNIT`, a
+  percentage of its own, and is not in the map.
+- **Checks.** Mirror checks 102 and 103 (`scripts/check-mirror-drift.mjs`) fail on a unit the Add
+  Metric dialog's list, a prefill or an example offers that has no symbol, and on a symbol no source
+  offers. Docs-drift check 373 holds the files that read to the map and the files that write data out
+  away from it, and 374 the symbols the documents name.
 
 ### A page's summary is one row of cards
 
@@ -372,6 +397,14 @@ never scrolls away and an error never pushes it down. `.modal` itself must not s
 whose list should take the leftover height passes `fill` and marks that child `modal-fill`; the
 schema builder's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
 window and is not needed any more.
+
+The header row holds the title and the controls: a dialog's `headerActions`, then the close button.
+The title takes the rest of the row and wraps inside its own column, with `overflow-wrap: anywhere`
+for a file name that has no break. It is never cut with an ellipsis, since the end of a file name
+is the part that tells two apart. The controls keep their size and sit at the top, so the close
+stays on the title's first line however long the title is. Controls too wide to leave the title 12
+characters (the Site Map's legend in the expanded plan) wrap to a line below it, and narrow to the
+row.
 
 **One metric list serves the schema builder and Add Derived Metric** (`common/MetricPicker.jsx`): the
 search, the standard filter and the grouped, tickable list. The list narrows what is shown, never
@@ -588,6 +621,24 @@ height is not known, and above the actions it could push Edit Details off the dr
 - **An entity's own page is one action away**, named for the page: "View in Devices" (`entityUrl`).
   The Audit Trail offers it for a device, gateway, cell, area or schema its lookups still hold, so a
   deleted entity gets none.
+- **A row the item's kind can never fill is not shown. A row it could fill, but has not yet, says
+  *Not set*.** A Host gateway has no appliance, so a CA expiry, a disk, memory, load, a flow hash, a
+  platform tag and a custom playbook can never be reported for it. Its drawer drew all seven, each
+  reading *Not set* for good, and its first action started at 1,073px, where a 1920×1080 screen
+  leaves 865px. The Gateways drawer keeps the rule in one table, `NEVER_FILLED_ROWS` in
+  `utils/gatewayType.js`, keyed on the gateway's kind and read by `gatewayShowsRow()`, so a row is
+  hidden by listing its label there, not by a condition beside the row.
+  - **Host and Simulated** keep Health Reported and Runtime Uptime, which a heartbeat fills, and
+    lose the seven appliance rows and the three forge rows (Bundle, Committed, Reported).
+  - **Playback** loses the health rows too: the ingestion daemon records none for a shadow gateway.
+  - **Third-party** loses every one of them, and says so in a Not Provided row.
+  - **Remote** loses none. Where it has not reported a figure the row says *Not set*. Its three
+    forge rows show only once they hold a value: as *Not set* on a new appliance they would add
+    three rows to its drawer.
+- **A missing repository is one line.** `GatewayRepositoryPanel` draws the drawer's field shape:
+  the label *Repository* with a help tip, then one muted line such as *None: edit it in Node-RED*.
+  The reason is in the tip, in about 35 words. Every case without a repository does the same:
+  Host, Simulated, Playback, Third-party, not yet enrolled, and enrolled with none created.
 
 - **The actions are two to a row** in a drawer wide enough for two 200px columns, about 440px and
   up, and one to a row below that. The first primary action and a danger action take the whole row.
@@ -1208,8 +1259,9 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
   good value is not tidied away first.
 - **A tab change drops the query**, so each tab opens on its own defaults. `keep` names the filters a
   page shares across its tabs: the Vocabulary search, and Capture's stored filter and search. A
-  function `keep(tab)` names them for the tab being opened: Capture keeps its two only between
-  Gateways and Devices, as Captures and Playbacks have no filters.
+  function `keep(tab)` names them for the tab being opened: Capture keeps the search between
+  Gateways and Devices, and between Captures and Playbacks, and the stored filter between the first
+  two only. A `job` never crosses a tab.
 - **`useUrlState` returns `[value, setValue]`**, as `useState` does. A setter reads the address when
   it runs, so several setters called in one handler compose.
 - **A new tab needs only an entry in its page's list**, in `navigation.jsx` (`DEVICES_TABS` and the
@@ -1252,12 +1304,34 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new`, for an automation whose id is `new` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
-| Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: none |
+| Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
 | Archives | `retired` | `sort` |
 | System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)) |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
 | Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
+
+### The Captures and Playbacks tabs: a search, and one job
+
+The two tabs (`components/tabs/CaptureHistory.jsx`) list the finished jobs of one kind, newest first,
+read a page at a time (`api.jobHistory()`).
+
+- **The search is the toolbar's first control**, as on every list page, and `/` focuses it. It writes
+  `?search=`. `jobSearchText()` is what it matches, one field to a line: the capture's note, the file's
+  name, the subject's name and Sparkplug ID, who started the job (their name, and their id), the status
+  as the database and the tab say it, the failure a row shows, and the job's id. The search reads on
+  through the older pages, `SEARCH_STEP` rows at a time up to `SEARCH_ROWS`, so a job past the first
+  page is found and not reported missing. Past the cap the foot says how many it did not search.
+- **`?job=<id>` lists that one job**, by `captureJobUrl(kind, id)` in `routes.js`, with a line above
+  the table saying so and Show all to leave it. It reads the job alone (`jobHistory(kind, { job })`), so
+  a job past the first page is there. A job still in progress, or an id that is no job's, is not listed:
+  the empty state says so, and the strip above the table shows the one in progress. Typing a search
+  leaves the job, and Clear filters counts it.
+- **A notification opens its job.** The toast for a recording or its stop opens Captures, one for a
+  playback or its stop opens Playbacks, each narrowed to the job (`start_capture_job()` and
+  `start_playback_job()` return its id), and a job's alert does the same from the `job` label
+  (`alertPage()`). A download and an upload make no job, so they open the subject whose capture it is.
+  The toast for a deleted capture is in `NO_LINK` (`notificationLinks.test.js`): its record is gone.
 
 ---
 
@@ -1331,13 +1405,21 @@ is below it. A page or tab with nothing to filter and no buttons draws no toolba
 **Actions are filled, filter controls are outlined.** Every action in `.filter-bar-actions` is
 `btn-primary`: New Device, Export CSV, Play a file…, Take a backup, a destination button. A filter
 control is `btn-ghost`, because it changes what the page shows rather than doing something: Clear
-filters, Filters (n), Expand all, and an on/off toggle such as Needs attention, which is filled
+filters, Filters (n), and an on/off toggle such as Needs attention, which is filled
 only while it is on, so its look says whether it is. **Amber (`btn-warning`) marks a destination
 that needs finishing**: Set a destination and Complete the destination. Backups shows two filled
 buttons side by side, Change destination and Take a backup, with the main one still last. Only the
 toolbar follows this rule: a side panel keeps exactly one primary action, and Discard stays
 outlined beside Save. `toolbarActionsFilled.test.js` reads every `.filter-bar-actions` group in
 the source and fails on an outlined button written into one.
+
+**A control for a page's groups sits over them, not in the toolbar.** Expand all and Collapse all
+(`ExpandAllToggle`) act on the groups the page draws, not on what it filters, so they are the first
+control, at the far left, of the row above the groups. That row is `.groups-header`, which the Audit
+Trail, History, Metrics and Vocabulary all use. A line saying what is shown goes beside it, as on
+History, and a key goes at its right-hand end. The row sits outside the scroller, so it stays on
+screen. Check 371 (`scripts/check-docs-drift.mjs`) reads the source and fails on a toggle written
+into a toolbar, or anywhere but first in this row.
 
 **Refresh and its interval are one control**, `RefreshButton` (`common/RefreshButton.jsx`), as
 Grafana's refresh picker is. The filled Refresh button reads again now. The select joined to its
@@ -1588,7 +1670,7 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   Metrics page names the type (`datatypeLabel()`) and in `GROUP_ORDER`: Double, Float, the
   integers, Boolean, String, Text, any other type by its code, then Other for a metric the catalog
   does not know. Each group is a `GroupHeading` with its count, which opens and closes it, and
-  `ExpandAllToggle` does every group from the start of the row above the charts (`history-header`), as the Audit Trail has it over its sections. A closed
+  `ExpandAllToggle` does every group from the start of the row above the charts (`groups-header`), as the Audit Trail has it over its sections. A closed
   group only unmounts its charts: the reads, the row cap and the Metrics filter are unchanged. Which
   are closed is kept in this browser (`CLOSED_GROUPS_KEY`, localStorage, by datatype code, read and
   written in try/catch), not in the address. The Metrics dropdown's options carry the same
@@ -1683,8 +1765,8 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   box, and focus goes back to the box's first lane. The tick boxes (`?device=`, telemetry keys) are
   the other way: the toolbar's **Chart** charts them at the control's window.
   **Export CSV** is in the popover, after Zoom, and in the toolbar beside Chart for the devices
-  ticked ([History's Export](#historys-export)). `.history-header` holds Collapse all, the status line and
-  the key, with `.trail-header`'s room above and below, on Overview and the Device tab alike.
+  ticked ([History's Export](#historys-export)). `.groups-header` holds Collapse all, the status line and
+  the key, on Overview and the Device tab alike.
 - **The address** is `/history/overview` with the window's keys and `device`; bare `/history` opens
   Overview too (`historyPath()`, `overviewAddress()`), and `/history/device` is the picker.
 
@@ -1723,7 +1805,7 @@ flag steps between false and true, and a state is a strip of its runs in text.
 
 | Prop | What it is |
 | :--- | :--- |
-| `metric`, `unit` | The title, "Spindle/LOAD (kW)", which names the figure and its chart |
+| `metric`, `unit` | The title, "Spindle/LOAD (kW)", which names the figure and its chart. `unit` is the catalogue's code, `KILOWATT`; the chart says its symbol |
 | `starts` | Each bucket's start in seconds: `bucketStarts(start, end, minutes)` |
 | `series` | `chartSeries(rows, starts)`: `kind`, then `avg`, `min`, `max`, `carried`, `states` and `last`, one entry a bucket |
 | `start`, `end` | The window in milliseconds. The time axis is exactly the window |
@@ -2238,6 +2320,11 @@ in "building management system".
   listed first, picked in the order under [The drawer is `ContextPanel`](#the-drawer-is-contextpanel).
 - **Tables.** Every header row, group band and section band is one opaque colour, `--bg-base`
   ([Table and Row Conventions](#table-and-row-conventions)).
+- **Callouts in a dialog.** A callout in a dialog's body leaves the gap it has above itself (12px)
+  before a table, a list or a form, so a banner never sits flush on what it qualifies. One rule in
+  `App.css` does it for every dialog. A replay lane that is offline gets an info callout, not the
+  DDEATH warning: a lane is offline between playbacks by design (the Device Configuration
+  Parameters dialog).
 - **Colour is never the only signal.** Tabs, sidebar flags, warning buttons and the Audit Trail
   markers each carry an icon, a shape or a number as well (WCAG 2.2 SC 1.4.1).
 - **The sidebar** colours an icon only when the viewer can act on what it flags, and shows how many.
@@ -2845,6 +2932,13 @@ Vitest with globals enabled and a jsdom environment. **3,851 tests across 162 fi
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.
+
+A test waits for the condition it checks, not for a time. Use `waitFor` or a `findBy` query. A fixed
+`setTimeout` wait passes on a quiet machine and fails on a busy one, and one long enough for the
+busiest machine slows every run. When the rule under test is about a limit the page reads from
+`../api`, mock the limit small in that test, as `historyAlerts.test.jsx` does for
+`ALERT_HISTORY_LIMIT`, so the test does not render a thousand rows to check a line of text. Some
+older tests still wait for a time. Change each to a condition when you touch it.
 
 ---
 

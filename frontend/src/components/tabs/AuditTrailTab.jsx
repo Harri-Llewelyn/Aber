@@ -2192,7 +2192,7 @@ export function AuditTrailTab({ userRole, showToast }) {
               opens or closes every section, over the section headings it acts on, and the key at
               the row's right-hand end, over the tracks it explains. How much of the trail is loaded
               is stated at the foot, beside Show more. */}
-          <div className="trail-header">
+          <div className="groups-header">
             <ExpandAllToggle
               anyOpen={sections.some(s => s.open)}
               onExpandAll={() => setSectionsOpen(sections.map(s => s.kind), true)}
