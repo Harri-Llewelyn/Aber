@@ -197,7 +197,7 @@ describe('proposing a change from a device', () => {
     expect(document.querySelector('#device-conformance').closest('.form-group').querySelector('.form-hint-locked')).toBeTruthy()
   })
 
-  it('shows nobody the note about who moves a device on a replay lane, where nobody does', async () => {
+  it('shows a replay lane its gateway as text, with no note about who moves it, where nobody does', async () => {
     const lane = device({ asset_id: 'bbbbbbbb-0000-4000-8000-000000000002', asset_name: 'CNC_01 (replay)', shadow_of: DEVICE_ID })
     await show(asOperator, [device(), lane])
     fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
@@ -208,11 +208,14 @@ describe('proposing a change from a device', () => {
     clickAction('Propose a Change')
     await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
 
-    const gateway = document.querySelector('#device-gateway').closest('.form-group')
+    // Fixed for everyone, so a label and not a greyed select; the other withheld fields stay controls.
+    expect(document.querySelector('#device-gateway')).toBeNull()
+    const gateway = within(document.querySelector('.modal')).getByText('Serving Gateway').closest('.form-group')
+    expect(gateway.querySelector('select, input')).toBeNull()
     expect(gateway.querySelector('.form-hint-locked')).toBeNull()
     expect(gateway.textContent).not.toMatch(/data path/)
     expect(gateway.textContent).toMatch(/This is a replay lane\. It stays on the Playback gateway/)
-    expect(document.querySelector('#device-gateway').disabled).toBe(true)
+    expect(document.querySelector('#device-conformance').disabled).toBe(true)
     // The schema and conformance notes are still true for a lane.
     expect(document.querySelectorAll('.form-hint-locked')).toHaveLength(2)
   })

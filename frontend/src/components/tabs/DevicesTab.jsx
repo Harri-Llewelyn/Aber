@@ -1251,27 +1251,40 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="device-gateway">Serving Gateway</label>
-              {/* A replay lane's gateway is fixed for everyone, so the note about who moves it would be
-                  untrue; the hint under the field says what is. */}
-              {!editing?.shadow_of && <Withheld field="active_gateway_id" />}
-              <select id="device-gateway" className="form-control" disabled={proposeMode || !!editing?.shadow_of} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))}>
-                <option value="">— Unassigned Gateway —</option>
-                {/* A replay lane is listed but disabled rather than filtered out, so a device that
-                    is a lane still opens with its own gateway shown. The database refuses the write
-                    either way. */}
-                {gateways.filter(g => !g.is_archived).map(g => (
-                  <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
-                    {g.gateway_name} ({g.gateway_id}) — Status: {g.status}
-                    {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
-                  </option>
-                ))}
-                {/* An archived gateway is not offered, and the database refuses one. A device
-                    already on one keeps it (an unchanged gateway passes), so it stays visible. */}
-                {gateways.filter(g => g.is_archived && g.gateway_id === form.active_gateway_id).map(g => (
-                  <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name} ({g.gateway_id}) — archived</option>
-                ))}
-              </select>
+              {editing?.shadow_of ? (
+                // A replay lane stays on the Playback gateway for everyone, so it is shown as text.
+                // The form still holds the id, so a save writes it unchanged.
+                <>
+                  <div className="form-label">Serving Gateway</div>
+                  <div className="mono" style={{ fontSize: '13px', overflowWrap: 'anywhere' }}>
+                    {(() => {
+                      const lane = gateways.find(g => g.gateway_id === form.active_gateway_id)
+                      return lane ? `${lane.gateway_name} (${lane.gateway_id})` : form.active_gateway_id
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label className="form-label" htmlFor="device-gateway">Serving Gateway</label>
+                  <Withheld field="active_gateway_id" />
+                  <select id="device-gateway" className="form-control" disabled={proposeMode} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))}>
+                    <option value="">— Unassigned Gateway —</option>
+                    {/* Playback is listed but disabled rather than filtered out, so whoever looks for it
+                        finds it, with the hint beneath saying why it cannot be picked. */}
+                    {gateways.filter(g => !g.is_archived).map(g => (
+                      <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
+                        {g.gateway_name} ({g.gateway_id}) — Status: {g.status}
+                        {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
+                      </option>
+                    ))}
+                    {/* An archived gateway is not offered, and the database refuses one. A device
+                        already on one keeps it (an unchanged gateway passes), so it stays visible. */}
+                    {gateways.filter(g => g.is_archived && g.gateway_id === form.active_gateway_id).map(g => (
+                      <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name} ({g.gateway_id}) — archived</option>
+                    ))}
+                  </select>
+                </>
+              )}
               {/* Shown always: the question is why Playback cannot be picked, asked while something
                   else is selected, so the sentence names Playback rather than the selection. */}
               <div className="form-hint">

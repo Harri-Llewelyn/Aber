@@ -117,12 +117,28 @@ describe('DeviceNameplateModal', () => {
     await waitFor(() => expect(showToast).toHaveBeenCalledWith("Nameplate of 'Simulated_CNC_01' cleared", 'success', { to: deviceUrl('dev-123') }));
   });
 
-  it('is read-only without the manage permission', async () => {
+  it('shows the values as text, not greyed fields, to a role with neither right', async () => {
     respond({ stored: { device_id: 'dev-123', manufacturer_name: 'DMG Mori' } });
     render(<DeviceNameplateModal asset={asset} canManage={false} onClose={vi.fn()} />);
-    await waitFor(() => expect(fieldFor('Manufacturer').value).toBe('DMG Mori'));
+    await screen.findByText('DMG Mori');
 
-    expect(fieldFor('Manufacturer')).toBeDisabled();
+    // Nothing here changes a value, so there is no input, and no label for one to answer to.
+    expect(document.querySelector('.modal input, .modal textarea, .modal select')).toBeNull();
+    expect(screen.queryByLabelText(/^Manufacturer/)).toBeNull();
+    const cell = screen.getByText('DMG Mori').parentElement;
+    expect(cell.querySelector('.form-label')).toHaveTextContent('Manufacturer');
+    expect(cell.querySelector('.form-label').tagName).not.toBe('LABEL');
+    // What was never filled in says so, in words.
+    expect(screen.getAllByText('Not set').length).toBeGreaterThan(5);
+    // The notice says why, and offers nothing to press.
+    expect(screen.getByText(/you are reading this nameplate/i)).toBeInTheDocument();
+  });
+
+  it('keeps a field the device publishes as text with its reason, for a reader too', async () => {
+    respond({ published: { serial_number: 'SN-FROM-DBIRTH' } });
+    render(<DeviceNameplateModal asset={asset} canManage={false} onClose={vi.fn()} />);
+    await screen.findByText('SN-FROM-DBIRTH');
+    expect(screen.getAllByText(/Published by the device at DBIRTH/)).toHaveLength(1);
   });
 
   it('offers one primary control, and it says what it will actually do', async () => {

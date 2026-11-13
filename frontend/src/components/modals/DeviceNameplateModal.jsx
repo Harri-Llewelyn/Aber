@@ -104,6 +104,8 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
 
   // The footer button files a proposal for a reader who may not save.
   const proposeMode = !canManage && canPropose
+  // Neither right: the values are shown as text, since there is nothing here to change them with.
+  const reading = !canManage && !proposeMode
 
   useEffect(() => {
     let cancelled = false
@@ -243,10 +245,10 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                 const element = byIdShort.get(field.idShort)
                 const deviceValue = published[field.column]
                 const isPublished = deviceValue !== undefined
-                // Explicit htmlFor/id names the input. A published value has no control to name, so its
-                // label is a plain div.
+                // Explicit htmlFor/id names the input. A value shown as text has no control to name, so
+                // its label is a plain div.
                 const inputId = `nameplate-${field.column}`
-                const NameTag = isPublished ? 'div' : 'label'
+                const NameTag = isPublished || reading ? 'div' : 'label'
                 return (
                   <div key={field.column}>
                     {/* The tip is a SIBLING of the label, not a child: a button inside a label is
@@ -261,7 +263,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                         : null}>
                       <NameTag
                         className="form-label"
-                        htmlFor={isPublished ? undefined : inputId}
+                        htmlFor={isPublished || reading ? undefined : inputId}
                         style={{ marginBottom: 0 }}
                       >
                         {field.label}
@@ -284,6 +286,11 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                         <div className="mono" style={{ fontSize: '13px', overflowWrap: 'anywhere' }}>{String(deviceValue)}</div>
                         <div className="form-hint">Published by the device at DBIRTH, so the export uses it.</div>
                       </>
+                    ) : reading ? (
+                      // The reader's notice above says why: nothing here changes it.
+                      <div className="mono" style={{ fontSize: '13px', overflowWrap: 'anywhere' }}>
+                        {form[field.column] || <span style={{ color: 'var(--text-muted)' }}>Not set</span>}
+                      </div>
                     ) : (
                       <input
                         id={inputId}
@@ -292,7 +299,6 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                         inputMode={field.inputMode}
                         placeholder={field.placeholder || ''}
                         value={form[field.column]}
-                        disabled={!canManage && !proposeMode}
                         onChange={e => set(field.column, e.target.value)}
                       />
                     )}

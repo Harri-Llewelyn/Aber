@@ -499,14 +499,15 @@ name in `form-label` over the value, and the reason in words under it, not only 
 table cell, as on Settings, the value is `.setting-static`.
 
 - **Fixed for everyone** is a label: Add Metric's Units for a type that takes none, the Sparkplug
-  group and the archive site key, a nameplate value the device publishes, and Cold Storage's site
-  key.
+  group and the archive site key, a nameplate value the device publishes, Cold Storage's site key,
+  and a replay lane's Serving Gateway, which stays on Playback. Its hint says why.
 - **Fixed for this role** is a label too. A Settings row for anyone but an Administrator shows its
   value as text, and Actions says who can change it. The Notifications tab's rows are the same rows.
+  So is a Digital Nameplate for a role that may neither edit nor propose; its notice says so.
 - **Conditional stays a control, with its reason in words.** A field that is open to someone else, or
   once something else is set, keeps its control: a proposal's fields that a proposal cannot carry
-  (`nonProposableFields()` words each), a replay lane's gateway, and Reference Type until an id is
-  given. The reason sits beside it, in `form-hint`.
+  (`nonProposableFields()` words each), and Reference Type until an id is given. The reason sits
+  beside it, in `form-hint`.
 - **A label is not a `<label>`.** A `<label htmlFor>` names a control. A value drawn as text has none,
   so its name is a plain `form-label` div.
 - **Read-only copy fields stay inputs.** A credential, URL or token is there to be selected and
