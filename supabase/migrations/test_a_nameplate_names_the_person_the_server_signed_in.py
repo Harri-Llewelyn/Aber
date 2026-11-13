@@ -98,7 +98,8 @@ class TheDatabaseStampsTheNameplate(unittest.TestCase):
             )
         self.cur.execute("INSERT INTO public.cells (id, name) VALUES (%s, 'Nameplate Stamp Cell 0210');",
                          (CELL,))
-        self.cur.execute("INSERT INTO public.devices (id, name, cell_id) VALUES (%s, 'Nameplate_Stamp_0210', %s);",
+        self.cur.execute("INSERT INTO public.devices (id, name, cell_id, location_scope)"
+                         " VALUES (%s, 'Nameplate_Stamp_0210', %s, 'cell');",
                          (DEVICE, CELL))
 
     def tearDown(self):

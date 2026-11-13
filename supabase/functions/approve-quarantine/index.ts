@@ -88,11 +88,10 @@ export default async function handler(req: Request): Promise<Response> {
       }
     }
 
-    // Location is optional and omitted when not answered, not defaulted: devices.cell_id is
-    // NULL-means-inherit with no column default, and writing a value the operator did not choose
-    // would turn inheritance off for every device approved here. An explicitly empty cell_id is the
-    // picker's Inherit option; the `p_set_*` flags carry the distinction between
-    // supplied-and-cleared and not-supplied into SQL.
+    // Location is optional and omitted when not answered, not defaulted: a device arrives following
+    // its gateway, and writing a value the operator did not choose would pin it to a place of its
+    // own for every device approved here. An explicitly empty cell_id is cleared; the `p_set_*`
+    // flags carry the distinction between supplied-and-cleared and not-supplied into SQL.
     const setCell = cell_id !== undefined;
     let normalisedCell: string | null = null;
     if (setCell) {
@@ -115,12 +114,19 @@ export default async function handler(req: Request): Promise<Response> {
       normalisedArea = trimmed || null;
     }
 
-    const setLocationScope = location_scope !== undefined;
-    if (setLocationScope && location_scope !== "cell" && location_scope !== "site_wide" && location_scope !== "area_wide") {
-      return badRequest("location_scope must be 'cell', 'area_wide' or 'site_wide'");
+    // A cell named with no scope is a cell of the device's own: what that request meant before a
+    // device could follow its gateway, and the only reading the CHECKs leave it.
+    const impliesCell = location_scope === undefined && normalisedCell !== null;
+    const setLocationScope = location_scope !== undefined || impliesCell;
+    const scope = impliesCell ? "cell" : location_scope;
+    if (setLocationScope && scope !== "gateway" && scope !== "cell" && scope !== "site_wide" && scope !== "area_wide") {
+      return badRequest("location_scope must be 'gateway', 'cell', 'area_wide' or 'site_wide'");
     }
-    if (setLocationScope && location_scope === "area_wide" && !normalisedArea) {
+    if (setLocationScope && scope === "area_wide" && !normalisedArea) {
       return badRequest("area_id is required when location_scope is 'area_wide'");
+    }
+    if (setLocationScope && scope === "cell" && setCell && !normalisedCell) {
+      return badRequest("cell_id is required when location_scope is 'cell'");
     }
 
     if (gateway_id !== undefined && gateway_id !== null && gateway_id !== "" && !isUuid(gateway_id)) {
@@ -141,7 +147,7 @@ export default async function handler(req: Request): Promise<Response> {
       p_merge_into_device_id: merge_into_device_id || null,
       p_asset_name: typeof asset_name === "string" ? asset_name : null,
       p_cell_id: normalisedCell,
-      p_location_scope: setLocationScope ? location_scope : null,
+      p_location_scope: setLocationScope ? scope : null,
       p_set_cell: setCell,
       p_set_location_scope: setLocationScope,
       p_area_id: normalisedArea,

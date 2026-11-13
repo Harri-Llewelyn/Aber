@@ -15,7 +15,7 @@ This function enforces **fail-closed** authorization. The caller's role is read 
 
 ## Location
 
-The body may carry `cell_id`, `area_id` and `location_scope` (`cell`, `area_wide` or `site_wide`). Each is written only when present: an absent key leaves the column alone, so `devices.cell_id` keeps its NULL-means-inherit meaning, while an empty string is the picker's explicit Inherit and is written as NULL. `area_wide` requires an `area_id` and clears the cell; `site_wide` clears both; `cell` clears the area. The RPC mirrors the same rules.
+The body may carry `cell_id`, `area_id` and `location_scope` (`gateway`, `cell`, `area_wide` or `site_wide`). Each is written only when present: an absent key leaves the column alone, so a device that arrived following its gateway keeps following it, while an empty string is written as NULL. `gateway` (Follow Gateway) and `site_wide` clear the cell and the area; `area_wide` requires an `area_id` and clears the cell; `cell` requires a cell and clears the area. A `cell_id` sent with no `location_scope` means `cell`. The RPC mirrors the same rules.
 
 ## Smoke Testing with Curl
 
