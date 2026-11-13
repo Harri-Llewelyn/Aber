@@ -4435,6 +4435,9 @@ checker and the audit writer are no one's, and that the checker refuses what it 
 The file's self-check asserts that each function is no browser-facing role's, that the five triggers
 are in place and enabled, and that the cascade from devices is there.
 
+How a delete resolves the alerts of its triggers is `0287`'s: once for the statement, in one pass
+(*Deleting an automation resolves its alerts in one pass (0287)*).
+
 ### An Administrator registers an app that signs people in (0260)
 
 An app someone built, such as an AAS viewer, can sign people in with their Aber account without a
@@ -5010,13 +5013,15 @@ never ask which wrote a row. A separate worker is not needed: the spike
 - **No role, no second factor.** The evaluator is the platform's act and not a person's, so it is no
   writer `mfa-exemptions.json` lists, and it is granted to no API role.
 
-**A person can be refused with a deadlock.** Deleting or turning off an automation resolves its
-alerts (0257), which takes their rows before the trigger rows. A run that writes the same alerts
-takes the trigger rows first, through the state table's foreign key. When the two meet, Postgres
-ends one with `40P01`. If it is the run, nothing was written and no alert is raised, and the next
-minute's run reads again.
+**A person can be refused with a deadlock.** Turning off an automation resolves its alerts (0257)
+while a run may be writing the same ones. When the two meet, Postgres ends one with `40P01`. If it
+is the run, nothing was written and no alert is raised, and the next minute's run reads again.
 If it is the person, the act is refused and succeeds when tried again. It needs the two to overlap
 for the length of a run, under a second at 10,000 pairs, and an automation with alerts firing.
+**Deleting an automation no longer meets the run so (0287).** It resolves after its trigger rows
+are gone, so it takes them first, as the run does through the state table's foreign key, and waits
+for a run that holds one. Before, it took the alerts of the earlier triggers before the later
+trigger rows, and a run holding one of those was the one ended.
 
 **Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression; its
 log shows one cursor for each metric, each with the filter), through `postgres_fdw` into
@@ -5517,6 +5522,78 @@ open proposal(s), which is the limit". The function is `0001`'s otherwise, line 
 `test_a_number_setting_says_whether_it_counts_whole_things.py` holds both: the guard for each kind of
 setting, the rounding of a stored part value on the upgrade and its silence on a replay, and the cap
 admitting a proposal at the floor of a stored 10.5.
+
+### Deleting an automation resolves its alerts in one pass (0287)
+
+Deleting an automation with 3,000 triggers while 1,474 of its alerts were firing took 38 s on the
+machine that found it, and 6.2 s on a private test database. The Automations page waits for the
+delete. Two things made it slow, and mending the first would not have mended the second:
+
+- **A call for each trigger.** `0257`'s row trigger called `resolve_automation_alerts()` with one
+  id for each trigger the delete removed, and each call read every firing alert.
+- **A call for many ids was no better.** Its one `UPDATE` tested each firing alert against the
+  prefix of each id with `starts_with()`, which Postgres can only do for every pair: one call for
+  3,000 ids took 5.0 s.
+
+What a delete does now:
+
+- **The match is an equality, so it is hashed.** `automation_alert_trigger_id(fingerprint)` reads
+  the trigger's id out of `condition:<trigger id>:<device id>:<metric>`, and out of the prefix
+  `condition:<trigger id>:`. Any other fingerprint, such as `condition:not-evaluated` or a rule's,
+  gives NULL. It reads what `automation_alert_fingerprint()` (`0255`) composes, so the two change
+  together, and `0287`'s self-check asserts they agree. `resolve_automation_alerts()` matches it
+  against the ids it is given, a hash semi-join: one pass over the firing alerts however many ids
+  there are, and an empty list reads none.
+- **A delete resolves once.** An `AFTER DELETE` statement trigger over the rows the statement
+  deleted (`REFERENCING OLD TABLE AS gone`), `trg_automation_triggers_gone_resolve_alerts`, runs
+  `automation_triggers_gone_resolve_their_alerts()`, which calls the resolve with all their ids.
+  Deleting an automation cascades to its triggers as one statement, so it is one call, and so is a
+  device's.
+- **After, not before.** Nothing needs the trigger row to be there: the resolve reads the ids and no
+  table points at an alert. What the order changes is the locks. Taking the alerts after the trigger
+  rows is the order the evaluator takes them in, which is why a delete no longer ends a run in a
+  deadlock (see *A person can be refused with a deadlock*, under `0271`). Measured with a run
+  holding the second of two triggers and asking for the first one's alert: `0257`'s order ended the
+  run with `40P01`, and this one makes the delete wait for it.
+- **`0257`'s row trigger stays, and does nothing on a delete.** `0257` is released and states the
+  trigger, so a replay puts it back. Its function, `automation_trigger_resolves_its_alerts()`, now
+  returns at once for a delete and is `0257`'s, word for word, for an update.
+- **The update arm is not a statement trigger.** Postgres does not allow a column list on a trigger
+  with transition tables (`transition tables cannot be specified for triggers with column lists`),
+  so one would run for every update of `automation_triggers`, not for the three columns the row
+  trigger listens to. `apply_automations()` updates each kept trigger in a statement of its own: the
+  3,000 updates of a changed document took 3.7 s and 4.5 s with such a trigger. A trigger archived
+  or given another device or metric is a few rows. A statement that archives 3,000 of them still
+  makes 3,000 calls, 5.4 s here, and no code path writes one.
+- **No index.** An expression index on `automation_alert_trigger_id(fingerprint)`, partial on
+  `status = 'firing'`, would make each of those calls a probe. It is not added: nothing needs it
+  while the delete is one call, and the evaluator would maintain it on every alert it writes. If a
+  path ever updates thousands of triggers in one statement, this is the index to add, and the
+  expression is this function's.
+
+**Measured** on a private test database (supabase/postgres 17.6.1.175), an automation with 3,000
+triggers, each on a device of its own, and 1,474 firing alerts, deleted:
+
+| | before | `0287` |
+| --- | ---: | ---: |
+| the delete (`DELETE FROM automations`) | 6.2 s | 0.16 to 0.20 s |
+| the same, with no alert firing | | 0.05 s |
+| one `resolve_automation_alerts()` for the 3,000 ids | 5.0 s | 0.12 to 0.18 s |
+
+Most of what remains is the 1,474 updates of `platform_alerts` and the triggers on it.
+
+The suite `test_deleting_an_automation_resolves_its_alerts_in_one_pass.py` (db lane) deletes an
+automation with 2,000 triggers and 1,000 firing alerts. It asserts that `platform_alerts` was
+updated in ONE statement, which a call for each row breaks on any machine, and that the delete took
+under 1.5 s, which a call for each row breaks on a slow one. It also holds that a delete resolves
+the alerts of the triggers it removes, from one trigger to a whole automation and a device, and
+no others (a sibling's, another automation's, a rule's, the outage alert, and an occurrence already
+resolved); that the update arm is as it was; that the function reads what the fingerprint function
+composes; and that a manager deletes through `delete_automation()`.
+
+The file's self-check asserts that none of its functions is any API role's, that the two functions
+agree on the fingerprint, that the resolve matches by trigger id, and that the statement trigger is
+in place, enabled, and over the deleted rows.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

@@ -1196,6 +1196,13 @@ python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
 # and the rendered document applies as unchanged. The Audit Trail rows, the lifecycle of a device
 # (archive, restore, delete) with the alerts it resolves, and automations_for_entity(). Every test rolls back.
 python supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py
+# Deleting an automation resolves its alerts in one pass (0257, 0287). An automation with 2,000
+# triggers and 1,000 firing alerts is deleted: platform_alerts is updated in one statement, and the
+# delete takes under 1.5 s. A delete resolves the alerts of the triggers it removes (one, several, a
+# whole automation, a device's) and no others; the update arm is as it was; the function that reads a
+# trigger's id out of a fingerprint reads what the composer writes; no API role runs them; and a
+# manager deletes through delete_automation(). Every test rolls back.
+python supabase/migrations/test_deleting_an_automation_resolves_its_alerts_in_one_pass.py
 # A threshold automation raises its alert from the database (0270, 0271). A local table stands in for
 # the historian, so every test rolls back. The read: the breaching pairs in platform_health_rows()'s
 # shape, no reading is no breach, NaN and a flag are no reading, only a live pair is read. The hold:

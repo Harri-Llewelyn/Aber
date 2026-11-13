@@ -1365,6 +1365,16 @@ export const SUITES = {
       'keeps the rows that fit, a document never deletes, the round trip); the audit rows; a device ' +
       'archived, restored or deleted and the alerts that end with a trigger; and automations_for_entity().',
   },
+  'supabase/migrations/test_deleting_an_automation_resolves_its_alerts_in_one_pass.py': {
+    lanes: ['db'],
+    why:
+      '0257 and 0287 -- that deleting an automation with 2,000 triggers and 1,000 firing alerts updates ' +
+      'platform_alerts in ONE statement and in under 1.5 s; that a delete resolves the alerts of the ' +
+      "triggers it removes (one, several, a whole automation, a device's) and no others; that the update arm " +
+      'is as it was (archived, moved, a new threshold); that automation_alert_trigger_id() reads what ' +
+      'automation_alert_fingerprint() composes; that no API role runs the functions; and a manager deleting ' +
+      'through delete_automation().',
+  },
   'supabase/migrations/test_the_automations_schema_and_the_function_agree.py': {
     lanes: ['db'],
     why:
