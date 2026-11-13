@@ -277,7 +277,7 @@ export function HistoryAlerts({ devices, win, setWin, every, setEvery, userRole,
         </EmptyState>
       ) : (
         <>
-          <div className="history-header">
+          <div className="groups-header">
             <p className="history-meta" role="status">
               {countWords(rows, reading.more)}
               {retention && ` ${retention}`}

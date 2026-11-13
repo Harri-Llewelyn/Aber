@@ -1,7 +1,7 @@
 import React from 'react'
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { captureSubjectUrl } from '../routes'
+import { captureJobUrl, captureSubjectUrl } from '../routes'
 import { CaptureTab } from '../components/tabs/CaptureTab'
 import { captureManifest } from '../api'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
@@ -343,7 +343,10 @@ describe('starting a capture', () => {
     await waitFor(() => expect(api.startCapture).toHaveBeenCalledWith({
       subjectKind: 'gateway', subjectId: 'gw-1', note: 'night shift', seconds: 600, replace: false
     }))
-    expect(props.showToast).toHaveBeenCalled()
+    // The recording's own job, on Captures: the one row a person opens it for.
+    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
+      'Recording Line 1 Gateway…', 'success', { to: '/capture/captures?job=job-1' }
+    ))
   })
 
   /** A playback refuses a capture with no birth certificate, and every recording asks for one. */
@@ -461,6 +464,16 @@ describe('the running card', () => {
     await waitFor(() => expect(api.stopCapture).toHaveBeenCalledWith('job-1'))
   })
 
+  it('opens the recording that was stopped, on Captures, in the toast', async () => {
+    api.activeCaptureJob.mockResolvedValue(JOB)
+    api.stopCapture.mockResolvedValue(true)
+    const { props } = renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: /Stop/ }))
+    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
+      'Stopping. The recorder finishes within a second or two.', 'success', { to: captureJobUrl('capture', 'job-1') }
+    ))
+  })
+
   /** A capture can finish between the click and the call. That is not a failure. */
   it('does not report a failure when the job had already finished', async () => {
     api.activeCaptureJob.mockResolvedValue(JOB)
@@ -468,7 +481,7 @@ describe('the running card', () => {
     const { props } = renderTab()
     fireEvent.click(await screen.findByRole('button', { name: /Stop/ }))
     await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
-      expect.stringContaining('already finished'), 'success', { to: captureSubjectUrl('gateway', 'gw-1') }
+      expect.stringContaining('already finished'), 'success', { to: captureJobUrl('capture', 'job-1') }
     ))
   })
 })
@@ -560,9 +573,11 @@ describe('deleting and downloading', () => {
     selectRow(row); fireEvent.click(panelAction(/Download/))
     await waitFor(() => expect(api.captureUrl).toHaveBeenCalledWith(CAPTURE.storage_path))
     expect(open).toHaveBeenCalledWith('https://example.test/signed', '_blank', 'noopener')
-    // issue_capture_download() wrote an Audit Trail row, so the download ends with a toast. A file
-    // in the downloads is nothing to link to.
-    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith('Downloading the capture of Line 1 Gateway…', 'success'))
+    // issue_capture_download() wrote an Audit Trail row, so the download ends with a toast, which
+    // opens the subject whose capture it was.
+    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
+      'Downloading the capture of Line 1 Gateway…', 'success', { to: captureSubjectUrl('gateway', 'gw-1') }
+    ))
     expect(props.showToast).toHaveBeenCalledTimes(1)
     open.mockRestore()
   })
@@ -853,7 +868,10 @@ describe('playing a capture back', () => {
       deviceMap: { dev270000000000400080000: 'dev310000000000400080000' },
       speed: 4
     }))
-    expect(props.showToast).toHaveBeenCalled()
+    // The playback's own job, on Playbacks.
+    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
+      'Playing back the capture…', 'success', { to: '/capture/playbacks?job=play-1' }
+    ))
   })
 
   /**
@@ -1182,6 +1200,16 @@ describe('the playback strip', () => {
     // Two Stop buttons would be ambiguous; only the playback strip is present here.
     fireEvent.click(await screen.findByRole('button', { name: /Stop/ }))
     await waitFor(() => expect(api.stopPlayback).toHaveBeenCalledWith('play-1'))
+  })
+
+  it('opens the playback that was stopped, on Playbacks, in the toast', async () => {
+    api.activePlaybackJob.mockResolvedValue(JOB)
+    api.stopPlayback.mockResolvedValue(true)
+    const { props } = renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: /Stop/ }))
+    await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
+      'Stopping the playback.', 'success', { to: captureJobUrl('playback', 'play-1') }
+    ))
   })
 
   it('surfaces a failed playback after its strip has gone', async () => {

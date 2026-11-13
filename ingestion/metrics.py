@@ -118,6 +118,7 @@ COUNTER_MAP = {
     "rollup_windows_recorded": ("aber_ingestion_rollup_windows_recorded_total", {}),
     "rollup_windows_failed": ("aber_ingestion_rollup_windows_failed_total", {}),
     "db_reconnects": ("aber_ingestion_db_reconnects_total", {}),
+    "write_retries_saved": ("aber_ingestion_write_retries_saved_total", {}),
     "db_connect_failures": ("aber_ingestion_db_connect_failures_total", {}),
     "db_heals": ("aber_ingestion_db_heals_total", {}),
     "db_heal_failures": ("aber_ingestion_db_heal_failures_total", {}),
@@ -294,6 +295,10 @@ HELP = {
         "Read it beside aber_ingestion_write_seconds: both occupy the one thread whose saturation "
         "is the daemon's ceiling.",
     "aber_ingestion_db_reconnects_total": "Times the historian connection was re-opened.",
+    "aber_ingestion_write_retries_saved_total":
+        "Messages the writer held alone whose write failed because the historian connection had gone, "
+        "and was written on a fresh one. Each would otherwise have been lost and counted by "
+        "aber_ingestion_write_failures_total.",
     "aber_ingestion_db_connect_failures_total": "Failed attempts to open the historian connection.",
     "aber_ingestion_db_heals_total":
         "Times the background recovery loop opened the historian connection the daemon should "

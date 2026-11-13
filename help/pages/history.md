@@ -130,7 +130,7 @@ Refreshing by itself works only while the window reaches now, such as **Last 24 
 
 ## What a chart shows
 
-Each chart is titled with the metric's name, with its unit in brackets when the Metrics page gives it one.
+Each chart is titled with the metric's name, with its unit in brackets when the Metrics page gives it one. A unit shows as its symbol, such as **°C** for CELSIUS and **mm** for MILLIMETER, in the title, the readings and the scale. A unit with no symbol shows as the Metrics page names it. The CSV export keeps that name, because other programs read it.
 
 - **Latest**, at the right of the title line, is the newest reading in the window, for example **Latest 21.3 °C · 4 Nov 12:40**. The time is the start of the bucket the reading arrived in, not the moment it was sent. A carried bucket never counts, so a quiet machine shows its last real reading. A window with only carried buckets says **No reading in this window**. A text or flag chart showing every change says since when its value has held instead.
 - **Pointing at a chart** shows that bucket instead: its time, its average, and its lowest to highest reading.
@@ -241,7 +241,7 @@ If a second factor is required to change the platform, exporting asks for it too
 
 The Metric tab shows one metric across every device that reports it, wherever the devices sit. Use it for a question such as "how do the bearing temperatures of all our lathes compare?", when the lathes are in several areas.
 
-1. Select the **Metric** tab under the page's name. It lists the metrics that some device in service reports, with their units and how many devices report each.
+1. Select the **Metric** tab under the page's name. It lists the metrics that some device in service reports, with their units as symbols and how many devices report each.
 2. Select a metric's name. Or select **Chart** after you pick several devices on Overview: the tab opens on the metric most of them report.
 3. Choose the period in the **time window**. **Zoom in**, **Zoom out** and a drag across a chart work as on the Device tab.
 4. To narrow the devices, select **Filters** and tick areas, cells or devices. Each list offers only what reports the metric. A device in no cell and no area is left out as soon as you choose any area or cell.

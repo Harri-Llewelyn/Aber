@@ -194,6 +194,11 @@ describe('the CSV shape', () => {
     expect(rows[0]).toEqual({ time: '2026-09-15T10:00:00.000Z', device: 'Lathe 3', metric: 'Speed', value: 42.5, unit: 'rpm' })
   })
 
+  it("keeps the unit as the catalogue's code, which other programs read, and never says its symbol", () => {
+    const celsius = { ...doc, rows: [['2026-09-15T10:00:00.000Z', 'dev1', 'Coolant/TEMP', 18.8, 'CELSIUS']] }
+    expect(exportRows(celsius, new Map([['dev1', 'Lathe 3']]))[0].unit).toBe('CELSIUS')
+  })
+
   it("names a device by the dashboard's name, and by its id where it is not known", () => {
     const rows = exportRows(doc, new Map([['dev1', 'Lathe 3']]))
     expect(rows.map(r => r.device)).toEqual(['Lathe 3', 'Lathe 3', 'dev2'])

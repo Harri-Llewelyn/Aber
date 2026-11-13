@@ -197,11 +197,12 @@ describe('a time in state as a percentage', () => {
     expect(SHARE_UNIT).toBe('% of the time')
   })
 
-  it("is how a reading with that unit is said, and every other unit's reading is as it was", () => {
+  it("is how a reading with that unit is said, and a unit with no symbol is said as it was", () => {
     expect(readingWords(0.425, SHARE_UNIT)).toBe('42.5%')
     expect(readingWords(null, SHARE_UNIT)).toBe('—')
     expect(readingWords(4.2, 'kW')).toBe('4.2 kW')
-    expect(readingWords(123.456, 'COUNT/HOUR')).toBe('123.5 COUNT/HOUR')
+    // A rate says its counter's symbol per hour (utils/units.js).
+    expect(readingWords(123.456, 'COUNT/HOUR')).toBe('123.5 count/h')
     // The first of a range carries a percentage's sign, and no other unit.
     expect(lowWords(0, SHARE_UNIT)).toBe('0%')
     expect(lowWords(0, 'kW')).toBe('0')

@@ -11,8 +11,8 @@ import { Tooltip } from './Tooltip'
 
 /**
  * The standard vocabularies as the page's one card: its heading, a tab per standard whose tooltip
- * is the standard's `hint`, a toolbar row (the search, Expand all), then the selected standard's
- * sections, which scroll inside the card (`.card-fill`; the page supplies `.page-fill`). What a
+ * is the standard's `hint`, a toolbar row (the search), the row Expand all starts, then the selected
+ * standard's sections, which scroll inside the card (`.card-fill`; the page supplies `.page-fill`). What a
  * standard is, and what to watch for in it, is on the page's help page. What differs per standard
  * arrives as a tab descriptor (how sections are derived, what an entry's tooltip says, the id it
  * shows on a line of its own (`idFor`, `{ label, value }`), what counts as in use); see
@@ -92,6 +92,11 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
           placeholder={active.searchPlaceholder || 'Search the vocabulary…'}
           ariaLabel={`Search the ${active.label} vocabulary`}
         />
+      </div>
+
+      {/* The control that acts on the sections sits at the start of the row over them, not in the
+          toolbar. */}
+      <div className="groups-header">
         <ExpandAllToggle
           anyOpen={filtered.some(s => isOpen(s.key))}
           onExpandAll={() => setAll(true)}
