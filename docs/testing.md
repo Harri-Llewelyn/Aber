@@ -74,7 +74,7 @@ node scripts/check-migration-idempotency.mjs
 
 # Database suites — the whole db lane, against a throwaway Postgres. Needs Docker and nothing else.
 #
-# RUN THEM THIS WAY. Every suite below defaults to port 54322, and that is where
+# RUN THEM THIS WAY. Every database suite defaults to port 54322, and that is where
 # `npm run dev:forward` publishes the LIVE database -- so the bare `python ...` form points at
 # production data and always has. See the note under this block for what that costs.
 #
