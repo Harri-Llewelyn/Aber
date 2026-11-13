@@ -412,6 +412,19 @@ class TestTheFunction(LaneBase):
             with self.subTest(name=name):
                 self.assertFalse(self.answers(name))
 
+    def test_each_writer_reads_the_lane_through_it_as_itself(self):
+        # The function reads devices as the caller, so a policy on devices that hid lanes from a
+        # writer would answer false here and let an object under a lane through.
+        for role in ("Administrator", "Shopfloor_Manager"):
+            with self.subTest(role=role):
+                self.as_caller("authenticated", PEOPLE[role])
+                try:
+                    self.cur.execute("SELECT public.is_replay_lane_model_path(%s), public.is_replay_lane_model_path(%s);",
+                                     (f"{self.lane}/model.glb", f"{self.machine}/model.glb"))
+                    self.assertEqual(self.cur.fetchone(), (True, False))
+                finally:
+                    self.back_to_owner()
+
     def test_authenticated_may_ask_and_anon_may_not(self):
         self.assertTrue(self.answers(f"{self.lane}/model.glb", role="authenticated"))
         self.cur.execute("SAVEPOINT anon_asks;")

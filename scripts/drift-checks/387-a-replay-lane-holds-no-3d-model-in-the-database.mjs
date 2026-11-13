@@ -3,7 +3,7 @@ import { fail, pass, read, supabaseReadme } from './lib.mjs';
 // -------------------------------------------------------------------------------------------------
 // 387. A replay lane holds no 3D model, in the database. 0294 moves what a lane held before it adds
 // devices_a_replay_lane_has_no_model, and adds it NOT VALID and validates it. The same file declares
-// is_replay_lane_model_path(), a SECURITY DEFINER function only authenticated executes. In
+// is_replay_lane_model_path(), a function that reads devices as the caller and only authenticated executes. In
 // storage-policies.sql the asset-3d-models INSERT policy and both halves of its UPDATE policy end by
 // calling it, and the SELECT and DELETE policies do not, so a machine can still remove a model that is
 // stored under its lane's id. supabase/README.md has the 0294 section, and it names the three.
@@ -21,8 +21,9 @@ export default function check() {
   if (!/ADD CONSTRAINT devices_a_replay_lane_has_no_model\s+CHECK \(\(\(shadow_of IS NULL\) OR \(model_3d_path IS NULL\)\)\) NOT VALID/.test(sql)) {
     problems387.push('0294 does not add devices_a_replay_lane_has_no_model as CHECK (shadow_of IS NULL OR model_3d_path IS NULL), NOT VALID');
   }
-  if (!/CREATE OR REPLACE FUNCTION public\.is_replay_lane_model_path\(p_name text\)[\s\S]*?SECURITY DEFINER/.test(sql)) {
-    problems387.push('0294 does not declare is_replay_lane_model_path(text) as SECURITY DEFINER');
+  const declared = sql.match(/CREATE OR REPLACE FUNCTION public\.is_replay_lane_model_path\(p_name text\)[\s\S]*?AS \$\$/)?.[0];
+  if (!declared || /SECURITY DEFINER/.test(declared)) {
+    problems387.push('0294 does not declare is_replay_lane_model_path(text), or declares it SECURITY DEFINER, which the schema lint would flag');
   }
   if (!sql.includes('REVOKE ALL ON FUNCTION public.is_replay_lane_model_path(text) FROM PUBLIC, anon, service_role;')
       || !sql.includes('GRANT EXECUTE ON FUNCTION public.is_replay_lane_model_path(text) TO authenticated;')) {

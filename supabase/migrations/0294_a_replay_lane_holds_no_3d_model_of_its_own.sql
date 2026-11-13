@@ -34,10 +34,13 @@
 -- -------------------------------------------------------------------------------------------------
 -- The asset-3d-models INSERT and UPDATE policies call this as the caller, so authenticated executes
 -- it. The folder is read as a uuid only when it is shaped like one, so a name such as
--- '__probe__/x.bin' or 'x.bin' is not a lane's. SECURITY DEFINER keeps the answer true whatever a
--- policy on devices later hides from the caller.
+-- '__probe__/x.bin' or 'x.bin' is not a lane's. It reads devices as the caller, as
+-- is_capture_subject_prefix() does, which the Administrator and the Shopfloor Manager may do for every
+-- row (devices_select_authenticated). It is not SECURITY DEFINER, so it needs no entry in the schema
+-- lint's allow-list; a policy on devices that hid lanes from them would fail this open, and the suite
+-- reads a lane as each of them.
 CREATE OR REPLACE FUNCTION public.is_replay_lane_model_path(p_name text) RETURNS boolean
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    LANGUAGE plpgsql STABLE
     SET search_path TO 'public'
     AS $$
 BEGIN
@@ -177,8 +180,8 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
                   WHERE p.oid = 'public.is_replay_lane_model_path(text)'::regprocedure
-                    AND l.lanname = 'plpgsql' AND p.prosecdef) THEN
-    RAISE EXCEPTION '0294: is_replay_lane_model_path() is not a SECURITY DEFINER plpgsql function';
+                    AND l.lanname = 'plpgsql' AND NOT p.prosecdef) THEN
+    RAISE EXCEPTION '0294: is_replay_lane_model_path() is not an invoker-rights plpgsql function';
   END IF;
   -- A name that is no lane's, whatever it holds, is answered false and never raises.
   IF public.is_replay_lane_model_path(NULL) OR public.is_replay_lane_model_path('')
