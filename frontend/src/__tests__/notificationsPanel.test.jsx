@@ -118,8 +118,21 @@ describe('for anyone but an Administrator', () => {
     await show({ readOnly: true })
     expect(within(toolbar()).queryAllByRole('button')).toEqual([])
     expect(toolbar()).toHaveTextContent('Only an Administrator sees and changes the webhook')
-    expect(screen.getByLabelText('Lowest severity the webhook sends')).toBeDisabled()
     expect(screen.getAllByText('Device Offline · press-4').length).toBeGreaterThan(0)
+  })
+
+  it('shows the routes as text, as every row of the Settings table is for such a role', async () => {
+    api.notificationWebhook.mockResolvedValue(HIDDEN)
+    await show({ readOnly: true })
+    // The choice reads as its label, with no greyed select, and Actions says who can change it.
+    expect(screen.queryByLabelText('Lowest severity the webhook sends')).toBeNull()
+    const severity = screen.getByText('Lowest severity the webhook sends').closest('tr')
+    expect(severity.querySelector('select, input')).toBeNull()
+    expect(severity.querySelector('.setting-cell-value')).toHaveTextContent('Warning and above')
+    expect(within(severity).getByText('Only an Administrator can change this')).toBeInTheDocument()
+    const reminder = screen.getByText('Remind every (hours)').closest('tr')
+    expect(reminder.querySelector('.setting-cell-value')).toHaveTextContent('12')
+    expect(reminder.querySelector('select, input')).toBeNull()
   })
 })
 

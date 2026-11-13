@@ -149,6 +149,8 @@ export function SemanticIdField({
               </select>
             </Tooltip>
           )}
+          {/* Disabled until there is an id to type: the reason is said beside it, not only on hover. */}
+          {!readOnly && !hasId && <div className="form-hint">Needs a semantic id first.</div>}
         </div>
       </div>
 

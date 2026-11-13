@@ -109,6 +109,13 @@ beforeEach(() => {
   })
 })
 
+/**
+ * A draft's tick for a metric: the checkbox of the picker row that names it. The row's label holds
+ * the name, its stored keys, its datatype and its standard, so the name alone does not label the box.
+ */
+const metricBox = (scope, name) => scope.getAllByRole('checkbox')
+  .find(box => box.closest('label')?.querySelector('.mono')?.textContent === name)
+
 describe('Registry — read-only protections and status badges', () => {
   it('badges an active schema as v1 · Active and marks it read-only', async () => {
     renderTab()
@@ -358,7 +365,7 @@ describe('Downloading a version definition', () => {
     fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
 
     const modal = document.querySelector('.modal')
-    fireEvent.click(within(modal).getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+    fireEvent.click(metricBox(within(modal), 'Systems/SPINDLE_TEMPERATURE'))
 
     expect(getByTooltip(
       'Downloads the last saved draft — unsaved changes are not included', modal
@@ -402,7 +409,7 @@ describe('Detail modal — read-only vs draft', () => {
     fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
 
     // Add a metric the forked definition did not carry.
-    fireEvent.click(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+    fireEvent.click(metricBox(screen, 'Systems/SPINDLE_TEMPERATURE'))
     fireEvent.click(screen.getByText('Publish Version v2'))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
@@ -445,7 +452,7 @@ describe('Detail modal — read-only vs draft', () => {
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
 
     fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
-    fireEvent.click(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+    fireEvent.click(metricBox(screen, 'Systems/SPINDLE_TEMPERATURE'))
     fireEvent.click(screen.getByText('Publish Version v2'))
 
     await waitFor(() => expect(order).toEqual(['save', 'publish']))
@@ -459,7 +466,7 @@ describe('Detail modal — read-only vs draft', () => {
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
 
     fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
-    fireEvent.click(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+    fireEvent.click(metricBox(screen, 'Systems/SPINDLE_TEMPERATURE'))
     fireEvent.click(screen.getByText('Publish Version v2'))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
@@ -508,7 +515,7 @@ describe('Detail modal — read-only vs draft', () => {
       const modal = within(document.querySelector('.modal'))
 
       // The kept metric names the keys it carries beyond its type; a plain one names none.
-      const rowOf = (name) => modal.getByLabelText(name).closest('label')
+      const rowOf = (name) => metricBox(modal, name).closest('label')
       expect(within(rowOf('Systems/TEMPERATURE')).getByText('enum · minimum')).toBeTruthy()
       expect(rowOf('Controller/EXECUTION').textContent).not.toMatch(/·/)
 
@@ -520,7 +527,7 @@ describe('Detail modal — read-only vs draft', () => {
       expect(descriptionOnly).not.toHaveProperty('schema_definition')
 
       await waitFor(() => expect(modal.getByRole('button', { name: 'Save Draft' }).disabled).toBe(true))
-      fireEvent.click(modal.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+      fireEvent.click(metricBox(modal, 'Systems/SPINDLE_TEMPERATURE'))
       fireEvent.click(modal.getByRole('button', { name: 'Save Draft' }))
       await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
       const stored = CONSTRAINED.schema_definition
@@ -538,7 +545,7 @@ describe('Detail modal — read-only vs draft', () => {
       await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
       fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
 
-      fireEvent.click(screen.getByLabelText('Systems/TEMPERATURE'))
+      fireEvent.click(metricBox(screen, 'Systems/TEMPERATURE'))
       fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }))
       await waitFor(() => expect(api.put).toHaveBeenCalled())
       expect(api.put.mock.calls[0][1].schema_definition).toEqual({
@@ -564,8 +571,8 @@ describe('Detail modal — read-only vs draft', () => {
       await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
       fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
 
-      expect(screen.getByLabelText('Systems/TEMPERATURE').checked).toBe(true)
-      fireEvent.click(screen.getByLabelText('Controller/EXECUTION'))
+      expect(metricBox(screen, 'Systems/TEMPERATURE').checked).toBe(true)
+      fireEvent.click(metricBox(screen, 'Controller/EXECUTION'))
       fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }))
       await waitFor(() => expect(api.put).toHaveBeenCalled())
       expect(api.put.mock.calls[0][1].schema_definition).toEqual({
@@ -710,7 +717,7 @@ describe('Detail modal — read-only vs draft', () => {
     expect(band('Controller')).toHaveTextContent(/^Controller$/)
     expect(band('Systems').getAttribute('style')).toBeNull()
 
-    fireEvent.click(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+    fireEvent.click(metricBox(screen, 'Systems/SPINDLE_TEMPERATURE'))
     expect(band('Systems')).toHaveTextContent(/2 selected$/)
   })
 
@@ -724,7 +731,7 @@ describe('Detail modal — read-only vs draft', () => {
     const draftBody = document.querySelector('.modal .modal-body')
     expect(draftBody).toHaveClass('modal-body-fill')
     const fill = draftBody.querySelector(':scope > .modal-fill')
-    expect(fill).toContainElement(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+    expect(fill).toContainElement(metricBox(screen, 'Systems/SPINDLE_TEMPERATURE'))
     expect(fill.innerHTML).not.toMatch(/max-height/)
 
     fireEvent.click(screen.getByText('Close'))

@@ -1252,7 +1252,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
             <div className="form-group">
               <label className="form-label" htmlFor="device-gateway">Serving Gateway</label>
-              <Withheld field="active_gateway_id" />
+              {/* A replay lane's gateway is fixed for everyone, so the note about who moves it would be
+                  untrue; the hint under the field says what is. */}
+              {!editing?.shadow_of && <Withheld field="active_gateway_id" />}
               <select id="device-gateway" className="form-control" disabled={proposeMode || !!editing?.shadow_of} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))}>
                 <option value="">— Unassigned Gateway —</option>
                 {/* A replay lane is listed but disabled rather than filtered out, so a device that

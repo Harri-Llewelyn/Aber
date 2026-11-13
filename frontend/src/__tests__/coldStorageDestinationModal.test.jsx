@@ -174,13 +174,23 @@ describe('what it shows', () => {
     expect(screen.queryByRole('button', { name: 'Replace Key' })).toBeNull()
   })
 
-  it('shows the site key read-only, and the destination as something to copy', () => {
+  it('shows the site key as a label with its reason, and the destination as something to copy', () => {
     open({ values: COMPLETE })
-    expect(screen.getByLabelText('Site key')).toHaveAttribute('readonly')
-    expect(screen.getByLabelText('Site key')).toHaveValue(SITE_KEY)
+    // Text, not a greyed field: nobody can change it here.
+    const facts = document.querySelector('.metric-edit-facts')
+    expect(facts.querySelector('.form-label')).toHaveTextContent('Site key')
+    expect(facts).toHaveTextContent(SITE_KEY)
+    expect(facts).toHaveTextContent('Fixed at install by values.yaml coldArchive.s3.siteKey.')
+    expect(screen.queryByLabelText('Site key')).toBeNull()
+    expect(facts.querySelector('input')).toBeNull()
     expect(screen.getByRole('button', { name: /copy destination/i })).toHaveAccessibleName(
       /https:\/\/s3\.eu-west-2\.amazonaws\.com\/plant-history\/site=broughton-7f3a9c21\//,
     )
+  })
+
+  it('says the site key is not set when the install gave none', () => {
+    open({ values: COMPLETE, siteKey: '' })
+    expect(document.querySelector('.metric-edit-facts')).toHaveTextContent('Not set')
   })
 
   it('says what is lost while archiving is off', () => {

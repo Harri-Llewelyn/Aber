@@ -22,7 +22,7 @@ const METRICS = [
 ]
 
 /** The picker with the choice held the way a dialog holds it. */
-function Harness({ initial = [], single = false, isDisabled, renderExtra, showUnits, metrics = METRICS, onChosen, listStyle }) {
+function Harness({ initial = [], single = false, isDisabled, renderExtra, renderNote, showUnits, metrics = METRICS, onChosen, listStyle }) {
   const [chosen, setChosen] = useState(initial)
   const pick = (m) => {
     const next = single ? [m.name] : chosen.includes(m.name) ? chosen.filter(n => n !== m.name) : [...chosen, m.name]
@@ -39,6 +39,7 @@ function Harness({ initial = [], single = false, isDisabled, renderExtra, showUn
         single={single}
         isDisabled={isDisabled}
         renderExtra={renderExtra}
+        renderNote={renderNote}
         showUnits={showUnits}
         listStyle={listStyle}
       />
@@ -168,6 +169,17 @@ describe('MetricPicker', () => {
     expect(onExtra).toHaveBeenCalledTimes(1)
     expect(control('Axes/X/POSITION').checked).toBe(true)
     expect(screen.queryByRole('button', { name: 'Extra of Axes/Y/POSITION' })).toBeNull()
+  })
+
+  it('draws a row’s note inside its label, after the name', () => {
+    render(<Harness renderNote={(m, picked) => <span data-testid={`note-${m.name}`}>{picked ? 'ticked' : 'idle'}</span>} />)
+    const row = rowOf('Axes/X/POSITION')
+    expect(row.contains(screen.getByTestId('note-Axes/X/POSITION'))).toBe(true)
+    expect(screen.getByTestId('note-Axes/X/POSITION').textContent).toBe('idle')
+    const name = row.querySelector('.mono')
+    expect(name.nextElementSibling).toBe(screen.getByTestId('note-Axes/X/POSITION'))
+    fireEvent.click(control('Axes/X/POSITION'))
+    expect(screen.getByTestId('note-Axes/X/POSITION').textContent).toBe('ticked')
   })
 
   it('shows each metric’s unit only when asked', () => {

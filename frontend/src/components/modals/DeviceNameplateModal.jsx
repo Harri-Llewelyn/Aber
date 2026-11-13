@@ -243,9 +243,10 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                 const element = byIdShort.get(field.idShort)
                 const deviceValue = published[field.column]
                 const isPublished = deviceValue !== undefined
-                // Explicit htmlFor/id: a disabled input inside a wrapping label is not reliably
-                // announced.
+                // Explicit htmlFor/id names the input. A published value has no control to name, so its
+                // label is a plain div.
                 const inputId = `nameplate-${field.column}`
+                const NameTag = isPublished ? 'div' : 'label'
                 return (
                   <div key={field.column}>
                     {/* The tip is a SIBLING of the label, not a child: a button inside a label is
@@ -258,9 +259,9 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                       <Tooltip text={element
                         ? `${element.id_short} — ${element.semantic_id_type} ${element.semantic_id}\n\n${element.description || ''}`
                         : null}>
-                      <label
+                      <NameTag
                         className="form-label"
-                        htmlFor={inputId}
+                        htmlFor={isPublished ? undefined : inputId}
                         style={{ marginBottom: 0 }}
                       >
                         {field.label}
@@ -269,7 +270,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                             <span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>*</span>
                           </Tooltip>
                         )}
-                      </label>
+                      </NameTag>
                       </Tooltip>
                       {/* Only on the fields whose label does not define them. The label's own hover
                           text carries the template's wording; this carries how to tell the field
@@ -277,15 +278,12 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                       {field.help && <HelpTip text={field.help} label={`What ${field.label} means`} />}
                     </div>
                     {isPublished ? (
-                      <Tooltip text="Published by the device at DBIRTH. The export uses this value, so it cannot be overridden here.">
-                        <input
-                          id={inputId}
-                          className="form-control"
-                          value={String(deviceValue)}
-                          readOnly
-                          disabled
-                        />
-                      </Tooltip>
+                      // What the device reported, as text with its reason: the exporter uses this value,
+                      // so it cannot be overridden here.
+                      <>
+                        <div className="mono" style={{ fontSize: '13px', overflowWrap: 'anywhere' }}>{String(deviceValue)}</div>
+                        <div className="form-hint">Published by the device at DBIRTH, so the export uses it.</div>
+                      </>
                     ) : (
                       <input
                         id={inputId}

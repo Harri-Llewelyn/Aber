@@ -4,10 +4,9 @@ import {
 } from '../common/Icons'
 import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
-import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
-import { groupCatalog } from '../../utils/metricGroup'
+import { datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { modelledMetrics } from '../../utils/deviceTags'
-import { LOCAL_EXTENSION_LABEL, storedSemanticIdPair } from '../../utils/standards'
+import { storedSemanticIdPair } from '../../utils/standards'
 import {
   schemaVersion, schemaStatus, statusLabel, statusBadgeClass, schemaVersionLabel,
   isSchemaEditable, canForkSchema, nextVersion, lineageOf, SCHEMA_STATUS
@@ -16,7 +15,7 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { Modal } from '../common/Modal'
 import { SemanticIdField } from '../common/SemanticIdField'
-import { MetricGroupHeading, PICKER_ROW, PICKER_ROW_LABEL } from '../common/MetricPicker'
+import { MetricPicker } from '../common/MetricPicker'
 import { PropertyRange, rangeProblems } from './SchemaBuilderModal'
 import { boundText, catalogPropertyEntry, isNumericType, sameJson } from '../../utils/schemaProperty'
 import { Tooltip } from '../common/Tooltip'
@@ -62,7 +61,6 @@ export function SchemaDetailModal({
   const [semantic, setSemantic] = useState(
     () => storedSemanticIdPair(schema?.semantic_id, schema?.semantic_id_type)
   )
-  const [search, setSearch] = useState('')
   // Metric name -> the range typed beside it. A metric with no entry shows, and keeps, its stored
   // bounds, so only a range somebody touched is rewritten.
   const [ranges, setRanges] = useState({})
@@ -83,14 +81,6 @@ export function SchemaDetailModal({
     const known = new Set(activeCatalog.map(m => m.name))
     return [...selectedNames].filter(n => !known.has(n))
   }, [activeCatalog, selectedNames])
-
-  const filteredCatalog = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return activeCatalog
-    return activeCatalog.filter(m =>
-      m.name.toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q)
-    )
-  }, [activeCatalog, search])
 
   const toggleMetric = (name) => {
     setSelectedNames(prev => {
@@ -440,59 +430,22 @@ export function SchemaDetailModal({
         )}
 
         {editable ? (
-          <>
-            <input
-              className="form-control"
-              style={{ marginBottom: '8px' }}
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search catalog metrics…"
-              aria-label="Search catalog metrics"
-            />
-            <div style={{ flex: '1 1 auto', minHeight: '160px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-              {filteredCatalog.length === 0 ? (
-                <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>No matching catalog metrics.</div>
-              ) : (
-                groupCatalog(filteredCatalog).map(group => (
-                  <div key={group.label}>
-                    <MetricGroupHeading
-                      group={group}
-                      picked={group.metrics.filter(m => selectedNames.has(m.name)).length}
-                    />
-                    {group.metrics.map(m => {
-                      const ticked = selectedNames.has(m.name)
-                      const ranged = ticked && rangeTypeOf(m.name) !== null
-                      return (
-                        // The range sits outside the label, so typing in it never toggles the tick.
-                        <div key={m.metric_uuid} style={{ ...PICKER_ROW, paddingRight: ranged ? '12px' : 0 }}>
-                          <label style={PICKER_ROW_LABEL}>
-                            <input
-                              type="checkbox"
-                              checked={ticked}
-                              onChange={() => toggleMetric(m.name)}
-                              aria-label={m.name}
-                            />
-                            <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
-                            {/* What a save writes for a ticked metric; what is stored for the rest. */}
-                            <StoredKeys entry={ticked && builtEntry(m.name) !== undefined ? builtEntry(m.name) : storedEntry(m.name)} />
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
-                            <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>{m.standard || LOCAL_EXTENSION_LABEL}</span>
-                          </label>
-                          {ranged && (
-                            <PropertyRange
-                              name={m.name}
-                              range={shownRange(m.name)}
-                              onChange={range => setRanges(prev => ({ ...prev, [m.name]: range }))}
-                            />
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ))
-              )}
-            </div>
-          </>
+          // The schema builder's list. The search and the standard filter narrow what is listed, never
+          // what is ticked; the range sits outside each row's label, so typing in it never toggles the tick.
+          <MetricPicker
+            metrics={activeCatalog}
+            isPicked={m => selectedNames.has(m.name)}
+            onPick={m => toggleMetric(m.name)}
+            // What a save writes for a ticked metric; what is stored for the rest.
+            renderNote={m => <StoredKeys entry={selectedNames.has(m.name) && builtEntry(m.name) !== undefined ? builtEntry(m.name) : storedEntry(m.name)} />}
+            renderExtra={(m, ticked) => ticked && rangeTypeOf(m.name) !== null && (
+              <PropertyRange
+                name={m.name}
+                range={shownRange(m.name)}
+                onChange={range => setRanges(prev => ({ ...prev, [m.name]: range }))}
+              />
+            )}
+          />
         ) : (
           <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             {selectedNames.size === 0 ? (

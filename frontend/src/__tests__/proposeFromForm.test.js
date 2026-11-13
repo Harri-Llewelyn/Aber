@@ -138,6 +138,15 @@ describe('the fields a proposal may not name', () => {
     }
   })
 
+  it('opens every sentence with what a proposal cannot do, then says why', () => {
+    for (const kind of ['device', 'gateway']) {
+      for (const sentence of Object.values(nonProposableFields(kind))) {
+        expect(sentence).toMatch(/^A proposal can’t change this\. \S/)
+      }
+    }
+    expect(nonProposableFields('area')).toEqual({})
+  })
+
   it('withholds what a gateway IS, and its address, not what it is called', () => {
     expect(Object.keys(nonProposableFields('gateway')).sort())
       .toEqual(['deployment', 'is_simulated', 'sparkplug_group'])

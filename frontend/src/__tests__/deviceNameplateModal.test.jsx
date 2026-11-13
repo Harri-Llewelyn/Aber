@@ -43,15 +43,24 @@ describe('DeviceNameplateModal', () => {
     expect(serial.value).toBe('');
   });
 
-  it('locks a field the device publishes and shows the device value', async () => {
+  it('shows a field the device publishes as text with its reason, not as a field', async () => {
     respond({ published: { serial_number: 'SN-FROM-DBIRTH' } });
     render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
-    await waitFor(() => expect(fieldFor('Serial number')).toBeDisabled());
+    await screen.findByText('SN-FROM-DBIRTH');
 
     // The exporter prefers the published value, so an editable field here would accept a change
-    // that never reached the shell -- the failure this locking exists to prevent.
-    expect(fieldFor('Serial number').value).toBe('SN-FROM-DBIRTH');
+    // that never reached the shell -- the failure this exists to prevent. A greyed field would
+    // still read as one that could be changed.
+    expect(screen.queryByDisplayValue('SN-FROM-DBIRTH')).toBeNull();
+    expect(screen.queryByLabelText(/^Serial number/)).toBeNull();
+    const cell = screen.getByText('SN-FROM-DBIRTH').parentElement;
+    expect(cell.querySelector('.form-label')).toHaveTextContent('Serial number');
+    expect(cell.querySelector('.form-label').tagName).not.toBe('LABEL');
+    expect(cell.querySelector('input')).toBeNull();
+    expect(cell).toHaveTextContent('Published by the device at DBIRTH, so the export uses it.');
+    // The rest stay editable, and say nothing of the device.
     expect(fieldFor('Manufacturer')).not.toBeDisabled();
+    expect(screen.getAllByText(/Published by the device at DBIRTH/)).toHaveLength(1);
     expect(screen.getByText(/publishes 1 of these itself/)).toBeInTheDocument();
   });
 
