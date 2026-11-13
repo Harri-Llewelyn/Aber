@@ -208,6 +208,20 @@ describe('what a proposal says it would change', () => {
     expect(rows[0].unchanged).toBe(true)
   })
 
+  it('says Follow Gateway where a proposal sets a device to follow its gateway, and keeps the value in the tooltip', async () => {
+    // The column holds `gateway`, which a reviewer could take for the gateway that carries the data.
+    mockLoad([deviceProposal({
+      patch: { location_scope: 'gateway', cell_id: null },
+      current: { location_scope: 'cell', cell_id: 'cell-1' }
+    })])
+    renderTab()
+    await selectRow()
+    const row = screen.getByText('Location scope').closest('tr')
+    expect(within(row).getByText('In a cell')).toBeInTheDocument()
+    expect(within(row).getByText('Follow Gateway')).toBeInTheDocument()
+    expect(within(row).queryByText('gateway')).toBeNull()
+  })
+
   it('gives the schema lane no diff at all', () => {
     // Its patch names an ACT, not a column, so a "current value" would be invented.
     expect(diffRows(schemaProposal())).toEqual([])

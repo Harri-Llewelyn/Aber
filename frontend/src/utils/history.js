@@ -12,7 +12,7 @@ import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
 import { datatypeLabel } from './sparkplugDatatype'
 import { modelledConstraints } from './payloadConformance'
 import { deviceIdentifiers, deviceIds } from './sparkplugId'
-import { SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell } from './cellResolution'
+import { SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell, isSiteWideSource } from './cellResolution'
 import { areaWideInService, inServiceDevices } from './inService'
 import { DERIVED_MAX_MINUTES, SHARE_UNIT, derivedInputCount, derivedReportedBy, percentWords, unitOf } from './derivedMetric'
 import { unitSticks, unitSymbol, withUnit } from './units'
@@ -933,11 +933,14 @@ export function blockWords(minutes) {
   return `${minutes}-minute blocks`
 }
 
-/** The groups that are lanes of their own on the Site Map, in its order, keyed by location source. */
+/**
+ * The groups that are lanes of their own on the Site Map, in its order, keyed by location source.
+ * `has` says which sources fill one: Site-Wide takes a device behind a Site-Wide gateway too.
+ */
 const OVERVIEW_LANES = [
-  { key: SOURCE_SITE_WIDE, label: 'Site-Wide' },
-  { key: SOURCE_SIMULATED, label: 'Simulated' },
-  { key: SOURCE_UNASSIGNED, label: 'Unassigned' },
+  { key: SOURCE_SITE_WIDE, label: 'Site-Wide', has: isSiteWideSource },
+  { key: SOURCE_SIMULATED, label: 'Simulated', has: (source) => source === SOURCE_SIMULATED },
+  { key: SOURCE_UNASSIGNED, label: 'Unassigned', has: (source) => source === SOURCE_UNASSIGNED },
 ]
 
 /** The group of cells filed in no area, named as the Site Map's tray is. */
@@ -979,7 +982,7 @@ export function overviewGroups(devices, cells = [], areas = []) {
   const unfiled = filled(liveCells.filter(c => !c.area_id).map(cellGroup))
   if (unfiled.length) out.push(parent('unfiled', UNFILED_GROUP, unfiled))
   for (const lane of OVERVIEW_LANES) {
-    const laneDevices = live.filter(d => d.location_source === lane.key)
+    const laneDevices = live.filter(d => lane.has(d.location_source))
     if (laneDevices.length) out.push({ key: lane.key, label: lane.label, devices: laneDevices })
   }
   return out

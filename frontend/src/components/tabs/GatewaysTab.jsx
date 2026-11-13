@@ -599,7 +599,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                    <SortHeader sort={sort} column="name">Gateway Name</SortHeader>
                    {!compact && <SortHeader sort={sort} column="uuid" title="The id to quote in a query, a ticket or an API call. The Sparkplug edge node id is derived from it.">Gateway UUID</SortHeader>}
                    <SortHeader sort={sort} column="type" title={"Remote: an appliance on the plant network. Third-party: an edge node Aber does not manage. Host: inside this stack. Simulated: generated readings. Playback: republished captures."}>Type</SortHeader>
-                   <SortHeader sort={sort} column="location" title="The cell, area or site it serves; a dash for a simulated or playback one. Devices inherit only a cell.">Location</SortHeader>
+                   <SortHeader sort={sort} column="location" title="The cell, area or site it serves; a dash for a simulated or playback one. Devices set to Follow Gateway take it.">Location</SortHeader>
                    <SortHeader sort={sort} column="status" title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</SortHeader>
                    <SortHeader sort={sort} column="last_heartbeat" title="How long since the edge node's last Sparkplug B node message: its birth, data or death.">Last Heartbeat</SortHeader>
                    {!compact && <SortHeader sort={sort} column="devices" title="The devices this gateway serves. The summary counts them by state; archived ones are listed, not counted.">Devices</SortHeader>}
@@ -811,9 +811,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               /* Says which lane it lands in instead, so the disabled control reads as an answer. */
               ? 'Simulated gateways have no cell: their devices resolve to the Simulated lane, which takes precedence over cell membership.'
               : form.location_scope === SCOPE_SITE_WIDE || form.location_scope === SCOPE_AREA_WIDE
-                ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide or Area-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
+                ? 'Devices set to Follow Gateway take this place with the gateway. A device with a place of its own keeps it, so a machine reached through a host-run connector can still be in a cell.'
                 : form.cell_id
-                  ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
+                  ? 'Devices served by this gateway that follow it appear under this cell. A device with a place of its own keeps it.'
                   : null}
           </div>
         </div>
@@ -987,10 +987,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             help: !gatewayAcceptsCell(selected)
               ? `Its devices resolve to the ${gatewayTypeLabel(gatewayType(selected))} lane, which takes precedence over cell membership.`
               : selected.location_scope === SCOPE_SITE_WIDE
-                ? 'A host-run or central connector serving the whole campus. Its devices inherit no cell from it.'
+                ? 'A host-run or central connector serving the whole campus. Devices set to Follow Gateway are Site-Wide with it.'
                 : selected.location_scope === SCOPE_AREA_WIDE
-                  ? 'A connector serving one whole area. Its devices inherit no cell from it.'
-                  : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
+                  ? 'A connector serving one whole area. Devices set to Follow Gateway are Area-Wide in that area with it.'
+                  : 'Devices served by this gateway resolve to this cell if they follow it, unless they have a place of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), help: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
           // What a Third-party gateway does not get, said rather than left as missing rows. No claim

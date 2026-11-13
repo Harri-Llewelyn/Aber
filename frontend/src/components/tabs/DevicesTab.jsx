@@ -51,9 +51,10 @@ import {
   deviceStatusBadge
 } from '../../utils/deviceStatus'
 import {
-  SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_INHERITED, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, NON_CELL_SOURCES,
-  resolveDeviceLocation, needsCellAssignment, unassignedHint,
-  locationSourceLabel, gatewayAcceptsCell, noCellReason
+  SCOPE_GATEWAY, SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_FOLLOWED_AREA, SOURCE_FOLLOWED_SITE,
+  SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, NON_CELL_SOURCES,
+  resolveDeviceLocation, needsCellAssignment, unassignedHint, followedPlaceFix, followedPlaceLine, isFollowedSource, isSiteWideSource,
+  normaliseScope, locationSourceLabel, gatewayAcceptsCell, noCellReason
 } from '../../utils/cellResolution'
 import { AreaIcon } from '../../utils/areaIcon'
 import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
@@ -183,8 +184,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [latestBySparkplugId, setLatestBySparkplugId] = useState(new Map())
   const [catalog, setCatalog] = useState([])
   // A device's type is derived from its schema's metric groups (utils/deviceTags.js).
-  // `cell_id` starts empty, meaning inherit from the gateway.
-  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_CELL })
+  // A new device follows its gateway, so it starts with no cell and no area of its own.
+  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_GATEWAY })
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
   const [lifecycle, setLifecycle] = useUrlList('lifecycle', LIFECYCLE_DEFAULT, { allowed: LIFECYCLE_VALUES, aliases: LIFECYCLE_ALIASES })
@@ -330,11 +331,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         description: form.description || '',
         connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
-        // '' is the inherit option, which api.js turns into NULL. All three keys are always sent
+        // '' is no cell or area, which api.js turns into NULL. All three keys are always sent
         // because the form always shows the one picker that sets them.
         cell_id: form.cell_id || '',
         area_id: form.area_id || '',
-        location_scope: form.location_scope || SCOPE_CELL,
+        location_scope: form.location_scope || SCOPE_GATEWAY,
       }
       // Edit only: a device being created takes the column's default rather than an explicit
       // 'audit'.
@@ -390,9 +391,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const closeForm = () => { setShowForm(false); setEditingProposal(null); setFormError(null) }
 
   // Why the form's save is off, in the order the fields appear. The database refuses Area-Wide with
-  // no area; it would take an empty name, which every list would then show as a blank row.
+  // no area and a cell scope with no cell; it would take an empty name, which every list would then
+  // show as a blank row.
   const formProblem = !(form.asset_name || '').trim() ? 'Give the device a name'
-    : locationIncomplete(form) ? 'Choose which area the device serves'
+    : locationIncomplete(form, { cellRequired: true })
+      ? (form.location_scope === SCOPE_AREA_WIDE ? 'Choose which area the device serves' : 'Choose which cell the device is in')
       : null
 
   /** Tick or untick one schema in the form's set. */
@@ -418,7 +421,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     // bypasses the `api` wrapper that feeds the activity line.
     const { data, error } = await trackRequest(() => supabase.functions.invoke('approve-quarantine', {
       // `asset_name` is the operator's correction to the announced label. `cell_id` and
-      // `location_scope` are the modal's location answer; '' is Inherit, and the edge function
+      // `location_scope` are the modal's location answer; '' is no cell, and the edge function
       // writes NULL for it.
       body: {
         device_id: assetId,
@@ -426,7 +429,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         asset_name: body?.asset_name,
         cell_id: body?.cell_id ?? '',
         area_id: body?.area_id ?? '',
-        location_scope: body?.location_scope || 'cell'
+        location_scope: body?.location_scope || SCOPE_GATEWAY
       }
     }))
 
@@ -596,12 +599,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   ].filter(Boolean)
 
   /**
-   * The cell lanes a device is in: its RESOLVED cell, not the explicit override, or every inherited
-   * device would be hidden; and Unassigned and Site-Wide, which are lanes rather than rows in `cells`.
+   * The cell lanes a device is in: its RESOLVED cell, not the explicit override, or every device that
+   * follows its gateway would be hidden; and Unassigned and Site-Wide, which are lanes rather than
+   * rows in `cells`. A device behind a Site-Wide gateway is in the Site-Wide lane.
    */
   const cellLanesOf = (a) => [
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) && CELL_FILTER_UNASSIGNED,
-    a.location_source === SOURCE_SITE_WIDE && CELL_FILTER_SITE_WIDE,
+    isSiteWideSource(a.location_source) && CELL_FILTER_SITE_WIDE,
     a.effective_cell_id,
   ].filter(Boolean)
 
@@ -1136,7 +1140,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         </td>
                         <td style={{ maxWidth: '170px' }}>
                           {(() => {
-                            // The resolved cell and how it was resolved: inherited and
+                            // The resolved cell and how it was resolved: following the gateway and
                             // set-on-device behave differently when the gateway is reassigned.
                             const gw = gatewayById.get(a.active_gateway_id) || null
                             const cellName = cellById.get(a.effective_cell_id)?.cell_name
@@ -1144,13 +1148,19 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             // Every lane that resolves to no cell, not just Site-Wide: use
                             // NON_CELL_SOURCES, or a simulated device reads as Unassigned.
                             if (NON_CELL_SOURCES.has(a.location_source)) {
+                              const areaName = areaById.get(a.effective_area_id)?.area_name || 'its area'
+                              const gwName = a.gateway_name || gw?.gateway_name || 'its gateway'
                               return (
                                 <Badge size="sm"
                                        title={a.location_source === SOURCE_SITE_WIDE
                                          ? 'Asserted to have no single cell — campus-wide or mobile'
                                          : a.location_source === SOURCE_AREA_WIDE
-                                           ? `Asserted to have no single cell — serves the whole of ${areaById.get(a.effective_area_id)?.area_name || 'its area'}`
-                                           : noCellReason(gw) || 'Resolves to a lane rather than to a cell'}>
+                                           ? `Asserted to have no single cell — serves the whole of ${areaName}`
+                                           : a.location_source === SOURCE_FOLLOWED_SITE
+                                             ? `Follows its gateway, ${gwName}, which serves the whole campus`
+                                             : a.location_source === SOURCE_FOLLOWED_AREA
+                                               ? `Follows its gateway, ${gwName}, which serves the whole of ${areaName}`
+                                               : noCellReason(gw) || 'Resolves to a lane rather than to a cell'}>
                                   {locationSourceLabel(a.location_source)}
                                 </Badge>
                               )
@@ -1279,29 +1289,37 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               </div>
             </div>
 
-            {/* Where the device is, which is not how its data reaches us. Inherit stores NULL; a
-                cell stores an override that wins over the gateway's. */}
+            {/* Where the device is, which is not how its data reaches us. Follow Gateway stores
+                nothing and takes the gateway's place; a cell, an area or the site is the device's
+                own and wins over the gateway's. */}
             {(() => {
               const formGateway = gateways.find(g => g.gateway_id === form.active_gateway_id) || null
+              const following = form.location_scope === SCOPE_GATEWAY
               const siteWide = form.location_scope === SCOPE_SITE_WIDE
               const areaWide = form.location_scope === SCOPE_AREA_WIDE
+              const inCell = normaliseScope(form.location_scope) === SCOPE_CELL
               const location = resolveDeviceLocation(
-                { cell_id: siteWide || areaWide ? null : form.cell_id, area_id: areaWide ? form.area_id : null, location_scope: form.location_scope },
+                { cell_id: inCell ? form.cell_id : null, area_id: areaWide ? form.area_id : null, location_scope: form.location_scope },
                 formGateway
               )
               const chosenAreaName = areas.find(ar => ar.area_id === form.area_id)?.area_name
               const nameOf = (id) => cells.find(c => c.cell_id === id)?.cell_name
-              const inheritedName = nameOf(location.gateway_cell_id)
+              const gatewayCellName = nameOf(location.gateway_cell_id)
               // Whether a cell means anything for this device, decided by its gateway. There is no
               // CHECK on the device side; a stored cell would be accepted and ignored.
               const acceptsCell = gatewayAcceptsCell(formGateway)
+              // Where Follow Gateway puts the device now, in the sentence the Cell and Area pages
+              // would use. An unplaced device is the one finding here.
+              const followedLine = followedPlaceLine(formGateway, { cells, areas })
+              const unplaced = location.location_source === SOURCE_UNASSIGNED
 
               return (
                 <div className="form-group">
                   <label className="form-label">Location</label>
                   {/* One exclusive choice of scope, then the cell or the area it calls for.
-                      The scopes are exclusive by CHECK (`devices_site_wide_has_no_cell` and the
-                      area-wide pair), which is what a radio group says. */}
+                      The scopes are exclusive by CHECK (`devices_site_wide_has_no_cell`, the
+                      area-wide pair and `devices_follow_gateway_has_no_place`), which is what a
+                      radio group says. */}
                   <LocationPicker
                     idPrefix="device"
                     form={form}
@@ -1309,32 +1327,34 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     cells={cells}
                     areas={areas}
                     disabled={!acceptsCell}
-                    // Named after what it resolves to, not "None": the empty value is a deliberate
-                    // "follow the gateway", not an absence.
-                    cellEmptyLabel={inheritedName ? `— Inherit from gateway (${inheritedName}) —` : '— Inherit from gateway (gateway has no cell) —'}
+                    followGateway
+                    // In a cell requires one: the empty option is a prompt, not an answer.
+                    cellEmptyLabel="— Choose a cell —"
                   />
 
-                  <div className="form-hint">
+                  <div className={`form-hint${acceptsCell && following && unplaced ? ' hint-warning' : ''}`}>
                     {!acceptsCell
                       /* Deliberately does not clear `cell_id`: nothing here is refused on save, so
                          a stored cell is kept and applies again if the gateway stops being
                          synthetic. */
                       ? `${noCellReason(formGateway)} Any cell already set on it is kept, and applies again if that changes.`
-                      : siteWide
-                        ? 'Reported as Site-Wide rather than under any cell. Use this for campus-wide or mobile assets.'
-                        : areaWide
-                          ? `Reported as Area-Wide in ${chosenAreaName || 'this area'} rather than under any cell in it. Use this for a building management system or anything that serves the whole area.`
-                          : location.location_source === SOURCE_EXPLICIT
-                          ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
-                          : inheritedName
-                            ? `Follows the gateway above. Reassigning the gateway moves this device with it.`
-                            : 'Neither this device nor its gateway has a cell, so it will show under Unassigned in the Cell filter. Pick a cell here, set one on the gateway, or mark it Site-Wide.'}
+                      : following
+                        ? (unplaced
+                          ? <><IconAlertTriangle size={12} /> {followedLine}. {followedPlaceFix(formGateway)}</>
+                          : `${followedLine}. It moves when the gateway does.`)
+                        : siteWide
+                          ? 'Reported as Site-Wide rather than under any cell. Use this for campus-wide or mobile assets.'
+                          : areaWide
+                            ? `Reported as Area-Wide in ${chosenAreaName || 'this area'} rather than under any cell in it. Use this for a building management system or anything that serves the whole area.`
+                            : form.cell_id
+                              ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
+                              : 'Choose the cell this device is in, or use Follow Gateway to take its gateway’s place.'}
                   </div>
 
                   {location.cell_mismatch && (
                     <div className="form-hint hint-warning">
                       <IconAlertTriangle size={12} /> This device is filed in <strong>{nameOf(location.effective_cell_id)}</strong> but its
-                      gateway serves <strong>{inheritedName}</strong>. That is allowed — a shared or host-run
+                      gateway serves <strong>{gatewayCellName}</strong>. That is allowed — a shared or host-run
                       connector often reaches across cells — but check it is what you meant.
                     </div>
                   )}
@@ -1627,7 +1647,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           {
             // One row for where the device is: Area › Cell, the lane standing in for a cell, or
             // Unassigned. The resolved location, not the explicit override; "(from gateway)" marks
-            // the inherited case, which moves when the gateway does.
+            // a device that follows its gateway, which moves when the gateway does.
             label: 'Location',
             full: true,
             value: selectedLocation && (() => {
@@ -1666,7 +1686,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     </>
                   )}
                   {place}
-                  {source === SOURCE_INHERITED && <span className="cell-meta">(from gateway)</span>}
+                  {isFollowedSource(source) && <span className="cell-meta">(from gateway)</span>}
                 </div>
               )
             })(),
@@ -1674,8 +1694,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               ? unassignedHint(selectedDevice, selectedGateway) || 'No cell resolved'
               : selectedLocation?.location_source === SOURCE_EXPLICIT
                 ? 'Set on the device itself, so it stays here regardless of its gateway.'
-                : selectedLocation?.location_source === SOURCE_INHERITED
-                  ? 'Inherited from its gateway. It will follow the gateway if that moves.'
+                : isFollowedSource(selectedLocation?.location_source)
+                  ? `Follows its gateway: ${followedPlaceLine(selectedGateway, { cells, areas })}. It moves when the gateway does.`
                   : selectedLocation?.location_scope === SCOPE_SITE_WIDE
                     ? 'Marked Site-Wide: it belongs to no single cell.'
                     : selectedLocation?.location_scope === SCOPE_AREA_WIDE

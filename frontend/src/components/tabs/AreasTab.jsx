@@ -16,7 +16,7 @@ import {
 } from '../../utils/listFilters'
 import { useSortableRows } from '../../hooks/useTableSort'
 import {
-  SCOPE_AREA_WIDE, SOURCE_AREA_WIDE, groupCellsByArea, groupDevicesByCell
+  SCOPE_AREA_WIDE, isAreaWideSource, groupCellsByArea, groupDevicesByCell
 } from '../../utils/cellResolution'
 import { isPlaced } from '../../utils/areaPlans'
 import { areaWideIn, archiveRefusal } from '../../utils/areaArchive'
@@ -277,7 +277,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
     }))
   }, [areas, cellsByArea, devicesByCell, assets, gateways])
   const countsOf = (area) => countsByArea.get(area.area_id) || { cells: 0, gateways: 0, devices: 0, wideDevices: 0 }
-  const areaWideDevices = (areaId) => assets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === areaId)
+  const areaWideDevices = (areaId) => assets.filter(a => isAreaWideSource(a.location_source) && a.effective_area_id === areaId)
   const areaWideGateways = (areaId) => gateways.filter(g => g.location_scope === SCOPE_AREA_WIDE && g.area_id === areaId)
 
   // Lifecycle is any of its values; its counts are over what the search lets through.

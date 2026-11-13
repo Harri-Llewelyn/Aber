@@ -30,7 +30,7 @@ const device = (overrides = {}) => ({
   is_archived: false,
   active_gateway_id: 'gw-1',
   cell_id: null,
-  location_scope: 'cell',
+  location_scope: 'gateway',
   first_dbirth_at: '2026-07-27T12:00:00Z',
   created_at: '2026-07-20T12:00:00Z',
   ...overrides
