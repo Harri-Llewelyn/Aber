@@ -13,7 +13,7 @@ vi.mock('../lib/supabaseClient', () => {
     const query = {
       then: (resolve, reject) => Promise.resolve(calls.answer).then(resolve, reject)
     };
-    for (const method of ['select', 'in', 'or', 'order', 'limit']) {
+    for (const method of ['select', 'in', 'eq', 'or', 'order', 'limit']) {
       query[method] = (...args) => {
         calls.log.push([method, ...args]);
         return query;
@@ -75,6 +75,28 @@ describe('jobHistory', () => {
       await expect(api.jobHistory('capture', { before })).rejects.toThrow(/page on from a row it read/);
     }
     expect(calls.log.some(([method]) => method === 'or')).toBe(false);
+  });
+
+  it('reads one job alone by its id, among the finished ones, and the count says whether it is there', async () => {
+    calls.answer = { data: [{ id: ID }], error: null, count: 1 };
+    const page = await api.jobHistory('playback', { job: ID, limit: 1 });
+    expect(page).toEqual({ rows: [{ id: ID }], remaining: 1, more: false });
+    expect(calls.log).toEqual([
+      ['from', 'playback_jobs'],
+      ['select', '*, gateways(name, sparkplug_id), captures(note, subject_sparkplug_id)', { count: 'exact' }],
+      ['in', 'status', ['COMPLETED', 'FAILED', 'CANCELLED']],
+      ['eq', 'id', ID],
+      ['order', 'created_at', { ascending: false }],
+      ['order', 'id', { ascending: false }],
+      ['limit', 2]
+    ]);
+  });
+
+  it('reads nothing for an id that is not one, rather than writing it into the filter', async () => {
+    for (const job of ['not-a-job', `${ID},status.eq.PENDING`, '']) {
+      expect(await api.jobHistory('capture', { job })).toEqual({ rows: [], remaining: 0, more: false });
+    }
+    expect(calls.log).toEqual([]);
   });
 
   it('says which history could not be read', async () => {

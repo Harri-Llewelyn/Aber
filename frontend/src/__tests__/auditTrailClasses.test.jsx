@@ -85,7 +85,7 @@ describe('the legend is the class filter', () => {
 
   it('sits at the right-hand end of its row, after Expand all and Collapse all', async () => {
     await show()
-    const header = document.querySelector('.trail-header')
+    const header = document.querySelector('.groups-header')
     expect(header.lastElementChild).toBe(screen.getByRole('group', { name: 'Classes' }))
     expect(header.firstElementChild).toHaveTextContent('Collapse all')
   })

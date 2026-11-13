@@ -36,7 +36,7 @@ const catalog = [
   { name: 'Spindle/LOAD', units: 'kW', datatype: 10 },
   { name: 'Controller/PARTS_PER_HOUR', units: 'COUNT/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Controller/PART_COUNT' } },
   { name: 'Controller/UPTIME', datatype: 10, derivation: { kind: 'time_in_state', input: 'Controller/EXECUTION', states: ['ACTIVE'] } },
-  { name: 'Power/TOTAL', units: 'kW', datatype: 10, derivation: { kind: 'sum', inputs: [{ metric: 'Power/PHASE_A', sign: 1 }, { metric: 'Power/PHASE_B', sign: 1 }] } },
+  { name: 'Power/TOTAL', units: 'KILOWATT', datatype: 10, derivation: { kind: 'sum', inputs: [{ metric: 'Power/PHASE_A', sign: 1 }, { metric: 'Power/PHASE_B', sign: 1 }] } },
 ]
 
 const routeGet = (path) => {
@@ -81,10 +81,11 @@ const field = () => within(panel()).queryByText('Derived Metrics')?.closest('.co
 describe("the Devices drawer's derived metrics", () => {
   it('lists each derived metric the device reports the inputs of, with its value, its tag and its window', async () => {
     await open('Press 1')
-    await waitFor(() => expect(field()?.textContent).toContain('120.4 COUNT/HOUR'))
+    await waitFor(() => expect(field()?.textContent).toContain('120.4 count/h'))
     const rows = [...field().querySelectorAll('.derived-values li')].map(li => li.textContent.replace(/\s+/g, ' ').trim())
+    // The catalogue holds codes (COUNT/HOUR, KILOWATT); the drawer says their symbols.
     expect(rows).toEqual([
-      'Controller/PARTS_PER_HOUR Derived 120.4 COUNT/HOUR over the last hour',
+      'Controller/PARTS_PER_HOUR Derived 120.4 count/h over the last hour',
       'Controller/UPTIME Derived 50% over the last hour',
       'Power/TOTAL Derived 7 kW at the last whole minute',
     ])
@@ -105,7 +106,7 @@ describe("the Devices drawer's derived metrics", () => {
   it('says a device with no value has none yet, and never reads it as zero', async () => {
     api.readDerivedCurrent.mockResolvedValue([current('Controller/PARTS_PER_HOUR', 0)])
     await open('Press 1')
-    await waitFor(() => expect(field()?.textContent).toContain('0 COUNT/HOUR over the last hour'))
+    await waitFor(() => expect(field()?.textContent).toContain('0 count/h over the last hour'))
     expect(field().textContent).toContain('Controller/UPTIME')
     expect(field().textContent.match(/No value yet\./g)).toHaveLength(2)
   })

@@ -467,7 +467,7 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
           <LoadingState label="readings" />
         ) : (
           <>
-            <div className="history-header">
+            <div className="groups-header">
               <ExpandAllToggle
                 anyOpen={SECTIONS.some(k => !closed.has(k))}
                 onExpandAll={() => setOpen(SECTIONS, true)}

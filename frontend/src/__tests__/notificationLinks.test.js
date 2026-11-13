@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  entityUrl, proposalUrl, metricUrl, captureSubjectUrl, backupUrl, personUrl, identityUrl, changesByUrl, replayLanesUrl,
+  entityUrl, proposalUrl, metricUrl, captureSubjectUrl, captureJobUrl, backupUrl, personUrl, identityUrl, changesByUrl, replayLanesUrl,
   automationUrl, automationsUrl, automationsForEntityUrl, automationForTriggerUrl, alertPage
 } from '../routes'
 
@@ -88,9 +88,8 @@ const NO_LINK = [
   { file: 'components/modals/DeviceExportModal.jsx', piece: 'unmappedWarning,', why: 'given only to a reader who cannot open the Metrics page' },
   { file: 'components/modals/GatewayBundleModal.jsx', piece: 'Bundle downloaded for', why: 'a file, in the downloads' },
   { file: 'components/tabs/SchemasTab.jsx', piece: 'Downloaded ${filename}', why: 'a file, in the downloads' },
-  { file: 'components/tabs/CaptureTab.jsx', piece: 'Downloading the capture of', why: 'a file, in the downloads' },
   { file: 'components/tabs/ArchivesTab.jsx', piece: 'permanently deleted', why: 'the record is gone' },
-  { file: 'components/tabs/CaptureTab.jsx', piece: 'Capture deleted.', why: 'the capture is gone' },
+  { file: 'components/tabs/CaptureTab.jsx', piece: 'Capture deleted.', why: 'the capture and its record are gone' },
   { file: 'components/tabs/AccessControlTab.jsx', piece: '” deleted`', why: 'the read-only broker account is gone' },
   { file: 'components/tabs/DevicesTab.jsx', piece: "Quarantined device '${item.asset_name}' rejected", why: 'a rejected device is deleted' },
   { file: 'components/tabs/SchemasTab.jsx', piece: 'discarded', why: 'a discarded draft is deleted' },
@@ -109,6 +108,23 @@ describe('a notification about a record links to it', () => {
 
   it.each(unlinked.map(n => [`${n.file}:${n.line}`, n]))('%s passes `to`, or NO_LINK says why not', (_, n) => {
     expect(listed(n), `${n.call}\nlinks nowhere: give it { to } (routes.js), or add it to NO_LINK with the reason`).toBeTruthy()
+  })
+
+  // A recording, a playback and the stop of either open the job; a download and an upload, which
+  // make no job, open the subject whose capture it is; a deleted capture is in NO_LINK.
+  it.each([
+    ['Recording ', "captureJobUrl('capture'"],
+    ['Stopping. The recorder finishes', "captureJobUrl('capture'"],
+    ['That capture had already finished', "captureJobUrl('capture'"],
+    ['Playing back the capture', "captureJobUrl('playback'"],
+    ['Stopping the playback', "captureJobUrl('playback'"],
+    ['That playback had already finished', "captureJobUrl('playback'"],
+    ['Downloading the capture of', 'captureSubjectUrl('],
+    ['Uploaded ', 'captureSubjectUrl('],
+  ])('the Capture page says %s and links to %s', (piece, link) => {
+    const call = all.find(n => n.file === 'components/tabs/CaptureTab.jsx' && n.call.includes(piece))
+    expect(call, `no showToast call says ${piece}`).toBeTruthy()
+    expect(call.call).toContain(link)
   })
 
   it.each(NO_LINK.map(e => [`${e.file}: ${e.piece}`, e]))('NO_LINK %s still names a call', (_, e) => {
@@ -142,6 +158,30 @@ describe('where a notification links to', () => {
     expect(captureSubjectUrl('device', 'd-1')).toBe('/capture/device?subject=d-1')
     // The lanes Prepare replay lanes made, on the Devices page, which hides lanes by default.
     expect(replayLanesUrl('g-1')).toBe('/devices?gateway=g-1&replay=1')
+  })
+
+  it('opens a recording or a playback on the tab of its kind, narrowed to that job', () => {
+    const job = '7d2c0000-0000-4000-8000-000000000001'
+    expect(captureJobUrl('capture', job)).toBe(`/capture/captures?job=${job}`)
+    expect(captureJobUrl('playback', job)).toBe(`/capture/playbacks?job=${job}`)
+    // With no job known, the tab of its kind and no narrowing.
+    expect(captureJobUrl('capture', undefined)).toBe('/capture/captures')
+    expect(captureJobUrl('playback', '')).toBe('/capture/playbacks')
+  })
+
+  it('opens the job a capture or playback alert names, on its kind\'s tab, narrowed to it', () => {
+    const job = '7d2c0000-0000-4000-8000-000000000002'
+    const alert = (rule_uid, label) => ({ rule_uid, labels: { alertname: 'Capture or Playback Failed', job: label }, entity_type: 'gateway' })
+    for (const rule of ['aber-job-failed', 'aber-job-stuck']) {
+      expect(alertPage(alert(rule, `capture job ${job}`))).toEqual({ to: `/capture/captures?job=${job}`, title: 'Show this capture on the Capture page' })
+      expect(alertPage(alert(rule, `playback job ${job}`))).toEqual({ to: `/capture/playbacks?job=${job}`, title: 'Show this playback on the Capture page' })
+    }
+    // Only a label composed as platform_health_rows() composes it, on a rule that names a job.
+    expect(alertPage(alert('aber-job-failed', 'recording job x'))).toBeNull()
+    expect(alertPage(alert('aber-job-failed', `capture job ${job} extra`))).toBeNull()
+    expect(alertPage(alert('aber-gateway-stale', `capture job ${job}`))).toBeNull()
+    // The playback worker not reporting has no job to name: the Playbacks tab.
+    expect(alertPage({ rule_uid: 'aber-playback-worker-stale' }).to).toBe('/capture/playbacks')
   })
 
   it('opens an automation by its id, and the list on what applies to one device or one alert', () => {
@@ -186,6 +226,9 @@ describe('where a notification links to', () => {
     ['components/tabs/ApprovalsTab.jsx', ["useUrlState('proposal'"], 'decided'],
     ['components/tabs/MetricsTab.jsx', ["useUrlState('metric'"], 'deprecated'],
     ['components/tabs/CaptureTab.jsx', ["useUrlState('subject'"], 'device'],
+    // A job's link names the tab of its kind and the job, which the tab lists alone.
+    ['components/tabs/CaptureTab.jsx', ["useUrlState('job'", "useUrlState('search'"], 'captures'],
+    ['components/tabs/CaptureTab.jsx', ["useUrlState('job'"], 'playbacks'],
     ['components/tabs/BackupsTab.jsx', ["useUrlState('run'"], null],
     ['components/tabs/DevicesTab.jsx', ["useUrlList('gateway'", "useUrlState('replay'"], null],
     ['components/tabs/PeopleSection.jsx', ["useUrlState('removed'", "useUrlState('search'", "useUrlState('person'"], null],
