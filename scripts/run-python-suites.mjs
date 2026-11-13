@@ -8,14 +8,16 @@
  * Twenty-one `run:` steps in ci.yml, each naming one suite. That list fell twenty behind the tree
  * (#147) and nothing noticed, because a list that is not compared to anything cannot be wrong --
  * it can only be incomplete, silently. The suites are now DISCOVERED from the tree and placed by
- * scripts/python-suites.mjs, which is also where the reasoning that used to sit above each step
- * now lives.
+ * scripts/python-suites.mjs from the header at the top of each suite file, which is also where the
+ * reasoning that used to sit above each step now lives.
  *
  *   node scripts/run-python-suites.mjs --lane unit
  *   node scripts/run-python-suites.mjs --lane db
  *   node scripts/run-python-suites.mjs --lane stack
- *   node scripts/run-python-suites.mjs --lane unit --list      (print, run nothing)
  *   node scripts/run-python-suites.mjs --lane unit --filter tls
+ *   node scripts/run-python-suites.mjs --list                  (every suite: its lanes and reason)
+ *   node scripts/run-python-suites.mjs --list --lane unit      (one lane's; runs nothing)
+ *   node scripts/run-python-suites.mjs --list --names          (the paths alone)
  *
  * =================================================================================================
  * THE AUDIT RUNS FIRST, AND IT IS THE POINT
@@ -27,7 +29,7 @@
  * this one is the backstop that cannot be skipped by a job ordering change, because the runner
  * refuses to run a tree it cannot account for.
  *
- * A suite that genuinely should not run anywhere declares `lanes: ['manual']` with a reason. That
+ * A suite that genuinely should not run anywhere declares `lanes: manual` in its header, with a reason. That
  * is a decision somebody made and wrote down, which is the difference between this and what it
  * replaced.
  *
@@ -62,16 +64,28 @@ const flag = (name) => {
 const lane = flag('--lane')
 const filter = flag('--filter')
 const listOnly = argv.includes('--list')
+const namesOnly = argv.includes('--names')
 
 const c = process.stdout.isTTY
   ? { bold: (s) => `\x1b[1m${s}\x1b[0m`, red: (s) => `\x1b[31m${s}\x1b[0m`,
       green: (s) => `\x1b[32m${s}\x1b[0m`, dim: (s) => `\x1b[2m${s}\x1b[0m` }
   : { bold: (s) => s, red: (s) => s, green: (s) => s, dim: (s) => s }
 
+/** A reason as lines no longer than `width`, broken at spaces. */
+const wrap = (text, width) => {
+  const out = []
+  let line = ''
+  for (const word of text.split(' ')) {
+    if (line && line.length + 1 + word.length > width) { out.push(line); line = word } else line = line ? `${line} ${word}` : word
+  }
+  if (line) out.push(line)
+  return out
+}
+
 const die = (msg) => { console.error(`\n${c.red('error:')} ${msg}\n`); process.exit(1) }
 
-if (!lane) die(`--lane is required. One of: ${LANES.join(', ')}`)
-if (!LANES.includes(lane)) die(`unknown lane "${lane}". One of: ${LANES.join(', ')}`)
+if (!lane && !listOnly) die(`--lane is required. One of: ${LANES.join(', ')}`)
+if (lane && !LANES.includes(lane)) die(`unknown lane "${lane}". One of: ${LANES.join(', ')}`)
 
 // -------------------------------------------------------------------------------------------
 // Walk the tree
@@ -98,36 +112,41 @@ const allFiles = walk('.')
 const audit = auditSuites(allFiles)
 
 if (audit.orphans.length) {
-  console.error(c.red(`\n${audit.orphans.length} Python suite(s) have no lane in scripts/python-suites.mjs:`))
+  console.error(c.red(`\n${audit.orphans.length} Python suite(s) have no header in their file saying which lane they run in (scripts/python-suites.mjs):`))
   for (const f of audit.orphans) console.error(c.red(`  ${f}`))
   console.error(
-    '\nA suite with no lane runs nowhere. Give it one -- unit (needs nothing), db (needs the\n' +
-    'migrated Postgres), stack (needs a running stack) -- or `manual` with a reason saying\n' +
-    'why it is deliberately not automated.\n'
+    '\nA suite with no lane runs nowhere. Give its file a header (`# suite:` with `lanes:` and `why:`,\n' +
+    'at the top, before the docstring) naming one -- unit (needs nothing), db (needs the migrated\n' +
+    'Postgres), stack (needs a running stack) -- or `manual` with a reason saying why it is\n' +
+    'deliberately not automated.\n'
   )
 }
 if (audit.phantoms.length) {
-  console.error(c.red(`\n${audit.phantoms.length} manifest entr(ies) name a file that does not exist:`))
+  console.error(c.red(`\n${audit.phantoms.length} header(s) in a file that is not a suite in the tree:`))
   for (const f of audit.phantoms) console.error(c.red(`  ${f}`))
-  console.error('\nA stale entry makes the orphan count read low, which is the failure this guard exists to catch.\n')
+  console.error('\nA stale header makes the orphan count read low, which is the failure this guard exists to catch.\n')
 }
 if (audit.badLanes.length) {
-  console.error(c.red(`\n${audit.badLanes.length} manifest entr(ies) declare no lane or an unknown one:`))
+  console.error(c.red(`\n${audit.badLanes.length} suite header(s) declare no lane or an unknown one:`))
   for (const f of audit.badLanes) console.error(c.red(`  ${f}`))
 }
 if (audit.badRunners.length) {
-  console.error(c.red(`\n${audit.badRunners.length} manifest entr(ies) declare an unknown runner:`))
+  console.error(c.red(`\n${audit.badRunners.length} suite header(s) declare an unknown runner:`))
   for (const f of audit.badRunners) console.error(c.red(`  ${f}`))
   console.error(`\nOne of: ${RUNNERS.join(', ')}. An unrecognised value would fall back to the`)
   console.error('script form, which for a pytest-style suite means running nothing and passing.\n')
 }
 if (audit.unexplained.length) {
-  console.error(c.red(`\n${audit.unexplained.length} manifest entr(ies) carry no reason:`))
+  console.error(c.red(`\n${audit.unexplained.length} suite header(s) carry no reason:`))
   for (const f of audit.unexplained) console.error(c.red(`  ${f}`))
+}
+if (audit.badHeaders.length) {
+  console.error(c.red(`\n${audit.badHeaders.length} suite header(s) this cannot read:`))
+  for (const f of audit.badHeaders) console.error(c.red(`  ${f}`))
 }
 if (
   audit.orphans.length || audit.phantoms.length || audit.badLanes.length ||
-  audit.badRunners.length || audit.unexplained.length
+  audit.badRunners.length || audit.unexplained.length || audit.badHeaders.length
 ) {
   process.exit(1)
 }
@@ -135,10 +154,10 @@ if (
 // -------------------------------------------------------------------------------------------
 // Run the lane
 // -------------------------------------------------------------------------------------------
-let suites = suitesInLane(lane)
+let suites = lane ? suitesInLane(lane) : Object.keys(SUITES).sort()
 if (filter) suites = suites.filter((s) => s.includes(filter))
 
-if (suites.length === 0) {
+if (suites.length === 0 && lane) {
   // NOT AN ERROR FOR A FILTER, which is a deliberate narrowing by whoever typed it. An empty LANE
   // is different: it means every suite that used to run here has been moved, and a job quietly
   // asserting nothing is exactly what this file exists to prevent.
@@ -147,7 +166,12 @@ if (suites.length === 0) {
 }
 
 if (listOnly) {
-  for (const s of suites) console.log(s)
+  for (const s of suites) {
+    if (namesOnly) { console.log(s); continue }
+    const { lanes, runner, why } = SUITES[s]
+    console.log(`${c.bold(s)}  [${lanes.join(', ')}]${runner ? ` (${runner})` : ''}`)
+    for (const line of wrap(why, 96)) console.log(`    ${line}`)
+  }
   process.exit(0)
 }
 
