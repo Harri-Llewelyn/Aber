@@ -31,7 +31,7 @@ import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/tim
 import { readDeviceSeries } from '../../utils/historyReads'
 import {
   DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, bucketStarts,
-  METRIC_PAGE_SIZE, changeSeries, chartSeries, derivedReadProblem, markBuckets, metricAddress, metricDevices, metricPages,
+  METRIC_PAGE_SIZE, changeSeries, chartSeries, chartTitle, derivedReadProblem, markBuckets, metricAddress, metricDevices, metricPages,
   multiplesWords, pageFrom, pagingWords, pickedAddress, readWords, stateReadLine, telemetryKey, validRanges,
 } from '../../utils/history'
 
@@ -267,7 +267,7 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
   // A new set of devices starts at the first page, and a page past the last is the last.
   const narrow = (set) => (list) => { set(list); setPageText('') }
   const plan = reading?.plan ?? null
-  const heading = unit ? `${reading?.metric ?? metric} (${unit})` : (reading?.metric ?? metric)
+  const heading = chartTitle(reading?.metric ?? metric, unit)
 
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))

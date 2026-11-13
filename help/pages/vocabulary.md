@@ -15,6 +15,7 @@ This page holds reference vocabularies: the published sets of terms that industr
 - Only some entries can be clicked. In MTConnect, these are data item types, not components, sub types or units. Every ISO 22400 KPI and every OPC UA data point can be clicked. In ASHRAE 223P, classes can be clicked, but relations cannot.
 - Entries already in use are ticked, and you can still click them. Clicking needs the Administrator role; without it the entries are read-only.
 - **ASHRAE 223P is a reference here.** Clicking a 223P class opens Add Metric in the BMS group, with the class as the type. It fills in no semantic identifier, datatype or units. Choose those yourself. A class names a piece of equipment, such as a temperature sensor, not the reading it takes. A 223P class is ticked when a 223P metric is named after it.
+- **A unit** in the MTConnect vocabulary is listed by its code, such as CELSIUS. The Metrics page shows it with its symbol, **°C (CELSIUS)**, and History shows the symbol alone.
 
 ## The four standards
 
