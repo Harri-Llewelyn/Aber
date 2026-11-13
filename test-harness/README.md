@@ -179,7 +179,7 @@ feel like, and which is reached first.
 | Ceiling | Value | What happens at it |
 | :--- | :--- | :--- |
 | `MAX_ENTITIES_PER_CACHE` | 1000 per cache, beyond the directory | Headroom for ids the directory does not hold. The refresher sizes each cache to the directory plus this, so the fleet is not a ceiling (#395); ids the directory lacks are. `aber_ingestion_cache_evictions_total` counts what it evicts |
-| `TELEMETRY_QUEUE_MAX_MESSAGES` | 10 000 | The callback thread blocks for 5 s, then drops the DDATA as `reason="write_queue_full"` |
+| `TELEMETRY_QUEUE_MAX_MESSAGES` | 10 000 | The callback thread blocks for 5 s, then drops the DDATA as `reason="write_queue_full"`. While the historian is down it drops at once, as `reason="db_unavailable"` |
 | `TELEMETRY_BATCH_MAX_MESSAGES` | 500 | One transaction carries at most this many messages, so batching stops helping above it |
 | `DIRECTORY_REFRESH_SECONDS` | 5 | The whole directory is read this often; its cost grows with the fleet, on a thread the hot path does not share |
 
