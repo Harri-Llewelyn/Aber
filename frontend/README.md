@@ -1404,7 +1404,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
-| `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
+| `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the form for a schema, and Upload the file** ([Schemas read and write YAML](#schemas-read-and-write-yaml)); changing one is versioning, not editing |
 | `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
@@ -2248,6 +2248,34 @@ dependency but CodeMirror, Lezer and `yaml`.
   Marks are a wavy line, a gutter icon and a message, never colour alone.
 - **`conditions:` offers nothing**: this release has no condition types.
 
+### Schemas read and write YAML
+
+**The Schemas page reads and writes YAML with the Automations page's machinery, and shares it**: no second
+YAML style. Its list has **Upload** and **Export** beside **Build Schema from Catalog**, in the order the
+Automations toolbar has them. A row's box ticks it for **Export**, which says how many (**Export (2)**) and
+saves them, or every schema in force with none ticked. The drawer's one export, **Export YAML**, replaces
+**Download JSON**. The format is `docs/device-schemas.md`.
+
+- **One JSON Schema each.** `public/json-schema/device-schemas.schema.json` is served beside the
+  automations one. `AutomationEditor` takes the schema as a prop (`schema`, the automations' when left
+  out), and `modelOf()` in `utils/automationEditorHelp.js` reads it into the kinds of map a file holds and
+  which list holds which. The help functions take that model last and default to the automations', so the
+  Automations page is unchanged. A schema that is not the automations' gets its keys, its required keys, the
+  values of an `enum`, every description on hover, and the catalogue's metrics for a property marked
+  `"x-completes": "metric"`. What is a threshold's alone (devices, holds, valid ranges) is the automations'
+  model's. No page hosts the editor for schemas yet: the YAML is exported and uploaded, not edited in place.
+- **Upload is the Automations upload.** `ApplySchemasModal` is `ApplyAutomationsModal`'s pattern on the
+  same parts: `useApplyPreview()` makes the dry run and holds its phases, `describeApply()` says why Apply
+  is held, and `ApplyResults` draws each result with its reasons placed on their lines. The text is read by
+  `parseAutomationsYaml()`, which is not about automations. A refusal's path (`$[0].metrics[1].minimum`)
+  is placed by `locatePath()`. A changed schema is a **new draft**, and the preview says which metrics it
+  adds, removes and changes the range of.
+- **The dialog toasts the success itself**, because it makes the call: one schema links to it, several to
+  the list. Export is a read, and toasts too.
+- **The export is rendered, never kept.** `renderDeviceSchemasYaml()` writes the keys of a schema and a
+  metric in the order a file reads best. It holds the version in force of each lineage ticked, since a
+  schema is found by its name and a draft is not in force.
+
 ### The Automations editor draws in a shadow root
 
 **CodeMirror writes `<style>` elements into the document it is mounted in, and the dashboard's
@@ -2266,8 +2294,8 @@ paragraph together.
   and change tab. The host stops those four (`SINGLE_KEY_SHORTCUTS`), and no other key.
 - **It is not a keyboard trap.** `Tab` is not bound, so it moves on; indenting is by `Enter`'s
   auto-indent and spaces. `Ctrl Space` asks for completion.
-- **Loaded with the page.** The editor, `yaml` and the schema are in the Automations chunk, not
-  the main bundle. Neither package's files carry a notice the build keeps, so `AutomationEditor.jsx` and
+- **Loaded with the page.** The editor and the schema are in the Automations chunk, and `yaml` in the
+  chunks of the Automations and Schemas pages, not the main bundle. Neither package's files carry a notice the build keeps, so `AutomationEditor.jsx` and
   `utils/automationYaml.js` open with theirs as `/*!` comments (`NOTICE.md`, check 322,
   `legalComments.test.js`).
 - **jsdom lays nothing out**, so a test of the editor stubs the two measurements CodeMirror asks a `Range`
