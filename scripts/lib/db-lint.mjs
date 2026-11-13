@@ -56,9 +56,10 @@ export function splinterScript (text) {
 /**
  * Every PL/pgSQL function in `schemas`, checked. A trigger function is checked against EACH table
  * it is attached to (plpgsql_check needs the row type, and a branch on TG_TABLE_NAME means a
- * finding can hold for one table and not another), and the table is part of the finding; one
- * attached to none is listed as unchecked rather than skipped silently. The extension is created
- * inside the transaction and rolled back with it, so the database is left as it was.
+ * finding can hold for one table and not another), with the transition tables the trigger names,
+ * and the table is part of the finding; one attached to none is listed as unchecked rather than
+ * skipped silently. The extension is created inside the transaction and rolled back with it, so the
+ * database is left as it was.
  */
 export function plpgsqlCheckScript (schemas = ['public']) {
   const list = schemas.map((s) => `'${s}'`).join(', ')
@@ -73,9 +74,9 @@ WITH fns AS (
    WHERE n.nspname IN (${list}) AND l.lanname = 'plpgsql'
      AND p.prorettype <> 'pg_catalog.event_trigger'::regtype
 ), targets AS (
-  SELECT f.oid, f.function, 0::oid AS relid FROM fns f WHERE NOT f.is_trigger
+  SELECT f.oid, f.function, 0::oid AS relid, NULL::name AS oldtable, NULL::name AS newtable FROM fns f WHERE NOT f.is_trigger
   UNION
-  SELECT f.oid, f.function || ' on ' || t.tgrelid::regclass::text, t.tgrelid
+  SELECT f.oid, f.function || ' on ' || t.tgrelid::regclass::text, t.tgrelid, t.tgoldtable, t.tgnewtable
     FROM fns f JOIN pg_catalog.pg_trigger t ON t.tgfoid = f.oid
    WHERE f.is_trigger
 ), findings AS (
@@ -84,7 +85,8 @@ WITH fns AS (
    CROSS JOIN LATERAL plpgsql_check_function_tb(
      g.oid, g.relid,
      fatal_errors => false, other_warnings => true, extra_warnings => true,
-     performance_warnings => false, security_warnings => true) c
+     performance_warnings => false, security_warnings => true,
+     oldtable => g.oldtable, newtable => g.newtable) c
   UNION ALL
   SELECT f.function, 'unchecked', 'trigger function attached to no table', NULL, NULL
     FROM fns f

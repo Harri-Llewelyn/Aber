@@ -801,6 +801,18 @@ export const SUITES = {
       "to confine an admin's write landed on top of a table-level UPDATE already held and did " +
       'nothing. The settings page would have worked perfectly while provenance was forgeable.',
   },
+  'supabase/migrations/test_a_number_setting_says_whether_it_counts_whole_things.py': {
+    lanes: ['db'],
+    why:
+      "0285's whole_number flag and 0286's proposal cap. Every number setting is listed with the " +
+      'reader that decided it, so a new one is decided when it is added; a whole setting refuses 1.5 ' +
+      'in its own words, for an Administrator and for the service role, and the fraction takes it; ' +
+      "the guard looks at a row only when its value or flag changes, so seed_setting()'s label " +
+      'refresh survives a stored part value. The upgrade is 0285\'s file run over a database as 1.8.0 ' +
+      'left it: each part value rounded down with a NOTICE and an Audit Trail row, a replay silent. ' +
+      'The cap admits a proposal at the floor of a stored 10.5, with the cap\'s sentence and never a ' +
+      'cast error, which is what stopped every proposal before.',
+  },
   'supabase/migrations/test_user_settings.py': {
     lanes: ['db'],
     why:
@@ -1363,6 +1375,16 @@ export const SUITES = {
       'keeps the rows that fit, a document never deletes, the round trip); the audit rows; a device ' +
       'archived, restored or deleted and the alerts that end with a trigger; and automations_for_entity().',
   },
+  'supabase/migrations/test_deleting_an_automation_resolves_its_alerts_in_one_pass.py': {
+    lanes: ['db'],
+    why:
+      '0257 and 0287 -- that deleting an automation with 2,000 triggers and 1,000 firing alerts updates ' +
+      'platform_alerts in ONE statement and in under 1.5 s; that a delete resolves the alerts of the ' +
+      "triggers it removes (one, several, a whole automation, a device's) and no others; that the update arm " +
+      'is as it was (archived, moved, a new threshold); that automation_alert_trigger_id() reads what ' +
+      'automation_alert_fingerprint() composes; that no API role runs the functions; and a manager deleting ' +
+      'through delete_automation().',
+  },
   'supabase/migrations/test_the_automations_schema_and_the_function_agree.py': {
     lanes: ['db'],
     why:
@@ -1540,6 +1562,15 @@ export const SUITES = {
       'none, scans only the table whose CHECK is missing, and passes once they are named. Each of ' +
       "those writers reaches the table without the dashboard's dialogs, which is why the CHECK is " +
       'the rule and the dialogs are not.',
+  },
+  'supabase/migrations/test_a_failed_type_change_revocation_is_retried.py': {
+    lanes: ['db'],
+    why:
+      "0288 -- a revocation a change of type asked for and that failed is asked again by the sweep, " +
+      "with the stamp kept, until a 2xx confirms it; and never once a credential was issued or enrolled " +
+      "after the stamp, since the account name is the same before and after and a retry would disable " +
+      'the new credential. The archive path is as it was, and the helper that decides is held by its ' +
+      'truth table.',
   },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of

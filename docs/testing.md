@@ -611,6 +611,19 @@ python supabase/migrations/test_platform_alerts_retention.py
 # days with the setting gone. Every test rolls back.
 python supabase/migrations/test_alert_history_is_kept_for_90_days.py
 python supabase/migrations/test_system_settings_rls.py
+# A number setting says whether it counts whole things (0285), and a part value never stops a proposal
+# (0286). Every number setting is listed with the reader that decided it, and a new one fails the suite
+# until it is decided. system_settings.whole_number is true for nine and false for the fraction, and
+# only a number can be whole. A whole setting refuses 1.5 and 0.5 as "<key> must be a whole number",
+# with of hours, of days or of seconds after it by the key's last word, for an Administrator and for the
+# service role, on an insert as on an update; the fraction accepts 0.125. The guard looks at a row only
+# when its value or its flag changes. The reminder interval keeps 0248's sentence and
+# notification_setting_guard() its other arms. 0285's file runs in the transaction over a database as
+# 1.8.0 left it: each stored part value is rounded down with a NOTICE and an Audit Trail row, a floor
+# is never undercut, and a replay writes nothing. A stored part day is its whole days for a suppression
+# window and an export. A stored 10.5 in the proposal cap admits ten and refuses the eleventh with the
+# cap's sentence. Every test rolls back.
+python supabase/migrations/test_a_number_setting_says_whether_it_counts_whole_things.py
 # The site's Sparkplug group (0131), which is DISPLAYED and not editable. An Administrator holds
 # GRANT UPDATE (value) on system_settings, so a direct PostgREST write is admitted by RLS and only
 # the trigger refuses it -- a read-only control in the browser alone would be a suggestion. Also
@@ -948,6 +961,12 @@ python supabase/migrations/test_changing_a_gateway_s_type_cleans_up_after_the_ol
 # renamed, only the table missing its CHECK is scanned, and it passes once they are named. Every test
 # rolls back.
 python supabase/migrations/test_a_device_or_gateway_name_cannot_be_blank.py
+# A failed revocation after a change of type is asked again (0288). The sweep asks again for a call
+# that got no 2xx, or no reply in five minutes, and keeps the stamp, until a 2xx confirms it. It never
+# asks once a credential was issued or enrolled after the stamp, over several runs: the broker account
+# has the same name before and after, so a retry would disable the new credential. The archive path is
+# as it was, and a restore ends the request. Every test rolls back.
+python supabase/migrations/test_a_failed_type_change_revocation_is_retried.py
 python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.
@@ -1146,7 +1165,8 @@ python supabase/migrations/test_an_audit_trail_filter_takes_several_values.py
 # and the caller's policies hold. p_counts gives each class, kind and action its events under every
 # filter but its own, the search, the people and the purged rule included. A backup request's id
 # finds the backup it took, released and pruned; a cancelled request's, its own lane; another id,
-# what it did. One form is declared, with its grants and its five class indexes, after the chain
+# what it did. One form is declared, with its grants and its five class indexes (a count that
+# names a class reads its index once VACUUM has made the pages visible), after the chain
 # and after 0001's declaration and sweep, 0168, 0222, 0227 and 0228 replay over the form from
 # before. Every test rolls back.
 python supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py
@@ -1190,6 +1210,13 @@ python supabase/migrations/test_an_alert_stays_quiet_during_planned_work.py
 # and the rendered document applies as unchanged. The Audit Trail rows, the lifecycle of a device
 # (archive, restore, delete) with the alerts it resolves, and automations_for_entity(). Every test rolls back.
 python supabase/migrations/test_an_automation_is_a_set_of_rows_applied_from_one_document.py
+# Deleting an automation resolves its alerts in one pass (0257, 0287). An automation with 2,000
+# triggers and 1,000 firing alerts is deleted: platform_alerts is updated in one statement, and the
+# delete takes under 1.5 s. A delete resolves the alerts of the triggers it removes (one, several, a
+# whole automation, a device's) and no others; the update arm is as it was; the function that reads a
+# trigger's id out of a fingerprint reads what the composer writes; no API role runs them; and a
+# manager deletes through delete_automation(). Every test rolls back.
+python supabase/migrations/test_deleting_an_automation_resolves_its_alerts_in_one_pass.py
 # A threshold automation raises its alert from the database (0270, 0271). A local table stands in for
 # the historian, so every test rolls back. The read: the breaching pairs in platform_health_rows()'s
 # shape, no reading is no breach, NaN and a flag are no reading, only a live pair is read. The hold:

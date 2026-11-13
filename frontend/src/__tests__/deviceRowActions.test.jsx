@@ -1,13 +1,21 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
+import { PERMISSION_UUIDS } from '../constants'
 import { pick } from '../test/listFilters'
+import { tooltipOf } from '../test/tooltips'
+import { __resetModelViewerLoader } from '../components/common/Model3DViewer'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
+  return {
+    ...actual,
+    api: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
+    model3dPublicUrl: (path) => (path ? `http://localhost:54321/storage/v1/object/public/asset-3d-models/${path}` : null),
+    model3dDownloadUrl: (path) => (path ? `http://localhost:54321/storage/v1/object/public/asset-3d-models/${path}?download=x` : null)
+  }
 })
 
 vi.mock('../lib/supabaseClient', () => ({
@@ -51,10 +59,7 @@ const show = async (rows, hasPermission = () => true) => {
 
 const inRow = () => within(document.querySelector('.page-main'))
 
-/**
- * Every action the row used to hold, now in the panel it opens. Scoped to `.context-panel-actions`:
- * the 3D uploader renders below the action list with controls of its own.
- */
+/** Every action the row used to hold, now in the panel it opens. Scoped to `.context-panel-actions`. */
 const panelLabels = () => {
   openPanel()
   return [...document.querySelectorAll('.context-panel-actions .context-action')]
@@ -193,49 +198,162 @@ describe('device row actions', () => {
   })
 })
 
-// The 3D model is an attachment like a link, in the drawer's 3D Model tile; the Configuration
-// modal is read-only and open to every role.
-describe('device 3D model attachment', () => {
-  it('offers the uploader as its own panel tile', async () => {
-    // One upload control fits a narrow column, unlike a list of links.
-    await show([device()])
+/* The 3D model is one action, whose label follows the model, and a dialog it opens. The drawer holds
+   no viewer and no drop zone, and loads nothing of the model until the action is pressed. */
+describe('device 3D model action', () => {
+  const PATH = 'aaaaaaaa-0000-4000-8000-000000000001/cnc.glb'
+  const operator = (perm) => perm !== PERMISSION_UUIDS.DEVICE_MANAGE
+  const actionButtons = () => [...document.querySelectorAll('.context-panel-actions .context-action')]
+  const modelAction = () => actionButtons().find(b => /3D Model/.test(b.textContent))
+  const dialog = () => document.querySelector('dialog[open]')
 
-    expect(screen.queryByTestId('model-3d-input')).not.toBeInTheDocument()
-
-    const panel = openPanel()
-    expect(panel.getByText('3D Model')).toBeInTheDocument()
-    expect(panel.getByTestId('model-3d-input')).toBeInTheDocument()
+  beforeEach(() => {
+    __resetModelViewerLoader()
+    delete self.ModelViewerElement
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, headers: { get: () => null } })
   })
 
-  it('shows the uploader regardless of whether the device has document links', async () => {
+  it('reads Add 3D Model… when none is attached, and opens the drop zone', async () => {
     await show([device()])
+    openPanel()
 
-    expect(openPanel().getByTestId('model-3d-input')).toBeInTheDocument()
+    const add = modelAction()
+    expect(add.textContent.trim()).toBe('Add 3D Model…')
+    expect(add).not.toBeDisabled()
+    fireEvent.click(add)
+
+    expect(dialog().querySelector('.modal')).toHaveClass('modal-full')
+    expect(within(dialog()).getByRole('heading', { name: 'CNC_01' })).toBeInTheDocument()
+    expect(within(dialog()).getByText(/Drop a 3D model here/i)).toBeInTheDocument()
+    expect(within(dialog()).getByTestId('model-3d-input')).toBeInTheDocument()
+  })
+
+  it('reads View 3D Model when one is attached, and opens the viewer', async () => {
+    await show([device({ model_3d_path: PATH })])
+    openPanel()
+
+    expect(modelAction().textContent.trim()).toBe('View 3D Model')
+    fireEvent.click(modelAction())
+
+    expect(await within(dialog()).findByTestId('model-3d-viewer')).toBeInTheDocument()
+    expect(within(dialog()).getByRole('link', { name: /Download/ })).toBeInTheDocument()
+    expect(within(dialog()).queryByText(/Drop a 3D model here/i)).toBeNull()
+  })
+
+  it('sits right after View History', async () => {
+    await show([device()])
+    openPanel()
+
+    const labels = actionButtons().map(b => b.textContent.trim())
+    expect(labels.indexOf('Add 3D Model…')).toBe(labels.indexOf('View History') + 1)
+  })
+
+  it('is one action and nothing else: the drawer has no 3D section, viewer or drop zone', async () => {
+    await show([device({ model_3d_path: PATH })])
+    const panel = openPanel()
+
+    expect(panel.queryByText('3D Model')).toBeNull()
+    expect(panel.queryByText('Public')).toBeNull()
+    expect(panel.queryByTestId('model-3d-input')).toBeNull()
+    expect(panel.queryByRole('button', { name: /Expand model/ })).toBeNull()
+    expect(document.querySelector('.context-panel .model-viewer-frame')).toBeNull()
+    expect(document.querySelectorAll('.context-panel-actions .context-action').length).toBeGreaterThan(0)
+    expect(actionButtons().filter(b => /3D Model/.test(b.textContent))).toHaveLength(1)
+  })
+
+  it('loads nothing of the model until the action is pressed, and stops when the dialog closes', async () => {
+    await show([device({ model_3d_path: PATH })])
+    openPanel()
+    await act(async () => { await Promise.resolve() })
+
+    // No viewer module, no element, no request for the file or its size.
+    expect(self.ModelViewerElement).toBeUndefined()
+    expect(document.querySelector('model-viewer')).toBeNull()
+    expect(screen.queryByTestId('model-3d-viewer-loading')).toBeNull()
+    expect(global.fetch).not.toHaveBeenCalled()
+
+    // A click focuses the button in a browser; fireEvent does not.
+    modelAction().focus()
+    fireEvent.click(modelAction())
+    await within(dialog()).findByTestId('model-3d-viewer')
+    expect(self.ModelViewerElement).toBeDefined()
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(dialog()).toBeNull()
+    expect(document.querySelector('model-viewer')).toBeNull()
+    // The drawer is still open, on the same device, and focus is back on the action.
+    expect(document.querySelector('.context-panel')).toHaveClass('context-panel-open')
+    expect(document.activeElement).toBe(modelAction())
+  })
+
+  it('offers Add 3D Model… off, with its reason, to a role that cannot manage devices', async () => {
+    await show([device()], operator)
+    openPanel()
+
+    const add = modelAction()
+    expect(add.textContent.trim()).toBe('Add 3D Model…')
+    expect(add).toBeDisabled()
+    expect(add).toHaveClass('btn-disabled')
+    expect(tooltipOf(add)).toMatch(/^Requires /)
+    fireEvent.click(add)
+    expect(dialog()).toBeNull()
+  })
+
+  it('lets a role that cannot manage devices view, and download, but not replace or remove', async () => {
+    await show([device({ model_3d_path: PATH })], operator)
+    openPanel()
+
+    expect(modelAction().textContent.trim()).toBe('View 3D Model')
+    expect(modelAction()).not.toBeDisabled()
+    fireEvent.click(modelAction())
+
+    await within(dialog()).findByTestId('model-3d-viewer')
+    expect(within(dialog()).getByRole('link', { name: /Download/ })).toBeInTheDocument()
+    expect(within(dialog()).queryByRole('button', { name: /Replace/ })).toBeNull()
+    expect(within(dialog()).queryByRole('button', { name: /Remove/ })).toBeNull()
+    // Anyone may read the note on who can open the file.
+    expect(within(dialog()).getByRole('button', { name: 'Public' })).toBeInTheDocument()
+  })
+
+  it('gives a role that can manage devices Replace and Remove, and Remove asks first', async () => {
+    await show([device({ model_3d_path: PATH })])
+    openPanel()
+    fireEvent.click(modelAction())
+    await within(dialog()).findByTestId('model-3d-viewer')
+
+    expect(within(dialog()).getByRole('button', { name: /Replace/ })).toBeInTheDocument()
+    fireEvent.click(within(dialog()).getByRole('button', { name: /Remove/ }))
+
+    const confirm = screen.getByRole('dialog', { name: 'Remove 3D model' })
+    expect(within(confirm).getByRole('button', { name: 'Remove Model' })).toHaveClass('btn-danger')
+  })
+
+  it('keeps an archived device\'s model viewable but not attachable, and says why', async () => {
+    await show([device({ is_archived: true })])
+    openPanel()
+
+    const add = modelAction()
+    expect(add).toBeDisabled()
+    expect(tooltipOf(add)).toBe('Restore this device to attach a 3D model')
+  })
+
+  it('lets an archived device\'s model be viewed, without Replace or Remove', async () => {
+    await show([device({ is_archived: true, model_3d_path: PATH })])
+    openPanel()
+
+    expect(modelAction().textContent.trim()).toBe('View 3D Model')
+    fireEvent.click(modelAction())
+    await within(dialog()).findByTestId('model-3d-viewer')
+    expect(within(dialog()).getByRole('link', { name: /Download/ })).toBeInTheDocument()
+    expect(within(dialog()).queryByRole('button', { name: /Replace/ })).toBeNull()
   })
 
   it('no longer advertises the 3D model from the Configuration action', async () => {
     await show([device()])
 
-    // The ACTION LIST must not advertise it -- the uploader is a section below, not a button.
     const labels = panelLabels()
     expect(labels).toMatch(/Configuration Parameters/i)
-    expect(labels).not.toMatch(/3D model/i)
-  })
-
-  it('withholds the upload controls from a role that cannot manage devices', async () => {
-    await show([device()], () => false)
-    openPanel()
-
-    // Both sides asserted: a read-only role is told the state and is not offered the drop prompt.
-    // RLS refuses the write regardless; this is the affordance.
-    await waitFor(() => expect(screen.getByText('No 3D model attached')).toBeInTheDocument())
-    expect(screen.queryByText(/Drop a 3D model here/i)).not.toBeInTheDocument()
-  })
-
-  it('offers the drop prompt to a role that can manage devices', async () => {
-    await show([device()])
-    openPanel()
-
-    await waitFor(() => expect(screen.getByText(/Drop a 3D model here/i)).toBeInTheDocument())
+    expect(labels.split('|').filter(l => /3D model/i.test(l))).toEqual(['Add 3D Model…'])
   })
 })

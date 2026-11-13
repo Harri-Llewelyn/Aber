@@ -10,7 +10,7 @@ import { TooltipBubble, useTooltipPosition } from './Tooltip'
  * trigger. `role="tooltip"` and `aria-describedby` tie the text to the button for screen readers.
  *
  * With `children` the button shows them in place of the "?", and they are its name, so `label` is
- * not used: the 3D Model label's "Public" marker.
+ * not used: the 3D model dialog's "Public" marker.
  */
 export function HelpTip({ text, label = 'More information', size = 13, children }) {
   const id = useId()

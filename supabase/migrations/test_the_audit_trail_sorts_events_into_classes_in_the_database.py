@@ -16,9 +16,12 @@ What is held here:
   * A backup request's id finds its own rows and the rows of the backup it took, released or pruned;
     a cancelled request's finds its own; any other id finds what it did.
   * One form is declared, with its grants, planned with its values, and its five class indexes are
-    valid and serve a query that names a class. A database still holding the form from before 0228
-    is brought to the one form by 0001's declaration and sweep, 0168, 0222, 0227 and 0228, and 0228
-    drops that form by itself too.
+    valid and serve a query that names a class. The suite runs VACUUM first: an index-only scan
+    is cheap only on pages the visibility map marks all-visible, and autovacuum may not have been
+    through the current month's partition. A failure carries the plan, last_autovacuum and
+    relallvisible against relpages. A database still holding the form from before 0228 is brought
+    to the one form by 0001's declaration and sweep, 0168, 0222, 0227 and 0228, and 0228 drops that
+    form by itself too.
 
 EVERY TEST ROLLS BACK. An audit row is permanent.
 """
@@ -466,7 +469,34 @@ class OneForm(Base):
         )
         self.assertEqual(self.cur.fetchall(), [("sql", "s", False, None, True, False)])
 
+    def make_the_pages_visible(self):
+        """
+        VACUUM (ANALYZE) the trail on a connection of its own, since it cannot run in a transaction.
+        An index-only scan is cheap only on pages the visibility map marks all-visible. Until
+        autovacuum has been through the current month's partition, the planner may prefer a bitmap
+        scan that rechecks the class, and the plan then has a CASE in it.
+        """
+        conn = get_connection()
+        try:
+            conn.autocommit = True
+            conn.cursor().execute("VACUUM (ANALYZE) public.audit_trail;")
+        finally:
+            conn.close()
+
+    def partition_state(self):
+        """What the planner knew about each partition that holds rows, for a failure to carry."""
+        self.cur.execute(
+            "SELECT c.relname, c.relallvisible, c.relpages, s.last_autovacuum, s.last_vacuum"
+            "  FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid"
+            "  LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid"
+            " WHERE i.inhparent = 'public.audit_trail'::regclass AND c.relpages > 0 ORDER BY 1;")
+        return "\n".join(
+            f"{name}: relallvisible {visible} of relpages {pages}, last_autovacuum {auto}, last_vacuum {manual}"
+            for name, visible, pages, auto, manual in self.cur.fetchall())
+
     def test_each_class_has_a_valid_index_that_a_query_naming_it_uses(self):
+        self.make_the_pages_visible()
+        state = self.partition_state()
         for cls in CLASSES:
             with self.subTest(cls=cls):
                 self.cur.execute(
@@ -480,8 +510,10 @@ class OneForm(Base):
                     " WHERE public.audit_event_class(t.action, t.entity_type, t.audit_domain, t.old_data, t.new_data) = %s;",
                     (cls,))
                 plan = "\n".join(r[0] for r in self.cur.fetchall())
-                self.assertRegex(plan, r"Index Only Scan using \S+")
-                self.assertNotIn("CASE", plan, "the class is read from the index, not computed")
+                # The assertions print the plan; the state says what the planner knew when it chose it.
+                why = f"\n{state}"
+                self.assertRegex(plan, r"Index Only Scan using \S+", why)
+                self.assertNotIn("CASE", plan, "the class is read from the index, not computed" + why)
 
     def test_a_first_upgrade_boot_ends_with_one_form(self):
         """0001 declares the new form beside the old one, its sweep drops the old one, and 0168, 0222,

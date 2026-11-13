@@ -3983,7 +3983,7 @@ paths:
                 value: { description: 'Must match the row''s `value_type`.' }
       responses:
         '204': { description: 'Updated, or matched nothing because the caller is not an Administrator.' }
-        '400': { description: 'The value did not match `value_type`, or an immutable column was addressed.' }
+        '400': { description: 'The value did not match `value_type`, was outside the setting''s bounds, was a part number for a setting whose `whole_number` is true (`<key> must be a whole number`), or an immutable column was addressed.' }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/person_profiles:
@@ -8081,6 +8081,13 @@ components:
             greppable from either end. An absent row means the fallback applies, which is what
             keeps local boot zero-configuration.
           example: DEFAULT_POLL_SECONDS (60) in AuditTrailTab.jsx
+        whole_number:
+          type: boolean
+          description: |
+            True for a number setting that counts whole things (days, hours, seconds, proposals): a
+            part value is refused with `400` and `<key> must be a whole number`, and the Settings page
+            offers a step of 1. False for a number that is a fraction, and for every other type (`0285`).
+          example: true
         updated_at: { type: string, format: date-time }
         updated_by:
           type: string
