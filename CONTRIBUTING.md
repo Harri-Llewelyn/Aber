@@ -21,10 +21,10 @@ playbook's module for the edge runtime
 ([`scripts/sync-gateway-platform.mjs`](scripts/sync-gateway-platform.mjs)); edit the source,
 run the script, and CI's `--check` refuses a stale copy.
 
-**A rename retires the old name.** Add it to `RETIRED` in check 19c of
-[`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs), one line, and each place that
-has to keep naming it to `KEPT` with its reason: the code that moves it, a test that plants it,
-history. After that the old name fails CI anywhere else.
+**A rename retires the old name.** Add it to `RETIRED` in check 19c
+([`scripts/drift-checks/019c-a-name-the-platform-retired-does-not.mjs`](scripts/drift-checks/019c-a-name-the-platform-retired-does-not.mjs)),
+one line, and each place that has to keep naming it to `KEPT` with its reason: the code that moves
+it, a test that plants it, history. After that the old name fails CI anywhere else.
 
 **Sweeping a surface for the comment rule** means proving the sweep changed no behaviour, and the
 comparison depends on what the surface is. For Python, compare the AST minus docstrings; for YAML,
@@ -95,6 +95,28 @@ not see a bullet carrying a table. Test a check by breaking the thing it guards,
   precisely because "an edit has to reach a database that already exists". Change the baseline pair
   with the same care as any other migration; the rule that new work arrives as a new numbered file
   is about keeping the chain readable, not about the pair being inert.
+
+## Where a new entry goes
+
+Each entry is a file of its own, so two pull requests never edit the same lines. Add the file. Do
+not add a line to a shared list.
+
+| You add | It goes in | How |
+| :--- | :--- | :--- |
+| A drift check | `scripts/drift-checks/<NNN>-<name>.mjs` | `NNN` is the check's number, padded to three digits, with its letter if it has one (`004b`). Export a default function. Import what you share from `./lib.mjs`. |
+| A mirror check | `scripts/mirror-checks/<NNN>-<name>.mjs` | The same, with that directory's `lib.mjs`. |
+| A Python suite | The top of the suite file | A `# suite:` header with `lanes:` and `why:`, before the docstring. [`scripts/python-suites.mjs`](scripts/python-suites.mjs) describes it. `node scripts/run-python-suites.mjs --list` prints every suite. |
+| A function a migration redefines | The header comment of that migration | `-- Redefines public.<fn>: <why>`, one line for each function. Never inside the function's body. |
+| A migration's section of the README | `unreleased/migrations/<NNNN>.md` | The whole section, `### <title> (NNNN)`. [`unreleased/migrations/README.md`](unreleased/migrations/README.md) says how. |
+| An upgrade note | `unreleased/upgrading/<name>.md` | The whole section, `### From X.Y.Z, <what changes>`. [`unreleased/upgrading/README.md`](unreleased/upgrading/README.md) says how. |
+
+The runners run the checks in number order, and refuse two files with one number. Use the numbers
+your issue allots. A drift check that reads `supabase/README.md` or `help/site/upgrading.md` reads it
+with `supabaseReadme()` or `upgradingGuide()` from `./lib.mjs`, which hold the notes in `unreleased/`
+folded in, so your check sees your note.
+
+The release folds the notes into the two documents and empties `unreleased/`
+([`docs/releases.md`](docs/releases.md)). A note written before that stays a file until then.
 
 ## Writing documentation
 

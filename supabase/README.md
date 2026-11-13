@@ -4618,7 +4618,7 @@ retries. This file states what makes it a channel. Who the people are is `0263`.
 The trigger function, the reminders, the decision, `notification_channel_is_configured()` and
 `notification_setting_guard()` are redeclared whole from `0247`, `0250` and `0248`, each unchanged but
 for what is said here: those files replay first on every boot, and the last declaration stands
-(`INTENDED_REDECLARATIONS` in `check-docs-drift.mjs` records the reasons).
+(the `-- Redefines` marker in each migration's header records the reasons).
 
 **`notification_setting_guard()` becomes `SECURITY DEFINER`.** It was an invoker's function that called
 `notification_allowed_hosts_problem()`, which no API role may run. Postgres checks `EXECUTE` on every
@@ -5709,6 +5709,8 @@ Operator, an Auditor and a person with no role: the name of who acknowledged an 
 the refusal of the name of who acknowledged a machine identity's alert to every role but an
 Administrator, the name of who scheduled or ended a window, the people named being the rows each role
 reads, a person with no name or only a picture left out, and the grants.
+
+> Notes for migrations not yet released are files in [`unreleased/migrations/`](../unreleased/migrations/README.md). The release folds each into a section above this one, in number order.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
