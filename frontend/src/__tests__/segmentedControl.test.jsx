@@ -194,3 +194,107 @@ describe('the stylesheet', () => {
     expect(rule('.user-popover-theme')).toMatch(/border-bottom:\s*1px solid var\(--border\)/)
   })
 })
+
+describe('an option offered and refused', () => {
+  const REASON = 'Search for a cell, or for up to 40 devices, to see more than 7 days at once.'
+  const WITH_LIMIT = [
+    { id: 'day', label: 'Day' },
+    { id: 'week', label: 'Week' },
+    { id: 'month', label: 'Month', unavailable: REASON },
+    { id: 'year', label: 'Year', unavailable: REASON }
+  ]
+  const setup = (props = {}) => {
+    const onChange = vi.fn()
+    const onRefuse = vi.fn()
+    render(<SegmentedControl label="Span" value="day" options={WITH_LIMIT} onChange={onChange} onRefuse={onRefuse} {...props} />)
+    return { onChange, onRefuse }
+  }
+
+  it('is aria-disabled and not disabled, so it can still be focused', () => {
+    setup()
+    const month = radio('Month')
+    expect(month).toHaveAttribute('aria-disabled', 'true')
+    expect(month).not.toBeDisabled()
+    expect(radio('Week')).not.toHaveAttribute('aria-disabled')
+    month.focus()
+    expect(document.activeElement).toBe(month)
+    expect(month.classList.contains('segmented-option-unavailable')).toBe(true)
+  })
+
+  it('shows the reason as its tooltip on focus, and ties it to the segment', () => {
+    setup()
+    const month = radio('Month')
+    fireEvent.focus(month)
+    const bubble = screen.getByRole('tooltip')
+    expect(bubble).toHaveTextContent(REASON)
+    expect(month.getAttribute('aria-describedby')).toBe(bubble.id)
+    expect(month).toHaveAccessibleName('Month')
+    expect(month).toHaveAccessibleDescription(REASON)
+  })
+
+  it('changes nothing when pressed, and hands the option to onRefuse', () => {
+    const { onChange, onRefuse } = setup()
+    fireEvent.click(radio('Month'))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(onRefuse).toHaveBeenCalledTimes(1)
+    expect(onRefuse.mock.calls[0][0]).toMatchObject({ id: 'month', unavailable: REASON })
+    expect(radio('Day')).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('answers Enter and Space on it as a press does', () => {
+    const { onChange, onRefuse } = setup()
+    const year = radio('Year')
+    year.focus()
+    fireEvent.keyDown(year, { key: 'Enter' })
+    fireEvent.click(year)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(onRefuse).toHaveBeenCalled()
+  })
+
+  it('still chooses the others', () => {
+    const { onChange, onRefuse } = setup()
+    fireEvent.click(radio('Week'))
+    expect(onChange).toHaveBeenCalledWith('week')
+    expect(onRefuse).not.toHaveBeenCalled()
+  })
+
+  it('is landed on by the arrow keys, which choose nothing there', () => {
+    const { onChange } = setup({ value: 'week' })
+    const week = radio('Week')
+    week.focus()
+    fireEvent.keyDown(week, { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(radio('Month'))
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.keyDown(radio('Month'), { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(radio('Week'))
+    expect(onChange).toHaveBeenCalledWith('week')
+  })
+
+  it('is one sentence for the option alone: a count does not replace it', () => {
+    setup({ options: [{ id: 'a', label: 'A', count: 3, unavailable: REASON }, { id: 'b', label: 'B', count: 1 }], value: 'b' })
+    fireEvent.focus(radio('A, 3'))
+    expect(screen.getByRole('tooltip')).toHaveTextContent(REASON)
+  })
+
+  it('says nothing and calls nothing when the page gives no onRefuse', () => {
+    const onChange = vi.fn()
+    render(<SegmentedControl label="Span" value="day" options={WITH_LIMIT} onChange={onChange} />)
+    fireEvent.click(radio('Month'))
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('is refused the same way in a menu', () => {
+    const { onChange, onRefuse } = setup({ menu: true })
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Month' }))
+    expect(screen.getByRole('menuitemradio', { name: 'Month' })).toHaveAttribute('aria-disabled', 'true')
+    expect(onChange).not.toHaveBeenCalled()
+    expect(onRefuse).toHaveBeenCalledTimes(1)
+  })
+
+  it('is greyed as a held button is, and pointing at it does not light it', () => {
+    const body = rule('.segmented-option-unavailable')
+    expect(body).toMatch(/opacity: 0\.55/)
+    expect(body).toMatch(/cursor: not-allowed/)
+    expect(rule('.segmented-option-unavailable:hover')).toMatch(/color: var\(--text-muted\)/)
+  })
+})

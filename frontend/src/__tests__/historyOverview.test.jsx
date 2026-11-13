@@ -22,7 +22,7 @@ import {
   AREA_WIDE_GROUP, COVERAGE_KEY, DEFAULT_HISTORY_WINDOW, OVERVIEW_GROUPS_KEY, OVERVIEW_OPEN_LANES_MAX,
   TOO_LONG_FOR_MANY, UNFILED_GROUP, boxWords, coverageBlock, coverageCounts, coverageRuns, coverageSteps, groupIsOpen,
   historyPath, overviewAddress, overviewGroups, readOverviewGroups, readingsStopWords, telemetryKey, uncountedStretches,
-  intervalMinutes, readWidth, uncountedWords, writeOverviewGroups,
+  intervalMinutes, overviewLimit, readWidth, uncountedWords, writeOverviewGroups,
 } from '../utils/history'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
@@ -706,5 +706,129 @@ describe('exporting from Overview', () => {
     expect(toolbarExport()).toHaveAttribute('aria-disabled', 'true')
     fireEvent.focus(toolbarExport())
     await waitFor(() => expect(screen.getByText('These devices have declared no metric, so there is nothing to export.')).toBeInTheDocument())
+  })
+})
+
+describe('the time control says why a long window is not offered', () => {
+  const HOUR_MS = 3600000
+  const span = (name) => within(screen.getByRole('radiogroup', { name: 'Span' })).getByRole('radio', { name })
+  const control = () => screen.getByRole('group', { name: 'Time window' })
+  const alerts = () => within(control()).queryAllByRole('alert')
+  const large = (n) => Array.from({ length: n }, (_, i) => place(100 + i, `Press ${String(i).padStart(2, '0')}`, inCell(i < 30 ? 'c1' : 'c2')))
+  const tooltip = (el) => document.getElementById(el.getAttribute('aria-describedby'))?.textContent
+  /** The widest window any read has asked for, in hours. */
+  const widest = () => Math.max(0, ...api.readCoverage.mock.calls.map(([q]) => (Date.parse(q.to) - Date.parse(q.from)) / HOUR_MS))
+
+  it("is the time control's limit while the selection is too large for a long window, and gone otherwise", () => {
+    const limit = overviewLimit(COVERAGE_SMALL_SELECTION + 1, 0)
+    expect(limit.maxSpanMs).toBe(169 * HOUR_MS)
+    expect(limit.reason).toBe(TOO_LONG_FOR_MANY)
+    expect(overviewLimit(COVERAGE_SMALL_SELECTION, 0)).toBeNull()
+    expect(overviewLimit(1000, 1)).toBeNull()
+    expect(overviewLimit(1000, COVERAGE_SMALL_SELECTION)).toBeNull()
+    expect(overviewLimit(1000, COVERAGE_SMALL_SELECTION + 1)).not.toBeNull()
+    expect(overviewLimit(1000, 0)).not.toBeNull()
+  })
+
+  it('agrees with the read: a window is over the limit exactly when a large selection has no block width for it', () => {
+    const day0 = new Date(2026, 10, 2).getTime()
+    const { maxSpanMs } = overviewLimit(1000, 0)
+    for (const hours of [24, 26, 120, 168, 169, 170, 720]) {
+      expect(coverageBlock(day0, day0 + hours * HOUR_MS, 1550, 1000) === null, `${hours} hours`).toBe(hours * HOUR_MS > maxSpanMs)
+    }
+  })
+
+  it('marks Month and Year with the reason, with more than 40 devices, and leaves Day and Week', async () => {
+    fleet = large(COVERAGE_SMALL_SELECTION + 20)
+    await visit('/history/overview?span=day&at=2026-11-02')
+    for (const name of ['Month', 'Year']) {
+      expect(span(name)).toHaveAttribute('aria-disabled', 'true')
+      expect(span(name)).not.toBeDisabled()
+      expect(tooltip(span(name))).toBe(TOO_LONG_FOR_MANY)
+    }
+    for (const name of ['Day', 'Week']) expect(span(name)).not.toHaveAttribute('aria-disabled')
+  })
+
+  it('refuses Month when it is pressed: the window stays, the reason is under the control, and no month is read', async () => {
+    fleet = large(COVERAGE_SMALL_SELECTION + 20)
+    await visit('/history/overview?span=day&at=2026-11-02')
+    await waitFor(() => expect(api.readCoverage).toHaveBeenCalled())
+    fireEvent.click(span('Month'))
+
+    expect(search()).toBe('?span=day&at=2026-11-02')
+    expect(alerts()).toHaveLength(1)
+    expect(alerts()[0]).toHaveTextContent(TOO_LONG_FOR_MANY)
+    // The page does not swap its lanes for a message: the window it shows is still read.
+    expect(document.querySelector('.empty-state')).toBeNull()
+    expect(lanes().length).toBeGreaterThan(0)
+    expect(widest()).toBeLessThanOrEqual(26)
+  })
+
+  it('refuses Last 30 days in the popover, and Zoom out where it would pass 7 days', async () => {
+    fleet = large(COVERAGE_SMALL_SELECTION + 20)
+    await visit('/history/overview?from=2026-10-28T00%3A00&to=2026-11-02T00%3A00')
+    const out = within(screen.getByRole('group', { name: 'Zoom' })).getByRole('button', { name: 'Zoom out' })
+    expect(out).toHaveAttribute('aria-disabled', 'true')
+    expect(tooltip(out)).toBe(TOO_LONG_FOR_MANY)
+
+    fireEvent.click(control().querySelector('.time-window-pick'))
+    const dialog = screen.getByRole('dialog', { name: 'Choose a time window' })
+    const rolling = within(dialog).getByRole('group', { name: 'Rolling' })
+    expect(within(rolling).getByRole('button', { name: 'Last 30 days' })).toHaveAttribute('aria-disabled', 'true')
+    expect(within(rolling).getByRole('button', { name: 'Last 7 days' })).not.toHaveAttribute('aria-disabled')
+    fireEvent.click(within(rolling).getByRole('button', { name: 'Last 30 days' }))
+    expect(within(rolling).getByRole('alert')).toHaveTextContent(TOO_LONG_FOR_MANY)
+    expect(search()).toBe('?from=2026-10-28T00%3A00&to=2026-11-02T00%3A00')
+  })
+
+  it('reads a month once there are 40 devices', async () => {
+    fleet = large(COVERAGE_SMALL_SELECTION)
+    await visit('/history/overview?span=day&at=2026-11-02')
+    await waitFor(() => expect(api.readCoverage).toHaveBeenCalled())
+    for (const name of ['Day', 'Week', 'Month', 'Year']) expect(span(name)).not.toHaveAttribute('aria-disabled')
+    expect(within(screen.getByRole('group', { name: 'Zoom' })).getByRole('button', { name: 'Zoom out' })).not.toHaveAttribute('aria-disabled')
+
+    api.readCoverage.mockClear()
+    fireEvent.click(span('Month'))
+    expect(search()).toBe('?span=month&at=2026-11-02')
+    expect(alerts()).toHaveLength(0)
+    await waitFor(() => expect(api.readCoverage).toHaveBeenCalled())
+    expect(api.readCoverage.mock.calls.at(-1)[0].assetIds).toHaveLength(COVERAGE_SMALL_SELECTION)
+    expect(widest()).toBeGreaterThan(24 * 28)
+  })
+
+  it('brings Month back, and clears the reason, when the search narrows to 40 devices or fewer', async () => {
+    fleet = large(COVERAGE_SMALL_SELECTION + 20)
+    await visit('/history/overview?span=day&at=2026-11-02')
+    fireEvent.click(span('Month'))
+    expect(alerts()).toHaveLength(1)
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Turning' } })
+    await waitFor(() => expect(span('Month')).not.toHaveAttribute('aria-disabled'), { timeout: 2000 })
+    expect(alerts()).toHaveLength(0)
+    expect(span('Year')).not.toHaveAttribute('aria-disabled')
+
+    api.readCoverage.mockClear()
+    fireEvent.click(span('Month'))
+    expect(search()).toContain('span=month')
+    await waitFor(() => expect(api.readCoverage).toHaveBeenCalled(), { timeout: 2000 })
+    expect(api.readCoverage.mock.calls.at(-1)[0].assetIds).toHaveLength(30)
+
+    // Clearing the search puts the limit back, and with the month on show the page says so itself.
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } })
+    await waitFor(() => expect(screen.getByText(TOO_LONG_FOR_MANY, { selector: '.empty-state *, .empty-state' })).toBeInTheDocument(), { timeout: 2000 })
+    expect(span('Month')).not.toHaveAttribute('aria-disabled')
+    expect(span('Year')).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('still says why in the page when the address opens a window already over the limit', async () => {
+    fleet = large(COVERAGE_SMALL_SELECTION + 20)
+    await visit('/history/overview?span=month&at=2026-11-02')
+    expect(document.querySelector('.empty-state')).toHaveTextContent(TOO_LONG_FOR_MANY)
+    expect(api.readCoverage).not.toHaveBeenCalled()
+    // The span on show is not refused, and Day is a way out.
+    expect(span('Month')).not.toHaveAttribute('aria-disabled')
+    fireEvent.click(span('Week'))
+    await waitFor(() => expect(api.readCoverage).toHaveBeenCalled())
   })
 })

@@ -354,3 +354,256 @@ describe('the clock', () => {
     expect(arrow('Next day')).not.toHaveAttribute('aria-disabled')
   })
 })
+
+describe('a page with a limit', () => {
+  const HOUR_MS = 60 * 60 * 1000
+  // 7 days and the hour a week gains when the clocks go back, as Overview's and the Logs tab's are.
+  const REASON = 'With more than 40 devices, this page shows 7 days at most. Search for a cell, or for up to 40 devices, to see a longer window.'
+  const LIMIT = { maxSpanMs: 169 * HOUR_MS, reason: REASON }
+
+  function Limited({ limit = LIMIT, zoom = false, allTime = false }) {
+    const [win, setWin] = useTimeWindow({ ranges: TIME_PRESETS, allTime, fallback: ALL_TIME })
+    return <TimeWindowControl value={win} onChange={setWin} ranges={TIME_PRESETS} allTime={allTime} zoom={zoom} limit={limit} />
+  }
+  const limited = (search = '', props = {}) => {
+    window.history.replaceState(null, '', `/history${search}`)
+    return render(<Limited {...props} />)
+  }
+  const alerts = () => within(group()).queryAllByRole('alert')
+  const zoom = (name) => within(within(group()).getByRole('group', { name: 'Zoom' })).getByRole('button', { name })
+  const rolling = () => within(choices()).getByRole('group', { name: 'Rolling' })
+  const custom = () => within(choices()).getByRole('group', { name: 'Custom range' })
+
+  describe('the span switch', () => {
+    it('keeps a span over the limit, aria-disabled and focusable, and gives the reason in its tooltip', () => {
+      limited('?span=day&at=2026-11-02')
+      for (const name of ['Month', 'Year']) {
+        expect(span(name)).toHaveAttribute('aria-disabled', 'true')
+        expect(span(name)).not.toBeDisabled()
+        expect(tooltipOf(span(name))).toBe(REASON)
+      }
+      span('Month').focus()
+      expect(document.activeElement).toBe(span('Month'))
+      for (const name of ['Day', 'Week']) expect(span(name)).not.toHaveAttribute('aria-disabled')
+      expect(tooltipOf(span('Week'))).toBeNull()
+    })
+
+    it('shows the tooltip on focus, as the shared bubble does', () => {
+      limited('?span=day&at=2026-11-02')
+      fireEvent.focus(span('Year'))
+      expect(screen.getByRole('tooltip')).toHaveTextContent(REASON)
+    })
+
+    it('changes nothing when pressed, and says the reason under the control', () => {
+      limited('?span=day&at=2026-11-02')
+      expect(alerts()).toHaveLength(0)
+
+      fireEvent.click(span('Month'))
+      expect(window.location.search).toBe('?span=day&at=2026-11-02')
+      expect(span('Day')).toHaveAttribute('aria-checked', 'true')
+      expect(span('Month')).toHaveAttribute('aria-checked', 'false')
+      expect(words()).toHaveTextContent('Today, Mon 2 Nov')
+      expect(alerts()).toHaveLength(1)
+      expect(alerts()[0]).toHaveTextContent(REASON)
+      // In the form fields' error style, and in the control's own box, under its row.
+      expect(alerts()[0]).toHaveClass('form-hint', 'hint-danger', 'time-window-problem')
+      expect(status()).toHaveTextContent('')
+    })
+
+    it('says it the same for the keyboard: Enter on the span', () => {
+      limited('?span=day&at=2026-11-02')
+      const year = span('Year')
+      year.focus()
+      fireEvent.click(year)
+      expect(window.location.search).toBe('?span=day&at=2026-11-02')
+      expect(alerts()[0]).toHaveTextContent(REASON)
+    })
+
+    it('clears the sentence when the window changes, and for a span that is allowed', () => {
+      limited('?span=day&at=2026-11-02')
+      fireEvent.click(span('Month'))
+      expect(alerts()).toHaveLength(1)
+
+      fireEvent.click(span('Week'))
+      expect(window.location.search).toBe('?span=week&at=2026-11-02')
+      expect(alerts()).toHaveLength(0)
+
+      fireEvent.click(span('Year'))
+      expect(alerts()).toHaveLength(1)
+      fireEvent.click(arrow('Previous week'))
+      expect(alerts()).toHaveLength(0)
+    })
+
+    it('brings the spans back, and clears the sentence, when the limit lifts', () => {
+      const { rerender } = limited('?span=day&at=2026-11-02')
+      fireEvent.click(span('Month'))
+      expect(alerts()).toHaveLength(1)
+
+      rerender(<Limited limit={null} />)
+      expect(alerts()).toHaveLength(0)
+      for (const name of ['Month', 'Year']) {
+        expect(span(name)).not.toHaveAttribute('aria-disabled')
+        expect(tooltipOf(span(name))).toBeNull()
+      }
+      fireEvent.click(span('Month'))
+      expect(window.location.search).toBe('?span=month&at=2026-11-02')
+    })
+
+    it('does not bring the old sentence back when the limit returns', () => {
+      const { rerender } = limited('?span=day&at=2026-11-02')
+      fireEvent.click(span('Month'))
+      rerender(<Limited limit={null} />)
+      rerender(<Limited />)
+      expect(alerts()).toHaveLength(0)
+      expect(span('Month')).toHaveAttribute('aria-disabled', 'true')
+    })
+
+    it('leaves the span already shown alone, and a week holding a clock change, which is not over', () => {
+      limited('?span=month&at=2026-11-02')
+      expect(span('Month')).not.toHaveAttribute('aria-disabled')
+      expect(span('Year')).toHaveAttribute('aria-disabled', 'true')
+      cleanup()
+
+      limited('?span=day&at=2026-10-21')
+      expect(span('Week')).not.toHaveAttribute('aria-disabled')
+    })
+
+    it('marks every span under a rolling window by the window it would show', () => {
+      limited('?range=30d')
+      expect(span('Day')).not.toHaveAttribute('aria-disabled')
+      expect(span('Week')).not.toHaveAttribute('aria-disabled')
+      expect(span('Month')).toHaveAttribute('aria-disabled', 'true')
+    })
+
+    it('leaves a page without a limit as it was', () => {
+      limited('?span=day&at=2026-11-02', { limit: null })
+      for (const name of ['Day', 'Week', 'Month', 'Year']) expect(span(name)).not.toHaveAttribute('aria-disabled')
+      fireEvent.click(span('Year'))
+      expect(window.location.search).toBe('?span=year&at=2026-11-02')
+      expect(alerts()).toHaveLength(0)
+    })
+  })
+
+  describe('a rolling range', () => {
+    it('over the limit is refused in the popover, marked as a span is, and the window stays', () => {
+      limited('?span=day&at=2026-11-02')
+      fireEvent.click(words())
+      const over = within(rolling()).getByRole('button', { name: 'Last 30 days' })
+      expect(over).toHaveAttribute('aria-disabled', 'true')
+      expect(over).not.toBeDisabled()
+      expect(tooltipOf(over)).toBe(REASON)
+      expect(within(rolling()).queryByRole('alert')).toBeNull()
+
+      fireEvent.click(over)
+      expect(window.location.search).toBe('?span=day&at=2026-11-02')
+      expect(screen.getByRole('dialog', { name: 'Choose a time window' })).toBeInTheDocument()
+      expect(within(rolling()).getByRole('alert')).toHaveTextContent(REASON)
+    })
+
+    it('within the limit is chosen as before, 7 days among them', () => {
+      limited('?span=day&at=2026-11-02')
+      fireEvent.click(words())
+      expect(within(rolling()).getByRole('button', { name: 'Last 7 days' })).not.toHaveAttribute('aria-disabled')
+      fireEvent.click(within(rolling()).getByRole('button', { name: 'Last 7 days' }))
+      expect(window.location.search).toBe('?range=7d')
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    it('shown already is not refused, and All time is, where a page offers it', () => {
+      limited('?range=30d', { allTime: true })
+      fireEvent.click(words())
+      expect(within(rolling()).getByRole('button', { name: 'Last 30 days' })).toHaveAttribute('aria-pressed', 'true')
+      expect(within(rolling()).getByRole('button', { name: 'Last 30 days' })).not.toHaveAttribute('aria-disabled')
+      const all = within(rolling()).getByRole('button', { name: 'All time' })
+      expect(all).toHaveAttribute('aria-disabled', 'true')
+      fireEvent.click(all)
+      expect(window.location.search).toBe('?range=30d')
+      expect(within(rolling()).getByRole('alert')).toHaveTextContent(REASON)
+    })
+  })
+
+  describe('a custom range', () => {
+    const type = (from, to) => {
+      fireEvent.change(within(choices()).getByLabelText('From'), { target: { value: from } })
+      fireEvent.change(within(choices()).getByLabelText('To'), { target: { value: to } })
+    }
+    const show = () => within(choices()).getByRole('button', { name: 'Show range' })
+
+    it('over the limit is refused by the range picker, with the reason, and the window stays', () => {
+      limited('?span=day&at=2026-11-02')
+      fireEvent.click(words())
+      expect(within(custom()).queryByRole('alert')).toBeNull()
+
+      type('2026-10-20T00:00', '2026-11-02T00:00')
+      expect(within(custom()).getByRole('alert')).toHaveTextContent(REASON)
+      expect(show()).toBeDisabled()
+      fireEvent.click(show())
+      fireEvent.submit(show().closest('form'))
+      expect(window.location.search).toBe('?span=day&at=2026-11-02')
+      expect(screen.getByRole('dialog', { name: 'Choose a time window' })).toBeInTheDocument()
+    })
+
+    it('takes a range as long as the limit, and clears the sentence as it comes under it', () => {
+      limited('?span=day&at=2026-11-02')
+      fireEvent.click(words())
+      type('2026-10-20T00:00', '2026-11-02T00:00')
+      expect(within(custom()).getByRole('alert')).toBeInTheDocument()
+
+      type('2026-10-26T00:00', '2026-11-02T01:00')
+      expect(within(custom()).queryByRole('alert')).toBeNull()
+      expect(show()).toBeEnabled()
+      fireEvent.click(show())
+      expect(window.location.search).toBe('?from=2026-10-26T00%3A00&to=2026-11-02T01%3A00')
+    })
+
+    it('says nothing on opening, even when the window shown is over the limit', () => {
+      limited('?span=month&at=2026-11-02')
+      fireEvent.click(words())
+      expect(within(choices()).getByLabelText('From')).toHaveValue('2026-11-01T00:00')
+      expect(within(custom()).queryByRole('alert')).toBeNull()
+      // It is the window shown, so it is still over: Show range waits for an edit.
+      expect(show()).toBeDisabled()
+    })
+
+    it('waits for both ends, as it did, before it says anything about the length', () => {
+      limited('?span=day&at=2026-11-02')
+      fireEvent.click(words())
+      type('2026-10-01T00:00', '')
+      expect(within(custom()).queryByRole('alert')).toBeNull()
+      expect(show()).toBeDisabled()
+    })
+  })
+
+  describe('Zoom out', () => {
+    it('is off where the window it would show is over the limit, focusable, with the reason as its tooltip', () => {
+      limited('?from=2026-10-28T00%3A00&to=2026-11-02T00%3A00', { zoom: true })
+      const out = zoom('Zoom out')
+      expect(out).toHaveAttribute('aria-disabled', 'true')
+      expect(out).not.toBeDisabled()
+      expect(tooltipOf(out)).toBe(REASON)
+      fireEvent.click(out)
+      expect(window.location.search).toBe('?from=2026-10-28T00%3A00&to=2026-11-02T00%3A00')
+      expect(zoom('Zoom in')).not.toHaveAttribute('aria-disabled')
+    })
+
+    it('is on below it, and still twice the window', () => {
+      limited('?from=2026-10-29T00%3A00&to=2026-11-01T00%3A00', { zoom: true })
+      expect(zoom('Zoom out')).not.toHaveAttribute('aria-disabled')
+      expect(tooltipOf(zoom('Zoom out'))).toMatch(/twice as long/)
+      fireEvent.click(zoom('Zoom out'))
+      expect(window.location.search).toBe('?from=2026-10-27T12%3A00&to=2026-11-02T12%3A00')
+    })
+
+    it('comes back when the limit lifts', () => {
+      const { rerender } = limited('?from=2026-10-28T00%3A00&to=2026-11-02T00%3A00', { zoom: true })
+      expect(zoom('Zoom out')).toHaveAttribute('aria-disabled', 'true')
+      rerender(<Limited limit={null} zoom />)
+      expect(zoom('Zoom out')).not.toHaveAttribute('aria-disabled')
+    })
+
+    it('keeps the reason it had for a window with no bounds, which a limit does not change', () => {
+      limited('', { zoom: true, allTime: true })
+      expect(tooltipOf(zoom('Zoom out'))).toMatch(/nothing wider/)
+    })
+  })
+})

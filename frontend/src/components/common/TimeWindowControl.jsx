@@ -1,13 +1,13 @@
-import React, { useId, useState } from 'react'
+import React, { useEffect, useId, useState } from 'react'
 import { ToolbarPopover } from './FiltersPopover'
 import { SegmentedControl } from './SegmentedControl'
 import { Tooltip } from './Tooltip'
-import { IconCalendar, IconChevronLeft, IconChevronRight, IconZoomIn, IconZoomOut } from './Icons'
+import { IconAlertTriangle, IconCalendar, IconChevronLeft, IconChevronRight, IconZoomIn, IconZoomOut } from './Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
   ALL_TIME, JUMPS, SPANS, SPAN_IDS, TIME_PRESETS, canStep, canZoomIn, canZoomOut, chooseSpan, holdsNow,
-  jumpTo, localMinute, parseDay, parseLocal, rollingWindow, sameWindow, stepNames, stepWindow, windowBounds,
-  windowWords, zoomBounds, zoomIn, zoomOut
+  jumpTo, localMinute, overLimit, parseDay, parseLocal, rollingWindow, sameWindow, stepNames, stepWindow,
+  windowBounds, windowWords, zoomBounds, zoomIn, zoomOut
 } from '../../utils/timeWindow'
 
 /** How often the control looks at the clock, so the words and the › arrow follow it. */
@@ -35,8 +35,16 @@ function WindowButton({ name, tip = name, off, reason, onStep, children }) {
   )
 }
 
-/** The popover's three groups: Jump to, Rolling and Custom range. `onChoose` takes the new window. */
-function WindowChoices({ value, ranges, allTime, spans, now, onChoose }) {
+/** Why a choice is refused, in the form fields' error style; a live region, so a screen reader hears it. */
+function Refusal({ reason }) {
+  return reason ? <p className="form-hint hint-danger" role="alert"><IconAlertTriangle size={12} /> {reason}</p> : null
+}
+
+/**
+ * The popover's three groups: Jump to, Rolling and Custom range. `onChoose` takes the new window.
+ * Under a `limit`, a rolling range or a custom one over it is refused here and the window stays.
+ */
+function WindowChoices({ value, ranges, allTime, spans, now, limit, onChoose }) {
   const id = useId()
   const bounds = windowBounds(value, now)
   const [day, setDay] = useState('')
@@ -45,9 +53,31 @@ function WindowChoices({ value, ranges, allTime, spans, now, onChoose }) {
   const [from, setFrom] = useState(value.kind === 'custom' ? value.from : boxed(bounds.start))
   const [to, setTo] = useState(value.kind === 'custom' ? value.to : boxed(bounds.end))
   const rangeOk = !!parseLocal(from) && !!parseLocal(to) && parseLocal(from) < parseLocal(to)
+  // A rolling range refused, and a custom one once a box has been edited: never on open, when the
+  // boxes hold the window already shown.
+  const [refused, setRefused] = useState(false)
+  const [edited, setEdited] = useState(false)
+  const customOver = rangeOk && overLimit({ kind: 'custom', from, to }, limit, now)
+  const reason = limit?.reason
 
   const option = (win, text, key) => {
     const chosen = sameWindow(win, value)
+    // Offered and refused, as a span over the limit is: not `disabled`, so it keeps its place in the
+    // tab order and its tooltip. The window shown is never refused, since it is already on screen.
+    if (!chosen && overLimit(win, limit, now)) {
+      return (
+        <Tooltip key={key} text={reason}>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost btn-disabled"
+            aria-disabled="true"
+            onClick={() => setRefused(true)}
+          >
+            {text}
+          </button>
+        </Tooltip>
+      )
+    }
     return (
       <button
         key={key}
@@ -90,27 +120,29 @@ function WindowChoices({ value, ranges, allTime, spans, now, onChoose }) {
           {ranges.map(r => option(rollingWindow(r.value, ranges), r.label, r.value))}
           {allTime && option(ALL_TIME, 'All time', 'all')}
         </div>
+        <Refusal reason={refused ? reason : null} />
       </div>
 
       <div className="time-window-group" role="group" aria-labelledby={`${id}-custom`}>
         <div className="form-label" id={`${id}-custom`}>Custom range</div>
         <form
           className="time-window-group"
-          onSubmit={(e) => { e.preventDefault(); if (rangeOk) onChoose({ kind: 'custom', from, to }) }}
+          onSubmit={(e) => { e.preventDefault(); if (rangeOk && !customOver) onChoose({ kind: 'custom', from, to }) }}
         >
           <label className="time-window-field">
             <span>From</span>
             <Tooltip text="In local time.">
-              <input type="datetime-local" className="form-control" value={from} onChange={e => setFrom(e.target.value)} />
+              <input type="datetime-local" className="form-control" value={from} onChange={e => { setFrom(e.target.value); setEdited(true) }} />
             </Tooltip>
           </label>
           <label className="time-window-field">
             <span>To</span>
             <Tooltip text="In local time. The range stops at the start of this minute.">
-              <input type="datetime-local" className="form-control" value={to} onChange={e => setTo(e.target.value)} />
+              <input type="datetime-local" className="form-control" value={to} onChange={e => { setTo(e.target.value); setEdited(true) }} />
             </Tooltip>
           </label>
-          <button type="submit" className="btn btn-sm btn-primary" disabled={!rangeOk}>Show range</button>
+          <Refusal reason={edited && customOver ? reason : null} />
+          <button type="submit" className="btn btn-sm btn-primary" disabled={!rangeOk || customOver}>Show range</button>
         </form>
       </div>
     </>
@@ -136,17 +168,33 @@ function WindowChoices({ value, ranges, allTime, spans, now, onChoose }) {
  * as a custom window. `extent` is the stretch the page's axis draws, which Zoom in halves where
  * the window has no bounds of its own (All time). A zoom calls `onChange(next, { replace: false })`,
  * so Back undoes it; everything else calls `onChange(next)`, which replaces the entry.
+ *
+ * `limit`, `{ maxSpanMs, reason }`, is a page's longest window and the sentence that says how to
+ * lift it, such as "Search for a cell, or for up to 40 devices, to see more than 7 days at once".
+ * The control refuses what is longer, and says why where the person acted. A span over it stays in
+ * the switch, `aria-disabled` and focusable, with the reason in its tooltip; pressing it changes
+ * nothing and says the reason under the control. A rolling or custom range over it is refused in the
+ * popover, and Zoom out is off with the reason in its tooltip. The window already shown is never
+ * refused. When `limit` goes, the spans come back and the sentence clears.
  */
 export function TimeWindowControl({
   value, onChange, ranges = TIME_PRESETS, allTime = false, spans = SPAN_IDS, label = 'Time window',
-  zoom = false, extent = null,
+  zoom = false, extent = null, limit = null,
 }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const [news, setNews] = useState('')
+  const [refused, setRefused] = useState(false)
   const names = stepNames(value)
   const span = value.kind === 'calendar' ? value.span : null
-  const offered = SPANS.filter(s => spans.includes(s.id))
+  // A span whose window, chosen now, is over the limit; the one shown is not refused.
+  const offered = SPANS.filter(s => spans.includes(s.id)).map(s => (
+    limit && s.id !== span && overLimit(chooseSpan(value, s.id, now), limit, now) ? { ...s, unavailable: limit.reason } : s
+  ))
+
+  // The sentence goes when anything it was about changes: the window, or the limit itself.
+  const windowKey = JSON.stringify(value)
+  useEffect(() => { setRefused(false) }, [windowKey, limit?.maxSpanMs, limit?.reason])
 
   /** Show `next`, and say so in the status line: the arrows and the switch keep focus, so nothing else would. */
   const show = (next, ...options) => {
@@ -165,6 +213,7 @@ export function TimeWindowControl({
   const unzoomable = value.kind === 'all' ? 'Nothing is drawn yet to zoom into.' : 'Set both ends of the custom range to zoom it.'
   const inReason = zoomable ? 'This window is one minute long, the narrowest a zoom goes.' : unzoomable
   const outReason = value.kind === 'all' ? 'All time already shows every event, so there is nothing wider.' : unzoomable
+  const outOver = canZoomOut(value, now, extent) && overLimit(zoomOut(value, now, extent), limit, now)
 
   return (
     <div className="time-window" role="group" aria-label={label}>
@@ -192,6 +241,7 @@ export function TimeWindowControl({
               allTime={allTime}
               spans={spans}
               now={now}
+              limit={limit}
               onChoose={(next) => { onChange(next); close() }}
             />
           )}
@@ -212,6 +262,7 @@ export function TimeWindowControl({
         options={offered}
         value={span}
         onChange={(next) => show(chooseSpan(value, next, now))}
+        onRefuse={() => setRefused(true)}
       />
 
       {/* In the expanded plan's order, Zoom in first. */}
@@ -229,13 +280,19 @@ export function TimeWindowControl({
           <WindowButton
             name="Zoom out"
             tip="Show twice as long a window about the same middle, ending no later than now. Back undoes a zoom."
-            off={!canZoomOut(value, now, extent)}
-            reason={outReason}
+            off={!canZoomOut(value, now, extent) || outOver}
+            reason={outOver ? limit.reason : outReason}
             onStep={() => show(zoomOut(value, now, extent), { replace: false })}
           >
             <IconZoomOut size={15} aria-hidden="true" />
           </WindowButton>
         </span>
+      )}
+
+      {refused && limit && (
+        <p className="form-hint hint-danger time-window-problem" role="alert">
+          <IconAlertTriangle size={12} /> {limit.reason}
+        </p>
       )}
 
       <div className="sr-only" role="status" aria-live="polite">{news}</div>

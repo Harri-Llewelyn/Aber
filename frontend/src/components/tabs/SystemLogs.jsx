@@ -13,7 +13,7 @@ import { IconAlertTriangle, IconCheck, IconCopy, IconFileText } from '../common/
 import { RefreshButton } from '../common/RefreshButton'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import {
-  DEFAULT_LOG_WINDOW, LOG_FILTER_MAX, LOG_LEVELS, LOG_LINES_MAX, LOG_RANGES, LOG_REFRESH_EVERY, LOG_SPANS,
+  DEFAULT_LOG_WINDOW, LOG_FILTER_MAX, LOG_LEVELS, LOG_LIMIT, LOG_LINES_MAX, LOG_RANGES, LOG_REFRESH_EVERY, LOG_SPANS,
   defaultLogService, formatLogTime, logListKey, logWindowParams
 } from '../../utils/serviceLogs'
 import { sameWindow } from '../../utils/timeWindow'
@@ -198,7 +198,7 @@ export function SystemLogs({ showToast }) {
           placeholder="Find text in a line…"
           ariaLabel="Find text in the log lines, matched exactly"
         />
-        <TimeWindowControl value={win} onChange={setWin} ranges={LOG_RANGES} spans={LOG_SPANS} />
+        <TimeWindowControl value={win} onChange={setWin} ranges={LOG_RANGES} spans={LOG_SPANS} limit={LOG_LIMIT} />
         <select
           className="form-control control-md"
           value={shown}

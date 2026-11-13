@@ -25,6 +25,19 @@ export const DEFAULT_LOG_WINDOW = rollingWindow(DEFAULT_LOG_RANGE, LOG_RANGES)
 export const LOG_SPANS = ['day', 'week']
 
 /**
+ * The widest fixed window the function reads, in hours: 7 days, and the hour a calendar week gains
+ * when the clocks go back, so the time control's Week is never refused. The drift check on the time
+ * control's limit holds it to LONGEST_WINDOW_HOURS in logs.ts.
+ */
+export const LOG_WINDOW_HOURS = 169
+
+/** What the time control refuses: a custom range wider than a read covers, and the way to stay inside it. */
+export const LOG_LIMIT = Object.freeze({
+  maxSpanMs: LOG_WINDOW_HOURS * 60 * MINUTE,
+  reason: 'A read of the logs covers at most 7 days. Choose a window of 7 days or less.',
+})
+
+/**
  * The window as service-logs takes it, worked out at fetch time: a rolling window as its `range`,
  * which the function measures back from now, and any other as its `from` and `to` instants, so
  * a refresh asks for the same window. A custom window missing an end sends the other alone, and

@@ -65,7 +65,7 @@ The Logs tab shows the newest lines one service wrote to its log, newest first. 
 - **Message** is the line. For a JSON line it is the message alone, with the fields **reason**, **device** and **edge_node** under it when the line has them. A traceback stays under its message, as one entry.
 - **The copy button** copies the line exactly as the service wrote it.
 - At most 500 lines are shown. When there are more in the window, the tab says so above the table. Choose a shorter window, or type a filter, to reach older lines.
-- A window covers at most 7 days, so the time window has no **Month**, **Year** or **All time**. A custom range longer than that is not read, and the tab says why. The time window otherwise works as it does on the Audit Trail: see [Moving through time](audit-trail.md#moving-through-time).
+- A window covers at most 7 days, so the time window has no **Month**, **Year** or **All time**. A custom range longer than that is refused in the range box, which says why. The window stays as it was. The time window otherwise works as it does on the Audit Trail: see [Moving through time](audit-trail.md#moving-through-time).
 - The address holds the window, so a link to the tab opens the same lines.
 - A line longer than 8 KiB is cut, and ends with **[cut at 8 KiB]**.
 - Everything in a line is shown as plain text. A line can hold text someone else chose, such as a device's name. Nothing in it can act as a link or run in the page.
