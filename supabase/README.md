@@ -11335,7 +11335,8 @@ URL would expire, which turns every shell already handed out into a time bomb.
 
 The consequence is a constraint on what may go in it: **nothing beyond machine geometry.** Writes
 are gated on `device:manage` rather than merely `authenticated`, because an upload both changes
-what a shell publishes *and* puts bytes at a world-readable URL.
+what a shell publishes *and* puts bytes at a world-readable URL. An `INSERT` or `UPDATE` of an
+object under a replay lane's id is refused too, since a lane holds no model of its own (0294).
 
 ### `broker-captures` is private, and holds the plant's traffic
 
