@@ -373,6 +373,14 @@ whose list should take the leftover height passes `fill` and marks that child `m
 schema builder's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
 window and is not needed any more.
 
+The header row holds the title and the controls: a dialog's `headerActions`, then the close button.
+The title takes the rest of the row and wraps inside its own column, with `overflow-wrap: anywhere`
+for a file name that has no break. It is never cut with an ellipsis, since the end of a file name
+is the part that tells two apart. The controls keep their size and sit at the top, so the close
+stays on the title's first line however long the title is. Controls too wide to leave the title 12
+characters (the Site Map's legend in the expanded plan) wrap to a line below it, and narrow to the
+row.
+
 **One metric list serves the schema builder and Add Derived Metric** (`common/MetricPicker.jsx`): the
 search, the standard filter and the grouped, tickable list. The list narrows what is shown, never
 what is chosen, because the dialog holds the choice. `single` makes the ticks radio buttons for a
