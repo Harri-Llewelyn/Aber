@@ -56,7 +56,7 @@ afterEach(() => { fetchSpy.mockRestore() })
 /** The dialog once its reads have settled. */
 async function openDialog(capture, onCancel = vi.fn()) {
   render(<StartPlaybackModal capture={capture} onConfirm={vi.fn()} onCancel={onCancel} />)
-  await screen.findByLabelText('Playback gateway')
+  await screen.findByText(/Plays back as/)
   await waitFor(() => expect(api.playbackWorkerStatus).toHaveBeenCalled())
   return onCancel
 }
@@ -68,7 +68,6 @@ describe('opening the playback dialog', () => {
     ['no manifest', { ...LISTLESS, manifest: null }],
   ])('on a capture with %s issues no download, and cancelling issues none either', async (_, capture) => {
     const onCancel = await openDialog(capture)
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: TARGET.id } })
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onCancel).toHaveBeenCalled()
     expect(api.captureUrl).not.toHaveBeenCalled()
@@ -79,7 +78,6 @@ describe('opening the playback dialog', () => {
     await openDialog(LISTLESS)
     const callout = screen.getByText(/stored without the list of devices it holds/)
     expect(callout.textContent).toMatch(/Download it, then play the file with Play a file…/)
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: TARGET.id } })
     // No mapping and no lanes to prepare: ensure_shadow_devices() reads the same manifest.
     expect(screen.queryByText(/Device mapping/)).toBeNull()
     expect(screen.queryByText(/Prepare replay lanes/)).toBeNull()
@@ -91,7 +89,6 @@ describe('opening the playback dialog', () => {
 
   it('maps from the manifest when it holds the list, reading nothing else', async () => {
     await openDialog({ ...LISTLESS, manifest: { birth_captured: true, device_ids: [RECORDED] } })
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: TARGET.id } })
     expect(await screen.findByLabelText(`Target device for ${RECORDED}`)).toBeInTheDocument()
     expect(screen.queryByText(/stored without the list/)).toBeNull()
     expect(api.captureUrl).not.toHaveBeenCalled()
@@ -100,7 +97,6 @@ describe('opening the playback dialog', () => {
 
   it('takes an empty list as a capture of node-level messages only, not as a missing one', async () => {
     await openDialog({ ...LISTLESS, manifest: { birth_captured: true, device_ids: [] } })
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: TARGET.id } })
     expect(screen.getByText(/publishes no device-level traffic/)).toBeInTheDocument()
     expect(screen.queryByText(/stored without the list/)).toBeNull()
     expect(screen.getByRole('button', { name: 'Play back' })).toBeEnabled()
@@ -142,7 +138,7 @@ describe('Prepare replay lanes', () => {
   const TWO_IDS = { ...LISTLESS, id: 'cap-2', manifest: { birth_captured: true, device_ids: [RECORDED, ALSO] } }
   const prepare = async (showToast) => {
     render(<StartPlaybackModal capture={TWO_IDS} subjectName="Spindle 4" onConfirm={vi.fn()} onCancel={vi.fn()} showToast={showToast} />)
-    fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: TARGET.id } })
+    await screen.findByText(/Plays back as/)
     fireEvent.click(await screen.findByRole('button', { name: /Prepare replay lanes/ }))
     await waitFor(() => expect(api.ensureShadowLanes).toHaveBeenCalledWith('cap-2'))
   }

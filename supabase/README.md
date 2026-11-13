@@ -2973,7 +2973,8 @@ nothing chosen, before any class was computed. Three changes meet it.
   a change to its rules rebuilds them (`REINDEX INDEX`, each a statement of its own, since a
   partitioned index cannot be rebuilt inside a transaction) in the same file. Check 199
   (`scripts/check-docs-drift.mjs`) refuses a later file that redeclares it without rebuilding all
-  five.
+  five. On a busy current partition the class counts may recheck rows until autovacuum catches up,
+  which costs time and never changes an answer.
 - **`audit_trail_matching(p_class, ...)`** returns one class's rows under every filter, each with
   whether its entity is deleted. It is a SQL function with no `SET` clause, so it inlines into each
   of the page's calls with its class a constant. The page calls it once per class for the counts and
@@ -3398,8 +3399,8 @@ the audit row belongs in the subject's lane, which the generic audit trigger can
   - `check_alert_suppression_window_length(p_starts_at, p_ends_at)` refuses an end more than the
     limit after the start, `22023`, with *A window can last at most 7 days, set on Settings ›
     Retention.* and the live value. A window of exactly the limit is accepted. A missing row, or a
-    value outside 1 to 90, is 7 days, so the limit never refuses every window. A part day is taken
-    as it is, as the other day settings take one. Both writers call it; nothing outside the
+    value outside 1 to 90, is 7 days, so the limit never refuses every window. The limit counts whole
+    days, so a stored part day is its whole days (`0285`). Both writers call it; nothing outside the
     database may.
   - **Scheduling** measures from the start the window gets: now, for a start in the past.
   - **A change of the start or the end** measures from the window's own start: the new one when the
@@ -4433,6 +4434,9 @@ checker and the audit writer are no one's, and that the checker refuses what it 
 The file's self-check asserts that each function is no browser-facing role's, that the five triggers
 are in place and enabled, and that the cascade from devices is there.
 
+How a delete resolves the alerts of its triggers is `0287`'s: once for the statement, in one pass
+(*Deleting an automation resolves its alerts in one pass (0287)*).
+
 ### An Administrator registers an app that signs people in (0260)
 
 An app someone built, such as an AAS viewer, can sign people in with their Aber account without a
@@ -5008,13 +5012,15 @@ never ask which wrote a row. A separate worker is not needed: the spike
 - **No role, no second factor.** The evaluator is the platform's act and not a person's, so it is no
   writer `mfa-exemptions.json` lists, and it is granted to no API role.
 
-**A person can be refused with a deadlock.** Deleting or turning off an automation resolves its
-alerts (0257), which takes their rows before the trigger rows. A run that writes the same alerts
-takes the trigger rows first, through the state table's foreign key. When the two meet, Postgres
-ends one with `40P01`. If it is the run, nothing was written and no alert is raised, and the next
-minute's run reads again.
+**A person can be refused with a deadlock.** Turning off an automation resolves its alerts (0257)
+while a run may be writing the same ones. When the two meet, Postgres ends one with `40P01`. If it
+is the run, nothing was written and no alert is raised, and the next minute's run reads again.
 If it is the person, the act is refused and succeeds when tried again. It needs the two to overlap
 for the length of a run, under a second at 10,000 pairs, and an automation with alerts firing.
+**Deleting an automation no longer meets the run so (0287).** It resolves after its trigger rows
+are gone, so it takes them first, as the run does through the state table's foreign key, and waits
+for a run that holds one. Before, it took the alerts of the earlier triggers before the later
+trigger rows, and a run holding one of those was the one ended.
 
 **Measured** on a private historian (TimescaleDB 2.31, the chart's retention and compression; its
 log shows one cursor for each metric, each with the filter), through `postgres_fdw` into
@@ -5137,7 +5143,7 @@ before it asks (`useSetting()`, with 14 where the row cannot be read).
   copy of the history, which Cold Storage's Parquet files are for.
 - **`telemetry_export_max_days()` answers it as the export reads it:** the setting, or 14 where the row
   is missing or outside the bounds, so a damaged setting never stops exports altogether and never
-  lifts the limit. A part day is taken as it is, as the other day settings take one. No browser role
+  lifts the limit. The limit counts whole days, so a stored part day is its whole days (`0285`). No browser role
   may call it: the setting is readable, and `export_telemetry()` is its one caller. Mirror check 91
   holds the default, the bounds and the place the refusal names to the dashboard's copies.
 - **Lowering it changes nothing already exported.** Each export is held to the limit as it is asked
@@ -5435,6 +5441,158 @@ name of spaces and a real name, on an insert and on an update), the Administrato
 API's role, the service role and an approved proposal, and the file itself run inside a transaction:
 every blank row named with its Sparkplug id and nothing renamed, only the table without its CHECK
 scanned, and the upgrade passing once the rows are named.
+
+### A number setting says whether it counts whole things (0285)
+
+`system_settings` held a value and its bounds and nothing more, so each reader decided what 1.5 meant for a
+count of days or hours. A retention window took a part day. The reminder interval alone refused one
+(`0248`). The cap on open proposals and the cold-archive threshold are read as integers, so a part
+value stopped every proposal, or every `platform_health` alert query. The Settings page offered every
+number as the same plain field.
+
+- **The flag is `system_settings.whole_number`.** It is true where the setting counts whole things. A CHECK,
+  `system_settings_whole_number_is_a_number`, holds it false for every other type. `seed_setting()`
+  does not take it, and cannot: a function with one more defaulted argument makes every seven-argument
+  call fail with "function is not unique", and `0001` states the seven-argument function again on every
+  boot, ahead of `0002`'s calls. So the flag is set beside the bounds, by an `UPDATE` guarded on the
+  value it sets, as `0278` sets its bounds. `0002` is released and is not edited. A new number setting
+  says so in its own migration, and `test_a_number_setting_says_whether_it_counts_whole_things.py` fails on a number
+  setting it does not list, so a new one is decided when it is added.
+- **`system_settings_whole_number_guard()` refuses a part value.** It is `BEFORE INSERT OR UPDATE`, and the
+  sentence is `<key> must be a whole number`, with "of hours", "of days" or "of seconds" after it where the
+  key ends in `_hours`, `_days` or `_seconds`. It raises `check_violation`, so PostgREST answers 400 with the
+  sentence, and it binds every role, the service role included. It looks at a row when its value or its
+  flag changes. A label or description refresh by `seed_setting()` passes on a row that already holds a
+  part value, and a flag set over a stored part value is refused, so the two cannot disagree.
+  It replaces the arm `0248` gave `notifications.reminder_hours`, which `0285` takes out of
+  `notification_setting_guard()`, keeping every other arm.
+- **Nine settings are whole, and one is not.** A reader that merely tolerates a fraction does not make a
+  setting part: only a reader that needs one does.
+
+  | Setting | Counts | The reader that decided it |
+  | :--- | :--- | :--- |
+  | `proposals.max_open_per_person` | whole | `enforce_open_proposal_cap()` compares a count of proposals with it, and read it `::integer` (`0286`). |
+  | `proposals.open_expiry_days` | whole | `expire_open_proposals()` turns days into an interval. |
+  | `proposals.retention_days` | whole | `prune_closed_proposals()`, the same. |
+  | `alerts.retention_days` | whole | `prune_platform_alerts()`, which builds the interval from seconds because `make_interval(days => numeric)` does not exist; History's Alerts tab says it in days. |
+  | `alerts.suppression_max_days` | whole | `check_alert_suppression_window_length()`, which took 1.5 as 36 hours; #1403 asked for whole days. |
+  | `archive.tier_after_days` | whole | `cold_archive_backlog_state()` reads it `::integer`, and `ingestion/cold_archive.py` takes `int()`, which drops the fraction. |
+  | `notifications.reminder_hours` | whole | `queue_platform_alert_reminders()`; `0248` already refused a part hour. |
+  | `history.export_max_days` | whole | `telemetry_export_max_days()` and `utils/telemetryExport.js` measure a window in seconds and so took a part day. It is the suppression limit's shape, and nobody needs 1.5 days. |
+  | `ui.audit_trail_poll_seconds` | whole | `AuditTrailTab.jsx` multiplies it by 1000 for `setInterval`, which takes a fraction. Nobody needs one for a record that is "deliberately not a live-tail". |
+  | `site_map.min_pin_spacing` | part | `place_cell_in_its_area()` and `utils/areaPlans.js` compare a distance with it: a fraction of the plan's shorter side, 0 to 0.5. |
+
+- **A part value already stored is rounded down, not refused.** Refusing would stop a site's
+  upgrade, and a day or an hour that was part of one stays a day or an hour. The file rounds each such
+  row in the nine down to a whole value that is never below the setting's floor, and raises a NOTICE
+  naming the key, the old value and the new one:
+  `0285: alerts.retention_days held 1.5 and now holds 1; ...`. The settings write path writes an Audit
+  Trail row for any change to a setting (`trg_system_settings_audit_trail_update`), and the rounding
+  is an `UPDATE` through it, so the trail records the old value and the new one, as a migration's.
+  The flag is then set, one more row for each setting on the first boot and none after. A replay finds
+  nothing to round, because the guard holds from the first boot.
+- **The two readers that took a part day as it was now take a stored part value as its whole days.**
+  `check_alert_suppression_window_length()` is declared again with that read, and its refusal says
+  "A window can last at most 2 days", never "1.5 days". `telemetry_export_max_days()` returns the whole
+  days. A value past the guard, which the service role could only write with the trigger disabled,
+  therefore means what the Settings page would have saved. The fallback each keeps is what mirror
+  checks 62 and 91 read. `0278`'s sentence that a part day "is taken as it is" is no longer true, and
+  the 0278 section below says so.
+- **The Settings page learns which settings are whole from the read it already makes.** `api.js` selects
+  `whole_number` beside the bounds, and a whole setting's field gets `step="1"` and the refusal "Must be a whole
+  number." before anything is sent. Any other number gets `step="any"`, which is also what a read
+  without the column gets. Mirror check 98 holds the field's step and the read to the column, and check
+  99 holds the page's sentence to the guard's and the seeds and fallbacks of the nine to whole numbers.
+- **Who changes them.** An Administrator, behind the second factor where it is required, as for every
+  setting. Every role reads them, so a Shopfloor Manager sees the field and the range and nothing
+  more.
+
+### A part value in the proposal cap never stops a proposal (0286)
+
+`enforce_open_proposal_cap()` read `proposals.max_open_per_person` as `(value #>> '{}')::integer`. A saved
+10.5 then failed every proposal insert with `invalid input syntax for type integer`, for a person's
+Propose a Change and for a machine identity's proposal alike, and the person saw a database error. `0285`
+refuses a part value when the setting is saved. `0286` reads it as `floor(...::numeric)::integer`, so a value
+that is stored anyway (written before `0285`, or past the guard) is its floor: 10.5 admits a tenth
+proposal and refuses the eleventh, with the sentence a person already knows, "you already have 10
+open proposal(s), which is the limit". The function is `0001`'s otherwise, line for line, and keeps its
+`SECURITY DEFINER`.
+
+`test_a_number_setting_says_whether_it_counts_whole_things.py` holds both: the guard for each kind of
+setting, the rounding of a stored part value on the upgrade and its silence on a replay, and the cap
+admitting a proposal at the floor of a stored 10.5.
+
+### Deleting an automation resolves its alerts in one pass (0287)
+
+Deleting an automation with 3,000 triggers while 1,474 of its alerts were firing took 38 s on the
+machine that found it, and 6.2 s on a private test database. The Automations page waits for the
+delete. Two things made it slow, and mending the first would not have mended the second:
+
+- **A call for each trigger.** `0257`'s row trigger called `resolve_automation_alerts()` with one
+  id for each trigger the delete removed, and each call read every firing alert.
+- **A call for many ids was no better.** Its one `UPDATE` tested each firing alert against the
+  prefix of each id with `starts_with()`, which Postgres can only do for every pair: one call for
+  3,000 ids took 5.0 s.
+
+What a delete does now:
+
+- **The match is an equality, so it is hashed.** `automation_alert_trigger_id(fingerprint)` reads
+  the trigger's id out of `condition:<trigger id>:<device id>:<metric>`, and out of the prefix
+  `condition:<trigger id>:`. Any other fingerprint, such as `condition:not-evaluated` or a rule's,
+  gives NULL. It reads what `automation_alert_fingerprint()` (`0255`) composes, so the two change
+  together, and `0287`'s self-check asserts they agree. `resolve_automation_alerts()` matches it
+  against the ids it is given, a hash semi-join: one pass over the firing alerts however many ids
+  there are, and an empty list reads none.
+- **A delete resolves once.** An `AFTER DELETE` statement trigger over the rows the statement
+  deleted (`REFERENCING OLD TABLE AS gone`), `trg_automation_triggers_gone_resolve_alerts`, runs
+  `automation_triggers_gone_resolve_their_alerts()`, which calls the resolve with all their ids.
+  Deleting an automation cascades to its triggers as one statement, so it is one call, and so is a
+  device's.
+- **After, not before.** Nothing needs the trigger row to be there: the resolve reads the ids and no
+  table points at an alert. What the order changes is the locks. Taking the alerts after the trigger
+  rows is the order the evaluator takes them in, which is why a delete no longer ends a run in a
+  deadlock (see *A person can be refused with a deadlock*, under `0271`). Measured with a run
+  holding the second of two triggers and asking for the first one's alert: `0257`'s order ended the
+  run with `40P01`, and this one makes the delete wait for it.
+- **`0257`'s row trigger stays, and does nothing on a delete.** `0257` is released and states the
+  trigger, so a replay puts it back. Its function, `automation_trigger_resolves_its_alerts()`, now
+  returns at once for a delete and is `0257`'s, word for word, for an update.
+- **The update arm is not a statement trigger.** Postgres does not allow a column list on a trigger
+  with transition tables (`transition tables cannot be specified for triggers with column lists`),
+  so one would run for every update of `automation_triggers`, not for the three columns the row
+  trigger listens to. `apply_automations()` updates each kept trigger in a statement of its own: the
+  3,000 updates of a changed document took 3.7 s and 4.5 s with such a trigger. A trigger archived
+  or given another device or metric is a few rows. A statement that archives 3,000 of them still
+  makes 3,000 calls, 5.4 s here, and no code path writes one.
+- **No index.** An expression index on `automation_alert_trigger_id(fingerprint)`, partial on
+  `status = 'firing'`, would make each of those calls a probe. It is not added: nothing needs it
+  while the delete is one call, and the evaluator would maintain it on every alert it writes. If a
+  path ever updates thousands of triggers in one statement, this is the index to add, and the
+  expression is this function's.
+
+**Measured** on a private test database (supabase/postgres 17.6.1.175), an automation with 3,000
+triggers, each on a device of its own, and 1,474 firing alerts, deleted:
+
+| | before | `0287` |
+| --- | ---: | ---: |
+| the delete (`DELETE FROM automations`) | 6.2 s | 0.16 to 0.20 s |
+| the same, with no alert firing | | 0.05 s |
+| one `resolve_automation_alerts()` for the 3,000 ids | 5.0 s | 0.12 to 0.18 s |
+
+Most of what remains is the 1,474 updates of `platform_alerts` and the triggers on it.
+
+The suite `test_deleting_an_automation_resolves_its_alerts_in_one_pass.py` (db lane) deletes an
+automation with 2,000 triggers and 1,000 firing alerts. It asserts that `platform_alerts` was
+updated in ONE statement, which a call for each row breaks on any machine, and that the delete took
+under 1.5 s, which a call for each row breaks on a slow one. It also holds that a delete resolves
+the alerts of the triggers it removes, from one trigger to a whole automation and a device, and
+no others (a sibling's, another automation's, a rule's, the outage alert, and an occurrence already
+resolved); that the update arm is as it was; that the function reads what the fingerprint function
+composes; and that a manager deletes through `delete_automation()`.
+
+The file's self-check asserts that none of its functions is any API role's, that the two functions
+agree on the fingerprint, that the resolve matches by trigger id, and that the statement trigger is
+in place, enabled, and over the deleted rows.
 
 ### A failed revocation after a change of type is asked again (0288)
 

@@ -63,7 +63,7 @@ export const HelpDrawerContext = createContext(null)
  * @param {Function} onCopy Toast callback handed to CopyableId.
  *
  * @param {node} beforeActions Sections that are facts about the entity, rendered with the metadata
- * above the actions, and a section of fixed height such as the device's 3D model.
+ * above the actions, and a section of fixed height.
  *
  * @param {node} children Sections that are tools, rendered after the actions so an unknown height
  * cannot push them off the drawer.

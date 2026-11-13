@@ -1728,6 +1728,85 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   if (seed && tab) compare('exportMaxDaysPlace', "the Settings tab navigation.jsx lists and 0278's category", tab[1], seed[2]);
 }
 
+// 98. A number setting's field takes its step from the flag 0285 adds. SettingsTab.jsx gives a number
+// field a step of 1 where whole_number is true and any step otherwise, the settings read selects the
+// column, and coerceValue() refuses a part value on the same property. A field that offers a step the
+// flag does not hold, or a read that leaves the column out, shows every setting as a fraction.
+{
+  const column = need(SCHEMA, /ADD COLUMN IF NOT EXISTS (whole_number) boolean DEFAULT false NOT NULL/,
+    'the whole_number column on system_settings in 0285');
+  const tab = read('frontend/src/components/tabs/SettingsTab.jsx');
+  const step = need(tab, /step: setting\.(\w+) \? (\d+) : '(\w+)'/, "the number field's step in SettingsTab.jsx");
+  const coerce = need(tab, /whole_number: (\w+) \} = bounds\s+if \(\1 && !Number\.isInteger\(n\)\)/,
+    "coerceValue()'s refusal of a part number in SettingsTab.jsx");
+  const select = need(read('frontend/src/api.js'),
+    /\.from\('system_settings'\)\s*\.select\('id,key,value,value_type,category,label,description,fallback_source,([^']*)'\)/,
+    "the settings read's column list in api.js");
+  if (column && step) {
+    compare('settingStep', 'the flag the Settings field reads and 0285 adds', step[1], column[1]);
+    compare('settingStep', "the step a whole setting's field offers and the step of whole numbers", step[2], '1');
+    compare('settingStep', "the step any other number's field offers and the browser's no-step", step[3], 'any');
+  }
+  if (column && select) {
+    compare('settingStep', 'whether the settings read selects the flag, in api.js', select[1].split(',').includes(column[1]), true);
+  }
+  if (column && coerce) ok.push(`settingStep: coerceValue() refuses a part number on bounds.${column[1]}, the field the read returns`);
+}
+
+// 99. What a whole setting is refused with, and what it can hold. The page's sentence ("Must be a
+// whole number.") is the database guard's ("<key> must be a whole number"); the guard names hours,
+// days or seconds by the key's last word, and each key 0285 flags ends in one of the three or is the
+// proposal cap, which has none. The seed and the bounds of each such setting are whole numbers, and so
+// are the dashboard's fallbacks for the ones it keeps, or a setting would fall back to a value its
+// own guard refuses.
+{
+  const guard = lastDefinition('CREATE OR REPLACE FUNCTION public.system_settings_whole_number_guard(', '$$;',
+    'system_settings_whole_number_guard()');
+  const refusal = guard && need(guard.body, /RAISE EXCEPTION '% (must be a whole number)%'/, `the guard's sentence (${guard.file})`);
+  const page = need(read('frontend/src/components/tabs/SettingsTab.jsx'), /throw new Error\('(Must be a whole number)\.'\)/,
+    "coerceValue()'s sentence in SettingsTab.jsx");
+  if (refusal && page) compare('wholeNumber', "the sentence the page refuses a part number with and the guard's", page[1].toLowerCase(), refusal[1]);
+
+  const keys = [...(need(SCHEMA, /v_whole text\[\] := ARRAY\[([^\]]*)\]/, "the settings 0285 flags whole")?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const units = guard ? [...guard.body.matchAll(/WHEN NEW\.key ~ '_(\w+)\$' THEN ' of (\w+)'/g)].map((m) => [m[1], m[2]]) : [];
+  if (guard) {
+    for (const [suffix, word] of units) if (suffix !== word) problems.push(`wholeNumber: the guard says "of ${word}" for keys ending _${suffix}`);
+    ok.push(`wholeNumber: the guard names ${units.map(([s]) => s).sort().join(', ')} by a key's last word`);
+  }
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const cap = 'proposals.max_open_per_person';
+  for (const key of keys) {
+    const last = key.split('.')[1].split('_').pop();
+    if (key !== cap && !units.some(([suffix]) => suffix === last)) {
+      problems.push(`wholeNumber: ${key} is flagged whole and its last word "${last}" is none the guard names, so its refusal names no unit`);
+    }
+    const seed = SCHEMA.match(new RegExp(`seed_setting\\(\\s*'${escape(key)}',\\s*to_jsonb\\(([0-9.]+)\\)`));
+    const bounds = SCHEMA.match(new RegExp(`SET min_value = ([0-9.]+), max_value = ([0-9.]+)\\s+WHERE key = '${escape(key)}'`));
+    if (!seed) problems.push(`wholeNumber: could not find ${key}' seed in the applied chain -- the file's shape changed, so this check is no longer checking it`);
+    else if (!Number.isInteger(Number(seed[1]))) problems.push(`wholeNumber: ${key} is flagged whole and is seeded ${seed[1]}`);
+    if (bounds && !(Number.isInteger(Number(bounds[1])) && Number.isInteger(Number(bounds[2])))) {
+      problems.push(`wholeNumber: ${key} is flagged whole and its bounds are ${bounds[1]} to ${bounds[2]}`);
+    }
+  }
+  const fallbacks = [
+    ['frontend/src/utils/alertSuppression.js', ['SUPPRESSION_MAX_DAYS', 'SUPPRESSION_MAX_DAYS_MIN', 'SUPPRESSION_MAX_DAYS_MAX']],
+    ['frontend/src/utils/telemetryExport.js', ['EXPORT_MAX_DAYS', 'EXPORT_MAX_DAYS_MIN', 'EXPORT_MAX_DAYS_MAX']],
+    ['frontend/src/utils/alertHistory.js', ['ALERT_RETENTION_DAYS']],
+    ['frontend/src/components/tabs/AuditTrailTab.jsx', ['DEFAULT_POLL_SECONDS']],
+  ];
+  let held = 0;
+  for (const [file, names] of fallbacks) {
+    const src = read(file);
+    for (const name of names) {
+      const value = need(src, new RegExp(`const ${escape(name)} = ([0-9.]+)$`, 'm'), `${name} in ${file}`);
+      if (!value) continue;
+      held += 1;
+      if (!Number.isInteger(Number(value[1]))) problems.push(`wholeNumber: ${name} in ${file} is ${value[1]}, a fallback for a setting the database holds to whole numbers`);
+    }
+  }
+  if (keys.length) ok.push(`wholeNumber: ${keys.length} settings flagged whole are seeded and bounded by whole numbers, and ${held} dashboard fallbacks for them are whole`);
+}
+
 // 92. What one export may hold, three limits and one list in two places (0279): export_telemetry()'s
 // rows, devices and metrics, and the resolutions it admits, against the dashboard's. A page that
 // says another cap trusts a file to hold rows it cannot; one that offers a resolution the function
@@ -1947,8 +2026,11 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   } else {
     compare('notificationKeys', 'the Notifications keys the page names and the migrations seed', named.join(', '), seeded.join(', '));
     if (guard) {
-      const guarded = [...guard.body.matchAll(/WHEN '(notifications\.[a-z_]+)' THEN/g)].map((m) => m[1]).sort();
-      compare('notificationKeys', `the Notifications keys the page names and the guard checks (${guard.file})`, named.join(', '), guarded.join(', '));
+      // A setting that counts whole things is held by system_settings_whole_number_guard() (0285), which
+      // is no arm of this one.
+      const whole = [...(SCHEMA.match(/v_whole text\[\] := ARRAY\[([^\]]*)\]/)?.[1] ?? '').matchAll(/'(notifications\.[a-z_]+)'/g)].map((m) => m[1]);
+      const guarded = [...new Set([...guard.body.matchAll(/WHEN '(notifications\.[a-z_]+)' THEN/g)].map((m) => m[1]).concat(whole))].sort();
+      compare('notificationKeys', `the Notifications keys the page names and the guards check (${guard.file}, and 0285's whole-number guard)`, named.join(', '), guarded.join(', '));
     }
   }
 }

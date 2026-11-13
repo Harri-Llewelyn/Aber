@@ -204,7 +204,7 @@ describe('a file from another site', () => {
       ...CAPTURE, manifest: { ...CAPTURE.manifest, device_ids: ['dev999999999999999999999'] }
     })
     fireEvent.click(within(panel).getByRole('button', { name: /Play back/ }))
-    fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
+    await screen.findByText(/Plays back as/)
     expect(await screen.findByText(/Every recorded device must exist/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Prepare replay lanes/ })).toBeNull()
   })
@@ -243,7 +243,7 @@ describe('a device recorded under the id it publishes', () => {
   it('offers its replay lanes rather than calling it a device this site does not have', async () => {
     const panel = await openPanel({ ...CAPTURE, manifest: { ...CAPTURE.manifest, device_ids: RECORDED } })
     fireEvent.click(within(panel).getByRole('button', { name: /Play back/ }))
-    fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
+    await screen.findByText(/Plays back as/)
     expect(await screen.findByRole('button', { name: 'Prepare replay lanes (2)' })).toBeInTheDocument()
     expect(screen.queryByText(/Every recorded device must exist/)).toBeNull()
   })

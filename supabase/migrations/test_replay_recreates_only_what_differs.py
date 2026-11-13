@@ -251,6 +251,9 @@ class AStaleTriggerIsPutBack(ReplayTestCase):
             timing = re.sub(r"^(CREATE TRIGGER \S+) (BEFORE|AFTER) ",
                             lambda m: f"{m.group(1)} {'AFTER' if m.group(2) == 'BEFORE' else 'BEFORE'} ",
                             c["statement"], count=1)
+            if " REFERENCING " in c["statement"]:
+                # A transition table belongs to an AFTER trigger, which BEFORE refuses: lose it instead.
+                timing = re.sub(r" REFERENCING .*? FOR EACH ", " FOR EACH ", c["statement"], count=1)
             table, name = sql.Identifier(*c["table"].split(".")), sql.Identifier(c["name"])
             # Disabling a trigger, or dropping one, is the owner's; creating one is the chain's.
             owner = self.owner_unless_ours(c["table"])

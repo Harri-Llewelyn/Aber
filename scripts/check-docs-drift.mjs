@@ -1279,7 +1279,10 @@ function edgeFunctionNames() {
     'public.notification_channel_is_configured': '0262 adds the email arm, which is configured once a role is told; 0247 declares the webhook alone, so it stands where email is not applied',
     'public.queue_platform_alert_notifications': '0262 queues an email beside the webhook when the email route carries the alert; 0247 queues the webhook alone',
     'public.queue_platform_alert_reminders': '0262 reminds only on a channel that still carries the alert, through notification_channel_reaches(), where 0247 named the webhook and a machine identity',
-    'public.notification_setting_guard': '0262 adds the two email settings, and makes the guard SECURITY DEFINER because no API role may run its helpers and Postgres checks EXECUTE on every function an expression names; 0248 declares the webhook settings alone',
+    'public.notification_setting_guard': '0262 adds the two email settings, and makes the guard SECURITY DEFINER because no API role may run its helpers and Postgres checks EXECUTE on every function an expression names; 0248 declares the webhook settings alone. 0285 takes the arm for the reminder interval out, since system_settings_whole_number_guard() holds it with every other whole-number setting, and keeps every other arm',
+    'public.check_alert_suppression_window_length': '0285 takes a stored part day as its whole days and words the refusal in whole days, since alerts.suppression_max_days now counts whole things; 0240 took a part day as it was and could say "1.5 days"',
+    'public.telemetry_export_max_days': '0285 takes a stored part day as its whole days, since history.export_max_days now counts whole things; 0278 took a part day as it was',
+    'public.enforce_open_proposal_cap': '0286 reads the cap as floor(...::numeric)::integer, so a stored part value is its floor and never stops a proposal; the baseline cast it to an integer, which a part value failed',
     'public.refresh_directory_liveness': '0223 takes Prometheus\'s address from directory_prometheus_url(), which refresh_directory_figures() reads too and which 0223 declares first, so the baseline\'s copy never names it during a replay. It also counts content that is not JSON as no answer, and sets a scraped service the answer did not report UNKNOWN; the baseline raised on such content without firing the next probe, and left every scraped service at its last ACTIVE when a probe failed',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
@@ -1323,6 +1326,8 @@ function edgeFunctionNames() {
     'public.log_display_name_change': '0213 writes nothing when the name did not change, so a row made or deleted for a picture alone writes no rename row; 0203 wrote one for every insert and delete',
     'public.machine_condition_readings': '0283 reads a pair on a derived metric from derived_current(), which gives it a value over the last hour or at the last whole minute; 0270 reads telemetry_latest, which holds nothing under a name no device publishes. The columns are 0270\'s, since a replay runs 0270 again first. A measured metric is read as it was',
     'public.evaluate_automations': '0283 words the value and the threshold in the summary of an alert it raises through automation_value_words() and automation_threshold_words(): a derived metric\'s value rounded to three decimals with its window, a time in state as a percentage, a measured one as it printed; 0271 printed the value as the evaluator read it. Nothing else changes, and the comparison, the threshold and the values the row keeps are the numbers they were',
+    'public.resolve_automation_alerts': '0287 matches a firing alert by the trigger id automation_alert_trigger_id() reads out of its fingerprint, an equality that is hashed, and not by starts_with() against each id\'s prefix, which compared every alert with every id: one call for 3,000 triggers took 5 s. It returns 0 at once for no ids; 0257 scanned for them',
+    'public.automation_trigger_resolves_its_alerts': '0287 returns at once for a delete, since a statement trigger resolves the alerts of the triggers a statement deleted in one call; the update arm is 0257\'s, word for word. 0257 resolved once for each row deleted',
     'public.machine_condition_rows': '0283 says the window in the detail of a derived metric ("is 4.2 over the last hour, below 5") and rounds its value to three decimals; 0270 words every value as it was read',
     'public.sweep_gateway_credential_revocations': '0288 asks again for a gateway that is not archived, whose change of type asked for a revocation that failed, keeping its stamp, until a 2xx confirms it or a credential issued or enrolled after the stamp replaces the one it ends; 0001 dropped the request row of every gateway that was not archived, so a failed call was never judged. An archived gateway is judged as 0001 judges it',
     'public.display_names_for': '0213 leaves out a row with no name, which holds only a picture, so the answer says nothing about a picture, and names the person who started a capture or playback job for the roles that read the jobs; 0203 had no such row and no such arm',
@@ -6177,6 +6182,80 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 359. The 0287 section names what the migration declares, and 0257's section points to it. A
+// function or a trigger added to the file and left out of the section is a reader tracing why a
+// delete resolves once, or why a row trigger that does nothing is still there, with no map.
+// -------------------------------------------------------------------------------------------------
+{
+  const MIGRATION = 'supabase/migrations/0287_deleting_an_automation_resolves_its_alerts_in_one_pass.sql';
+  const HEADING = 'Deleting an automation resolves its alerts in one pass (0287)';
+  const readme = read('supabase/README.md');
+  const sql = read(MIGRATION);
+  const problems359 = [];
+  const section = readme.match(new RegExp(`\\n### ${HEADING.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&')}\\n([\\s\\S]*?)(?=\\n### )`))?.[1];
+  const functions = [...sql.matchAll(/^CREATE OR REPLACE FUNCTION public\.([a-z_]+)\(/gm)].map((m) => m[1]);
+  const triggers = [...sql.matchAll(/^SELECT public\.replay_trigger\('public\.[a-z_]+', '([a-z_]+)'/gm)].map((m) => m[1]);
+  if (!section) problems359.push(`supabase/README.md has no section "${HEADING}"`);
+  if (functions.length < 4 || triggers.length < 1) problems359.push(`${MIGRATION}: could not read its functions (${functions.length}) and its trigger (${triggers.length})`);
+  if (section) {
+    for (const name of [...functions, ...triggers]) {
+      if (!section.includes(`\`${name}(`) && !section.includes(`\`${name}\``)) {
+        problems359.push(`the 0287 section does not name \`${name}\`, which ${MIGRATION} declares`);
+      }
+    }
+    if (!/An `AFTER DELETE` statement trigger/.test(section)) problems359.push('the 0287 section does not say the delete resolves in an AFTER DELETE statement trigger');
+    if (!/`0257`'s row trigger stays/.test(section)) problems359.push("the 0287 section does not say 0257's row trigger stays");
+  }
+  const at257 = readme.match(/\n### An automation follows the devices it names \(0257\)\n([\s\S]*?)(?=\n### )/)?.[1];
+  if (!at257) problems359.push('supabase/README.md has no 0257 section');
+  else if (!at257.includes(`*${HEADING}*`)) problems359.push(`the 0257 section does not point to *${HEADING}*`);
+  if (problems359.length) {
+    fail(`supabase/README.md does not describe 0287 as the migration declares it:\n${problems359.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the 0287 section names its ${functions.length} functions and its statement trigger, and 0257's section points to it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 360. The bound of the delete's suite is said as the suite holds it. The suite deletes an automation
+// with TRIGGERS triggers and FIRING firing alerts and allows BOUND_SECONDS; the README's 0287 section,
+// the testing document and the suite's entry in python-suites.mjs say the same numbers, so a bound
+// loosened in the suite until a return to a call for each row passes it is not left described as
+// the old one.
+// -------------------------------------------------------------------------------------------------
+{
+  const SUITE = 'supabase/migrations/test_deleting_an_automation_resolves_its_alerts_in_one_pass.py';
+  const py = read(SUITE);
+  const triggers = Number(py.match(/^TRIGGERS = (\d+)$/m)?.[1]);
+  const firing = Number(py.match(/^FIRING = (\d+)$/m)?.[1]);
+  const bound = py.match(/^BOUND_SECONDS = ([\d.]+)$/m)?.[1];
+  const problems360 = [];
+  if (!triggers || !firing || !bound) problems360.push(`could not read TRIGGERS, FIRING and BOUND_SECONDS from ${SUITE}`);
+  else {
+    const people = `${triggers.toLocaleString('en-US')} triggers and ${firing.toLocaleString('en-US')} firing alerts`;
+    const said = {
+      'supabase/README.md': read('supabase/README.md').match(/\n### Deleting an automation resolves its alerts in one pass \(0287\)\n([\s\S]*?)(?=\n### )/)?.[1] ?? '',
+      'docs/testing.md': read('docs/testing.md'),
+      'scripts/python-suites.mjs': read('scripts/python-suites.mjs'),
+    };
+    for (const [file, text] of Object.entries(said)) {
+      const flat = text.replace(/'\s*\+\s*\n\s*(?:'|")/g, '').replace(/\n#\s*/g, ' ').replace(/\s+/g, ' ');
+      const at = flat.indexOf('test_deleting_an_automation_resolves_its_alerts_in_one_pass.py');
+      const near = file === 'supabase/README.md' ? flat : flat.slice(Math.max(0, at), at + 900);
+      if (file !== 'supabase/README.md' && at < 0) { problems360.push(`${file} does not list ${SUITE}`); continue; }
+      const around = file === 'docs/testing.md' ? flat.slice(Math.max(0, at - 700), at + 100) : near;
+      if (!around.includes(people)) problems360.push(`${file} does not say the suite deletes an automation with ${people}`);
+      if (!around.includes(`under ${bound} s`)) problems360.push(`${file} does not say the delete must take under ${bound} s`);
+    }
+  }
+  if (problems360.length) {
+    fail(`the delete's bound is not said as ${SUITE} holds it:\n${problems360.map((p) => `        ${p}`).join('\n')}`);
+  } else {
+    pass(`the README, the testing document and the suite list say the delete's suite deletes ${triggers.toLocaleString('en-US')} triggers with ${firing.toLocaleString('en-US')} firing alerts in under ${bound} s`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 321. The Automations page's address is stated as the code reads it. frontend/README.md's routing
 // table names each query key the page reads and its two path forms; the page reads each key through
 // the hook that puts it in the address, and routes.js builds the links other pages send there (a
@@ -6500,6 +6579,118 @@ const OPERATOR_PAIRS = [
     fail('the help and the Suppression windows section disagree:\n' + problems237.map((p) => `        ${p}`).join('\n'));
   } else {
     pass('the help names the Suppression windows controls as the drawer draws them, and says a suppressed alert is not counted and colours nothing');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 365. The Devices drawer offers the 3D model as one action, after View History, and the help names
+// it as the drawer does. The label follows the model: View 3D Model with one attached, Add 3D
+// Model… with none. The drawer keeps no 3D Model section, so no Model3DLabel and no beforeActions.
+// The dialog it opens draws Download, Replace, Remove and a Public marker, and the viewer Reset
+// view; devices.md names each.
+// -------------------------------------------------------------------------------------------------
+{
+  const tab = read('frontend/src/components/tabs/DevicesTab.jsx');
+  const dialog = read('frontend/src/components/common/Model3DUploader.jsx');
+  const viewer = read('frontend/src/components/common/Model3DViewer.jsx');
+  const help = read('help/pages/devices.md');
+  const problems365 = [];
+  const after = tab.match(/label: 'View History', icon: <\w+ size=\{13\} \/>,\s*to: deviceHistoryUrl\([^)]*\),\s*title: [^\n]+\n\s*\},\s*(?:\/\*[\s\S]*?\*\/\s*)?\{\s*label: [^\n]*'View 3D Model'[^\n]*'Add 3D Model…'/);
+  if (!after) problems365.push("DevicesTab.jsx has no action right after View History whose label is 'View 3D Model' with a model and 'Add 3D Model…' without one");
+  if (/Model3DLabel|model-section|beforeActions=/.test(tab)) problems365.push('DevicesTab.jsx still draws a 3D Model section in the drawer (Model3DLabel, model-section or beforeActions)');
+  for (const word of ['Download', 'Replace', 'Remove', 'Public']) {
+    if (!dialog.includes(` ${word}`)) problems365.push(`Model3DUploader.jsx no longer draws "${word}"`);
+    if (!help.includes(`**${word}**`)) problems365.push(`help/pages/devices.md does not name **${word}**`);
+  }
+  if (!viewer.includes('Reset view')) problems365.push('Model3DViewer.jsx no longer draws "Reset view"');
+  for (const label of ['View 3D Model', 'Add 3D Model…', 'Reset view']) {
+    if (!help.includes(`**${label}**`)) problems365.push(`help/pages/devices.md does not name **${label}**`);
+  }
+  if (!/\*\*View 3D Model\*\*[^\n]*after \*\*View History\*\*/.test(help)) problems365.push('help/pages/devices.md does not say View 3D Model sits after View History');
+  if (/\*\*Expand\*\*/.test(help.slice(help.indexOf('**View 3D Model**'), help.indexOf('**Suppression windows**')))) {
+    problems365.push('help/pages/devices.md still sends a reader to an Expand button for the model, which the drawer no longer has');
+  }
+  if (problems365.length) {
+    fail('the Devices drawer\'s 3D model action and its help disagree:\n' + problems365.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the Devices drawer has one 3D model action after View History, View 3D Model or Add 3D Model…, and the help names it and the view\'s Download, Replace, Remove, Public and Reset view');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 366. Nothing of a device's 3D model loads until its dialog is opened. DevicesTab mounts the
+// dialog only while modelOpen is set; Model3DViewer is the one file that imports @google/model-viewer
+// and only through import(); the viewer is imported by the dialog alone and does not auto-rotate;
+// and the README and the help both say so.
+// -------------------------------------------------------------------------------------------------
+{
+  const src = allFiles.filter((f) => /^frontend\/src\/.*\.jsx?$/.test(f) && !/^frontend\/src\/(__tests__|test)\//.test(f));
+  const tab = read('frontend/src/components/tabs/DevicesTab.jsx');
+  const viewer = read('frontend/src/components/common/Model3DViewer.jsx');
+  const problems366 = [];
+  if (!/\{modelOpen && selectedDevice && \(\s*<Model3DUploader/.test(tab)) problems366.push('DevicesTab.jsx does not mount Model3DUploader only while modelOpen is set');
+  const viewerImports = [];
+  const moduleImports = [];
+  for (const f of src) {
+    const text = read(f);
+    if (/(?:from|import)\s+['"]@google\/model-viewer['"]/.test(text)) moduleImports.push(f);
+    if (/from\s+['"][./]*(?:components\/)?(?:common\/)?Model3DViewer['"]/.test(text)) viewerImports.push(f);
+  }
+  if (moduleImports.length) problems366.push(`${moduleImports.join(', ')} import @google/model-viewer statically, so the viewer loads with the page`);
+  if (!viewer.includes("import('@google/model-viewer')")) problems366.push("Model3DViewer.jsx does not load @google/model-viewer with import()");
+  if (viewerImports.some((f) => f !== 'frontend/src/components/common/Model3DUploader.jsx')) {
+    problems366.push(`${viewerImports.filter((f) => f !== 'frontend/src/components/common/Model3DUploader.jsx').join(', ')} import Model3DViewer, which only the 3D model dialog may`);
+  }
+  if (/auto-rotate/.test(viewer)) problems366.push('Model3DViewer.jsx turns the model by itself, so it keeps drawing in an open dialog');
+  const readme = read('frontend/README.md');
+  if (!readme.includes("### A device's 3D model opens on request")) problems366.push("frontend/README.md has no \"A device's 3D model opens on request\" section");
+  if (!readme.includes('**Nothing loads until it is asked for.**')) problems366.push('frontend/README.md does not say nothing of the model loads until it is asked for');
+  if (!read('help/pages/devices.md').includes('Nothing of the model loads until you open the view')) problems366.push('help/pages/devices.md does not say nothing of the model loads until the view is opened');
+  if (problems366.length) {
+    fail('the 3D model loads before it is asked for, or the docs say otherwise:\n' + problems366.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the 3D model\'s dialog is mounted only while open, @google/model-viewer is imported only through import() in the one viewer, and the README and the help say so');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 367. The help says who may do what with a 3D model as the code gates it. Viewing and Download are
+// open to every role; Add 3D Model…, Replace and Remove need device:manage. The drawer greys Add
+// out with requiresRolesTitle(DEVICE_MANAGE) (and for an archived device, which cannot take one),
+// and the dialog draws Replace and Remove only under canManage, with Download outside it.
+// -------------------------------------------------------------------------------------------------
+{
+  const tab = read('frontend/src/components/tabs/DevicesTab.jsx');
+  const dialog = read('frontend/src/components/common/Model3DUploader.jsx');
+  const help = read('help/pages/devices.md');
+  const problems367 = [];
+  if (!/disabled: !selectedDevice\.model_3d_path && \(!canManage \|\| selectedDevice\.is_archived\)/.test(tab)) {
+    problems367.push('DevicesTab.jsx does not grey Add 3D Model… out for a role that may not manage devices or for an archived device, and only then');
+  }
+  if (!/requiresRolesTitle\(PERMISSION_UUIDS\.DEVICE_MANAGE\)[\s\S]{0,200}Restore this device to attach a 3D model/.test(tab)) {
+    problems367.push("DevicesTab.jsx's Add 3D Model… does not name the roles, then the restore, as its reasons");
+  }
+  if (!/canManage=\{canManage && !selectedDevice\.is_archived\}/.test(tab.slice(tab.indexOf('<Model3DUploader')))) {
+    problems367.push('DevicesTab.jsx hands the dialog canManage without the archived check');
+  }
+  const download = dialog.indexOf('<IconDownload size={12} /> Download');
+  const gate = dialog.indexOf('{canManage && (');
+  const replace = dialog.indexOf('<IconUpload size={12} /> Replace');
+  if (download < 0 || gate < 0 || replace < 0 || !(download < gate && gate < replace)) {
+    problems367.push('Model3DUploader.jsx does not draw Download before, and outside, the canManage gate that holds Replace and Remove');
+  }
+  const bullet = help.slice(help.indexOf('**The 3D model\'s file**'), help.indexOf('**Add 3D Model…**'));
+  for (const phrase of ['**Download** saves it, and every role can use it', '**Replace** and **Remove** need permission to manage devices', '**Remove** asks first']) {
+    if (!bullet.includes(phrase)) problems367.push(`help/pages/devices.md's 3D model file bullet does not say "${phrase}"`);
+  }
+  const add = help.slice(help.indexOf('**Add 3D Model…**'), help.indexOf('**Who can open a model.**'));
+  for (const phrase of ['It needs permission to manage devices', 'greyed out', 'An archived device cannot take a new model']) {
+    if (!add.includes(phrase)) problems367.push(`help/pages/devices.md's Add 3D Model… bullet does not say "${phrase}"`);
+  }
+  if (problems367.length) {
+    fail('the 3D model\'s gating and the help disagree:\n' + problems367.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the help says Download and viewing are open to every role, and Add 3D Model…, Replace and Remove need device:manage, as the drawer and the dialog gate them');
   }
 }
 
@@ -8054,6 +8245,35 @@ const OPERATOR_PAIRS = [
     for (const p of problems101) fail(`capture caps: ${p}`);
   } else {
     pass(`the capture caps (${seconds / 3600} hours, ${count} messages, ${mib} MiB) agree in the CHECK, the recorder, the dialog, the help and the README; the bucket and the playback pod's /tmp hold a larger file`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 347. The help says the playback dialog names the Playback gateway, as StartPlaybackModal draws
+// it. A site has one, so the dialog states it in a fixed "Plays back as" line and uses it; only a
+// site with two (a replacement being swapped in) gets the "Choose the Playback gateway…" select. A
+// help page that tells the reader to choose the gateway sends them looking for a control the dialog
+// does not draw.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems347 = [];
+  const modal = read('frontend/src/components/modals/StartPlaybackModal.jsx');
+  const help = read('help/pages/capture.md');
+  for (const [piece, what] of [
+    ['targets?.length === 1', 'names the gateway when the site has one'],
+    ['Plays back as', 'draws the fixed "Plays back as" line'],
+    ['targets.length > 1', 'draws the select only when the site has more than one'],
+    ['Choose the Playback gateway…', 'keeps the select\'s "Choose the Playback gateway…" option'],
+  ]) {
+    if (!modal.includes(piece)) problems347.push(`StartPlaybackModal.jsx no longer ${what} (${piece})`);
+  }
+  if (!help.includes('The playback dialog names the Playback gateway')) problems347.push('help/pages/capture.md does not say "The playback dialog names the Playback gateway"');
+  const asks = help.match(/\b(?:asks for|choose|pick|select)s? (?:the|a) (?:Playback )?gateway/i);
+  if (asks) problems347.push(`help/pages/capture.md says "${asks[0]}", and the dialog asks for no gateway`);
+  if (problems347.length) {
+    fail('The playback dialog and the help disagree on how the Playback gateway is named:\n' + problems347.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the playback dialog names the one Playback gateway in a fixed line, offers a select only for two, and the help says it names the gateway');
   }
 }
 
@@ -11668,6 +11888,138 @@ const OPERATOR_PAIRS = [
 }
 
 // -------------------------------------------------------------------------------------------------
+// 353. The settings that count whole things are named as 0285 flags them. The upgrade guide's
+// section lists each of the nine by the label its seed gives, says how many there are, and names
+// the one number setting that takes a fraction; the Settings help names the one that is a count of
+// proposals and the one that is a fraction, and says days, hours and seconds. A page naming a
+// setting 0285 leaves part tells a person a value will be refused that the database accepts.
+// -------------------------------------------------------------------------------------------------
+{
+  const SQL = 'supabase/migrations/0285_a_number_setting_says_whether_it_counts_whole_things.sql';
+  const chain = allFiles.filter((f) => /^supabase\/migrations\/\d{4}_[^/]*\.sql$/.test(f)).sort().map(read).join('\n');
+  const flagged = [...(read(SQL).match(/v_whole text\[\] := ARRAY\[([^\]]*)\]/)?.[1] || '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const labels = new Map();
+  for (const m of chain.matchAll(/seed_setting\(\s*'([a-z_.]+)',\s*to_jsonb\([^)]*\),\s*'number',\s*'[^']*',\s*'((?:[^']|'')*)'/g)) {
+    labels.set(m[1], m[2].replace(/''/g, "'"));
+  }
+  const problems353 = [];
+  if (flagged.length === 0) problems353.push(SQL + ': could not read the settings it flags whole_number');
+  const parts = [...labels.keys()].filter((k) => !flagged.includes(k));
+  for (const key of flagged) if (!labels.has(key)) problems353.push(SQL + ' flags ' + key + ', which no migration seeds as a number');
+  if (parts.length === 0) problems353.push('every number setting is flagged whole in ' + SQL + ', so the guide has no fraction to name');
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  const guide = read('help/site/upgrading.md');
+  const at = guide.indexOf('\n### From 1.9.0, a setting that counts days, hours or seconds takes whole numbers\n');
+  const section = at < 0 ? '' : guide.slice(at, guide.indexOf('\n## ', at));
+  if (!section) {
+    problems353.push('help/site/upgrading.md has no "From 1.9.0, a setting that counts days, hours or seconds takes whole numbers" section');
+  } else {
+    const count = words[flagged.length] ?? String(flagged.length);
+    const lead = count[0].toUpperCase() + count.slice(1) + ' number settings now take whole numbers only';
+    if (!section.includes('\n' + lead)) problems353.push('the upgrade guide does not say "' + lead + '"');
+    for (const key of flagged) {
+      const label = labels.get(key);
+      if (label && !section.includes('**' + label + '**')) problems353.push('the upgrade guide does not name **' + label + '**, which 0285 flags whole');
+      if (!section.includes("'" + key + "'")) problems353.push("the upgrade guide's query does not name '" + key + "'");
+    }
+    for (const key of parts) {
+      const label = labels.get(key);
+      if (!section.includes('**' + label + '**')) problems353.push('the upgrade guide does not name **' + label + '**, which stays a fraction');
+    }
+  }
+  const help = read('help/pages/settings.md');
+  for (const needle of ['takes a whole number', 'every setting counted in days, hours or seconds']) {
+    if (!help.includes(needle)) problems353.push('help/pages/settings.md does not say "' + needle + '"');
+  }
+  for (const key of ['proposals.max_open_per_person', ...parts]) {
+    const label = labels.get(key);
+    if (label && !help.includes('**' + label + '**')) problems353.push('help/pages/settings.md does not name **' + label + '**');
+  }
+  if (problems353.length) {
+    fail('the upgrade guide and the Settings help name the whole-number settings otherwise than 0285 flags them:\n' +
+      problems353.map((p) => '        ' + p).join('\n'));
+  } else {
+    pass('the upgrade guide names the ' + flagged.length + ' settings 0285 flags whole and the ' + parts.length + ' that stays a fraction, and the Settings help says what they take');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 354. supabase/README.md's table of the number settings says what 0285 does: a row for every number
+// setting the chain seeds, "whole" for each key 0285 flags and "part" for the others, and the counts
+// in its sentence. A table that calls a setting part which the file flags whole sends a reader to
+// a reader that no longer decides it.
+// -------------------------------------------------------------------------------------------------
+{
+  const SQL = 'supabase/migrations/0285_a_number_setting_says_whether_it_counts_whole_things.sql';
+  const chain = allFiles.filter((f) => /^supabase\/migrations\/\d{4}_[^/]*\.sql$/.test(f)).sort().map(read).join('\n');
+  const flagged = [...(read(SQL).match(/v_whole text\[\] := ARRAY\[([^\]]*)\]/)?.[1] || '').matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+  const seeded = [...new Set([...chain.matchAll(/seed_setting\(\s*'([a-z_.]+)',\s*to_jsonb\([^)]*\),\s*'number'/g)].map((m) => m[1]))].sort();
+  const readme = read('supabase/README.md');
+  const from = readme.indexOf('\n### A number setting says whether it counts whole things (0285)\n');
+  const section = from < 0 ? '' : readme.slice(from, readme.indexOf('\n### ', from + 5));
+  const rows = new Map([...section.matchAll(/^\s*\| `([a-z_.]+)` \| (whole|part) \|/gm)].map((m) => [m[1], m[2]]));
+  const problems354 = [];
+  if (!section) problems354.push('supabase/README.md has no "A number setting says whether it counts whole things (0285)" section');
+  if (flagged.length === 0) problems354.push(SQL + ': could not read the settings it flags whole_number');
+  for (const key of seeded) {
+    const want = flagged.includes(key) ? 'whole' : 'part';
+    if (section && rows.get(key) !== want) problems354.push('the 0285 table says ' + key + ' is ' + (rows.get(key) ?? 'missing') + ', and 0285 makes it ' + want);
+  }
+  for (const key of rows.keys()) if (!seeded.includes(key)) problems354.push('the 0285 table lists ' + key + ', which no migration seeds as a number');
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  const parts = seeded.length - flagged.length;
+  const lead = (words[flagged.length] ?? String(flagged.length)).replace(/^./, (c) => c.toUpperCase());
+  const says = '**' + lead + ' settings are whole, and ' + (words[parts] ?? parts) + (parts === 1 ? ' is not' : ' are not') + '.**';
+  if (section && !section.replace(/\s+/g, ' ').includes(says)) problems354.push('the 0285 section does not say ' + says);
+  if (problems354.length) {
+    fail("supabase/README.md's table of whole-number settings says otherwise than 0285 does:\n" +
+      problems354.map((p) => '        ' + p).join('\n'));
+  } else {
+    pass('supabase/README.md lists each of the ' + seeded.length + ' number settings as 0285 leaves it: ' + flagged.length + ' whole, ' + parts + ' part');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 355. Nothing says a part day is taken as it is, and the upgrade guide quotes the line 0285 logs.
+// The suppression and export readers took a part day until 0285; the prose that said so is gone, the
+// refusal no longer words a part day (no trim_scale in its redeclaration), and the guide's line,
+// "0285: <key> held 1.5 and now holds 1", and the grep in its After-an-upgrade table are the
+// NOTICE the file raises.
+// -------------------------------------------------------------------------------------------------
+{
+  const SQL = 'supabase/migrations/0285_a_number_setting_says_whether_it_counts_whole_things.sql';
+  const sql = read(SQL);
+  const problems355 = [];
+  for (const file of allFiles.filter((f) => f.endsWith('.md') && !gitignored(f))) {
+    if (read(file).includes('part day is taken as it is')) problems355.push(file + ' still says a part day is taken as it is');
+  }
+  const fn = sql.indexOf('CREATE OR REPLACE FUNCTION public.check_alert_suppression_window_length(');
+  if (fn < 0 || sql.slice(fn, sql.indexOf('$;', fn + 80)).includes('trim_scale')) {
+    problems355.push(SQL + ' does not redeclare check_alert_suppression_window_length() without trim_scale');
+  }
+  const guide = read('help/site/upgrading.md');
+  if (!/RAISE NOTICE '0285: % held % and now holds %;/.test(sql)) {
+    problems355.push(SQL + ' raises no NOTICE of the form "0285: <key> held <old> and now holds <new>"');
+  } else {
+    if (!guide.includes('`0285: <key> held 1.5 and now holds 1`')) problems355.push('the upgrade guide does not quote "0285: <key> held 1.5 and now holds 1"');
+    if (!guide.includes("grep '0285:'")) problems355.push("the upgrade guide's After-an-upgrade table does not grep for '0285:'");
+  }
+  const readme = read('supabase/README.md');
+  for (const [what, title, next] of [
+    ['0240', '### An alert stays quiet during planned work (0240)', "### The Audit Trail files a suppression window's acts (0241)"],
+    ['0278', '### The longest export is a setting (0278)', '### An export of readings is checked, bounded and recorded (0279)'],
+  ]) {
+    const zone = readme.slice(readme.indexOf(title), readme.indexOf(next));
+    if (!zone.includes('whole days (`0285`)')) problems355.push("supabase/README.md's " + what + ' section does not say a part day is its whole days (0285)');
+  }
+  if (problems355.length) {
+    fail('the part-day prose or the rounding line is stale against 0285:\n' + problems355.map((p) => '        ' + p).join('\n'));
+  } else {
+    pass('no document says a part day is taken as it is, the suppression refusal words whole days, and the guide quotes the NOTICE 0285 raises');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 331. History's help and the upgrade guide say who may export as the dashboard holds it:
 // TELEMETRY_EXPORT_ROLES' two roles in words (utils/telemetryExport.js), and the greyed button's
 // title, EXPORT_DENIED_TITLE. A help page naming another role sends a person to someone who cannot
@@ -12191,6 +12543,48 @@ const EXPORT_ENTRY_TABS = EXPORT_ENTRY_FILES.map((f) => f.match(/^frontend\/src\
     fail('A dialog\'s title and its close button are laid out otherwise than frontend/README.md says:\n' + problems345.map((p) => `        ${p}`).join('\n'));
   } else {
     pass(`a dialog's title wraps and is never cut, the controls keep their size, and a title keeps ${room} characters before wide controls wrap below it`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 357. The class-index suite plans with the pages visible, and says why when it fails. A count that
+// names a class is an index-only scan only on pages the visibility map marks all-visible, and until
+// autovacuum has been through the current month's partition the planner may read it through a
+// bitmap scan whose recheck computes the class. So the test runs VACUUM (ANALYZE) first, outside its
+// transaction, and a failure carries the plan, last_autovacuum and relallvisible against relpages.
+// 0228's section says what a busy partition costs. A suite that dropped the VACUUM would fail on the
+// runs autovacuum is late, though nothing it tests had changed.
+// -------------------------------------------------------------------------------------------------
+{
+  const problems357 = [];
+  const suite = read('supabase/migrations/test_the_audit_trail_sorts_events_into_classes_in_the_database.py').replace(/\r\n/g, '\n');
+  const vacuum = suite.match(/ {4}def make_the_pages_visible\(self\):[\s\S]*?(?=\n {4}def )/)?.[0] ?? '';
+  if (!vacuum.includes('conn.autocommit = True') || !vacuum.includes('VACUUM (ANALYZE) public.audit_trail;')) {
+    problems357.push('the suite has no make_the_pages_visible() that runs VACUUM (ANALYZE) public.audit_trail on an autocommit connection');
+  }
+  const test = suite.match(/ {4}def test_each_class_has_a_valid_index_that_a_query_naming_it_uses\(self\):[\s\S]*?(?=\n {4}def )/)?.[0] ?? '';
+  if (!test) problems357.push('the suite has no test_each_class_has_a_valid_index_that_a_query_naming_it_uses');
+  else {
+    const at = (needle) => test.indexOf(needle);
+    if (at('self.make_the_pages_visible()') < 0 || at('self.make_the_pages_visible()') > at('EXPLAIN')) {
+      problems357.push('test_each_class_has_a_valid_index_that_a_query_naming_it_uses does not make the pages visible before it explains');
+    }
+    if (!/assertRegex\(plan, r"Index Only Scan using \\S\+", why\)/.test(test)) problems357.push('its Index Only Scan assertion does not carry the planner state');
+    if (!/assertNotIn\("CASE", plan, .*\+ why\)/.test(test)) problems357.push('its no-CASE assertion does not carry the planner state');
+  }
+  const state = suite.match(/ {4}def partition_state\(self\):[\s\S]*?(?=\n {4}def )/)?.[0] ?? '';
+  for (const piece of ['last_autovacuum', 'last_vacuum', 'relallvisible', 'relpages']) {
+    if (!state.includes(piece)) problems357.push(`partition_state() does not report ${piece}`);
+  }
+  const section = read('supabase/README.md').replace(/\s+/g, ' ');
+  if (!section.includes('On a busy current partition the class counts may recheck rows until autovacuum catches up, which costs time and never changes an answer.')) {
+    problems357.push("supabase/README.md's 0228 section does not say what a busy current partition costs the class counts");
+  }
+  if (problems357.length) {
+    fail('the class-index suite and its documents disagree about the visibility map:\n' +
+      problems357.map((p) => `        ${p}`).join('\n'));
+  } else {
+    pass('the class-index suite runs VACUUM (ANALYZE) before it explains and reports the planner\'s state on a failure, and the 0228 section says what a busy partition costs');
   }
 }
 

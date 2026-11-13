@@ -2043,6 +2043,41 @@ same values. Nothing is renamed for you, because only you know what each one is.
 An API client that writes a blank name now gets HTTP 400, naming `devices_name_not_blank` or
 `gateways_name_not_blank`. The dashboard says "Give the device a name" or "Give the gateway a name".
 
+### From 1.9.0, a setting that counts days, hours or seconds takes whole numbers
+
+Nine number settings now take whole numbers only: a part number such as 1.5 is refused. Settings are
+on the **Settings** page. They are:
+
+- **Retention:** **Alert history kept for (days)** and **Longest suppression window (days)**.
+- **Approvals:** **Open proposals allowed per person**, **Open proposal expires after (days)** and
+  **Closed proposals kept for (days)**.
+- **Cold Storage:** **Archive chunks older than (days)**.
+- **History:** **Longest export (days)**.
+- **Notifications:** **Remind every (hours)**.
+- **Audit Trail:** **Refresh interval (seconds)**.
+
+**Minimum spacing between cells on an area plan** is a fraction of the plan, and still takes one.
+
+A part value you saved before is rounded down when you upgrade, never below the setting's minimum.
+Nothing needs doing. To see before upgrading whether any setting holds one, run this. No rows means
+nothing changes:
+
+```bash
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+  "SELECT key, value FROM public.system_settings
+     WHERE key IN ('alerts.retention_days', 'alerts.suppression_max_days', 'archive.tier_after_days',
+                   'history.export_max_days', 'notifications.reminder_hours', 'proposals.max_open_per_person',
+                   'proposals.open_expiry_days', 'proposals.retention_days', 'ui.audit_trail_poll_seconds')
+       AND (value #>> '{}')::numeric <> trunc((value #>> '{}')::numeric) ORDER BY key;"
+```
+
+db-init's log names each value it rounds, as `0285: <key> held 1.5 and now holds 1`. Each is also a
+change in the Audit Trail, from the migration. A saved 10.5 in **Open proposals allowed per person**
+stopped every proposal in 1.8.x. It becomes 10.
+
+An API client that writes a part value to one of them now gets HTTP 400, with `<key> must be a whole
+number`.
+
 ### From 1.9.0, a credential revoked by a change of a gateway's type is asked for again
 
 Changing a gateway's type to or from Remote disables the broker credential the old type held. On
@@ -2119,6 +2154,7 @@ is fresh.
 | Which cells lost a `grafana_url` that was not a web address (upgrading to 1.8.0) | `kubectl -n aber logs job/aber-db-init \| grep '0219: cell'` — no line means none; each old value is in its cell's Audit Trail |
 | Which role rows named no account and were deleted (upgrading to 1.8.0) | `kubectl -n aber logs job/aber-db-init \| grep 'user_roles: deleted'` — no line means none; each row that named no account is a `ROLE_REVOKED` row in the Audit Trail |
 | Whether Studio's sign-in was removed (upgrading to 1.8.0 with Studio off) | `kubectl -n aber logs job/aber-db-init \| grep 'approval(s) revoked'` — no line means Studio had no sign-in to remove |
+| Which settings had a part value rounded down (upgrading to 1.9.0) | `kubectl -n aber logs job/aber-db-init \| grep '0285:'` — no line means none; each is a change in the Audit Trail, from the migration |
 | The historian's extension matches its image | `kubectl -n aber logs job/aber-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
 | Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |

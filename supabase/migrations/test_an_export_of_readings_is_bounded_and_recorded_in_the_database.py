@@ -238,7 +238,7 @@ class TheSetting(ExportBase):
                          (14, "number", "History", "Longest export (days)", 1, 366, False, False))
 
     def test_it_is_held_to_its_bounds(self):
-        for days in (0, 0.5, 367):
+        for days in (0, -1, 367):
             with self.subTest(days=days):
                 self.cur.execute("SAVEPOINT bound;")
                 with self.assertRaises(psycopg2.errors.CheckViolation):
@@ -312,11 +312,28 @@ class Refusals(ExportBase):
         self.limit(1)
         refusal = self.assertRefused("22023", self.asked, end=T0 + timedelta(days=1, seconds=1))
         self.assertEqual(refusal.diag.message_primary, sentence % ("1 day", 2))
-        self.limit(1.5)
-        refusal = self.assertRefused("22023", self.asked, end=T0 + timedelta(hours=36, seconds=1))
-        self.assertEqual(refusal.diag.message_primary, sentence % ("1.5 days", 2))
+        self.limit(2)
+        refusal = self.assertRefused("22023", self.asked, end=T0 + timedelta(days=2, seconds=1))
+        self.assertEqual(refusal.diag.message_primary, sentence % ("2 days", 3))
         self.limit(366)
         self.assertRefused("22023", self.asked, end=T0 + timedelta(days=366, seconds=1))
+
+    def test_a_stored_part_day_is_its_whole_days(self):
+        # The setting counts whole days and refuses a part one (0285). One written before that, or
+        # with the guard's trigger off, is read as its whole days, and the sentence says whole days.
+        sentence = "An export can cover at most %s, set on Settings › History. This window is %s days."
+        self.cur.execute("ALTER TABLE public.system_settings DISABLE TRIGGER system_settings_whole_number_trg;")
+        self.limit(1.5)
+        self.cur.execute("ALTER TABLE public.system_settings ENABLE TRIGGER system_settings_whole_number_trg;")
+        refusal = self.assertRefused("22023", self.asked, end=T0 + timedelta(days=1, seconds=1))
+        self.assertEqual(refusal.diag.message_primary, sentence % ("1 day", 2))
+
+    def test_the_setting_refuses_a_part_day(self):
+        self.cur.execute("SAVEPOINT part_day;")
+        with self.assertRaises(psycopg2.errors.CheckViolation) as caught:
+            self.limit(1.5)
+        self.cur.execute("ROLLBACK TO SAVEPOINT part_day;")
+        self.assertEqual(caught.exception.diag.message_primary, KEY + " must be a whole number of days")
 
     def test_a_window_of_exactly_the_limit_is_not_refused_for_its_length(self):
         # It gets as far as the read, which is gone: 42P01, not 22023.
