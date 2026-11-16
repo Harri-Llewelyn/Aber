@@ -109,8 +109,8 @@ class UnitWordsBase(unittest.TestCase):
         area = self.cur.fetchone()[0]
         self.cur.execute("INSERT INTO public.cells (name, area_id) VALUES ('Test_0292_Cell', %s) RETURNING id;", (area,))
         cell = self.cur.fetchone()[0]
-        self.cur.execute("INSERT INTO public.devices (id, name, cell_id) VALUES (%s, %s, %s) RETURNING sparkplug_id;",
-                         (DEVICE, DEVICE_NAME, cell))
+        self.cur.execute("INSERT INTO public.devices (id, name, cell_id, location_scope) VALUES (%s, %s, %s, 'cell') "
+                         "RETURNING sparkplug_id;", (DEVICE, DEVICE_NAME, cell))
         self.sparkplug = self.cur.fetchone()[0]
         for name, units in MEASURED:
             self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, units) VALUES (%s, 10, %s);", (name, units))
