@@ -629,8 +629,11 @@ describe('deprecating and restoring a derived metric', () => {
     fireEvent.click(within(document.querySelector('.context-panel')).getByRole('button', { name: 'Deprecate' }))
     const modal = document.querySelector('.modal')
     expect(modal.textContent).toMatch(/moves .*Controller\/UPTIME.* from the Derived tab/)
-    const offered = [...modal.querySelectorAll('option')].map(o => o.textContent).filter(t => !t.startsWith('—'))
+    // Chosen from the schema builder's list, one radio at a time.
+    const offered = [...modal.querySelectorAll('label .mono')].map(el => el.textContent)
     expect(offered).toEqual(['Controller/PARTS_PER_HOUR', 'Power/TOTAL'])
+    expect([...modal.querySelectorAll('input[type="radio"]')]).toHaveLength(2)
+    expect(modal.querySelector('select[id="deprecate-superseded-by"]')).toBeNull()
   })
 
   it('restores to the Derived tab, with a toast that links there', async () => {

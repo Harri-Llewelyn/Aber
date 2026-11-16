@@ -415,20 +415,24 @@ describe('a setting that is fixed at install', () => {
     expect(screen.getByText('Sparkplug group')).toBeInTheDocument()
   }
 
-  it('shows the value', async () => {
+  const row = () => screen.getByText('Sparkplug group').closest('tr')
+
+  it('shows the value as text, not as a field', async () => {
     await show()
-    expect(screen.getByLabelText('Sparkplug group')).toHaveValue('Plant-7')
+    const value = row().querySelector('.setting-cell-value')
+    expect(value).toHaveTextContent('Plant-7')
+    expect(value.querySelector('input, select, textarea')).toBeNull()
+    expect(screen.queryByDisplayValue('Plant-7')).toBeNull()
   })
 
-  it('does not offer an editable control', async () => {
+  it('names the setting with a plain label, since no control is there to name', async () => {
     await show()
-    expect(screen.getByLabelText('Sparkplug group')).toBeDisabled()
+    expect(screen.getByText('Sparkplug group').tagName).not.toBe('LABEL')
+    expect(screen.queryByLabelText('Sparkplug group')).toBeNull()
   })
 
-  it('offers no Save, even after a change is attempted', async () => {
+  it('offers no Save', async () => {
     await show()
-    const input = screen.getByLabelText('Sparkplug group')
-    fireEvent.change(input, { target: { value: 'Somewhere-Else' } })
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument()
     expect(api.patchSetting).not.toHaveBeenCalled()
   })
@@ -441,11 +445,11 @@ describe('a setting that is fixed at install', () => {
     expect(screen.queryByText(/falls back to/i)).not.toBeInTheDocument()
   })
 
-  it('says "Fixed at install" in the Actions cell, beside the greyed field', async () => {
+  it('says "Fixed at install" in the Actions cell, on the row that shows the value', async () => {
     await show()
     const fixed = screen.getByText('Fixed at install')
     expect(fixed.closest('td')).toHaveClass('setting-cell-actions')
-    expect(fixed.closest('tr')).toContainElement(screen.getByLabelText('Sparkplug group'))
+    expect(fixed.closest('tr')).toBe(row())
   })
 
   it('copies the values.yaml path it is set by, not the words around it', async () => {

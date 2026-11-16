@@ -411,8 +411,10 @@ row.
 search, the standard filter and the grouped, tickable list. The list narrows what is shown, never
 what is chosen, because the dialog holds the choice. `single` makes the ticks radio buttons for a
 dialog that takes one metric. A caller that cannot show a long list at the window's height gives it
-one with `listStyle`. The schema editor for a draft keeps its own list, which shows each metric's
-stored keys.
+one with `listStyle`. A catalog metric is always chosen from this list, never from a dropdown, which
+stops being usable as the catalog grows: Deprecate Metric's Superseded By, and the schema editor for a
+draft, which adds each metric's stored keys with `renderNote`. The vocabulary pickers in Add Metric
+(MTConnect's data item types and the others) are still grouped dropdowns.
 
 ### A dialog takes focus
 
@@ -487,6 +489,29 @@ Three kinds of dialog explain themselves another way:
   field, because its problems are spread across a long form.
 - **A role that may not act** sees `permitted={false}`, with the roles that may in the tooltip
   ([Permission gating](#permission-gating)).
+
+### A value nobody can change is a label
+
+A value that no one looking at it can change is text, never a greyed-out input. A disabled control
+reads as "you could change this if you were allowed", which is wrong for a fixed or computed value.
+Show it as Edit Metric shows a name it cannot change (`form-group metric-edit-facts`): the field's
+name in `form-label` over the value, and the reason in words under it, not only in a tooltip. In a
+table cell, as on Settings, the value is `.setting-static`.
+
+- **Fixed for everyone** is a label: Add Metric's Units for a type that takes none, the Sparkplug
+  group and the archive site key, a nameplate value the device publishes, Cold Storage's site key,
+  and a replay lane's Serving Gateway, which stays on Playback. Its hint says why.
+- **Fixed for this role** is a label too. A Settings row for anyone but an Administrator shows its
+  value as text, and Actions says who can change it. The Notifications tab's rows are the same rows.
+  So is a Digital Nameplate for a role that may neither edit nor propose; its notice says so.
+- **Conditional stays a control, with its reason in words.** A field that is open to someone else, or
+  once something else is set, keeps its control: a proposal's fields that a proposal cannot carry
+  (`nonProposableFields()` words each), and Reference Type until an id is given. The reason sits
+  beside it, in `form-hint`.
+- **A label is not a `<label>`.** A `<label htmlFor>` names a control. A value drawn as text has none,
+  so its name is a plain `form-label` div.
+- **Read-only copy fields stay inputs.** A credential, URL or token is there to be selected and
+  copied, so it is not covered.
 
 ### A plan opens expanded
 

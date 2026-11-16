@@ -727,6 +727,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // For MTConnect only SAMPLE carries units. The other standards state the unit on the vocabulary
   // entry, so the field stays available for them.
   const unitsApply = isMTConnect ? effectiveCategory === CATEGORY_WITH_UNITS : true
+  const noUnitsReason = effectiveCategory
+    ? `Only a ${CATEGORY_WITH_UNITS} data item has a unit; this type's category is ${effectiveCategory}.`
+    : usingCustomType
+      ? `Only a ${CATEGORY_WITH_UNITS} data item has a unit, and a type outside MTConnect has no category.`
+      : `Only a ${CATEGORY_WITH_UNITS} data item has a unit. Choose a Data Item Type first.`
   const typeGroups = typesByCategory(vocabulary)
   const availableSubTypes = subTypes(vocabulary)
   const isoKpis = kpis(isoVocabulary)
@@ -1599,23 +1604,31 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               </div>
             )}
 
-            <div className="form-group" style={{ flex: '0 1 150px' }}>
-              <label className="form-label" htmlFor="metric-units">Units</label>
-              <Tooltip text={unitsApply
-                ? 'A vocabulary entry fills it where its standard states one; otherwise you choose it.'
-                : 'Only SAMPLE data items carry units.'}>
-                <select
-                  id="metric-units"
-                  className="form-control"
-                  value={unitsApply ? newMetric.units : ''}
-                  disabled={!unitsApply}
-                  onChange={e => setNewMetric(m => ({ ...m, units: e.target.value }))}
-                >
-                  <option value="">— None —</option>
-                  {availableUnits.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </Tooltip>
-            </div>
+            {unitsApply ? (
+              <div className="form-group" style={{ flex: '0 1 150px' }}>
+                <label className="form-label" htmlFor="metric-units">Units</label>
+                <Tooltip text="A vocabulary entry fills it where its standard states one; otherwise you choose it.">
+                  <select
+                    id="metric-units"
+                    className="form-control"
+                    value={newMetric.units}
+                    onChange={e => setNewMetric(m => ({ ...m, units: e.target.value }))}
+                  >
+                    <option value="">— None —</option>
+                    {availableUnits.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </Tooltip>
+              </div>
+            ) : (
+              // A type that takes no unit is a fact, as Edit Metric shows a name it cannot change.
+              <div className="form-group metric-edit-facts" style={{ flex: '0 1 220px' }}>
+                <div>
+                  <div className="form-label">Units</div>
+                  <div>None</div>
+                  <div className="form-hint">{noUnitsReason}</div>
+                </div>
+              </div>
+            )}
 
             <div className="form-group" style={{ flex: '0 1 140px' }}>
               <label className="form-label" htmlFor="metric-datatype">Sparkplug Datatype <RequiredMark /></label>

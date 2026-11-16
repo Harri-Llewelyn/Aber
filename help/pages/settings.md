@@ -2,7 +2,7 @@
 
 This page holds the settings for the whole site. They apply to everyone on this site. They cover how long things are kept, thresholds, and switches for what Aber does on its own. Each setting is a stored value with a name, and every change is recorded in the Audit Trail as a row.
 
-Everyone can read this page. Only an Administrator can change a setting. For any other role the fields are greyed out, and Actions says **Only an Administrator can change this**.
+Everyone can read this page. Only an Administrator can change a setting. For any other role each value is shown as text, not as a field. Actions says **Only an Administrator can change this**.
 
 Your own choices, such as your theme and sidebar layout, are not here. They are on your **Profile** page. Open it from the account menu: select your avatar at the foot of the sidebar, then select **Profile**.
 
@@ -19,7 +19,7 @@ Your own choices, such as your theme and sidebar layout, are not here. They are 
 - **Retention** holds how long things are kept. It also holds **Longest suppression window (days)**: the most days a [suppression window](devices.md#suppression-windows) may last, 7 unless you change it, from 1 to 90. A longer window is refused when someone schedules it or changes its times. Lowering it leaves the windows already scheduled as they are.
 - **Enabled / Disabled** switches turn scheduled jobs on and off. A change takes effect the next time the job runs, and does not undo anything already done.
 - **Cold Storage** here holds the archive threshold and the read-only site key. The archive destination, and the switch that turns archiving on, are set in one dialog on the Cold Storage page, so they are not listed here.
-- **A read-only setting** shows **Set by** and where it is set, in a greyed field, and **Fixed at install** in Actions. The Sparkplug group and the archive site key are fixed when Aber is installed, and cannot be changed here. Changing the group would change the address of every gateway.
+- **A read-only setting** shows its value as text, **Set by** and where it is set, and **Fixed at install** in Actions. The Sparkplug group and the archive site key are fixed when Aber is installed, and cannot be changed here. Changing the group would change the address of every gateway.
 - **Security** holds **Require MFA to change the platform**. It is off when Aber is installed. Only an Administrator can turn it on or off.
 - While it is on, an Administrator or a Shopfloor Manager needs [MFA](../guides/glossary.md#mfa-multi-factor-authentication) to change anything: a save, an approval, a new credential, a change on People. They need it to sign in to Node-RED, Studio and the forge too.
 - Reading is never refused, and Grafana, Operators and Auditors are never asked. Someone refused is told to add an authenticator on **Profile › MFA**.

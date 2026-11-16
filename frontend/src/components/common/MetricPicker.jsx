@@ -50,11 +50,13 @@ export function MetricGroupHeading({ group, picked, title }) {
  * more once a limit is reached. A chosen one stays enabled so it can be unticked.
  * @param {(metric: object, picked: boolean) => React.ReactNode} [renderExtra] Controls drawn beside a
  * row, outside its label so using them never toggles the tick (the schema builder's range).
+ * @param {(metric: object, picked: boolean) => React.ReactNode} [renderNote] Text drawn inside the
+ * row's label after the name, such as the keys a draft schema stores for it.
  * @param {boolean} [showUnits] Shows each metric's unit after its datatype.
  * @param {string} [emptyText] What the list says when no metric can be chosen at all.
  */
 export function MetricPicker({
-  metrics, isPicked, onPick, single = false, isDisabled, renderExtra, showUnits = false, listStyle,
+  metrics, isPicked, onPick, single = false, isDisabled, renderExtra, renderNote, showUnits = false, listStyle,
   emptyText = 'No matching catalog metrics.'
 }) {
   const [search, setSearch] = useState('')
@@ -131,6 +133,7 @@ export function MetricPicker({
                         onChange={() => onPick(m)}
                       />
                       <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
+                      {renderNote?.(m, picked)}
                       <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
                       {showUnits && m.units && <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{m.units}</span>}
                       {/* Which standard a metric came from is what makes a mixed-standard choice

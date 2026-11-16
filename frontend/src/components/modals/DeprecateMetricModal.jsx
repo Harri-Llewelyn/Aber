@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { IconAlertTriangle } from '../common/Icons'
 import { ConfirmModal } from './ConfirmModal'
-import { Tooltip } from '../common/Tooltip'
+import { MetricPicker } from '../common/MetricPicker'
 
 export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, onCancel }) {
   const [supersededBy, setSupersededBy] = useState('')
@@ -9,6 +9,7 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
   // A derived metric is replaced by another derived one: a changed definition is a new metric.
   const replacementCandidates = (catalog || []).filter(m =>
     !m.deprecated && m.metric_uuid !== metric.metric_uuid && (!metric.derivation || m.derivation))
+  const replacement = replacementCandidates.find(m => m.metric_uuid === supersededBy)
 
   return (
     <ConfirmModal
@@ -34,21 +35,31 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
       onConfirm={() => onConfirm(supersededBy || null)}
       onCancel={onCancel}
     >
-      <div className="form-group">
-        <label className="form-label" htmlFor="deprecate-superseded-by">Superseded By (optional)</label>
-        <Tooltip text={metric.derivation ? 'The derived metric that takes its place' : 'Point future schema authors at a replacement metric'}>
-          <select
-            id="deprecate-superseded-by"
-            className="form-control"
-            value={supersededBy}
-            onChange={e => setSupersededBy(e.target.value)}
-          >
-            <option value="">— No replacement —</option>
-            {replacementCandidates.map(m => (
-              <option key={m.metric_uuid} value={m.metric_uuid}>{m.name}</option>
-            ))}
-          </select>
-        </Tooltip>
+      {/* The schema builder's metric list, radio buttons: one replacement, or none. A radio cannot be
+          unpicked, so the choice is stated beneath the list with a way to clear it. */}
+      <div className="form-group" role="group" aria-labelledby="deprecate-superseded-label">
+        <span className="form-label" id="deprecate-superseded-label">Superseded By (optional)</span>
+        <p className="form-hint" style={{ marginTop: 0 }}>
+          {metric.derivation ? 'The derived metric that takes its place.' : 'Point future schema authors at a replacement metric.'}
+        </p>
+        <MetricPicker
+          metrics={replacementCandidates}
+          single
+          isPicked={m => m.metric_uuid === supersededBy}
+          onPick={m => setSupersededBy(m.metric_uuid)}
+          listStyle={{ flex: 'none', height: '220px' }}
+          emptyText={metric.derivation ? 'No other derived metric can take its place.' : 'No other metric can take its place.'}
+        />
+        <div className="form-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: '28px' }}>
+          {replacement ? (
+            <>
+              <span>Replaced by <span className="mono">{replacement.name}</span></span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSupersededBy('')}>
+                No replacement
+              </button>
+            </>
+          ) : 'No replacement chosen.'}
+        </div>
       </div>
     </ConfirmModal>
   )

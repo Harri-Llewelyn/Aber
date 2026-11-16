@@ -139,24 +139,9 @@ describe("the device form's gateway picker", () => {
     expect(optionFor(gatewaySelect(), PLAYBACK)).toBeTruthy()
   })
 
-  it('keeps an existing replay lane showing its own gateway', async () => {
-    // A device that IS a lane. Its gateway must remain the select's value -- a disabled option is
-    // still a rendered, selected one, which is the whole reason for disabling rather than removing.
-    await show([device({
-      asset_id: 'bbbbbbbb-0000-4000-8000-000000000002',
-      asset_name: 'CNC_01 (replay)',
-      active_gateway_id: PLAYBACK,
-      effective_cell_id: null,
-      gateway_cell_id: null,
-      location_source: 'shadow'
-    })], 'CNC_01 (replay)')
-    openEdit('CNC_01 (replay)')
-    expect(gatewaySelect().value).toBe(PLAYBACK)
-  })
-
   it('does not offer to move a replay lane, which the database refuses', async () => {
     // `shadow_of` is what makes a device a lane, and a lane never leaves the Playback gateway
-    // through the API, so the picker is shown but not editable.
+    // through the API, so its gateway is shown, and is not a control.
     await show([device(), device({
       asset_id: 'bbbbbbbb-0000-4000-8000-000000000002',
       asset_name: 'CNC_01 (replay)',
@@ -172,9 +157,16 @@ describe("the device form's gateway picker", () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeTruthy())
     openEdit('CNC_01 (replay)')
-    expect(gatewaySelect().value).toBe(PLAYBACK)
-    expect(gatewaySelect().disabled).toBe(true)
-    expect(screen.getByText(/This is a replay lane\. It stays on the Playback gateway/)).toBeTruthy()
+    // Nobody can move it, so its gateway is a label with the lane hint as its reason, not a greyed select.
+    expect(gatewaySelect()).toBeUndefined()
+    expect(document.querySelector('#device-gateway')).toBeNull()
+    const modal = within(document.querySelector('.modal'))
+    const name = modal.getByText('Serving Gateway')
+    expect(name.tagName).not.toBe('LABEL')
+    const field = name.closest('.form-group')
+    expect(field.querySelector('.mono')).toHaveTextContent(`Playback (${PLAYBACK})`)
+    expect(field.querySelector('select, input')).toBeNull()
+    expect(field.querySelector('.form-hint')).toHaveTextContent('This is a replay lane. It stays on the Playback gateway, and the database refuses a move.')
   })
 
   /* An archived gateway is not offered, and the database refuses one. A device already on one

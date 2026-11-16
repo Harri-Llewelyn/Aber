@@ -6927,6 +6927,24 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   resize: vertical;
 }
 
+/* A value shown as text: a setting fixed at install, or one the viewer may not change. As tall as the
+   field a neighbouring row holds, so the rows keep their height. */
+.setting-static {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.setting-static-empty { color: var(--text-muted); }
+.setting-static-block {
+  display: block;
+  margin: 0;
+  padding: 10px 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
 /* The permitted range, stated rather than left to a spinner's limits. */
 .setting-bounds {
   margin-top: 4px;
