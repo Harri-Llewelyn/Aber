@@ -1,7 +1,7 @@
 /**
  * The browser's side of reading a derived metric (0282): which derived metrics a device's reports
  * make possible, how a read is split from the measured ones, what a window that is too long for one says,
- * how the Area tab folds a cell, what Export leaves out, and the drawer's Applies To line.
+ * how the Area tab folds a cell, and the drawer's Applies To line.
  */
 import { describe, it, expect } from 'vitest'
 import { HISTORY_MAX_ROWS } from '../api'
@@ -13,7 +13,6 @@ import {
   cellMetrics, chartSeries, chartSummary, defaultCellMetric, derivedReadProblem, deviceMetrics, foldByGroup, groupSeries, historyMetrics,
   latestWords, lowWords, metricDevices, pickGroupResolution, readingWords,
 } from '../utils/history'
-import { DERIVED_EXPORT_NOTE, exportableMetrics } from '../utils/telemetryExport'
 
 const counter = { kind: 'counter_rate', input: 'Controller/PART_COUNT' }
 const state = { kind: 'time_in_state', input: 'Controller/EXECUTION', states: ['ACTIVE'] }
@@ -222,17 +221,6 @@ describe('a time in state as a percentage', () => {
   it("is the unit the Metric tab's picker lists for it", () => {
     const row = historyMetrics([device('d1', 'Press 1', ['Controller/EXECUTION'])], [], [...catalog, { name: 'Controller/UPTIME', datatype: 10, derivation: state }]).find(m => m.name === 'Controller/UPTIME')
     expect(row.unit).toBe('% of the time')
-  })
-})
-
-describe('what Export leaves out', () => {
-  it('is the derived metrics, said where they were chosen, and the rest are named as they were', () => {
-    expect(exportableMetrics(['Controller/PARTS_PER_HOUR', 'Controller/PART_COUNT', 'Power/NET'], catalog))
-      .toEqual({ names: ['Controller/PART_COUNT'], left: ['Controller/PARTS_PER_HOUR', 'Power/NET'] })
-    expect(exportableMetrics(['Power/A'], catalog)).toEqual({ names: ['Power/A'], left: [] })
-    expect(exportableMetrics([], catalog)).toEqual({ names: [], left: [] })
-    expect(exportableMetrics(['Anything'], null)).toEqual({ names: ['Anything'], left: [] })
-    expect(DERIVED_EXPORT_NOTE).toBe('A derived metric is computed when it is drawn, and is not exported. Export its inputs.')
   })
 })
 

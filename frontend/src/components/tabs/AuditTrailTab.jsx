@@ -748,7 +748,9 @@ const shownAfter = (action, d) =>
         ? d.after.map(x => x?.name ?? x?.id).join(', ')
         : action === 'TELEMETRY_EXPORTED' && d.field === 'metrics' && Array.isArray(d.after)
           ? d.after.join(', ')
-          : formatValue(d.after)
+          : action === 'TELEMETRY_EXPORTED' && d.field === 'derived' && Array.isArray(d.after)
+            ? d.after.map(x => `${x?.name} = ${x?.definition}`).join('; ')
+            : formatValue(d.after)
 
 /**
  * The rows the drawer's table draws. A Logs read over a fixed window, and an export of readings,

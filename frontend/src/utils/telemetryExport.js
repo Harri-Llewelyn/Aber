@@ -9,7 +9,7 @@
  */
 
 import { dayWords } from './alertSuppression'
-import { splitDerived } from './derivedMetric'
+import { SHARE_FRACTION_NOTE } from './derivedMetric'
 
 /**
  * Who may export readings, as export_telemetry() admits them (mirror check 90). Operators read the
@@ -62,19 +62,20 @@ export function exportWindowProblem(startMs, endMs, maxDays) {
   return `An export can cover at most ${dayWords(maxDays)}, set on ${EXPORT_MAX_DAYS_PLACE}. This window is ${days} days.`
 }
 
-/** What an export says where a derived metric is among the metrics chosen. */
-export const DERIVED_EXPORT_NOTE = 'A derived metric is computed when it is drawn, and is not exported. Export its inputs.'
+/**
+ * What the dialog says where a derived metric is among the metrics chosen. It has no readings, only
+ * buckets: export_telemetry() computes it per bucket of the resolution, and per minute where the
+ * resolution is Raw, which no derived metric has finer.
+ */
+export const DERIVED_RAW_NOTE = 'A derived metric has no readings. With Raw samples its values come at 1 minute, in the same file.'
+export const DERIVED_BUCKET_NOTE = 'A derived metric has no readings. Its value is computed for each bucket, from the 1-minute rollup.'
+export const derivedNote = (resolutionKey) => (resolutionKey === 'raw' ? DERIVED_RAW_NOTE : DERIVED_BUCKET_NOTE)
 
 /**
- * The metrics an export names: `names` less the derived ones, which are computed when drawn and
- * hold no reading to export (`left`, said with DERIVED_EXPORT_NOTE). export_telemetry() is as it was.
- * One rule, for every place that offers Export: pass `names` and the catalog, name `names` in the
- * export and say `left` where it is not empty.
+ * The resolution a file says it holds. A Raw export of derived metrics alone holds no raw reading,
+ * only 1-minute buckets, so its first line and its name say that.
  */
-export function exportableMetrics(names, catalog) {
-  const { measured, derived } = splitDerived(names, catalog)
-  return { names: measured, left: derived }
-}
+export const fileResolutionKey = (resolutionKey, hasMeasured) => (resolutionKey === 'raw' && !hasMeasured ? '1m' : resolutionKey)
 
 /** The most devices and metrics one export may name, as export_telemetry() holds them (mirror check 92). */
 export const EXPORT_MAX_DEVICES = 1000
@@ -238,6 +239,21 @@ export function provenanceRow(resolutionKey) {
     ? commentRow('# RESOLUTION: raw samples (public.telemetry)', '# every reading as published')
     : commentRow(`# RESOLUTION: ${entry.short} (public.${entry.relation})`,
       '# aggregated, NOT individual readings; time is the bucket start and value its average, or its last value for a text or a flag')
+}
+
+/**
+ * One comment row for each derived metric in the file, from the document's `derived`: its name and
+ * definition, and what a row of it is. A derived metric is a bucket's value, one a minute where the
+ * resolution is Raw. A time in state is a fraction from 0 to 1 in the file, whatever its unit
+ * column says, so the row says so.
+ */
+export function derivedRows(document, resolutionKey) {
+  const bucket = resolutionByKey(resolutionKey === 'raw' ? '1m' : resolutionKey).short
+  return (document?.derived ?? []).map(d => commentRow(
+    `# DERIVED: ${d.metric} = ${d.definition}, computed from the 1-minute rollup`,
+    `# ${bucket}, not individual readings: time is the bucket start and value the bucket's value`
+      + (d.kind === 'time_in_state' ? `; the unit is ${d.unit}, and the value is ${SHARE_FRACTION_NOTE}` : '')
+  ))
 }
 
 /**

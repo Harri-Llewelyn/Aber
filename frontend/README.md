@@ -2061,7 +2061,18 @@ serve them all, so there is one set of rules.
   and is a warning when the file stops at the cap. An export with no rows writes no file, no row and
   no toast, and says why in the dialog. The row is in the **Readings** lane (`READINGS`, `telemetry`),
   its action **Readings exported** (`TELEMETRY_EXPORTED`), a Read. The drawer names its devices and
-  shows its window in local time, as a service-logs read's is.
+  shows its window in local time, as a service-logs read's is. Where a derived metric was exported it
+  names each as `name = definition`.
+- **A derived metric is exported like any other, per bucket.** Every entry point names the metrics it
+  chose, derived ones among them, and hands the dialog the catalog (`catalog`), which says which are
+  derived (`splitDerived()`). `export_telemetry()` reads them through `derived_series()` and names
+  them in the document's `derived`. The dialog says what the file will hold: a value at 1 minute where
+  Raw is chosen, and for each bucket otherwise (`derivedNote()`). The file gets one `# DERIVED:` comment
+  row for each (`derivedRows()`), which gives its definition in the words the Derived tab uses and says
+  what a row is. A time in state is a fraction from 0 to 1 in the file, with the unit `% of the time`
+  History draws it in, and its comment row says so. A Raw export of derived metrics alone holds no raw
+  reading, so its first line, its name and the dialog's warnings follow the 1-minute buckets it holds
+  (`fileResolutionKey()`). The columns stay the five.
 - **Settings gains a History tab** (`SETTINGS_TABS`), with the one setting.
 - `telemetryExport.test.js`, `telemetryExportModal.test.jsx`, `historyPage.test.jsx`,
   `historyOverview.test.jsx`, `historyCellPage.test.jsx`, `historyExportAreaMetric.test.jsx` and
@@ -2072,14 +2083,15 @@ serve them all, so there is one set of rules.
 
 A derived metric ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) is a catalogue row with a
 definition, computed where it is read. History offers it, draws it and tags it; the Devices drawer shows
-its current value; Export leaves it out. The database's rules are in
+its current value; Export saves its values. The database's rules are in
 [supabase/README.md](../supabase/README.md#history-draws-a-derived-metric-from-the-minutes-0282).
 
 - **A device reports a derived metric when it reports all its inputs.** `deviceMetrics(device, schemas,
   catalog)` adds each such metric to what a device declared and its schemas model, so the Device tab's
   charts and Metrics filter, the Cell and Area tabs' metric lists, and the Metric tab's picker and its
   devices all follow one rule (`derivedReportedBy()`). Without the catalog it lists measured metrics
-  only, as it always did, which is what Overview and Export read.
+  only, as it always did. Overview reads it with the catalog, so its box exports the derived metrics its
+  devices have the inputs of.
 - **A read is split by the catalogue** (`splitDerived()`): a measured name goes to
   `api.readCarriedTelemetry()`, a derived one to `api.readDerivedSeries()`, which returns the same
   columns, so `chartSeries()` draws both. A derived series draws its value as the line and has no band
@@ -2108,10 +2120,8 @@ its current value; Export leaves it out. The database's rules are in
   charts (`SmallMultiples`'s `derived`) and in the Devices drawer. The word is the tag, never a colour.
 - **The hour-of-day grids say they do not apply.** They read measured readings; a derived metric is
   computed over a stretch of time and has no mean at an hour.
-- **Export leaves a derived metric out, by one function.** `exportableMetrics(names, catalog)` returns
-  the measured names for `export_telemetry()` and the derived ones as `left`, said with
-  `DERIVED_EXPORT_NOTE` in the button's tooltip and in the dialog (`TelemetryExportModal`'s `left`).
-  The Device and Cell tabs call it; any other place that offers Export passes its names through it.
+- **Export saves a derived metric's values.** Every place that offers Export passes the names chosen,
+  derived ones included, and the catalog to `TelemetryExportModal`. *History's Export* has the rest.
 - **The Devices drawer lists a device's derived metrics** (`common/DeviceDerivedValues.jsx`): the
   current value of each, with its unit, its tag and its window in words (`currentWords()`), from one
   `api.readDerivedCurrent()` when the drawer opens on the device. A device with no value says so, a

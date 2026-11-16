@@ -152,7 +152,7 @@ A chart with nothing to draw says **No readings in this window, and none before 
 
 ## Derived metrics
 
-A derived metric is one Aber computes from others, such as parts per hour. Its chart, and its name wherever you choose a metric, carry a **Derived** tag. No machine sent its values, so you will not find them in an export.
+A derived metric is one Aber computes from others, such as parts per hour. Its chart, and its name wherever you choose a metric, carry a **Derived** tag. No machine sent its values, so Aber computes them, in the charts and in an export.
 
 - **Which devices.** The Device, Cell, Metric and Area tabs offer a derived metric on every device that reports all its inputs. The Metric tab's list counts those devices.
 - **How it is drawn.** A rate is how many the counter grew by in an hour. A time in state is the share of the bucket spent in its states, shown as a percentage of the bucket with one decimal at most, such as 42% or 42.5%. A sum adds its inputs minute by minute, and the bucket is the average of those minutes.
@@ -160,7 +160,8 @@ A derived metric is one Aber computes from others, such as parts per hour. Its c
 - **It is read from the minutes.** Time in state is resolved to the minute. A counter that resets and then climbs back past its old value inside one minute is counted short by that old value.
 - **A wide bucket's sum need not equal the sum of its inputs' averages.** An input's average weighs its readings, and a quiet input has few of them. A derived sum weighs every minute alike.
 - **A long window can be too long.** A derived metric is read from the minutes, so a window of many months, or of many devices, is refused. The chart says so. Choose a shorter window or fewer devices.
-- **Two things do not apply.** The hour-of-day grids read measured metrics, so they say so for a derived one. **Export CSV** leaves a derived metric out and says why. Export its inputs. A metric is listed when the device declared it the last time it started, or when one of its schemas includes it.
+- **It can be exported.** **Export CSV** saves a derived metric's values, one for each bucket. [Exporting readings](#exporting-readings) says how.
+- **One thing does not apply.** The hour-of-day grids read measured metrics, so they say so for a derived one. A metric is listed when the device declared it the last time it started, or when one of its schemas includes it.
 
 ## Which bucket size you see
 
@@ -225,6 +226,8 @@ The resolutions:
 - **Raw samples**, the one the dialog starts on, is every reading as the machine sent it.
 - **1 minute**, **5 minutes** and **1 hour** are summaries: one row for each period, with its start as the time and its average as the value. A text or a flag has no average, so its row holds the period's last value.
 
+A derived metric has no readings, so its rows are its computed values. Each row is one bucket: its start and its value. The file marks each derived metric with a comment row that gives its definition, such as **# DERIVED: Controller/PARTS_PER_HOUR = rate of Controller/PART_COUNT, per hour**. With **Raw samples**, a derived metric comes at 1 minute, in the same file as the raw readings, and the dialog says so. With another resolution, it comes at that resolution. A time in state is a fraction from 0 to 1 in the file, such as 0.42 for 42%. Its unit column says **% of the time**, and its comment row says the value is a fraction.
+
 Each resolution says how far back it has data, because raw readings are kept for much less time than the summaries. If the window starts before the resolution you chose begins, the dialog says so, names the finest resolution that covers the whole window, and offers to switch. It never swaps in a summary by itself. A raw file that starts later than the window says so in its first lines.
 
 **Buckets** changes only the charts. The export has its own **Resolution**.
@@ -235,7 +238,7 @@ Each resolution says how far back it has data, because raw readings are kept for
 - **An export holds at most 50,000 rows.** If there are more, the file stops at a whole minute, and the message and the file's first lines say where. Choose a shorter window, fewer devices or metrics, or a coarser resolution.
 - **At most 1,000 devices and 500 metrics.**
 
-If a second factor is required to change the platform, exporting asks for it too. Each export is recorded in the Audit Trail, in the **Readings** lane. The entry names who exported. It lists the devices and metrics, the window and the resolution. It also says how many rows left.
+If a second factor is required to change the platform, exporting asks for it too. Each export is recorded in the Audit Trail, in the **Readings** lane. The entry names who exported. It lists the devices and metrics, and the definition of each derived metric. It gives the window and the resolution. It also says how many rows left.
 
 ## The Metric tab: one metric across devices
 

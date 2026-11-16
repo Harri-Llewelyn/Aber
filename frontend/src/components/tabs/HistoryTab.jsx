@@ -342,6 +342,7 @@ export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGatewa
               cells={loaded.cells}
               areas={loaded.areas}
               schemas={loaded.schemas}
+              catalog={loaded.catalog}
               win={win}
               setWin={setWin}
               every={every}
