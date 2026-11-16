@@ -561,8 +561,9 @@ owns.
 Critical, `for: 2m`. Both halves of the condition matter: `$B < 1` is the daemon holding no
 connection, `$E > 0` is somebody publishing, with `or vector(0)` for the same reason the silent
 rule needs it and summed across `msg_type` for the same reason. On an idle stack the gauge alone is
-not data loss; that case is the next rule. Two minutes because the daemon retries internally, so
-two minutes means the retries are not winning. `db_connected` cannot see a connection dropped by
+not data loss; that case is the next rule. Two minutes because the daemon holds what arrives in its
+queue and keeps trying, so two minutes means the historian is not coming back by itself, and a busy
+site's queue may already be full (`ingestion/README.md`, *Connection handling*). `db_connected` cannot see a connection dropped by
 the server; the drop rule catches that consequence.
 
 NoData is OK, not Alerting, and that was learned: NoData here means the ingestion scrape has gone

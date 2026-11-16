@@ -116,7 +116,8 @@ TELEMETRY_INSERT_PAGE_SIZE = int(os.getenv("TELEMETRY_INSERT_PAGE_SIZE", "500"))
 
 # The historian writer (see TelemetryWriter). Messages waiting to be written are bounded so a
 # stalled historian cannot grow the process without limit; a full queue holds the callback
-# thread for the put timeout, which is backpressure onto the broker, then drops.
+# thread for the put timeout, which is backpressure onto the broker, then drops. While the writer
+# knows the historian is down, a full queue drops at once.
 TELEMETRY_QUEUE_MAX_MESSAGES = int(os.getenv("TELEMETRY_QUEUE_MAX_MESSAGES", "10000"))
 TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS = float(os.getenv("TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS", "5"))
 # Messages per transaction, at most.
@@ -139,11 +140,16 @@ SHUTDOWN_EXIT_MARGIN_SECONDS = 1.0
 # and every cache miss costs a round trip, as it did before the thread existed.
 DIRECTORY_REFRESH_SECONDS = float(os.getenv("DIRECTORY_REFRESH_SECONDS", "5"))
 
-# Bounded retry on a failed TimescaleDB connection. It runs on the paho callback thread, which
-# every device shares, so the ceiling is deliberately low.
+# Bounded retry on a failed TimescaleDB connection: one pass of the writer's wait below. Kept short
+# so a pass ends in about a second and a shutdown is not kept waiting behind it.
 DB_CONNECT_MAX_ATTEMPTS = int(os.getenv("DB_CONNECT_MAX_ATTEMPTS", "3"))
 DB_CONNECT_BACKOFF_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_SECONDS", "0.25"))
 DB_CONNECT_BACKOFF_MAX_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_MAX_SECONDS", "2.0"))
+
+# The writer's wait when a pass above cannot open a connection: it keeps the message in hand and
+# passes again after START seconds, doubling the wait up to MAX. Messages behind it queue.
+DB_OUTAGE_RETRY_START_SECONDS = float(os.getenv("DB_OUTAGE_RETRY_START_SECONDS", "0.5"))
+DB_OUTAGE_RETRY_MAX_SECONDS = float(os.getenv("DB_OUTAGE_RETRY_MAX_SECONDS", "5"))
 
 # Unbounded retry off the message path, for a historian that is not up yet (Docker restarts
 # containers in its own order; depends_on does not apply). Nothing is lost while it waits.
@@ -309,10 +315,11 @@ def get_timescaledb_connection():
     """
     The daemon's single TimescaleDB connection, reconnecting when it has gone away.
 
-    One connection, one writer (the paho callback thread). `closed` only reflects a close on this
-    side; a server-side drop fails on first use and the caller's handler covers it. Retries are
-    bounded because this thread is shared by the whole fleet. The lock serialises assignment
-    against the healer thread only. See ingestion/README.md -> "Connection handling".
+    One connection, one writer (the historian writer thread). `closed` only reflects a close on
+    this side; a server-side drop fails on first use and the caller's handler covers it. Retries
+    are bounded: the writer waits between passes, and a shutdown must not sit behind one. The lock
+    serialises assignment against the healer thread only. See ingestion/README.md -> "Connection
+    handling".
     """
     global _ts_conn
 
@@ -339,11 +346,10 @@ def get_timescaledb_connection():
             except Exception as e:
                 count("db_connect_failures")
                 if attempt == DB_CONNECT_MAX_ATTEMPTS:
-                    # Final failure. The caller drops the message; the counter is what makes that
-                    # loss visible without reading the log.
+                    # The end of one pass. The writer waits and passes again; see
+                    # TelemetryWriter._connection().
                     logger.warning(
-                        "TimescaleDB connection failed after %d attempt(s): %s. Telemetry for "
-                        "this message is dropped; the next message retries.",
+                        "TimescaleDB connection failed after %d attempt(s): %s.",
                         DB_CONNECT_MAX_ATTEMPTS, e
                     )
                     _ts_conn = None
@@ -2967,7 +2973,8 @@ class TelemetryWriter:
     The queue between the callback thread and the historian, and the thread that drains it.
 
     `submit()` is the callback thread's side. `flush()` writes everything queued on the calling
-    thread and exists for the suites, which never start the thread.
+    thread and exists for the suites, which never start the thread. The thread waits for a
+    historian that cannot be reached; `flush()` makes one pass at it and drops.
     """
 
     def __init__(self, maxsize, max_batch):
@@ -2975,17 +2982,42 @@ class TelemetryWriter:
         self.max_batch = max_batch
         self._stop = threading.Event()
         self._thread = None
+        # Only the thread waits for the historian.
+        self._waits = False
+        # True from the first pass that cannot open a connection until one opens. The writer
+        # thread sets it; submit() reads it, and sets `_drop_logged` for the outage's one line.
+        self._down = False
+        self._down_at = 0.0
+        self._drop_logged = False
 
     def depth(self):
-        """Messages waiting. The saturation signal: it only grows while the writer is behind."""
+        """Messages waiting. It grows while the writer is behind, and while the historian is down."""
         return self._queue.qsize()
 
     def submit(self, pending):
-        """Queue one message. False when the queue stayed full for the whole put timeout."""
+        """
+        Queue one message. False when it was dropped: the queue stayed full for the whole put
+        timeout, or it was full while the historian is down, which does not wait.
+        """
         try:
-            self._queue.put(pending, timeout=TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS)
+            if self._down:
+                self._queue.put_nowait(pending)
+            else:
+                self._queue.put(pending, timeout=TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS)
             return True
         except queue.Full:
+            if self._down:
+                drop(
+                    "db_unavailable",
+                    "Historian writer queue is full (%d messages) and the historian is down; "
+                    "dropping DDATA for '%s'. Each drop is counted; this line is not repeated "
+                    "until the historian has been reached again.",
+                    self._queue.maxsize, pending.wire_id,
+                    emit_log=not self._drop_logged,
+                    device=pending.wire_id,
+                )
+                self._drop_logged = True
+                return False
             drop(
                 "write_queue_full",
                 "Historian writer queue has held %d messages for %.0fs; dropping DDATA for '%s'. "
@@ -3004,11 +3036,17 @@ class TelemetryWriter:
             self._write(batch)
 
     def start(self):
+        self._waits = True
         self._thread = threading.Thread(target=self._run, name="historian-writer", daemon=True)
         self._thread.start()
 
     def stop(self, timeout):
-        """Ask the thread to drain what is queued and exit. True when it did within `timeout`."""
+        """
+        Ask the thread to drain what is queued and exit. True when it did within `timeout`.
+
+        A historian that is down is not waited for: the message in hand and everything queued is
+        dropped and counted.
+        """
         self._stop.set()
         if self._thread is None:
             return True
@@ -3044,25 +3082,84 @@ class TelemetryWriter:
                 break
         return items
 
+    def _connection(self, in_hand):
+        """
+        A connection and the seconds spent waiting for it, or (None, waited).
+
+        The thread keeps passing at a historian that cannot be reached, waiting
+        DB_OUTAGE_RETRY_START_SECONDS and doubling to DB_OUTAGE_RETRY_MAX_SECONDS between passes,
+        until one opens or the writer is told to stop. A stopped writer that found the historian
+        down does not try again, and flush() makes one pass.
+        """
+        waited = 0.0
+        if self._down and self._stop.is_set():
+            return None, waited
+        delay = DB_OUTAGE_RETRY_START_SECONDS
+        while True:
+            conn = get_timescaledb_connection()
+            if conn:
+                self._reached()
+                return conn, waited
+            self._unreachable(in_hand)
+            if not self._waits or self._stop.is_set():
+                return None, waited
+            began = time.perf_counter()
+            stopped = self._stop.wait(delay)
+            waited += time.perf_counter() - began
+            if stopped:
+                return None, waited
+            delay = min(delay * 2, DB_OUTAGE_RETRY_MAX_SECONDS)
+
+    def _unreachable(self, in_hand):
+        """The first pass of an outage to fail: say so once, and let submit() stop waiting."""
+        if self._down:
+            return
+        self._down = True
+        self._down_at = time.monotonic()
+        self._drop_logged = False
+        logger.warning(
+            "TimescaleDB is unreachable. The writer holds %d message(s) and tries again, waiting "
+            "%.1fs at first and %.0fs at most; %d more are queued. Once the queue is full, what "
+            "arrives is dropped as db_unavailable.",
+            in_hand, DB_OUTAGE_RETRY_START_SECONDS, DB_OUTAGE_RETRY_MAX_SECONDS, self.depth(),
+        )
+
+    def _reached(self):
+        """The first connection after an outage."""
+        if not self._down:
+            return
+        self._down = False
+        self._drop_logged = False
+        logger.info(
+            "TimescaleDB reachable again after %.0fs. Writing what was held; %d message(s) are "
+            "queued behind it.",
+            time.monotonic() - self._down_at, self.depth(),
+        )
+
     def _write(self, batch, retry=True):
         """
         Write `batch` as one transaction. True once it is committed.
 
         A lone message that fails because the connection went is written once more on a fresh one
-        (`retry`); a batch is split instead, and each message takes that retry on its own.
+        (`retry`); a batch is split instead, and each message takes that retry on its own. With no
+        connection to be had, the thread waits for the historian (`_connection`), and the batch is
+        dropped only when it is stopped.
         """
         # The clock starts before the connection is acquired: a reconnect occupies this thread
         # for up to DB_CONNECT_MAX_ATTEMPTS * DB_CONNECT_BACKOFF_SECONDS, and that stall is what
-        # the histogram exists to expose.
+        # the histogram exists to expose. The wait for a historian that is down is taken off
+        # again: an outage is not the writer's occupancy.
         started = time.perf_counter()
 
-        db_conn = get_timescaledb_connection()
+        db_conn, waited = self._connection(len(batch))
         if not db_conn:
-            for item in batch:
+            # One line per batch, so a shutdown that drops a full queue does not write ten thousand.
+            for i, item in enumerate(batch):
                 drop(
                     "db_unavailable",
-                    "TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'",
-                    item.wire_id,
+                    "TimescaleDB connection unavailable. Dropping %d DDATA message(s), the first "
+                    "for '%s'.", len(batch), item.wire_id,
+                    emit_log=i == 0,
                     device=item.wire_id,
                 )
             return False
@@ -3085,9 +3182,9 @@ class TelemetryWriter:
                 )
                 return all([self._write([item]) for item in batch])
             if lost and retry:
-                # One reconnect, through get_timescaledb_connection()'s bounded retry, and one more
-                # write. Rows are ON CONFLICT DO NOTHING, so a commit whose acknowledgement was
-                # lost is not written twice; _after_commit has not run for this attempt.
+                # One reconnect, which waits for a historian that is down, and one more write.
+                # Rows are ON CONFLICT DO NOTHING, so a commit whose acknowledgement was lost is
+                # not written twice; _after_commit has not run for this attempt.
                 logger.warning(
                     "TimescaleDB connection lost while writing DDATA for '%s' (%s); retrying once "
                     "on a fresh connection.", batch[0].wire_id, e,
@@ -3103,7 +3200,7 @@ class TelemetryWriter:
             return False
 
         # After `with db_conn` exits: the commit is where a hypertable write becomes durable.
-        observe_write_seconds(time.perf_counter() - started)
+        observe_write_seconds(time.perf_counter() - started - waited)
         count("rollup_windows_recorded", windows)
         for item in batch:
             _after_commit(item)

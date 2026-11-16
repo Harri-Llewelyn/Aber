@@ -25,6 +25,8 @@ ingestion.py is loaded.
 """
 import os
 import sys
+import threading
+import time
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -338,8 +340,14 @@ class FakeHistorian:
         self.attempts = 0
         self.faults = []
         self.poison = set()
+        # While set to an Event that is not yet set, every connection is refused, and counted.
+        self.refuse_until = None
+        self.refused = 0
 
     def open(self):
+        if self.refuse_until is not None and not self.refuse_until.is_set():
+            self.refused += 1
+            raise psycopg2.OperationalError("connection refused")
         conn = FakeConnection(self)
         self.opened.append(conn)
         return conn
@@ -498,6 +506,207 @@ class TestConnectionLost(WriterTestCase):
         self.assertIn("aber_ingestion_write_retries_saved_total 2.0", registry.render())
 
 
+class StepEvent:
+    """A stop event that records each wait without sleeping, and is set by the n-th."""
+
+    def __init__(self, n):
+        self.n = n
+        self.delays = []
+        self.stopped = False
+
+    def is_set(self):
+        return self.stopped
+
+    def set(self):
+        self.stopped = True
+
+    def wait(self, timeout):
+        self.delays.append(timeout)
+        if len(self.delays) >= self.n:
+            self.stopped = True
+        return self.stopped
+
+
+class TestHistorianOutage(WriterTestCase):
+    """
+    The historian is down, not just the connection: it refuses new ones for as long as a restart
+    takes. The writer thread keeps the message in hand and passes at it again, the queue holds what
+    arrives behind it, and every message is written once, in order, when it answers. A full queue
+    drops at once while it is down, and a shutdown does not wait for it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.historian = FakeHistorian()
+        ingestion.get_timescaledb_connection = self._real["get_timescaledb_connection"]
+        ingestion.execute_values = self.historian.execute_values
+        patches = (("_open_timescaledb_connection", self.historian.open), ("_ts_conn", None),
+                   # One attempt is one pass, so each refusal is one pass of the writer's wait.
+                   ("DB_CONNECT_MAX_ATTEMPTS", 1),
+                   ("DB_OUTAGE_RETRY_START_SECONDS", 0.005), ("DB_OUTAGE_RETRY_MAX_SECONDS", 0.01))
+        for name, value in patches:
+            patcher = patch.object(ingestion, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.writer = ingestion.TelemetryWriter(maxsize=50, max_batch=4)
+
+    def tearDown(self):
+        # Before the bindings go back: the thread may be mid-pass.
+        self.writer.stop(5)
+        super().tearDown()
+
+    def wait_for(self, condition, what, timeout=5.0):
+        end = time.monotonic() + timeout
+        while not condition():
+            self.assertLess(time.monotonic(), end, "timed out waiting for %s" % what)
+            time.sleep(0.002)
+
+    def names(self):
+        return [name for _, name in list(self.historian.committed)]
+
+    def message(self, i):
+        return pending(DEV_A, [("M%d" % i, float(i))])
+
+    def test_messages_that_arrive_while_the_historian_is_down_are_written_once_in_order(self):
+        with self.assertLogs(ingestion.logger, level="INFO") as logs:
+            self.writer.start()
+            self.writer.submit(self.message(0))
+            self.wait_for(lambda: self.names() == ["M0"], "the first message")
+
+            # The next write finds the connection dead, and no connection opens until released.
+            self.historian.faults.append(server_closed)
+            self.historian.refuse_until = threading.Event()
+            self.writer.submit(self.message(1))
+            self.wait_for(lambda: self.historian.refused >= 3, "the writer to wait for the historian")
+            self.assertEqual(self.writer.depth(), 0, "the message is in hand, not queued")
+            for i in range(2, 8):
+                self.writer.submit(self.message(i))
+            self.assertEqual(self.writer.depth(), 6, "what arrives behind it waits in the queue")
+            self.assertEqual(self.names(), ["M0"])
+
+            self.historian.refuse_until.set()
+            self.wait_for(lambda: len(self.names()) == 8, "every message")
+
+        self.assertEqual(self.names(), ["M%d" % i for i in range(8)])
+        snapshot = registry.counter_snapshot()
+        self.assertEqual(snapshot.get("dropped_db_unavailable"), 0)
+        self.assertEqual(snapshot.get("write_failures"), 0)
+        self.assertEqual(snapshot.get("write_retries_saved"), 1)
+        self.assertEqual(snapshot.get("written_messages"), 8)
+        messages = [record.getMessage() for record in logs.records]
+        self.assertEqual(len([m for m in messages if "is unreachable" in m]), 1,
+                         "said once per outage, not once per pass")
+        self.assertEqual(len([m for m in messages if "reachable again" in m]), 1)
+
+    def test_a_batch_held_through_an_outage_is_still_one_transaction(self):
+        self.historian.refuse_until = threading.Event()
+        for i in range(3):
+            self.writer.submit(self.message(i))
+        self.writer.start()
+        self.wait_for(lambda: self.historian.refused >= 2, "the writer to wait for the historian")
+        self.historian.refuse_until.set()
+        self.wait_for(lambda: len(self.names()) == 3, "the batch")
+
+        self.assertEqual(self.names(), ["M0", "M1", "M2"])
+        self.assertEqual(len(self.historian.opened), 1)
+
+    def test_a_full_queue_while_the_historian_is_down_drops_at_once_and_says_so_once(self):
+        calls = []
+        ingestion.get_timescaledb_connection = lambda: calls.append(1)  # None: no connection
+        # A put timeout that would fail the bound below if the receive thread were held for it.
+        ingestion.TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS = 30
+        self.writer = ingestion.TelemetryWriter(maxsize=2, max_batch=1)
+        self.writer.start()
+        self.writer.submit(self.message(1))
+        self.wait_for(lambda: self.writer._down and self.writer.depth() == 0, "the writer to hold M1")
+        self.assertTrue(self.writer.submit(self.message(2)))
+        self.assertTrue(self.writer.submit(self.message(3)))
+
+        with self.assertLogs(ingestion.logger, level="WARNING") as logs:
+            began = time.monotonic()
+            self.assertFalse(self.writer.submit(self.message(4)))
+            self.assertFalse(self.writer.submit(self.message(5)))
+            elapsed = time.monotonic() - began
+
+        self.assertLess(elapsed, 2)
+        snapshot = registry.counter_snapshot()
+        self.assertEqual(snapshot.get("dropped_db_unavailable"), 2)
+        self.assertEqual(snapshot.get("dropped_write_queue_full"), 0)
+        full = [r for r in logs.records if "queue is full" in r.getMessage()]
+        self.assertEqual(len(full), 1, "one line for the outage, not one per message")
+        self.assertEqual(self.writer.depth(), 2)
+
+    def test_a_full_queue_waits_again_once_the_historian_has_answered(self):
+        ingestion.TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS = 0.01
+        writer = ingestion.TelemetryWriter(maxsize=1, max_batch=1)
+        writer._unreachable(0)
+        self.assertTrue(writer.submit(self.message(1)))
+        self.assertFalse(writer.submit(self.message(2)))
+        self.assertEqual(registry.counter_snapshot().get("dropped_db_unavailable"), 1)
+
+        writer._reached()
+        self.assertFalse(writer.submit(self.message(3)))
+        snapshot = registry.counter_snapshot()
+        self.assertEqual(snapshot.get("dropped_write_queue_full"), 1)
+        self.assertEqual(snapshot.get("dropped_db_unavailable"), 1)
+
+    def test_a_shutdown_while_the_historian_is_down_returns_and_counts_what_it_held(self):
+        calls = []
+        ingestion.get_timescaledb_connection = lambda: calls.append(1)
+        # A wait that would outlast the bound below if the stop did not end it.
+        patcher = patch.object(ingestion, "DB_OUTAGE_RETRY_START_SECONDS", 60.0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.writer = ingestion.TelemetryWriter(maxsize=8, max_batch=1)
+        self.writer.start()
+        for i in range(3):
+            self.writer.submit(self.message(i))
+        self.wait_for(lambda: self.writer._down and self.writer.depth() == 2, "the writer to hold M0")
+
+        began = time.monotonic()
+        self.assertTrue(self.writer.stop(timeout=5))
+
+        self.assertLess(time.monotonic() - began, 2)
+        self.assertEqual(registry.counter_snapshot().get("dropped_db_unavailable"), 3)
+        self.assertEqual(self.writer.depth(), 0)
+        self.assertEqual(len(calls), 1, "a stopped writer that found the historian down tries no more")
+
+    def test_the_wait_doubles_to_its_cap(self):
+        ingestion.get_timescaledb_connection = lambda: None
+        stop = StepEvent(7)
+        writer = ingestion.TelemetryWriter(maxsize=8, max_batch=4)
+        writer._waits = True
+        writer._stop = stop
+        with patch.object(ingestion, "DB_OUTAGE_RETRY_START_SECONDS", 0.5), \
+                patch.object(ingestion, "DB_OUTAGE_RETRY_MAX_SECONDS", 5.0):
+            conn, _ = writer._connection(1)
+
+        self.assertIsNone(conn)
+        self.assertEqual(stop.delays, [0.5, 1.0, 2.0, 4.0, 5.0, 5.0, 5.0])
+
+    def test_the_time_spent_waiting_is_not_the_writers_occupancy(self):
+        waits = 2
+        left = [waits]
+
+        def historian():
+            if left[0]:
+                left[0] -= 1
+                return None
+            return self.conn
+
+        ingestion.get_timescaledb_connection = historian
+        with patch.object(ingestion, "DB_OUTAGE_RETRY_START_SECONDS", 0.2), \
+                patch.object(ingestion, "DB_OUTAGE_RETRY_MAX_SECONDS", 0.2):
+            before = registry.histogram_snapshot()["aber_ingestion_write_seconds"]["sum"]
+            self.writer.start()
+            self.writer.submit(self.message(0))
+            self.wait_for(lambda: registry.counter_snapshot().get("written_messages") == 1,
+                          "the message", timeout=10)
+
+        after = registry.histogram_snapshot()["aber_ingestion_write_seconds"]["sum"]
+        self.assertLess(after - before, 0.2, "two waits of 0.2s were taken off")
+
+
 class TestQueue(WriterTestCase):
 
     def test_depth_reports_what_is_waiting(self):
@@ -575,6 +784,14 @@ class TestShutdownDefaults(unittest.TestCase):
 
     def test_the_daemon_holds_one_writer(self):
         self.assertIsInstance(ingestion._writer, ingestion.TelemetryWriter)
+
+    def test_the_outage_waits_are_half_a_second_doubling_to_five(self):
+        """The README says these numbers; a drift check holds it to them."""
+        for name in ("DB_OUTAGE_RETRY_START_SECONDS", "DB_OUTAGE_RETRY_MAX_SECONDS"):
+            if name in os.environ:
+                self.skipTest("%s is set in this environment" % name)
+        self.assertEqual(ingestion.DB_OUTAGE_RETRY_START_SECONDS, 0.5)
+        self.assertEqual(ingestion.DB_OUTAGE_RETRY_MAX_SECONDS, 5.0)
 
 
 class TestExposition(unittest.TestCase):
