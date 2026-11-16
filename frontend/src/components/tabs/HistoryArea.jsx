@@ -27,8 +27,8 @@ import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import {
-  DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, areaExportNote, areaExportScope, exportMaxDays,
-  exportSizeProblem, exportWindowProblem, exportableMetrics, mayExportReadings,
+  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, areaExportNote, areaExportScope, exportMaxDays,
+  exportSizeProblem, exportWindowProblem, mayExportReadings,
 } from '../../utils/telemetryExport'
 import { navigate, useUrlState } from '../../hooks/useUrlState'
 import { areaWideInService } from '../../utils/inService'
@@ -379,10 +379,7 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
   const { start: shownStart, end: shownEnd } = windowBounds(win, now)
-  // A derived metric is computed when drawn and holds no reading to export.
-  const exportable = exportableMetrics(metric ? [metric] : [], catalog)
   const exportBlocked = !metric ? 'This area has no metric to export.'
-    : exportable.left.length ? DERIVED_EXPORT_NOTE
     : stateKind ? `${metric} is text or a flag, so this tab draws no mean or total of it and has nothing to export. The Cell tab exports it.`
       : assetKeys.length === 0 ? `None of the machines in ${area.name} reports ${metric}, so there is nothing to export.`
         : exportSizeProblem(assetKeys.length, 1) ?? exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
@@ -395,7 +392,7 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
         const reports = new Set(keys)
         return cell.machines.filter(d => reports.has(telemetryKey(d))).map(d => ({ id: telemetryKey(d), name: d.asset_name }))
       }),
-      names: exportable.names, scope: areaExportScope(area.name, reporting.map(c => c.keys.length)),
+      names: [metric], scope: areaExportScope(area.name, reporting.map(c => c.keys.length)),
       from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
     })
   }
@@ -524,6 +521,7 @@ export function HistoryArea({ area, areas, devices, schemas, catalog, win, setWi
         <TelemetryExportModal
           devices={exporting.devices}
           metricNames={exporting.names}
+          catalog={catalog}
           scope={exporting.scope}
           note={areaExportNote(areaWide)}
           from={exporting.from}

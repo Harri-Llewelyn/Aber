@@ -28,8 +28,7 @@ import { alertsAddress } from '../../utils/alertHistory'
 import { deviceIds } from '../../utils/sparkplugId'
 import { splitDerived, unitOf } from '../../utils/derivedMetric'
 import {
-  DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem,
-  exportableMetrics, mayExportReadings,
+  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem, mayExportReadings,
 } from '../../utils/telemetryExport'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
@@ -328,19 +327,15 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
 
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
-  // A derived metric is computed when drawn and holds no reading: the export names the others.
-  const exportable = exportableMetrics(names, catalog)
   const exportBlocked = names.length === 0
     ? 'This device has no metric to export.'
-    : exportable.names.length === 0
-      ? DERIVED_EXPORT_NOTE
-      : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
+    : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
   /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
   const openExport = () => {
     const at = Date.now()
     const { start, end } = windowBounds(win, at)
     setExporting({
-      devices: [{ id: telemetryKey(device), name: device.asset_name }], names: exportable.names, left: exportable.left,
+      devices: [{ id: telemetryKey(device), name: device.asset_name }], names,
       from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
     })
   }
@@ -427,9 +422,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
             permitted={canExport}
             deniedTitle={EXPORT_DENIED_TITLE}
             disabled={Boolean(exportBlocked)}
-            title={exportBlocked ?? (exportable.left.length
-              ? `Download the readings of the measured metrics shown, over this window, as CSV. ${DERIVED_EXPORT_NOTE}`
-              : 'Download the readings of the metrics shown, over this window, as CSV')}
+            title={exportBlocked ?? 'Download the readings of the metrics shown, over this window, as CSV'}
             onClick={openExport}
           >
             <IconDownload size={13} aria-hidden="true" /> Export CSV
@@ -537,7 +530,7 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
         <TelemetryExportModal
           devices={exporting.devices}
           metricNames={exporting.names}
-          left={exporting.left}
+          catalog={catalog}
           from={exporting.from}
           to={exporting.to}
           windowWords={exporting.windowWords}

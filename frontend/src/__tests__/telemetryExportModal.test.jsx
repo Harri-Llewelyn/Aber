@@ -7,10 +7,11 @@
  * limit is said before anything is asked, and the confirm is held.
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { TelemetryExportModal, exportWords } from '../components/modals/TelemetryExportModal'
 import { api, TELEMETRY_EXPORT_MAX_ROWS } from '../api'
+import { DERIVED_BUCKET_NOTE, DERIVED_RAW_NOTE } from '../utils/telemetryExport'
 import { downloadCSV } from '../utils/downloadCSV'
 import { auditEventUrl } from '../routes'
 
@@ -376,5 +377,96 @@ describe('telemetry export resolution', () => {
     await waitFor(() => expect(downloadCSV).toHaveBeenCalled())
     const [rows] = downloadCSV.mock.calls[0]
     expect(rows[1].time).toBe(`# STARTS AT ${new Date(NOW - 30 * 60000).toISOString()}`)
+  })
+})
+
+describe('a derived metric among the metrics', () => {
+  const RATE = 'Controller/PARTS_PER_HOUR'
+  const UPTIME = 'Controller/UPTIME'
+  const catalog = [
+    { name: 'Systems/TEMPERATURE', units: '°C', datatype: 10 },
+    { name: RATE, units: 'COUNT/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Controller/PART_COUNT' } },
+    { name: UPTIME, datatype: 10, derivation: { kind: 'time_in_state', input: 'Controller/EXECUTION', states: ['ACTIVE'] } },
+  ]
+  const derivedDocument = (rows = [], extra = {}) => document_(rows, {
+    derived: [
+      { metric: RATE, kind: 'counter_rate', definition: 'rate of Controller/PART_COUNT, per hour', unit: 'COUNT/HOUR' },
+      { metric: UPTIME, kind: 'time_in_state', definition: 'share of time Controller/EXECUTION is ACTIVE', unit: '% of the time' },
+    ], ...extra,
+  })
+  const minuteRow = (metric, value, unit) => [new Date(NOW - 60000).toISOString(), LATHE.id, metric, value, unit]
+  const openWith = async (metricNames, props = {}) => {
+    const showToast = vi.fn()
+    const onClose = vi.fn()
+    render(<TelemetryExportModal devices={[LATHE]} metricNames={metricNames} catalog={catalog} {...windowProps()} {...props} onClose={onClose} showToast={showToast} />)
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/v1/telemetry/horizons'))
+    return { showToast, onClose }
+  }
+
+  it('is offered with the measured ones, and asked for by name in the one call', async () => {
+    await openWith(['Systems/TEMPERATURE', RATE])
+    expect(screen.getByText(RATE)).toBeInTheDocument()
+    runExport()
+    await waitFor(() => expect(api.exportTelemetry).toHaveBeenCalledTimes(1))
+    expect(api.exportTelemetry.mock.calls[0][0]).toMatchObject({ metricNames: ['Systems/TEMPERATURE', RATE], resolution: 'raw' })
+  })
+
+  it('says its values come at 1 minute where Raw is chosen, and per bucket otherwise', async () => {
+    await openWith(['Systems/TEMPERATURE', RATE])
+    expect(screen.getByText(DERIVED_RAW_NOTE)).toBeInTheDocument()
+    fireEvent.click(within(picker()).getByRole('button', { name: /^5 minutes/ }))
+    expect(screen.getByText(DERIVED_BUCKET_NOTE)).toBeInTheDocument()
+    expect(screen.queryByText(DERIVED_RAW_NOTE)).not.toBeInTheDocument()
+  })
+
+  it('says nothing of a derived metric where none is chosen', async () => {
+    await openWith(['Systems/TEMPERATURE'])
+    expect(screen.queryByText(DERIVED_RAW_NOTE)).not.toBeInTheDocument()
+    expect(screen.queryByText(DERIVED_BUCKET_NOTE)).not.toBeInTheDocument()
+  })
+
+  it('has a comment row of its own in the file, after the provenance line, and its rows in the same five columns', async () => {
+    api.exportTelemetry.mockResolvedValue(derivedDocument([
+      [new Date(NOW - 90000).toISOString(), LATHE.id, 'Systems/TEMPERATURE', 41.5, '°C'],
+      minuteRow(RATE, 12, 'COUNT/HOUR'),
+      minuteRow(UPTIME, 0.42, '% of the time'),
+    ]))
+    await openWith(['Systems/TEMPERATURE', RATE, UPTIME])
+    runExport()
+    await waitFor(() => expect(downloadCSV).toHaveBeenCalledTimes(1))
+    const [file, filename] = downloadCSV.mock.calls[0]
+    expect(file[0].time).toContain('RESOLUTION: raw samples')
+    expect(file[1].time).toBe('# DERIVED: Controller/PARTS_PER_HOUR = rate of Controller/PART_COUNT, per hour, computed from the 1-minute rollup')
+    expect(file[2].time).toBe('# DERIVED: Controller/UPTIME = share of time Controller/EXECUTION is ACTIVE, computed from the 1-minute rollup')
+    expect(file[2].device).toContain('the value is a fraction from 0 to 1 (0.9 is 90%)')
+    expect(file.map(r => Object.keys(r))).toEqual(Array(6).fill(['time', 'device', 'metric', 'value', 'unit']))
+    expect(file.slice(3).map(r => [r.metric, r.value, r.unit])).toEqual([
+      ['Systems/TEMPERATURE', 41.5, '°C'], [RATE, 12, 'COUNT/HOUR'], [UPTIME, 0.42, '% of the time'],
+    ])
+    expect(filename).toBe('Simulated_CNC_01-telemetry-2026-08-02.csv')
+  })
+
+  it('is a file of 1-minute buckets, named so, where Raw is chosen and only derived metrics are', async () => {
+    api.exportTelemetry.mockResolvedValue(derivedDocument([minuteRow(RATE, 12, 'COUNT/HOUR')]))
+    const { showToast } = await openWith([RATE])
+    runExport()
+    await waitFor(() => expect(downloadCSV).toHaveBeenCalledTimes(1))
+    const [file, filename] = downloadCSV.mock.calls[0]
+    // No raw reading is in it, so the first line does not say every reading as published.
+    expect(file[0].time).toContain('RESOLUTION: 1-minute buckets')
+    expect(file[0].device).toContain('aggregated, NOT individual readings')
+    expect(filename).toBe('Simulated_CNC_01-telemetry-1m-2026-08-02.csv')
+    // Raw is still what is asked for: the database reads a derived metric at a minute for it.
+    expect(api.exportTelemetry.mock.calls[0][0].resolution).toBe('raw')
+    expect(showToast).toHaveBeenCalledWith('Exported 1 bucket of Simulated_CNC_01', 'success', { to: auditEventUrl(4711) })
+  })
+
+  it('does not warn that raw begins later when only derived metrics are chosen', async () => {
+    // Raw reaches back 90 days and the window starts 100 days ago; the rollup reaches 180.
+    await openWith([RATE], { from: new Date(NOW - 100 * DAY).toISOString(), to: new Date(NOW - 99 * DAY).toISOString() })
+    expect(screen.queryByText(/starts before/)).not.toBeInTheDocument()
+    cleanup()
+    await openWith(['Systems/TEMPERATURE', RATE], { from: new Date(NOW - 100 * DAY).toISOString(), to: new Date(NOW - 99 * DAY).toISOString() })
+    expect(screen.getByText(/That window starts before raw telemetry begins/)).toBeInTheDocument()
   })
 })

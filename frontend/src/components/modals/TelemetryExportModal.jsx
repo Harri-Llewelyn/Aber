@@ -3,9 +3,10 @@ import { api, TELEMETRY_EXPORT_MAX_ROWS } from '../../api'
 import { useSetting } from '../../hooks/useSettings'
 import { auditEventUrl } from '../../routes'
 import { downloadCSV } from '../../utils/downloadCSV'
+import { splitDerived } from '../../utils/derivedMetric'
 import {
-  DERIVED_EXPORT_NOTE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS_PLACE, EXPORT_RESOLUTIONS, bestResolutionFor, coversRange,
-  exportMaxDays, exportRows, exportWindowProblem, noticeRows, provenanceRow, resolutionByKey
+  EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS_PLACE, EXPORT_RESOLUTIONS, bestResolutionFor, coversRange,
+  derivedNote, derivedRows, exportMaxDays, exportRows, exportWindowProblem, fileResolutionKey, noticeRows, provenanceRow, resolutionByKey
 } from '../../utils/telemetryExport'
 import { dayWords } from '../../utils/alertSuppression'
 import { clockWords } from '../../utils/timeWindow'
@@ -35,7 +36,9 @@ import { Tooltip } from '../common/Tooltip'
  * offers to switch. A file that stops short, at the row cap or where raw begins, says so in its
  * comment lines as well as here.
  *
- * `left` is the derived metrics a page chose and exportableMetrics() left out: the dialog says why.
+ * `catalog` is the metric catalog, which says which of `metricNames` are derived: the file holds a
+ * derived metric's value for each bucket (a minute where the resolution is Raw), marked by a comment
+ * row each, and the dialog says so.
  *
  *   <TelemetryExportModal devices={[{ id: key, name }]} metricNames={names} from={start.toISOString()}
  *     to={end.toISOString()} windowWords="Last 24 hours" onClose={close} showToast={showToast} />
@@ -70,13 +73,13 @@ export function exportWords({ devices, metricNames, windowWords, from, to, scope
   return `${scope ?? subjectWords(devices)} · ${metrics} · ${windowWords} (${boundWords(from)} – ${boundWords(to)})`
 }
 
-/** The file's name: the device's, or "readings" for several, then the resolution and the window's day. */
+/** The file's name: the device's, or "readings" for several, then the resolution (not Raw's) and the window's day. */
 const fileName = (devices, resolutionKey, from) => {
   const stem = devices.length === 1 ? devices[0].name : 'readings'
   return `${stem}-telemetry${resolutionKey === 'raw' ? '' : `-${resolutionKey}`}-${from.slice(0, 10)}.csv`
 }
 
-export function TelemetryExportModal({ devices, metricNames, left = [], from, to, windowWords, scope, note, onClose, showToast }) {
+export function TelemetryExportModal({ devices, metricNames, catalog = null, from, to, windowWords, scope, note, onClose, showToast }) {
   const [resolution, setResolution] = useState('raw')
   const [horizons, setHorizons] = useState(null)   // null until the lookup settles
   const [busy, setBusy]       = useState(false)
@@ -84,6 +87,8 @@ export function TelemetryExportModal({ devices, metricNames, left = [], from, to
   const maxDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
   const nameOf = useMemo(() => new Map(devices.map(d => [d.id, d.name])), [devices])
   const subject = subjectWords(devices)
+  const derivedNames = useMemo(() => splitDerived(metricNames, catalog).derived, [metricNames, catalog])
+  const hasMeasured = derivedNames.length < metricNames.length
 
   // How far back each resolution reaches, read once when the dialog opens. It decorates the picker
   // and drives the warning; it never gates the export, so a stack whose historian is unreachable
@@ -105,11 +110,12 @@ export function TelemetryExportModal({ devices, metricNames, left = [], from, to
   // dialog refusing on its own ignorance.
   const coverage = useMemo(() => {
     if (problem || horizons === null) return null
-    const entry = resolutionByKey(resolution)
+    // Derived metrics alone are read from the 1-minute rollup, whichever choice is Raw's.
+    const entry = resolutionByKey(fileResolutionKey(resolution, hasMeasured))
     const covers = coversRange(horizons, entry.relation, from)
     if (covers !== false) return null
     return { entry, better: bestResolutionFor(horizons, from), from }
-  }, [from, problem, resolution, horizons])
+  }, [from, problem, resolution, horizons, hasMeasured])
 
   /** Why an export that returned no rows found none: the retention policy, the cap, or nothing there. */
   const noRowsWords = (document, entry) => {
@@ -137,6 +143,7 @@ export function TelemetryExportModal({ devices, metricNames, left = [], from, to
   const runExport = async () => {
     if (problem) return
     const entry = resolutionByKey(resolution)
+    const held = fileResolutionKey(entry.key, hasMeasured)
     setBusy(true)
     setError(null)
     try {
@@ -145,17 +152,18 @@ export function TelemetryExportModal({ devices, metricNames, left = [], from, to
       })
 
       if (!document.row_count) {
-        setError(noRowsWords(document, entry))
+        setError(noRowsWords(document, resolutionByKey(held)))
         setBusy(false)
         return
       }
 
-      // The provenance line first, so the first line of the file says what the file is, then what
-      // makes it less than the window asked for.
-      const file = [provenanceRow(entry.key), ...noticeRows(document, from, document.max_rows), ...exportRows(document, nameOf)]
-      downloadCSV(file, fileName(devices, entry.key, from))
+      // The provenance line first, so the first line of the file says what the file is, then each
+      // derived metric, then what makes it less than the window asked for. A Raw export of derived
+      // metrics alone holds buckets only, and says so.
+      const file = [provenanceRow(held), ...derivedRows(document, entry.key), ...noticeRows(document, from, document.max_rows), ...exportRows(document, nameOf)]
+      downloadCSV(file, fileName(devices, held, from))
 
-      const what = entry.key === 'raw' ? 'row' : 'bucket'
+      const what = held === 'raw' ? 'row' : 'bucket'
       const count = document.row_count.toLocaleString()
       showToast?.(
         document.truncated
@@ -220,8 +228,6 @@ export function TelemetryExportModal({ devices, metricNames, left = [], from, to
         </div>
       </div>
 
-      {left.length > 0 && <p className="form-hint">{DERIVED_EXPORT_NOTE}</p>}
-
       <div className="form-group">
         <label className="form-label">Resolution</label>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }} role="group" aria-label="Export resolution">
@@ -250,6 +256,9 @@ export function TelemetryExportModal({ devices, metricNames, left = [], from, to
             ? 'Every reading as published. The raw hypertable is kept for a fraction of the time the rollups are, so an older window may need one of them.'
             : 'Aggregated buckets, not individual readings. A row is a bucket: its start and its average, or its last value for a text or a flag. The file says so in its first line.'}
         </div>
+        {derivedNames.length > 0 && (
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>{derivedNote(resolution)}</div>
+        )}
       </div>
 
       {coverage && (

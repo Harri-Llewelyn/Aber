@@ -13,6 +13,7 @@ import { HistoryTab } from '../components/tabs/HistoryTab'
 import { api } from '../api'
 import { downloadCSV } from '../utils/downloadCSV'
 import { telemetryKey } from '../utils/history'
+import { DERIVED_RAW_NOTE } from '../utils/telemetryExport'
 
 const { polls } = vi.hoisted(() => ({ polls: [] }))
 
@@ -110,10 +111,9 @@ const visit = async (address, { userRole = 'Administrator', list = devices, cat 
 }
 
 const DENIED = 'Requires Administrator or Shopfloor Manager'
-// A derived metric every machine that reports Spindle/LOAD reports the input of: computed when drawn, never exported.
+// A derived metric every machine that reports Spindle/LOAD reports the input of: computed, and exported per bucket.
 const DERIVED = 'Spindle/LOAD_RATE'
 const withDerived = [...catalog, { name: DERIVED, units: 'kW/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Spindle/LOAD' } }]
-const DERIVED_NOTE = 'A derived metric is computed when it is drawn, and is not exported. Export its inputs.'
 const toolbar = () => document.querySelector('.filter-bar-actions')
 const exportButton = () => within(toolbar()).getByRole('button', { name: /Export CSV/ })
 const asked = () => api.exportTelemetry.mock.calls.map(c => c[0])
@@ -280,11 +280,18 @@ describe("exporting an area's metric", () => {
     expect(exportButton()).toHaveAccessibleDescription('Controller/EXECUTION is text or a flag, so this tab draws no mean or total of it and has nothing to export. The Cell tab exports it.')
   })
 
-  it('is off for a derived metric, which is computed when drawn and holds no reading to export', async () => {
+  it('exports a derived metric for the machines behind its charts, and says it comes at 1 minute where Raw is chosen', async () => {
     await visit(`/history/area/a1?metric=${encodeURIComponent(DERIVED)}`, { cat: withDerived })
     await waitFor(() => expect(api.readDerivedSeries).toHaveBeenCalled())
-    expect(exportButton()).toBeDisabled()
-    expect(exportButton()).toHaveAccessibleDescription(DERIVED_NOTE)
+    expect(exportButton()).not.toBeDisabled()
+    fireEvent.click(exportButton())
+    const dialog = await screen.findByRole('dialog', { name: /Export readings — 3 devices/ })
+    expect(within(dialog).getByText(/^Boardroom · 3 machines in 2 cells · Spindle\/LOAD_RATE · /)).toBeInTheDocument()
+    expect(within(dialog).getByText(DERIVED_RAW_NOTE)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(asked()).toHaveLength(1))
+    expect(asked()[0]).toMatchObject({ metricNames: [DERIVED], resolution: 'raw' })
+    expect([...asked()[0].assetIds].sort()).toEqual(keysOf(LATHE3, LATHE4, MILL))
   })
 
   it('is off for an area with no machine in service, which has no metric to export', async () => {
@@ -461,11 +468,17 @@ describe('exporting a metric across devices', () => {
     expect(exportButton()).toHaveAccessibleDescription('No device in service reports No/SuchMetric, so there is nothing to export.')
   })
 
-  it('is off for a derived metric, which is computed when drawn and holds no reading to export', async () => {
+  it('exports a derived metric for every device that reports its inputs, and says it comes at 1 minute where Raw is chosen', async () => {
     await visit(`/history/metric/${encodeURIComponent(DERIVED)}`, { cat: withDerived })
     await waitFor(() => expect(api.readDerivedSeries).toHaveBeenCalled())
-    expect(exportButton()).toBeDisabled()
-    expect(exportButton()).toHaveAccessibleDescription(DERIVED_NOTE)
+    expect(exportButton()).not.toBeDisabled()
+    fireEvent.click(exportButton())
+    const dialog = await screen.findByRole('dialog', { name: /Export readings/ })
+    expect(within(dialog).getByText(DERIVED_RAW_NOTE)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(asked()).toHaveLength(1))
+    expect(asked()[0].metricNames).toEqual([DERIVED])
+    expect([...asked()[0].assetIds].sort()).toEqual(keysOf(LATHE3, LATHE4, MILL, METER, HALLC))
   })
 
   it('takes a text or flag metric as the Cell tab does', async () => {

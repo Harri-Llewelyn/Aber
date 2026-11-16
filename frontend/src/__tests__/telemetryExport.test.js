@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
-  EXPORT_COLUMNS, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DEVICES, EXPORT_MAX_METRICS, EXPORT_RESOLUTIONS,
-  TELEMETRY_EXPORT_ROLES, areaExportNote, areaExportScope, bestResolutionFor, commentRow, coversRange, exportMaxDays, exportRows,
-  exportSizeProblem, exportWindowProblem, mayExportReadings, metricExportNote, metricExportScope, noticeRows, overExportLimit,
-  overLimitShort, provenanceRow, resolutionByKey
+  DERIVED_BUCKET_NOTE, DERIVED_RAW_NOTE, EXPORT_COLUMNS, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DEVICES,
+  EXPORT_MAX_METRICS, EXPORT_RESOLUTIONS, TELEMETRY_EXPORT_ROLES, areaExportNote, areaExportScope, bestResolutionFor, commentRow,
+  coversRange, derivedNote, derivedRows, exportMaxDays, exportRows, exportSizeProblem, exportWindowProblem, fileResolutionKey,
+  mayExportReadings, metricExportNote, metricExportScope, noticeRows, overExportLimit, overLimitShort, provenanceRow, resolutionByKey
 } from '../utils/telemetryExport'
+import { derivationText } from '../utils/derivedMetric'
 import { TELEMETRY_RESOLUTION_RELATIONS } from '../api'
 
 /**
@@ -251,5 +252,51 @@ describe('the provenance line', () => {
     const line = Object.values(provenanceRow('raw')).join(' ')
     expect(line).toContain('raw samples')
     expect(line).toContain('public.telemetry')
+  })
+})
+
+describe('a derived metric in the file', () => {
+  const rate = { metric: 'Controller/PARTS_PER_HOUR', kind: 'counter_rate', definition: 'rate of Controller/PART_COUNT, per hour', unit: 'COUNT/HOUR' }
+  const share = { metric: 'Controller/UPTIME', kind: 'time_in_state', definition: 'share of time Controller/EXECUTION is ACTIVE', unit: '% of the time' }
+
+  it('is marked by one comment row each, naming its definition and that it is computed from the 1-minute rollup', () => {
+    const [row] = derivedRows({ derived: [rate] }, '1m')
+    expect(row.time).toBe('# DERIVED: Controller/PARTS_PER_HOUR = rate of Controller/PART_COUNT, per hour, computed from the 1-minute rollup')
+    // Every column is present and empty but the two, so the file keeps its five columns.
+    expect(Object.keys(row)).toEqual(EXPORT_COLUMNS)
+    expect(derivedRows({ derived: [rate, share] }, '1m')).toHaveLength(2)
+    expect(derivedRows({ derived: [] }, 'raw')).toEqual([])
+    expect(derivedRows({}, 'raw')).toEqual([])
+  })
+
+  it("says a row is a bucket, a minute's where the resolution is Raw", () => {
+    expect(derivedRows({ derived: [rate] }, 'raw')[0].device).toBe("# 1-minute buckets, not individual readings: time is the bucket start and value the bucket's value")
+    expect(derivedRows({ derived: [rate] }, '5m')[0].device).toContain('# 5-minute buckets, not individual readings')
+    expect(derivedRows({ derived: [rate] }, '1h')[0].device).toContain('# 1-hour buckets, not individual readings')
+  })
+
+  it('says a time in state is a fraction from 0 to 1, and what its unit column says', () => {
+    expect(derivedRows({ derived: [share] }, 'raw')[0].device)
+      .toContain('; the unit is % of the time, and the value is a fraction from 0 to 1 (0.9 is 90%)')
+    // Only a time in state is a fraction.
+    expect(derivedRows({ derived: [rate] }, 'raw')[0].device).not.toContain('fraction')
+  })
+
+  it("words a definition as the dashboard does, so a row's definition is the one the tables show", () => {
+    const definition = { kind: 'counter_rate', input: 'Controller/PART_COUNT' }
+    expect(derivationText(definition)).toBe(rate.definition.replace('Controller/PARTS_PER_HOUR = ', ''))
+  })
+
+  it('has a note for where it is chosen: 1 minute for Raw, the bucket otherwise', () => {
+    expect(derivedNote('raw')).toBe(DERIVED_RAW_NOTE)
+    expect(DERIVED_RAW_NOTE).toMatch(/With Raw samples its values come at 1 minute/)
+    for (const key of ['1m', '5m', '1h']) expect(derivedNote(key)).toBe(DERIVED_BUCKET_NOTE)
+  })
+
+  it('names a Raw export of derived metrics alone by the 1-minute buckets it holds', () => {
+    expect(fileResolutionKey('raw', false)).toBe('1m')
+    expect(fileResolutionKey('raw', true)).toBe('raw')
+    for (const key of ['1m', '5m', '1h']) expect(fileResolutionKey(key, false)).toBe(key)
+    expect(provenanceRow(fileResolutionKey('raw', false)).time).toContain('RESOLUTION: 1-minute buckets')
   })
 })

@@ -24,6 +24,7 @@ import {
   historyPath, overviewAddress, overviewGroups, readOverviewGroups, readingsStopWords, telemetryKey, uncountedStretches,
   intervalMinutes, readWidth, uncountedWords, writeOverviewGroups,
 } from '../utils/history'
+import { DERIVED_RAW_NOTE } from '../utils/telemetryExport'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
@@ -73,6 +74,8 @@ const CELLS = [
 const AREAS = [{ area_id: 'a1', area_name: 'Hall B', name: 'Hall B' }, { area_id: 'a2', area_name: 'Annex', name: 'Annex', is_archived: true }]
 
 let fleet = DEVICES
+/** The metric catalog the page reads: none, unless a test gives it a derived metric. */
+let catalog = []
 let counted = { computed_from: '-infinity', computed_to: 'infinity', complete: true }
 /** Where the 5-minute rollup reaches back to: a window older than this comes back in hours, as 0245 reads it. */
 let fiveMinuteReach = -Infinity
@@ -93,6 +96,7 @@ const routeGet = (path) => {
   if (path.startsWith('/api/v1/devices')) return Promise.resolve(fleet)
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(CELLS)
   if (path.startsWith('/api/v1/areas')) return Promise.resolve(AREAS)
+  if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(catalog)
   return Promise.resolve([])
 }
 
@@ -102,6 +106,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   polls.length = 0
   fleet = DEVICES
+  catalog = []
   fiveMinuteReach = -Infinity
   counted = { computed_from: '-infinity', computed_to: 'infinity', complete: true }
   window.localStorage.clear()
@@ -621,6 +626,26 @@ describe('exporting from Overview', () => {
     expect(asked()[0].to).toBe(new Date(2026, 10, 2, 14).toISOString())
     expect(asked()[0].resolution).toBe('raw')
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('Exported 1 row of 3 devices', 'success', { to: '/audit-trail?event=77' }))
+  })
+
+  it('adds the derived metrics the box\'s devices have the inputs of, and says they come at 1 minute where Raw is chosen', async () => {
+    catalog = [
+      { name: 'Spindle/LOAD', units: 'kW', datatype: 10 }, { name: 'Spindle/SPEED', units: 'rpm', datatype: 10 },
+      { name: 'Spindle/LOAD_RATE', units: 'kW/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Spindle/LOAD' } },
+      { name: 'Coolant/FLOW_RATE', units: 'L/HOUR', datatype: 10, derivation: { kind: 'counter_rate', input: 'Coolant/FLOW' } },
+    ]
+    await visit('/history/overview?span=day&at=2026-11-02')
+    const popover = tenToTwo()
+    fireEvent.click(exportIn(popover))
+    const dialog = await screen.findByRole('dialog', { name: /Export readings — 3 devices/ })
+    // The rate of a counter none of them reports is not offered.
+    expect(within(dialog).getByText(/^3 devices · 3 metrics · /)).toBeInTheDocument()
+    expect(within(dialog).getByText('Spindle/LOAD_RATE')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Coolant/FLOW_RATE')).not.toBeInTheDocument()
+    expect(within(dialog).getByText(DERIVED_RAW_NOTE)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(asked()).toHaveLength(1))
+    expect(asked()[0].metricNames).toEqual(['Spindle/LOAD', 'Spindle/LOAD_RATE', 'Spindle/SPEED'])
   })
 
   it('is greyed for a role that may not export, saying who may, and does not open the dialog', async () => {

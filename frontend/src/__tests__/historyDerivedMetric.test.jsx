@@ -9,7 +9,7 @@ import { render, screen, waitFor, within, fireEvent, cleanup } from '@testing-li
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { HistoryTab } from '../components/tabs/HistoryTab'
 import { api } from '../api'
-import { DERIVED_EXPORT_NOTE } from '../utils/telemetryExport'
+import { DERIVED_BUCKET_NOTE, DERIVED_RAW_NOTE } from '../utils/telemetryExport'
 import { telemetryKey } from '../utils/history'
 
 const { plots } = vi.hoisted(() => ({ plots: [] }))
@@ -189,25 +189,35 @@ describe('the Device tab', () => {
     expect(api.readDerivedSeries).not.toHaveBeenCalled()
   })
 
-  it('leaves a derived metric out of Export and says why, where it is chosen', async () => {
+  it('exports a derived metric with the measured ones, and says it comes at 1 minute where Raw is chosen', async () => {
     await visit(`/history/device/${PRESS2}?range=24h`)
     await screen.findAllByRole('figure')
     const button = screen.getByRole('button', { name: /Export CSV/ })
     expect(button).not.toBeDisabled()
-    expect(button).toHaveAccessibleDescription(expect.stringContaining(DERIVED_EXPORT_NOTE))
+    expect(button).toHaveAccessibleDescription('Download the readings of the metrics shown, over this window, as CSV')
     fireEvent.click(button)
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('Controller/PART_COUNT')).toBeInTheDocument()
-    expect(within(dialog).queryByText(RATE)).not.toBeInTheDocument()
-    expect(within(dialog).getByText(DERIVED_EXPORT_NOTE)).toBeInTheDocument()
+    expect(within(dialog).getByText(RATE)).toBeInTheDocument()
+    expect(within(dialog).getByText(DERIVED_RAW_NOTE)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /^1 minute/ }))
+    expect(within(dialog).getByText(DERIVED_BUCKET_NOTE)).toBeInTheDocument()
+    expect(within(dialog).queryByText(DERIVED_RAW_NOTE)).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(api.exportTelemetry).toHaveBeenCalledTimes(1))
+    expect(api.exportTelemetry.mock.calls[0][0]).toMatchObject({ metricNames: ['Controller/PART_COUNT', RATE], resolution: '1m' })
   })
 
-  it('has nothing to export when only a derived metric is chosen', async () => {
+  it('exports a derived metric alone', async () => {
     await visit(`/history/device/${PRESS2}?range=24h&metric=${encodeURIComponent(RATE)}`)
     await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (count/h)' })
     const button = screen.getByRole('button', { name: /Export CSV/ })
-    expect(button).toBeDisabled()
-    expect(button).toHaveAccessibleDescription(DERIVED_EXPORT_NOTE)
+    expect(button).not.toBeDisabled()
+    fireEvent.click(button)
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(api.exportTelemetry).toHaveBeenCalledTimes(1))
+    expect(api.exportTelemetry.mock.calls[0][0]).toMatchObject({ metricNames: [RATE], resolution: 'raw' })
   })
 })
 
@@ -245,12 +255,19 @@ describe('the Cell tab', () => {
     expect(api.readHourOfDay).not.toHaveBeenCalled()
   })
 
-  it('has nothing to export: the button says so', async () => {
+  it('exports it for the machines that report its inputs', async () => {
     await visit(`/history/cell/c1?metric=${encodeURIComponent(RATE)}`)
     await waitFor(() => expect(plots.length).toBeGreaterThan(0))
     const button = screen.getByRole('button', { name: /Export CSV/ })
-    expect(button).toBeDisabled()
-    expect(button).toHaveAccessibleDescription(DERIVED_EXPORT_NOTE)
+    expect(button).not.toBeDisabled()
+    fireEvent.click(button)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(DERIVED_RAW_NOTE)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
+    await waitFor(() => expect(api.exportTelemetry).toHaveBeenCalledTimes(1))
+    const call = api.exportTelemetry.mock.calls[0][0]
+    expect(call.metricNames).toEqual([RATE])
+    expect(call.assetIds.sort()).toEqual([telemetryKey({ asset_id: PRESS1 }), telemetryKey({ asset_id: PRESS2 })].sort())
   })
 
   it('says a window too long for the machines, and reads nothing', async () => {
