@@ -24,10 +24,9 @@ const hueOf = (state) => ({ '--state-hue': stateHue(state) })
  * and starts the next. Each value takes the hue its text hashes to, at the theme's lightness and
  * chroma, and a hairline in the later run's edge colour parts two neighbours whose hues are too near
  * to tell apart (NEAR_HUE_DEG). A carried stretch is hatched. A run under NAMED_RUN_PX keeps its
- * colour and no name, at least 1px wide so a brief state is never lost; the head names it under
- * the pointer.
- * A bucket that held more than one value (`marks`) is dotted along its foot. With `flag`, the runs
- * are true and false, drawn in the two flag colours of the theme, never hashed.
+ * colour and no name, at least 1px wide so a brief state is never lost; the head names it under the
+ * pointer. A bucket that held more than one value (`marks`) is dotted along its foot. With `flag`,
+ * the runs are true and false, drawn in the two flag colours of the theme, never hashed.
  *
  * It takes the runs (stateRuns(), or a change read's) and the window, and fills the width it is
  * given, so a chart, or a lane of History's Overview, can place it on any time scale.

@@ -1853,6 +1853,17 @@ text and a flag's true and false.
 - **The head** reads the bucket under the pointer, and otherwise the latest reading
   (`latestWords()`): the newest bucket a reading arrived in, never a carried one, with its `last`
   value and the bucket's start, since a bucket is not a reading's timestamp.
+- **A number's key** (`common/NumberKey.jsx`) is under the chart, in the text key's place and style:
+  `numberKey()`'s four entries for `numberFigures()`. The lowest and highest come from the buckets' own
+  `min_double` and `max_double`, so they are the true extremes at any bucket size, with the bucket
+  each was in (a bucket read before a carried one wins a tie, and a carried one says so). The mean and
+  median are over time: each bucket counts once, carried buckets included and any at or after `now`
+  left out, over the buckets' averages. Under report by exception a reading comes when a value moves,
+  so a mean of the readings leans to where it moved, and this does not; it is at the bucket's
+  resolution. Each carries the unit as the head does (`readingWords()`). Pointing at an entry hands
+  its `mark` to the chart, which places it with the plot's own `valToPos()` in the `u-over` layer
+  (`chart-point-mark`, `chart-level-mark`); the words carry every figure, so hover is an aid only.
+  `chartSummary()` adds the mean and the median. Text and flags keep their own keys.
 - **A state** is `stateRuns()`, clipped to the window and to now, drawn by `common/StateBand.jsx`:
   one band of its runs, edge to edge, on the window's own scale. It takes the runs and the window
   alone, so a lane of Overview can place it as a chart does. The runs meet with no gap; only a
@@ -1903,7 +1914,7 @@ text and a flag's true and false.
 | `now` | The clock. Inside the window, a Now line and label, and a hatched "No readings yet" after it |
 | `minutes` | The bucket's width: a state strip's runs, and the times the head says |
 | `validRange` | `{ minimum, maximum }` from the schemas, or null: a dotted line labelled "valid range" |
-| `summary` | `chartSummary()`: the metric, the window, the resolution, the latest reading and its bucket, the lowest and highest, a state's shares, the carried buckets and the valid range, for a screen reader |
+| `summary` | `chartSummary()`: the metric, the window, the resolution, the latest reading and its bucket, the lowest and highest, the mean and median over time, a state's shares, the carried buckets and the valid range, for a screen reader |
 | `syncKey` | Charts sharing it share the cursor, so every chart of a device shows the same moment |
 | `band` | A drag's band, `{ lo, hi, mid, words }` (fractions of the window, and `bandWords()`), shaded over the plot or the strip, or null |
 | `height` | The plot's height in pixels, 140 by default |

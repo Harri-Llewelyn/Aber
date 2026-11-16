@@ -9,7 +9,7 @@ import {
   validRanges, withAlpha, STATE_KEY_MAX, durationWords, keyWords, latestReading, latestWords, momentWords, runWords,
   shareWords, hueGap, NEAR_HUE_DEG, stateHue, stateKey, stateRuns, stateShares, TEXT_BUCKET_MIN_PX, datatypeKind, readPlan, readableResolution,
   OTHER_GROUP, metricGroups, changeSeries, markBuckets, markedStretches, momentSecondsWords, readWords, runNear, spanWords,
-  stateReadLine, flagWord, changeCount, changeWords, markWords,
+  stateReadLine, flagWord, changeCount, changeWords, markWords, numberFigures, numberKey,
 } from '../utils/history'
 import { deviceHistoryUrl } from '../routes'
 
@@ -316,7 +316,8 @@ describe("a chart's text for a screen reader", () => {
       metric: 'Spindle/LOAD', unit: 'kW', windowText: 'Today, Mon 2 Nov', resolution, series, starts,
       validRange: { minimum: 0, maximum: 120 },
     })).toBe(`Spindle/LOAD (kW), Today, Mon 2 Nov, in 5-minute buckets. Latest 45 kW, in the bucket from ${bucket(1)}.`
-      + ' Lowest 30.1 kW, highest 52 kW. 2 of 4 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
+      + ' Lowest 30.1 kW, highest 52 kW. Mean 43.81 kW and median 44.5 kW over time.'
+      + ' 2 of 4 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
   })
 
   it('says when no reading arrived in the window, and the value carried into it', () => {
@@ -326,7 +327,7 @@ describe("a chart's text for a screen reader", () => {
     ], starts)
     expect(chartSummary({ metric: 'Axis/X', unit: 'mm', windowText: 'Last 1 hour', resolution, series, starts }))
       .toBe('Axis/X (mm), Last 1 hour, in 5-minute buckets. No reading in this window; 7 mm is carried forward from before it.'
-        + ' Lowest 7 mm, highest 7 mm. 2 of 4 buckets had no reading and carry the last one forward.')
+        + ' Lowest 7 mm, highest 7 mm. Mean 7 mm and median 7 mm over time. 2 of 4 buckets had no reading and carry the last one forward.')
   })
 
   it('says when a series has nothing to show', () => {
@@ -386,6 +387,69 @@ describe('the latest reading', () => {
     const d = new Date(2026, 10, 2, 12, 40)
     expect(momentWords(d.getTime(), 5)).toMatch(/^2 Nov 12:40$/)
     expect(momentWords(d.getTime(), 1440)).toMatch(/^2 Nov$/)
+  })
+})
+
+describe("a number chart's figures", () => {
+  const starts = bucketStarts(T0, T0 + 6 * MINUTE, 1)
+  const at = (i, values) => ({ bucket_ts: new Date(T0 + i * MINUTE).toISOString(), ...values })
+  const read = (i, avg, min, max) => at(i, { avg_double: avg, min_double: min, max_double: max, last_double: avg, n_rows: 3, is_carried: false })
+  const carried = (i, v) => at(i, { avg_double: v, min_double: v, max_double: v, last_double: v, n_rows: 0, is_carried: true })
+
+  it('takes the lowest and highest from the buckets own, and the mean and median over the buckets averages, carried included and the future out', () => {
+    // Five buckets before now: 10 read, 20 read, 20 carried twice, then 50 read. A sixth starts at now, with a value of its own.
+    const series = chartSeries([
+      read(0, 10, 8, 12), read(1, 20, 18, 25), carried(2, 20), carried(3, 20), read(4, 50, 40, 61), read(5, 100, 99, 101),
+    ], starts)
+    const figures = numberFigures(series, starts, { now: T0 + 5 * MINUTE })
+    // Held for 5 minutes: (10 + 20 + 20 + 20 + 50) / 5 = 24, and the middle of 10, 20, 20, 20, 50 is 20.
+    expect(figures.mean).toBe(24)
+    expect(figures.median).toBe(20)
+    // The mean of the readings alone would be (10 + 20 + 50) / 3 = 26.7, which leans to where the value moved.
+    expect(figures.lowest).toEqual({ value: 8, i: 0, carried: false })
+    expect(figures.highest).toEqual({ value: 61, i: 4, carried: false })
+    // With no clock, the sixth counts: (120 + 100) / 6, and its 101 is the highest.
+    expect(numberFigures(series, starts).mean).toBeCloseTo(220 / 6, 10)
+    expect(numberFigures(series, starts).highest.value).toBe(101)
+  })
+
+  it('takes the middle of the two middle averages when the count is even', () => {
+    const series = chartSeries([read(0, 10, 10, 10), read(1, 40, 40, 40), read(2, 30, 30, 30), read(3, 20, 20, 20)], starts)
+    expect(numberFigures(series, starts).median).toBe(25)
+    expect(numberFigures(series, starts).mean).toBe(25)
+  })
+
+  it('names a bucket read before a carried one where they tie, and says when an extreme was carried', () => {
+    const tie = chartSeries([carried(0, 70), read(1, 30, 25, 70), read(2, 40, 30, 45)], starts)
+    expect(numberFigures(tie, starts).highest).toEqual({ value: 70, i: 1, carried: false })
+    expect(numberFigures(tie, starts).lowest).toEqual({ value: 25, i: 1, carried: false })
+    const quiet = chartSeries([carried(0, 7), carried(1, 7)], starts)
+    const figures = numberFigures(quiet, starts)
+    expect(figures.lowest).toEqual({ value: 7, i: 0, carried: true })
+    const entries = numberKey(figures, starts, 1, 'kW')
+    expect(entries.find(e => e.id === 'lowest').when).toBe(`${momentWords(T0, 1)}, carried forward`)
+  })
+
+  it('has none for a series with no value before now', () => {
+    expect(numberFigures(chartSeries([], starts), starts)).toBeNull()
+    expect(numberFigures(chartSeries([read(5, 1, 1, 1)], starts), starts, { now: T0 + 5 * MINUTE })).toBeNull()
+  })
+
+  it('keys the lowest, highest, mean and median, each with the unit as the head says it, and what hovering one marks', () => {
+    const series = chartSeries([
+      read(0, 10, 8, 12), read(1, 20, 18, 25), carried(2, 20), carried(3, 20), read(4, 50, 40, 61),
+    ], starts)
+    const entries = numberKey(numberFigures(series, starts, { now: T0 + 5 * MINUTE }), starts, 1, 'kW')
+    expect(entries.map(e => [e.id, e.label, e.value, e.when])).toEqual([
+      ['lowest', 'min', '8 kW', momentWords(T0, 1)],
+      ['highest', 'max', '61 kW', momentWords(T0 + 4 * MINUTE, 1)],
+      ['mean', 'mean', '24 kW', 'over time'],
+      ['median', 'median', '20 kW', 'over time'],
+    ])
+    // An extreme is marked at its bucket and value; the other two as a level across the window.
+    expect(entries.map(e => e.mark)).toEqual([
+      { at: T0, value: 8 }, { at: T0 + 4 * MINUTE, value: 61 }, { at: null, value: 24 }, { at: null, value: 20 },
+    ])
   })
 })
 

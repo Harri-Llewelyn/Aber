@@ -28,11 +28,12 @@ import { createPortal } from 'react-dom'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { DerivedTag } from './DerivedTag'
+import { NumberKey } from './NumberKey'
 import { StateBand, StateBandKey } from './StateBand'
 import { clockWords } from '../../utils/timeWindow'
 import {
-  changeCount, chartPalette, chartTitle, latestWords, lowWords, markWords, markedStretches, momentWords, nowFraction, readingWords, runNear,
-  runWords, splitCarried, stateKey, stateRuns, stateShares, validRangeWords,
+  changeCount, chartPalette, chartTitle, latestWords, lowWords, markWords, markedStretches, momentWords, nowFraction, numberFigures,
+  numberKey, readingWords, runNear, runWords, splitCarried, stateKey, stateRuns, stateShares, validRangeWords,
 } from '../../utils/history'
 
 const DAY_S = 24 * 60 * 60
@@ -166,6 +167,16 @@ function NowMarker({ fraction, now }) {
 }
 
 /**
+ * What a hovered key entry points at on a number chart, over the plot: a ring on a bucket's
+ * extreme (`left` as a percentage of the window), or a dotted line across at a level.
+ */
+function KeyMark({ mark }) {
+  return mark.left === undefined
+    ? <div className="chart-level-mark" aria-hidden="true" style={{ top: mark.top }} />
+    : <div className="chart-point-mark" aria-hidden="true" style={{ left: `${mark.left}%`, top: mark.top }} />
+}
+
+/**
  * A band being dragged across the charts (`band`: its ends and middle as fractions of the window,
  * and the window a release sets in words), drawn as the Audit Trail draws one on its axis.
  */
@@ -194,14 +205,17 @@ function BandMark({ band }) {
  * when the value did; a bucket series may carry marks (markBuckets()), a dotted foot along the band.
  * `note` says which read the chart shows when the status line says otherwise. The head reads the
  * bucket under the pointer, or the run under it on a band, and otherwise the latest reading
- * (latestWords()). `band` is a drag's band, which the page shades on every chart; uPlot's own drag
+ * (latestWords()). A number chart has a key under it (NumberKey): its lowest and highest with their
+ * buckets, and its mean and median over time (numberFigures()); pointing at an entry marks it on the
+ * plot. `band` is a drag's band, which the page shades on every chart; uPlot's own drag
  * selection stays off. `plugins` are uPlot plugins the page adds to a number chart, such as the
  * periods an alert was firing; a band is not drawn by uPlot and takes none. Pass the same array
- * while they are the same: a new one draws the chart again. `yRange` is a number chart's value scale, `[low, high]`, the same across
- * charts that share one (sharedScale()); it too is the same array while it is the same. `label`
- * names the chart in place of its metric and unit, and `head` is what the title line shows in place
- * of that name (a link, a status dot), so a machine's chart is named by the machine: the figure
- * keeps `label` as its name. `derived` marks a derived metric's chart with a DerivedTag beside its title.
+ * while they are the same: a new one draws the chart again. `yRange` is a number chart's value
+ * scale, `[low, high]`, the same across charts that share one (sharedScale()); it too is the same
+ * array while it is the same. `label` names the chart in place of its metric and unit, and `head`
+ * is what the title line shows in place of that name (a link, a status dot), so a machine's chart
+ * is named by the machine: the figure keeps `label` as its name. `derived` marks a derived metric's
+ * chart with a DerivedTag beside its title.
  *
  * Colours and the axis font are the theme's tokens, read again on a theme switch. The figure is
  * named by its title, and `summary` (chartSummary(), utils/history.js) is its text for a screen
@@ -221,6 +235,8 @@ export function TimeSeriesChart({
   const [hover, setHover] = useState(null)
   const [runHover, setRunHover] = useState(null)
   const [markHover, setMarkHover] = useState(null)
+  const [keyMark, setKeyMark] = useState(null)
+  const plotRef = useRef(null)
   const palette = useChartPalette()
   const drawn = series.kind === 'number'
   const isFlag = series.kind === 'flag'
@@ -236,6 +252,10 @@ export function TimeSeriesChart({
   )
   const key = useMemo(() => (isState ? stateKey(stateShares(runs)) : null), [isState, runs])
   const changes = useMemo(() => (isFlag ? changeCount(series, runs) : null), [isFlag, series, runs])
+  const keyEntries = useMemo(() => {
+    const figures = drawn ? numberFigures(series, starts, { now }) : null
+    return figures ? numberKey(figures, starts, minutes, unit) : []
+  }, [drawn, series, starts, now, minutes, unit])
 
   useEffect(() => {
     const box = boxRef.current
@@ -254,6 +274,7 @@ export function TimeSeriesChart({
       return undefined
     }
     setFailed(false)
+    plotRef.current = plot
     setOver(plot.over)
     const resize = typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => plot.setSize({ width: box.clientWidth, height }))
@@ -262,7 +283,9 @@ export function TimeSeriesChart({
     return () => {
       resize?.disconnect()
       plot.destroy()
+      plotRef.current = null
       setOver(null)
+      setKeyMark(null)
     }
   }, [drawn, starts, series, start, end, height, validRange, yRange, palette, syncKey, plugins, unit])
 
@@ -286,6 +309,17 @@ export function TimeSeriesChart({
     const mark = marks.find(m => t >= m.startMs && t < m.endMs) ?? null
     setMarkHover(mark)
     setRunHover(mark ? null : runNear(runs, t, HOVER_SLACK_PX * msPerPx))
+  }
+
+  /** A key entry's mark, placed from the plot's own scales: a ring at a bucket's value, or a level. */
+  const markKey = (mark) => {
+    const plot = plotRef.current
+    if (!mark || typeof plot?.valToPos !== 'function') {
+      setKeyMark(null)
+      return
+    }
+    const top = plot.valToPos(mark.value, 'y')
+    setKeyMark(mark.at === null ? { top } : { top, left: ((mark.at - start) / (end - start)) * 100 })
   }
 
   const title = label ?? chartTitle(metric, unit)
@@ -323,10 +357,11 @@ export function TimeSeriesChart({
             {failed ? 'This chart could not be drawn in this browser.' : 'No readings in this window, and none before it.'}
           </div>
         )}
-        {drawn && !failed && over && (fraction !== null || band) && createPortal(
+        {drawn && !failed && over && (fraction !== null || band || keyMark) && createPortal(
           <>
             {fraction !== null && <NowMarker fraction={fraction} now={now} />}
             {band && <BandMark band={band} />}
+            {keyMark && <KeyMark mark={keyMark} />}
           </>,
           over,
         )}
@@ -334,6 +369,7 @@ export function TimeSeriesChart({
       {isState && key.shown.length > 0 && (
         <StateBandKey stateKey={key} carried={runs.some(r => r.carried.length > 0)} mixed={marks.length > 0} flag={isFlag} changes={changes} />
       )}
+      {keyEntries.length > 0 && <NumberKey entries={keyEntries} onMark={markKey} />}
       <p className="sr-only" id={`${id}-summary`}>{summary}</p>
     </figure>
   )

@@ -563,6 +563,69 @@ export function stateKey(shares, max = STATE_KEY_MAX) {
 }
 
 /**
+ * A number chart's figures over its window, or null when no bucket has a value.
+ *
+ * `lowest` and `highest` come from the buckets' own minimum and maximum, so they are the true
+ * extremes of the readings at any bucket size: `{ value, i, carried }`, `i` the bucket they were in
+ * (the first, and a bucket that was read before one carried forward, when two tie). A carried bucket
+ * counts: the value it held was the metric's value in the window.
+ *
+ * `mean` and `median` are over time, not over readings. Under report by exception a device sends
+ * little while a value is steady, so the readings lean towards the moments it moved. Each bucket
+ * counts once, carried ones included, so every stretch of the window weighs the same: the mean is
+ * the average value as it was held, and the median the value held for half of the window. Both are
+ * taken over the buckets' averages, so they are at the bucket's resolution. A bucket starting at or
+ * after `now` is left out.
+ */
+export function numberFigures(series, starts, { now = Infinity } = {}) {
+  const held = []
+  let lowest = null
+  let highest = null
+  series.avg.forEach((avg, i) => {
+    if (!isValue(avg) || starts[i] * 1000 >= now) return
+    held.push(avg)
+    const carried = Boolean(series.carried[i])
+    const lo = isValue(series.min[i]) ? series.min[i] : avg
+    const hi = isValue(series.max[i]) ? series.max[i] : avg
+    if (!lowest || lo < lowest.value || (lo === lowest.value && lowest.carried && !carried)) lowest = { value: lo, i, carried }
+    if (!highest || hi > highest.value || (hi === highest.value && highest.carried && !carried)) highest = { value: hi, i, carried }
+  })
+  if (!held.length) return null
+  const sorted = [...held].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  return {
+    lowest,
+    highest,
+    mean: held.reduce((a, b) => a + b, 0) / held.length,
+    median: sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2,
+  }
+}
+
+/**
+ * A number chart's key under it, from numberFigures(): one entry each for the lowest, the highest,
+ * the mean and the median, `{ id, label, value, when, mark }`. `value` carries the unit as the chart's
+ * head does (readingWords()); `when` is the bucket's start for an extreme, "carried forward" when
+ * that bucket was, and "over time" for the other two. `mark` is what hovering the entry points at on
+ * the chart: `{ at, value }`, `at` a time in milliseconds, or null for a level across the whole window.
+ */
+export function numberKey(figures, starts, minutes, unit) {
+  const extreme = (id, label, f) => ({
+    id,
+    label,
+    value: readingWords(f.value, unit),
+    when: `${momentWords(starts[f.i] * 1000, minutes)}${f.carried ? ', carried forward' : ''}`,
+    mark: { at: starts[f.i] * 1000, value: f.value },
+  })
+  const level = (id, label, value) => ({ id, label, value: readingWords(value, unit), when: 'over time', mark: { at: null, value } })
+  return [
+    extreme('lowest', 'min', figures.lowest),
+    extreme('highest', 'max', figures.highest),
+    level('mean', 'mean', figures.mean),
+    level('median', 'median', figures.median),
+  ]
+}
+
+/**
  * The hue a state's value is drawn in, 0 to 359, from its text alone, so a value has the same
  * colour on every chart, device, refresh and session, and a value never seen before has one too.
  * djb2 over the text's code points, then murmur3's finaliser, since djb2 alone moves with the last
@@ -748,10 +811,10 @@ export const chartTitle = (metric, unit) => (unit ? `${metric} (${unitSymbol(uni
 
 /**
  * The text a screen reader is given for a chart: the metric, the window, the resolution, the
- * latest reading and its bucket (as the chart head says it), the lowest and highest, a state's
- * share of the time in each value, how many buckets carried a value forward, and the valid range
- * where the schema declares one. `span` (`{ start, end, now }`, in milliseconds) places a state's
- * runs.
+ * latest reading and its bucket (as the chart head says it), the lowest and highest, the mean and
+ * median over time (numberFigures()), a state's share of the time in each value, a flag's changes,
+ * how many buckets carried a value forward, and the valid range where the schema declares one.
+ * `span` (`{ start, end, now }`, in milliseconds) places a state's runs and bounds the figures.
  */
 export function chartSummary({ metric, unit, windowText, resolution, series, validRange, starts, span, read = null, derived = false }) {
   const head = `${chartTitle(metric, unit)}${derived ? ', a derived metric' : ''}, ${windowText}, ${series.runs ? 'every change' : read ?? `in ${resolution.words}`}.`
@@ -779,9 +842,11 @@ export function chartSummary({ metric, unit, windowText, resolution, series, val
     parts.push(held === undefined ? 'No reading in this window.' : `No reading in this window; ${word(held)} is carried forward from before it.`)
   }
   if (series.kind === 'number') {
-    const lows = series.min.filter(v => v !== null)
-    const highs = series.max.filter(v => v !== null)
-    parts.push(`Lowest ${word(Math.min(...lows))}, highest ${word(Math.max(...highs))}.`)
+    const figures = numberFigures(series, starts, { now: span?.now })
+    if (figures) {
+      parts.push(`Lowest ${word(figures.lowest.value)}, highest ${word(figures.highest.value)}.`)
+      parts.push(`Mean ${word(figures.mean)} and median ${word(figures.median)} over time.`)
+    }
   }
   if ((series.kind === 'state' || series.kind === 'flag') && span) {
     const runs = stateRuns(series, starts, { ...span, minutes: resolution.minutes })

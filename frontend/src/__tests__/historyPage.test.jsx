@@ -168,8 +168,12 @@ describe("a device's charts", () => {
     const first = Math.floor(Date.parse(api.readCarriedTelemetry.mock.calls[0][0].from) / width) * width
     expect(load).toHaveAccessibleDescription(
       `Spindle/LOAD (kW), Last 7 days, in 5-minute buckets. Latest 41 kW, in the bucket from ${momentWords(first + width, 5)}.`
-      + ' Lowest 39 kW, highest 45 kW. 1 of 2017 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
+      + ' Lowest 39 kW, highest 45 kW. Mean 41 kW and median 41 kW over time.'
+      + ' 1 of 2017 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
     expect(screen.getByText('Valid range 0 to 120 kW')).toBeInTheDocument()
+    // Under the chart: its min and max from the buckets own, and its mean and median over time.
+    const key = [...within(figures[0]).getAllByRole('listitem')].map(li => [...li.querySelectorAll('span')].map(s => s.textContent))
+    expect(key.map(k => [k[0], k[1]])).toEqual([['min', '39 kW'], ['max', '45 kW'], ['mean', '41 kW'], ['median', '41 kW']])
     expect(plots).toHaveLength(2)
   })
 

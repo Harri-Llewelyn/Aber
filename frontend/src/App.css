@@ -6204,6 +6204,36 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .chart-state-time { font-variant-numeric: tabular-nums; }
 .chart-state-time::before { content: "·"; margin-right: 6px; }
 .chart-state-key-changes .chart-state-key-name { font-family: inherit; color: inherit; }
+/* A number chart's key, in the text key's place and style: its lowest and highest with their buckets,
+   and its mean and median over time. An entry lights while the pointer is on it, and the chart marks
+   what it names: a ring on a bucket's value, or a dotted line across at a level. */
+.chart-number-key { gap: 2px 18px; }
+.chart-number-key-entry { flex-wrap: wrap; padding: 0 4px; margin: 0 -4px; border-radius: var(--radius-xs); }
+.chart-number-key-label { color: var(--text-muted); }
+.chart-number-key-entry:hover { background: var(--bg-glass); }
+.chart-number-key-value { font-family: var(--font-mono); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.chart-number-key-when::before { content: "·"; margin-right: 6px; }
+.chart-point-mark {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid var(--text-primary);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--bg-card);
+  pointer-events: none;
+}
+.chart-level-mark {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--text-primary);
+  pointer-events: none;
+}
 .chart-state-swatch {
   flex-shrink: 0;
   width: 10px;
