@@ -49,7 +49,6 @@ import uuid
 
 import psycopg2
 import psycopg2.errors
-from psycopg2 import sql
 from psycopg2.extras import Json
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
@@ -304,11 +303,10 @@ class TheResolution(Base):
 
 
 class TheChecks(Base):
-    def insert_device(self, **columns):
-        statement = sql.SQL("INSERT INTO public.devices (name, {names}) VALUES ('Probe', {marks});").format(
-            names=sql.SQL(", ").join(sql.Identifier(name) for name in columns),
-            marks=sql.SQL(", ").join(sql.Placeholder() for _ in columns))
-        self.cur.execute(statement, tuple(columns.values()))
+    def insert_device(self, location_scope, cell_id=None, area_id=None):
+        self.cur.execute(
+            "INSERT INTO public.devices (name, location_scope, cell_id, area_id) VALUES ('Probe', %s, %s, %s);",
+            (location_scope, cell_id, area_id))
 
     def refused(self, constraint, **columns):
         self.cur.execute("SAVEPOINT probe;")
@@ -677,10 +675,17 @@ class TheWriters(Base):
         self.assertEqual(self.cur.fetchone()[0], ["PROPOSAL_APPLIED", "UPDATE"])
 
     def approve_quarantined(self, device_id, **args):
-        names = ["p_device_id", "p_actor_id"] + list(args)
-        arguments = sql.SQL(", ").join(sql.SQL("{} => %s").format(sql.Identifier(name)) for name in names)
-        self.cur.execute(sql.SQL("SELECT public.approve_quarantined_device({});").format(arguments),
-                         (device_id, MANAGER_ID, *args.values()))
+        """The call with every argument named, the ones not given as the function's own defaults."""
+        given = {"p_gateway_id": None, "p_cell_id": None, "p_location_scope": None, "p_set_cell": False,
+                 "p_set_location_scope": False, "p_area_id": None, "p_set_area": False, **args}
+        self.assertEqual(set(given), {"p_gateway_id", "p_cell_id", "p_location_scope", "p_set_cell",
+                                      "p_set_location_scope", "p_area_id", "p_set_area"})
+        self.cur.execute(
+            "SELECT public.approve_quarantined_device(p_device_id => %s, p_actor_id => %s, p_gateway_id => %s,"
+            " p_cell_id => %s, p_location_scope => %s, p_set_cell => %s, p_set_location_scope => %s,"
+            " p_area_id => %s, p_set_area => %s);",
+            (device_id, MANAGER_ID, given["p_gateway_id"], given["p_cell_id"], given["p_location_scope"],
+             given["p_set_cell"], given["p_set_location_scope"], given["p_area_id"], given["p_set_area"]))
         return self.cur.fetchone()[0]
 
     def quarantined(self):
