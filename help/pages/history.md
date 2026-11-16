@@ -22,7 +22,7 @@ Everyone who can sign in can open History. Each lane and chart shows only what y
 
 The strip never shows a reading's value, only how many arrived. A lane says **No readings since 15:00** when a device's readings stop inside the window. Machines send a reading only when a value changes, so a steady machine can be quiet for hours. The status dot says whether the device is online, and an offline device says **Offline**.
 
-The lanes are grouped as the Site Map places devices: each area and its cells, the cells in no area, then **Site-Wide**, **Simulated** and **Unassigned**. Each group's heading is in the column of names, a cell's a step in from its area's. Archived devices are not shown. With many devices the lanes scroll inside the card, and the time axis and the headings stay in view.
+The lanes are grouped as the Site Map places devices: each area and its cells, the cells in no area, then **Site-Wide**, **Simulated**, **Replay lanes** and **Unassigned**. Each group's heading is in the column of names, a cell's a step in from its area's. Archived devices are not shown. With many devices the lanes scroll inside the card, and the time axis and the headings stay in view.
 
 The strips follow the Audit Trail's time axis, after the column of names, so they do not line up with the Device tab's charts.
 
@@ -30,6 +30,13 @@ The strips follow the Audit Trail's time axis, after the column of names, so the
 - **Select Collapse all or Expand all**, at the start of the line above the lanes, to close or open every group.
 - This browser remembers which groups you opened and closed. On a first visit every group is open, unless there are more than 200 devices. Then every group starts closed.
 - **Type in the search box** to show only the devices whose name, id, cell or area matches.
+
+**Replay lanes are hidden until you ask for them.** A playback makes one for each device a capture recorded. A replay lane is not a machine, and it is in no area or cell. To show them:
+
+1. Select **Filters** in the toolbar. The button appears once a replay lane exists.
+2. Tick **Show replay lanes**. The number beside it is how many lanes it adds.
+
+The **Replay lanes** group then appears after **Simulated**. The same tick box is on the Devices page, and on the Device tab. Select **Clear** in the panel to hide the lanes again.
 
 The part of the window after now is hatched and says **No readings yet**. A crosswise hatch marks a stretch the historian has not counted yet. After an upgrade it counts older history in the background, and the line above the lanes says so, for example **Coverage before 3 Oct is still being computed**.
 
@@ -66,10 +73,12 @@ The newest few minutes are counted a little after they arrive, so the right-hand
 
 ## Choosing a device and a window
 
-1. Open **History** in the sidebar, directly below the Site Map, and select the **Device** tab. It lists every device.
+1. Open **History** in the sidebar, directly below the Site Map, and select the **Device** tab. It lists every device except the replay lanes.
 2. Type in the search box to find a device by its name, its id, its cell or its area. Select its name.
 3. Choose the period in the **time window**, after the device's name. It opens on **Last 24 hours**.
 4. To chart another device, select its name in the toolbar and pick one from the list.
+
+To list the replay lanes, tick **Show replay lanes**: in **Filters** on the list, or in the toolbar's list of devices. The tick box appears once a replay lane exists. Open a replay lane's charts from a link, such as a lane's name on Overview, and the tick box is ticked for you. The address keeps it, so a link you share shows the same list.
 
 You can also start from a device. On the Devices page, open the device and select **View History**.
 

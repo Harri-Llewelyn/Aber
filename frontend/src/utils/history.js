@@ -12,8 +12,9 @@ import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
 import { datatypeLabel } from './sparkplugDatatype'
 import { modelledConstraints } from './payloadConformance'
 import { deviceIdentifiers, deviceIds } from './sparkplugId'
-import { SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell, isSiteWideSource } from './cellResolution'
+import { SOURCE_SHADOW, SOURCE_SIMULATED, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, groupDevicesByCell, isSiteWideSource } from './cellResolution'
 import { areaWideInService, inServiceDevices } from './inService'
+import { REPLAY_LANES_PARAM, isReplayLane } from './replayLanes'
 import { DERIVED_MAX_MINUTES, SHARE_UNIT, derivedInputCount, derivedReportedBy, percentWords, unitOf } from './derivedMetric'
 import { unitSticks, unitSymbol, withUnit } from './units'
 import {
@@ -242,13 +243,14 @@ export function overviewAddress(win, { devices = [] } = {}) {
 /**
  * The address of a device's charts, or the picker's, keeping the window shown now, and the metrics
  * chosen (`metric`) and the bucket choice (`bucket`) when they are not the defaults. The next
- * device keeps the metrics it has.
+ * device keeps the metrics it has. `replay` keeps the Show replay lanes check on.
  */
-export function pickedAddress(deviceId, win, { metrics = [], bucket = 'auto' } = {}) {
+export function pickedAddress(deviceId, win, { metrics = [], bucket = 'auto', replay = false } = {}) {
   const query = new URLSearchParams()
   for (const [k, v] of Object.entries(windowToQuery(win, DEFAULT_HISTORY_WINDOW))) if (v) query.set(k, v)
   if (metrics.length) query.set('metric', encodeList(metrics))
   if (bucket && bucket !== 'auto') query.set('bucket', bucket)
+  if (replay) query.set(REPLAY_LANES_PARAM, '1')
   // A list reads with its commas, as useUrlList writes it.
   const q = query.toString().replace(/%2C/gi, ',')
   return `${deviceHistoryPath(deviceId)}${q ? `?${q}` : ''}`
@@ -949,13 +951,19 @@ export function blockWords(minutes) {
 
 /**
  * The groups that are lanes of their own on the Site Map, in its order, keyed by location source.
- * `has` says which sources fill one: Site-Wide takes a device behind a Site-Wide gateway too.
+ * `has` says which devices fill one: Site-Wide takes a device behind a Site-Wide gateway too. Replay
+ * lanes sit after Simulated: a group of their own, not a place on the floor, and `lanes` marks the
+ * one that takes the devices inServiceDevices() leaves out.
  */
 const OVERVIEW_LANES = [
-  { key: SOURCE_SITE_WIDE, label: 'Site-Wide', has: isSiteWideSource },
-  { key: SOURCE_SIMULATED, label: 'Simulated', has: (source) => source === SOURCE_SIMULATED },
-  { key: SOURCE_UNASSIGNED, label: 'Unassigned', has: (source) => source === SOURCE_UNASSIGNED },
+  { key: SOURCE_SITE_WIDE, label: 'Site-Wide', has: (d) => isSiteWideSource(d.location_source) },
+  { key: SOURCE_SIMULATED, label: 'Simulated', has: (d) => d.location_source === SOURCE_SIMULATED },
+  { key: SOURCE_SHADOW, label: 'Replay lanes', has: isReplayLane, lanes: true },
+  { key: SOURCE_UNASSIGNED, label: 'Unassigned', has: (d) => d.location_source === SOURCE_UNASSIGNED },
 ]
+
+/** The Replay lanes group's key, which Overview leaves out until the Show replay lanes check is on. */
+export const REPLAY_LANES_GROUP = SOURCE_SHADOW
 
 /** The group of cells filed in no area, named as the Site Map's tray is. */
 export const UNFILED_GROUP = 'Unfiled — in no area yet'
@@ -969,12 +977,14 @@ const inNameOrder = (own) => (a, b) => nameOf(a, own).localeCompare(nameOf(b, ow
 /**
  * The Overview's groups, each device where the Site Map places it: every area in service, in name
  * order, holding a group for each of its cells in service and one for its Area-Wide devices; the
- * cells in no area under UNFILED_GROUP; then Site-Wide, Simulated and Unassigned. Only devices in
- * service are placed (inServiceDevices()), and a group with none is left out. Each is
- * `{ key, label, devices, groups? }`, an area's `devices` being all its groups', in name order.
+ * cells in no area under UNFILED_GROUP; then Site-Wide, Simulated, Replay lanes (REPLAY_LANES_GROUP)
+ * and Unassigned. Only devices in service are placed (inServiceDevices()), and the replay lanes that
+ * are not archived. A group with none is left out. Each is `{ key, label, devices, groups? }`, an
+ * area's `devices` being all its groups', in name order.
  */
 export function overviewGroups(devices, cells = [], areas = []) {
   const live = inServiceDevices(devices).slice().sort(inNameOrder('asset_name'))
+  const lanes = inServiceDevices(devices, { replayLanes: true }).filter(isReplayLane).sort(inNameOrder('asset_name'))
   const byCell = groupDevicesByCell(live)
   const liveCells = cells.filter(c => !c.is_archived).slice().sort(inNameOrder('cell_name'))
   const cellGroup = (c) => {
@@ -996,7 +1006,7 @@ export function overviewGroups(devices, cells = [], areas = []) {
   const unfiled = filled(liveCells.filter(c => !c.area_id).map(cellGroup))
   if (unfiled.length) out.push(parent('unfiled', UNFILED_GROUP, unfiled))
   for (const lane of OVERVIEW_LANES) {
-    const laneDevices = live.filter(d => lane.has(d.location_source))
+    const laneDevices = (lane.lanes ? lanes : live).filter(lane.has)
     if (laneDevices.length) out.push({ key: lane.key, label: lane.label, devices: laneDevices })
   }
   return out

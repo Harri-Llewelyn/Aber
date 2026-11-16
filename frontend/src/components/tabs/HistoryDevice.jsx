@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 
 import { HISTORY_CHANGE_SERIES, api } from '../../api'
 import { useSetting } from '../../hooks/useSettings'
 import { ToolbarPopover } from '../common/FiltersPopover'
+import { ReplayLanesCheck } from '../common/ReplayLanesCheck'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { TimeSeriesChart } from '../common/TimeSeriesChart'
@@ -26,6 +27,7 @@ import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBands } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import { deviceIds } from '../../utils/sparkplugId'
+import { isReplayLane } from '../../utils/replayLanes'
 import { splitDerived, unitOf } from '../../utils/derivedMetric'
 import {
   EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem, mayExportReadings,
@@ -42,10 +44,15 @@ import {
 /** How often the page looks at the clock, so the now marker follows it. */
 const CLOCK_MS = 60 * 1000
 
-/** The toolbar's device: its name, opening a list of the others to chart instead, at the same view. */
-function DeviceSwitcher({ device, devices, win, chosen, bucket }) {
+/**
+ * The toolbar's device: its name, opening a list of the others to chart instead, at the same view.
+ * The list leaves out replay lanes until its Show replay lanes check is on, except the device
+ * charted now. The check is offered while a lane exists (`laneCount`).
+ */
+function DeviceSwitcher({ device, devices, win, chosen, bucket, showLanes, setShowLanes, laneCount }) {
   const [search, setSearch] = useState('')
-  const shown = devices.filter(d => deviceMatches(d, search))
+  const listed = devices.filter(d => showLanes || d.asset_id === device.asset_id || !isReplayLane(d))
+  const shown = listed.filter(d => deviceMatches(d, search))
   return (
     <ToolbarPopover
       label="Choose a device"
@@ -57,14 +64,15 @@ function DeviceSwitcher({ device, devices, win, chosen, bucket }) {
       {({ close }) => (
         <>
           <SearchInput value={search} onChange={setSearch} placeholder="Find a device…" ariaLabel="Find a device" width="md" />
+          {laneCount > 0 && <ReplayLanesCheck checked={showLanes} onChange={setShowLanes} count={laneCount} />}
           <ul className="history-device-list">
             {shown.map(d => (
               <li key={d.asset_id}>
                 <RouteLink
-                  to={pickedAddress(d.asset_id, win, { metrics: chosen, bucket })}
+                  to={pickedAddress(d.asset_id, win, { metrics: chosen, bucket, replay: showLanes })}
                   className={`history-device-option${d.asset_id === device.asset_id ? ' is-current' : ''}`}
                   aria-current={d.asset_id === device.asset_id ? 'true' : undefined}
-                  onNavigate={() => { close(); navigate(pickedAddress(d.asset_id, win, { metrics: chosen, bucket })) }}
+                  onNavigate={() => { close(); navigate(pickedAddress(d.asset_id, win, { metrics: chosen, bucket, replay: showLanes })) }}
                 >
                   <OverflowText>{d.asset_name}</OverflowText>
                   {(d.cell_name || d.area_name) && (
@@ -176,6 +184,9 @@ const WIDTH_SETTLE_MS = 300
  * the window, resolved to its bounds as it opens, for an Administrator or a Shopfloor Manager, and
  * for a window no longer than history.export_max_days: the button says why when it is off.
  *
+ * The toolbar's device switcher lists the others, replay lanes only while its Show replay lanes
+ * check is on (`showLanes`, `?replay=1`); the device charted now is always listed.
+ *
  * The window zooms as the Audit Trail's does: Zoom in and Zoom out in the time control, and a drag
  * across any chart, which shades the band on every chart and sets it as the window on release, as a
  * new history entry, so Back undoes it.
@@ -184,7 +195,9 @@ const WIDTH_SETTLE_MS = 300
  * opens and closes it. A closed group only hides its charts: the reads, the row cap and the Metrics
  * filter are the same. Which are closed is kept in this browser (CLOSED_GROUPS_KEY).
  */
-export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, every, setEvery, userRole, showToast }) {
+export function HistoryDevice({
+  device, devices, schemas, catalog, win, setWin, every, setEvery, userRole, showToast, showLanes, setShowLanes, laneCount,
+}) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const metrics = useMemo(() => deviceMetrics(device, schemas, catalog), [device, schemas, catalog])
@@ -401,7 +414,10 @@ export function HistoryDevice({ device, devices, schemas, catalog, win, setWin, 
   return (
     <>
       <div className="filter-bar">
-        <DeviceSwitcher device={device} devices={devices} win={win} chosen={chosen} bucket={bucket} />
+        <DeviceSwitcher
+          device={device} devices={devices} win={win} chosen={chosen} bucket={bucket}
+          showLanes={showLanes} setShowLanes={setShowLanes} laneCount={laneCount}
+        />
         <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} zoom />
         <FilterDropdown
           label="Metrics"
