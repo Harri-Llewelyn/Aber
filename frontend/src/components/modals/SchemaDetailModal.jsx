@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import {
-  IconGitBranch, IconLock, IconHistory, IconAlertTriangle, IconCheck, IconDownload, IconTrash
+  IconGitBranch, IconLock, IconHistory, IconAlertTriangle, IconCheck, IconTrash
 } from '../common/Icons'
 import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
@@ -43,7 +43,7 @@ function StoredKeys({ entry }) {
  */
 export function SchemaDetailModal({
   schema, schemas = [], catalog = [], deviceCount = 0, canManage = false,
-  onFork, onPublish, onDiscard, onSaveDraft, onDownload, onClose, showToast
+  onFork, onPublish, onDiscard, onSaveDraft, onClose, showToast
 }) {
   const editable = isSchemaEditable(schema)
   const status = schemaStatus(schema)
@@ -226,23 +226,6 @@ export function SchemaDetailModal({
   const footer = (
     <>
       <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
-
-      {/* Visible here rather than behind an overflow menu: this is the screen someone is on
-          when they want the file in an editor. It downloads what is stored, so on a dirty draft
-          that is the last saved state. */}
-      <Tooltip text={!schema?.schema_definition
-        ? 'This version has no definition to download'
-        : editable && dirty
-          ? 'Downloads the last saved draft — unsaved changes are not included'
-          : `Save ${schema?.schema_name}.schema.json to open in an editor or JSON Schema tool`}>
-        <button
-          className={`btn btn-ghost ${!schema?.schema_definition ? 'btn-disabled' : ''}`}
-          disabled={!schema?.schema_definition || busy}
-          onClick={() => onDownload?.()}
-        >
-          <IconDownload size={13} /> Download JSON
-        </button>
-      </Tooltip>
 
       {/* Both write buttons are locked by `busy`, but only the one clicked spins. */}
       {editable && (

@@ -2293,8 +2293,9 @@ dependency but CodeMirror, Lezer and `yaml`.
 **The Schemas page reads and writes YAML with the Automations page's machinery, and shares it**: no second
 YAML style. Its list has **Upload** and **Export** beside **Build Schema from Catalog**, in the order the
 Automations toolbar has them. A row's box ticks it for **Export**, which says how many (**Export (2)**) and
-saves them, or every schema in force with none ticked. The drawer's one export, **Export YAML**, replaces
-**Download JSON**. The format is `docs/device-schemas.md`.
+saves them, or every schema in force with none ticked. A schema's one export is **Export YAML**, in its
+drawer: neither the drawer nor the detail dialog offers **Download JSON**. The format is
+`docs/device-schemas.md`.
 
 - **One JSON Schema each.** `public/json-schema/device-schemas.schema.json` is served beside the
   automations one. `AutomationEditor` takes the schema as a prop (`schema`, the automations' when left

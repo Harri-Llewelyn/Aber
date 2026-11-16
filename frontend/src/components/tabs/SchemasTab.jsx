@@ -10,7 +10,6 @@ import { SchemaDetailModal } from '../modals/SchemaDetailModal'
 import { SchemaForkModal } from '../modals/SchemaForkModal'
 import { ApplySchemasModal } from '../modals/ApplySchemasModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
-import { downloadJSON } from '../../utils/downloadJSON'
 import { downloadBlob } from '../../utils/downloadBlob'
 import { renderDeviceSchemasYaml } from '../../utils/deviceSchemaYaml'
 import { DEVICE_SCHEMAS_FILE_MAX_BYTES, DEVICE_SCHEMAS_FILE_NAME } from '../../utils/deviceSchemas'
@@ -205,23 +204,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         : ''),
       'success'
     )
-  }
-
-  /**
-   * Download a version's definition as a standalone `.schema.json`. The stored document verbatim,
-   * so it diffs cleanly against the database and the previous version; the identity rides on the
-   * filename, which carries the version. `.schema.json` so editors and tooling recognise it.
-   */
-  const handleDownloadSchema = (sch) => {
-    if (!sch?.schema_definition) {
-      // downloadJSON() returns silently on falsy data, so an empty definition would look like a
-      // button that does nothing. Say what happened instead.
-      showToast(`Schema '${sch?.schema_name || 'unknown'}' has no definition to download`, 'error')
-      return
-    }
-    const filename = `${sch.schema_name}.schema.json`
-    downloadJSON(sch.schema_definition, filename)
-    showToast(`Downloaded ${filename}`, 'success')
   }
 
   /**
@@ -527,7 +509,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           canManage={canManageSchema}
           showToast={showToast}
           onFork={() => { setForkTarget(detailSchema); setDetailSchema(null) }}
-          onDownload={() => handleDownloadSchema(detailSchema)}
           onSaveDraft={handleSaveDraft}
           onPublish={handlePublish}
           onDiscard={() => setDiscardTarget(detailSchema)}

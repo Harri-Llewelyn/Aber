@@ -4,7 +4,7 @@ import { fail, pass, read } from './lib.mjs';
 // 404. The Schemas help names each control of an export and an upload as the page labels it, and each
 // status the preview draws. The help is written to be followed: "choose **Upload**" in a page whose
 // button says Load sends a reader looking for a control that is not there. A schema has one export,
-// so the drawer says Export YAML and offers no Download JSON.
+// so the drawer says Export YAML, and neither it nor the detail dialog offers Download JSON.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
   const HELP = 'help/pages/schemas.md';
@@ -25,6 +25,8 @@ export default function check() {
   }
   if (!page.includes("label: 'Export YAML'")) problems404.push(`${PAGE} has no drawer action Export YAML`);
   if (page.includes("label: 'Download JSON'")) problems404.push(`${PAGE} still offers Download JSON in the drawer, where a schema has one export, Export YAML`);
+  const DETAIL = 'frontend/src/components/modals/SchemaDetailModal.jsx';
+  if (read(DETAIL).includes('Download JSON')) problems404.push(`${DETAIL} still offers Download JSON, where a schema has one export, Export YAML`);
   if (!help.includes('device-schemas.yaml') || !read('frontend/src/utils/deviceSchemas.js').includes("'device-schemas.yaml'")) {
     problems404.push(`${HELP} and utils/deviceSchemas.js do not both say the file is device-schemas.yaml`);
   }
