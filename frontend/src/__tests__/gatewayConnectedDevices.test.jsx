@@ -77,8 +77,8 @@ describe('the gateway devices column', () => {
   })
 
   it('pins a quarantined device however deep in the fleet it sits', async () => {
-    // Same rule as Unmodelled on the Devices row: it is the one entry that calls for action, and
-    // it would otherwise be lost among nineteen healthy ones.
+    // It is the one entry that calls for action, and it would otherwise be lost among nineteen
+    // healthy ones.
     const fleet = [...twenty.slice(0, 19), device(20, { is_quarantined: true, status: 'OFFLINE' })]
     await show(fleet)
 

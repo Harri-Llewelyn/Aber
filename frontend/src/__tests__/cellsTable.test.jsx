@@ -221,8 +221,7 @@ describe('assigned gateways and devices', () => {
     expect(within(row).getByRole('button', { name: /^\+/ })).toBeTruthy()
   })
 
-  /* A quarantined device is pinned, as Unmodelled is on the Devices page: it is the entry that
-     calls for action. */
+  /* A quarantined device is pinned: it is the entry that calls for action. */
   it('keeps a quarantined device visible however many healthy ones surround it', async () => {
     renderCells({}, {
       devices: [
