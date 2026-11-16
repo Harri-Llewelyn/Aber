@@ -17,18 +17,18 @@ export default function check() {
   if (!parse || !shape || !apply || !trigger || !nameFormat) return;
   const { derivedMetric, input } = schema.$defs;
   const props = derivedMetric.properties;
-  const constant = (fn, name, type) => need(fn.body.split('\n').find((line) => line.trim().startsWith(`${name} `)) ?? '',
-    new RegExp(`CONSTANT ${type}\\s+:=\\s+'?([^;']+)'?;`), `${name} in ${fn.file}`)?.[1];
+  const constant = (fn, name) => need(fn.body.split('\n').find((line) => line.trim().startsWith(`${name} `)) ?? '',
+    /CONSTANT (?:integer|text)\s+:=\s+'?([^;']+)'?;/, `${name} in ${fn.file}`)?.[1];
 
   compare('derivedMetricsVocabulary', `the most derived metrics in a file, in the schema and in derived_metrics_parse() (${parse.file})`,
-    schema.maxItems, constant(parse, 'c_max_metrics', 'integer'));
+    schema.maxItems, constant(parse, 'c_max_metrics'));
   compare('derivedMetricsVocabulary', `the most inputs of a sum, in the schema, in derived_metrics_parse() (${parse.file}) and in derivation_shape_problem() (${shape.file})`,
     [props.inputs.maxItems, props.inputs.maxItems].join(', '),
-    [constant(parse, 'c_max_inputs', 'integer'), constant(shape, 'c_max_inputs', 'integer')].join(', '));
+    [constant(parse, 'c_max_inputs'), constant(shape, 'c_max_inputs')].join(', '));
   compare('derivedMetricsVocabulary', `the fewest inputs of a sum, in the schema and in derivation_shape_problem() (${shape.file})`,
     props.inputs.minItems, need(shape.body, /NOT BETWEEN (\d+) AND c_max_inputs/, 'the fewest inputs of a sum in derivation_shape_problem()')?.[1]);
   compare('derivedMetricsVocabulary', 'the metric name pattern of the schema (a name, an input, an input of a sum), derived_metrics_parse(), derivation_shape_problem() and the catalogue table CHECK',
-    [props.name.pattern, props.input.pattern, input.properties.metric.pattern, constant(parse, 'c_name', 'text'), constant(shape, 'c_name', 'text')].join(' | '),
+    [props.name.pattern, props.input.pattern, input.properties.metric.pattern, constant(parse, 'c_name'), constant(shape, 'c_name')].join(' | '),
     new Array(5).fill(nameFormat[1]).join(' | '));
   compare('derivedMetricsVocabulary', `the longest description, in the schema and in derived_metrics_parse() (${parse.file})`,
     props.description.maxLength, [...parse.body.matchAll(/char_length\(v_val #>> '\{\}'\) > (\d+)/g)].map((m) => m[1]).join(', '));

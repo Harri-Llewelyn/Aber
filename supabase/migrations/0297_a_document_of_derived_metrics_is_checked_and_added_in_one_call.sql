@@ -351,7 +351,7 @@ BEGIN
       ELSIF v_def IS NOT NULL
             AND public.derivation_canonical(v_have.derivation) IS DISTINCT FROM public.derivation_canonical(v_def) THEN
         v_reasons := v_reasons || public.automation_reason(v_path || '.name', format(
-          '`%s` already exists with another definition, and a definition is fixed once saved. Add this one under a new name, then deprecate `%s` and name the new one as its replacement.', v_name, v_name));
+          '`%s` already exists with another definition, and a definition is fixed once saved. Add this one under a new name, then deprecate `%s`, choosing the new one as Superseded By.', v_name, v_name));
       ELSIF v_def IS NOT NULL AND v_desc_ok
             AND public.derived_metric_description(v_have.description) IS DISTINCT FROM v_desc THEN
         v_reasons := v_reasons || public.automation_reason(

@@ -337,7 +337,7 @@ class Applying(DerivedBase):
         self.assertIn("fixed once saved", message)
         self.assertIn("new name", message)
         self.assertIn("deprecate", message)
-        self.assertIn("replacement", message)
+        self.assertIn("Superseded By", message)
         self.assertEqual(self.apply([rate(RATE, PHASE_A, description=RATE_DESCRIPTION)], dry_run=False)[0]["status"], "refused")
         self.assertEqual(self.row(RATE), before, "an upload never edits")
 
