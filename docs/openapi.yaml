@@ -1063,14 +1063,26 @@ paths:
         text or a flag. Raw is read from the oldest reading the historian still holds (`raw_from`);
         a window that starts earlier is read from there, and `read_from` says where.
 
-        **At most 50,000 rows.** Past that the rows end at a whole minute: `truncated` is true and
-        `read_to` is the time they end. A minute that holds more than 50,000 readings returns none.
-        The read is bounded by time, from the rollup's own count of what each hour and minute holds,
-        because `postgres_fdw` sends no `LIMIT` for a read naming devices and metrics.
+        **A name in `metric_names` that is a derived metric** (`metric_catalog.derivation`) is read
+        through `derived_series()`, the function History reads, and not from a rollup. It has no
+        readings, only buckets: its rows are the resolution's buckets, and one minute for `raw`, which
+        no derived metric is finer than. A row's `time` is the bucket's start and its `value` the
+        bucket's value, as for a rollup, and `unit` is its catalogue unit (`COUNT/HOUR` for a rate), or
+        `% of the time` for a time in state, whose value is a fraction from 0 to 1. `derived` names each
+        one asked for with its kind, its definition in words and its unit. A derived metric starts at
+        the window's start, whatever `raw_from` says, and a device that lacks an input of it has no row.
+
+        **At most 50,000 rows**, derived ones included. Past that the rows end at a whole minute:
+        `truncated` is true and `read_to` is the time they end. A minute that holds more than 50,000
+        readings returns none. The read is bounded by time, from the rollup's own count of what each
+        hour and minute holds (a derived metric's is the devices that have its inputs times its buckets),
+        because `postgres_fdw` sends no `LIMIT` for a read naming devices and metrics. Derived metrics are
+        read in chunks that each stay inside `derived_series()`'s limits.
 
         **An export that returns rows writes one `TELEMETRY_EXPORTED` row in the Audit Trail**, in
         the asset lane under `telemetry`, naming who exported, the devices (id and name), the
-        metrics, the window, the resolution and how many rows left. `audit_id` is that row's id. One
+        metrics, the window, the resolution and how many rows left, and, when a derived metric was
+        asked for, its name and definition (`derived`). `audit_id` is that row's id. One
         that returns none writes none, and a refusal writes none. `SECURITY DEFINER`.
       requestBody:
         content:
@@ -1082,8 +1094,8 @@ paths:
                 from_ts: { type: string, format: date-time, description: 'Readings from this time on.' }
                 to_ts: { type: string, format: date-time, description: 'Readings before this time. After `from_ts`, and at most `history.export_max_days` later.' }
                 asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], maxItems: 1000, description: 'Device Sparkplug IDs (devices.sparkplug_id). A repeated or blank one is ignored.' }
-                metric_names: { type: array, items: { type: string }, example: [Spindle/LOAD], maxItems: 500 }
-                resolution: { type: string, enum: [raw, 1m, 5m, 1h], default: raw, description: '`raw`, or the average of the 1-minute, 5-minute or 1-hour rollup. Never one in place of another.' }
+                metric_names: { type: array, items: { type: string }, example: [Spindle/LOAD], maxItems: 500, description: 'Measured metrics and derived ones. A derived metric is computed, and comes per bucket of the resolution: at 1 minute for `raw`.' }
+                resolution: { type: string, enum: [raw, 1m, 5m, 1h], default: raw, description: '`raw`, or the average of the 1-minute, 5-minute or 1-hour rollup. Never one in place of another. A derived metric has no readings, so it comes at the rollup''s width, and at 1 minute for `raw`.' }
       responses:
         '200':
           description: The export.
@@ -7560,9 +7572,19 @@ components:
         row_count: { type: integer }
         max_rows: { type: integer, example: 50000 }
         truncated: { type: boolean, description: 'The rows end at `read_to`, not at the window''s end.' }
-        read_from: { type: string, format: date-time, description: 'Where the rows begin: the window''s start, or the oldest raw reading the historian holds when that is later.' }
+        read_from: { type: string, format: date-time, description: 'Where the rows begin: the window''s start, or the oldest raw reading the historian holds when that is later. A derived metric''s rows begin at the window''s start.' }
         read_to: { type: string, format: date-time, description: 'Where the rows end: the window''s end, or the whole minute they were cut at.' }
         raw_from: { type: string, format: date-time, nullable: true, description: 'The oldest raw reading the historian holds, for `raw`; null otherwise.' }
+        derived:
+          type: array
+          description: 'The derived metrics asked for, by name: one row of the file marks each. Empty when none was.'
+          items:
+            type: object
+            properties:
+              metric: { type: string, example: Controller/PARTS_PER_HOUR }
+              kind: { type: string, enum: [counter_rate, time_in_state, sum] }
+              definition: { type: string, example: 'rate of Controller/PART_COUNT, per hour', description: 'The definition in the words the dashboard uses.' }
+              unit: { type: string, nullable: true, example: COUNT/HOUR, description: 'The catalogue unit; `% of the time` for a time in state, whose value is a fraction from 0 to 1.' }
 
     TelemetryCoverageRow:
       type: object
