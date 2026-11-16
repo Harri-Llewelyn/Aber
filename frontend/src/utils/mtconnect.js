@@ -20,6 +20,9 @@ const VOCABULARY_KINDS = {
 /** Only SAMPLE observations are a continuously-varying measurement, so only they carry units. */
 export const CATEGORY_WITH_UNITS = 'SAMPLE'
 
+/** The three categories a data item can declare, SAMPLE first: the order a picker and the help use. */
+export const MTCONNECT_CATEGORIES = ['SAMPLE', 'EVENT', 'CONDITION']
+
 const byKind = (vocabulary, kind) =>
   (vocabulary || []).filter(v => v.kind === kind)
 
@@ -51,7 +54,7 @@ export function typesByCategory(vocabulary) {
     buckets.get(key).push(type.name)
   }
   // SAMPLE first: it is the common case for telemetry, and the only category carrying units.
-  const order = ['SAMPLE', 'EVENT', 'CONDITION', 'OTHER']
+  const order = [...MTCONNECT_CATEGORIES, 'OTHER']
   return order
     .filter(k => buckets.has(k))
     .map(k => ({ category: k, types: buckets.get(k).slice().sort() }))

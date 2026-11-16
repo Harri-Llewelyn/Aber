@@ -16,7 +16,7 @@ import {
 import { formatDateTime } from '../../utils/format'
 import { modelledMetrics } from '../../utils/deviceTags'
 import {
-  typesByCategory, subTypes, unitNames, categoryOfType, CATEGORY_WITH_UNITS
+  typesByCategory, subTypes, unitNames, categoryOfType, CATEGORY_WITH_UNITS, MTCONNECT_CATEGORIES
 } from '../../utils/mtconnect'
 import {
   STANDARDS, STANDARD_OPTIONS, LOCAL_EXTENSION_LABEL, sameSemanticIdPair, storedSemanticIdPair
@@ -112,6 +112,8 @@ const BLANK_METRIC = {
   // MTConnect is the default because it is the largest vocabulary and most metrics come from it.
   standard: STANDARDS.MTCONNECT,
   group: '', newGroup: '', instance: '', type: '', customType: '',
+  // A custom MTConnect type's category, which no vocabulary supplies. SAMPLE is the common one.
+  customCategory: MTCONNECT_CATEGORIES[0],
   subType: '', units: '', datatype: 10, description: '',
   // The Permitted Values field as typed: the operator's own, like the description, so a change of
   // standard or type keeps it.
@@ -519,8 +521,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       standard: value,
       group: keepGroup ? m.group : '',
       newGroup: keepGroup ? m.newGroup : '',
-      type: '', companionSpec: '', customType: '', subType: '', units: '',
-      vocabCategory: '', vocabSemanticId: '', semanticIdOwn: null
+      type: '', companionSpec: '', customType: '', customCategory: BLANK_METRIC.customCategory,
+      subType: '', units: '', vocabCategory: '', vocabSemanticId: '', semanticIdOwn: null
     }))
   }
 
@@ -718,10 +720,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // MTConnect claim even though the form was on the MTConnect tab.
   const effectiveStandard = (isCustomStandard || usingCustomType) ? STANDARDS.CUSTOM : newMetric.standard
 
-  // MTConnect assigns each data item type a category, so it is derived. The other standards supply
-  // theirs with the vocabulary entry. A local extension has none.
+  // MTConnect assigns each data item type a category, so it is derived; a custom type has none to
+  // derive, so the operator chooses it. The other standards supply theirs with the vocabulary
+  // entry. A Custom metric has none.
   const effectiveCategory = isMTConnect
-    ? (usingCustomType ? '' : categoryOfType(vocabulary, effectiveType))
+    ? (usingCustomType ? newMetric.customCategory : categoryOfType(vocabulary, effectiveType))
     : newMetric.vocabCategory
 
   // For MTConnect only SAMPLE carries units. The other standards state the unit on the vocabulary
@@ -729,9 +732,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const unitsApply = isMTConnect ? effectiveCategory === CATEGORY_WITH_UNITS : true
   const noUnitsReason = effectiveCategory
     ? `Only a ${CATEGORY_WITH_UNITS} data item has a unit; this type's category is ${effectiveCategory}.`
-    : usingCustomType
-      ? `Only a ${CATEGORY_WITH_UNITS} data item has a unit, and a type outside MTConnect has no category.`
-      : `Only a ${CATEGORY_WITH_UNITS} data item has a unit. Choose a Data Item Type first.`
+    : `Only a ${CATEGORY_WITH_UNITS} data item has a unit. Choose a Data Item Type first.`
   const typeGroups = typesByCategory(vocabulary)
   const availableSubTypes = subTypes(vocabulary)
   const isoKpis = kpis(isoVocabulary)
@@ -1585,6 +1586,24 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               </div>
             )}
 
+            {/* Every MTConnect data item declares one, an extension included. It decides whether
+                Units is offered, so it is asked before Units. */}
+            {usingCustomType && (
+              <div className="form-group" style={{ flex: '0 1 150px' }}>
+                <label className="form-label" htmlFor="metric-custom-category">Category</label>
+                <Tooltip text="SAMPLE is a measured quantity and takes a unit. EVENT is a change of state, CONDITION a fault or warning.">
+                  <select
+                    id="metric-custom-category"
+                    className="form-control"
+                    value={newMetric.customCategory}
+                    onChange={e => setNewMetric(m => ({ ...m, customCategory: e.target.value }))}
+                  >
+                    {MTCONNECT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </Tooltip>
+              </div>
+            )}
+
             {/* MTConnect only: a subType qualifies a data item type. An ISO KPI and an OPC UA
                 browse name are whole concepts, so there is nothing to qualify. */}
             {isMTConnect && (
@@ -1687,7 +1706,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             {' '}— immutable once created.
             {effectiveCategory && (
               <> Category <strong>{effectiveCategory}</strong>
-                {isMTConnect ? ', from the MTConnect standard.' : `, mapped from ${newMetric.standard}.`}</>
+                {usingCustomType
+                  ? ', as you chose it.'
+                  : isMTConnect ? ', from the MTConnect standard.' : `, mapped from ${newMetric.standard}.`}</>
             )}
             {effectiveStandard
               ? <> Provenance <strong>{effectiveStandard}</strong>.</>

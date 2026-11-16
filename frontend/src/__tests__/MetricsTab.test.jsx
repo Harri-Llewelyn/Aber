@@ -2551,11 +2551,9 @@ describe('Add Metric: Units is a label where the type takes none', () => {
     expect(unitsFacts().textContent).toContain('Choose a Data Item Type first')
   })
 
-  it('says to choose a type first while none is chosen, and why a custom type has none', async () => {
+  it('says to choose a type first while none is chosen', async () => {
     await openForm()
     expect(unitsFacts().textContent).toContain('Choose a Data Item Type first.')
-    chooseType('__custom__')
-    expect(unitsFacts().textContent).toContain('a type outside MTConnect has no category')
   })
 
   it('brings the select back when the type changes to a SAMPLE, and is a select for another standard', async () => {
@@ -2575,6 +2573,105 @@ describe('Add Metric: Units is a label where the type takes none', () => {
     chooseType('EXECUTION')
     fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.objectContaining({ category: 'EVENT', units: '' })))
+  })
+
+  it('adds a SAMPLE metric with its category and unit', async () => {
+    api.post.mockResolvedValue({ metric_uuid: 'new' })
+    await openForm()
+    chooseType('ANGLE')
+    fireEvent.change(screen.getByRole('combobox', { name: 'Units' }), { target: { value: 'MILLIMETER' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.objectContaining({
+      category: 'SAMPLE', units: 'MILLIMETER', standard: 'MTConnect'
+    })))
+  })
+})
+
+describe('Add Metric: a custom MTConnect type asks for its category', () => {
+  const unitsFacts = () => [...document.querySelectorAll('.metric-edit-facts')]
+    .find(el => el.querySelector('.form-label')?.textContent === 'Units')
+  const chooseCustomType = (name = 'VIBRATION_RMS') => {
+    fireEvent.change(screen.getByLabelText(/Data Item Type/), { target: { value: '__custom__' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g. VIBRATION_RMS'), { target: { value: name } })
+  }
+  const categorySelect = () => screen.getByRole('combobox', { name: 'Category' })
+  const categoryOptions = () => [...categorySelect().querySelectorAll('option')].map(o => o.value)
+  const add = () => fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+
+  it('offers SAMPLE, EVENT and CONDITION in that order, once the custom type is picked, with SAMPLE chosen', async () => {
+    await openForm()
+    expect(screen.queryByRole('combobox', { name: 'Category' })).toBeNull()
+    chooseCustomType()
+    expect(categoryOptions()).toEqual(['SAMPLE', 'EVENT', 'CONDITION'])
+    expect(categorySelect().value).toBe('SAMPLE')
+  })
+
+  it('is not asked for a type MTConnect defines, nor for the Custom standard', async () => {
+    await openForm()
+    fireEvent.change(screen.getByLabelText(/Data Item Type/), { target: { value: 'ANGLE' } })
+    expect(screen.queryByRole('combobox', { name: 'Category' })).toBeNull()
+    fireEvent.change(standardSelect(), { target: { value: '' } })
+    expect(screen.queryByRole('combobox', { name: 'Category' })).toBeNull()
+  })
+
+  it('offers Units for a SAMPLE and saves the metric with its unit and category', async () => {
+    api.post.mockResolvedValue({ metric_uuid: 'new' })
+    await openForm()
+    chooseCustomType()
+    expect(screen.getByRole('combobox', { name: 'Units' })).toBeEnabled()
+    expect(unitsFacts()).toBeUndefined()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Units' }), { target: { value: 'MILLIMETER' } })
+    add()
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.objectContaining({
+      name: 'VIBRATION_RMS', category: 'SAMPLE', units: 'MILLIMETER', standard: ''
+    })))
+  })
+
+  it.each(['EVENT', 'CONDITION'])('takes no unit for a %s, says why, and saves its category', async (category) => {
+    api.post.mockResolvedValue({ metric_uuid: 'new' })
+    await openForm()
+    chooseCustomType()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Units' }), { target: { value: 'MILLIMETER' } })
+    fireEvent.change(categorySelect(), { target: { value: category } })
+
+    expect(screen.queryByRole('combobox', { name: 'Units' })).toBeNull()
+    expect(unitsFacts().textContent).toContain('None')
+    expect(unitsFacts().textContent).toContain(`Only a SAMPLE data item has a unit; this type's category is ${category}.`)
+    expect(unitsFacts().textContent).not.toContain('has no category')
+    add()
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.objectContaining({
+      name: 'VIBRATION_RMS', category, units: '', standard: ''
+    })))
+  })
+
+  it('says in the name line which category was chosen', async () => {
+    await openForm()
+    chooseCustomType()
+    fireEvent.change(categorySelect(), { target: { value: 'CONDITION' } })
+    const line = namePreview().closest('.form-hint')
+    expect(line.textContent).toContain('Category CONDITION, as you chose it.')
+    expect(line.textContent).not.toContain('from the MTConnect standard')
+  })
+
+  it('starts on SAMPLE again after the form is cleared by a change of standard', async () => {
+    await openForm()
+    chooseCustomType()
+    fireEvent.change(categorySelect(), { target: { value: 'EVENT' } })
+    fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
+    fireEvent.change(standardSelect(), { target: { value: 'MTConnect' } })
+    chooseCustomType()
+    expect(categorySelect().value).toBe('SAMPLE')
+  })
+})
+
+describe('the catalogue shows a stored category whatever the standard', () => {
+  it('lists a local extension’s category in its row and its drawer', async () => {
+    renderTab()
+    await waitForCatalog()
+    const row = within(catalogTable()).getByText('safety_interlock').closest('tr')
+    expect(within(row).getByText('EVENT').closest('td')).toHaveClass('cell-meta')
+    const panel = selectMetric(catalogTable(), 'safety_interlock')
+    expect(panel.getByText('Category').nextElementSibling).toHaveTextContent('EVENT')
   })
 })
 
