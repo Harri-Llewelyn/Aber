@@ -49,6 +49,7 @@ import uuid
 
 import psycopg2
 import psycopg2.errors
+from psycopg2 import sql
 from psycopg2.extras import Json
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
@@ -304,10 +305,10 @@ class TheResolution(Base):
 
 class TheChecks(Base):
     def insert_device(self, **columns):
-        names = ", ".join(columns)
-        marks = ", ".join(["%s"] * len(columns))
-        self.cur.execute(f"INSERT INTO public.devices (name, {names}) VALUES ('Probe', {marks});",
-                         tuple(columns.values()))
+        statement = sql.SQL("INSERT INTO public.devices (name, {names}) VALUES ('Probe', {marks});").format(
+            names=sql.SQL(", ").join(sql.Identifier(name) for name in columns),
+            marks=sql.SQL(", ").join(sql.Placeholder() for _ in columns))
+        self.cur.execute(statement, tuple(columns.values()))
 
     def refused(self, constraint, **columns):
         self.cur.execute("SAVEPOINT probe;")
@@ -677,8 +678,8 @@ class TheWriters(Base):
 
     def approve_quarantined(self, device_id, **args):
         names = ["p_device_id", "p_actor_id"] + list(args)
-        marks = ", ".join(f"{n} => %s" for n in names)
-        self.cur.execute(f"SELECT public.approve_quarantined_device({marks});",
+        arguments = sql.SQL(", ").join(sql.SQL("{} => %s").format(sql.Identifier(name)) for name in names)
+        self.cur.execute(sql.SQL("SELECT public.approve_quarantined_device({});").format(arguments),
                          (device_id, MANAGER_ID, *args.values()))
         return self.cur.fetchone()[0]
 

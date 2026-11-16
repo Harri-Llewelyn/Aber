@@ -14,13 +14,26 @@ export default function check() {
   const problems385 = [];
   const list = (text) => [...text.matchAll(/'?([a-z_]+)'?(?:::text)?/g)].map((m) => m[1]).sort();
 
+  // The text between two literals, found with indexOf: the names are fixed words of this repository,
+  // and a pattern built from them would be a RegExp from a variable.
+  const between = (text, open, close, from = 0) => {
+    const start = text.indexOf(open, from);
+    if (start < 0) return null;
+    const end = text.indexOf(close, start + open.length);
+    return end < 0 ? null : { text: text.slice(start + open.length, end), end };
+  };
   const checkValues = (table) => {
-    const m = baseline.match(new RegExp(`CONSTRAINT ${table}_location_scope_valid CHECK \\(\\(location_scope = ANY \\(ARRAY\\[([^\\]]+)\\]\\)\\)\\)`));
-    return m ? [...m[1].matchAll(/'([a-z_]+)'::text/g)].map((x) => x[1]).sort() : null;
+    const found = between(baseline, `CONSTRAINT ${table}_location_scope_valid CHECK ((location_scope = ANY (ARRAY[`, ']');
+    return found ? [...found.text.matchAll(/'([a-z_]+)'::text/g)].map((x) => x[1]).sort() : null;
   };
   const schemaOf = (name) => {
-    const m = yaml.match(new RegExp(`\\n    ${name}:\\n      type: string\\n      enum: \\[([^\\]]+)\\]\\n      default: ([a-z_]+)\\n`));
-    return m ? { values: list(m[1]), fallback: m[2] } : null;
+    const found = between(yaml, `\n    ${name}:\n      type: string\n      enum: [`, ']');
+    if (!found) return null;
+    // The default is the very next line.
+    const marker = '\n      default: ';
+    const at = found.end + 1;
+    if (!yaml.startsWith(marker, at)) return null;
+    return { values: list(found.text), fallback: yaml.slice(at + marker.length, yaml.indexOf('\n', at + marker.length)) };
   };
 
   const device = schemaOf('DeviceLocationScope');
@@ -40,9 +53,10 @@ export default function check() {
   // Which schema each property uses.
   const use = (schema, property) => {
     const at = yaml.indexOf(`\n    ${schema}:\n`);
+    if (at < 0) return undefined;
     const stop = [...yaml.slice(at + 5).matchAll(/\n {4}[A-Za-z]+:\n/g)][0];
     const body = yaml.slice(at, stop ? at + 5 + stop.index : undefined);
-    return body.match(new RegExp(`${property}: \\{ \\$ref: '#/components/schemas/([A-Za-z]+)' \\}`))?.[1];
+    return between(body, `${property}: { $ref: '#/components/schemas/`, "' }")?.text;
   };
   for (const schema of ['Device', 'DeviceWrite', 'DeviceLocation']) {
     if (use(schema, 'location_scope') !== 'DeviceLocationScope') problems385.push(`${schema}.location_scope does not use DeviceLocationScope`);
