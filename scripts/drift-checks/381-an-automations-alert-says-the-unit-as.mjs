@@ -11,7 +11,12 @@ export default function check() {
   const FILE = 'supabase/migrations/0292_an_automation_s_alert_says_its_reading_s_unit.sql';
   const sql = read(FILE);
   const problems381 = [];
-  const fnBody = (name) => sql.match(new RegExp(`CREATE OR REPLACE FUNCTION public\\.${name}\\([\\s\\S]*?\\n\\$\\$;`))?.[0] ?? '';
+  // A function's declaration, from its CREATE to the first `$$;` that ends a line, found as text.
+  const fnBody = (name) => {
+    const at = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${name}(`);
+    const end = at === -1 ? -1 : sql.indexOf('\n$$;', at);
+    return end === -1 ? '' : sql.slice(at, end + 4);
+  };
   for (const name of ['unit_symbol', 'with_unit']) {
     const body = fnBody(name);
     if (!body) problems381.push(`${FILE} does not declare ${name}()`);
@@ -26,7 +31,7 @@ export default function check() {
       if (!body.includes('public.with_unit(')) problems381.push(`${name}() does not word a measured metric through with_unit()`);
       if (!body.includes("'time_in_state'")) problems381.push(`${name}() has lost its time in state arm`);
     }
-    if (!new RegExp(`^-- Redefines public\\.${name}: `, 'm').test(sql)) problems381.push(`${FILE} has no "-- Redefines public.${name}" marker`);
+    if (!sql.split('\n').some((line) => line.startsWith(`-- Redefines public.${name}: `))) problems381.push(`${FILE} has no "-- Redefines public.${name}" marker`);
   }
   if (!fnBody('automation_value_words').includes("' over the last hour'")) problems381.push('automation_value_words() has lost its derived arm');
   const redeclared = [...sql.matchAll(/^CREATE OR REPLACE FUNCTION public\.(\w+)\(/gm)].map((m) => m[1]).sort();
@@ -41,7 +46,8 @@ export default function check() {
     problems381.push('docs/automations.md has no summary example that gives the temperature its unit');
   } else {
     if (example[2] !== example[4]) problems381.push(`docs/automations.md's example says ${example[2]} for the value and ${example[4]} for the threshold`);
-    if (!sql.includes(`WHEN 'CELSIUS'`) || !new RegExp(`WHEN 'CELSIUS'\\s+THEN '${example[2]}'`).test(sql)) {
+    const celsius = sql.split(`WHEN 'CELSIUS'`).slice(1).map((rest) => rest.trimStart());
+    if (!celsius.some((rest) => rest.startsWith(`THEN '${example[2]}'`))) {
       problems381.push(`docs/automations.md's example says ${example[2]}, which unit_symbol() does not give CELSIUS`);
     }
   }
