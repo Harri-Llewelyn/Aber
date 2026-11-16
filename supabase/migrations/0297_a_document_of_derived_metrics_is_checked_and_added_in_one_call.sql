@@ -471,6 +471,9 @@ DECLARE
   v_state   text;
   v_work    jsonb := '[]'::jsonb;
   v_refused boolean := false;
+  v_at      integer[] := ARRAY[]::integer[];
+  v_ids     uuid[]    := ARRAY[]::uuid[];
+  v_us      text[]    := ARRAY[]::text[];
 BEGIN
   IF v_uid IS NULL OR NOT public.has_role(ARRAY['Administrator']) THEN
     RAISE EXCEPTION 'Only an Administrator may add derived metrics.'
@@ -522,15 +525,18 @@ BEGIN
       INSERT INTO public.metric_catalog (name, datatype, description, derivation)
       VALUES (v_canon ->> 'name', c_datatype, v_canon ->> 'description', v_canon -> 'derivation')
       RETURNING id, units INTO v_id, v_units;
-      -- The id of what was made, for the result.
-      v_work := (SELECT jsonb_agg(CASE WHEN w -> 'index' = v_item -> 'index'
-                                       THEN w || jsonb_build_object('id', v_id, 'units', v_units) ELSE w END ORDER BY ord)
-                   FROM jsonb_array_elements(v_work) WITH ORDINALITY AS e(w, ord));
+      -- What was made, by its place in the file, for the result.
+      v_at := array_append(v_at, (v_item ->> 'index')::integer);
+      v_ids := array_append(v_ids, v_id);
+      v_us := array_append(v_us, v_units);
     END LOOP;
   END IF;
 
-  RETURN coalesce((SELECT jsonb_agg(w - 'canon' ORDER BY ord)
-                     FROM jsonb_array_elements(v_work) WITH ORDINALITY AS e(w, ord)), '[]'::jsonb);
+  RETURN coalesce((SELECT jsonb_agg(CASE WHEN m.at IS NULL THEN e.w - 'canon'
+                                         ELSE (e.w - 'canon') || jsonb_build_object('id', m.id, 'units', m.units) END ORDER BY e.ord)
+                     FROM jsonb_array_elements(v_work) WITH ORDINALITY AS e(w, ord)
+                     LEFT JOIN unnest(v_at, v_ids, v_us) AS m(at, id, units) ON m.at = (e.w ->> 'index')::integer),
+                  '[]'::jsonb);
 END
 $$;
 
