@@ -3159,6 +3159,14 @@ a.summary-card { text-decoration: none; }
    which makes this colour invalid at computed-value time, so the icon inherits --text-primary. */
 .segmented-option-checked .segmented-icon { color: var(--signal-tone); }
 
+/* An option offered and refused (SegmentedControl `unavailable`): greyed as a held button is, but
+   still focusable, and its tooltip is the reason. Pointing at it does not light it. */
+.segmented-option-unavailable {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.segmented-option-unavailable:hover { color: var(--text-muted); }
+
 /* ===== Loading ===== */
 .spinner {
   display: inline-block;
@@ -5507,6 +5515,17 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Why a span, a range or a zoom is refused (the page's `limit`), in the form fields' error style, on a
+   line of its own under the control. It adds nothing to the control's width, which the arrows, the
+   switch and the zoom decide: `width: 0` keeps its sentence out of the width, and `min-width: 100%`
+   gives it that width to wrap in. */
+.time-window-problem {
+  flex: 0 0 auto;
+  width: 0;
+  min-width: 100%;
+  margin: 0;
 }
 
 .time-window-pick {

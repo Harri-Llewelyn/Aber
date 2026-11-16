@@ -148,6 +148,26 @@ export function timeWindow(win, now = Date.now()) {
   }
 }
 
+/**
+ * How long the window is, in ms, or null where it has no length: All time, and a custom window with
+ * an end left out. A calendar window's length is its own, so a week holding a clock change is an
+ * hour longer or shorter than 7 days.
+ */
+export function windowLength(win, now = Date.now()) {
+  const { start, end } = windowBounds(win, now)
+  return start && end ? end.getTime() - start.getTime() : null
+}
+
+/**
+ * Whether the window is longer than a page's `limit` (`{ maxSpanMs, reason }`) allows. A window
+ * with no length, which shows more than any limit, is over it; with no limit nothing is.
+ */
+export function overLimit(win, limit, now = Date.now()) {
+  if (!limit) return false
+  const ms = windowLength(win, now)
+  return ms === null || ms > limit.maxSpanMs
+}
+
 /** How many calendar days apart two Dates at the same clock time are; null at different times. */
 function wholeDaysBetween(a, b) {
   if (a.getHours() !== b.getHours() || a.getMinutes() !== b.getMinutes() || a.getSeconds() !== b.getSeconds()) return null

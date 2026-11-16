@@ -50,7 +50,9 @@ You don't need to drag. Tick the box at the start of a lane to pick that device,
 The block size depends on how many devices Overview shows:
 
 - **40 devices or fewer** get about one block for every 4 pixels of the strip, at any window up to a year. A block is never shorter than 5 minutes, so a short window has few blocks.
-- **More than 40** get 5-minute blocks up to a day and 1-hour blocks up to 7 days. A longer window is not shown, and the page says why. To see one, type a cell's name in the search box, or narrow the list to 40 devices or fewer.
+- **More than 40** get 5-minute blocks up to a day and 1-hour blocks up to 7 days.
+- **Past 7 days, the choices are greyed.** With more than 40 devices, **Month**, **Year** and **Last 30 days** are greyed in the time window. Point at one, or move to it with Tab, and its tooltip says why. Select one and the reason appears under the time window, and the window stays as it was. A custom range over 7 days is refused the same way. **Zoom out** is greyed when it would pass 7 days.
+- **To see a longer window,** type a cell's name in the search box, or narrow the list to 40 devices or fewer. The greyed choices come back by themselves. A link that opens a longer window shows the reason on the page instead.
 
 ### How far back Overview reaches
 

@@ -11,7 +11,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FILTER_SETTLE_MS, SystemLogs } from '../components/tabs/SystemLogs'
-import { LOG_LINES_MAX, LOG_RANGES, defaultLogService, formatLogTime, logWindowParams } from '../utils/serviceLogs'
+import { LOG_LIMIT, LOG_LINES_MAX, LOG_RANGES, defaultLogService, formatLogTime, logWindowParams } from '../utils/serviceLogs'
 import { rollingWindow } from '../utils/timeWindow'
 import { api } from '../api'
 
@@ -431,5 +431,59 @@ describe('when there is nothing to read', () => {
     })
     render(<SystemLogs showToast={vi.fn()} />)
     expect(await screen.findByText(/The logs could not be read: The log store did not answer within 10 seconds/)).toBeInTheDocument()
+  })
+})
+
+describe('a read covers at most 7 days, and the time control says so', () => {
+  // Monday 2 November 2026, 15:20 in London.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 2, 15, 20))
+  })
+  afterEach(() => { vi.useRealTimers() })
+
+  const type = (from, to) => {
+    fireEvent.change(within(choices()).getByLabelText('From'), { target: { value: from } })
+    fireEvent.change(within(choices()).getByLabelText('To'), { target: { value: to } })
+  }
+  const show = () => within(choices()).getByRole('button', { name: 'Show range' })
+
+  it('gives the control the function’s widest window, 7 days and the hour a week gains', () => {
+    expect(LOG_LIMIT.maxSpanMs).toBe(169 * 60 * 60 * 1000)
+    expect(LOG_LIMIT.reason).toMatch(/at most 7 days/)
+  })
+
+  it('refuses a custom range over it in the range box, with the reason, and reads nothing new', async () => {
+    render(<SystemLogs showToast={vi.fn()} />)
+    await waitFor(() => expect(reads()).toHaveLength(1))
+    fireEvent.click(words())
+    type('2026-10-20T00:00', '2026-11-02T00:00')
+
+    expect(within(choices()).getByRole('alert')).toHaveTextContent(LOG_LIMIT.reason)
+    expect(show()).toBeDisabled()
+    fireEvent.submit(show().closest('form'))
+    expect(query()).toEqual({})
+    expect(reads()).toHaveLength(1)
+    expect(words()).toHaveTextContent('Last 1 hour')
+  })
+
+  it('takes a custom range of 7 days and an hour, as the function does, and reads it', async () => {
+    render(<SystemLogs showToast={vi.fn()} />)
+    await waitFor(() => expect(reads()).toHaveLength(1))
+    fireEvent.click(words())
+    type('2026-10-26T00:00', '2026-11-02T01:00')
+    expect(within(choices()).queryByRole('alert')).toBeNull()
+    fireEvent.click(show())
+    await waitFor(() => expect(reads()).toHaveLength(2))
+    expect(reads()[1]).toMatchObject({ from: '2026-10-26T00:00:00.000Z', to: '2026-11-02T01:00:00.000Z' })
+  })
+
+  it('refuses nothing it offers: Day, Week and every rolling range are within the limit', async () => {
+    render(<SystemLogs showToast={vi.fn()} />)
+    await waitFor(() => expect(reads()).toHaveLength(1))
+    for (const name of ['Day', 'Week']) expect(span(name)).not.toHaveAttribute('aria-disabled')
+    fireEvent.click(words())
+    const rolling = within(choices()).getByRole('group', { name: 'Rolling' })
+    for (const button of within(rolling).getAllByRole('button')) expect(button).not.toHaveAttribute('aria-disabled')
   })
 })

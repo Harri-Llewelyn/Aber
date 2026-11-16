@@ -832,6 +832,20 @@ export const LARGE_FIVE_MINUTE_HOURS = 26
 export const TOO_LONG_FOR_MANY = `With more than ${COVERAGE_SMALL_SELECTION} devices, Overview shows 7 days at most. `
   + `Search for a cell, or for up to ${COVERAGE_SMALL_SELECTION} devices, to see a longer window.`
 
+const OVERVIEW_LIMIT = Object.freeze({ maxSpanMs: COVERAGE_LARGE_MAX_HOURS * HOUR, reason: TOO_LONG_FOR_MANY })
+
+/**
+ * The time control's limit while a selection is too large for a long window: the longest window a
+ * read takes, COVERAGE_LARGE_MAX_HOURS, and TOO_LONG_FOR_MANY, which says how to lift it. Null where
+ * the whole selection reads any window: `devices` are every device Overview lists, and `matching`
+ * those the search names, which a long window reads alone when there are few enough of them.
+ */
+export function overviewLimit(devices, matching) {
+  if (devices <= COVERAGE_SMALL_SELECTION) return null
+  if (matching > 0 && matching <= COVERAGE_SMALL_SELECTION) return null
+  return OVERVIEW_LIMIT
+}
+
 /**
  * The block width a read of `devices` devices takes over [start, end), in minutes, for a strip
  * `widthPx` wide; null when the window is too long for that many (TOO_LONG_FOR_MANY).

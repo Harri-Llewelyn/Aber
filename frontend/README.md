@@ -1600,7 +1600,7 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
   module-level constants, as the window is memoised on them. The Audit Trail offers every range,
   every span and All time, and falls back to All time. System › Logs offers its own five ranges
   (Last 6 hours among them), Day and Week, and no All time, since a read covers at most 7 days; it
-  falls back to Last 1 hour.
+  falls back to Last 1 hour, and passes a `limit` (below) for a custom range wider than that.
 - **A span a page does not offer is passed over** in the address, which then falls back, and Jump
   to lands on Day, or on the first span offered where Day is not.
 - **Left to right**: ‹, the window in words with a chevron, ›, then the Day | Week | Month | Year
@@ -1633,12 +1633,34 @@ const { since, until } = timeWindow(win)   // at fetch time: ISO instants, '' fo
   order and with its glyphs (`IconZoomIn`, `IconZoomOut`). Zoom in shows the middle half of the
   window and Zoom out twice it about the same middle, each as a custom window to the second
   (`zoomIn`, `zoomOut`). Zoom in stops at `ZOOM_FLOOR_MS` (one minute), since under an hour the axis
-  prints seconds. Zoom out has no limit, but a window that would end past the current minute is
-  moved back to end with it, so it holds now. A rolling window is measured from the current minute,
+  prints seconds. Zoom out has no limit of its own, other than a page's `limit` (below), but a
+  window that would end past the current minute is moved back to end with it, so it holds now. A rolling window is measured from the current minute,
   as a step measures it. Where a window has no bounds of its own (All time, or a custom range with
   an end left out), Zoom in halves `extent`, the `{ start, end }` the page's axis draws; Zoom out is
   off under All time. An off button is `aria-disabled` with its reason in the tooltip, as the arrows
   are. The Audit Trail and History pass `zoom`; System › Logs does not.
+- **A page's limit: `limit={{ maxSpanMs, reason }}`.** A page that cannot read a window longer than
+  `maxSpanMs` says so here, rather than in a message of its own. `reason` is the one sentence for it,
+  and it names the limit and how to lift it: "With more than 40 devices, Overview shows 7 days at
+  most. Search for a cell, or for up to 40 devices, to see a longer window." Pass a module-level
+  object, or null where nothing limits the window, and the control does the rest:
+  - **A span over the limit** stays in the switch, `aria-disabled` and not `disabled`, so it keeps
+    its Tab stop. Its tooltip is the reason, on hover and on focus. Pressing it changes nothing and
+    says the reason under the control, in the form fields' error style (`.time-window-problem`, a
+    `role="alert"`). The span shown is never marked, since it is already on screen. A span is over
+    when the window it would show is longer, so a week holding a clock change (169 hours) is not.
+  - **A rolling range, All time or a custom range over the limit** is refused in the popover, where
+    its own validation is. A rolling range stays in its group, marked as a span is, and says the
+    reason under the group. A custom range says it under the boxes once one is edited, never on open,
+    and Show range is held. The window stays as it was.
+  - **Zoom out** is off, with the reason in its tooltip, where the window it would show is over.
+  - **When the limit goes,** as it does when a search narrows to 40 devices, the spans and ranges come
+    back by themselves, and the sentence under the control clears. It clears too when the window
+    changes. `overLimit(win, limit, now)` and `windowLength()` in `utils/timeWindow.js` are the check.
+  - **A window already over the limit** (arrived at by the address) is not refused: the page still
+    has to say why it shows nothing. Overview does, in the body, with the same sentence.
+  - **Not an action's limit.** History's export has its own, `exportWindowProblem()`, which holds
+    Export CSV at a window over the setting. It does not limit what is shown, so it is not this.
 - **Back undoes a zoom.** A zoom calls `onChange(next, { replace: false })`, and `useTimeWindow`'s
   setter then adds a history entry (`navigate()` without `replace`). Everything else calls
   `onChange(next)`, which replaces the entry. A page that wraps `onChange` passes the second
@@ -2755,6 +2777,12 @@ passes `{ record: false }`, as an alert's toast does.
   `aria-describedby`, as the Sidebar layout switch's segments are; otherwise the name with its
   count, which the label does not show; and none where the label says it all, as on the theme
   switch.
+  An option with `unavailable`, the sentence that says why and how to lift it, is offered and
+  refused: `aria-disabled`, not `disabled`, so it keeps its Tab stop and the arrow keys land on it
+  (they choose nothing there). Its tooltip is that sentence, on hover and on focus. A press, Enter
+  or Space calls `onRefuse(option)` and never `onChange`; the page says the reason where the person
+  acted, as the time control does under itself (`segmented-option-unavailable` greys it as a held
+  button is).
 - **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
   reload and stays in that browser tab. It holds text only (the message, its group and its
   destination), and every read and write is wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a

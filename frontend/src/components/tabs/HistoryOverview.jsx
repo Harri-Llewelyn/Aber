@@ -30,7 +30,7 @@ import {
 } from '../../utils/telemetryExport'
 import {
   COVERAGE_KEY, COVERAGE_PER_READ, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW,
-  ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_LONG_FOR_MANY, axisTicks, blockReadoutWords,
+  ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_LONG_FOR_MANY, overviewLimit, axisTicks, blockReadoutWords,
   blockWords, boxWords, bucketStarts, chartAddress, coverageBlock, coverageCounts, coverageRuns, coverageSteps, coverageSummary,
   deviceMatches, deviceMetrics, groupIsOpen, groupKeys, inReads, mergeCounts, nowFraction, overviewGroups, pickedAddress,
   readOverviewGroups, readWidth, readingsStopWords, telemetryKey, uncountedStretches, uncountedWords, writeOverviewGroups,
@@ -449,6 +449,9 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
     [groups, settledSearch]
   )
 
+  // What the time control refuses: a window too long for every device, until the search names few.
+  const limit = overviewLimit(keys.length, matchingKeys.length)
+
   const keysKey = keys.join('\n')
   const windowKey = JSON.stringify(win)
   /** What a read over [from, to) takes: its devices and block width, or why there is none. */
@@ -737,7 +740,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
           placeholder="Find a device…"
           ariaLabel="Find a device by its name, id, cell or area"
         />
-        <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} zoom />
+        <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} zoom limit={limit} />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
           {/* The tick boxes' way to Chart, without a drag. */}

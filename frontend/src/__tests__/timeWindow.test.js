@@ -9,7 +9,7 @@ import { describe, it, expect, afterAll } from 'vitest'
 import {
   ALL_TIME, SPAN_IDS, TIME_PRESETS, ZOOM_FLOOR_MS, bandWindow, bandWords, calendarTicks, canStep,
   canZoomIn, canZoomOut, chooseSpan, holdsNow, jumpTo, lengthWords, parseLocal, rollingWindow, stepNames,
-  stepWindow, timeWindow, windowBounds, windowEndsWords, windowFromQuery, windowToQuery, windowWords, zoomIn,
+  overLimit, stepWindow, timeWindow, windowBounds, windowEndsWords, windowLength, windowFromQuery, windowToQuery, windowWords, zoomIn,
   zoomOut
 } from '../utils/timeWindow'
 
@@ -434,5 +434,42 @@ describe('a band dragged across a timeline', () => {
 
   it('leaves the control naming the seconds of a zoomed window that has them', () => {
     expect(windowWords(custom('2026-11-02T10:29:29', '2026-11-02T10:30:29'), NOW)).toBe('Mon 2 Nov, 10:29:29 – 10:30:29')
+  })
+})
+
+describe("a page's limit", () => {
+  const WEEK_AND_AN_HOUR = 169 * HOUR
+  const limit = { maxSpanMs: WEEK_AND_AN_HOUR, reason: 'Seven days at most.' }
+
+  it('measures a window by its own length, so a week holding a clock change is an hour out', () => {
+    expect(windowLength(day('2026-11-02'), NOW)).toBe(24 * HOUR)
+    expect(windowLength(day('2026-10-25'), NOW)).toBe(25 * HOUR)
+    expect(windowLength(span('week', '2026-11-02'), NOW)).toBe(168 * HOUR)
+    expect(windowLength(span('week', '2026-10-21'), NOW)).toBe(169 * HOUR)
+    expect(windowLength(span('month', '2026-11-02'), NOW)).toBe(30 * 24 * HOUR)
+    expect(windowLength(rollingWindow('7d'), NOW)).toBe(7 * 24 * HOUR)
+    expect(windowLength({ kind: 'custom', from: '2026-11-02T10:00', to: '2026-11-02T14:30' }, NOW)).toBe(4.5 * HOUR)
+  })
+
+  it('has no length for All time, or for a custom window missing an end', () => {
+    expect(windowLength(ALL_TIME, NOW)).toBeNull()
+    expect(windowLength({ kind: 'custom', from: '2026-11-02T10:00', to: '' }, NOW)).toBeNull()
+  })
+
+  it('is over the limit when the window is longer, and not when it is exactly as long', () => {
+    expect(overLimit(span('week', '2026-10-21'), limit, NOW)).toBe(false)
+    expect(overLimit(rollingWindow('7d'), limit, NOW)).toBe(false)
+    expect(overLimit(span('month', '2026-11-02'), limit, NOW)).toBe(true)
+    expect(overLimit(span('year', '2026-11-02'), limit, NOW)).toBe(true)
+    expect(overLimit(rollingWindow('30d'), limit, NOW)).toBe(true)
+    expect(overLimit({ kind: 'custom', from: '2026-11-01T00:00', to: '2026-11-08T01:00' }, limit, NOW)).toBe(false)
+    expect(overLimit({ kind: 'custom', from: '2026-11-01T00:00', to: '2026-11-08T01:01' }, limit, NOW)).toBe(true)
+  })
+
+  it('counts a window with no length as over, since it shows more than any limit, and no limit as none', () => {
+    expect(overLimit(ALL_TIME, limit, NOW)).toBe(true)
+    expect(overLimit({ kind: 'custom', from: '2026-11-02T10:00', to: '' }, limit, NOW)).toBe(true)
+    expect(overLimit(span('year', '2026-11-02'), null, NOW)).toBe(false)
+    expect(overLimit(ALL_TIME, undefined, NOW)).toBe(false)
   })
 })
