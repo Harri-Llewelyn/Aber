@@ -12,7 +12,7 @@ export default function check() {
   const count = (text, re) => (text.match(re) || []).length;
   // A machine-capable permission guards these, and require_mfa() admits every caller without a
   // covered role, so they call it though has_role() is not theirs.
-  const GATED_BY_AUTHORITY = ['fork_schema', 'publish_schema_version', 'discard_schema_draft'];
+  const GATED_BY_AUTHORITY = ['fork_schema', 'publish_schema_version', 'discard_schema_draft', 'apply_device_schemas'];
 
   // Final policy forms: the last CREATE POLICY of each name on each table, in replay order.
   const policies = new Map();
