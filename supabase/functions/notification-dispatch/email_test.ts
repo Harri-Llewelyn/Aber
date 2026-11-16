@@ -158,6 +158,21 @@ Deno.test("text an alert carries cannot add a line, a header or a control charac
   assert.ok(body.split("\n").every((l) => l.length < 600), "a long summary is cut");
 });
 
+Deno.test("an automation's alert reads its reading's unit in the What line as the database wrote it, and its data keeps the code", () => {
+  const summary = "Press 4: Spindle/BEARING_TEMPERATURE is 82.4 °C, above 80 °C for 5m";
+  const automation = {
+    ...ALERT,
+    name: "Spindle bearing hot",
+    summary,
+    labels: { metric: "Spindle/BEARING_TEMPERATURE" },
+    values: { value: 82.4, threshold: 80 },
+  };
+  const { body } = content(due({ alert: automation }));
+  assert.ok(body.includes(`What:     ${summary}`), body);
+  assert.ok(body.includes("  value: 82.4\n  threshold: 80"), body);
+  assert.ok(body.includes("  metric: Spindle/BEARING_TEMPERATURE"), body);
+});
+
 Deno.test("a relay's words lose every address before they are kept", () => {
   assert.equal(withoutAddresses("550 5.1.1 <bob@example.net>: Recipient address rejected"), "550 5.1.1 <address>: Recipient address rejected");
   assert.equal(withoutAddresses("550 bob@example.net does not exist; alice@example.net neither"), "550 <address> does not exist; <address> neither");
