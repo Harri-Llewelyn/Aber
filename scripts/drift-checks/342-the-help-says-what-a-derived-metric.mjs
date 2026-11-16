@@ -20,7 +20,7 @@ export default function check() {
       ['resolved to the minute', 'that time in state is resolved to the minute'],
       ['counted short by that old value', 'that a counter that resets and passes its old value inside one minute is counted short'],
       ["need not equal the sum of its inputs' averages", "that a wide bucket's derived sum need not equal the sum of its inputs' averages"],
-      ['Export CSV', 'that Export leaves a derived metric out'],
+      ['Export CSV', 'that Export CSV saves a derived metric'],
     ]) {
       if (!history.includes(phrase)) problems342.push(`help/pages/history.md's Derived metrics does not say ${what}`);
     }

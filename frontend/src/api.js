@@ -24,10 +24,11 @@ import {
 import { PICTURE_BUCKET, picturePath } from './utils/picture';
 
 // A device has two relationships to a cell: `devices.gateway_id -> gateways.cell_id` is the data
-// path, and `devices.cell_id` is an explicit location override (NULL means inherit). The effective
-// cell is resolved by public.device_locations and merged onto each row as `effective_cell_id` /
-// `location_source` / `cell_mismatch`; `cell_id` stays the raw column. Read `effective_cell_id`
-// to display, `cell_id` to edit. No embed can express "unless the child overrides".
+// path, and `devices.cell_id` is the cell the device is in when its `location_scope` is 'cell'
+// (a device that follows its gateway has none). The effective cell is resolved by
+// public.device_locations and merged onto each row as `effective_cell_id` / `location_source` /
+// `cell_mismatch`; `cell_id` stays the raw column. Read `effective_cell_id` to display, `cell_id`
+// to edit. No embed can express "unless the child has a place of its own".
 // `asset_id` is always the device UUID, including for quarantined devices.
 /**
  * The IDTA Digital Nameplate template the editor and the AAS exporter both work against.
@@ -3364,8 +3365,8 @@ const apiMethods = {
         schemasByDevice.get(link.device_id).push(link.schema_id);
       }
 
-      // No `cell_id:` override here: `cell_id` is the device's own explicit override (null means
-      // inherit), and the resolved value is `effective_cell_id`.
+      // No `cell_id:` override here: `cell_id` is the device's own cell (null when it follows its
+      // gateway), and the resolved value is `effective_cell_id`.
       return (data || []).map(d => ({
         ...mapDeviceRow(d, d.gateways, locations?.get(d.id)),
         submodel_schema_ids: schemasByDevice.get(d.id) || []
@@ -4030,8 +4031,8 @@ const apiMethods = {
         // column defaults to OFFLINE for a device that has not connected. Sending one here claims a
         // machine is running before the platform has heard from it, which
         // devices_online_implies_born now refuses.
-        // Omitted entirely when the caller sends nothing: cell_id has no column default, and NULL
-        // means "inherit from the gateway".
+        // Omitted entirely when the caller sends nothing: the column defaults to following the
+        // gateway, with no cell and no area.
         ...locationFieldsFrom(body)
       }).select();
       if (error) throw nameRefusal(error, 'device');

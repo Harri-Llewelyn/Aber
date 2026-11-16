@@ -56,7 +56,8 @@ const browser = (permission = 'granted', answer = permission) => {
   vi.stubGlobal('Notification', Fake)
 }
 
-const settle = () => new Promise(resolve => setTimeout(resolve, 20))
+/** Runs what is already queued, so a notification that should not be raised has had its chance to be. */
+const settle = () => act(async () => {})
 
 beforeEach(() => {
   vi.clearAllMocks()

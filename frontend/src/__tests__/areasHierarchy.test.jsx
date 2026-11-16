@@ -224,6 +224,24 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
       .toBe('0 Cells · 1 Gateway · 0 Devices · 1 Area-Wide')
   })
 
+  // A device that follows its gateway is placed where the gateway is, which for a wide gateway is no cell.
+  it('files a device that follows an Area-Wide gateway under its area, and one behind a Site-Wide gateway in the Site-Wide lane', async () => {
+    const followsArea = {
+      ...bms, asset_id: 'dev-f-area', asset_name: 'AssemblyFlow_Child', location_scope: 'gateway', area_id: null,
+      location_source: 'followed_area', effective_area_id: 'area-a'
+    }
+    const followsSite = {
+      ...bms, asset_id: 'dev-f-site', asset_name: 'Campus_Child', location_scope: 'gateway', area_id: null,
+      location_source: 'followed_site', effective_area_id: null
+    }
+    api.get.mockImplementation(routeGet({ gateways: [], cells: [], devices: [followsArea, followsSite] }))
+    await renderSiteMap()
+    expect(areaCards()[0].querySelector('.area-card-counts').textContent.trim())
+      .toBe('0 Cells · 0 Gateways · 1 Device · 1 Area-Wide')
+    expect(lanes()[0].querySelector('.site-lane-counts').textContent.trim()).toBe('0 Gateways · 1 Device')
+    expect(lanes()[2].querySelector('.site-lane-counts').textContent.trim()).toBe('0 Gateways · 0 Devices')
+  })
+
   it('still queues a gateway that is scoped to a cell and has none', async () => {
     const looseGw = {
       gateway_id: 'gw-loose', gateway_name: 'Loose_Gateway', cell_id: null, area_id: null,

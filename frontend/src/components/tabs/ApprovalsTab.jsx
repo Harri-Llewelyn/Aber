@@ -132,18 +132,29 @@ function iconLookup(proposal, key) {
 }
 
 /**
- * One before/after value. A resolved id shows its name and keeps the uuid in the tooltip; an icon
- * key `iconOf` knows shows its picture and label and keeps the key in the tooltip. Anything
- * unresolved falls back to the raw value rather than being hidden, which is the same rule the
- * kind and key labels follow -- an archived or deleted cell is a real state, and a reviewer
- * seeing a raw uuid is better served than one seeing a blank.
+ * The words the Location pickers use for a `location_scope`, so a proposal says Follow Gateway where
+ * the database says `gateway`: the value is a scope, not the gateway that carries the data.
  */
-function ValueCell({ value, names, iconOf }) {
+const SCOPE_LABELS = new Map([
+  ['gateway', 'Follow Gateway'], ['cell', 'In a cell'], ['area_wide', 'Area-Wide'], ['site_wide', 'Site-Wide']
+])
+
+/**
+ * One before/after value. A resolved id shows its name and keeps the uuid in the tooltip; an icon
+ * key `iconOf` knows shows its picture and label and keeps the key in the tooltip; a scope shows the
+ * picker's words and keeps the value in the tooltip. Anything unresolved falls back to the raw value
+ * rather than being hidden, which is the same rule the kind and key labels follow -- an archived or
+ * deleted cell is a real state, and a reviewer seeing a raw uuid is better served than one seeing a
+ * blank.
+ */
+function ValueCell({ value, names, iconOf, labelOf }) {
   const picture = iconOf?.(value)
   if (picture) {
     const { Icon, label } = picture
     return <Tooltip text={value}><span className="icon-value"><Icon size={14} aria-hidden="true" />{label}</span></Tooltip>
   }
+  const labelled = typeof value === 'string' ? labelOf?.get(value) : undefined
+  if (labelled) return <Tooltip text={value}><span>{labelled}</span></Tooltip>
   const named = typeof value === 'string' ? names?.get(value) : undefined
   if (named) return <Tooltip text={value}><span>{named}</span></Tooltip>
   return <>{displayValue(value)}</>
@@ -250,11 +261,11 @@ function DiffTable({ proposal, names, replaced }) {
               <td>{keyLabel(r.key)}</td>
               {before && (
                 <td className="cell-meta">
-                  <ValueCell value={open ? r.from : replaced[r.key]} names={names} iconOf={iconLookup(proposal, r.key)} />
+                  <ValueCell value={open ? r.from : replaced[r.key]} names={names} iconOf={iconLookup(proposal, r.key)} labelOf={r.key === 'location_scope' ? SCOPE_LABELS : undefined} />
                 </td>
               )}
               <td>
-                <strong><ValueCell value={r.to} names={names} iconOf={iconLookup(proposal, r.key)} /></strong>
+                <strong><ValueCell value={r.to} names={names} iconOf={iconLookup(proposal, r.key)} labelOf={r.key === 'location_scope' ? SCOPE_LABELS : undefined} /></strong>
                 {open && r.unchanged && <Badge size="sm" className="badge-follow">unchanged</Badge>}
               </td>
             </tr>

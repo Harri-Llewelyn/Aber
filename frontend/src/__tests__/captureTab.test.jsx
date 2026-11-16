@@ -1500,8 +1500,11 @@ describe('playing a file', () => {
     expect(button).toHaveClass('btn-primary', 'btn-disabled')
     expect(button).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
 
-    dropOnCard(editedFile())
-    await new Promise(r => setTimeout(r, 0))
+    // A drop handler reads the file at once, so a file nobody reads was ignored.
+    const file = editedFile()
+    const read = vi.spyOn(file, 'text')
+    dropOnCard(file)
+    expect(read).not.toHaveBeenCalled()
     expect(screen.queryByLabelText('File it against')).toBeNull()
   })
 

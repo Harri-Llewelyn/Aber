@@ -91,12 +91,12 @@ class Base(unittest.TestCase):
 
     def _device(self, area_id=None, gateway_id=None, is_archived=False, archived_at=None,
                 is_quarantined=False):
-        """Area-Wide in `area_id` when one is given, else in a cell (through `gateway_id`, if any)."""
+        """Area-Wide in `area_id` when one is given, else following its gateway (`gateway_id`, if any)."""
         device_id = str(uuid.uuid4())
         self.cur.execute(
             "INSERT INTO public.devices (id, name, status, location_scope, area_id, gateway_id, "
             "is_archived, archived_at, is_quarantined) VALUES (%s, %s, 'OFFLINE', %s, %s, %s, %s, %s, %s);",
-            (device_id, f"Archive_Guard_Dev_{device_id[:8]}", "area_wide" if area_id else "cell",
+            (device_id, f"Archive_Guard_Dev_{device_id[:8]}", "area_wide" if area_id else "gateway",
              area_id, gateway_id, is_archived, archived_at, is_quarantined),
         )
         return device_id

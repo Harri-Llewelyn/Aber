@@ -31,10 +31,10 @@ const device = (overrides = {}) => ({
   is_archived: false,
   active_gateway_id: 'gw-1',
   cell_id: null,
-  location_scope: 'cell',
+  location_scope: 'gateway',
   effective_cell_id: 'cell-1',
   gateway_cell_id: 'cell-1',
-  location_source: 'inherited',
+  location_source: 'followed_cell',
   conformance_policy: 'audit',
   created_at: '2026-07-20T12:00:00Z',
   ...overrides

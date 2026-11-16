@@ -66,6 +66,7 @@ function functionsAnswer(status, body, auth = 403) {
 }
 
 const userChecks = (fetchMock) => fetchMock.mock.calls.filter(([url]) => isUserCheck(url)).length;
+const functionCalls = (fetchMock) => fetchMock.mock.calls.filter(([url]) => !isUserCheck(url)).length;
 
 /** Each edge-function call in api.js, by the function it calls. */
 const CALLS = [
@@ -138,8 +139,10 @@ describe('an edge function refusing the session', () => {
       api.enrolmentReadiness().catch((e) => e)
     ]);
     await vi.waitFor(() => expect(userChecks(fetchMock)).toBe(1));
-    // The other two refusals reach the check while the first is still waiting on it.
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The other two refusals reach the check while the first is still waiting on it: all three
+    // functions have been called, and one turn of the event loop runs the promises behind each answer.
+    await vi.waitFor(() => expect(functionCalls(fetchMock)).toBe(3));
+    await new Promise((resolve) => setImmediate(resolve));
     release(403);
     const failures = await together;
     expect(failures.map((f) => f.code)).toEqual([SESSION_REFUSED, SESSION_REFUSED, SESSION_REFUSED]);

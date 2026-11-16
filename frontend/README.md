@@ -411,8 +411,10 @@ row.
 search, the standard filter and the grouped, tickable list. The list narrows what is shown, never
 what is chosen, because the dialog holds the choice. `single` makes the ticks radio buttons for a
 dialog that takes one metric. A caller that cannot show a long list at the window's height gives it
-one with `listStyle`. The schema editor for a draft keeps its own list, which shows each metric's
-stored keys.
+one with `listStyle`. A catalog metric is always chosen from this list, never from a dropdown, which
+stops being usable as the catalog grows: Deprecate Metric's Superseded By, and the schema editor for a
+draft, which adds each metric's stored keys with `renderNote`. The vocabulary pickers in Add Metric
+(MTConnect's data item types and the others) are still grouped dropdowns.
 
 ### A dialog takes focus
 
@@ -488,6 +490,29 @@ Three kinds of dialog explain themselves another way:
 - **A role that may not act** sees `permitted={false}`, with the roles that may in the tooltip
   ([Permission gating](#permission-gating)).
 
+### A value nobody can change is a label
+
+A value that no one looking at it can change is text, never a greyed-out input. A disabled control
+reads as "you could change this if you were allowed", which is wrong for a fixed or computed value.
+Show it as Edit Metric shows a name it cannot change (`form-group metric-edit-facts`): the field's
+name in `form-label` over the value, and the reason in words under it, not only in a tooltip. In a
+table cell, as on Settings, the value is `.setting-static`.
+
+- **Fixed for everyone** is a label: Add Metric's Units for a type that takes none, the Sparkplug
+  group and the archive site key, a nameplate value the device publishes, Cold Storage's site key,
+  and a replay lane's Serving Gateway, which stays on Playback. Its hint says why.
+- **Fixed for this role** is a label too. A Settings row for anyone but an Administrator shows its
+  value as text, and Actions says who can change it. The Notifications tab's rows are the same rows.
+  So is a Digital Nameplate for a role that may neither edit nor propose; its notice says so.
+- **Conditional stays a control, with its reason in words.** A field that is open to someone else, or
+  once something else is set, keeps its control: a proposal's fields that a proposal cannot carry
+  (`nonProposableFields()` words each), and Reference Type until an id is given. The reason sits
+  beside it, in `form-hint`.
+- **A label is not a `<label>`.** A `<label htmlFor>` names a control. A value drawn as text has none,
+  so its name is a plain `form-label` div.
+- **Read-only copy fields stay inputs.** A credential, URL or token is there to be selected and
+  copied, so it is not covered.
+
 ### A plan opens expanded
 
 An area's plan (on a Site Map card, and in the Areas and Cells panels) has an Expand button
@@ -555,6 +580,11 @@ when the page reloads the device.
   not a write.
 - **The file's row wraps**, with the name and size on the left and the buttons on the right, and a
   long name wraps rather than being cut. The dialog has the width, so the buttons keep their words.
+- **A replay lane shows its machine's model, read-only.** The lane holds none of its own, and the
+  database keeps its `model_3d_path` NULL, so the drawer reads the machine's. `DevicesTab` hands the
+  dialog that machine as `modelOf`. The dialog then reads its path, says "<machine>'s model" in place
+  of **Public**, and draws no Replace, Remove, drop zone or file input. A lane whose machine has no
+  model gets no 3D action, neither View nor Add, and a dialog open when the model goes closes.
 
 ### An area's plan turns in quarter turns
 
@@ -2056,7 +2086,18 @@ serve them all, so there is one set of rules.
   and is a warning when the file stops at the cap. An export with no rows writes no file, no row and
   no toast, and says why in the dialog. The row is in the **Readings** lane (`READINGS`, `telemetry`),
   its action **Readings exported** (`TELEMETRY_EXPORTED`), a Read. The drawer names its devices and
-  shows its window in local time, as a service-logs read's is.
+  shows its window in local time, as a service-logs read's is. Where a derived metric was exported it
+  names each as `name = definition`.
+- **A derived metric is exported like any other, per bucket.** Every entry point names the metrics it
+  chose, derived ones among them, and hands the dialog the catalog (`catalog`), which says which are
+  derived (`splitDerived()`). `export_telemetry()` reads them through `derived_series()` and names
+  them in the document's `derived`. The dialog says what the file will hold: a value at 1 minute where
+  Raw is chosen, and for each bucket otherwise (`derivedNote()`). The file gets one `# DERIVED:` comment
+  row for each (`derivedRows()`), which gives its definition in the words the Derived tab uses and says
+  what a row is. A time in state is a fraction from 0 to 1 in the file, with the unit `% of the time`
+  History draws it in, and its comment row says so. A Raw export of derived metrics alone holds no raw
+  reading, so its first line, its name and the dialog's warnings follow the 1-minute buckets it holds
+  (`fileResolutionKey()`). The columns stay the five.
 - **Settings gains a History tab** (`SETTINGS_TABS`), with the one setting.
 - `telemetryExport.test.js`, `telemetryExportModal.test.jsx`, `historyPage.test.jsx`,
   `historyOverview.test.jsx`, `historyCellPage.test.jsx`, `historyExportAreaMetric.test.jsx` and
@@ -2067,14 +2108,15 @@ serve them all, so there is one set of rules.
 
 A derived metric ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) is a catalogue row with a
 definition, computed where it is read. History offers it, draws it and tags it; the Devices drawer shows
-its current value; Export leaves it out. The database's rules are in
+its current value; Export saves its values. The database's rules are in
 [supabase/README.md](../supabase/README.md#history-draws-a-derived-metric-from-the-minutes-0282).
 
 - **A device reports a derived metric when it reports all its inputs.** `deviceMetrics(device, schemas,
   catalog)` adds each such metric to what a device declared and its schemas model, so the Device tab's
   charts and Metrics filter, the Cell and Area tabs' metric lists, and the Metric tab's picker and its
   devices all follow one rule (`derivedReportedBy()`). Without the catalog it lists measured metrics
-  only, as it always did, which is what Overview and Export read.
+  only, as it always did. Overview reads it with the catalog, so its box exports the derived metrics its
+  devices have the inputs of.
 - **A read is split by the catalogue** (`splitDerived()`): a measured name goes to
   `api.readCarriedTelemetry()`, a derived one to `api.readDerivedSeries()`, which returns the same
   columns, so `chartSeries()` draws both. A derived series draws its value as the line and has no band
@@ -2103,10 +2145,8 @@ its current value; Export leaves it out. The database's rules are in
   charts (`SmallMultiples`'s `derived`) and in the Devices drawer. The word is the tag, never a colour.
 - **The hour-of-day grids say they do not apply.** They read measured readings; a derived metric is
   computed over a stretch of time and has no mean at an hour.
-- **Export leaves a derived metric out, by one function.** `exportableMetrics(names, catalog)` returns
-  the measured names for `export_telemetry()` and the derived ones as `left`, said with
-  `DERIVED_EXPORT_NOTE` in the button's tooltip and in the dialog (`TelemetryExportModal`'s `left`).
-  The Device and Cell tabs call it; any other place that offers Export passes its names through it.
+- **Export saves a derived metric's values.** Every place that offers Export passes the names chosen,
+  derived ones included, and the catalog to `TelemetryExportModal`. *History's Export* has the rest.
 - **The Devices drawer lists a device's derived metrics** (`common/DeviceDerivedValues.jsx`): the
   current value of each, with its unit, its tag and its window in words (`currentWords()`), from one
   `api.readDerivedCurrent()` when the drawer opens on the device. A device with no value says so, a
@@ -2992,8 +3032,16 @@ A test waits for the condition it checks, not for a time. Use `waitFor` or a `fi
 `setTimeout` wait passes on a quiet machine and fails on a busy one, and one long enough for the
 busiest machine slows every run. When the rule under test is about a limit the page reads from
 `../api`, mock the limit small in that test, as `historyAlerts.test.jsx` does for
-`ALERT_HISTORY_LIMIT`, so the test does not render a thousand rows to check a line of text. Some
-older tests still wait for a time. Change each to a condition when you touch it.
+`ALERT_HISTORY_LIMIT`, so the test does not render a thousand rows to check a line of text. No test
+waits for a time now. A `setTimeout` or `setImmediate` in `src/__tests__/` fails the docs drift
+check unless that check lists it with its reason.
+
+Three cases come up. To check that nothing happened, follow the step that should do nothing with
+one that does something, or run what is queued with `await act(async () => {})`. Where the test is
+about a delay, fake the timer with `vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })`,
+move it on with `vi.advanceTimersByTime()`, and use real timers again before a `waitFor`, which
+waits on a timer of its own. A page that `App.jsx` opens with `lazy()` is imported in `beforeAll`,
+so compiling it is not a second for a `findBy` to wait out.
 
 ---
 

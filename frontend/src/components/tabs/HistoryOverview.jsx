@@ -393,7 +393,7 @@ function SelectionPopover({ box, layerRef, words, keys, win, names, chartFor, ex
  * than history.export_max_days: the box's words say when its window is over, as it is drawn, and the
  * button says why it is off.
  */
-export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, every, setEvery, userRole, showToast }) {
+export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, setWin, every, setEvery, userRole, showToast }) {
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const [search, setSearch] = useUrlState('search', '')
@@ -426,8 +426,8 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
   const [exporting, setExporting] = useState(null)
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
-  // What each device reports, for Export's metrics: read once, not on every move of a box.
-  const metricsByKey = useMemo(() => new Map(placed.map(d => [telemetryKey(d), deviceMetrics(d, schemas)])), [placed, schemas])
+  // What each device reports, and the derived metrics it has the inputs of, for Export's metrics: read once, not on every move of a box.
+  const metricsByKey = useMemo(() => new Map(placed.map(d => [telemetryKey(d), deviceMetrics(d, schemas, catalog)])), [placed, schemas, catalog])
 
   /** The width a track is drawn at: the axis track's, else the page's less the label column, else a default's. */
   const stripPx = () => {
@@ -862,6 +862,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, win, setWin, e
         <TelemetryExportModal
           devices={exporting.devices}
           metricNames={exporting.names}
+          catalog={catalog}
           from={exporting.from}
           to={exporting.to}
           windowWords={exporting.windowWords}

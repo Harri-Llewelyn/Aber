@@ -266,8 +266,8 @@ class AMillionRows(unittest.TestCase):
                          " 'Million Cell ' || j FROM generate_series(0, 99) j;")
         self.cur.execute("INSERT INTO public.gateways (id, name, cell_id) SELECT md5('million-gateway-' || j)::uuid,"
                          " 'Million Gateway ' || j, md5('million-cell-' || j)::uuid FROM generate_series(0, 49) j;")
-        self.cur.execute("INSERT INTO public.devices (id, name, cell_id) SELECT md5('million-device-' || j)::uuid,"
-                         " 'Million Device ' || j, md5('million-cell-' || (j %% 100))::uuid"
+        self.cur.execute("INSERT INTO public.devices (id, name, cell_id, location_scope) SELECT md5('million-device-' || j)::uuid,"
+                         " 'Million Device ' || j, md5('million-cell-' || (j %% 100))::uuid, 'cell'"
                          " FROM generate_series(0, %s) j;", (LIVE_DEVICES - 1,))
         self.cur.execute("SELECT set_config('role', 'authenticated', true);")
         self.cur.execute("SELECT set_config('request.jwt.claims', %s, true);",

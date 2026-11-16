@@ -124,7 +124,7 @@ export function buildFacts({ devices = [], schemas = [], catalog = [], documentD
     const id = d.asset_id ?? d.id
     if (!id) continue
     const known = documentDevices[id]
-    const place = known ? known.place : d.location_source === 'site_wide'
+    const place = known ? known.place : (d.location_source === 'site_wide' || d.location_source === 'followed_site')
       ? 'Site-wide'
       : [d.cell_name, d.area_name].filter(Boolean).join(' · ') || null
     byId.set(id, { id, name: known?.name ?? d.asset_name ?? d.name ?? id, place, archived: Boolean(d.is_archived), device: d })

@@ -11257,7 +11257,7 @@ CREATE TABLE IF NOT EXISTS public.devices (
     last_birth_metrics_at timestamp with time zone,
     model_3d_path text,
     cell_id uuid,
-    location_scope text DEFAULT 'cell'::text NOT NULL,
+    location_scope text DEFAULT 'gateway'::text NOT NULL,
     description text,
     conformance_policy text DEFAULT 'audit'::text NOT NULL,
     shadow_of uuid,
@@ -11265,7 +11265,7 @@ CREATE TABLE IF NOT EXISTS public.devices (
     CONSTRAINT devices_area_wide_has_no_cell CHECK (((location_scope <> 'area_wide'::text) OR (cell_id IS NULL))),
     CONSTRAINT devices_area_wide_names_its_area CHECK (((location_scope = 'area_wide'::text) = (area_id IS NOT NULL))),
     CONSTRAINT devices_conformance_policy_valid CHECK ((conformance_policy = ANY (ARRAY['audit'::text, 'enforce'::text]))),
-    CONSTRAINT devices_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text, 'area_wide'::text]))),
+    CONSTRAINT devices_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text, 'area_wide'::text, 'gateway'::text]))),
     CONSTRAINT devices_model_3d_path_shape CHECK (((model_3d_path IS NULL) OR (model_3d_path ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[^/]+\.(gltf|glb|obj|stl)$'::text))),
     CONSTRAINT devices_online_implies_born CHECK (((status IS DISTINCT FROM 'ONLINE'::text) OR (first_dbirth_at IS NOT NULL))),
     CONSTRAINT devices_shadow_of_is_not_self CHECK (((shadow_of IS NULL) OR (shadow_of <> id))),
@@ -11297,7 +11297,7 @@ ALTER TABLE public.devices
     ADD COLUMN IF NOT EXISTS last_birth_metrics_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS model_3d_path text,
     ADD COLUMN IF NOT EXISTS cell_id uuid,
-    ADD COLUMN IF NOT EXISTS location_scope text DEFAULT 'cell'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS location_scope text DEFAULT 'gateway'::text NOT NULL,
     ADD COLUMN IF NOT EXISTS description text,
     ADD COLUMN IF NOT EXISTS conformance_policy text DEFAULT 'audit'::text NOT NULL,
     ADD COLUMN IF NOT EXISTS shadow_of uuid,
@@ -11322,7 +11322,7 @@ ALTER TABLE public.devices
     ALTER COLUMN last_birth_metrics_at DROP DEFAULT,
     ALTER COLUMN model_3d_path DROP DEFAULT,
     ALTER COLUMN cell_id DROP DEFAULT,
-    ALTER COLUMN location_scope SET DEFAULT 'cell'::text,
+    ALTER COLUMN location_scope SET DEFAULT 'gateway'::text,
     ALTER COLUMN description DROP DEFAULT,
     ALTER COLUMN conformance_policy SET DEFAULT 'audit'::text,
     ALTER COLUMN shadow_of DROP DEFAULT,
@@ -11381,14 +11381,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_location_scope_valid'
                 AND conrelid = 'public.devices'::regclass
-                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((location_scope = ANY (ARRAY[''cell''::text, ''site_wide''::text, ''area_wide''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((location_scope = ANY (ARRAY[''cell''::text, ''site_wide''::text, ''area_wide''::text, ''gateway''::text])))') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_location_scope_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'devices_location_scope_valid'
                     AND conrelid = 'public.devices'::regclass) THEN
     ALTER TABLE public.devices
-        ADD CONSTRAINT devices_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text, 'area_wide'::text])));
+        ADD CONSTRAINT devices_location_scope_valid CHECK ((location_scope = ANY (ARRAY['cell'::text, 'site_wide'::text, 'area_wide'::text, 'gateway'::text])));
   END IF;
 END $c$;
 

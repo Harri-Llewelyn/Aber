@@ -122,7 +122,8 @@ class EvaluatorBase(unittest.TestCase):
         cell = self.cur.fetchone()[0]
         self.sparkplug = {}
         for device, name in ((DEV_A, "Test_0271_Lathe_3"), (DEV_B, "Test_0271_Lathe_4")):
-            self.cur.execute("INSERT INTO public.devices (id, name, cell_id) VALUES (%s, %s, %s) RETURNING sparkplug_id;",
+            self.cur.execute("INSERT INTO public.devices (id, name, cell_id, location_scope)"
+                             " VALUES (%s, %s, %s, 'cell') RETURNING sparkplug_id;",
                              (device, name, cell))
             self.sparkplug[device] = self.cur.fetchone()[0]
         self.cur.execute("INSERT INTO public.metric_catalog (name, datatype) VALUES (%s, 10), (%s, 10), (%s, 11);",

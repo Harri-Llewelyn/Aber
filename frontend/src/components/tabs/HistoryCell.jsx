@@ -26,8 +26,7 @@ import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import { derivedDefinitions, unitOf } from '../../utils/derivedMetric'
 import {
-  DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem,
-  exportableMetrics, mayExportReadings,
+  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem, mayExportReadings,
 } from '../../utils/telemetryExport'
 import { navigate, useUrlState } from '../../hooks/useUrlState'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
@@ -348,18 +347,15 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
   const { start: shownStart, end: shownEnd } = windowBounds(win, now)
-  // A derived metric is computed when drawn and holds no reading to export.
-  const exportable = exportableMetrics(metric ? [metric] : [], catalog)
   const exportBlocked = !metric ? 'This cell has no metric to export.'
-    : exportable.left.length ? DERIVED_EXPORT_NOTE
-      : reporters.length === 0 ? `None of the machines in ${cell.name} reports ${metric}, so there is nothing to export.`
-        : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
+    : reporters.length === 0 ? `None of the machines in ${cell.name} reports ${metric}, so there is nothing to export.`
+      : exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
   /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
   const openExport = () => {
     const at = Date.now()
     const { start, end } = windowBounds(win, at)
     setExporting({
-      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: exportable.names, left: exportable.left,
+      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: [metric],
       from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
     })
   }
@@ -481,7 +477,7 @@ export function HistoryCell({ cell, cells, schemas, catalog, win, setWin, every,
         <TelemetryExportModal
           devices={exporting.devices}
           metricNames={exporting.names}
-          left={exporting.left}
+          catalog={catalog}
           from={exporting.from}
           to={exporting.to}
           windowWords={exporting.windowWords}

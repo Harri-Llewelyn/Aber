@@ -1,8 +1,8 @@
 /**
  * The Settings page for every role. Every signed-in account may read a setting (RLS hides the rows
  * marked `sensitive` from all but Administrators), so the page is in everyone's rail; changing one
- * is an Administrator's, so for anyone else each field is disabled and says who can change it,
- * rather than offering a Save the database will refuse.
+ * is an Administrator's, so for anyone else each value is shown as text and Actions says who can
+ * change it, rather than offering a field and a Save the database will refuse.
  */
 import React from 'react'
 import { act, render, screen, within } from '@testing-library/react'
@@ -47,18 +47,35 @@ beforeEach(() => {
 })
 
 describe('for anyone but an Administrator', () => {
-  it('disables every field and says who can change it', async () => {
+  it('shows every value as text and says who can change it', async () => {
     await show({ readOnly: true })
 
-    expect(within(row('Alert history kept for (days)')).getByRole('spinbutton')).toBeDisabled()
-    expect(within(row('Expire open proposals')).getByRole('combobox')).toBeDisabled()
+    const value = (label) => row(label).querySelector('.setting-cell-value')
+    // No control is drawn, greyed or not: a value nobody here can change is a label.
+    for (const label of ['Alert history kept for (days)', 'Expire open proposals', 'Sparkplug group']) {
+      expect(value(label).querySelector('input, select, textarea'), label).toBeNull()
+    }
+    expect(within(row('Alert history kept for (days)')).queryByRole('spinbutton')).toBeNull()
+    expect(within(row('Expire open proposals')).queryByRole('combobox')).toBeNull()
+    // The name is a plain label, since a <label> names a control.
+    expect(screen.queryByLabelText('Alert history kept for (days)')).toBeNull()
+
+    // A number as it is, a switch as Enabled or Disabled.
+    expect(value('Alert history kept for (days)')).toHaveTextContent('7')
+    expect(value('Expire open proposals')).toHaveTextContent('Enabled')
     for (const label of ['Alert history kept for (days)', 'Expire open proposals']) {
       expect(within(row(label)).getByText('Only an Administrator can change this')).toBeInTheDocument()
     }
     // A setting fixed at install says so instead: nobody can change it here.
+    expect(value('Sparkplug group')).toHaveTextContent('Aber')
     expect(within(row('Sparkplug group')).getByText('Fixed at install')).toBeInTheDocument()
     expect(within(row('Sparkplug group')).queryByText(/Only an Administrator/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+
+  it('still states the permitted range, which says what an Administrator may set', async () => {
+    await show({ readOnly: true })
+    expect(within(row('Alert history kept for (days)')).getByText('1 to 3650')).toBeInTheDocument()
   })
 
   /* Who may change a setting is said on each row, so the tab's tooltip is the same for every role:
@@ -76,6 +93,8 @@ describe('for an Administrator', () => {
   it('leaves every field editable, with no note about who may change it', async () => {
     await show({ readOnly: false })
     expect(within(row('Alert history kept for (days)')).getByRole('spinbutton')).toBeEnabled()
+    expect(within(row('Expire open proposals')).getByRole('combobox')).toBeEnabled()
+    expect(screen.getByLabelText('Alert history kept for (days)')).toBeInTheDocument()
     expect(screen.queryByText('Only an Administrator can change this')).toBeNull()
   })
 })

@@ -78,17 +78,21 @@ info:
 
     ### Asset location
 
-    A device has **two** relationships to a cell, and they answer different questions:
+    A device has **two** relationships to a place, and they answer different questions:
 
     * `devices.gateway_id → gateways.cell_id` is the **data path** — what the Sparkplug topic
       carries.
-    * `devices.cell_id` is an explicit **location override**. `NULL` means inherit from the
-      gateway; it is not a stored "unassigned", and the column has no default.
+    * `devices.location_scope` says where the device **is**. `gateway` (the default, shown as
+      Follow Gateway) takes whatever place the gateway has when it is read: its cell, its area,
+      the whole site, or none. `cell` is the cell `devices.cell_id` names, and it requires one.
+      `area_wide` and `site_wide` are an operator's assertion that the device has no single cell.
+      A CHECK forbids a cell with `gateway`, `area_wide` or `site_wide`, and an area with
+      anything but `area_wide`.
 
-    Resolution is `COALESCE(device.cell_id, gateway.cell_id)`, exposed by the
-    **`device_locations`** view. `location_scope` (`cell` | `area_wide` | `site_wide`) records an
-    operator's assertion that an asset has no single cell; a CHECK forbids either wide scope with
-    a populated `cell_id`.
+    Resolution is exposed by the **`device_locations`** view, and `location_source` says which
+    arm answered. A device that follows its gateway resolves to `followed_cell`,
+    `followed_area` or `followed_site`, or to `unassigned` when the gateway has no location or
+    there is no gateway. Changing a gateway's location moves the devices that follow it.
 
     Above the cell sits the ISA-95 **area** (one part of the site, `/rest/v1/areas`):
     `cells.area_id` files a cell, and a device's `effective_area_id` on the same view is its cell's
@@ -101,8 +105,8 @@ info:
     the hierarchy and is not modelled: a building with two floors is two areas.
 
     **No embed can express this.** `cells?select=*,gateways(devices(*))` returns devices by
-    inheritance only, so a device explicitly placed in cell B whose gateway serves cell A comes
-    back under A. Read `device_locations` and merge by `device_id`.
+    their gateway only, so a device placed in cell B whose gateway serves cell A comes back under
+    A. Read `device_locations` and merge by `device_id`.
 
   contact:
     name: Aber
@@ -501,8 +505,11 @@ paths:
         `id` and `sparkplug_id` are generated — do not send them. The issued `sparkplug_id`
         is what the gateway must publish this device as.
 
-        **Do not set `cell_id` on create.** Leaving it NULL is what lets the device inherit
-        its gateway's cell; a value here is an explicit override that survives re-homing.
+        **Leave the location out on create.** A new device has `location_scope=gateway`: it
+        follows its gateway, with no cell and no area. To put it in a cell, send
+        `location_scope=cell` with the `cell_id`; a `cell_id` alone is refused by
+        `devices_follow_gateway_has_no_place`, and `cell` with no cell by
+        `devices_cell_scope_names_a_cell`.
       parameters: [{ $ref: '#/components/parameters/Prefer' }]
       requestBody:
         required: true
@@ -516,9 +523,10 @@ paths:
       tags: [Assets]
       summary: Update devices matching a filter
       description: |
-        `gateway_id` moves a device along the data path. `cell_id` / `location_scope` move it
-        on the shopfloor map. Setting `location_scope=site_wide` requires `cell_id` to be
-        NULL in the same request, or a CHECK rejects it with `400`.
+        `gateway_id` moves a device along the data path. `cell_id` / `area_id` /
+        `location_scope` move it on the shopfloor map. Setting `location_scope` to `site_wide` or
+        `gateway` requires `cell_id` (and `area_id`) to be NULL in the same request, or a CHECK
+        rejects it with `400`. `location_scope=cell` requires a `cell_id`.
       parameters:
         - { name: id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
         - $ref: '#/components/parameters/Prefer'
@@ -529,7 +537,7 @@ paths:
             schema: { $ref: '#/components/schemas/DeviceWrite' }
       responses:
         '204': { description: Updated. }
-        '400': { description: 'CHECK violation — most often `site_wide` with a populated `cell_id`.' }
+        '400': { description: 'CHECK violation — most often `site_wide` or `gateway` with a populated `cell_id`, or `cell` with none.' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
   # ------------------------------------------------------------ Location ----
@@ -538,14 +546,15 @@ paths:
       tags: [Location]
       summary: Each device's effective cell, resolved at read time
       description: |
-        Read-only view resolving `COALESCE(device.cell_id, gateway.cell_id)`.
+        Read-only view resolving each device's place from its `location_scope`: its own cell, its
+        own area, the site, or the place its gateway has.
 
         **Never collapse `effective_cell_id` and `explicit_cell_id`.** The first is what to
         display; the second is what to put back in an edit form. A form that round-trips the
-        effective value converts an inherited cell into an explicit override.
+        effective value pins a device that follows its gateway to a cell of its own.
 
-        `location_source` says which arm won (`device` | `gateway` | `none`), and
-        `cell_mismatch` is true when an explicit cell disagrees with the gateway's.
+        `location_source` says which arm won (see `DeviceLocation`), and `cell_mismatch` is
+        true when a device's own cell disagrees with the gateway's.
       parameters:
         - $ref: '#/components/parameters/Select'
         - name: device_id
@@ -1063,14 +1072,26 @@ paths:
         text or a flag. Raw is read from the oldest reading the historian still holds (`raw_from`);
         a window that starts earlier is read from there, and `read_from` says where.
 
-        **At most 50,000 rows.** Past that the rows end at a whole minute: `truncated` is true and
-        `read_to` is the time they end. A minute that holds more than 50,000 readings returns none.
-        The read is bounded by time, from the rollup's own count of what each hour and minute holds,
-        because `postgres_fdw` sends no `LIMIT` for a read naming devices and metrics.
+        **A name in `metric_names` that is a derived metric** (`metric_catalog.derivation`) is read
+        through `derived_series()`, the function History reads, and not from a rollup. It has no
+        readings, only buckets: its rows are the resolution's buckets, and one minute for `raw`, which
+        no derived metric is finer than. A row's `time` is the bucket's start and its `value` the
+        bucket's value, as for a rollup, and `unit` is its catalogue unit (`COUNT/HOUR` for a rate), or
+        `% of the time` for a time in state, whose value is a fraction from 0 to 1. `derived` names each
+        one asked for with its kind, its definition in words and its unit. A derived metric starts at
+        the window's start, whatever `raw_from` says, and a device that lacks an input of it has no row.
+
+        **At most 50,000 rows**, derived ones included. Past that the rows end at a whole minute:
+        `truncated` is true and `read_to` is the time they end. A minute that holds more than 50,000
+        readings returns none. The read is bounded by time, from the rollup's own count of what each
+        hour and minute holds (a derived metric's is the devices that have its inputs times its buckets),
+        because `postgres_fdw` sends no `LIMIT` for a read naming devices and metrics. Derived metrics are
+        read in chunks that each stay inside `derived_series()`'s limits.
 
         **An export that returns rows writes one `TELEMETRY_EXPORTED` row in the Audit Trail**, in
         the asset lane under `telemetry`, naming who exported, the devices (id and name), the
-        metrics, the window, the resolution and how many rows left. `audit_id` is that row's id. One
+        metrics, the window, the resolution and how many rows left, and, when a derived metric was
+        asked for, its name and definition (`derived`). `audit_id` is that row's id. One
         that returns none writes none, and a refusal writes none. `SECURITY DEFINER`.
       requestBody:
         content:
@@ -1082,8 +1103,8 @@ paths:
                 from_ts: { type: string, format: date-time, description: 'Readings from this time on.' }
                 to_ts: { type: string, format: date-time, description: 'Readings before this time. After `from_ts`, and at most `history.export_max_days` later.' }
                 asset_ids: { type: array, items: { type: string }, example: [dev220000000000400080000], maxItems: 1000, description: 'Device Sparkplug IDs (devices.sparkplug_id). A repeated or blank one is ignored.' }
-                metric_names: { type: array, items: { type: string }, example: [Spindle/LOAD], maxItems: 500 }
-                resolution: { type: string, enum: [raw, 1m, 5m, 1h], default: raw, description: '`raw`, or the average of the 1-minute, 5-minute or 1-hour rollup. Never one in place of another.' }
+                metric_names: { type: array, items: { type: string }, example: [Spindle/LOAD], maxItems: 500, description: 'Measured metrics and derived ones. A derived metric is computed, and comes per bucket of the resolution: at 1 minute for `raw`.' }
+                resolution: { type: string, enum: [raw, 1m, 5m, 1h], default: raw, description: '`raw`, or the average of the 1-minute, 5-minute or 1-hour rollup. Never one in place of another. A derived metric has no readings, so it comes at the rollup''s width, and at 1 minute for `raw`.' }
       responses:
         '200':
           description: The export.
@@ -4774,6 +4795,10 @@ paths:
 
         Write the object **before** the `devices.model_3d_path` row: a row pointing at nothing
         exports a dead link, whereas an unreferenced object is merely litter.
+
+        **Not under a replay lane's id.** A lane holds no model of its own: its machine's is
+        shown. An object whose first folder is the id of a device with `shadow_of` set is refused,
+        whatever the role.
       requestBody:
         required: true
         content:
@@ -4781,7 +4806,7 @@ paths:
             schema: { type: string, format: binary }
       responses:
         '200': { description: Stored. }
-        '403': { description: 'Role lacks `device:manage`.' }
+        '403': { description: 'Role lacks `device:manage`, or the key is under a replay lane''s id.' }
     delete:
       tags: [Storage]
       summary: Remove a 3D model object
@@ -4873,7 +4898,8 @@ paths:
                 merge_into_device_id: { type: string, format: uuid, nullable: true, description: Fold this discovery into an existing device row instead of approving it separately. }
                 asset_name: { type: string, nullable: true }
                 cell_id: { type: string, format: uuid, nullable: true }
-                location_scope: { type: string, enum: [cell, site_wide], nullable: true }
+                area_id: { type: string, format: uuid, nullable: true, description: 'Required with `location_scope=area_wide`.' }
+                location_scope: { type: string, enum: [gateway, cell, area_wide, site_wide], nullable: true, description: 'Written only when present. `gateway` clears the cell and the area; `cell` requires a `cell_id`. A `cell_id` sent with no scope means `cell`.' }
       responses:
         '200':
           description: Approved.
@@ -7151,15 +7177,26 @@ components:
       enum: [cell, area_wide, site_wide]
       default: cell
       description: |
-        `site_wide` is an operator's assertion that this asset has no single cell and no single
-        area: it serves the whole campus (an AGV, an ambient sensor). `area_wide` is the same
-        assertion one level down: no single cell, one area (a building management system), and it
-        REQUIRES `area_id`. A CHECK forbids either alongside a populated `cell_id`, and forbids
-        `area_id` on anything but `area_wide` — a cell-scoped asset's area is its cell's, read from
-        `device_locations`.
+        A gateway's location. `site_wide` is an operator's assertion that this asset has no single
+        cell and no single area: it serves the whole campus (an AGV, an ambient sensor).
+        `area_wide` is the same assertion one level down: no single cell, one area (a building
+        management system), and it REQUIRES `area_id`. A CHECK forbids either alongside a
+        populated `cell_id`, and forbids `area_id` on anything but `area_wide` — a cell-scoped
+        asset's area is its cell's. A gateway has no gateway to follow, so it never takes
+        `gateway`. The devices that follow it take this place.
 
-        **Scope does not inherit; only `cell_id` does.** A device behind a site-wide gateway
-        resolves to *Unassigned*, not to Site-Wide.
+    DeviceLocationScope:
+      type: string
+      enum: [gateway, cell, area_wide, site_wide]
+      default: gateway
+      description: |
+        A device's location. `gateway` (Follow Gateway, the default) takes whatever place the
+        device's gateway has when it is read: the gateway's cell, its area (Area-Wide), the whole
+        site (Site-Wide), or none, which is *Unassigned*. It names no cell and no area of its own,
+        and moves when the gateway's location does. `cell` is the cell `cell_id` names, and
+        REQUIRES it. `site_wide` and `area_wide` are the device's own assertion, as for a
+        gateway, whatever its gateway does; `area_wide` REQUIRES `area_id`. A CHECK forbids a
+        `cell_id` with any scope but `cell`, and an `area_id` with any but `area_wide`.
 
     Area:
       type: object
@@ -7364,11 +7401,11 @@ components:
           format: uuid
           nullable: true
           description: >-
-            Explicit LOCATION OVERRIDE. NULL means inherit from the gateway; it is not a stored
-            "unassigned", and the column has no default — a default would make inheritance
-            unreachable. Read `device_locations.effective_cell_id` to display.
+            The device's own cell: set exactly when `location_scope` is `cell`, NULL for every
+            other scope. A device that follows its gateway has none; its cell is the gateway's.
+            The column has no default. Read `device_locations.effective_cell_id` to display.
         area_id: { type: string, format: uuid, nullable: true, description: 'Populated exactly when `location_scope` is `area_wide`. Read `device_locations.effective_area_id` to display.' }
-        location_scope: { $ref: '#/components/schemas/LocationScope' }
+        location_scope: { $ref: '#/components/schemas/DeviceLocationScope' }
         status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE, description: 'Set ONLINE on DBIRTH, OFFLINE on DDEATH, and OFFLINE by the ingestion watchdog after a configurable silence. DDATA from a device the watchdog timed out sets it ONLINE again.' }
         is_quarantined:
           type: boolean
@@ -7380,7 +7417,8 @@ components:
           description: >-
             An object KEY in the `asset-3d-models` bucket, never a URL. A stored URL bakes in the
             origin of whichever stack uploaded it. The public URL is composed at read time from
-            AAS_MODEL_PUBLIC_BASE. CHECK-constrained on the file extension.
+            AAS_MODEL_PUBLIC_BASE. CHECK-constrained on the file extension. Always null on a replay
+            lane (`shadow_of` set): the database refuses one, and the lane shows its machine's.
         connection_method: { type: string, nullable: true, example: Sparkplug B }
         shadow_of:
           type: string
@@ -7423,9 +7461,9 @@ components:
         name: { type: string, example: Sim_CNC_Mill_01 }
         description: { type: string, nullable: true, description: 'Operator note. Shown in the dashboard, and served by i3X as the device object''s description; nothing acts on it.' }
         gateway_id: { type: string, format: uuid, nullable: true }
-        cell_id: { type: string, format: uuid, nullable: true, description: 'Send NULL to clear an override and return the device to inheriting.' }
+        cell_id: { type: string, format: uuid, nullable: true, description: 'Required with `location_scope=cell`; must be NULL otherwise. To stop pinning a device to a cell, send NULL with `location_scope=gateway`.' }
         area_id: { type: string, format: uuid, nullable: true, description: 'Required with `location_scope=area_wide`; must be NULL otherwise.' }
-        location_scope: { $ref: '#/components/schemas/LocationScope' }
+        location_scope: { $ref: '#/components/schemas/DeviceLocationScope' }
         status: { type: string, enum: [ONLINE, OFFLINE] }
         is_quarantined: { type: boolean }
         model_3d_path: { type: string, nullable: true }
@@ -7441,21 +7479,25 @@ components:
         gateway_id: { type: string, format: uuid, nullable: true }
         explicit_cell_id: { type: string, format: uuid, nullable: true, description: 'The raw `devices.cell_id`. This is what an edit form must round-trip.' }
         gateway_cell_id: { type: string, format: uuid, nullable: true }
-        location_scope: { $ref: '#/components/schemas/LocationScope' }
+        location_scope: { $ref: '#/components/schemas/DeviceLocationScope' }
         effective_cell_id: { type: string, format: uuid, nullable: true, description: 'What to display. NULL for every lane — read `location_source` to tell which.' }
         location_source:
           type: string
-          enum: [shadow, simulated, site_wide, explicit, inherited, unassigned]
+          enum: [shadow, simulated, site_wide, area_wide, followed_site, followed_area, followed_cell, explicit, inherited, unassigned]
           description: >-
             Which arm answered, most specific first. `shadow` and `simulated` are read off the
             GATEWAY (0059) and resolve to no cell: they are lanes rather than places, and an asset
             behind one is not unfiled but unfileable — `gateways_synthetic_has_no_cell` refuses the
-            write. `site_wide` is an operator's assertion that an asset has no single cell.
-            `explicit` and `inherited` look identical once resolved, but only the second moves when
-            the gateway is reassigned. `unassigned` is the fall-through and the only one that means
-            "nobody has decided": it is a queue that should drain, which is why the four above it
-            are kept out of it.
-          example: inherited
+            write. `site_wide` and `area_wide` are an operator's assertion that an asset has no
+            single cell. `followed_site`, `followed_area` and `followed_cell` are a device that
+            follows its gateway (`location_scope=gateway`), placed where the gateway is: the whole
+            site, the gateway's area, or the gateway's cell. They move when the gateway's location
+            does, and `explicit` does not. `inherited` is the older name for a cell the gateway
+            supplied; nothing produces it now that a cell scope names its cell. `unassigned` is the
+            fall-through, also for a device that follows a gateway with no location or has no
+            gateway, and the only one that means "nobody has decided": it is a queue that should
+            drain, which is why the others are kept out of it.
+          example: followed_cell
         cell_mismatch: { type: boolean, description: True when an explicit cell disagrees with the gateway's. }
 
     DeviceUnsPath:
@@ -7633,9 +7675,19 @@ components:
         row_count: { type: integer }
         max_rows: { type: integer, example: 50000 }
         truncated: { type: boolean, description: 'The rows end at `read_to`, not at the window''s end.' }
-        read_from: { type: string, format: date-time, description: 'Where the rows begin: the window''s start, or the oldest raw reading the historian holds when that is later.' }
+        read_from: { type: string, format: date-time, description: 'Where the rows begin: the window''s start, or the oldest raw reading the historian holds when that is later. A derived metric''s rows begin at the window''s start.' }
         read_to: { type: string, format: date-time, description: 'Where the rows end: the window''s end, or the whole minute they were cut at.' }
         raw_from: { type: string, format: date-time, nullable: true, description: 'The oldest raw reading the historian holds, for `raw`; null otherwise.' }
+        derived:
+          type: array
+          description: 'The derived metrics asked for, by name: one row of the file marks each. Empty when none was.'
+          items:
+            type: object
+            properties:
+              metric: { type: string, example: Controller/PARTS_PER_HOUR }
+              kind: { type: string, enum: [counter_rate, time_in_state, sum] }
+              definition: { type: string, example: 'rate of Controller/PART_COUNT, per hour', description: 'The definition in the words the dashboard uses.' }
+              unit: { type: string, nullable: true, example: COUNT/HOUR, description: 'The catalogue unit; `% of the time` for a time in state, whose value is a fraction from 0 to 1.' }
 
     TelemetryCoverageRow:
       type: object

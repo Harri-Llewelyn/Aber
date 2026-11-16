@@ -2507,3 +2507,130 @@ describe('a metric\'s id', () => {
     expect(within(catalogTable()).queryByText('Axes/DISPLACEMENT')).toBeNull()
   })
 })
+
+describe('Add Metric: Reference Type says why it waits for an id', () => {
+  it('is a control with its reason in words beside it, until there is an id', async () => {
+    await openForm()
+    expect(semanticIdInput().value).toBe('')
+    expect(referenceTypeSelect()).toBeDisabled()
+    const column = referenceTypeSelect().closest('div[style*="flex"]')
+    expect(column.textContent).toContain('Needs a semantic id first.')
+    fireEvent.change(semanticIdInput(), { target: { value: 'https://example.org/term' } })
+    expect(referenceTypeSelect()).toBeEnabled()
+    expect(screen.queryByText('Needs a semantic id first.')).toBeNull()
+  })
+})
+
+describe('Add Metric: Units is a label where the type takes none', () => {
+  const unitsFacts = () => [...document.querySelectorAll('.metric-edit-facts')]
+    .find(el => el.querySelector('.form-label')?.textContent === 'Units')
+  const chooseType = (value) => fireEvent.change(screen.getByLabelText(/Data Item Type/), { target: { value } })
+
+  it('is a select for a SAMPLE, which carries a unit', async () => {
+    await openForm()
+    chooseType('ANGLE')
+    expect(screen.getByRole('combobox', { name: 'Units' })).toBeEnabled()
+    expect(unitsFacts()).toBeUndefined()
+  })
+
+  it('reads None as text for an EVENT, with the reason, and offers no greyed select', async () => {
+    await openForm()
+    chooseType('EXECUTION')
+    expect(screen.queryByRole('combobox', { name: 'Units' })).toBeNull()
+    expect(document.getElementById('metric-units')).toBeNull()
+    const facts = unitsFacts()
+    expect(facts).toBeDefined()
+    expect(facts.textContent).toContain('None')
+    expect(facts.textContent).toContain('Only a SAMPLE data item has a unit; this type\'s category is EVENT.')
+  })
+
+  it('goes back to asking for a type when the type is cleared', async () => {
+    await openForm()
+    chooseType('EXECUTION')
+    fireEvent.change(screen.getByLabelText(/Data Item Type/), { target: { value: '' } })
+    expect(unitsFacts().textContent).toContain('Choose a Data Item Type first')
+  })
+
+  it('says to choose a type first while none is chosen, and why a custom type has none', async () => {
+    await openForm()
+    expect(unitsFacts().textContent).toContain('Choose a Data Item Type first.')
+    chooseType('__custom__')
+    expect(unitsFacts().textContent).toContain('a type outside MTConnect has no category')
+  })
+
+  it('brings the select back when the type changes to a SAMPLE, and is a select for another standard', async () => {
+    await openForm()
+    chooseType('EXECUTION')
+    expect(unitsFacts()).toBeDefined()
+    chooseType('ANGLE')
+    expect(unitsFacts()).toBeUndefined()
+    expect(screen.getByRole('combobox', { name: 'Units' })).toBeInTheDocument()
+    fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
+    expect(screen.getByRole('combobox', { name: 'Units' })).toBeEnabled()
+  })
+
+  it('adds an EVENT metric with no unit', async () => {
+    api.post.mockResolvedValue({ metric_uuid: 'new' })
+    await openForm()
+    chooseType('EXECUTION')
+    fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.objectContaining({ category: 'EVENT', units: '' })))
+  })
+})
+
+describe('Deprecate Metric: the replacement is picked from the schema builder’s list', () => {
+  const open = async (name) => {
+    renderTab()
+    await waitForCatalog()
+    selectMetric(catalogTable(), name)
+    fireEvent.click(drawerButton('Deprecate'))
+    return document.querySelector('.modal')
+  }
+  const rowOf = (modal, name) => [...modal.querySelectorAll('label')].find(l => l.querySelector('.mono')?.textContent === name)
+  const listed = (modal) => [...modal.querySelectorAll('label .mono')].map(el => el.textContent)
+
+  it('lists every other metric that is not deprecated, with the search and the standard filter, as radio buttons', async () => {
+    const modal = await open('Axes/DISPLACEMENT')
+    expect(listed(modal)).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE', 'safety_interlock'])
+    expect(modal.querySelectorAll('input[type="radio"]')).toHaveLength(3)
+    expect(modal.querySelector('select#deprecate-superseded-by')).toBeNull()
+    expect(within(modal).getByLabelText('Search catalog metrics')).toBeInTheDocument()
+    expect(within(modal).getByLabelText('Standard')).toBeInTheDocument()
+    expect(modal.textContent).toContain('No replacement chosen.')
+  })
+
+  it('narrows the list by search and by standard', async () => {
+    const modal = await open('Axes/DISPLACEMENT')
+    fireEvent.change(within(modal).getByLabelText('Search catalog metrics'), { target: { value: 'firm' } })
+    expect(listed(modal)).toEqual(['Controller/FIRMWARE'])
+    fireEvent.change(within(modal).getByLabelText('Search catalog metrics'), { target: { value: '' } })
+    fireEvent.change(within(modal).getByLabelText('Standard'), { target: { value: 'MTConnect' } })
+    expect(listed(modal)).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE'])
+  })
+
+  it('sends the chosen metric, and replaces it when another is chosen', async () => {
+    api.post.mockResolvedValue({})
+    const modal = await open('Axes/DISPLACEMENT')
+    fireEvent.click(rowOf(modal, 'Controller/EXECUTION').querySelector('input'))
+    expect(modal.textContent).toContain('Replaced by Controller/EXECUTION')
+    fireEvent.click(rowOf(modal, 'Controller/FIRMWARE').querySelector('input'))
+    expect(modal.textContent).toContain('Replaced by Controller/FIRMWARE')
+    expect(rowOf(modal, 'Controller/EXECUTION').querySelector('input').checked).toBe(false)
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Deprecate Metric' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog/m1/deprecate', { superseded_by: 'm3' }))
+  })
+
+  it('keeps the choice when a search hides it, and sends none once it is cleared', async () => {
+    api.post.mockResolvedValue({})
+    const modal = await open('Axes/DISPLACEMENT')
+    fireEvent.click(rowOf(modal, 'Controller/EXECUTION').querySelector('input'))
+    fireEvent.change(within(modal).getByLabelText('Search catalog metrics'), { target: { value: 'safety' } })
+    expect(modal.textContent).toContain('Replaced by Controller/EXECUTION')
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'No replacement' }))
+    expect(modal.textContent).toContain('No replacement chosen.')
+    fireEvent.click(within(modal).getByRole('button', { name: 'Deprecate Metric' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog/m1/deprecate', { superseded_by: null }))
+  })
+})

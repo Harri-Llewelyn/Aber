@@ -2538,6 +2538,12 @@ class TestTheLocationTree(unittest.TestCase):
             (("area_wide", None, "a"), "a"),
             (("area_wide", None, "gone"), A.SITE_ELEMENT_ID),
             (("site_wide", None, None), A.SITE_ELEMENT_ID),
+            # A device that follows its gateway is filed where the gateway is: its cell, its area
+            # or the site, and Unassigned only when the gateway has no place.
+            (("followed_cell", "c", "a"), "c"),
+            (("followed_area", None, "a"), "a"),
+            (("followed_area", None, "gone"), A.SITE_ELEMENT_ID),
+            (("followed_site", None, None), A.SITE_ELEMENT_ID),
             (("unassigned", None, None), A.UNASSIGNED_ELEMENT_ID),
             # No location row (or a denied view) names no place.
             ((None, None, None), A.UNASSIGNED_ELEMENT_ID),
@@ -2555,7 +2561,7 @@ class TestTheLocationTree(unittest.TestCase):
         view = sql[last.start():sql.index(";", last.start())]
         labels = set(re.findall(r"(?:THEN|ELSE) '([a-z_]+)'::text", view))
         used = {A.SOURCE_SHADOW, A.SOURCE_SIMULATED, A.SOURCE_SITE_WIDE, A.SOURCE_AREA_WIDE,
-                A.SOURCE_EXPLICIT, A.SOURCE_UNASSIGNED}
+                A.SOURCE_EXPLICIT, A.SOURCE_FOLLOWED_SITE, A.SOURCE_UNASSIGNED}
         self.assertLessEqual(used, labels)
         self.assertEqual(set(A.LANES), {A.SOURCE_SHADOW, A.SOURCE_SIMULATED})
 

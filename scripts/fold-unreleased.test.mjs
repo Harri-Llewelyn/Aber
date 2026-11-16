@@ -85,3 +85,31 @@ test('a name of a note in text that is not a link is listed, not rewritten', () 
     assert.equal(text(root, 'docs/code.md'), 'See unreleased/migrations/9902.md in a comment.\n')
   } finally { rmSync(root, { recursive: true }) }
 })
+
+test('--help prints the usage and folds nothing', () => {
+  const root = copy()
+  try {
+    const r = run(root, '--help')
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /^Usage: node scripts\/fold-unreleased\.mjs/)
+    assert.equal(text(root, 'supabase/README.md'), FILES['supabase/README.md'])
+    assert.ok(existsSync(join(root, 'unreleased/migrations/9902.md')))
+  } finally { rmSync(root, { recursive: true }) }
+})
+
+test('an argument it does not know is refused before anything is read', () => {
+  const root = copy()
+  try {
+    const r = run(root, '--dry-run')
+    assert.equal(r.status, 2)
+    assert.match(r.stderr, /Unknown argument: --dry-run/)
+    assert.equal(text(root, 'help/site/upgrading.md'), FILES['help/site/upgrading.md'])
+    assert.ok(existsSync(join(root, 'unreleased/upgrading/new.md')))
+  } finally { rmSync(root, { recursive: true }) }
+})
+
+test('--root with no directory is refused', () => {
+  const r = spawnSync(process.execPath, [SCRIPT, '--root'], { encoding: 'utf8' })
+  assert.equal(r.status, 2)
+  assert.match(r.stderr, /--root needs a directory/)
+})

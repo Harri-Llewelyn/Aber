@@ -118,8 +118,8 @@ class AutomationsBase(unittest.TestCase):
         self.cur.execute("INSERT INTO public.cells (name, area_id) VALUES ('Test_0257_Cell_2', %s) RETURNING id;", (area,))
         cell = self.cur.fetchone()[0]
         for device, name in ((DEV_A, "Test_0257_Lathe_3"), (DEV_B, "Test_0257_Lathe_4"), (DEV_C, "Test_0257_Press")):
-            self.cur.execute("INSERT INTO public.devices (id, name, cell_id) VALUES (%s, %s, %s);",
-                             (device, name, cell if device == DEV_A else None))
+            self.cur.execute("INSERT INTO public.devices (id, name, cell_id, location_scope) VALUES (%s, %s, %s, %s);",
+                             (device, name, cell if device == DEV_A else None, "cell" if device == DEV_A else "gateway"))
         self.cur.execute("INSERT INTO public.metric_catalog (name, datatype) VALUES (%s, 10), (%s, 4);", (METRIC, METRIC_2))
 
     def tearDown(self):

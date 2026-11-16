@@ -1558,8 +1558,11 @@ into the writer.
 **The queue is bounded** (`TELEMETRY_QUEUE_MAX_MESSAGES`, 10,000). A full queue holds the callback
 thread for `TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS` (5) first — the broker sees a slow consumer, which
 is backpressure — and only then drops, with `reason="write_queue_full"`, so a writer that is merely
-slow costs latency and a writer that is stuck costs a counted drop rather than a hung daemon.
-`aber_ingestion_write_queue_depth` is the saturation signal: it grows only while the writer is behind.
+slow costs latency and a writer that is stuck costs a counted drop rather than a hung daemon. While
+the historian is down the drop is at once, as `db_unavailable`, and the queue is what holds the
+readings ([*Connection handling*](#connection-handling)).
+`aber_ingestion_write_queue_depth` is the saturation signal: it grows while the writer is behind,
+and while the historian is down.
 
 **The table above is a bench measurement of the write path alone**, taken against the database with
 nothing else in the way. What the assembled stack sustains — broker, directory, caches and disk all
@@ -1568,8 +1571,9 @@ in the path, and the queue depth above as the signal — is measured by the load
 
 **A SIGTERM drains the queue before the process exits**, bounded by
 `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` (8, inside the pod's termination grace period). A restart under load
-loses nothing the daemon had accepted; the log says how many were queued and, if the bound was hit,
-how many were lost.
+loses nothing the daemon had accepted while the historian answers; the log says how many were queued
+and, if the bound was hit, how many were lost. With the historian down, it drops what is held and
+queued instead of waiting for it.
 
 ### Connection handling
 
@@ -1577,32 +1581,68 @@ One connection, not a pool, and one thread — the writer — uses it. That is w
 module-level global safe: psycopg2 connections are not safe for concurrent use, and the callback
 thread never touches this one.
 
-`get_timescaledb_connection()` retries a failed connect `DB_CONNECT_MAX_ATTEMPTS` (3) times with
-exponential backoff, capped at `DB_CONNECT_BACKOFF_MAX_SECONDS`. **Bounded and short on purpose:**
-returning `None` on the first failure meant a momentary blip dropped telemetry silently, because
-the writer answers `None` by dropping the batch — but every queued message waits on this retry, so
-a generous one stalls the whole fleet behind one unreachable database.
+`get_timescaledb_connection()` makes one **pass**. It tries to connect `DB_CONNECT_MAX_ATTEMPTS` (3)
+times with exponential backoff, capped at `DB_CONNECT_BACKOFF_MAX_SECONDS`, and returns `None` if
+none opens. **A pass is short on purpose:** the writer waits between passes itself, and a shutdown
+has to be able to cut that wait short.
 
 `conn.closed` is checked but is **not sufficient**: psycopg2 sets it only for a close on this side.
 A connection dropped by the server still reports `closed == 0` and fails on first use, which is what
 the writer's exception handler and the next call through here cover.
 
+**A historian that is down is waited for.** When a pass opens no connection, the writer keeps the
+message in hand and passes again. The wait between passes starts at `DB_OUTAGE_RETRY_START_SECONDS`
+(0.5 s) and doubles each time to `DB_OUTAGE_RETRY_MAX_SECONDS` (5 s): 0.5, 1, 2, 4, then 5 s for as
+long as it takes. A batch is held whole and written as one transaction. When a connection opens, the
+writer writes what it holds and then the queue, in order, each message once. The log says so twice
+per outage: when the first pass fails, and when the first connection opens.
+
+**The queue holds what arrives meanwhile.** It takes `TELEMETRY_QUEUE_MAX_MESSAGES` (10,000)
+messages, besides the batch in hand. How long that lasts is 10,000 divided by the messages arriving
+each second:
+
+| Messages arriving | The queue holds |
+| :--- | :--- |
+| 0.95 msg/s, the measured fleet | 10,500 s (2.9 hours) |
+| 40 msg/s, 200 devices publishing every 5 s | 250 s |
+| 100 msg/s, the load generator's first step | 100 s |
+| 1,000 msg/s | 10 s |
+
+A historian restart takes about 15 s. The queue holds one at any rate up to 660 msg/s.
+[#1494](https://github.com/Harri-Llewelyn/Aber/issues/1494) ends the daemon's Sparkplug session so
+that the gateways buffer through an outage longer than this, and its first threshold has to be
+shorter than the figure for the site's rate.
+
+**A full queue drops at once while the historian is down.** `submit()` does not hold the callback
+thread for the put timeout, because that would stall every device behind one unreachable database.
+It drops the message and counts it as `messages_dropped_total{reason="db_unavailable"}`. The log
+carries one line for the outage, not one per message. While the historian is up, a full queue
+behaves as [above](#the-historian-writer): it holds the callback thread, then drops as
+`write_queue_full`.
+
+**A shutdown does not wait for the historian.** A SIGTERM drains the queue as it always does. A
+writer that finds the historian down then drops what it holds and what is queued, counts it as
+`db_unavailable` and exits. The log says how many in each batch.
+
 **The message in hand is written again on a fresh connection.** A write failed for the
 connection's sake when it raised `psycopg2.InterfaceError`, or an `OperationalError` after which the
 connection reports itself closed. The writer then closes a connection that still reads open and
-calls `get_timescaledb_connection()` once. The bounded retry above is the only wait. Then it writes
-the message once more. That covers a historian that restarted: an upgrade, a node reboot, a pod
-moved.
+calls `get_timescaledb_connection()` once per pass, waiting as above if no pass opens one. Then it
+writes the message once more. That saves the first message written after the connection went,
+however long the historian took to come back.
 
-If the second write fails, or no connection can be opened, the message is dropped as before. It is
-counted by `write_failures_total`, or by `messages_dropped_total{reason="db_unavailable"}`. A message
-the retry saved is counted by `write_retries_saved_total`. A transaction of several messages that
-fails is split and each message is written alone, so each takes that retry too. Any other error is
-the message's own fault: it is counted and dropped without a retry.
+If the second write fails, the message is dropped. It is counted by `write_failures_total`. A
+message the retry saved is counted by `write_retries_saved_total`. A transaction of several messages
+that fails is split and each message is written alone, so each takes that retry too. Any other error
+is the message's own fault: it is counted and dropped without a retry. A message dropped because the
+historian was down, with the queue full or the writer stopping, is counted by
+`messages_dropped_total{reason="db_unavailable"}`.
 
 Nothing is written twice. The telemetry insert is `ON CONFLICT DO NOTHING`, so a commit whose
 acknowledgement was lost leaves the retry nothing to add. The UNS republish and the conformance
-record run only after the write that succeeded.
+record run only after the write that succeeded. They wait behind the writer through an outage and
+then catch up in order. Device state and gateway heartbeats never touch the writer, so they carry
+on through it.
 
 A separate healer thread retries, off the message path and every `DB_HEAL_INTERVAL_SECONDS`, the two startup
 steps a dependency that was not up yet can prevent: the historian connection and `capture_worker.reconcile()`.
@@ -2123,6 +2163,7 @@ still open. This is the one place it is written down; other pages link here.
 | **1** | Gateway to broker: the link drops, or the broker restarts | The edge node. The [appliance](#store-and-forward-on-the-appliance-loss-1) keeps its readings on disk and replays them as historical. Any other edge node: what its vendor does; a sequence gap makes the daemon ask for a rebirth, which restates current values | What the appliance's buffer cannot hold, which is reported. A link that dies without closing is noticed only at the keepalive, so the appliance sends again what it published in that window. A third-party edge node that does not buffer loses the gap |
 | **2** | Across a daemon restart or upgrade | The edge node again, [the Sparkplug way](#a-daemon-restart-loss-2): the death certificate says the host is offline, a conformant edge node configured with this primary host buffers until the next birth, then replays with `is_historical`. The daemon receives until the stream is quiet before it stops | A third-party edge node that ignores STATE and does not buffer loses the gap, by design |
 | **3** | A connected daemon that falls behind | The broker queues up to 20,000 messages for it (`max_queued_messages`), which holds the rebirth after a restart ([below](#a-daemon-restart-loss-2)). Past that it sheds, and *Broker Shedding Messages* says so | A daemon that stays behind. Design work with [#397](https://github.com/Harri-Llewelyn/Aber/issues/397), [#398](https://github.com/Harri-Llewelyn/Aber/issues/398) and [#791](https://github.com/Harri-Llewelyn/Aber/issues/791) |
+| **4** | A historian outage while the daemon stays connected: a restart, an upgrade, a node reboot | The daemon. The writer keeps the message in hand, the queue holds what arrives behind it (10,000 messages), and all of it is written once, in order, when the historian answers ([*Connection handling*](#connection-handling)) | What arrives after the queue is full: dropped at once and counted as `messages_dropped_total{reason="db_unavailable"}`, 100 s into an outage at 100 msg/s. What the writer holds and the queue holds when the daemon itself stops during the outage. A longer outage is [#1494](https://github.com/Harri-Llewelyn/Aber/issues/1494) |
 
 **Sparkplug puts the buffer at the edge, and Aber stays conformant.** Sparkplug 3.0.0 requires
 NBIRTH, DBIRTH, NDATA, DDATA, DDEATH, NCMD and DCMD at QoS 0 (`tck-id-topics-ddata-mqtt` and its
@@ -2280,8 +2321,10 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `MAX_ENTITIES_PER_CACHE` | `1000` | Headroom on each entity resolution cache beyond what the directory holds, for ids seen on the wire that it does not; the whole capacity when the refresher is off |
 | `DIRECTORY_REFRESH_SECONDS` | `5` | Seconds between directory refresh passes — see [The directory refresher](#the-directory-refresher). `0` disables the thread |
 | `TELEMETRY_BATCH_MAX_MESSAGES` | `500` | Messages per historian transaction, at most — see [The historian writer](#the-historian-writer) |
-| `TELEMETRY_QUEUE_MAX_MESSAGES` | `10000` | Messages the writer may hold. Full means backpressure for the put timeout, then a counted drop |
-| `TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS` | `5` | How long a full queue holds the callback thread before dropping |
+| `TELEMETRY_QUEUE_MAX_MESSAGES` | `10000` | Messages the writer may hold. Full means backpressure for the put timeout, then a counted drop, and at once while the historian is down — see [Connection handling](#connection-handling) |
+| `TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS` | `5` | How long a full queue holds the callback thread before dropping, while the historian is up |
+| `DB_OUTAGE_RETRY_START_SECONDS` | `0.5` | The writer's first wait when no connection to the historian opens. It doubles each time |
+| `DB_OUTAGE_RETRY_MAX_SECONDS` | `5` | The longest the writer waits between passes at a historian that is down |
 | `TELEMETRY_SHUTDOWN_RECEIVE_SECONDS` | `5` | After the death certificate on a SIGTERM, how long the daemon may go on receiving what edge nodes sent before they heard it — see [The Primary Host](#the-primary-host-and-the-state-every-gateway-watches) |
 | `TELEMETRY_SHUTDOWN_QUIET_SECONDS` | `0.5` | It stops receiving sooner once no message has arrived for this long |
 | `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` | `8` | How long a SIGTERM then waits for the writer's queue to drain. The three, with the 2 s death certificate, stay inside the pod's 30 s termination grace period |
@@ -2420,12 +2463,12 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_write_batch_failures_total` | — | A transaction carrying several messages failed and was split. The message at fault is in `write_failures_total`; the rest were written on the retry. |
 | `aber_ingestion_rollup_windows_recorded_total` | — | Hours of telemetry written later than the rollups' refresh reaches back (a replay), recorded for the historian job that refreshes them. |
 | `aber_ingestion_rollup_windows_failed_total` | — | Such hours that could not be recorded. **The readings are stored but missing from the rollups** until the hour is refreshed by hand ([Loss model](#loss-model)). |
-| `aber_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
-| `aber_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
+| `aber_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows while the writer is behind the fleet, and while the historian is down, when it is the readings the queue holds ([*Connection handling*](#connection-handling)). |
+| `aber_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. Through an outage they rise by one for each attempt, 3 for each pass the writer makes at the historian. |
 | `aber_ingestion_write_retries_saved_total` | — | A message held alone whose write failed on a lost connection and was written on a fresh one ([*Connection handling*](#connection-handling)). Each would otherwise be in `write_failures_total`. |
 | `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `audit_trail` (archived migration 0026). The telemetry was still written. |
 | `aber_ingestion_capture_jobs_total` | `outcome` | Capture jobs the recorder ended: `completed` (stored), `failed` (including the jobs the startup sweep failed) or `discarded` (ended on the page, or deleted, while it recorded). A failure is counted once it is written. The *Capture or Playback Failed* alert reads the database rather than this ([Recording from the dashboard](#recording-from-the-dashboard)). |
-| `aber_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
+| `aber_ingestion_db_connected` | — | Gauge. 0 means the historian is unreachable: telemetry is queued now, and dropped once the queue is full. |
 | `aber_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
 | `aber_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by the directory plus `MAX_ENTITIES_PER_CACHE`. |
 | `aber_ingestion_cache_evictions_total` | `cache` | **Non-zero is the interesting case.** The cap was reached, so either the fleet exceeds it or something is publishing ids that churn. |
@@ -2434,7 +2477,8 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_unmapped_counter_total` | `counter` | A counter exists in `ingestion.py` with no mapping in `metrics.py`. Not a data fault — a monitoring one. |
 
 `reason` on the drop counter: `gateway_binding` (a device published under a gateway that does not
-own it), `gateway_archived`, `device_archived`, `quarantined_or_unregistered`, `db_unavailable`,
+own it), `gateway_archived`, `device_archived`, `quarantined_or_unregistered`, `db_unavailable`
+(the historian was down and the queue full, or the writer was stopping),
 `write_queue_full` (the writer's queue stayed full for the put timeout), and the four
 directory-unavailable reasons below.
 
@@ -2512,9 +2556,9 @@ looks wrong.
 | Alert | Expression | For | Why this threshold |
 | :--- | :--- | :--- | :--- |
 | Ingestion consuming nothing | `rate(aber_ingestion_messages_total[5m]) == 0` | 10m | A running daemon with no traffic. On a plant that is always publishing this is the highest-value rule here, and it is the one the heartbeat file cannot express. |
-| Telemetry being dropped | `sum(rate(aber_ingestion_messages_dropped_total[5m])) > 0` | 5m | Any sustained drop rate. Not "above a threshold" — the correct number is zero, and `for: 5m` is what absorbs a restart. |
+| Telemetry being dropped | `sum(rate(aber_ingestion_messages_dropped_total[5m])) > 0` | 5m | Any sustained drop rate. Not "above a threshold" — the correct number is zero. A historian restart drops nothing while the queue holds it ([*Connection handling*](#connection-handling)), so what fires this is an outage longer than the queue holds, or any other reason. |
 | Binding rejections rising | `rate(aber_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
-| Historian unreachable | `aber_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
+| Historian unreachable | `aber_ingestion_db_connected == 0` | 2m | Telemetry is queued now, and dropped once the queue is full ([how long it holds](#connection-handling)). The `for` is 2m because a restart is over within it. |
 | Broker shedding messages | `sum(increase(broker_publish_messages_dropped[5m])) > 0` | 1m | **Zero is the steady state.** A shed message never reached the daemon, so the drop rule cannot see it. Broker-wide: Message loss rising beside it places the loss on the historian path. |
 | Message loss | `rate(aber_ingestion_sequence_gaps_total[15m]) > 0` | 15m | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
 | Readings refused for their timestamp | `time() - aber_ingestion_timestamps_rejected_at_seconds < 900` | 1m | Any refusal is a reading lost. Per edge node and reason, so a clock fault (`too_new`, `too_old`) reads apart from an outage longer than the platform keeps (`historical_too_old`). A gauge, not a counter, so the first refusal fires it. |
@@ -2553,7 +2597,9 @@ acquired, not at the `INSERT`, and stops after `with db_conn` commits. A reconne
 writer for up to `DB_CONNECT_MAX_ATTEMPTS × DB_CONNECT_BACKOFF_SECONDS` while every queued message
 waits, and timing only the `INSERT` would hide it. The bucket boundaries are chosen so it cannot
 hide inside a bucket that also holds healthy writes: **anything at or above `le="0.25"` is the
-reconnect path, not the database.**
+reconnect path, not the database.** The writer's waits between passes at a historian that is down
+are taken off again. An outage is not occupancy, and counting it would make the saturation rule
+read a restart as load.
 
 **Committed writes only.** A transaction that raised is counted by
 `aber_ingestion_write_failures_total` and excluded here, so a p99 spike means a slow database and

@@ -106,6 +106,24 @@ describe('TELEMETRY_EXPORTED in the drawer', () => {
     expect(payload).toContain('"id": "deva0d172790000400080000"')
   })
 
+  it('says each derived metric exported as its name and its definition', async () => {
+    served = exportOf({
+      metrics: ['Controller/PARTS_PER_HOUR', 'Controller/UPTIME', 'Spindle/LOAD'],
+      derived: [
+        { name: 'Controller/PARTS_PER_HOUR', definition: 'rate of Controller/PART_COUNT, per hour' },
+        { name: 'Controller/UPTIME', definition: 'share of time Controller/EXECUTION is ACTIVE' },
+      ],
+    })
+    const diff = await openDrawer()
+    expect(Object.fromEntries(rowsOf(diff)).derived).toBe(
+      'Controller/PARTS_PER_HOUR = rate of Controller/PART_COUNT, per hour; Controller/UPTIME = share of time Controller/EXECUTION is ACTIVE')
+  })
+
+  it('has no derived row for an export that named none', async () => {
+    const diff = await openDrawer()
+    expect(rowsOf(diff).map(([field]) => field)).not.toContain('derived')
+  })
+
   it('names a device the platform did not know by its id', async () => {
     served = exportOf({ devices: [{ id: 'devunknown0279', name: null }] })
     const diff = await openDrawer()

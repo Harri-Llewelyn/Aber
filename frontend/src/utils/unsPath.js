@@ -25,9 +25,10 @@ export const unsTopicOf = (row) => (row?.uns_path ? `${unsTopicRoot()}/${row.uns
 const UNSAFE = /[/+#]/
 
 /**
- * Why an area or a cell cannot be saved under `name`, or null. areas_name_topic_safe and
- * cells_name_topic_safe refuse an empty name and these three characters; mirror check 64 holds the
- * characters to both CHECKs. `noun` is 'area' or 'cell'.
+ * Why an area or a cell cannot be saved under `name`, or null. areas_name_not_blank and
+ * cells_name_not_blank refuse a name of nothing or of spaces; areas_name_topic_safe and
+ * cells_name_topic_safe refuse these three characters, and mirror check 64 holds them to both.
+ * `noun` is 'area' or 'cell'.
  */
 export const placeNameProblem = (name, noun) => (!(name || '').trim() ? `Give the ${noun} a name`
   : UNSAFE.test(name) ? 'The name cannot contain / + or #'
@@ -50,7 +51,7 @@ const SKIP_SENTENCES = {
   lane: ({ source }) => (source === SOURCE_SHADOW
     ? 'it is a replay lane, a recording of a device, not a place on the plant.'
     : 'it is a simulated device, not a place on the plant.'),
-  unassigned: () => 'nothing says where it is. Put it in a cell in Edit Details, or make it Area-Wide or Site-Wide.',
+  unassigned: () => 'nothing says where it is. Give its gateway a location, or choose one for it in Edit Details.',
   cell_unfiled: () => 'its cell is in no area. Put the cell in an area on the Cells page.',
   unsafe_name: unsafeName,
 }

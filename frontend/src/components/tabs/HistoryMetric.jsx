@@ -23,8 +23,8 @@ import { useChartBand } from '../../hooks/useChartBand'
 import { useAlertBandsFor } from '../../hooks/useAlertBands'
 import { alertsAddress } from '../../utils/alertHistory'
 import {
-  DERIVED_EXPORT_NOTE, EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportSizeProblem, exportWindowProblem,
-  exportableMetrics, mayExportReadings, metricExportNote, metricExportScope,
+  EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportSizeProblem, exportWindowProblem,
+  mayExportReadings, metricExportNote, metricExportScope,
 } from '../../utils/telemetryExport'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
@@ -272,10 +272,7 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
   const { start: shownStart, end: shownEnd } = windowBounds(win, now)
-  // A derived metric is computed when drawn and holds no reading to export.
-  const exportable = exportableMetrics([metric], catalog)
-  const exportBlocked = exportable.left.length ? DERIVED_EXPORT_NOTE
-    : !info ? `No device in service reports ${metric}, so there is nothing to export.`
+  const exportBlocked = !info ? `No device in service reports ${metric}, so there is nothing to export.`
     : allKeys.length === 0 ? `No device that reports ${metric} is in the area, cell or devices chosen, so there is nothing to export.`
       : exportSizeProblem(allKeys.length, 1) ?? exportWindowProblem(shownStart?.getTime(), shownEnd?.getTime(), exportDays)
   /** The export, with the window fixed to its bounds now, so the file is what the dialog names. */
@@ -284,7 +281,7 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
     const { start, end } = windowBounds(win, at)
     const paged = metricPages(start.getTime(), end.getTime(), allKeys.length, page).paged
     setExporting({
-      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: exportable.names,
+      devices: reporters.map(d => ({ id: telemetryKey(d), name: d.asset_name })), names: [metric],
       scope: metricExportScope(reporters.length, everyReporter.length),
       note: paged ? metricExportNote(reporters.length, METRIC_PAGE_SIZE) : null,
       from: start.toISOString(), to: end.toISOString(), windowWords: windowWords(win, at),
@@ -396,6 +393,7 @@ export function HistoryMetric({ metric, devices, schemas, catalog = null, metric
         <TelemetryExportModal
           devices={exporting.devices}
           metricNames={exporting.names}
+          catalog={catalog}
           scope={exporting.scope}
           note={exporting.note}
           from={exporting.from}

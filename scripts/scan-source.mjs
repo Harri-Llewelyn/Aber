@@ -21,7 +21,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -109,6 +109,31 @@ export function ignoreRules (text) {
 }
 
 /**
+ * The docker arguments that hide .git from the container, so Semgrep finds no repository and runs
+ * no git: in a worktree .git names a host path the container cannot resolve. A mount must match
+ * what it covers: /dev/null over a file, which git skips as no gitfile where it refuses an empty
+ * one, an empty tmpfs over a folder, and nothing where there is no .git.
+ */
+export function gitMask (repo) {
+  let kind
+  try { kind = lstatSync(join(repo, '.git')) } catch { return [] }
+  if (kind.isDirectory()) return ['--tmpfs', '/src/.git:ro']
+  if (kind.isFile()) return ['-v', '/dev/null:/src/.git:ro']
+  return []
+}
+
+/**
+ * What `docker run` is given. The checkout is walked rather than listed through git: gitMask()
+ * covers its .git, so the container has no repository to list and Semgrep runs no git, and
+ * --no-git-ignore reads every file the walk finds, .gitignore or not. No time limit per rule:
+ * check-docs-drift.mjs takes some taint rules past the default 5 s, and three rules timing out on a
+ * file skip it for every rule.
+ */
+export const dockerArgs = (repo) => ['run', '--rm', '-v', `${repo.replace(/\\/g, '/')}:/src:ro`, ...gitMask(repo), '-w', '/src', IMAGE,
+  'semgrep', 'scan', '--config', 'p/default', '--config', 'p/security-audit', '--metrics', 'off',
+  '--no-git-ignore', '--json', '--quiet', '--timeout', '0', '--max-target-bytes', '0']
+
+/**
  * The tracked files the scan did not read as its ignore list says. `missing`: outside the list
  * and not in the report's paths.scanned, which Semgrep does without an error (a size limit, an
  * ignore list of its own). `ignoredButRead`: left out by the list as `ignored` reads it, yet read,
@@ -132,14 +157,8 @@ function main () {
   }
   const ignored = ignoreRules(readFileSync(join(REPO, IGNORE_FILE), 'utf8'))
 
-  // The checkout, walked rather than listed through git: a worktree's .git names a host path the
-  // container cannot resolve, and Semgrep then scans nothing and reports success. No time limit per
-  // rule: check-docs-drift.mjs takes some taint rules past the default 5 s, and three rules timing
-  // out on a file skip it for every rule.
-  const r = spawnSync('docker', ['run', '--rm', '-v', `${REPO.replace(/\\/g, '/')}:/src:ro`, '-w', '/src', IMAGE,
-    'semgrep', 'scan', '--config', 'p/default', '--config', 'p/security-audit', '--metrics', 'off',
-    '--no-git-ignore', '--json', '--quiet', '--timeout', '0', '--max-target-bytes', '0'],
-  { encoding: 'utf8', maxBuffer: 1 << 28, env: { ...process.env, MSYS_NO_PATHCONV: '1' } })
+  const r = spawnSync('docker', dockerArgs(REPO),
+    { encoding: 'utf8', maxBuffer: 1 << 28, env: { ...process.env, MSYS_NO_PATHCONV: '1' } })
   let report
   try { report = JSON.parse(r.stdout) } catch {
     console.error(`semgrep did not produce a report:\n${(r.stderr || '').slice(-1500)}`)

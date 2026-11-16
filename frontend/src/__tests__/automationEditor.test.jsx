@@ -3,7 +3,7 @@ import { act, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { EditorView } from '@codemirror/view'
 import { startCompletion, currentCompletions } from '@codemirror/autocomplete'
-import { forceLinting, diagnosticCount } from '@codemirror/lint'
+import { forceLinting, forEachDiagnostic } from '@codemirror/lint'
 import { AutomationEditor } from '../components/common/AutomationEditor'
 import { buildFacts } from '../utils/automationEditorHelp'
 import { SINGLE_KEY_SHORTCUTS } from '../shortcuts'
@@ -30,6 +30,13 @@ const facts = buildFacts({
 })
 
 const TEXT = '- id: lathe\n  alias: Lathe\n  triggers:\n    - trigger: threshold\n      device: \n'
+
+/** The message of each mark the editor shows. */
+const marks = (view) => {
+  const messages = []
+  forEachDiagnostic(view.state, (d) => messages.push(d.message))
+  return messages
+}
 
 /** The view the editor mounted into its shadow root. */
 const viewOf = (container) => EditorView.findFromDOM(container.querySelector('.automation-editor').shadowRoot.querySelector('.cm-editor'))
@@ -108,12 +115,11 @@ describe('the automation editor', () => {
     const refusals = [{ path: '$[0].alias', message: '`alias` is the name the list shows.' }]
     const { container, rerender } = render(<AutomationEditor value={'- id: a\n  alias: x\n  alias: y\n'} onChange={() => {}} facts={facts} />)
     const view = viewOf(container)
-    await act(async () => { forceLinting(view); await new Promise(r => setTimeout(r, 400)) })
-    expect(diagnosticCount(view.state)).toBe(1)
+    act(() => { forceLinting(view) })
+    await waitFor(() => expect(marks(view)).toEqual(['Map keys must be unique']))
 
     rerender(<AutomationEditor value={'- id: a\n  alias: x\n'} onChange={() => {}} facts={facts} refusals={refusals} />)
-    await act(async () => { await new Promise(r => setTimeout(r, 400)) })
-    expect(diagnosticCount(viewOf(container).state)).toBe(1)
+    await waitFor(() => expect(marks(viewOf(container))).toEqual(['`alias` is the name the list shows.']))
   })
 
   it('removes its view and its listeners when it goes', () => {

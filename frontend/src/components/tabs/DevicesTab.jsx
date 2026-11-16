@@ -51,9 +51,10 @@ import {
   deviceStatusBadge
 } from '../../utils/deviceStatus'
 import {
-  SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_INHERITED, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, NON_CELL_SOURCES,
-  resolveDeviceLocation, needsCellAssignment, unassignedHint,
-  locationSourceLabel, gatewayAcceptsCell, noCellReason
+  SCOPE_GATEWAY, SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_FOLLOWED_AREA, SOURCE_FOLLOWED_SITE,
+  SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, NON_CELL_SOURCES,
+  resolveDeviceLocation, needsCellAssignment, unassignedHint, followedPlaceFix, followedPlaceLine, isFollowedSource, isSiteWideSource,
+  normaliseScope, locationSourceLabel, gatewayAcceptsCell, noCellReason
 } from '../../utils/cellResolution'
 import { AreaIcon } from '../../utils/areaIcon'
 import { unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
@@ -183,8 +184,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [latestBySparkplugId, setLatestBySparkplugId] = useState(new Map())
   const [catalog, setCatalog] = useState([])
   // A device's type is derived from its schema's metric groups (utils/deviceTags.js).
-  // `cell_id` starts empty, meaning inherit from the gateway.
-  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_CELL })
+  // A new device follows its gateway, so it starts with no cell and no area of its own.
+  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_GATEWAY })
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
   const [lifecycle, setLifecycle] = useUrlList('lifecycle', LIFECYCLE_DEFAULT, { allowed: LIFECYCLE_VALUES, aliases: LIFECYCLE_ALIASES })
@@ -330,11 +331,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         description: form.description || '',
         connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
-        // '' is the inherit option, which api.js turns into NULL. All three keys are always sent
+        // '' is no cell or area, which api.js turns into NULL. All three keys are always sent
         // because the form always shows the one picker that sets them.
         cell_id: form.cell_id || '',
         area_id: form.area_id || '',
-        location_scope: form.location_scope || SCOPE_CELL,
+        location_scope: form.location_scope || SCOPE_GATEWAY,
       }
       // Edit only: a device being created takes the column's default rather than an explicit
       // 'audit'.
@@ -390,9 +391,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const closeForm = () => { setShowForm(false); setEditingProposal(null); setFormError(null) }
 
   // Why the form's save is off, in the order the fields appear. The database refuses Area-Wide with
-  // no area; it would take an empty name, which every list would then show as a blank row.
+  // no area and a cell scope with no cell; it would take an empty name, which every list would then
+  // show as a blank row.
   const formProblem = !(form.asset_name || '').trim() ? 'Give the device a name'
-    : locationIncomplete(form) ? 'Choose which area the device serves'
+    : locationIncomplete(form, { cellRequired: true })
+      ? (form.location_scope === SCOPE_AREA_WIDE ? 'Choose which area the device serves' : 'Choose which cell the device is in')
       : null
 
   /** Tick or untick one schema in the form's set. */
@@ -418,7 +421,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     // bypasses the `api` wrapper that feeds the activity line.
     const { data, error } = await trackRequest(() => supabase.functions.invoke('approve-quarantine', {
       // `asset_name` is the operator's correction to the announced label. `cell_id` and
-      // `location_scope` are the modal's location answer; '' is Inherit, and the edge function
+      // `location_scope` are the modal's location answer; '' is no cell, and the edge function
       // writes NULL for it.
       body: {
         device_id: assetId,
@@ -426,7 +429,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         asset_name: body?.asset_name,
         cell_id: body?.cell_id ?? '',
         area_id: body?.area_id ?? '',
-        location_scope: body?.location_scope || 'cell'
+        location_scope: body?.location_scope || SCOPE_GATEWAY
       }
     }))
 
@@ -596,12 +599,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   ].filter(Boolean)
 
   /**
-   * The cell lanes a device is in: its RESOLVED cell, not the explicit override, or every inherited
-   * device would be hidden; and Unassigned and Site-Wide, which are lanes rather than rows in `cells`.
+   * The cell lanes a device is in: its RESOLVED cell, not the explicit override, or every device that
+   * follows its gateway would be hidden; and Unassigned and Site-Wide, which are lanes rather than
+   * rows in `cells`. A device behind a Site-Wide gateway is in the Site-Wide lane.
    */
   const cellLanesOf = (a) => [
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) && CELL_FILTER_UNASSIGNED,
-    a.location_source === SOURCE_SITE_WIDE && CELL_FILTER_SITE_WIDE,
+    isSiteWideSource(a.location_source) && CELL_FILTER_SITE_WIDE,
     a.effective_cell_id,
   ].filter(Boolean)
 
@@ -742,8 +746,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // and the drawer closes itself.
   const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
   const selectedIds = deviceIds(selectedDevice)
-  // The model's dialog belongs to the device it was opened on.
+  /* A replay lane holds no model of its own: it shows its machine's, read-only. A lane whose
+     machine has none, or is not in the list, has nothing to show and the drawer offers no action. */
+  const laneMachine = selectedDevice?.shadow_of
+    ? assets.find(a => a.asset_id === selectedDevice.shadow_of) || null
+    : null
+  const modelPath = (selectedDevice?.shadow_of ? laneMachine : selectedDevice)?.model_3d_path || null
+  // The model's dialog belongs to the device it was opened on, and closes with the model it shows.
   useEffect(() => { setModelOpen(false) }, [selectedId])
+  const laneHasNoModel = !!selectedDevice?.shadow_of && !modelPath
+  useEffect(() => { if (laneHasNoModel) setModelOpen(false) }, [laneHasNoModel])
 
   /* How many automations apply to the open device, named or site-wide (automations_for_entity()),
      for the drawer's View in Automations. A failed read leaves the action without its count. */
@@ -1136,7 +1148,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         </td>
                         <td style={{ maxWidth: '170px' }}>
                           {(() => {
-                            // The resolved cell and how it was resolved: inherited and
+                            // The resolved cell and how it was resolved: following the gateway and
                             // set-on-device behave differently when the gateway is reassigned.
                             const gw = gatewayById.get(a.active_gateway_id) || null
                             const cellName = cellById.get(a.effective_cell_id)?.cell_name
@@ -1144,13 +1156,19 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             // Every lane that resolves to no cell, not just Site-Wide: use
                             // NON_CELL_SOURCES, or a simulated device reads as Unassigned.
                             if (NON_CELL_SOURCES.has(a.location_source)) {
+                              const areaName = areaById.get(a.effective_area_id)?.area_name || 'its area'
+                              const gwName = a.gateway_name || gw?.gateway_name || 'its gateway'
                               return (
                                 <Badge size="sm"
                                        title={a.location_source === SOURCE_SITE_WIDE
                                          ? 'Asserted to have no single cell — campus-wide or mobile'
                                          : a.location_source === SOURCE_AREA_WIDE
-                                           ? `Asserted to have no single cell — serves the whole of ${areaById.get(a.effective_area_id)?.area_name || 'its area'}`
-                                           : noCellReason(gw) || 'Resolves to a lane rather than to a cell'}>
+                                           ? `Asserted to have no single cell — serves the whole of ${areaName}`
+                                           : a.location_source === SOURCE_FOLLOWED_SITE
+                                             ? `Follows its gateway, ${gwName}, which serves the whole campus`
+                                             : a.location_source === SOURCE_FOLLOWED_AREA
+                                               ? `Follows its gateway, ${gwName}, which serves the whole of ${areaName}`
+                                               : noCellReason(gw) || 'Resolves to a lane rather than to a cell'}>
                                   {locationSourceLabel(a.location_source)}
                                 </Badge>
                               )
@@ -1251,25 +1269,40 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="device-gateway">Serving Gateway</label>
-              <Withheld field="active_gateway_id" />
-              <select id="device-gateway" className="form-control" disabled={proposeMode || !!editing?.shadow_of} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))}>
-                <option value="">— Unassigned Gateway —</option>
-                {/* A replay lane is listed but disabled rather than filtered out, so a device that
-                    is a lane still opens with its own gateway shown. The database refuses the write
-                    either way. */}
-                {gateways.filter(g => !g.is_archived).map(g => (
-                  <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
-                    {g.gateway_name} ({g.gateway_id}) — Status: {g.status}
-                    {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
-                  </option>
-                ))}
-                {/* An archived gateway is not offered, and the database refuses one. A device
-                    already on one keeps it (an unchanged gateway passes), so it stays visible. */}
-                {gateways.filter(g => g.is_archived && g.gateway_id === form.active_gateway_id).map(g => (
-                  <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name} ({g.gateway_id}) — archived</option>
-                ))}
-              </select>
+              {editing?.shadow_of ? (
+                // A replay lane stays on the Playback gateway for everyone, so it is shown as text.
+                // The form still holds the id, so a save writes it unchanged.
+                <>
+                  <div className="form-label">Serving Gateway</div>
+                  <div className="mono" style={{ fontSize: '13px', overflowWrap: 'anywhere' }}>
+                    {(() => {
+                      const lane = gateways.find(g => g.gateway_id === form.active_gateway_id)
+                      return lane ? `${lane.gateway_name} (${lane.gateway_id})` : form.active_gateway_id
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label className="form-label" htmlFor="device-gateway">Serving Gateway</label>
+                  <Withheld field="active_gateway_id" />
+                  <select id="device-gateway" className="form-control" disabled={proposeMode} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))}>
+                    <option value="">— Unassigned Gateway —</option>
+                    {/* Playback is listed but disabled rather than filtered out, so whoever looks for it
+                        finds it, with the hint beneath saying why it cannot be picked. */}
+                    {gateways.filter(g => !g.is_archived).map(g => (
+                      <option key={g.gateway_id} value={g.gateway_id} disabled={!gatewayAcceptsDevices(g)}>
+                        {g.gateway_name} ({g.gateway_id}) — Status: {g.status}
+                        {gatewayAcceptsDevices(g) ? '' : ' — replay lane, not assignable'}
+                      </option>
+                    ))}
+                    {/* An archived gateway is not offered, and the database refuses one. A device
+                        already on one keeps it (an unchanged gateway passes), so it stays visible. */}
+                    {gateways.filter(g => g.is_archived && g.gateway_id === form.active_gateway_id).map(g => (
+                      <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name} ({g.gateway_id}) — archived</option>
+                    ))}
+                  </select>
+                </>
+              )}
               {/* Shown always: the question is why Playback cannot be picked, asked while something
                   else is selected, so the sentence names Playback rather than the selection. */}
               <div className="form-hint">
@@ -1279,29 +1312,37 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               </div>
             </div>
 
-            {/* Where the device is, which is not how its data reaches us. Inherit stores NULL; a
-                cell stores an override that wins over the gateway's. */}
+            {/* Where the device is, which is not how its data reaches us. Follow Gateway stores
+                nothing and takes the gateway's place; a cell, an area or the site is the device's
+                own and wins over the gateway's. */}
             {(() => {
               const formGateway = gateways.find(g => g.gateway_id === form.active_gateway_id) || null
+              const following = form.location_scope === SCOPE_GATEWAY
               const siteWide = form.location_scope === SCOPE_SITE_WIDE
               const areaWide = form.location_scope === SCOPE_AREA_WIDE
+              const inCell = normaliseScope(form.location_scope) === SCOPE_CELL
               const location = resolveDeviceLocation(
-                { cell_id: siteWide || areaWide ? null : form.cell_id, area_id: areaWide ? form.area_id : null, location_scope: form.location_scope },
+                { cell_id: inCell ? form.cell_id : null, area_id: areaWide ? form.area_id : null, location_scope: form.location_scope },
                 formGateway
               )
               const chosenAreaName = areas.find(ar => ar.area_id === form.area_id)?.area_name
               const nameOf = (id) => cells.find(c => c.cell_id === id)?.cell_name
-              const inheritedName = nameOf(location.gateway_cell_id)
+              const gatewayCellName = nameOf(location.gateway_cell_id)
               // Whether a cell means anything for this device, decided by its gateway. There is no
               // CHECK on the device side; a stored cell would be accepted and ignored.
               const acceptsCell = gatewayAcceptsCell(formGateway)
+              // Where Follow Gateway puts the device now, in the sentence the Cell and Area pages
+              // would use. An unplaced device is the one finding here.
+              const followedLine = followedPlaceLine(formGateway, { cells, areas })
+              const unplaced = location.location_source === SOURCE_UNASSIGNED
 
               return (
                 <div className="form-group">
                   <label className="form-label">Location</label>
                   {/* One exclusive choice of scope, then the cell or the area it calls for.
-                      The scopes are exclusive by CHECK (`devices_site_wide_has_no_cell` and the
-                      area-wide pair), which is what a radio group says. */}
+                      The scopes are exclusive by CHECK (`devices_site_wide_has_no_cell`, the
+                      area-wide pair and `devices_follow_gateway_has_no_place`), which is what a
+                      radio group says. */}
                   <LocationPicker
                     idPrefix="device"
                     form={form}
@@ -1309,32 +1350,34 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     cells={cells}
                     areas={areas}
                     disabled={!acceptsCell}
-                    // Named after what it resolves to, not "None": the empty value is a deliberate
-                    // "follow the gateway", not an absence.
-                    cellEmptyLabel={inheritedName ? `— Inherit from gateway (${inheritedName}) —` : '— Inherit from gateway (gateway has no cell) —'}
+                    followGateway
+                    // In a cell requires one: the empty option is a prompt, not an answer.
+                    cellEmptyLabel="— Choose a cell —"
                   />
 
-                  <div className="form-hint">
+                  <div className={`form-hint${acceptsCell && following && unplaced ? ' hint-warning' : ''}`}>
                     {!acceptsCell
                       /* Deliberately does not clear `cell_id`: nothing here is refused on save, so
                          a stored cell is kept and applies again if the gateway stops being
                          synthetic. */
                       ? `${noCellReason(formGateway)} Any cell already set on it is kept, and applies again if that changes.`
-                      : siteWide
-                        ? 'Reported as Site-Wide rather than under any cell. Use this for campus-wide or mobile assets.'
-                        : areaWide
-                          ? `Reported as Area-Wide in ${chosenAreaName || 'this area'} rather than under any cell in it. Use this for a building management system or anything that serves the whole area.`
-                          : location.location_source === SOURCE_EXPLICIT
-                          ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
-                          : inheritedName
-                            ? `Follows the gateway above. Reassigning the gateway moves this device with it.`
-                            : 'Neither this device nor its gateway has a cell, so it will show under Unassigned in the Cell filter. Pick a cell here, set one on the gateway, or mark it Site-Wide.'}
+                      : following
+                        ? (unplaced
+                          ? <><IconAlertTriangle size={12} /> {followedLine}. {followedPlaceFix(formGateway)}</>
+                          : `${followedLine}. It moves when the gateway does.`)
+                        : siteWide
+                          ? 'Reported as Site-Wide rather than under any cell. Use this for campus-wide or mobile assets.'
+                          : areaWide
+                            ? `Reported as Area-Wide in ${chosenAreaName || 'this area'} rather than under any cell in it. Use this for a building management system or anything that serves the whole area.`
+                            : form.cell_id
+                              ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
+                              : 'Choose the cell this device is in, or use Follow Gateway to take its gateway’s place.'}
                   </div>
 
                   {location.cell_mismatch && (
                     <div className="form-hint hint-warning">
                       <IconAlertTriangle size={12} /> This device is filed in <strong>{nameOf(location.effective_cell_id)}</strong> but its
-                      gateway serves <strong>{inheritedName}</strong>. That is allowed — a shared or host-run
+                      gateway serves <strong>{gatewayCellName}</strong>. That is allowed — a shared or host-run
                       connector often reaches across cells — but check it is what you meant.
                     </div>
                   )}
@@ -1552,6 +1595,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       {modelOpen && selectedDevice && (
         <Model3DUploader
           device={selectedDevice}
+          modelOf={laneMachine}
           canManage={canManage && !selectedDevice.is_archived}
           showToast={showToast}
           onChange={() => loadAll()}
@@ -1627,7 +1671,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           {
             // One row for where the device is: Area › Cell, the lane standing in for a cell, or
             // Unassigned. The resolved location, not the explicit override; "(from gateway)" marks
-            // the inherited case, which moves when the gateway does.
+            // a device that follows its gateway, which moves when the gateway does.
             label: 'Location',
             full: true,
             value: selectedLocation && (() => {
@@ -1666,7 +1710,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     </>
                   )}
                   {place}
-                  {source === SOURCE_INHERITED && <span className="cell-meta">(from gateway)</span>}
+                  {isFollowedSource(source) && <span className="cell-meta">(from gateway)</span>}
                 </div>
               )
             })(),
@@ -1674,8 +1718,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               ? unassignedHint(selectedDevice, selectedGateway) || 'No cell resolved'
               : selectedLocation?.location_source === SOURCE_EXPLICIT
                 ? 'Set on the device itself, so it stays here regardless of its gateway.'
-                : selectedLocation?.location_source === SOURCE_INHERITED
-                  ? 'Inherited from its gateway. It will follow the gateway if that moves.'
+                : isFollowedSource(selectedLocation?.location_source)
+                  ? `Follows its gateway: ${followedPlaceLine(selectedGateway, { cells, areas })}. It moves when the gateway does.`
                   : selectedLocation?.location_scope === SCOPE_SITE_WIDE
                     ? 'Marked Site-Wide: it belongs to no single cell.'
                     : selectedLocation?.location_scope === SCOPE_AREA_WIDE
@@ -1777,13 +1821,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             title: "Chart this device's readings over time on the History page, and export them"
           },
           /* One action that follows the model: View when one is attached, Add when none is. Viewing
-             needs no permission; attaching does, and an archived device cannot take a new one. */
-          {
-            label: selectedDevice.model_3d_path ? 'View 3D Model' : 'Add 3D Model…',
+             needs no permission; attaching does, and an archived device cannot take a new one. A
+             replay lane views its machine's model and is never offered Add. */
+          (!selectedDevice.shadow_of || modelPath) && {
+            label: modelPath ? 'View 3D Model' : 'Add 3D Model…',
             icon: <IconCube size={13} />,
             onClick: () => setModelOpen(true),
-            disabled: !selectedDevice.model_3d_path && (!canManage || selectedDevice.is_archived),
-            title: selectedDevice.model_3d_path
+            disabled: !modelPath && (!canManage || selectedDevice.is_archived),
+            title: selectedDevice.shadow_of
+              ? `Turn and zoom the 3D model of ${laneMachine.asset_name}, which this replay lane shows`
+              : modelPath
               ? "Turn and zoom this device's 3D model, and download its file"
               : !canManage
                 ? requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)

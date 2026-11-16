@@ -182,6 +182,44 @@ describe('proposing a change from a device', () => {
     expect(document.querySelectorAll('.modal select[disabled]').length).toBeGreaterThanOrEqual(2)
   })
 
+  it('opens each note with what a proposal cannot do, and keeps the field a control beside it', async () => {
+    await show(asOperator)
+    openPanel()
+    clickAction('Propose a Change')
+    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+
+    const locked = [...document.querySelectorAll('.form-hint-locked')]
+    expect(locked).toHaveLength(3)
+    for (const note of locked) expect(note.textContent).toMatch(/^A proposal can’t change this\. /)
+    // Each note sits with the field it is about, which stays a control rather than becoming text.
+    expect(document.querySelector('#device-gateway').disabled).toBe(true)
+    expect(document.querySelector('#device-gateway').closest('.form-group').querySelector('.form-hint-locked')).toBeTruthy()
+    expect(document.querySelector('#device-conformance').closest('.form-group').querySelector('.form-hint-locked')).toBeTruthy()
+  })
+
+  it('shows a replay lane its gateway as text, with no note about who moves it, where nobody does', async () => {
+    const lane = device({ asset_id: 'bbbbbbbb-0000-4000-8000-000000000002', asset_name: 'CNC_01 (replay)', shadow_of: DEVICE_ID })
+    await show(asOperator, [device(), lane])
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
+    fireEvent.click(await screen.findByText(/Show replay lanes/))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeTruthy())
+    fireEvent.click(within(document.querySelector('.page-main')).getByText('CNC_01 (replay)'))
+    clickAction('Propose a Change')
+    await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
+
+    // Fixed for everyone, so a label and not a greyed select; the other withheld fields stay controls.
+    expect(document.querySelector('#device-gateway')).toBeNull()
+    const gateway = within(document.querySelector('.modal')).getByText('Serving Gateway').closest('.form-group')
+    expect(gateway.querySelector('select, input')).toBeNull()
+    expect(gateway.querySelector('.form-hint-locked')).toBeNull()
+    expect(gateway.textContent).not.toMatch(/data path/)
+    expect(gateway.textContent).toMatch(/This is a replay lane\. It stays on the Playback gateway/)
+    expect(document.querySelector('#device-conformance').disabled).toBe(true)
+    // The schema and conformance notes are still true for a lane.
+    expect(document.querySelectorAll('.form-hint-locked')).toHaveLength(2)
+  })
+
   it('asks a proposer why, and asks a manager nothing', async () => {
     // A person saving their own change has nobody to explain it to; a person proposing one is
     // writing to an approver who has not stood in front of the machine.

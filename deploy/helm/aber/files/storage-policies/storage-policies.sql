@@ -28,7 +28,9 @@ ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 -- asset-3d-models. Public reads (/object/public/...) are served by the bucket's public flag and
 -- never consult a SELECT policy. SELECT governs listing, and storage-api's writes read the row
 -- back, so it takes the same authority as writing: the geometry is public, the inventory of which
--- devices have a model is not.
+-- devices have a model is not. A model belongs to a machine, so INSERT and UPDATE refuse an object
+-- under a replay lane's id (public.is_replay_lane_model_path(), 0294). DELETE does not: a machine
+-- may hold a model that was stored under its lane's id before then, and removes it as any other.
 DROP POLICY IF EXISTS "asset_3d_models_public_read" ON storage.objects;
 DROP POLICY IF EXISTS "asset_3d_models_select_privileged" ON storage.objects;
 CREATE POLICY "asset_3d_models_select_privileged" ON storage.objects
@@ -44,6 +46,7 @@ CREATE POLICY "asset_3d_models_insert_privileged" ON storage.objects
   WITH CHECK (
     bucket_id = 'asset-3d-models'
     AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
+    AND NOT public.is_replay_lane_model_path(storage.objects.name)
   );
 
 DROP POLICY IF EXISTS "asset_3d_models_update_privileged" ON storage.objects;
@@ -52,10 +55,12 @@ CREATE POLICY "asset_3d_models_update_privileged" ON storage.objects
   USING (
     bucket_id = 'asset-3d-models'
     AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
+    AND NOT public.is_replay_lane_model_path(storage.objects.name)
   )
   WITH CHECK (
     bucket_id = 'asset-3d-models'
     AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
+    AND NOT public.is_replay_lane_model_path(storage.objects.name)
   );
 
 DROP POLICY IF EXISTS "asset_3d_models_delete_privileged" ON storage.objects;
@@ -100,6 +105,16 @@ BEGIN
      AND policyname LIKE 'asset\_3d\_models\_%' AND policyname <> ALL (expected);
   IF extra IS NOT NULL THEN
     RAISE WARNING 'asset-3d-models policies this file does not create: %. Drop them if nothing needs them.', extra;
+  END IF;
+  -- A write arm without the lane's refusal would let the Storage API put a model under a lane's id,
+  -- which the dashboard no longer offers and nothing else would stop.
+  IF EXISTS (SELECT 1 FROM pg_policies p
+              WHERE p.schemaname = 'storage' AND p.tablename = 'objects'
+                AND p.policyname IN ('asset_3d_models_insert_privileged', 'asset_3d_models_update_privileged')
+                AND (coalesce(p.with_check, '') NOT LIKE '%is_replay_lane_model_path%'
+                     OR (p.cmd = 'UPDATE' AND coalesce(p.qual, '') NOT LIKE '%is_replay_lane_model_path%'))) THEN
+    RAISE EXCEPTION 'asset-3d-models: an INSERT or UPDATE policy admits an object under a replay lane''s id. '
+      'A model belongs to a machine, and the lane shows its machine''s (0294).';
   END IF;
   RAISE NOTICE 'storage policies reconciled (4 asset-3d-models policies on storage.objects).';
 END $$;

@@ -4969,7 +4969,8 @@ never ask which wrote a row. A separate worker is not needed: the spike
 - **The alert is written as the webhook writes one.** `fingerprint` is
   `automation_alert_fingerprint()`'s (0255), `alert_name` the automation's alias, `severity` the
   `alert` action's, `entity_type` `device` with the device's id and `sparkplug_id`, and `summary`
-  "Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m". `labels` are `severity`,
+  "Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5 °C, above 80 °C for 5m" (the unit is `0292`'s; a metric
+  with none reads "is 82.5, above 80"). `labels` are `severity`,
   `entity_type`, `metric`, `automation` (the automation's key) and `trigger_id`, all strings as
   Grafana's are. `values` are `value`, the reading that fired it, and `threshold`. `rule_uid` is
   null, and the frontend's link to Grafana does not apply to a `condition:` row
@@ -5159,8 +5160,10 @@ The Device, Overview and Cell views of History each export through one function,
 **`export_telemetry(from_ts, to_ts, asset_ids, metric_names, resolution)`**. The database holds the
 rules, not the button: an Operator reads the charts and cannot export, and a call that skips the
 dashboard meets the same refusals. It returns one `jsonb` document: `columns`, `rows` (time, asset
-id, metric, value, unit), `row_count`, `truncated`, `read_from`, `read_to`, `raw_from`, `max_rows`
-and `audit_id`. The browser writes the CSV from it.
+id, metric, value, unit), `row_count`, `truncated`, `read_from`, `read_to`, `raw_from`, `max_rows`,
+`audit_id` and, since `0296`, `derived`. The browser writes the CSV from it. This section is the function
+as `0279` declared it. `0296` declares it again and reads a derived metric through `derived_series()`
+(`0282`) too, with every check below as it was.
 
 - **It refuses, before it reads anything:** a caller who is not an Administrator or a Shopfloor Manager
   (`42501`, with the roles in words); a session that has not given its second factor while that is
@@ -5255,7 +5258,8 @@ A derived metric ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) has
 `0267` keeps its definition, and nothing is stored. **`derived_series(from_ts, to_ts, bucket, asset_ids,
 metric_names)`** computes it where it is read, from each input's `telemetry_carried()` at one minute,
 and **`derived_current(asset_ids, metric_names)`** gives its current value. They are the one
-computation of a derived metric: a chart, the Devices drawer and an automation read the same number.
+computation of a derived metric: a chart, the Devices drawer, an automation and an export (`0296`) read
+the same number.
 
 - **A counter rate** is the increase per hour. A minute's increase is its carried last value less the
   minute before's; **a fall is a reset, and the new value counts as the increase**. A bucket's rate is
@@ -5371,12 +5375,14 @@ reads again, after `derived_current()`, and the evaluator with one change, the w
   saved.
 - **A value is said in one place, `automation_value_words(metric, value)`.** A derived metric's value is
   rounded to three decimals and followed by its window, "4.167 over the last hour" or "7 at the last
-  whole minute"; any other value is printed as it was, so a measured alert reads as it did. **A time in
+  whole minute"; any other value is printed as it was, and `0292` follows a measured metric's with its
+  unit. **A time in
   state is a percentage in words**, "42% over the last hour", with one decimal at most and a trailing
   zero dropped, because it reads better so. It is still a fraction from 0 to 1 as data: the value
   the function returns, `platform_alerts.values`, the threshold in a file (`below: 0.9` is 90%) and
   what is compared. `automation_threshold_words(metric, threshold)` words the threshold beside it, "90%"
-  for a time in state and as printed for any other. `machine_condition_rows()` words its detail with
+  for a time in state and as printed for any other, with the unit `0292` gives a measured metric's.
+  `machine_condition_rows()` words its detail with
   both ("Controller/PARTS_PER_HOUR is 4.167 over the last hour, below 5"), and so does the alert's
   summary. The browser says a share with `percentWords()`, and one table of fractions and their words
   is held by this suite and by `derivedMetricReads.test.js`.
@@ -5413,7 +5419,8 @@ i3X address space.
   where it is missing, so a replay scans nothing and keeps the constraint's oid. `btrim` removes
   spaces only: a name of tabs or line breaks is still stored. The areas' and cells' own CHECKs
   (`areas_name_topic_safe`, `cells_name_topic_safe`) refuse an empty name and do not trim it, so a
-  name of spaces is a name there.
+  name of spaces was a name there until `0291`, which adds `areas_name_not_blank` and
+  `cells_name_not_blank` beside them.
 - **A row that is already blank is named, never renamed.** Adding a CHECK scans the table and fails on
   such a row with a message that names none. So the file looks first, in each table whose CHECK is not
   there yet, and raises one error that names every blank row: its table, id, Sparkplug id and what
@@ -7411,8 +7418,8 @@ never turned, and a **shadow** spindle reporting 4000 RPM *did* turn, on a real 
 the capture was recorded. Both are "not a machine running right now", and they give opposite answers
 to *is this number true* — which is the question being asked at the moment anyone consults a lane.
 
-Precedence is `shadow > simulated > site_wide > area_wide > explicit > inherited > unassigned`,
-most specific first: both flags are true of a shadow device, so without an explicit order it lands in
+Precedence is `shadow > simulated > site_wide > area_wide > followed_site / followed_area /
+followed_cell > explicit > inherited > unassigned` (the followed arms are `0293`'s), most specific first: both flags are true of a shadow device, so without an explicit order it lands in
 Simulated and
 the more informative lane is silently unreachable. `device_locations` computes it and
 `utils/cellResolution.js` mirrors it, with `check-mirror-drift.mjs` pinning the label list literally
@@ -11335,7 +11342,8 @@ URL would expire, which turns every shell already handed out into a time bomb.
 
 The consequence is a constraint on what may go in it: **nothing beyond machine geometry.** Writes
 are gated on `device:manage` rather than merely `authenticated`, because an upload both changes
-what a shell publishes *and* puts bytes at a world-readable URL.
+what a shell publishes *and* puts bytes at a world-readable URL. An `INSERT` or `UPDATE` of an
+object under a replay lane's id is refused too, since a lane holds no model of its own (0294).
 
 ### `broker-captures` is private, and holds the plant's traffic
 

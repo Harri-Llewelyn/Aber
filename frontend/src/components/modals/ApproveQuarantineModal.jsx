@@ -6,7 +6,9 @@ import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { usePendingKey } from '../../hooks/usePendingAction'
 import { gatewayAcceptsDevices } from '../../utils/gatewayType'
-import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
+import {
+  SCOPE_GATEWAY, SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, followedPlaceFix, followedPlaceLine, resolveDeviceLocation
+} from '../../utils/cellResolution'
 
 export function ApproveQuarantineModal({ item, cells, gateways, areas = [], suggestion, onApprove, onMerge, onCancel }) {
   // One key space across both buttons: approving as new and merging into the suggested match are
@@ -34,24 +36,25 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
     offered.find(g => gatewayAcceptsDevices(g))?.gateway_id || '')
 
   // The location is chosen here because the operator is already looking at the device. The same
-  // picker as the Devices form: an empty cell means inherit from the gateway, and forcing a value
-  // would store an override that stops tracking the gateway.
-  const [location, setLocation] = useState({ cell_id: '', area_id: '', location_scope: SCOPE_CELL })
+  // picker as the Devices form: a device follows its gateway unless told otherwise, and forcing a
+  // place would pin it where it stops tracking the gateway.
+  const [location, setLocation] = useState({ cell_id: '', area_id: '', location_scope: SCOPE_GATEWAY })
   const scope = location.location_scope
   const cellId = scope === SCOPE_CELL ? location.cell_id : ''
 
   const selectedGateway = gateways.find(g => g.gateway_id === gatewayId)
-  const derivedCellName = selectedGateway?.cell_id
-    ? (cells.find(c => c.cell_id === selectedGateway.cell_id)?.cell_name || null)
-    : null
   const chosenAreaName = areas.find(a => a.area_id === location.area_id)?.area_name
 
-  // What the device will resolve to once approved. A gateway with no cell cannot supply one, so the
-  // operator is told that leaving the picker alone leaves the device without a cell.
-  const willBeUnassigned = scope === SCOPE_CELL && !cellId && !selectedGateway?.cell_id
+  // Where Follow Gateway puts the device once approved, in the Devices form's words. A gateway with
+  // no location, or none at all, leaves the device Unassigned, which the operator is told now.
+  const followedLine = followedPlaceLine(selectedGateway, { cells, areas })
+  const willBeUnassigned = scope === SCOPE_GATEWAY &&
+    resolveDeviceLocation({ location_scope: SCOPE_GATEWAY }, selectedGateway).location_source === SOURCE_UNASSIGNED
 
-  // Area-Wide with no area named would be refused by the database; held here.
-  const problem = !isGateway && locationIncomplete(location) ? 'Choose which area the device serves' : null
+  // Area-Wide with no area named and In a cell with no cell would be refused by the database; held here.
+  const problem = !isGateway && locationIncomplete(location, { cellRequired: true })
+    ? (scope === SCOPE_AREA_WIDE ? 'Choose which area the device serves' : 'Choose which cell the device is in')
+    : null
 
   const handleSave = () => decide('approve', () => onApprove(item.asset_id, {
     asset_name: assetName,
@@ -156,27 +159,25 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
               onChange={fields => setLocation(l => ({ ...l, ...fields }))}
               cells={cells}
               areas={areas}
-              cellEmptyLabel={derivedCellName
-                ? `— Inherit from gateway (${derivedCellName}) —`
-                : '— Inherit from gateway (gateway has no cell) —'}
+              followGateway
+              cellEmptyLabel="— Choose a cell —"
             />
 
             {willBeUnassigned ? (
               <div className="form-hint hint-warning">
-                <IconAlertTriangle size={12} />{' '}
-                {gatewayId
-                  ? 'The selected gateway has no cell of its own, so this device will show under Unassigned in the Cell filter. Pick a cell now, or mark it Area-Wide or Site-Wide.'
-                  : 'With no gateway and no cell, this device will show under Unassigned in the Cell filter.'}
+                <IconAlertTriangle size={12} /> {followedLine}. {followedPlaceFix(selectedGateway)}
               </div>
             ) : (
               <div className="form-hint">
-                {scope === SCOPE_SITE_WIDE
-                  ? 'Reported as Site-Wide rather than under any cell.'
-                  : scope === SCOPE_AREA_WIDE
-                    ? `Reported as Area-Wide in ${chosenAreaName || 'the chosen area'} rather than under any cell in it.`
-                    : cellId
-                      ? 'Set on this device — it stays put even if the gateway is reassigned.'
-                      : 'Follows the gateway above, and moves with it.'}
+                {scope === SCOPE_GATEWAY
+                  ? `${followedLine}. It moves when the gateway does.`
+                  : scope === SCOPE_SITE_WIDE
+                    ? 'Reported as Site-Wide rather than under any cell.'
+                    : scope === SCOPE_AREA_WIDE
+                      ? `Reported as Area-Wide in ${chosenAreaName || 'the chosen area'} rather than under any cell in it.`
+                      : cellId
+                        ? 'Set on this device — it stays put even if the gateway is reassigned.'
+                        : 'Choose the cell this device is in, or use Follow Gateway to take its gateway’s place.'}
               </div>
             )}
           </div>

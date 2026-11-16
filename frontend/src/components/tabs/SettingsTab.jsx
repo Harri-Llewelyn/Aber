@@ -30,8 +30,8 @@ export const CATEGORY_DESCRIPTIONS = Object.fromEntries(SETTINGS_TABS.map(t => [
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
  * closed in the database, where RLS grants UPDATE and nothing else, and a row exists because some
  * code reads it. Every role reads it, as RLS allows; rows marked `sensitive` reach Administrators
- * only. `readOnly`, for anyone but an Administrator, is a courtesy: RLS refuses the write, which is
- * why `api.patchSetting` treats zero rows affected as an error.
+ * only. `readOnly`, for anyone but an Administrator, shows each value as text and is a courtesy: RLS
+ * refuses the write, which is why `api.patchSetting` treats zero rows affected as an error.
  */
 
 /**
@@ -94,6 +94,14 @@ export function fallbackCopy(text) {
   return null
 }
 
+/** A setting's value as words for a row shown as text: a choice by its label, a switch as Enabled or Disabled. */
+function valueText(setting, stored) {
+  const option = SETTING_OPTIONS[setting.key]?.find(o => o.value === stored)
+  if (option) return option.label
+  if (setting.value_type === 'boolean') return stored === 'true' ? 'Enabled' : 'Disabled'
+  return stored
+}
+
 function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly = false }) {
   const [draft, setDraft] = useState(() => displayValue(setting.value, setting.value_type))
   const [saving, setSaving] = useState(false)
@@ -138,6 +146,9 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
   }
 
   const reset = () => { setDraft(stored); setError(null) }
+  // A value that is shown, not edited: fixed at install for everyone, or for anyone but an
+  // Administrator. Actions says which.
+  const fixed = setting.read_only || readOnly
   const copy = fallbackCopy(setting.fallback_source)
 
   // The permitted range, stated rather than left to a spinner's limits: `min`/`max` on the input
@@ -152,7 +163,10 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
   return (
     <tr ref={rowRef} className={`setting-row${highlighted ? ' setting-row-found' : ''}`} data-setting={setting.key}>
       <td className="setting-cell setting-cell-name">
-        <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>
+        {/* A label belongs to a control: a value shown as text is named by its row. */}
+        {fixed
+          ? <div className="setting-label">{setting.label}</div>
+          : <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>}
         <div className="setting-key">
           <CopyableId
             value={setting.key}
@@ -187,19 +201,18 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
       </td>
 
       <td className="setting-cell setting-cell-value">
-        {/* A read-only setting is rendered as such rather than left editable: the database refuses
-            the write either way, so an operator is not offered a control that cannot work. Two
-            settings are fixed: the Sparkplug group, which re-addresses every gateway if changed,
-            and the archive site key. */}
-        {setting.read_only ? (
-          <input
-            id={`setting-${setting.key}`}
-            className="form-control"
-            type="text"
-            value={stored}
-            readOnly
-            disabled
-          />
+        {/* A value nobody here can change is text, not a greyed-out field: the database refuses the
+            write either way, and a control would only look like one that might work. Two settings are
+            fixed for everyone: the Sparkplug group, which re-addresses every gateway if changed, and
+            the archive site key. */}
+        {fixed ? (
+          setting.value_type === 'json' ? (
+            <pre className="setting-static setting-static-block mono">{stored}</pre>
+          ) : (
+            <div className={`setting-static${stored === '' ? ' setting-static-empty' : ''}${setting.value_type === 'string' ? ' mono' : ''}`}>
+              {stored === '' ? 'Not set' : valueText(setting, stored)}
+            </div>
+          )
         ) : SETTING_OPTIONS[setting.key] ? (
           /* A closed set, which the database's guard holds too: a choice rather than a text field. */
           <select
@@ -207,7 +220,6 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
             className="form-control"
             value={draft}
             onChange={e => setDraft(e.target.value)}
-            disabled={readOnly}
           >
             {SETTING_OPTIONS[setting.key].map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
@@ -217,7 +229,6 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
             className="form-control"
             value={draft === 'true' ? 'true' : 'false'}
             onChange={e => setDraft(e.target.value)}
-            disabled={readOnly}
           >
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
@@ -229,7 +240,6 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
             rows={4}
             value={draft}
             onChange={e => setDraft(e.target.value)}
-            disabled={readOnly}
           />
         ) : (
           <input
@@ -238,7 +248,6 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
             type={setting.value_type === 'number' ? 'number' : 'text'}
             value={draft}
             onChange={e => setDraft(e.target.value)}
-            disabled={readOnly}
             aria-describedby={range ? rangeId : undefined}
             {...(setting.value_type === 'number' ? { step: setting.whole_number ? 1 : 'any' } : {})}
             {...(hasMin ? { min: setting.min_value } : {})}

@@ -66,7 +66,9 @@ describe('the schema builders write what ingestion reads', () => {
         onSaveDraft={onSaveDraft} onClose={() => {}} />
     )
 
-    for (const m of fixture.catalog) fireEvent.click(screen.getByLabelText(m.name))
+    for (const m of fixture.catalog) {
+      fireEvent.click(screen.getByText(m.name).closest('label').querySelector('input[type="checkbox"]'))
+    }
     typeRanges()
     fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }))
 

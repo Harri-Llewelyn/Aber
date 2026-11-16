@@ -123,16 +123,15 @@ export function ColdStorageDestinationModal({ values = {}, siteKey = '', credent
           disabled={pending}
           consequence="If the new one is wrong, the first sign is the nightly export failing to authenticate."
         />
-        <div className="form-group">
-          <label className="form-label" htmlFor="cold-site-key">Site key</label>
-          <input
-            id="cold-site-key"
-            className="form-control mono"
-            value={siteKey}
-            readOnly
-            placeholder="Not set"
-          />
-          <p className="form-hint">Fixed at install by <span className="mono">values.yaml coldArchive.s3.siteKey</span>.</p>
+        {/* Text, not a field: no one can change it here. */}
+        <div className="form-group metric-edit-facts">
+          <div style={{ minWidth: 0 }}>
+            <div className="form-label">Site key</div>
+            <div className="mono" style={{ overflowWrap: 'anywhere' }}>
+              {siteKey || <span style={{ color: 'var(--text-muted)' }}>Not set</span>}
+            </div>
+            <p className="form-hint">Fixed at install by <span className="mono">values.yaml coldArchive.s3.siteKey</span>.</p>
+          </div>
         </div>
       </div>
 

@@ -10,8 +10,8 @@ import { helpTipText } from '../test/tooltips'
 
 /**
  * The Devices tab's location UI. The distinction under test is between the resolved cell and the
- * explicit override: they render the same name in the common case, so confusing them would look
- * correct on screen while detaching every inherited device from its gateway on save.
+ * device's own: they render the same name in the common case, so confusing them would look correct
+ * on screen while pinning every device that follows its gateway to a cell of its own on save.
  */
 
 vi.mock('../api', async () => {
@@ -34,12 +34,12 @@ const device = (overrides = {}) => ({
   is_quarantined: false,
   is_archived: false,
   active_gateway_id: 'gw-1',
-  // Inherited by default: no explicit override, resolving to the gateway's cell.
+  // Follows its gateway by default: no cell of its own, resolving to the gateway's cell.
   cell_id: null,
-  location_scope: 'cell',
+  location_scope: 'gateway',
   effective_cell_id: CELL_1,
   gateway_cell_id: CELL_1,
-  location_source: 'inherited',
+  location_source: 'followed_cell',
   cell_mismatch: false,
   first_dbirth_at: '2026-07-27T12:00:00Z',
   created_at: '2026-07-20T12:00:00Z',
@@ -51,7 +51,10 @@ const GATEWAYS = [
   { gateway_id: 'gw-host', gateway_name: 'Host_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', status: 'ONLINE', is_archived: false, devices: [] },
   // `gateways_synthetic_has_no_cell` (0001_baseline_schema.sql) forbids a cell here, so cell_id is null by constraint
   // rather than by omission -- the fixture cannot be written any other way.
-  { gateway_id: 'gw-sim', gateway_name: 'Sim_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', is_simulated: true, status: 'ONLINE', is_archived: false, devices: [] }
+  { gateway_id: 'gw-sim', gateway_name: 'Sim_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', is_simulated: true, status: 'ONLINE', is_archived: false, devices: [] },
+  // An Area-Wide and a Site-Wide gateway: no cell of their own, so a device following one is in no cell.
+  { gateway_id: 'gw-area', gateway_name: 'AssemblyFlow', cell_id: null, area_id: 'area-1', location_scope: 'area_wide', deployment: 'host', status: 'ONLINE', is_archived: false, devices: [] },
+  { gateway_id: 'gw-site', gateway_name: 'Campus_Gateway', cell_id: null, location_scope: 'site_wide', deployment: 'host', status: 'ONLINE', is_archived: false, devices: [] }
 ]
 
 const CELLS = [
@@ -93,21 +96,21 @@ describe('the cell column', () => {
   const cellColumn = () =>
     within(screen.getByRole('table')).getAllByRole('row')[1].querySelectorAll('td')[4]
 
-  it('shows the resolved cell for an inherited device, with no "set on device" note', async () => {
+  it('shows the resolved cell for a device that follows its gateway, with no "set on device" note', async () => {
     await show([device()])
     expect(within(cellColumn()).getByText('Assembly')).toBeInTheDocument()
     expect(within(cellColumn()).queryByText('Set on device')).not.toBeInTheDocument()
   })
 
   it('marks an explicitly filed device, since it will not move with its gateway', async () => {
-    await show([device({ cell_id: CELL_2, effective_cell_id: CELL_2, location_source: 'explicit' })])
+    await show([device({ cell_id: CELL_2, location_scope: 'cell', effective_cell_id: CELL_2, location_source: 'explicit' })])
     expect(within(cellColumn()).getByText('Paint Shop')).toBeInTheDocument()
     expect(within(cellColumn()).getByText('Set on device')).toBeInTheDocument()
   })
 
   it('warns when a device is filed in a cell its gateway does not serve', async () => {
     await show([device({
-      cell_id: CELL_2, effective_cell_id: CELL_2, location_source: 'explicit', cell_mismatch: true
+      cell_id: CELL_2, location_scope: 'cell', effective_cell_id: CELL_2, location_source: 'explicit', cell_mismatch: true
     })])
     expect(within(cellColumn()).getByText(/Gateway elsewhere/)).toBeInTheDocument()
   })
@@ -126,6 +129,24 @@ describe('the cell column', () => {
       location_scope: 'site_wide', effective_cell_id: null, location_source: 'site_wide'
     })])
     expect(within(cellColumn()).getByText('Site-Wide')).toBeInTheDocument()
+    expect(within(cellColumn()).queryByText(/Unassigned/)).not.toBeInTheDocument()
+  })
+
+  it('shows a device behind an Area-Wide gateway as Area-Wide, and says it follows the gateway', async () => {
+    await show([device({
+      active_gateway_id: 'gw-area', effective_cell_id: null, gateway_cell_id: null, effective_area_id: 'area-1',
+      location_source: 'followed_area'
+    })], { areas: [{ area_id: 'area-1', area_name: 'North Shop', cells: [], cell_count: 0 }] })
+    const badge = within(cellColumn()).getByText('Area-Wide')
+    expect(within(cellColumn()).queryByText(/Unassigned/)).not.toBeInTheDocument()
+    expect(badge).toHaveAccessibleDescription(/Follows its gateway, AssemblyFlow, which serves the whole of North Shop/)
+  })
+
+  it('shows a device behind a Site-Wide gateway as Site-Wide, not as Unassigned', async () => {
+    await show([device({
+      active_gateway_id: 'gw-site', effective_cell_id: null, gateway_cell_id: null, location_source: 'followed_site'
+    })])
+    expect(within(cellColumn()).getByText('Site-Wide')).toHaveAccessibleDescription(/Follows its gateway, Campus_Gateway/)
     expect(within(cellColumn()).queryByText(/Unassigned/)).not.toBeInTheDocument()
   })
 
@@ -193,6 +214,17 @@ describe('the cell filter', () => {
     expect(screen.queryByText('CNC_01')).not.toBeInTheDocument()
   })
 
+  it('the Site-Wide lane holds a device that follows a Site-Wide gateway', async () => {
+    await show([
+      device({ asset_name: 'Follower', active_gateway_id: 'gw-site', effective_cell_id: null, location_source: 'followed_site' }),
+      device({ asset_id: 'bbbbbbbb-0000-4000-8000-000000000002', asset_name: 'AGV_01',
+               effective_cell_id: null, gateway_cell_id: null, location_source: 'unassigned' })
+    ], { expect: 'Follower' })
+    pick('Cell', '__site_wide__')
+    expect(screen.getByText('Follower')).toBeInTheDocument()
+    expect(screen.queryByText('AGV_01')).not.toBeInTheDocument()
+  })
+
   it('the Site-Wide lane does not pick up merely unassigned devices', async () => {
     // The two must not merge: Unassigned is a queue that should drain, Site-Wide is a home.
     await show([
@@ -209,21 +241,56 @@ describe('the cell filter', () => {
 describe('the edit form', () => {
   const cellPicker = () => document.getElementById('device-cell')
 
-  it('names the inherited cell in the placeholder instead of calling it "None"', async () => {
-    // Empty means INHERIT, not unassigned. A "None" label would misdescribe the default.
+  it('says where Follow Gateway puts the device now, and that it moves with the gateway', async () => {
     await show([device()])
     openEdit()
-    expect(within(cellPicker()).getByText(/Inherit from gateway \(Assembly\)/)).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Follow Gateway/i })).toBeChecked()
+    expect(screen.getByText('Cell Assembly, from Line_A_Gateway. It moves when the gateway does.')).toBeInTheDocument()
   })
 
-  it('leaves the picker empty for an inherited device, so saving does not create an override', async () => {
+  it('names the area of an Area-Wide gateway, and the gateway, for a device that follows it', async () => {
+    // The case the line exists for: AssemblyFlow is Area-Wide in Assembly, and the device took
+    // neither the area nor the site it names until it could follow.
+    await show([device({
+      active_gateway_id: 'gw-area', effective_cell_id: null, gateway_cell_id: null, location_source: 'followed_area'
+    })], { areas: [{ area_id: 'area-1', area_name: 'Assembly', cells: [], cell_count: 0 }] })
+    openEdit()
+    expect(screen.getByText('Area-Wide in Assembly, from AssemblyFlow. It moves when the gateway does.')).toBeInTheDocument()
+  })
+
+  it('names a Site-Wide gateway for a device that follows it', async () => {
+    await show([device({
+      active_gateway_id: 'gw-site', effective_cell_id: null, gateway_cell_id: null, location_source: 'followed_site'
+    })])
+    openEdit()
+    expect(screen.getByText('Site-Wide, from Campus_Gateway. It moves when the gateway does.')).toBeInTheDocument()
+  })
+
+  it('names the gateway that has no location, as a finding', async () => {
+    await show([device({
+      active_gateway_id: 'gw-host', effective_cell_id: null, gateway_cell_id: null, location_source: 'unassigned'
+    })])
+    openEdit()
+    const line = screen.getByText(/Unassigned: Host_Gateway has no location\./)
+    expect(line.closest('.form-hint')).toHaveClass('hint-warning')
+    expect(line.textContent).toMatch(/Set a location on the gateway/)
+  })
+
+  it('has no cell picker while the device follows its gateway, so saving stores no cell of its own', async () => {
     await show([device()])
     openEdit()
-    expect(cellPicker().value).toBe('')
+    expect(cellPicker()).toBeNull()
+  })
+
+  it('changes the line when the gateway is changed in the same form', async () => {
+    await show([device()])
+    openEdit()
+    fireEvent.change(document.getElementById('device-gateway') || screen.getByLabelText(/Serving Gateway/i), { target: { value: 'gw-site' } })
+    expect(screen.getByText(/Site-Wide, from Campus_Gateway\./)).toBeInTheDocument()
   })
 
   it('preselects the explicit cell for a device that has one', async () => {
-    await show([device({ cell_id: CELL_2, effective_cell_id: CELL_2, location_source: 'explicit' })])
+    await show([device({ cell_id: CELL_2, location_scope: 'cell', effective_cell_id: CELL_2, location_source: 'explicit' })])
     openEdit()
     expect(cellPicker().value).toBe(CELL_2)
   })
@@ -236,21 +303,45 @@ describe('the edit form', () => {
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
-    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', location_scope: 'cell' })
+    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: '', location_scope: 'gateway' })
   })
 
-  it('writes an explicit cell when one is chosen', async () => {
+  it('writes a cell of its own when In a cell is chosen and a cell picked', async () => {
     await show([device()])
     openEdit()
+    fireEvent.click(screen.getByRole('radio', { name: /In a cell/i }))
     fireEvent.change(cellPicker(), { target: { value: CELL_2 } })
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
-    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: CELL_2 })
+    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: CELL_2, area_id: '', location_scope: 'cell' })
+  })
+
+  it('requires a cell once In a cell is chosen: the button says so, and the picker prompts for one', async () => {
+    // `devices_cell_scope_names_a_cell` refuses it, so the form holds the save instead.
+    await show([device()])
+    openEdit()
+    fireEvent.click(screen.getByRole('radio', { name: /In a cell/i }))
+    expect(within(cellPicker()).getByText('— Choose a cell —')).toBeInTheDocument()
+    expect(cellPicker().value).toBe('')
+    expect(screen.getByRole('button', { name: /Save Configuration/i })).toBeDisabled()
+    fireEvent.change(cellPicker(), { target: { value: CELL_2 } })
+    expect(screen.getByRole('button', { name: /Save Configuration/i })).toBeEnabled()
+  })
+
+  it('returns to following the gateway, and sends no cell, when Follow Gateway is chosen again', async () => {
+    await show([device({ cell_id: CELL_2, location_scope: 'cell', effective_cell_id: CELL_2, location_source: 'explicit' })])
+    openEdit()
+    fireEvent.click(screen.getByRole('radio', { name: /Follow Gateway/i }))
+    expect(cellPicker()).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: '', location_scope: 'gateway' })
   })
 
   it('clears the cell when Site-Wide is chosen, mirroring the CHECK constraint', async () => {
-    await show([device({ cell_id: CELL_2, effective_cell_id: CELL_2, location_source: 'explicit' })])
+    await show([device({ cell_id: CELL_2, location_scope: 'cell', effective_cell_id: CELL_2, location_source: 'explicit' })])
     openEdit()
     // One radio of three rather than a checkbox beside the cell picker:
     // `devices_site_wide_has_no_cell` makes the answers exclusive, and a radio group says so.
@@ -261,28 +352,22 @@ describe('the edit form', () => {
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', location_scope: 'site_wide' })
   })
 
-  it('says the device will show under Unassigned when nothing can supply a cell', async () => {
-    await show([device({
-      active_gateway_id: 'gw-host', effective_cell_id: null, gateway_cell_id: null,
-      location_source: 'unassigned'
-    })])
-    openEdit()
-    expect(screen.getByText(/will show under Unassigned in the Cell filter/i)).toBeInTheDocument()
-  })
-
   it('keeps an archived cell selectable when the device already points at it', async () => {
     // Dropping it from the list would relocate the device on the next save.
     const cells = [...CELLS, { cell_id: 'cell-old', cell_name: 'Decommissioned Bay', is_archived: true }]
-    await show([device({ cell_id: 'cell-old', effective_cell_id: 'cell-old', location_source: 'explicit' })], { cells })
+    await show([device({ cell_id: 'cell-old', location_scope: 'cell', effective_cell_id: 'cell-old', location_source: 'explicit' })], { cells })
     openEdit()
     expect(within(cellPicker()).getByText(/Decommissioned Bay \(archived\)/)).toBeInTheDocument()
   })
 
-  it('offers the three scopes as one exclusive choice, with the cell list only under In a cell', async () => {
+  it('offers the four choices as one exclusive group, Follow Gateway first, with the cell list only under In a cell', async () => {
     await show([device()])
     openEdit()
     const radios = screen.getAllByRole('radio').map(r => r.value)
-    expect(radios).toEqual(['cell', 'area_wide', 'site_wide'])
+    expect(radios).toEqual(['gateway', 'cell', 'area_wide', 'site_wide'])
+    expect(screen.getByRole('radio', { name: /Follow Gateway/i })).toBeChecked()
+    expect(cellPicker()).toBeNull()
+    fireEvent.click(screen.getByRole('radio', { name: /In a cell/i }))
     expect(screen.getByRole('radio', { name: /In a cell/i })).toBeChecked()
     // Site-Wide is not a checkbox reaching over to clear the select, and not an entry in it either:
     // the cell list holds cells.
@@ -338,7 +423,8 @@ describe('the edit form', () => {
     // withheld.
     await show([device({ active_gateway_id: 'gw-sim', effective_cell_id: null, location_source: 'simulated' })])
     openEdit()
-    expect(document.querySelector('#device-cell').disabled).toBe(true)
+    expect(screen.getAllByRole('radio').every(r => r.disabled)).toBe(true)
+    expect(cellPicker()).toBeNull()
     expect(screen.getByText(/belong to the Simulated lane/i, { ignore: '[role=tooltip]' })).toBeInTheDocument()
   })
 
@@ -347,7 +433,7 @@ describe('the edit form', () => {
     // comes back into force if the gateway stops being synthetic.
     api.put.mockResolvedValue({})
     await show([device({
-      active_gateway_id: 'gw-sim', cell_id: CELL_2, effective_cell_id: null, location_source: 'simulated'
+      active_gateway_id: 'gw-sim', cell_id: CELL_2, location_scope: 'cell', effective_cell_id: null, location_source: 'simulated'
     })])
     openEdit()
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
@@ -443,8 +529,24 @@ describe('the Location row in the context panel', () => {
     expect(labels).not.toContain('Location Source')
   })
 
+  it('says a device that follows an Area-Wide gateway is Area-Wide in its area, from the gateway', async () => {
+    const value = await location({
+      active_gateway_id: 'gw-area', effective_cell_id: null, gateway_cell_id: null, effective_area_id: 'area-1',
+      location_source: 'followed_area'
+    })
+    expect(value.textContent).toBe('North Shop›Area-Wide(from gateway)')
+    expect(helpTipText('What Location means')).toMatch(/^Follows its gateway: Area-Wide in North Shop, from AssemblyFlow/)
+  })
+
+  it('says a device that follows a Site-Wide gateway is Site-Wide, from the gateway', async () => {
+    const value = await location({
+      active_gateway_id: 'gw-site', effective_cell_id: null, gateway_cell_id: null, location_source: 'followed_site'
+    })
+    expect(value.textContent).toBe('Site-Wide(from gateway)')
+  })
+
   it('drops "(from gateway)" for a device filed on itself', async () => {
-    const value = await location({ cell_id: CELL_2, location_source: 'explicit' })
+    const value = await location({ cell_id: CELL_2, location_scope: 'cell', location_source: 'explicit' })
     expect(value.textContent).toBe('North Shop›Paint Shop')
     expect(helpTipText('What Location means')).toMatch(/^Set on the device itself/)
   })
@@ -478,7 +580,7 @@ describe('needs attention', () => {
 
   it('counts a device filed against its gateway', async () => {
     await show([
-      device({ cell_id: CELL_2, effective_cell_id: CELL_2, location_source: 'explicit', cell_mismatch: true })
+      device({ cell_id: CELL_2, location_scope: 'cell', effective_cell_id: CELL_2, location_source: 'explicit', cell_mismatch: true })
     ])
     expect(attentionButton().textContent).toMatch(/\(1\)/)
   })
@@ -488,7 +590,7 @@ describe('needs attention', () => {
   it('has no archived-cell finding', async () => {
     const cells = [...CELLS, { cell_id: 'cell-old', cell_name: 'Decommissioned Bay', is_archived: true }]
     await show([
-      device({ cell_id: 'cell-old', effective_cell_id: 'cell-old', location_source: 'explicit' })
+      device({ cell_id: 'cell-old', location_scope: 'cell', effective_cell_id: 'cell-old', location_source: 'explicit' })
     ], { cells })
     expect(attentionButton().textContent).toMatch(/\(0\)/)
   })
@@ -517,26 +619,42 @@ describe('approving a quarantined device', () => {
   const approveButton = () =>
     within(screen.getByRole('dialog')).getByRole('button', { name: /Approve & Onboard/i })
 
-  const openApproval = async () => {
-    await show([], { quarantine: [quarantined], expect: 'Unknown_Robot', tab: /^Quarantine/ })
+  const openApproval = async (options = {}) => {
+    await show([], { quarantine: [quarantined], expect: 'Unknown_Robot', tab: /^Quarantine/, ...options })
     fireEvent.click(screen.getAllByRole('button', { name: /Approve/i })[0])
     await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())
   }
 
-  it('offers a cell picker again, defaulting to inherit', async () => {
+  it('offers the four choices as the Devices form does, defaulting to Follow Gateway with no cell picker', async () => {
     await openApproval()
-    const picker = document.getElementById('approve-cell')
-    expect(picker.value).toBe('')
+    expect(screen.getAllByRole('radio').map(r => r.value)).toEqual(['gateway', 'cell', 'area_wide', 'site_wide'])
+    expect(screen.getByRole('radio', { name: /Follow Gateway/i })).toBeChecked()
+    expect(document.getElementById('approve-cell')).toBeNull()
   })
 
-  it('warns that a gateway with no cell leaves the device without one', async () => {
+  it('warns that a gateway with no location leaves the device Unassigned', async () => {
     await openApproval()
-    expect(screen.getByText(/will show under Unassigned in the Cell filter/i)).toBeInTheDocument()
+    expect(screen.getByText(/Unassigned: Host_Gateway has no location\./)).toBeInTheDocument()
+  })
+
+  it('says where Follow Gateway puts the device once a gateway that has a place is chosen', async () => {
+    await openApproval({ areas: [{ area_id: 'area-1', area_name: 'Assembly', cells: [], cell_count: 0 }] })
+    fireEvent.change(document.getElementById('approve-gateway'), { target: { value: 'gw-area' } })
+    expect(screen.getByText(/Area-Wide in Assembly, from AssemblyFlow\. It moves when the gateway does\./)).toBeInTheDocument()
+  })
+
+  it('holds the button until a cell is picked once In a cell is chosen', async () => {
+    await openApproval()
+    fireEvent.click(screen.getByRole('radio', { name: /In a cell/i }))
+    expect(approveButton()).toBeDisabled()
+    fireEvent.change(document.getElementById('approve-cell'), { target: { value: CELL_2 } })
+    expect(approveButton()).toBeEnabled()
   })
 
   it('forwards the chosen cell to the edge function', async () => {
     supabase.functions.invoke.mockResolvedValue({ data: { success: true }, error: null })
     await openApproval()
+    fireEvent.click(screen.getByRole('radio', { name: /In a cell/i }))
     fireEvent.change(document.getElementById('approve-cell'), { target: { value: CELL_2 } })
     fireEvent.click(approveButton())
 
@@ -572,9 +690,9 @@ describe('approving a quarantined device', () => {
     })
   })
 
-  it('forwards inherit as an empty cell rather than omitting the key', async () => {
+  it('forwards Follow Gateway as an empty cell and area rather than omitting the keys', async () => {
     // The edge function distinguishes absent (do not write) from empty (write NULL); the modal
-    // always answers, so it always sends the key.
+    // always answers, so it always sends the keys.
     supabase.functions.invoke.mockResolvedValue({ data: { success: true }, error: null })
     await openApproval()
     fireEvent.click(approveButton())
@@ -582,7 +700,8 @@ describe('approving a quarantined device', () => {
     await waitFor(() => expect(supabase.functions.invoke).toHaveBeenCalled())
     const body = supabase.functions.invoke.mock.calls[0][1].body
     expect(body.cell_id).toBe('')
-    expect(body.location_scope).toBe('cell')
+    expect(body.area_id).toBe('')
+    expect(body.location_scope).toBe('gateway')
   })
 })
 

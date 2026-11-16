@@ -1,6 +1,6 @@
 import React from 'react'
 import { render, screen, within, waitFor, fireEvent } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import App from '../App'
@@ -238,6 +238,10 @@ describe('Merged navigation shell', () => {
    * the facts the button names.
    */
   describe('Account menu', () => {
+    // App opens Profile with lazy(), and the first import in a run compiles the page, which can
+    // take longer than a findBy waits. A hook has ten seconds, so the page is loaded here first.
+    beforeAll(() => import('../components/tabs/ProfileTab'))
+
     const trigger = () => screen.getByRole('button', { name: /account menu/i })
 
     it('names the address and the role on the button, and prints the address as a rail label', async () => {

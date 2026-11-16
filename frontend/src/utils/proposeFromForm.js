@@ -104,9 +104,13 @@ export const PROPOSAL_FORMS = {
   }
 }
 
-/** The form keys this form cannot propose, with the sentence to show beside each. */
+/**
+ * The form keys this form cannot propose, with the sentence to show beside each: that a proposal
+ * can't change it, then who can.
+ */
 export function nonProposableFields(kind) {
-  return PROPOSAL_FORMS[kind]?.withheld || {}
+  return Object.fromEntries(Object.entries(PROPOSAL_FORMS[kind]?.withheld || {})
+    .map(([key, why]) => [key, `A proposal can’t change this. ${why}`]))
 }
 
 /**
