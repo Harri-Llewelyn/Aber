@@ -16,7 +16,8 @@
  *
  * Running it again does nothing. A name of a note in text that is not a Markdown link (a comment in
  * code, say) is not rewritten; the script lists each one, so the release commit can fix it by hand.
- * `--root <dir>` runs it on a copy of the repository.
+ * `--root <dir>` runs it on a copy of the repository. `--help` prints the usage, and any other
+ * argument is refused before anything is read.
  *
  * node: built-ins only.
  */
@@ -26,9 +27,18 @@ import { fileURLToPath } from 'node:url'
 
 import { GUIDE, README, foldGuide, foldReadme, newHome, readNotes, retarget } from './lib/unreleased-notes.mjs'
 
+// The fold deletes files, so an argument it does not know stops it before it reads anything.
+const USAGE = 'Usage: node scripts/fold-unreleased.mjs [--check] [--root <dir>]'
 const argv = process.argv.slice(2)
-const root = resolve(argv.includes('--root') ? argv[argv.indexOf('--root') + 1] : join(dirname(fileURLToPath(import.meta.url)), '..'))
-const check = argv.includes('--check')
+let check = false
+let rootArg = null
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--check') check = true
+  else if (argv[i] === '--root' && argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')) rootArg = argv[++i]
+  else if (argv[i] === '--help' || argv[i] === '-h') { console.log(USAGE); process.exit(0) }
+  else { console.error(`${argv[i] === '--root' ? '--root needs a directory' : `Unknown argument: ${argv[i]}`}\n${USAGE}`); process.exit(2) }
+}
+const root = resolve(rootArg ?? join(dirname(fileURLToPath(import.meta.url)), '..'))
 const LINK = /(\]\()([^)\s]+)(\))/g
 const SKIPPED = new Set(['node_modules', '.git', '.cache', '.venv', 'venv', '__pycache__', 'dist', 'build'])
 const TEXT = /\.(md|mjs|js|jsx|ts|tsx|json|ya?ml|sql|py|sh|txt|tpl|toml|html|css)$/
