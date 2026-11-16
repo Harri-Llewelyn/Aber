@@ -50,9 +50,9 @@ src/
 
 ### Derived state is computed client-side, never stored
 
-Device tags, unmodelled metrics, metric grouping, gateway staleness, effective cell and
-provisioning-overdue all follow the same shape: **a pure function in `src/utils/`, unit-tested,
-with no backend cron and nothing persisted that could go stale.**
+A device's metric groups and findings (unmodelled metrics, values out of vocabulary), gateway
+staleness, effective cell and provisioning-overdue all follow the same shape: **a pure function in
+`src/utils/`, unit-tested, with no backend cron and nothing persisted that could go stale.**
 
 The reason is concrete. Editing a schema reclassifies its devices *immediately*; a stored flag
 would stay wrong until the device's next birth, and rebirths are rare.
@@ -662,6 +662,13 @@ height is not known, and above the actions it could push Edit Details off the dr
   it: who acknowledged it and why, or until when a window keeps it quiet and why. A suppressed one
   takes a dashed neutral outline and a crossed bell, since it colours nothing. The Devices page
   hands the banner the device's alert from `alertIndex(..., { suppressed: true })`.
+- **A finding is a badge in the subtitle, not a row.** A device's drawer has a **Metric groups**
+  row, which holds the groups its schemas model and no finding. Each finding (Unmodelled, Out of
+  vocabulary: `deviceFindings()`) is a warning badge beside the lifecycle badge, its hover text
+  listing the metrics; the roster's Status column draws the same badges. One name serves the drawer
+  row, the roster column, the filter and the edit form: Metric groups. "Type" is left for an AAS
+  `assetType`. The filter's address key is `group`, and `utils/devicesAddress.js` rewrites an old
+  `?type=` link once, the findings becoming Status values.
 - **A control that changes what the drawer shows goes in `nav`**, a slot at the drawer's full width
   under its header and above the fields. It continues the header's band, takes the header's rule,
   and stays in view while the body scrolls. The Audit Trail's step buttons are there, in their two
@@ -3035,7 +3042,8 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
     table, with the reason each unsortable one keeps its order, so a new table cannot ship unsorted.
 - **Row actions live in the details drawer.** Keep one or two primary actions visible in the row; the rest go in the drawer, which can also say *why* an action is disabled.
 - **`common/TagList.jsx` collapses long tag lists**, with `priority` entries pinned ahead of the
-  cut — the entry that matters most is not the one that sorts first.
+  cut — the entry that matters most is not the one that sorts first. The Cells page pins an archived
+  gateway; the Devices roster's Metric groups need no pin, since a finding is no longer in the list.
 
 ---
 
