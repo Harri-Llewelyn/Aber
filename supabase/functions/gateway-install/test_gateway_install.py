@@ -33,7 +33,8 @@ import zipfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "enroll-gateway"))
 from test_enroll_gateway import (  # noqa: E402
-    PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
+    PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, check_sparkplug_id, delete_broker_account,
+    delete_gateway_and_wait_for_revoke, enroll, rest, sign_in, sparkplug_id_of,
 )
 import stack_sign_in  # noqa: E402  -- on the path test_enroll_gateway puts there
 
@@ -89,7 +90,9 @@ class InstallerBase(unittest.TestCase):
             raise
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"could not sign in as the seeded administrator ({err})")
-        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
+        # A row a crashed run left behind is deleted like any other, so its revoke is answered before
+        # this class enrols under the same id.
+        delete_gateway_and_wait_for_revoke(TEST_GW_ID, sparkplug_id_of(TEST_GW_ID))
         status, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body={"id": TEST_GW_ID, "name": "Test_Installer", "status": "OFFLINE", "deployment": "remote"},
@@ -97,6 +100,7 @@ class InstallerBase(unittest.TestCase):
         if status >= 300:
             raise unittest.SkipTest(f"could not create the test gateway: {rows}")
         cls.sparkplug_id = rows[0]["sparkplug_id"]
+        check_sparkplug_id(TEST_GW_ID, cls.sparkplug_id)
         status, minted = mint(cls.admin_token)
         if status == 503:
             raise unittest.SkipTest(f"this deployment cannot mint the install command: {minted}")
@@ -105,7 +109,7 @@ class InstallerBase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
+        delete_gateway_and_wait_for_revoke(TEST_GW_ID, cls.sparkplug_id)
 
 
 class TestTheCommand(InstallerBase):

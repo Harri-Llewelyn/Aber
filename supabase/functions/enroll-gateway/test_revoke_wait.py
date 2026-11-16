@@ -114,6 +114,12 @@ class TestIds(unittest.TestCase):
     def test_the_sparkplug_id_is_gwy_and_21_hex_digits_of_the_uuid(self):
         self.assertEqual(suite.sparkplug_id_of(GATEWAY), SPARKPLUG)
 
+    def test_an_id_the_database_made_differently_is_refused(self):
+        suite.check_sparkplug_id(GATEWAY, SPARKPLUG)
+        with self.assertRaises(AssertionError) as caught:
+            suite.check_sparkplug_id(GATEWAY, "gwy" + "0" * 21)
+        self.assertIn(GATEWAY, str(caught.exception))
+
     def test_only_digit_lines_are_request_ids(self):
         self.assertEqual(suite.request_ids(HEADER_LINE + "41\n 42 \nnot-an-id\n"), [41, 42])
 

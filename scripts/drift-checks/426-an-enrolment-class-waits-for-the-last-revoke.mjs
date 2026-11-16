@@ -1,15 +1,21 @@
 import { fail, pass, read } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
-// 426. A class of the enrol-gateway suite deletes its gateway only through
-// delete_gateway_and_wait_for_revoke(). Every class enrols under one gateway id, so a revoke the
-// delete queued and the credential service has not answered would disable the account the next
-// class makes under the same name. The helper waits for the answer in net._http_response (pg_net
-// takes a request off its queue before the answer, so an empty queue proves nothing). The suite
-// holds no bare delete of a gateway row, the base class's setUpClass and tearDownClass call the
-// helper, and any other tearDownClass goes through the base class's.
+// 426. A class of a stack suite that enrols a gateway deletes the gateway only through
+// delete_gateway_and_wait_for_revoke() (enroll-gateway, forge-events, gateway-install). Every class
+// of a suite enrols under one gateway id, so a revoke the delete queued and the credential service
+// has not answered would disable the account the next class makes under the same name. The helper,
+// in test_enroll_gateway.py, waits for the answer in net._http_response (pg_net takes a request off
+// its queue before the answer, so an empty queue proves nothing). No suite holds a bare delete of a
+// gateway row, its base class's setUpClass and tearDownClass call the helper, and any other
+// tearDownClass goes through the base class's.
 // -------------------------------------------------------------------------------------------------
-const SUITE = 'supabase/functions/enroll-gateway/test_enroll_gateway.py';
+const HELPER_FILE = 'supabase/functions/enroll-gateway/test_enroll_gateway.py';
+const SUITES = [
+  HELPER_FILE,
+  'supabase/functions/forge-events/test_forge_events.py',
+  'supabase/functions/gateway-install/test_gateway_install.py',
+];
 
 /** The body of each definition whose first line matches `header`: the lines up to the next one indented no further. */
 function bodies(src, header) {
@@ -29,31 +35,33 @@ function bodies(src, header) {
 }
 
 export default function check() {
-  const src = read(SUITE);
   const problems426 = [];
-  if (/rest\([^)]*\/gateways\?[^)]*method="DELETE"/.test(src)) {
-    problems426.push(`${SUITE} deletes a gateway row with a bare REST call`);
-  }
-  const helper = bodies(src, /^def delete_gateway_and_wait_for_revoke\(/);
+  const helper = bodies(read(HELPER_FILE), /^def delete_gateway_and_wait_for_revoke\(/);
   if (helper.length !== 1 || !helper[0].includes('FROM net._http_response')) {
     problems426.push('delete_gateway_and_wait_for_revoke() does not wait for the answer in net._http_response');
   }
-  const setUps = bodies(src, /^\s+def setUpClass\(cls\):/);
-  const tearDowns = bodies(src, /^\s+def tearDownClass\(cls\):/);
-  if (!setUps.some((b) => b.includes('delete_gateway_and_wait_for_revoke('))) {
-    problems426.push('no setUpClass deletes a leftover gateway through delete_gateway_and_wait_for_revoke()');
-  }
-  if (!tearDowns.some((b) => b.includes('delete_gateway_and_wait_for_revoke('))) {
-    problems426.push('no tearDownClass deletes the gateway through delete_gateway_and_wait_for_revoke()');
-  }
-  for (const body of tearDowns) {
-    if (!body.includes('delete_gateway_and_wait_for_revoke(') && !body.includes('super().tearDownClass()')) {
-      problems426.push("a tearDownClass neither waits for the revoke nor calls the base class's");
+  for (const suite of SUITES) {
+    const src = read(suite);
+    if (/rest\([^)]*\/gateways\?[^)]*method="DELETE"/.test(src)) {
+      problems426.push(`${suite} deletes a gateway row with a bare REST call`);
+    }
+    const setUps = bodies(src, /^\s+def setUpClass\(cls\):/);
+    const tearDowns = bodies(src, /^\s+def tearDownClass\(cls\):/);
+    if (!setUps.some((b) => b.includes('delete_gateway_and_wait_for_revoke('))) {
+      problems426.push(`${suite}: no setUpClass deletes a leftover gateway through delete_gateway_and_wait_for_revoke()`);
+    }
+    if (!tearDowns.some((b) => b.includes('delete_gateway_and_wait_for_revoke('))) {
+      problems426.push(`${suite}: no tearDownClass deletes the gateway through delete_gateway_and_wait_for_revoke()`);
+    }
+    for (const body of tearDowns) {
+      if (!body.includes('delete_gateway_and_wait_for_revoke(') && !body.includes('super().tearDownClass()')) {
+        problems426.push(`${suite}: a tearDownClass neither waits for the revoke nor calls the base class's`);
+      }
     }
   }
   if (problems426.length) {
-    for (const p of problems426) fail(`an enrol-gateway class must wait for the last revoke: ${p}`);
+    for (const p of problems426) fail(`a stack-suite class must wait for the last revoke: ${p}`);
   } else {
-    pass("the enrol-gateway suite deletes its gateway only through delete_gateway_and_wait_for_revoke(), which waits for the revoke's answer in net._http_response");
+    pass(`the ${SUITES.length} stack suites that enrol a gateway delete it only through delete_gateway_and_wait_for_revoke(), which waits for the revoke's answer in net._http_response`);
   }
 }

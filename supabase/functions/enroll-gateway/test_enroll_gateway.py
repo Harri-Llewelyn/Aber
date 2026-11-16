@@ -97,6 +97,13 @@ def sparkplug_id_of(gateway_id):
     return "gwy" + gateway_id.replace("-", "")[:21]
 
 
+def check_sparkplug_id(gateway_id, sparkplug_id):
+    """The wait finds a revoke by this id: one that differed would match nothing and wait for nothing."""
+    if sparkplug_id != sparkplug_id_of(gateway_id):
+        raise AssertionError(
+            f"the database named gateway {gateway_id} {sparkplug_id}, not {sparkplug_id_of(gateway_id)}")
+
+
 def database(sql):
     """One command as the database owner, inside the database pod: `net` is not exposed over REST."""
     return stack_exec.output("supabase-db", "psql", "-U", "postgres", "-d", "postgres", "-q", "-At", "-c", sql)
@@ -263,10 +270,7 @@ class EnrollGatewayBase(unittest.TestCase):
         if status >= 300:
             raise unittest.SkipTest(f"could not create the test gateway: {rows}")
         cls.sparkplug_id = rows[0]["sparkplug_id"]
-        # The wait finds a revoke by this id: a different one would match nothing and wait for nothing.
-        if cls.sparkplug_id != sparkplug_id_of(TEST_GW_ID):
-            raise AssertionError(
-                f"the database named the test gateway {cls.sparkplug_id}, not {sparkplug_id_of(TEST_GW_ID)}")
+        check_sparkplug_id(TEST_GW_ID, cls.sparkplug_id)
 
         try:
             cls.admin_token = sign_in()
