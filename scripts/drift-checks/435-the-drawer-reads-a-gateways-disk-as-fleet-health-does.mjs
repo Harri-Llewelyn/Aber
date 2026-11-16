@@ -11,12 +11,9 @@ export default function check() {
   const problems435 = [];
   const source = read('frontend/src/utils/gatewayHealth.js');
   const gib = source.match(/const GIB = 1024 \*\* 3;/) ? 1024 ** 3 : null;
-  const figure = (name) => {
-    const m = source.match(new RegExp(`export const ${name} = (\\d+) \\* GIB;`));
-    return m && gib ? Number(m[1]) * gib : null;
-  };
-  const danger = figure('DISK_FREE_DANGER_BYTES');
-  const warn = figure('DISK_FREE_WARN_BYTES');
+  const times = (m) => (m && gib ? Number(m[1]) * gib : null);
+  const danger = times(source.match(/export const DISK_FREE_DANGER_BYTES = (\d+) \* GIB;/));
+  const warn = times(source.match(/export const DISK_FREE_WARN_BYTES = (\d+) \* GIB;/));
   if (danger === null || warn === null) problems435.push('utils/gatewayHealth.js no longer states DISK_FREE_DANGER_BYTES and DISK_FREE_WARN_BYTES as `N * GIB`, so this check cannot read them');
 
   const dashboard = JSON.parse(read('grafana/provisioning/dashboards/platform/gateway-fleet-health.json'));

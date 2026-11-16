@@ -26,7 +26,10 @@ export default async function check() {
     problems434.push(`GatewaysTab.jsx marks [${marked.join(', ')}] as health rows, not [${BLOCK.join(', ')}]`);
   }
   for (const label of OUTSIDE) {
-    if (new RegExp(`label: '${label}',\\n\\s+health: true`).test(tab)) problems434.push(`GatewaysTab.jsx folds "${label}" into the Health block, which a heartbeat fills and which stays outside it`);
+    // The row's own object, from its label to the next row's, found as text.
+    const at = tab.indexOf(`label: '${label}',`);
+    const row = tab.slice(at, tab.indexOf('label:', at + 1));
+    if (at < 0 || row.includes('health: true')) problems434.push(`GatewaysTab.jsx folds "${label}" into the Health block, which a heartbeat fills and which stays outside it`);
   }
   // A block row is hidden for the same kinds together, so no kind shows half of it.
   for (const [kind, hidden] of Object.entries(NEVER_FILLED_ROWS)) {
