@@ -37,7 +37,7 @@ const metric = (name: string, semanticId: string | null, description: string, ex
 /** One device's rows, as loadDeviceRecord() returns them. */
 function record(definitions: DeviceRecord["definitions"]): DeviceRecord {
   return {
-    device: { id: "d1", sparkplug_id: "dev1", name: "AHU 1", status: "ONLINE" },
+    device: { id: "d1", sparkplug_id: "dev1", name: "AHU 1" },
     config: [],
     links: [{ schema_id: "s1", submodel_key: null }],
     catalog: [
@@ -251,6 +251,18 @@ Deno.test("the nameplate's OPC UA ids are Machinery ExpandedNodeIds", () => {
       throw new Error(`${id} is not a Machinery ExpandedNodeId`);
     }
   }
+});
+
+Deno.test("a nameplate holds no connection method and no status, whatever the device row says", () => {
+  const rows = record(DEFINED);
+  rows.device = { ...rows.device, connection_method: "Sparkplug B", status: "ONLINE" };
+  // deno-lint-ignore no-explicit-any
+  const nameplate = (buildEnvironment(rows).submodels as any[])
+    .find((s) => s.idShort === "DigitalNameplate").submodelElements;
+  // deno-lint-ignore no-explicit-any
+  const idShorts = nameplate.map((e: any) => e.idShort);
+  assert.equal(idShorts.includes("AssetSparkplugId"), true);
+  assert.equal(idShorts.filter((id: string) => id === "ConnectionMethod" || id === "Status"), []);
 });
 
 // A derived metric: a catalog row with a definition, in no schema and no birth.

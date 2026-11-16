@@ -552,8 +552,7 @@ def metric(name, semantic_id, datatype, units=None, description=None, standard="
 # elements and a schema with an id.
 LOCAL_CONCEPT = "urn:example:plant:safety-interlock"
 SHELL_RECORD = {
-    "device": {"id": "d1", "sparkplug_id": "dev1", "name": "Mill 1", "status": "ONLINE",
-               "connection_method": "MQTT / Sparkplug B"},
+    "device": {"id": "d1", "sparkplug_id": "dev1", "name": "Mill 1"},
     "config": [{"metric_name": "SERIAL_NUMBER", "val_string": "SN-1"}],
     "links": [{"schema_id": "s1", "submodel_key": None}],
     "catalog": [
@@ -711,6 +710,25 @@ class TestConceptDescriptions(unittest.TestCase):
         environment = run_build_environment(bare)["environment"]
         self.assertEqual(semantic_ids(environment), set())
         self.assertNotIn("conceptDescriptions", environment)
+
+
+@unittest.skipUnless(node_strips_types(), "Node 22.6 or later is needed to run shell.ts")
+class TestNameplatePlatformProperties(unittest.TestCase):
+    """The nameplate's own properties say what is lasting about the asset, and no more."""
+
+    def test_the_device_row_s_connection_method_and_status_are_not_exported(self):
+        # A live state frozen into a file is out of date once it is saved, and the connection
+        # method is always Sparkplug B: neither belongs in a document handed over.
+        record = {**SHELL_RECORD,
+                  "device": {**SHELL_RECORD["device"], "connection_method": "Sparkplug B",
+                             "status": "ONLINE"},
+                  "gateway": {"name": "Line A", "sparkplug_id": "gwy1"}}
+        built = run_build_environment(record)
+        nameplate = next(s for s in built["environment"]["submodels"]
+                         if s["idShort"] == "DigitalNameplate")
+        elements = {e["idShort"] for e in nameplate["submodelElements"]}
+        self.assertTrue({"AssetSparkplugId", "EdgeGatewayName", "EdgeGatewaySparkplugId"} <= elements)
+        self.assertEqual(elements & {"ConnectionMethod", "Status"}, set())
 
 
 class TestAasExportAuthorization(unittest.TestCase):
@@ -911,7 +929,7 @@ class TestAasExportLive(unittest.TestCase):
         """AssetSparkplugId and friends are ours; IDTA defines nothing for them, so they carry
         nothing. An id minted under admin-shell.io for a local concept would be a forgery."""
         elements = {e["idShort"]: e for e in self.submodels["DigitalNameplate"]["submodelElements"]}
-        for id_short in ("AssetSparkplugId", "ConnectionMethod", "EdgeGatewayName", "Status"):
+        for id_short in ("AssetSparkplugId", "EdgeGatewayName", "EdgeGatewaySparkplugId"):
             element = elements.get(id_short)
             if element is None:
                 continue
