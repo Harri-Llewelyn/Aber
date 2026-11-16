@@ -50,7 +50,8 @@ describe('useRealtimeTable hook', () => {
 
   it('opens no channel when disabled', async () => {
     renderHook(() => useRealtimeTable('devices', vi.fn(), { enabled: false }))
-    await new Promise(r => setTimeout(r, 20))
+    // The session read that would open a channel answers within one turn.
+    await act(async () => {})
     expect(channels).toHaveLength(0)
   })
 
@@ -59,7 +60,7 @@ describe('useRealtimeTable hook', () => {
   it('opens no channel when there is no session', async () => {
     session = null
     renderHook(() => useRealtimeTable('devices', vi.fn()))
-    await new Promise(r => setTimeout(r, 20))
+    await act(async () => {})
     expect(channels).toHaveLength(0)
   })
 
@@ -87,12 +88,16 @@ describe('useRealtimeTable hook', () => {
     renderHook(() => useRealtimeTable('devices', onChange, { debounceMs: 30 }))
     await waitFor(() => expect(channels).toHaveLength(1))
 
-    await act(async () => {
-      channels[0].emit()
-      channels[0].emit()
-      channels[0].emit()
-      await new Promise(r => setTimeout(r, 80))
-    })
+    // Only the debounce's timer is faked, from here: the burst's changes are what it coalesces.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    channels[0].emit()
+    channels[0].emit()
+    channels[0].emit()
+    vi.advanceTimersByTime(29)
+    expect(onChange).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(onChange).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(1000)
     expect(onChange).toHaveBeenCalledTimes(1)
   })
 
@@ -111,7 +116,8 @@ describe('useRealtimeTable hook', () => {
     })
     await waitFor(() => expect(channels).toHaveLength(1))
     rerender({ t: ['devices', 'gateways'] })
-    await new Promise(r => setTimeout(r, 20))
+    // A rebuilt channel would open once the session read answers, within one turn.
+    await act(async () => {})
     expect(channels).toHaveLength(1)
     expect(removeChannel).not.toHaveBeenCalled()
   })

@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 import { GatewayBundleModal } from '../components/modals/GatewayBundleModal'
@@ -97,7 +97,7 @@ describe('GatewayBundleModal — straight after creating the gateway', () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
     renderModal()
     await ready()
-    await new Promise(r => setTimeout(r, 50))
+    await act(async () => {})
     expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1)
   })
 

@@ -6,7 +6,7 @@
  */
 import React from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from '../App'
 import { ChangePasswordModal } from '../components/modals/ChangePasswordModal'
@@ -152,6 +152,10 @@ describe('the Change Password dialog', () => {
 })
 
 describe('the Profile page', () => {
+  // App opens Profile with lazy(), and the first import in a run compiles the page, which can
+  // take longer than a findBy waits. A hook has ten seconds, so the page is loaded here first.
+  beforeAll(() => import('../components/tabs/ProfileTab'))
+
   function signIn(user) {
     const session = { access_token: 'token', user }
     supabase.auth.getSession.mockResolvedValue({ data: { session } })

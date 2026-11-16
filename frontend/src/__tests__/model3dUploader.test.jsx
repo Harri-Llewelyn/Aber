@@ -217,7 +217,7 @@ describe('Model3DUploader', () => {
     render(<Model3DUploader device={device()} canManage={false} showToast={vi.fn()} />)
     drop(screen.getByRole('button', { name: /Upload a 3D model/i }), makeFile('cnc.glb'))
 
-    await new Promise(r => setTimeout(r, 0))
+    // A drop that is taken calls the upload in the same turn, so there is nothing to wait for.
     expect(api.uploadDeviceModel).not.toHaveBeenCalled()
   })
 

@@ -1,6 +1,6 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import App from '../App'
 import { ShortcutsModal, shortcutGroups } from '../components/modals/ShortcutsModal'
 
@@ -198,6 +198,10 @@ describe('`[` and `]`', () => {
 })
 
 describe('on a page whose tab is in the address', () => {
+  // App opens Profile with lazy(), and the first import in a run compiles the page, which can
+  // take longer than a findBy waits. A hook has ten seconds, so the page is loaded here first.
+  beforeAll(() => import('../components/tabs/ProfileTab'))
+
   it('moves the address and adds a history entry, as a click does', async () => {
     window.history.pushState({}, '', '/profile')
     await renderApp({ ready: 'main .tab-strip' })

@@ -80,7 +80,8 @@ const news = () => document.querySelector('.trail-drawer-nav [role="status"]')
 const press = (key, target = document) => fireEvent.keyDown(target, { key })
 const nav = () => within(document.querySelector('.trail-drawer-nav-btns'))
 const button = (name) => nav().getByRole('button', { name })
-const settle = () => new Promise(r => setTimeout(r, 20))
+/** Runs what is already queued, so a key or a click that should do nothing has had its chance to do something. */
+const settle = () => act(async () => {})
 
 describe('the helpers', () => {
   it('orders by time, then by id inside one transaction', () => {
