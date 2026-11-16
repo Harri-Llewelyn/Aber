@@ -87,7 +87,7 @@ const NO_LINK = [
   { file: 'components/modals/DeviceExportModal.jsx', piece: '${label} exported for', why: 'a file, in the downloads' },
   { file: 'components/modals/DeviceExportModal.jsx', piece: 'unmappedWarning,', why: 'given only to a reader who cannot open the Metrics page' },
   { file: 'components/modals/GatewayBundleModal.jsx', piece: 'Bundle downloaded for', why: 'a file, in the downloads' },
-  { file: 'components/tabs/SchemasTab.jsx', piece: 'Downloaded ${filename}', why: 'a file, in the downloads' },
+  { file: 'components/tabs/SchemasTab.jsx', piece: 'Exported ${', why: 'a file, in the downloads' },
   { file: 'components/tabs/ArchivesTab.jsx', piece: 'permanently deleted', why: 'the record is gone' },
   { file: 'components/tabs/CaptureTab.jsx', piece: 'Capture deleted.', why: 'the capture and its record are gone' },
   { file: 'components/tabs/AccessControlTab.jsx', piece: '” deleted`', why: 'the read-only broker account is gone' },

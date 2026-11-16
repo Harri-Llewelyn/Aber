@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { RouteLink } from '../common/RouteLink'
 import { deviceUrl, devicesForSchemaUrl, schemaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
@@ -8,8 +8,11 @@ import { ValidatePayloadModal } from '../modals/ValidatePayloadModal'
 import { SchemaBuilderModal } from '../modals/SchemaBuilderModal'
 import { SchemaDetailModal } from '../modals/SchemaDetailModal'
 import { SchemaForkModal } from '../modals/SchemaForkModal'
+import { ApplySchemasModal } from '../modals/ApplySchemasModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
-import { downloadJSON } from '../../utils/downloadJSON'
+import { downloadBlob } from '../../utils/downloadBlob'
+import { renderDeviceSchemasYaml } from '../../utils/deviceSchemaYaml'
+import { DEVICE_SCHEMAS_FILE_MAX_BYTES, DEVICE_SCHEMAS_FILE_NAME } from '../../utils/deviceSchemas'
 import {
   schemaVersionLabel, schemaStatus, statusBadgeClass, statusLabel, isSchemaEditable,
   canForkSchema, nextVersion, schemaVersion, SCHEMA_STATUS
@@ -23,7 +26,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import {
-  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTrash, IconHistory
+  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconUpload, IconTrash, IconHistory
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -93,6 +96,11 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     allowed: STATUS_VALUES, aliases: STATUS_ALIASES
   })
   const [schemaSearch, setSchemaSearch] = useUrlState('search')
+  // The versions ticked for the toolbar's Export, which exports the schemas they belong to, or every
+  // schema in force with none ticked. A file chosen to upload, as text, is checked and shown before it applies.
+  const [ticked, setTicked] = useState(() => new Set())
+  const [upload, setUpload] = useState(null)
+  const fileRef = useRef(null)
 
   const load = useCallback(async () => {
     try {
@@ -199,20 +207,44 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   }
 
   /**
-   * Download a version's definition as a standalone `.schema.json`. The stored document verbatim,
-   * so it diffs cleanly against the database and the previous version; the identity rides on the
-   * filename, which carries the version. `.schema.json` so editors and tooling recognise it.
+   * Export schemas as YAML: those of the lineages the ids belong to, each as it is in force, or every
+   * schema in force with no ids. The rows are rendered by `device_schemas_document()`, the file is
+   * what an upload reads back, and an upload of it reports every schema unchanged.
    */
-  const handleDownloadSchema = (sch) => {
-    if (!sch?.schema_definition) {
-      // downloadJSON() returns silently on falsy data, so an empty definition would look like a
-      // button that does nothing. Say what happened instead.
-      showToast(`Schema '${sch?.schema_name || 'unknown'}' has no definition to download`, 'error')
+  const exportSchemas = async (ids) => {
+    try {
+      const docs = await api.deviceSchemasDocument(ids)
+      if (docs.length === 0) {
+        showToast('There is no schema in force to export. A draft is exported once it is published', 'error')
+        return
+      }
+      downloadBlob(new Blob([renderDeviceSchemasYaml(docs)], { type: 'application/yaml;charset=utf-8' }), DEVICE_SCHEMAS_FILE_NAME)
+      showToast(`Exported ${plural(docs.length, 'schema')} to ${DEVICE_SCHEMAS_FILE_NAME}`, 'success')
+    } catch (e) {
+      showToast(e.message || 'The schemas could not be exported', 'error')
+    }
+  }
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0]
+    // The same file chosen twice must raise the change again.
+    e.target.value = ''
+    if (!file) return
+    if (file.size > DEVICE_SCHEMAS_FILE_MAX_BYTES) {
+      showToast(`${file.name} is larger than ${DEVICE_SCHEMAS_FILE_MAX_BYTES / (1024 * 1024)} MiB, more than a file of schemas holds`, 'error')
       return
     }
-    const filename = `${sch.schema_name}.schema.json`
-    downloadJSON(sch.schema_definition, filename)
-    showToast(`Downloaded ${filename}`, 'success')
+    try {
+      setUpload({ name: file.name, text: await file.text() })
+    } catch {
+      showToast(`${file.name} could not be read`, 'error')
+    }
+  }
+
+  /** Every new schema and new draft is a row of the list, which the upload has just changed. */
+  const applied = () => {
+    setUpload(null)
+    load()
   }
 
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
@@ -267,6 +299,23 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     }
   )
 
+  // Only what is still in the list: a version discarded leaves the ticks.
+  const pickedIds = schemas.filter(sc => ticked.has(sc.schema_uuid)).map(sc => sc.schema_uuid)
+  const allShown = visibleSchemas.length > 0 && visibleSchemas.every(sc => ticked.has(sc.schema_uuid))
+  const someShown = visibleSchemas.some(sc => ticked.has(sc.schema_uuid))
+  const headBox = useRef(null)
+  useEffect(() => { if (headBox.current) headBox.current.indeterminate = someShown && !allShown }, [someShown, allShown])
+  const toggleTicked = (id) => setTicked(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  const toggleAllShown = () => setTicked(prev => {
+    const next = new Set(prev)
+    for (const sc of visibleSchemas) { if (allShown) next.delete(sc.schema_uuid); else next.add(sc.schema_uuid) }
+    return next
+  })
+
   // Resolved fresh every render, from the id.
   const selectedSchema = schemas.find(s => s.schema_uuid === selectedId) || null
   const selectedStatus = selectedSchema ? schemaStatus(selectedSchema) : null
@@ -314,7 +363,26 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
 
             <div className="filter-bar-actions">
               <ClearFilters count={schemaFilterCount} onClear={clearSchemaFilters} />
-              {/* The only way to create a schema. Every metric is one the site adopted, with its
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManageSchema}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+                title="Choose a device-schemas.yaml file. It is checked and shown to you before anything changes"
+                onClick={() => fileRef.current?.click()}
+              >
+                <IconUpload size={13} aria-hidden="true" /> Upload
+              </ActionButton>
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                disabled={schemas.length === 0}
+                title={pickedIds.length
+                  ? `Download the ${plural(pickedIds.length, 'schema')} you ticked, as they are in force, as ${DEVICE_SCHEMAS_FILE_NAME}`
+                  : schemas.length === 0 ? 'There is no schema to export' : `Download every schema in force as ${DEVICE_SCHEMAS_FILE_NAME}. Tick some to export only those`}
+                onClick={() => exportSchemas(pickedIds.length ? pickedIds : null)}
+              >
+                <IconDownload size={13} aria-hidden="true" /> {pickedIds.length ? `Export (${pickedIds.length})` : 'Export'}
+              </ActionButton>
+              {/* The form for a schema, as Upload is the file for one. Every metric is one the site adopted, with its
                   catalog name and datatype, and its standard and semantic id where the row has them
                   (both are nullable). The device tags and unmodelled detection read the names. */}
               <ActionButton
@@ -343,6 +411,15 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             <table>
               <thead>
                 <tr>
+                  <th className="automation-select">
+                    <input
+                      ref={headBox}
+                      type="checkbox"
+                      aria-label="Select every schema shown"
+                      checked={allShown}
+                      onChange={toggleAllShown}
+                    />
+                  </th>
                   <SortHeader sort={sort} column="name">Schema Name</SortHeader>
                   <SortHeader sort={sort} column="version" title="Lineage position and lifecycle state. Only a draft is editable.">Version</SortHeader>
                   <SortHeader sort={sort} column="change" title="Why this version exists, recorded when it was created">Change Description</SortHeader>
@@ -369,6 +446,14 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                         toggle()
                       }}
                     >
+                      <td className="automation-select">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${sch.schema_name}`}
+                          checked={ticked.has(sch.schema_uuid)}
+                          onChange={() => toggleTicked(sch.schema_uuid)}
+                        />
+                      </td>
                       <td>
                         <strong>{sch.schema_name}</strong>
                         {/* A published version is read-only, and the lock says so on the row; the
@@ -424,7 +509,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           canManage={canManageSchema}
           showToast={showToast}
           onFork={() => { setForkTarget(detailSchema); setDetailSchema(null) }}
-          onDownload={() => handleDownloadSchema(detailSchema)}
           onSaveDraft={handleSaveDraft}
           onPublish={handlePublish}
           onDiscard={() => setDiscardTarget(detailSchema)}
@@ -476,6 +560,25 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           onClose={() => setShowValidateModal(false)}
         />
       )}
+      {upload && (
+        <ApplySchemasModal
+          text={upload.text}
+          source={upload.name}
+          showToast={showToast}
+          onApplied={applied}
+          onClose={() => setUpload(null)}
+        />
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        className="sr-only"
+        accept=".yaml,.yml,text/yaml,application/yaml,application/x-yaml"
+        tabIndex={-1}
+        aria-hidden="true"
+        data-testid="schemas-file"
+        onChange={onFile}
+      />
       {showBuilderModal && <SchemaBuilderModal catalog={catalog} onSubmit={handleBuilderSubmit} onCancel={() => setShowBuilderModal(false)} />}
       </div>
 
@@ -583,12 +686,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               : 'This version has no definition to validate against'
           },
           {
-            label: 'Download JSON', icon: <IconDownload size={13} />,
-            onClick: () => handleDownloadSchema(selectedSchema),
-            disabled: !selectedSchema.schema_definition,
-            title: selectedSchema.schema_definition
-              ? `Save ${selectedSchema.schema_name}.schema.json to open in an editor or JSON Schema tool`
-              : 'This version has no definition to download'
+            // The schema as it is in force, whichever version is open: a file an upload reads back.
+            label: 'Export YAML', icon: <IconDownload size={13} />,
+            onClick: () => exportSchemas([selectedSchema.schema_uuid]),
+            title: `Save this schema, as it is in force, as ${DEVICE_SCHEMAS_FILE_NAME}. Upload it on another site, or change it and upload it here`
           },
           // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
           canReadTrail && {

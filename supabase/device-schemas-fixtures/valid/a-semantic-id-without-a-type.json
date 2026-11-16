@@ -1,0 +1,14 @@
+{
+  "about": "The type is optional.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "semantic_id": "nsu=http://example.test/UA/;i=6002"
+    }
+  ]
+}

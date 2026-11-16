@@ -1,0 +1,16 @@
+{
+  "about": "A bound on a metric that is text.",
+  "path": "$[0].metrics[0].minimum",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_TEXT@",
+          "minimum": 0
+        }
+      ]
+    }
+  ]
+}

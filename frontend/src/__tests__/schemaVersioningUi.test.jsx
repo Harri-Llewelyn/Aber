@@ -1,11 +1,11 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
-import { getByTooltip, tooltipOf } from '../test/tooltips'
+import { getByTooltip } from '../test/tooltips'
 import { pick } from '../test/listFilters'
 
 vi.mock('../api', async () => {
@@ -245,131 +245,35 @@ describe('Forking — the change description prompt', () => {
   })
 })
 
-describe('Downloading a version definition', () => {
-  // The anchor-click mechanism in downloadJSON() is not exercisable in jsdom, so the Blob is
-  // captured instead: what matters is the exact bytes written and the filename, not the plumbing.
-  let captured
-
-  beforeEach(() => {
-    captured = []
-    // `URL.createObjectURL` and `Blob.prototype.text` are polyfilled in src/test/setup.js. Spying
-    // on the real Blob keeps this a test of what downloadJSON() wrote.
-    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
-      captured.push(blob)
-      return 'blob:mock'
-    })
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  const downloadedText = () => captured[0].text()
-
-  const clickRowDownload = async (name) => {
-    fireEvent.click(panelFor(name).getByText('Download JSON'))
-  }
-
-  it('offers the download from the context panel, not from the row', async () => {
-    // The download is a direct panel action rather than the only item behind a More menu.
+describe("A schema's one export", () => {
+  it('is Export YAML in the context panel, not on the row', async () => {
+    // The export is a direct panel action rather than the only item behind a More menu.
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
     const row = rowFor('Robot_Arm_Schema')
-    expect(within(row).queryByText(/Download/i)).toBeNull()
+    expect(within(row).queryByText(/Download|Export/i)).toBeNull()
     expect(within(row).queryByTitle('More')).toBeNull()
-    expect(panelFor('Robot_Arm_Schema').getByText('Download JSON')).toBeTruthy()
+    const panel = panelFor('Robot_Arm_Schema')
+    expect(panel.getByText('Export YAML')).toBeTruthy()
+    expect(panel.queryByText('Download JSON')).toBeNull()
   })
 
-  it('writes the stored definition verbatim, with no injected wrapper or title', async () => {
-    renderTab()
-    await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
-    await clickRowDownload('Robot_Arm_Schema')
-
-    await waitFor(() => expect(captured.length).toBe(1))
-    // Byte-for-byte the schema_definition: a published version is immutable, so the file has to
-    // stay diffable against the database and the previous version.
-    expect(JSON.parse(await downloadedText())).toEqual(V1.schema_definition)
-  })
-
-  it('names the file after the version, which is what carries the version number', async () => {
-    schemaRows = [V1, DRAFT_V2]
-    const anchors = []
-    const realCreate = document.createElement.bind(document)
-    vi.spyOn(document, 'createElement').mockImplementation((tag) => {
-      const el = realCreate(tag)
-      if (tag === 'a') anchors.push(el)
-      return el
-    })
-
-    renderTab()
-    await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
-    await clickRowDownload('Robot_Arm_Schema_v2')
-
-    // The download's own anchor: the drawer draws links of its own, View Audit Trail among them.
-    const downloads = () => anchors.filter(a => a.hasAttribute('download'))
-    await waitFor(() => expect(downloads().length).toBe(1))
-    // `.schema.json`, so editors and JSON Schema tooling recognise it -- the whole point of
-    // opening the file elsewhere.
-    expect(downloads()[0].getAttribute('download')).toBe('Robot_Arm_Schema_v2.schema.json')
-  })
-
-  it('downloads an archived version too — reading history is not a privileged act', async () => {
-    schemaRows = [ARCHIVED_V1, ACTIVE_V2]
-    renderTab()
-    await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
-    revealArchived()
-
-    await clickRowDownload('Robot_Arm_Schema')
-    await waitFor(() => expect(captured.length).toBe(1))
-    expect(JSON.parse(await downloadedText())).toEqual(ARCHIVED_V1.schema_definition)
-  })
-
-  it('is available without schema-management permission', async () => {
-    // Downloading is a read. Gating it behind write authority would be the same category error as
-    // gating the AAS export, which is deliberately allowed to Operator and Auditor.
-    renderTab(false)
-    await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
-
-    await clickRowDownload('Robot_Arm_Schema')
-    await waitFor(() => expect(captured.length).toBe(1))
-  })
-
-  it('reports a schema with no definition instead of doing nothing', async () => {
-    // downloadJSON() returns silently on falsy data, so this would otherwise be a dead button.
-    schemaRows = [{ ...V1, schema_definition: null }]
-    renderTab()
-    await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
-
-    const item = panelFor('Robot_Arm_Schema').getByText('Download JSON').closest('button')
-    expect(item.disabled).toBe(true)
-    expect(tooltipOf(item)).toBe('This version has no definition to download')
-  })
-
-  it('offers the download as a visible button inside the detail modal', async () => {
+  it('is not offered again in the detail dialog of a published version', async () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
     fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
 
-    const modal = document.querySelector('.modal')
-    fireEvent.click(within(modal).getByText('Download JSON'))
-
-    await waitFor(() => expect(captured.length).toBe(1))
-    expect(JSON.parse(await downloadedText())).toEqual(V1.schema_definition)
+    expect(within(document.querySelector('.modal')).queryByText(/Download/)).toBeNull()
   })
 
-  it('warns in the modal that a dirty draft downloads its last saved state', async () => {
+  it('is not offered again in the detail dialog of a draft', async () => {
     schemaRows = [V1, DRAFT_V2]
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
     fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
 
-    const modal = document.querySelector('.modal')
-    fireEvent.click(metricBox(within(modal), 'Systems/SPINDLE_TEMPERATURE'))
-
-    expect(getByTooltip(
-      'Downloads the last saved draft — unsaved changes are not included', modal
-    )).toBeTruthy()
+    expect(within(document.querySelector('.modal')).queryByText(/Download/)).toBeNull()
   })
 })
 

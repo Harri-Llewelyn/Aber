@@ -1,0 +1,23 @@
+{
+  "about": "The first schema is fine and the second is not: the whole file is refused.",
+  "path": "$[1].metrics[0].name",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    },
+    {
+      "name": "Conveyor_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_UNKNOWN@"
+        }
+      ]
+    }
+  ]
+}

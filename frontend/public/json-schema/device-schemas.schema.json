@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aber device schemas",
+  "description": "A list of device schemas. A schema says which catalogue metrics a kind of device is expected to publish, and the valid range of each number. This file describes exactly what Aber accepts. Anything else is refused, not ignored. The database is the authority: it also checks that each metric is in the catalogue and is not a derived one, and that no `name` is used twice in the file.",
+  "type": "array",
+  "maxItems": 200,
+  "items": { "$ref": "#/$defs/deviceSchema" },
+  "$defs": {
+    "deviceSchema": {
+      "title": "Device schema",
+      "description": "One schema. Its `name` is how Aber finds it, on any site: uploading a file with the name of a schema that exists never edits its published version. A changed schema becomes a new draft version, and an unchanged one is left as it is.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "metrics"],
+      "properties": {
+        "name": {
+          "description": "The schema's name: 1 to 120 characters, with no space at either end. Leave off the version: a schema's versions are `name`, `name_v2`, `name_v3` and so on, and the file names the schema.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^\\S(.*\\S)?$",
+          "examples": ["Robot_Arm_Schema"]
+        },
+        "description": {
+          "description": "What the schema is for, in your words, up to 4,000 characters. Optional.",
+          "type": "string",
+          "maxLength": 4000
+        },
+        "semantic_id": {
+          "description": "The published id of the standard Submodel this schema matches, such as an IDTA template's IRI. Leave it out for a schema you composed yourself: a claim it does not meet is worse than none.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "pattern": "^\\S(.*\\S)?$",
+          "examples": ["https://admin-shell.io/idta/nameplate/3/0/Nameplate"]
+        },
+        "semantic_id_type": {
+          "description": "How to read `semantic_id`: IRI for a URL or URN, IRDI for an ECLASS or IEC CDD code, ExpandedNodeId for an OPC UA node. Only with `semantic_id`.",
+          "enum": ["IRI", "IRDI", "ExpandedNodeId"]
+        },
+        "change_description": {
+          "description": "Why this version exists, up to 1,000 characters. Used only when the file makes a new draft version of a schema that exists, or a new schema. Optional.",
+          "type": "string",
+          "maxLength": 1000,
+          "examples": ["Added the spindle load, and a valid range for the bearing temperature"]
+        },
+        "metrics": {
+          "description": "The catalogue metrics the schema models, at least one. A schema with none constrains nothing. The order does not matter.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": { "$ref": "#/$defs/metric" }
+        }
+      }
+    },
+    "metric": {
+      "title": "Metric",
+      "description": "One metric of a schema, by its catalogue name. Its type, description and permitted values come from the catalogue, as the schema builder writes them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "description": "The catalogue name of the metric, such as Spindle/LOAD. It must be in the metric catalogue and not be a derived metric. A deprecated one is accepted only where the schema already models it.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$",
+          "x-completes": "metric"
+        },
+        "minimum": {
+          "description": "The lowest valid reading, for a number. In the metric's catalogue unit: never write a unit. A device set to Enforce drops a reading below it. Leave it out for no lower bound.",
+          "type": "number"
+        },
+        "maximum": {
+          "description": "The highest valid reading, for a number. In the metric's catalogue unit: never write a unit. A device set to Enforce drops a reading above it. Leave it out for no upper bound.",
+          "type": "number"
+        },
+        "semantic_id": {
+          "description": "The semantic id the catalogue gives the metric. An export writes it so a file shows which concept each name means. A different one is refused, since the same name must not mean another thing. It is never written to the catalogue, and can be left out.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

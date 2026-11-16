@@ -1,0 +1,11 @@
+{
+  "about": "An empty list of metrics.",
+  "path": "$[0].metrics",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": []
+    }
+  ]
+}

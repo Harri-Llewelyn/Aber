@@ -1,0 +1,15 @@
+{
+  "about": "A name that is nothing but a version.",
+  "path": "$[0].name",
+  "database": true,
+  "document": [
+    {
+      "name": "_v2",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

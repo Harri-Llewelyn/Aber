@@ -1,0 +1,23 @@
+{
+  "about": "Two schemas of one name.",
+  "path": "$[1].name",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    },
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

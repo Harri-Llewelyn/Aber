@@ -1,0 +1,14 @@
+{
+  "about": "A number with no lower bound.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "maximum": 100
+        }
+      ]
+    }
+  ]
+}

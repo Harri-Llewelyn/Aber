@@ -11,3 +11,6 @@ and what each covers. Each component's own README sits beside its code.
 
 The [automations reference](automations.md) is the format of the file a person writes or uploads to
 raise an alert: its keys, what the database does with it, and what happens when a device goes.
+
+The [device schemas reference](device-schemas.md) is the format of the file a person exports from the
+Schemas page or uploads to it: its keys, and how an upload becomes a new draft version.

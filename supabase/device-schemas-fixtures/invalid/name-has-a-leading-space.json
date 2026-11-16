@@ -1,0 +1,15 @@
+{
+  "about": "A space at the start of a name.",
+  "path": "$[0].name",
+  "database": false,
+  "document": [
+    {
+      "name": " Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

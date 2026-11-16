@@ -1,0 +1,23 @@
+{
+  "about": "A schema and its own second version.",
+  "path": "$[1].name",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    },
+    {
+      "name": "Robot_Arm_Schema_v2",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

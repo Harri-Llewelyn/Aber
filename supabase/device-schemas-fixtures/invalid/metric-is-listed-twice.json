@@ -1,0 +1,18 @@
+{
+  "about": "One metric twice in a schema.",
+  "path": "$[0].metrics[1].name",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        },
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

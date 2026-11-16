@@ -1,0 +1,15 @@
+{
+  "about": "An empty name.",
+  "path": "$[0].name",
+  "database": false,
+  "document": [
+    {
+      "name": "",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

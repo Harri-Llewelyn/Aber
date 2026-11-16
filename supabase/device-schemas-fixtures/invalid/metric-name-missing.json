@@ -1,0 +1,15 @@
+{
+  "about": "A metric with no name.",
+  "path": "$[0].metrics[0].name",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "minimum": 0
+        }
+      ]
+    }
+  ]
+}

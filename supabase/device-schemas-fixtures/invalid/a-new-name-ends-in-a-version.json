@@ -1,0 +1,15 @@
+{
+  "about": "A schema that does not exist yet, named with a version.",
+  "path": "$[0].name",
+  "database": true,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema_v2",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ]
+    }
+  ]
+}

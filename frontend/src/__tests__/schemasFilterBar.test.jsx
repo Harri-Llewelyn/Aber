@@ -71,7 +71,7 @@ const registryCard = () => [...document.querySelectorAll('.card-header .section-
   .find(h => h.textContent.trim().startsWith('Schemas'))?.closest('.card')
 
 const registryRows = () => [...(registryCard()?.querySelectorAll('tbody tr') || [])]
-const registryNames = () => registryRows().map(r => r.querySelector('td')?.textContent.trim())
+const registryNames = () => registryRows().map(r => r.querySelector('td:not(.automation-select)')?.textContent.trim())
 
 const searchBox = () => screen.getByLabelText('Search the schema registry')
 /** The status filter: a dropdown whose button says what is chosen. */

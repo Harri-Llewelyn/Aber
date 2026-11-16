@@ -1,0 +1,16 @@
+{
+  "about": "A semantic id of 1,001 characters.",
+  "path": "$[0].semantic_id",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "semantic_id": "@X1001@"
+    }
+  ]
+}

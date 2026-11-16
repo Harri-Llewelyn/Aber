@@ -1,0 +1,16 @@
+{
+  "about": "A number for a change description.",
+  "path": "$[0].change_description",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "change_description": 1
+    }
+  ]
+}

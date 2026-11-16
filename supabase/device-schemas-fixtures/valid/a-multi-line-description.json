@@ -1,0 +1,14 @@
+{
+  "about": "A description may run to several lines.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "description": "First line.\nSecond line."
+    }
+  ]
+}

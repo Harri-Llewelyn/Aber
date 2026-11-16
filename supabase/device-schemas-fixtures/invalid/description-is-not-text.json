@@ -1,0 +1,18 @@
+{
+  "about": "A list for a description.",
+  "path": "$[0].description",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@"
+        }
+      ],
+      "description": [
+        "x"
+      ]
+    }
+  ]
+}

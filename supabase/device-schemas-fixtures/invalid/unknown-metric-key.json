@@ -1,0 +1,16 @@
+{
+  "about": "A key a metric does not take.",
+  "path": "$[0].metrics[0].unit",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "unit": "mm"
+        }
+      ]
+    }
+  ]
+}

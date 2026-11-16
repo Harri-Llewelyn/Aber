@@ -1,0 +1,13 @@
+{
+  "about": "A text where a metric is expected.",
+  "path": "$[0].metrics[0]",
+  "database": false,
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        "@METRIC_NUMBER@"
+      ]
+    }
+  ]
+}

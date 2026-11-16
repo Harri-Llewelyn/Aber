@@ -40,7 +40,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { Compartment, EditorState } from '@codemirror/state'
 import {
   EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, hoverTooltip, keymap, lineNumbers,
@@ -51,14 +51,15 @@ import { forceLinting, linter, lintGutter, lintKeymap } from '@codemirror/lint'
 import { yaml } from '@codemirror/lang-yaml'
 import { HighlightStyle, indentOnInput, syntaxHighlighting } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
-import { completionsAt, hoverAt, marksFor } from '../../utils/automationEditorHelp'
+import { AUTOMATIONS_MODEL, completionsAt, hoverAt, marksFor, modelOf } from '../../utils/automationEditorHelp'
 import { SINGLE_KEY_SHORTCUTS } from '../../shortcuts'
 
 /*
  * The YAML editor of the Automations page: CodeMirror 6 with YAML highlighting, line numbers,
- * completion and hover from the automations JSON Schema and this site's devices and metrics
- * (utils/automationEditorHelp.js), and lint marks for syntax errors, thresholds outside a metric's
- * valid range and the database's refusals. Loaded only with the page.
+ * completion and hover from a JSON Schema (the automations', unless it is given another) and this
+ * site's devices and metrics (utils/automationEditorHelp.js), and lint marks for syntax errors, for
+ * thresholds outside a metric's valid range (the automations' schema alone) and for the database's
+ * refusals. Loaded only with the page.
  *
  * It lives in a shadow root. CodeMirror styles itself with <style> elements, which the dashboard's
  * Content-Security-Policy refuses (style-src names no inline style); in a shadow root it adopts a
@@ -172,14 +173,17 @@ function toTooltip(hover) {
  * The editor. `value` is the YAML, and `onChange` hears each edit's whole text. `facts` is what
  * buildFacts() gives (this site's devices, metrics and ranges), `refusals` the `{ path, message }` list
  * the database gave for this text, drawn on their lines until the next edit (the page clears them).
- * `readOnly` still lets the text be read, selected and copied, and reached by keyboard.
+ * `readOnly` still lets the text be read, selected and copied, and reached by keyboard. `schema` is the
+ * JSON Schema the file is held to, which completion and hover follow: the automations' when it is
+ * left out. Nothing of any one schema is in this component.
  */
-export function AutomationEditor({ value, onChange, facts = null, refusals = null, readOnly = false, label = 'Automation YAML' }) {
+export function AutomationEditor({ value, onChange, facts = null, refusals = null, readOnly = false, label = 'Automation YAML', schema = null }) {
   const hostRef = useRef(null)
   const viewRef = useRef(null)
+  const model = useMemo(() => (schema ? modelOf(schema) : AUTOMATIONS_MODEL), [schema])
   // Read by the callbacks below as they run, so the editor is made once and still sees the latest.
   const latest = useRef({})
-  latest.current = { onChange, facts, refusals }
+  latest.current = { onChange, facts, refusals, model }
   const modeRef = useRef(new Compartment())
 
   useEffect(() => {
@@ -205,15 +209,15 @@ export function AutomationEditor({ value, onChange, facts = null, refusals = nul
           syntaxHighlighting(highlight),
           autocompletion({
             override: [(context) => {
-              const result = completionsAt(context.state.doc.toString(), context.pos, latest.current.facts ?? NO_FACTS)
+              const result = completionsAt(context.state.doc.toString(), context.pos, latest.current.facts ?? NO_FACTS, latest.current.model)
               return result ? toCompletions(result) : null
             }],
           }),
           hoverTooltip((view, pos) => {
-            const hover = hoverAt(view.state.doc.toString(), pos, latest.current.facts ?? NO_FACTS)
+            const hover = hoverAt(view.state.doc.toString(), pos, latest.current.facts ?? NO_FACTS, latest.current.model)
             return hover ? toTooltip(hover) : null
           }, { hoverTime: 250 }),
-          linter((view) => marksFor(view.state.doc.toString(), latest.current.facts, latest.current.refusals), { delay: 300 }),
+          linter((view) => marksFor(view.state.doc.toString(), latest.current.facts, latest.current.refusals, latest.current.model), { delay: 300 }),
           lintGutter(),
           keymap.of([...defaultKeymap, ...historyKeymap, ...completionKeymap, ...lintKeymap]),
           EditorView.contentAttributes.of({ 'aria-label': label }),
@@ -251,10 +255,10 @@ export function AutomationEditor({ value, onChange, facts = null, refusals = nul
     viewRef.current?.dispatch({ effects: modeRef.current.reconfigure(EditorState.readOnly.of(readOnly)) })
   }, [readOnly])
 
-  // The refusals and the site's facts feed the lint marks, which read them as they run.
+  // The refusals, the site's facts and the schema feed the lint marks, which read them as they run.
   useEffect(() => {
     if (viewRef.current) forceLinting(viewRef.current)
-  }, [refusals, facts])
+  }, [refusals, facts, model])
 
   return <div className="automation-editor" ref={hostRef} />
 }

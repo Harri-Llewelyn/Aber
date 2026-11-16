@@ -1,0 +1,15 @@
+{
+  "about": "Bounds are any number.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "minimum": -40.5,
+          "maximum": 1000
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "about": "A number with no upper bound.",
+  "document": [
+    {
+      "name": "Robot_Arm_Schema",
+      "metrics": [
+        {
+          "name": "@METRIC_NUMBER@",
+          "minimum": 0
+        }
+      ]
+    }
+  ]
+}
