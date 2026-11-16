@@ -2,7 +2,9 @@
 
 Devices are the machines, or parts of machines, that gateways send data for. Most are not created here. A device appears when a gateway announces it, and this page is where you turn that arrival into a proper record: named, placed, given a schema, and documented. In ISA-95 terms a device is a work unit, the lowest level, inside its cell.
 
-The page is one card with two tabs. **Registered** lists the devices admitted to Aber, and opens on **Active**. **Quarantine** holds announced devices still waiting to be let in. While any are waiting, its tab turns the warning colour and shows a warning icon and the number waiting, so the list never jumps when a device arrives. The flag on Devices in the sidebar, and the search's **Quarantine** entry, open that tab. The card scrolls; the page does not.
+The page is one card with two tabs. **Registered** lists the devices admitted to Aber, and opens on **Active**. **Quarantine** holds announced devices still waiting to be let in. While any are waiting, its tab turns the warning colour and shows a warning icon and the number waiting, so the list never jumps when a device arrives. The card scrolls; the page does not.
+
+The sidebar flags Devices in two ways, and never adds the two numbers together. A red number counts the devices with a firing alert that nobody has acknowledged. It counts devices, not alerts, so a device with three alerts counts once. An alert someone has acknowledged, or that a suppression window keeps quiet, is not counted. The red number is for people who can acknowledge an alert: an Administrator, a Shopfloor Manager or an Operator. An amber number counts the devices waiting in quarantine, for people who can approve or reject them. With the sidebar's tabs listed, the red number sits on **Registered** and the amber one on **Quarantine**. With them closed, Devices shows the red number, and its tooltip names both. Without an alert it shows the amber number. The flag opens **Quarantine** when quarantine is all it says, and the search's **Quarantine** entry opens that tab too.
 
 ## What the controls do
 

@@ -89,6 +89,9 @@
   /* --danger clears AA on a bare card but only 4.45:1 on the 0.15 rose tint the error toast and
      .badge-danger sit on; one step lighter clears it at 5.3:1. */
   --danger-text:  #ff6b85;
+  /* The ink for a count filled with --danger, as --warning-contrast is for amber: dark ink measures
+     6.0:1 on the rose here, and white would be 3.0:1. */
+  --danger-contrast: #0b0e14;
   /* The cluster badge: a fifth colour outside the four-colour event classification, because a badge
      says how many events are here, not what kind. Violet is the nearest unused hue to the accent.
      The -text variant is the label ink on the 0.18 tint, 7.8:1 over --bg-surface. */
@@ -206,6 +209,8 @@
   /* --danger (#e11d48) measures 4.72:1 on a white card -- a pass -- but drops to 3.71:1 on
      --danger-tint. Rose-700 clears that at 4.96:1. */
   --danger-text:  #be123c;
+  /* White on --danger (#e11d48) is 4.70:1; the dark ink of the other theme would be 3.8:1. */
+  --danger-contrast: #ffffff;
   /* The dark theme's #d8b4fe is a pale lavender: on a white card under a light violet tint it is
      effectively invisible. Violet-700 on a 0.12 tint of violet-600 measures 7.4:1. */
   --cluster:      #7e22ce;
@@ -833,6 +838,10 @@ html, body, #root {
    since which page you are on outranks what is waiting there. */
 .sidebar-item.sidebar-item-warning:not(.active) { color: var(--warning-text); }
 .sidebar-item.sidebar-item-warning:not(.active):hover { color: var(--warning-text); }
+/* A firing alert is danger, not warning: the rose text and a rose count. The title and label carry
+   the words, so neither colour is the only signal. */
+.sidebar-item.sidebar-item-danger:not(.active) { color: var(--danger-text); }
+.sidebar-item.sidebar-item-danger:not(.active):hover { color: var(--danger-text); }
 
 /* The number: a badge on the icon's top-right corner while the rail is collapsed, the end of the
    label once it is expanded. Filled, so it stands apart from the active item's accent icon too. */
@@ -851,6 +860,7 @@ html, body, #root {
   text-align: center;
   letter-spacing: 0;
 }
+.sidebar-item-count-danger { background: var(--danger); color: var(--danger-contrast); }
 .sidebar-expanded .sidebar-item-count {
   position: static;
   margin-left: auto;
@@ -913,6 +923,7 @@ a.sidebar-item { text-decoration: none; }
 .sidebar-tab:hover { color: var(--text-primary); }
 .sidebar-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .sidebar-tab.sidebar-tab-warning:not(.active) { color: var(--warning-text); }
+.sidebar-tab.sidebar-tab-danger:not(.active) { color: var(--danger-text); }
 
 /* The current tab: the accent at 600, and a 2px accent stroke over the guide line, a border so it
    is not colour alone and survives forced-colours mode. -11px is the list's 10px padding and the
@@ -941,6 +952,7 @@ a.sidebar-item { text-decoration: none; }
   text-align: center;
   letter-spacing: 0;
 }
+.sidebar-tab-count-danger { background: var(--danger); color: var(--danger-contrast); }
 
 /* Global search, the centre of the top bar. `flex: 0 1 480px` against two `flex: 1 1 0` flanks, so
    it sits on the bar's true centre and shrinks before the brand does. */

@@ -184,10 +184,24 @@ There are no arrow-key rules, which a tree would bring and nobody expects in a m
   page's included. While none is open it is `aria-disabled`, dimmed and inert but still a Tab stop,
   rather than hidden, so the foot never changes height. It is 34px, the row the account menu's
   arrow is measured from.
-- **Counts.** A signal from `useNavSignals` belongs to a page, and `signalTab` names the tab it is
-  about: Devices' Quarantine and Approvals' Awaiting a decision. While the page's tabs are on
-  screen the number moves to that tab, named as the tab bar names it ("Quarantine, 3 waiting"), and
-  the page's link reads plain. Otherwise the page's link carries it, so no number shows twice.
+- **Counts.** A signal from `useNavSignals` belongs to a page and is built from parts, one for each
+  condition the viewer can act on there (`utils/navSignal.js`). `signalTabs` names the tab each
+  part is about: Devices' firing alerts on Registered and its quarantine on Quarantine, and
+  Approvals' proposals on Awaiting a decision. While the page's tabs are on screen each number
+  moves to its tab, named as the tab bar names it ("Quarantine, 3 waiting"), and the page's link
+  reads plain. Otherwise the page's link carries the most urgent part's number, `danger` before
+  `warning`, and its title and label name every part ("2 devices with a firing alert · 1 device
+  awaiting zero-touch onboarding approval"), so no number shows twice and none is the sum of two.
+  A page whose tabs are not listed, Gateways, keeps both counts on its link the same way.
+- **A firing alert is `danger`.** The rail's danger tone is `--danger-text` on a page or tab and a
+  count filled with `--danger` under `--danger-contrast`, as the warning tone is, held to AA in
+  both themes by `railDangerContrast.test.js`. The alert counts read the list `usePlatformAlerts`
+  keeps for the header's counter, handed to `useNavSignals` by App: no second read and no second
+  Realtime subscription. An alert counts while nobody has acknowledged it and no window keeps it
+  quiet, once for each device or gateway, for a viewer who may acknowledge it (`mayAcknowledge()`,
+  the check the counter's Acknowledge button uses). The rail entry opens the tab its lead count is
+  about (`signalTabOf()`): Registered, the bare page, while an alert leads, Quarantine while
+  quarantine is all it flags.
 - **No tooltips** on the tab entries. A tooltip on every row would flash as the pointer moves down
   the rail, and the tab bar's tabs already carry each tab's sentence.
 - **The modes.** The list shows only on the wide rail: as it opens in Hover mode, always in Expanded

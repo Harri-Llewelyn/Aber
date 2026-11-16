@@ -16,7 +16,7 @@ import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { askAuthServer, clearInvalidSession } from './utils/sessionError'
 import { useSessionRecheck } from './hooks/useSessionRecheck'
 import { signOutOfThisBrowser, signedOutNotice } from './utils/signOut'
-import { TABS, pageTitleOf, tabIsVisible, urlNamesWithheldTab, visiblePages } from './navigation'
+import { TABS, pageTitleOf, signalTabOf, tabHref, tabIsVisible, urlNamesWithheldTab, visiblePages } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
 import { AuthShell } from './components/auth/AuthShell'
 import { SecondFactorScreen } from './components/auth/SecondFactorChallenge'
@@ -597,9 +597,10 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   useDocumentTitle(pageTitleOf(tab, url), countedCount, connection.status !== CONNECTION_OK)
   useAlertFavicon(countedCount)
 
-  // What the rail flags, with a number, to a viewer who can act on it: quarantine, offline gateways,
+  // What the rail flags, with a number, to a viewer who can act on it: devices and gateways with a
+  // firing alert (the list the counter holds, not a second read), quarantine, offline gateways,
   // unfiled cells and waiting proposals. Owned here for the same reason the alerts are.
-  const navSignals = useNavSignals({ hasPermission, userRole, userId: session?.user?.id })
+  const navSignals = useNavSignals({ hasPermission, userRole, userId: session?.user?.id, alerts: firingAlerts })
 
   // Fed by the counter every call through `api` increments, so it covers a save on a modal and a
   // tab's reconciliation poll alike without either having to report anything.
@@ -650,9 +651,10 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
 
   // The export warning links to Metrics with Unmapped on, only for a reader who has that page.
   const unmappedMetricsTo = navTabs.some(t => t.id === 'metrics') ? unmappedMetricsUrl() : undefined
-  // Where each rail entry goes: the bare page, except Devices, which opens the Quarantine tab while
-  // the rail flags a waiting device.
-  const railHref = (id) => (id === 'devices' && navSignals.devices ? tabUrl('devices', 'quarantine') : tabUrl(id))
+  // Where each rail entry goes: the bare page, except a page whose signal leads with a condition on
+  // one of its tabs, which opens that tab. Devices opens Quarantine while a waiting device is all it
+  // flags, and the Registered tab (the bare page) while a firing alert leads.
+  const railHref = (id) => tabHref(id, signalTabOf(TABS.find(t => t.id === id), navSignals[id]))
 
   return (
     <div className="app-shell">
