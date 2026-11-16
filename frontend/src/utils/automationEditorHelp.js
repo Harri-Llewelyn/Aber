@@ -538,7 +538,7 @@ export function hoverAt(text, pos, facts, model = AUTOMATIONS_MODEL) {
 
   if (model.automations && kind === 'trigger' && line.key === 'device') return deviceHover(value, facts, span.from, span.to)
   if (model.automations && kind === 'trigger' && line.key === 'metric') return { ...span, ...metricHover(value, facts, devicesOf(object)) }
-  if (propertyOf(kind, line.key, model)?.['x-completes'] === 'metric') return { ...span, ...catalogueMetricHover(value, facts) }
+  if (propertyOf(kind, line.key, model)?.['x-completes'] === 'metric') return { ...span, ...catalogueMetricHover(value, facts, propertyOf(kind, line.key, model)) }
   if (model.automations && kind === 'trigger' && (line.key === 'above' || line.key === 'below')) {
     const ids = devicesOf(object)
     const metric = typeof object.metric === 'string' ? object.metric : null
@@ -558,11 +558,14 @@ export function hoverAt(text, pos, facts, model = AUTOMATIONS_MODEL) {
   return description ? { ...span, title: `${line.key} ${value}`, lines: [description] } : null
 }
 
-/** A catalogue metric a schema names: its unit, and what a schema cannot do with it. */
-function catalogueMetricHover(name, facts) {
+/**
+ * A catalogue metric a schema names: its unit, and what the file cannot do with it. A derived metric
+ * says what its property's `x-derived-says` says, or what a device schema says when it has none.
+ */
+function catalogueMetricHover(name, facts, property) {
   const info = facts.metrics.get(name)
   if (!info) return { title: name, lines: ['Not in the metric catalogue. Register it on the Metrics page first.'] }
-  if (info.derived) return { title: name, lines: ['A derived metric. Nothing publishes it, so a schema cannot model it.'] }
+  if (info.derived) return { title: name, lines: [property?.['x-derived-says'] ?? 'A derived metric. Nothing publishes it, so a schema cannot model it.'] }
   return { title: name, lines: [info.unit ? `Unit: ${info.unit}` : 'No unit in the catalogue.'] }
 }
 

@@ -7762,7 +7762,7 @@ ol.gateway-steps {
 .metric-col-semantic-id { width: 252px; }
 .metric-col-superseded { width: 220px; }
 /* Derived: Definition takes what is left, which is why it is the one column with no width. */
-.metric-table-derived { min-width: 940px; }
+.metric-table-derived { min-width: 976px; }
 .metric-col-kind { width: 140px; }
 .metric-col-description { width: 240px; }
 /* Uncatalogued: Declared By takes what is left, and its chips wrap within it. */

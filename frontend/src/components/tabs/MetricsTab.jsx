@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -7,13 +7,15 @@ import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
 import { RestoreMetricModal } from '../modals/RestoreMetricModal'
 import { EditMetricSemanticIdModal } from '../modals/EditMetricSemanticIdModal'
 import { AddDerivedMetricModal } from '../modals/AddDerivedMetricModal'
+import { useDerivedMetricsYaml } from '../../hooks/useDerivedMetricsYaml'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
 import {
   groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup, isValidMetricName,
   metricNameError,
   composeMetricName, METRIC_GROUP_SEPARATOR
 } from '../../utils/metricGroup'
-import { formatDateTime } from '../../utils/format'
+import { formatDateTime, plural } from '../../utils/format'
+import { DERIVED_METRICS_FILE_NAME } from '../../utils/derivedMetricsFile'
 import { modelledMetrics } from '../../utils/deviceTags'
 import {
   typesByCategory, subTypes, unitNames, categoryOfType, CATEGORY_WITH_UNITS
@@ -57,7 +59,7 @@ import {
 } from '../../utils/schemaProperty'
 import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
-  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory, IconChartLine
+  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck, IconHistory, IconChartLine, IconDownload, IconUpload
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
@@ -67,6 +69,9 @@ import { FilterDropdown } from '../common/FilterChecklist'
 import { applyFacets } from '../../utils/listFilters'
 import { METRICS_TABS } from '../../navigation'
 import { useSortableRows, useTableSort } from '../../hooks/useTableSort'
+
+// The YAML editor is CodeMirror, which only an Upload or New in YAML needs: it loads when one is first opened.
+const DerivedMetricsEditorModal = lazy(() => import('../modals/DerivedMetricsEditorModal').then(m => ({ default: m.DerivedMetricsEditorModal })))
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
 // the CHECK constraint on metric_groups.name rejects anything containing the separator.
@@ -683,6 +688,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [deprecatedRows, deprecatedSort] = useSortableRows(deprecatedCatalog, deprecatedSortColumns, { active: view === 'deprecated' })
   const [uncataloguedRows, uncataloguedSort] = useSortableRows(shownUncatalogued, UNCATALOGUED_SORT, { active: view === 'uncatalogued' })
   const [derivedRows, derivedSort] = useSortableRows(shownDerived, DERIVED_SORT, { active: view === 'derived' })
+  // Export holds the derived metrics ticked, or every one listed; Upload and New in YAML open the editor.
+  const yaml = useDerivedMetricsYaml({ listed: derivedCatalog, shown: shownDerived, showToast, reload: load })
   // The names devices declare that no row has: a derived metric may not take one.
   const declaredNames = useMemo(() => new Set((uncatalogued || []).map(u => u.metric_name)), [uncatalogued])
 
@@ -1097,6 +1104,34 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     className="btn btn-primary btn-sm"
                     permitted={canManageSchema}
                     deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+                    title="Choose a derived-metrics.yaml file. It opens in the editor, and is checked and shown to you before anything is added"
+                    onClick={yaml.chooseFile}
+                  >
+                    <IconUpload size={13} aria-hidden="true" /> Upload
+                  </ActionButton>
+                  <ActionButton
+                    className="btn btn-primary btn-sm"
+                    disabled={derivedCatalog.length === 0}
+                    title={yaml.pickedIds.length
+                      ? `Download the ${plural(yaml.pickedIds.length, 'derived metric')} you ticked as ${DERIVED_METRICS_FILE_NAME}`
+                      : derivedCatalog.length === 0 ? 'There is no derived metric to export' : `Download every derived metric as ${DERIVED_METRICS_FILE_NAME}. Tick some to export only those`}
+                    onClick={yaml.exportYaml}
+                  >
+                    <IconDownload size={13} aria-hidden="true" /> {yaml.pickedIds.length ? `Export (${yaml.pickedIds.length})` : 'Export'}
+                  </ActionButton>
+                  <ActionButton
+                    className="btn btn-primary btn-sm"
+                    permitted={canManageSchema}
+                    deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+                    title="Write derived metrics as YAML in an editor, as the Automations page does. Nothing is added until you confirm what it would add"
+                    onClick={yaml.newFile}
+                  >
+                    <IconPlus size={13} aria-hidden="true" /> New in YAML
+                  </ActionButton>
+                  <ActionButton
+                    className="btn btn-primary btn-sm"
+                    permitted={canManageSchema}
+                    deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
                     onClick={() => setShowAddDerived(true)}
                   >
                     <IconPlus size={13} /> Add Derived Metric
@@ -1115,6 +1150,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 <div className="table-wrap">
                   <table className="metric-table metric-table-derived">
                     <colgroup>
+                      <col className="automation-select" />
                       <col className="metric-col-name" />
                       <col className="metric-col-kind" />
                       <col />
@@ -1123,6 +1159,15 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     </colgroup>
                     <thead>
                       <tr>
+                        <th className="automation-select">
+                          <input
+                            ref={yaml.headBox}
+                            type="checkbox"
+                            aria-label="Select every derived metric shown"
+                            checked={yaml.allShown}
+                            onChange={yaml.toggleAllShown}
+                          />
+                        </th>
                         <SortHeader sort={derivedSort} column="name">Name</SortHeader>
                         <SortHeader sort={derivedSort} column="kind" title="How the value is computed">Kind</SortHeader>
                         <SortHeader sort={derivedSort} column="definition" title="The metrics it is computed from, and how. A definition cannot change once saved.">Definition</SortHeader>
@@ -1133,6 +1178,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     <tbody>
                       {derivedRows.map(m => (
                         <tr key={m.metric_uuid} {...rowProps(m)}>
+                          <td className="automation-select">
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${m.name}`}
+                              checked={yaml.ticked.has(m.metric_uuid)}
+                              onChange={() => yaml.toggle(m.metric_uuid)}
+                            />
+                          </td>
                           <td><span className="mono">{m.name}</span></td>
                           <td className="cell-meta">{kindLabel(m.derivation.kind)}</td>
                           <td><Definition derivation={m.derivation} /></td>
@@ -1753,6 +1806,29 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           onCancel={() => setShowAddDerived(false)}
         />
       )}
+
+      {yaml.editing && (
+        <Suspense fallback={null}>
+          <DerivedMetricsEditorModal
+            text={yaml.editing.text}
+            source={yaml.editing.name}
+            catalog={catalog}
+            showToast={showToast}
+            onApplied={yaml.applied}
+            onClose={yaml.closeEditor}
+          />
+        </Suspense>
+      )}
+      <input
+        ref={yaml.fileRef}
+        type="file"
+        className="sr-only"
+        accept=".yaml,.yml,text/yaml,application/yaml,application/x-yaml"
+        tabIndex={-1}
+        aria-hidden="true"
+        data-testid="derived-metrics-file"
+        onChange={yaml.onFile}
+      />
 
       {deprecateTarget && (
         <DeprecateMetricModal
