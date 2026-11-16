@@ -9,11 +9,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { IGNORE_FILE, UNPARSED, ignoreRules, parseFailures, unscanned } from './scan-source.mjs';
+import { IGNORE_FILE, UNPARSED, dockerArgs, gitMask, ignoreRules, parseFailures, unscanned } from './scan-source.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -171,5 +172,51 @@ test('the repository\'s own ignore list reads every test directory but the chart
     let above = i - 1;
     while (above >= 0 && isPattern(lines[above])) above -= 1;
     assert.match(lines[above] ?? '', /^# \S/, `${IGNORE_FILE}: "${line}" has no reason above it`);
+  });
+});
+
+// What keeps git out of the container: a mount over the checkout's .git. Docker refuses a file
+// mounted over a folder and a folder over a file, so each kind of .git has its own.
+const inCheckout = (make, check) => {
+  const root = mkdtempSync(join(tmpdir(), 'scan-source-test-'));
+  try {
+    make(root);
+    check(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+// What `docker run` is given between the /src mount and -w.
+const mountOf = (args) => args.slice(4, args.indexOf('-w'));
+
+test('a worktree\'s .git is a file, and /dev/null is mounted over it', () => {
+  inCheckout((root) => writeFileSync(join(root, '.git'), 'gitdir: /host/repo/.git/worktrees/wt-1\n'), (root) => {
+    assert.deepEqual(gitMask(root), ['-v', '/dev/null:/src/.git:ro']);
+    assert.deepEqual(mountOf(dockerArgs(root)), ['-v', '/dev/null:/src/.git:ro']);
+  });
+});
+
+test('a checkout\'s .git is a folder, and an empty tmpfs is mounted over it', () => {
+  inCheckout((root) => mkdirSync(join(root, '.git')), (root) => {
+    assert.deepEqual(gitMask(root), ['--tmpfs', '/src/.git:ro']);
+    assert.deepEqual(mountOf(dockerArgs(root)), ['--tmpfs', '/src/.git:ro']);
+  });
+});
+
+test('a copy with no .git mounts nothing over it, which a read-only /src could not take', () => {
+  inCheckout(() => {}, (root) => {
+    assert.deepEqual(gitMask(root), []);
+    assert.deepEqual(mountOf(dockerArgs(root)), []);
+  });
+});
+
+test('the checkout is mounted read-only at /src, with the scan\'s flags, and the mask follows it', () => {
+  inCheckout((root) => mkdirSync(join(root, '.git')), (root) => {
+    const args = dockerArgs(root);
+    assert.deepEqual(args.slice(0, 3), ['run', '--rm', '-v']);
+    assert.ok(args[3].endsWith(':/src:ro'), args[3]);
+    assert.ok(args.indexOf('--tmpfs') < args.indexOf('-w'));
+    assert.ok(args.includes('--no-git-ignore'), 'the walk reads every file, whatever .gitignore says');
+    assert.ok(args.includes('--max-target-bytes'));
   });
 });
