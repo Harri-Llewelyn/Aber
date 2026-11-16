@@ -2,7 +2,7 @@ import React from 'react'
 import { act, render, waitFor } from '@testing-library/react'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { EditorView } from '@codemirror/view'
-import { startCompletion, currentCompletions } from '@codemirror/autocomplete'
+import { startCompletion, currentCompletions, completionStatus } from '@codemirror/autocomplete'
 import AUTOMATIONS from '../../public/json-schema/automations.schema.json'
 import DEVICE_SCHEMAS from '../../public/json-schema/device-schemas.schema.json'
 import { AutomationEditor } from '../components/common/AutomationEditor'
@@ -157,7 +157,8 @@ describe('the editor given a schema', () => {
   it('completes from the automations\' when it is given none, and offers a device-schema file nothing', async () => {
     const { container } = render(<AutomationEditor value={TEXT} onChange={() => {}} facts={facts} />)
     const view = await complete(container)
-    await act(async () => { await new Promise(r => setTimeout(r, 50)) })
+    // The source answers once; an empty list is only a result once it is no longer pending.
+    await waitFor(() => expect(completionStatus(view.state)).not.toBe('pending'))
     expect(currentCompletions(view.state)).toEqual([])
   })
 })
