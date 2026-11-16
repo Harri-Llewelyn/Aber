@@ -96,6 +96,7 @@ die()  { printf '::error::%s\n' "$*" >&2; exit 1; }
 PF_PIDS=()
 cleanup_pf() {
   for pid in "${PF_PIDS[@]:-}"; do
+    # shellcheck disable=SC2015 # the || true is meant: neither an empty pid nor a process already gone may stop the cleanup
     [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
   done
   PF_PIDS=()
@@ -106,10 +107,9 @@ trap cleanup_pf EXIT
 # "Forwarding from ..." immediately and can still fail to connect to the pod behind it.
 forward() {
   local svc="$1" local_port="$2" remote_port="$3"
-  kubectl -n "$NS" port-forward "svc/$svc" "$local_port:$remote_port" >/tmp/pf-$svc.log 2>&1 &
+  kubectl -n "$NS" port-forward "svc/$svc" "$local_port:$remote_port" >"/tmp/pf-$svc.log" 2>&1 &
   PF_PIDS+=("$!")
-  local i
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     if (exec 3<>"/dev/tcp/127.0.0.1/$local_port") 2>/dev/null; then
       exec 3<&- 3>&-
       return 0
@@ -176,8 +176,7 @@ rest() {
 # The token is read from its own Secret at each call: a forge restored from a backup mints a new one
 # when it starts (forge/README.md, "The machine account's token").
 forge_credentials() {
-  local i
-  for i in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     FORGE_TOKEN="${GITEA_MACHINE_TOKEN:-$(kubectl -n "$NS" get secret "$RELEASE-forge-token" -o 'jsonpath={.data.token}' 2>/dev/null | base64 -d || true)}"
     [ -n "$FORGE_TOKEN" ] && return 0
     sleep 2
@@ -488,6 +487,7 @@ restore_volume() {
   local deploy="$1" archive="$2" claim image helper
   claim=$(kubectl -n "$NS" get "deploy/$deploy" -o jsonpath='{.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}')
   image=$(kubectl -n "$NS" get "deploy/$deploy" -o jsonpath='{.spec.template.spec.containers[0].image}')
+  # shellcheck disable=SC2015 # die exits, so the || branch runs only when the claim or the image is missing
   [ -n "$claim" ] && [ -n "$image" ] || die "deploy/$deploy has no 'data' claim to restore into"
   helper="volume-restore-$deploy"
   log "restoring $claim from $(basename "$archive") with $deploy scaled to zero"
@@ -550,8 +550,8 @@ cmd_restore() {
   # connected; stopped for the replay, started after, as the runbook says.
   log "stopping supabase-realtime for the replay"
   kubectl -n "$NS" scale deploy/supabase-realtime --replicas=0 >/dev/null
-  local i connected
-  for i in $(seq 1 60); do
+  local connected
+  for _ in $(seq 1 60); do
     connected=$(sb -tAc "SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE '%realtime%'" | tr -d '\r\n ')
     [ "$connected" = "0" ] && break
     sleep 2
@@ -682,8 +682,8 @@ cmd_assert() {
   # A restored stack whose backup service never noticed would refuse every new backup.
   if has_deployment backup-service; then
     log "asserting the service failed the job the dump carries as RUNNING"
-    local running i
-    for i in $(seq 1 24); do
+    local running
+    for _ in $(seq 1 24); do
       running=$(rest "$token" GET '/backup_jobs?status=eq.RUNNING&select=id' | jq 'length')
       [ "$running" = "0" ] && break
       sleep 5
@@ -730,8 +730,7 @@ cmd_assert() {
 forward_minio() {
   kubectl -n "$OFFSITE_NS" port-forward svc/minio "$MINIO_PORT:9000" >/tmp/pf-minio.log 2>&1 &
   PF_PIDS+=("$!")
-  local i
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     if (exec 3<>"/dev/tcp/127.0.0.1/$MINIO_PORT") 2>/dev/null; then
       exec 3<&- 3>&-
       return 0

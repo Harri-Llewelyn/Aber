@@ -57,6 +57,7 @@ ASSUME_YES="${ASSUME_YES:-false}"
 log() { printf '%s  %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+# shellcheck disable=SC2012 # the names are listed only to be filtered to the manifest-<stamp>.txt ones, in a message
 [ -n "$BACKUP_STAMP" ] || die "set BACKUP_STAMP=<stamp>. Available:
 $(ls -1 "$BACKUP_DIR" 2>/dev/null | sed -n 's/^manifest-\(.*\)\.txt$/  \1/p' || echo '  (none found)')"
 

@@ -115,6 +115,7 @@ if [ "$INCLUDE_STORAGE" = "true" ]; then
   INCLUDE_STORAGE=false $0"
   [ -n "$STORAGE_HOST_PATH" ] \
     || die "INCLUDE_STORAGE is true and STORAGE_HOST_PATH is empty, so the storage objects cannot be archived. $FIXES"
+  # shellcheck disable=SC2015 # die exits, so the || branch runs only when the directory is not readable
   [ -d "$STORAGE_HOST_PATH" ] && [ -r "$STORAGE_HOST_PATH" ] \
     || die "STORAGE_HOST_PATH '$STORAGE_HOST_PATH' is not a readable directory. $FIXES"
 fi
@@ -138,7 +139,7 @@ dump_db() {
   out="$BACKUP_DIR/${name}-${STAMP}.${DUMP_EXT}"
 
   log "dumping $name -> $out"
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086 # DUMP_ARGS is a list of flags, and splits on purpose
   PGPASSWORD="$pw" pg_dump $DUMP_ARGS -h "$host" -p "$port" -U "$user" -d "$db" -f "$out"
 
   size=$(wc -c < "$out" | tr -d ' ')

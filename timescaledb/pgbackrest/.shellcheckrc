@@ -1,0 +1,7 @@
+# ShellCheck reads this for the scripts in this folder (scripts/lint-sh.mjs). The chart mounts
+# historian-backup.sh, and the historian pod's checksum/pgbackrest annotation covers it, so an edit
+# to the script restarts the historian where physical backup is on. The finding is kept here
+# instead of in the script.
+#
+# SC2209 reads `type=diff` as the output of the command `diff`. It is the string "diff".
+disable=SC2209

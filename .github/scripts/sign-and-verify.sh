@@ -39,9 +39,9 @@ CHECK_ATTESTATIONS="${CHECK_ATTESTATIONS:-true}"
 # Keyless unless both overrides are given. Word-splitting the overrides is the point: they carry
 # flags.
 if [ -n "${COSIGN_SIGN_ARGS+x}" ] && [ -n "${COSIGN_VERIFY_ARGS+x}" ]; then
-  # shellcheck disable=SC2206
+  # shellcheck disable=SC2206 # word-splitting the override is the point: it carries flags
   SIGN_ARGS=(${COSIGN_SIGN_ARGS})
-  # shellcheck disable=SC2206
+  # shellcheck disable=SC2206 # word-splitting the override is the point: it carries flags
   VERIFY_ARGS=(${COSIGN_VERIFY_ARGS})
 else
   if [ -z "${EXPECTED_IDENTITY:-}" ]; then

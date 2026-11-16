@@ -23,6 +23,7 @@
     "lint:historian": "node scripts/lint-historian.mjs",
     "lint:js": "node scripts/lint-js.mjs",
     "lint:py": "node scripts/lint-py.mjs",
+    "lint:sh": "node scripts/lint-sh.mjs",
     "lint:deno": "node scripts/lint-deno.mjs",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "scan:config": "node scripts/scan-config.mjs",

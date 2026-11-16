@@ -18,6 +18,7 @@ const CHECKS = [
   ['historian', 'lint-historian.mjs', []],
   ['js', 'lint-js.mjs', []],
   ['py', 'lint-py.mjs', []],
+  ['sh', 'lint-sh.mjs', []],
   ['deno', 'lint-deno.mjs', []],
   ['secrets', 'scan-secrets.mjs', []],
   ['config', 'scan-config.mjs', []],

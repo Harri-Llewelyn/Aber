@@ -1,17 +1,18 @@
 # Static analysis
 
-Nine checks read the source, the schema and the history without running the stack. Each runs in a
+Ten checks read the source, the schema and the history without running the stack. Each runs in a
 pinned container or from a pinned lockfile, and each fails on any finding that is not in its
 allow-list. Every allow-list entry carries the reason it was accepted. An entry that no longer
 matches anything is reported as stale, so delete it: left in place, it would hide the same finding
 if it came back.
 
 ```bash
-npm run lint              # all nine, one after another, with a summary; --skip=NAME,... to leave some out
+npm run lint              # all ten, one after another, with a summary; --skip=NAME,... to leave some out
 npm run lint:db           # the Supabase schema (also runs inside npm run test:db)
 npm run lint:historian    # the TimescaleDB schema
 npm run lint:js           # ESLint
 npm run lint:py           # Ruff
+npm run lint:sh           # ShellCheck
 npm run lint:deno         # deno lint, deno check and deno test
 npm run scan:secrets      # gitleaks
 npm run scan:config       # trivy config
@@ -23,14 +24,14 @@ Every check needs Docker. `lint:js` also needs npm, `scan:config` needs helm, an
 advisory databases, the first ESLint install and `lint:deno`, which reads the edge functions' npm
 registry metadata on every run, need network access.
 
-CI runs all nine on a clean `ubuntu-26.04` runner, in two jobs of [`ci.yml`](../.github/workflows/ci.yml):
+CI runs all ten on a clean `ubuntu-26.04` runner, in two jobs of [`ci.yml`](../.github/workflows/ci.yml):
 
 - **Secret Scan** runs `scan:secrets --history=head` on every push, documentation included, over a
   full clone (`fetch-depth: 0`), because a secret pasted into a README is the case it exists for.
   It reads the history of the commit under test, so a pull request fails only on what it would add
   to main. [`secret-scan.yml`](../.github/workflows/secret-scan.yml) scans every ref, pull request
   heads included, on each push to main and daily ([`testing.md`](testing.md#the-secret-scans)).
-- **Static Analysis** runs the other eight with `node scripts/lint-all.mjs --skip=secrets`, on
+- **Static Analysis** runs the other nine with `node scripts/lint-all.mjs --skip=secrets`, on
   every push that changes more than documentation (the `changes` gate that also guards the
   end-to-end stack). Its setup is Node 24 and Helm 3.16.3; Docker is on the runner already.
 
@@ -42,6 +43,7 @@ Nothing is cached between runs: the pinned ESLint installs into `.cache/lint/esl
 | `lint:historian` | splinter | A throwaway historian built the way the maintenance Job builds it | The same advisors. The TimescaleDB image does not ship plpgsql_check, so its PL/pgSQL is not checked | the same file, `historian_splinter` and `historian_plpgsql_check` |
 | `lint:js` | ESLint 9 with the React and Hooks plugins | `frontend/src`, `scripts`, `forge` | `eslint:recommended`, React's recommended rules and the rules of hooks. Missing effect dependencies are a warning. A `title` on an HTML element or an icon in `frontend/src` is an error: the browser's tooltip, which the dashboard replaces with its own (`frontend/README.md`, Tooltips) | none: an inline `eslint-disable-next-line RULE -- reason` |
 | `lint:py` | Ruff 0.14.0 | Every `.py` | Pyflakes and the pycodestyle errors (`ruff.toml`), not style | none: an inline `# noqa: CODE -- reason` |
+| `lint:sh` | ShellCheck 0.10.0 | Every tracked shell script (see *What `lint:sh` reads*) | ShellCheck's rules at every severity: quoting, `A && B || C`, unused variables, a parsed `ls` | none: an inline `# shellcheck disable=SCnnnn # reason`, or a `.shellcheckrc` beside a script the chart mounts |
 | `lint:deno` | deno lint 2.5.6, and deno check and deno test with the Deno the functions image builds with | `supabase/functions` | Deno's recommended rules except `no-import-prefix`, type errors, and failing `*_test.ts` | none: an inline `// deno-lint-ignore RULE -- reason` |
 | `scan:secrets` | gitleaks 8.30.1 | Every commit on every ref (`--history=head`: the checked-out commit's history), and what is not committed yet | Keys, tokens and passwords, printed redacted | `.gitleaksignore`, by fingerprint, for committed findings only; with `--ignore-union`, every branch's list too, never a pull request head's |
 | `scan:config` | trivy config 0.74.0 | The chart rendered three times from `values-prod.yaml.example`: as it stands, with every optional workload on, and with the workloads a switch replaces (see below); and every Dockerfile | HIGH and CRITICAL misconfiguration: security contexts, root users, host mounts | `scripts/lint/config-allowlist.json`, by check and resource |
@@ -79,6 +81,24 @@ turns that switch on, and the third overlay does not name it: false, or true wit
 hides nothing (`mosquitto.tls.enabled`, read that way only by a render-time refusal). Each render
 after the first adds about 15 seconds, and the whole scan takes about 45 seconds on a laptop.
 
+## What lint:sh reads
+
+`lint:sh` runs ShellCheck 0.10.0 from the pinned image `koalaman/shellcheck:v0.10.0` over every
+tracked shell script. A script is a file whose name ends in `.sh` or whose first line is a shell
+shebang. So `aber-gateway-converge`, which has no suffix, is read with the rest. ShellCheck reads
+each script whole, where Semgrep's bash parser stops at some constructs.
+
+It does not read:
+
+- **The copies in the chart's `files/`.** `node scripts/sync-helm-chart-files.mjs --check` holds
+  them identical to their sources, and the sources are read.
+- **Shell inside a workflow's `run:` step or a chart template.** `actionlint` would read the first.
+  The second would need the chart rendered first.
+- **Scripts in any other language.**
+
+ShellCheck is GPL-3.0. It runs only as a container, here and in CI, and nothing of it ships with
+Aber.
+
 ## Accepting a finding
 
 Fix the finding if you can. When the finding is correct but the code is right anyway, add its key
@@ -94,6 +114,12 @@ Each key is chosen to survive unrelated edits:
   changing it makes the finding new. A line whose text repeats in the same file shares one entry.
 - **trivy** keys name the check and the resource (the container of a workload, or the Dockerfile),
   never a line number.
+
+A ShellCheck finding that is not a fault is accepted in the script, above the line:
+`# shellcheck disable=SC2016 # the reason`. ShellCheck reads a trailing `# reason`, and reads
+`-- reason` as a syntax error. A script the chart mounts is not edited for this, because a change to
+it restarts the database pod that mounts it, where physical backup is on. A `.shellcheckrc` in its
+folder names the code and the reason instead, as `supabase/db/pgbackrest/.shellcheckrc` does.
 
 A tracked file that Semgrep cannot parse, whole or in part, fails `scan:source`. Semgrep only warns
 about such a file, and no rule reads the part it could not parse, so a finding there would pass
