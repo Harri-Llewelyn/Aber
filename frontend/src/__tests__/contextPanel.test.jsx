@@ -228,6 +228,75 @@ describe('ContextPanel component', () => {
     expect(document.querySelector('.context-panel-nav')).toBeNull()
     expect(document.querySelector('.context-panel-header')).not.toHaveClass('context-panel-header-nav')
   })
+
+  describe('a group of fields', () => {
+    const grouped = (id = 'health-1', extra = {}) => [
+      { label: 'Uptime', value: '3h' },
+      { group: 'Health', id, summary: 'Disk 3.0 GiB free', tone: 'warning', fields: [{ label: 'Disk Free', value: '3.0 GiB' }, { label: 'Load', value: '0.4' }], ...extra },
+      { label: 'Description', value: 'A line' },
+    ]
+    const heading = () => screen.getByRole('button', { name: /^Health/ })
+
+    it('draws one list for a drawer with no group, as before', () => {
+      render(<ContextPanel {...baseProps} open onClose={vi.fn()} />)
+      expect(document.querySelectorAll('.context-panel-fields')).toHaveLength(1)
+      expect(document.querySelector('.context-field-group')).toBeNull()
+    })
+
+    it('stands between the lists of the fields before and after it, in order', () => {
+      render(<ContextPanel {...baseProps} open onClose={vi.fn()} fields={grouped()} actions={[]} />)
+      const body = document.querySelector('.context-panel-body')
+      expect([...body.children].map(el => el.tagName.toLowerCase() + '.' + el.className.split(' ')[0])).toEqual([
+        'dl.context-panel-fields', 'section.context-field-group', 'dl.context-panel-fields',
+      ])
+      expect([...body.querySelectorAll('dt')].map(dt => dt.textContent.trim())).toEqual(['Uptime', 'Disk Free', 'Load', 'Description'])
+    })
+
+    it('is a disclosure button naming its rows, closed to start with, that says its summary', () => {
+      render(<ContextPanel {...baseProps} open onClose={vi.fn()} fields={grouped()} />)
+
+      expect(heading()).toHaveAttribute('aria-expanded', 'false')
+      expect(heading()).toHaveAccessibleName('Health, Disk 3.0 GiB free')
+      expect(document.getElementById(heading().getAttribute('aria-controls'))).toBe(screen.getByText('Disk Free').closest('dl'))
+      expect(screen.getByText('Disk Free').closest('dl')).not.toBeVisible()
+
+      fireEvent.click(heading())
+      expect(heading()).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByText('Disk Free').closest('dl')).toBeVisible()
+    })
+
+    it('draws a tone as an icon and a class, and none without one', () => {
+      const { rerender } = render(<ContextPanel {...baseProps} open onClose={vi.fn()} fields={grouped()} />)
+      expect(document.querySelector('.context-field-group')).toHaveClass('context-field-group-warning')
+      expect(document.querySelector('.group-heading-icon svg')).not.toBeNull()
+
+      rerender(<ContextPanel {...baseProps} open onClose={vi.fn()} fields={grouped('health-1', { tone: undefined })} />)
+      expect(document.querySelector('.context-field-group').className).toBe('context-field-group')
+      expect(document.querySelector('.group-heading-icon')).toBeNull()
+    })
+
+    it('keeps its state while the same entity refreshes, and starts closed for another', () => {
+      const { rerender } = render(<ContextPanel {...baseProps} open onClose={vi.fn()} fields={grouped()} />)
+      fireEvent.click(heading())
+
+      rerender(<ContextPanel {...baseProps} open onClose={vi.fn()} fields={grouped('health-1', { summary: 'Disk 2.0 GiB free' })} />)
+      expect(heading()).toHaveAttribute('aria-expanded', 'true')
+      expect(heading()).toHaveAccessibleName('Health, Disk 2.0 GiB free')
+
+      rerender(<ContextPanel {...baseProps} open onClose={vi.fn()} fields={grouped('health-2')} />)
+      expect(heading()).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    it('colours a field\'s value amber with `warning`, as `danger` colours it red', () => {
+      render(<ContextPanel {...baseProps} open onClose={vi.fn()} fields={[
+        { label: 'A', value: '1', warning: true }, { label: 'B', value: '2', danger: true }, { label: 'C', value: '3' },
+      ]} />)
+      const value = (label) => screen.getByText(label).closest('.context-field').querySelector('dd')
+      expect(value('A')).toHaveClass('context-field-warning')
+      expect(value('B')).toHaveClass('context-field-danger')
+      expect(value('C').className).toBe('context-field-value')
+    })
+  })
 })
 
 describe('A row that opens a panel shows a chevron', () => {

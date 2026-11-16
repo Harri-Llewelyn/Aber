@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useRef } from 'react'
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { IconX, IconAlertTriangle, IconAlertCircle, IconExternalLink, IconCheck, IconBellOff } from './Icons'
 import CopyableId from './CopyableId'
+import { GroupHeading } from './GroupHeading'
 import { HelpTip } from './HelpTip'
 import { RouteLink } from './RouteLink'
 import { Tooltip } from './Tooltip'
@@ -47,11 +48,17 @@ export const HelpDrawerContext = createContext(null)
  * buttons: drawn at the drawer's full width under the header, above the fields, and kept in view
  * while the body scrolls.
  *
- * @param {Array} fields [{ label, value, display?, mono?, copyable?, help?, full?, danger? }].
- * `copyable` renders a CopyableId (`display` is shown in place of the copied value); `danger`
- * colours the value only; `help` puts a HelpTip beside the label, for a field whose name does
- * not say what it is for, or whose value needs a sentence: a tooltip a keyboard and a touch
+ * @param {Array} fields [{ label, value, display?, mono?, copyable?, help?, full?, danger?, warning? }].
+ * `copyable` renders a CopyableId (`display` is shown in place of the copied value); `danger` and
+ * `warning` colour the value only; `help` puts a HelpTip beside the label, for a field whose name
+ * does not say what it is for, or whose value needs a sentence: a tooltip a keyboard and a touch
  * screen reach.
+ *
+ * An entry `{ group, id, summary?, tone?, fields }` is a group of fields that opens and closes under
+ * a heading (`GroupHeading`), closed until the reader opens it. `summary` is what the heading says
+ * while the group is closed, so a state that needs attention is not hidden with it; `tone`
+ * (`danger` or `warning`) adds an icon of its own shape and the tone's colour to the words. `id` is
+ * distinct for each entity the drawer shows, so a drawer that moves to another starts closed.
  *
  * @param {Array} actions [{ label, icon, onClick, to?, href?, disabled?, title?, primary?, pending?,
  * pendingLabel? }]. `title` is the action's tooltip, the shared one, for what its label does not
@@ -153,11 +160,15 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fi
               prop, because this panel knows nothing about entities. */}
           {alert && <AlertBanner alert={alert} open={open} />}
 
-          {fields.length > 0 && (
-            <dl className="context-panel-fields">
-              {fields.map((f, i) => <Field key={i} f={f} onCopy={onCopy} />)}
-            </dl>
-          )}
+          {fieldRuns(fields).map((run, i) => (
+            Array.isArray(run)
+              ? (
+                <dl key={i} className="context-panel-fields">
+                  {run.map((f, j) => <Field key={j} f={f} onCopy={onCopy} />)}
+                </dl>
+              )
+              : <FieldGroup key={run.id} group={run} onCopy={onCopy} />
+          ))}
 
           {/* Facts, with the metadata they belong to, and sections of fixed height. */}
           {beforeActions && <div className="context-panel-facts">{beforeActions}</div>}
@@ -310,6 +321,48 @@ function AlertBanner({ alert, open }) {
   )
 }
 
+/**
+ * The fields in drawing order, as runs: consecutive plain fields share one list, and a group of
+ * fields (an entry with `fields`) stands alone between them. A drawer with no group draws one list.
+ */
+function fieldRuns(fields) {
+  const runs = []
+  for (const f of fields) {
+    if (f.fields) runs.push(f)
+    else if (Array.isArray(runs[runs.length - 1])) runs[runs.length - 1].push(f)
+    else runs.push([f])
+  }
+  return runs
+}
+
+/**
+ * A group of fields under a heading that opens and closes, closed to start with. The panel is
+ * always mounted, so the open state lives here and is dropped with the group: the key is the group's
+ * `id`, one for each entity, and a drawer that shows another entity starts closed. The rows stay in
+ * the page and are hidden while it is closed, as History's groups do.
+ */
+function FieldGroup({ group, onCopy }) {
+  const [open, setOpen] = useState(false)
+  const rowsId = `${group.id}-fields`
+  const Icon = group.tone === 'danger' ? IconAlertCircle : group.tone === 'warning' ? IconAlertTriangle : null
+  return (
+    <section className={`context-field-group${group.tone ? ` context-field-group-${group.tone}` : ''}`}>
+      <GroupHeading
+        open={open}
+        onToggle={() => setOpen(o => !o)}
+        label={group.group}
+        detail={group.summary}
+        icon={Icon && <Icon size={12} />}
+        controls={rowsId}
+        className="context-field-group-heading"
+      />
+      <dl id={rowsId} className="context-panel-fields context-field-group-fields" hidden={!open}>
+        {group.fields.map((f, i) => <Field key={i} f={f} onCopy={onCopy} />)}
+      </dl>
+    </section>
+  )
+}
+
 /** One label and its value. */
 function Field({ f, onCopy }) {
   return (
@@ -321,7 +374,7 @@ function Field({ f, onCopy }) {
       </dt>
       <dd
         className={`context-field-value${f.mono && !f.copyable ? ' mono' : ''}`
-          + (f.danger ? ' context-field-danger' : '')}
+          + (f.danger ? ' context-field-danger' : f.warning ? ' context-field-warning' : '')}
       >
         {/* Empty is stated rather than left blank. A missing Sparkplug id and a blank row look
             identical otherwise, and only one of them is a problem. */}

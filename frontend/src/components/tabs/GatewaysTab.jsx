@@ -9,7 +9,7 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
   gatewayDisplayStatus, isGatewayOnline, isGatewayPending, formatHeartbeat, formatUptime,
-  formatCertExpiry, isCertExpiring, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS,
+  formatCertExpiry, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS,
   gatewayGroupMismatch
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId, sparkplugGroupProblem } from '../../utils/sparkplugId'
@@ -24,7 +24,8 @@ import { inServiceDevices } from '../../utils/inService'
 import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { isShadowGateway } from '../../utils/fleetCounts'
-import { flowDriftState, flowDriftLabel, isFlowDrift, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
+import { flowDriftState, flowDriftLabel, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
+import { gatewayHealthProblems, rowTone, foldHealthRows, TONE_DANGER, TONE_WARNING } from '../../utils/gatewayHealth'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
@@ -435,6 +436,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const selectedCounted = countedDevices(selectedDevices)
   const selectedCell = selected ? cells.find(c => c.cell_id === selected.cell_id) : null
   const selectedGroupMismatch = gatewayGroupMismatch(selected)
+  // What the health rows say is wrong: each row's colour and the closed Health block's summary.
+  const healthProblems = selected ? gatewayHealthProblems(selected, { rootNotAfter: enrolment?.ca?.not_after }) : []
 
   // "None yet" only when the stack holds no gateway of its own; anything else is a filter's doing.
   // The seeded Playback gateway does not count, so a new install still prompts under its row.
@@ -947,7 +950,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             {selected.is_archived && <ArchivedBadge title="Archived: out of service. Restore it below." />}
           </>
         )}
-        fields={selected ? [
+        fields={selected ? foldHealthRows([
           { label: 'Gateway UUID', value: selected.gateway_id, mono: true, copyable: true },
           // The id it publishes under: what a Sparkplug trace or an MQTT subscription is keyed on.
           { label: 'Sparkplug Edge Node ID', value: selected.sparkplug_id || gatewaySparkplugId(selected.gateway_id), mono: true, copyable: true },
@@ -1055,17 +1058,26 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               help: 'Age of the last heartbeat that carried appliance health. Separate from Last '
                 + 'Heartbeat on purpose: a gateway can keep beating while its collector has stopped.'
             },
+            {
+              label: 'Runtime Uptime',
+              value: formatUptime(selected.uptime_seconds),
+              help: 'How long the appliance\'s Node-RED runtime has been up. PROCESS uptime, not '
+                + 'host uptime: a restarted container resets it while the machine stays up.'
+            },
+            // The rows marked `health` fold into one closed Health block (foldHealthRows), whose
+            // summary names the worst state; a row's colour and that summary come from the same
+            // answer (gatewayHealthProblems).
             // The root this appliance holds, beside the one the platform publishes. Behind means it has
             // not converged since the root was re-issued.
             {
               label: 'CA Expires',
+              health: true,
               value: [
                 formatCertExpiry(selected.cert_expires_at),
                 holdsOlderRoot(selected.cert_expires_at, enrolment?.ca?.not_after)
                   ? 'holds an older root' : null,
               ].filter(Boolean).join(' — ') || null,
-              danger: isCertExpiring(selected.cert_expires_at)
-                || holdsOlderRoot(selected.cert_expires_at, enrolment?.ca?.not_after),
+              danger: rowTone(healthProblems, 'CA Expires') === TONE_DANGER,
               help: 'When the broker root THIS appliance trusts expires, as it reported. The '
                 + 'platform publishes the current root to every appliance and each installs it at '
                 + 'its next hourly convergence, so a gateway can be behind for an hour by design'
@@ -1076,29 +1088,29 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             },
             {
               label: 'Disk Free',
+              health: true,
               value: formatBytes(selected.disk_free_bytes),
+              danger: rowTone(healthProblems, 'Disk Free') === TONE_DANGER,
+              warning: rowTone(healthProblems, 'Disk Free') === TONE_WARNING,
               help: 'Free space on the appliance\'s root filesystem, from node_exporter. An '
-                + 'appliance that fills its disk stops publishing and reports nothing about why.'
+                + 'appliance that fills its disk stops publishing and reports nothing about why. '
+                + 'Under 5 GiB reads amber and under 1 GiB red, as on Grafana\'s Gateway Fleet Health.'
             },
             {
               label: 'Memory Available',
+              health: true,
               value: formatBytes(selected.mem_available_bytes),
               help: 'Host MemAvailable -- available rather than free, so it counts reclaimable '
                 + 'cache. That is the number that predicts whether an allocation will succeed.'
             },
             {
               label: 'Load (1m)',
+              health: true,
               value: selected.load_1m === null || selected.load_1m === undefined
                 ? null
                 : Number(selected.load_1m).toFixed(2),
               help: 'Host 1-minute load average. NOT normalised by core count -- compare this '
                 + 'gateway against itself over time, not against another gateway.'
-            },
-            {
-              label: 'Runtime Uptime',
-              value: formatUptime(selected.uptime_seconds),
-              help: 'How long the appliance\'s Node-RED runtime has been up. PROCESS uptime, not '
-                + 'host uptime: a restarted container resets it while the machine stays up.'
             },
             // The drift check: `flow_hash` (what the appliance last deployed) against
             // `forge_head_flow_sha256` (the head of main). Within the grace period of a push it is
@@ -1106,10 +1118,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             // flow-sync log says why.
             {
               label: 'Flow',
+              health: true,
               value: selected.flow_hash
                 ? [selected.flow_hash.slice(0, 12), flowDriftLabel(flowDriftState(selected))].filter(Boolean).join(' · ')
                 : null,
-              danger: isFlowDrift(flowDriftState(selected)),
+              danger: rowTone(healthProblems, 'Flow') === TONE_DANGER,
               help: 'First 12 characters of the SHA-256 of the flow this appliance last deployed, '
                 + 'compared with the same digest at the head of main. "matches main" is '
                 + 'convergence. "main moved, deploying" is a push younger than '
@@ -1122,6 +1135,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             // playbook version this appliance is on, so a fleet mid-rollout reads one gateway at a time.
             {
               label: 'Platform',
+              health: true,
               value: selected.forge_appliance_platform_tag
                 ? [
                   selected.forge_appliance_platform_tag,
@@ -1130,8 +1144,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                     : selected.forge_appliance_platform_outcome,
                 ].filter(Boolean).join(' · ')
                 : null,
-              danger: Boolean(selected.forge_appliance_platform_outcome)
-                && selected.forge_appliance_platform_outcome !== 'converged',
+              danger: rowTone(healthProblems, 'Platform') === TONE_DANGER,
               help: 'The platform playbook tag this appliance last converged to, and how that run '
                 + 'ended. It converges hourly and after boot. "failed" means ansible-pull did not '
                 + 'complete and the timer will try again; the appliance\'s own journal '
@@ -1143,6 +1156,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             // still publishes and reads ONLINE, so this row is the only place it shows.
             {
               label: 'Custom',
+              health: true,
               value: selected.forge_appliance_custom_outcome
                 ? [
                   selected.forge_appliance_custom_outcome,
@@ -1151,7 +1165,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                     : null,
                 ].filter(Boolean).join(' ')
                 : null,
-              danger: selected.forge_appliance_custom_outcome === 'failed',
+              danger: rowTone(healthProblems, 'Custom') === TONE_DANGER,
               help: 'How this gateway\'s own custom.yml ended on the last convergence, and the '
                 + 'commit it ran from. A gateway whose repository carries a playbook of its own -- '
                 + 'a bespoke adapter for machinery no standard node reaches -- runs it after the '
@@ -1168,7 +1182,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           },
           // A row this kind of gateway can never fill is not shown (NEVER_FILLED_ROWS): a Host
           // gateway has no appliance to report a disk, and a Third-party node reports no health.
-        ].filter(f => gatewayShowsRow(selected, f.label)) : []}
+        ].filter(f => gatewayShowsRow(selected, f.label)), healthProblems, `gateway-health-${selected.gateway_id}`) : []}
         actions={selected ? [
           // Ask the node to republish its birth certificate (`Node Control/Rebirth`): the only command
           // this dashboard sends. Not on an archived gateway, nor the Playback gateway, which hears an

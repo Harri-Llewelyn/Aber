@@ -36,7 +36,7 @@ export default async function check() {
   for (const label of new Set(Object.values(NEVER_FILLED_ROWS).flat())) {
     if (!drawn.has(label)) problems368.push(`NEVER_FILLED_ROWS names "${label}", which GatewaysTab.jsx no longer draws as a row`);
   }
-  if (!/\]\.filter\(f => gatewayShowsRow\(selected, f\.label\)\) : \[\]\}/.test(tab)) problems368.push('GatewaysTab.jsx does not filter its drawer fields through gatewayShowsRow()');
+  if (!/\]\.filter\(f => gatewayShowsRow\(selected, f\.label\)\)/.test(tab)) problems368.push('GatewaysTab.jsx does not filter its drawer fields through gatewayShowsRow()');
   if (/THIRD_PARTY \? \[\] : \[/.test(tab) || /health_reported_at && gatewayType\(selected\) !== GATEWAY_TYPES\.THIRD_PARTY/.test(tab)) {
     problems368.push('GatewaysTab.jsx tests the Third-party kind beside a row again: the rule is NEVER_FILLED_ROWS alone');
   }
