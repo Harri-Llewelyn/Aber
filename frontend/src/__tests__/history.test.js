@@ -7,7 +7,7 @@ import {
   bucketStarts, chartPalette, chartSeries, chartSummary, deviceHistoryPath, deviceMatches, deviceMetrics, historyDevices,
   historyPath, inReads, nowFraction, pickResolution, pickedAddress, resolutionFor, splitCarried, validRangeWords,
   validRanges, withAlpha, STATE_KEY_MAX, durationWords, keyWords, latestReading, latestWords, momentWords, runWords,
-  shareWords, stateHue, stateKey, stateRuns, stateShares, TEXT_BUCKET_MIN_PX, datatypeKind, readPlan, readableResolution,
+  shareWords, hueGap, NEAR_HUE_DEG, stateHue, stateKey, stateRuns, stateShares, TEXT_BUCKET_MIN_PX, datatypeKind, readPlan, readableResolution,
   OTHER_GROUP, metricGroups, changeSeries, markBuckets, markedStretches, momentSecondsWords, readWords, runNear, spanWords,
   stateReadLine,
 } from '../utils/history'
@@ -441,6 +441,14 @@ describe("a state chart's runs and key", () => {
     // A uniform spread puts 100 in each; none here is under 60 or over 140.
     expect(Math.min(...perSector)).toBeGreaterThan(60)
     expect(Math.max(...perSector)).toBeLessThan(140)
+  })
+
+  it('measures how near two values hues are, the short way round the wheel', () => {
+    expect(hueGap('RUNNING', 'RUNNING')).toBe(0)
+    expect(hueGap('RUNNING', 'IDLE')).toBe(Math.min(Math.abs(127 - 301), 360 - Math.abs(127 - 301)))
+    expect(hueGap('FAULT', 'IDLE')).toBe(360 - (301 - 10))
+    expect(hueGap('PICK_BIN_A', 'IDLE')).toBe(hueGap('IDLE', 'PICK_BIN_A'))
+    expect(NEAR_HUE_DEG).toBeLessThan(180)
   })
 
   it('says a sliver of a share as under one per cent', () => {

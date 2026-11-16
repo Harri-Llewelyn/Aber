@@ -27,12 +27,12 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { OverflowText } from './OverflowText'
 import { DerivedTag } from './DerivedTag'
+import { StateBand, StateBandKey } from './StateBand'
 import { clockWords } from '../../utils/timeWindow'
 import {
   chartPalette, chartTitle, latestWords, lowWords, markWords, markedStretches, momentWords, nowFraction, readingWords, runNear,
-  runWords, shareWords, splitCarried, stateHue, stateKey, stateRuns, stateShares, validRangeWords,
+  runWords, splitCarried, stateKey, stateRuns, stateShares, validRangeWords,
 } from '../../utils/history'
 
 const DAY_S = 24 * 60 * 60
@@ -42,9 +42,6 @@ const NO_PLUGINS = Object.freeze([])
 
 /** How near the pointer, in pixels, a run thinner than this either side is found (runNear()). */
 const HOVER_SLACK_PX = 4
-
-/** Under this many pixels a state's box keeps its colour and edge but no name, which could not show. */
-const NAMED_RUN_PX = 24
 
 /**
  * The theme's chart colours, read again whenever `<html data-theme>` changes, so a chart follows a
@@ -187,93 +184,15 @@ function BandMark({ band }) {
   )
 }
 
-/** A value's hue for App.css to colour it with, through the CSSOM: `--state-hue` (stateHue()). */
-const hueOf = (state) => ({ '--state-hue': stateHue(state) })
-
-/**
- * A state metric as runs of its value across the window: text, which no line can draw. Each value
- * takes the hue its text hashes to, at the theme's lightness and chroma, and keeps its name, and a
- * carried stretch is hatched, as a number chart dashes one. A box under NAMED_RUN_PX keeps its
- * colour and edge at its own width, at least 2px, without the name; the head names it under the
- * pointer. A bucket that held more than one value (`marks`) is dotted along its foot.
- */
-function StateStrip({ runs, marks, start, end }) {
-  const ref = useRef(null)
-  const [px, setPx] = useState(0)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return undefined
-    setPx(el.clientWidth)
-    if (typeof ResizeObserver !== 'function') return undefined
-    const watcher = new ResizeObserver(() => setPx(el.clientWidth))
-    watcher.observe(el)
-    return () => watcher.disconnect()
-  }, [])
-  const span = end - start
-  const part = (from, to, of) => ({ left: `${((from - of.from) / of.span) * 100}%`, width: `${((to - from) / of.span) * 100}%` })
-  const whole = { from: start, span }
-  return (
-    <div className="chart-states" ref={ref}>
-      {runs.map(r => {
-        const own = { from: r.startMs, span: r.endMs - r.startMs }
-        const thin = px > 0 && ((r.endMs - r.startMs) / span) * px < NAMED_RUN_PX
-        return (
-          <span key={r.from} className={`chart-state${thin ? ' chart-state-thin' : ''}`} style={{ ...part(r.startMs, r.endMs, whole), ...hueOf(r.state) }}>
-            {r.carried.map(c => (
-              <span key={c.startMs} className="chart-state-carried" style={part(c.startMs, c.endMs, own)} />
-            ))}
-            {!thin && <OverflowText>{r.state}</OverflowText>}
-          </span>
-        )
-      })}
-      {marks.map(m => <span key={m.startMs} className="chart-state-mixed" style={part(m.startMs, m.endMs, whole)} />)}
-    </div>
-  )
-}
-
-/** Under a state chart: each value with its colour and its share of the charted time, then the others. */
-function StateKey({ stateKey: key, carried, mixed }) {
-  return (
-    <ul className="chart-state-key">
-      {key.shown.map(s => (
-        <li key={s.state} className="chart-state-key-value" style={hueOf(s.state)}>
-          <span className="chart-state-swatch" aria-hidden="true" />
-          <OverflowText className="chart-state-key-name">{s.state}</OverflowText>
-          <span className="chart-state-share">{shareWords(s.share)}</span>
-        </li>
-      ))}
-      {key.others && (
-        <li className="chart-state-key-plain">
-          <span className="chart-state-swatch" aria-hidden="true" />
-          <span className="chart-state-key-name">{`${key.others.count} other${key.others.count === 1 ? '' : 's'}`}</span>
-          <span className="chart-state-share">{shareWords(key.others.share)}</span>
-        </li>
-      )}
-      {carried && (
-        <li className="chart-state-key-plain">
-          <span className="chart-state-swatch chart-state-swatch-carried" aria-hidden="true" />
-          <span className="chart-state-key-name">carried forward</span>
-        </li>
-      )}
-      {mixed && (
-        <li className="chart-state-key-plain">
-          <span className="chart-state-swatch chart-state-swatch-mixed" aria-hidden="true" />
-          <span className="chart-state-key-name">more than one value in the bucket</span>
-        </li>
-      )}
-    </ul>
-  )
-}
-
 /**
  * One time-series chart, on uPlot, sized to its container and redrawn when that changes, so a
  * window always fits the width and nothing scrolls sideways. The line is each bucket's average, the
  * band its minimum to maximum. A bucket with no reading carries the last value forward and is drawn
  * dashed, so a carried stretch never reads as a measured one. The schema's valid range is a dotted
  * line labelled "valid range". Where the window reaches past now, a Now line and a hatched "No
- * readings yet" mark the rest. A flag steps between false and true; a state is a strip of its runs,
- * a colour a value with its name kept, carried stretches hatched, and a key of each value's share
- * of the time under it. A series of every change (changeSeries()) is laid on its changes' own
+ * readings yet" mark the rest. A flag steps between false and true; a state is one band of its runs
+ * (StateBand), a colour a value with its name kept where it fits, carried stretches hatched, and a
+ * key of each value's share of the time under it. A series of every change (changeSeries()) is laid on its changes' own
  * times instead of buckets, so a flag steps and a run starts and stops when the value did; a bucket
  * series may carry marks (markBuckets()), a flag's as a band from false to true and a state's as a
  * dotted foot. `note` says which read the chart shows when the status line says otherwise. The head
@@ -398,7 +317,7 @@ export function TimeSeriesChart({
             onPointerMove={pointAt}
             onPointerLeave={() => { setRunHover(null); setMarkHover(null) }}
           >
-            <StateStrip runs={runs} marks={marks} start={start} end={end} />
+            <StateBand runs={runs} marks={marks} start={start} end={end} />
             {(fraction !== null || band) && (
               <div className="chart-overlay">
                 {fraction !== null && <NowMarker fraction={fraction} now={now} />}
@@ -421,7 +340,7 @@ export function TimeSeriesChart({
         )}
       </div>
       {isState && key.shown.length > 0 && (
-        <StateKey stateKey={key} carried={runs.some(r => r.carried.length > 0)} mixed={marks.length > 0} />
+        <StateBandKey stateKey={key} carried={runs.some(r => r.carried.length > 0)} mixed={marks.length > 0} />
       )}
       <p className="sr-only" id={`${id}-summary`}>{summary}</p>
     </figure>

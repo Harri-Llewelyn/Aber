@@ -6105,10 +6105,12 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   font-size: 12px;
   color: var(--text-muted);
 }
-/* A state metric: each run of one value is a box across its stretch of the window, named in text,
+/* A state metric: one band of its runs across the window, each run named in text where it fits and
    filled with its value's colour: the hue the element carries (`--state-hue`, its text's hash) at
    the theme's lightness and chroma, the edge a lighter or darker step, the text in the text colour.
-   A carried stretch inside it is hatched instead of filled, as a number chart dashes one. */
+   The runs meet with no gap; the edge runs along the band's top and foot, and across its two ends,
+   which are the only rounded corners. A carried stretch inside a run is hatched instead of filled,
+   as a number chart dashes one. */
 .chart-state,
 .chart-state-key-value {
   --tone: oklch(var(--chart-state-edge-l) var(--chart-state-edge-c) var(--state-hue));
@@ -6123,24 +6125,37 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   bottom: 0;
   display: flex;
   align-items: center;
-  min-width: 0;
+  min-width: 1px;
   overflow: hidden;
   padding: 0 6px;
-  border: 1px solid var(--tone);
-  border-radius: var(--radius-xs);
+  border: solid var(--tone);
+  border-width: 1px 0;
   background: var(--tone-fill);
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-primary);
 }
 .chart-state > .overflow-text { position: relative; }
-/* A run too narrow to name: its own width, at least 2px, a fill and a leading edge, so a change of
-   seconds over a day still shows; the head names it under the pointer. */
-.chart-state.chart-state-thin { min-width: 2px; padding: 0; border-width: 0 0 0 1px; border-radius: 0; }
+.chart-state-first {
+  border-left-width: 1px;
+  border-top-left-radius: var(--radius-xs);
+  border-bottom-left-radius: var(--radius-xs);
+}
+.chart-state-last {
+  border-right-width: 1px;
+  border-top-right-radius: var(--radius-xs);
+  border-bottom-right-radius: var(--radius-xs);
+}
+/* A run too narrow to name: its own width, at least 1px, over its neighbours, so a change of seconds
+   over a day still shows; the head names it under the pointer. */
+.chart-state.chart-state-thin { z-index: 1; padding: 0; }
+/* Two neighbours whose hues are too near to tell apart (NEAR_HUE_DEG), the later wide enough to spare it. */
+.chart-state-divided { box-shadow: inset 1px 0 0 var(--tone); }
 /* A bucket that held more than one value, past the change read's cap: dotted along the strip's foot,
    over the box that shows the bucket's last value. */
 .chart-state-mixed {
   position: absolute;
+  z-index: 2;
   bottom: 0;
   height: 4px;
   pointer-events: none;
@@ -6175,7 +6190,7 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   height: 10px;
   border: 1px solid var(--tone);
   border-radius: 2px;
-  background: var(--tone);
+  background: var(--tone-fill, var(--tone));
 }
 .chart-state-swatch-carried {
   background: repeating-linear-gradient(45deg, var(--tone) 0 1px, transparent 1px 4px), var(--bg-card);

@@ -579,6 +579,19 @@ export function stateHue(text) {
   return ((h ^ (h >>> 16)) >>> 0) % 360
 }
 
+/** How far apart two hashed hues are, in degrees: 0 to 180, the short way round the wheel. */
+export function hueGap(a, b) {
+  const apart = Math.abs(stateHue(a) - stateHue(b))
+  return Math.min(apart, 360 - apart)
+}
+
+/**
+ * Two neighbouring values whose hues are closer than this many degrees are not told apart side by
+ * side at the theme's lightness and chroma, so the band parts them with a hairline. Further apart,
+ * the colours alone do (themeContrast.test.js measures it in both themes).
+ */
+export const NEAR_HUE_DEG = 40
+
 /** A share in words: a whole percentage, or "<1%" for a sliver that is there. */
 export const shareWords = (share) => (share > 0 && share < 0.005 ? '<1%' : `${Math.round(share * 100)}%`)
 

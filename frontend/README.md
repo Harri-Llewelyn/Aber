@@ -1852,8 +1852,12 @@ flag steps between false and true, and a state is a strip of its runs in text.
 - **The head** reads the bucket under the pointer, and otherwise the latest reading
   (`latestWords()`): the newest bucket a reading arrived in, never a carried one, with its `last`
   value and the bucket's start, since a bucket is not a reading's timestamp.
-- **A state** is `stateRuns()`, clipped to the window and to now. Each value's colour comes from
-  its text: `stateHue()` hashes it (djb2, then murmur3's finaliser, so names a character apart do
+- **A state** is `stateRuns()`, clipped to the window and to now, drawn by `common/StateBand.jsx`:
+  one band of its runs, edge to edge, on the window's own scale. It takes the runs and the window
+  alone, so a lane of Overview can place it as a chart does. The runs meet with no gap; only a
+  band's two ends are rounded (`chart-state-first`, `chart-state-last`), a break in the readings
+  ending one band and starting the next, and the edge runs along its top and foot. Each value's
+  colour comes from its text: `stateHue()` hashes it (djb2, then murmur3's finaliser, so names a character apart do
   not land a degree apart) to a hue, which the box carries as `--state-hue` through React's style,
   the CSSOM, so the CSP is unchanged. App.css draws it as `oklch()` of the theme's
   `--chart-state-l` and `--chart-state-c` and that hue, with a stronger edge. The same value is the
@@ -1861,13 +1865,15 @@ flag steps between false and true, and a state is a strip of its runs in text.
   At those tokens every hue is inside sRGB, the label clears 7.4:1 (dark) and 13:1 (light) on its
   box, and the edge 3:1 on the card; `themeContrast.test.js` walks all 360 hues. A hash is not a
   meaning: two values can land near each other (about one pair in twelve within 15°), and IDLE is
-  not grey, so each box keeps its name and colour is never the only cue. `colourLiterals.test.js`
-  allows an `oklch()` of three tokens alone, which writes no colour. A carried stretch inside a run
+  not grey, so each run keeps its name where it fits and colour is never the only cue. Two
+  neighbours within `NEAR_HUE_DEG` (40°) are not told apart side by side, which
+  `themeContrast.test.js` measures in both themes, so the later run takes a hairline in its edge
+  colour (`chart-state-divided`), never on a run under 4px, which it would fill. No other run has a
+  divider. `colourLiterals.test.js` allows an `oklch()` of three tokens alone, which writes no colour. A carried stretch inside a run
   is hatched. Under the strip, `stateKey()` names the `STATE_KEY_MAX` (6) values with the most time
-  and counts the rest as others. The head reads the run under the pointer (`runWords()`). A box
-  under 24px keeps its colour and edge at its own width, at least 2px, and no name
-  (`chart-state-thin`), so a change of seconds over a day still shows and none is drawn wider than
-  its time.
+  and counts the rest as others. The head reads the run under the pointer (`runWords()`). A run
+  under 36px has no name (`chart-state-thin`), and every run is at least 1px wide (`min-width`),
+  over its neighbours when thinner, so a change of seconds over a day still shows.
 - **Every change** (`changeSeries()`): a text's or a flag's series laid on its changes' own times,
   with `runs`, `exact`, each value's real stretch. `starts` are the window's start when a value was
   carried in, each change, and where the last run stops, so a flag's stepped line steps when the

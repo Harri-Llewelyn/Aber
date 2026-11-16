@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { tokenBlocks, themeTokens, resolveColour, over, declaration } from '../test/themeColours'
 import { AUDIT_TRAIL_CLASSES } from '../constants'
+import { NEAR_HUE_DEG } from '../utils/history'
 
 /**
  * WCAG contrast guard for the theme tokens. A token that looks right in the theme it was authored
@@ -692,6 +693,26 @@ describe("a state chart's colour, at every hue its values can hash to", () => {
     }
     expect(worstLabel).toBeGreaterThanOrEqual(AA_TEXT)
     expect(worstEdge).toBeGreaterThanOrEqual(AA_LARGE)
+  })
+})
+
+describe("a state band's neighbours, whose hues are a hash's", () => {
+  /*
+   * Two runs side by side are told apart by their colour when their fills differ by about 0.03 in
+   * OKLab, which at one lightness and chroma is 2 C sin(gap / 2) for a hue gap. The fills are inside
+   * sRGB at every hue (above), so that is their distance. Neighbours closer than NEAR_HUE_DEG get a
+   * hairline; the band draws none between the rest.
+   */
+  const TOLD_APART = 0.03
+  const fillsApart = (t, gap) => 2 * Number(t['--chart-state-c']) * Math.sin((gap * Math.PI) / 360)
+
+  it.each(Object.entries(THEMES))('%s: two fills NEAR_HUE_DEG apart differ plainly, and two 20 degrees apart do not', (_, t) => {
+    expect(fillsApart(t, NEAR_HUE_DEG)).toBeGreaterThanOrEqual(TOLD_APART)
+    expect(fillsApart(t, 20)).toBeLessThan(TOLD_APART)
+  })
+
+  it('draws the hairline in the run\'s own edge colour, which stands out from the card in both themes', () => {
+    expect(declaration(APP_CSS, '.chart-state-divided', 'box-shadow')).toBe('inset 1px 0 0 var(--tone)')
   })
 })
 
