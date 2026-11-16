@@ -88,6 +88,66 @@ def delete_broker_account(username):
 # 2f/2e block -- these run against the same database and must not fight over one row.
 TEST_GW_ID = "2d000000-0000-4000-8000-000000000001"
 
+# How long a delete waits for the credential service to answer the revoke it queued.
+REVOKE_ANSWER_SECONDS = 30
+
+
+def sparkplug_id_of(gateway_id):
+    """The edge node id the database generates for a gateway: `gwy` and the uuid's first 21 hex digits."""
+    return "gwy" + gateway_id.replace("-", "")[:21]
+
+
+def database(sql):
+    """One command as the database owner, inside the database pod: `net` is not exposed over REST."""
+    return stack_exec.output("supabase-db", "psql", "-U", "postgres", "-d", "postgres", "-q", "-At", "-c", sql)
+
+
+def request_ids(output):
+    """The ids a psql -At listing prints, one per line. Any other line is not one."""
+    return [int(line) for line in output.splitlines() if line.strip().isdigit()]
+
+
+def delete_gateway_and_wait_for_revoke(gateway_id, sparkplug_id, timeout=REVOKE_ANSWER_SECONDS):
+    """
+    Delete a gateway row, then return once the credential service has answered the revoke the delete
+    queued (none is queued for a gateway that never enrolled).
+
+    pg_net's worker takes a request out of net.http_request_queue when it starts it, before the
+    answer, so an empty queue does not show the revoke arrived: the answer in net._http_response
+    does. The ids are read in the delete's own transaction, where the worker cannot have taken the
+    request yet. Without the wait, a gateway made again under the same id is disabled by the revoke
+    meant for the row it replaced.
+    """
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", gateway_id):
+        raise ValueError(f"not a gateway id: {gateway_id!r}")
+    if not re.fullmatch(r"gwy[0-9a-f]{21}", sparkplug_id):
+        raise ValueError(f"not a sparkplug_id: {sparkplug_id!r}")
+    # One command string is one transaction. The header gives the audit row the actor a PostgREST
+    # delete as service_role gives it, and the last statement is the one psql always prints.
+    queued = request_ids(database(
+        "SELECT set_config('request.headers', jsonb_build_object('x-aber-actor', 'service')::text, true); "
+        f"DELETE FROM public.gateways WHERE id = '{gateway_id}'; "
+        "SELECT id FROM net.http_request_queue "
+        f"WHERE url LIKE '%/revoke-gateway-credential' AND convert_from(body, 'UTF8') LIKE '%{sparkplug_id}%' "
+        "ORDER BY id"
+    ))
+    pending = set(queued)
+    deadline = time.monotonic() + timeout
+    while pending:
+        answered = request_ids(database(
+            f"SELECT id FROM net._http_response WHERE id IN ({', '.join(str(i) for i in sorted(pending))})"
+        ))
+        pending -= set(answered)
+        if not pending:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"deleting gateway {gateway_id} ({sparkplug_id}) queued revoke request(s) "
+                f"{sorted(pending)}, and net._http_response holds no answer after {timeout}s: the "
+                "revoke may still arrive and disable the next account made under this name"
+            )
+        time.sleep(1)
+
 
 ADMIN_EMAIL = os.getenv("ABER_ADMIN_EMAIL", "admin@aber.local")
 ADMIN_PASSWORD = os.getenv("ABER_ADMIN_PASSWORD", "aber123")
@@ -185,7 +245,9 @@ class EnrollGatewayBase(unittest.TestCase):
         except Exception as err:  # noqa: BLE001 -- any failure here means "no stack"
             raise unittest.SkipTest(f"PostgREST is unreachable at {SUPABASE_URL}: {err}")
 
-        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
+        # A row a crashed run left behind is deleted like any other, so its revoke lands before this
+        # class enrols under the same id.
+        delete_gateway_and_wait_for_revoke(TEST_GW_ID, sparkplug_id_of(TEST_GW_ID))
         status, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body={
@@ -201,6 +263,10 @@ class EnrollGatewayBase(unittest.TestCase):
         if status >= 300:
             raise unittest.SkipTest(f"could not create the test gateway: {rows}")
         cls.sparkplug_id = rows[0]["sparkplug_id"]
+        # The wait finds a revoke by this id: a different one would match nothing and wait for nothing.
+        if cls.sparkplug_id != sparkplug_id_of(TEST_GW_ID):
+            raise AssertionError(
+                f"the database named the test gateway {cls.sparkplug_id}, not {sparkplug_id_of(TEST_GW_ID)}")
 
         try:
             cls.admin_token = sign_in()
@@ -213,11 +279,15 @@ class EnrollGatewayBase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
-        # The broker account outlives the row (the plugin knows nothing about gateways), so it is
-        # removed explicitly or it accumulates across runs. Deleted through the service container's
-        # own admin credential, the one place a delete is spoken; the service itself never does.
-        delete_broker_account(cls.sparkplug_id)
+        # The account is deleted after the revoke is answered, never before: the next class
+        # enrols under the same name, and a revoke still on its way would disable that account.
+        try:
+            delete_gateway_and_wait_for_revoke(TEST_GW_ID, cls.sparkplug_id)
+        finally:
+            # The broker account outlives the row (the plugin knows nothing about gateways), so it is
+            # removed explicitly or it accumulates across runs. Deleted through the service container's
+            # own admin credential, the one place a delete is spoken; the service itself never does.
+            delete_broker_account(cls.sparkplug_id)
 
     def issue_token(self, ttl_minutes=30):
         """Mint a token exactly as the dashboard does: anon key, Administrator's access token."""
