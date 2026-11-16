@@ -11,7 +11,7 @@ export default function check() {
   const dialog = read('frontend/src/components/common/Model3DUploader.jsx');
   const help = read('help/pages/devices.md');
   const problems367 = [];
-  if (!/disabled: !selectedDevice\.model_3d_path && \(!canManage \|\| selectedDevice\.is_archived\)/.test(tab)) {
+  if (!/disabled: !modelPath && \(!canManage \|\| selectedDevice\.is_archived\)/.test(tab)) {
     problems367.push('DevicesTab.jsx does not grey Add 3D Model… out for a role that may not manage devices or for an archived device, and only then');
   }
   if (!/requiresRolesTitle\(PERMISSION_UUIDS\.DEVICE_MANAGE\)[\s\S]{0,200}Restore this device to attach a 3D model/.test(tab)) {

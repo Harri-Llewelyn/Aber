@@ -36,11 +36,16 @@ const MAX_BYTES = 50 * 1024 * 1024
  *
  * @param {object} device  The device row; `model_3d_path` is read each render, so the dialog turns
  *                         from the drop zone to the viewer when the parent reloads after an upload.
+ * @param {object} [modelOf]  The device whose model is shown when it is not `device`'s own: a replay
+ *                         lane shows its machine's. The dialog is then read-only, whoever asks, and
+ *                         says whose model it is in place of the Public marker.
  * @param {boolean} canManage  May attach, replace and remove. Download and viewing need nothing.
  * @param {Function} onChange  Called with the new path after an upload, and null after a removal.
  * @param {Function} onClose   Closes the dialog; also called once a removal has finished.
  */
-export function Model3DUploader({ device, canManage, showToast, onChange, onClose }) {
+export function Model3DUploader({ device, modelOf, canManage: mayManage, showToast, onChange, onClose }) {
+  // A model that is another device's is never changed from here.
+  const canManage = mayManage && !modelOf
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState(null)
@@ -48,7 +53,7 @@ export function Model3DUploader({ device, canManage, showToast, onChange, onClos
   const [confirmRemove, setConfirmRemove] = useState(false)
   const inputRef = useRef(null)
 
-  const path = device?.model_3d_path || null
+  const path = (modelOf || device)?.model_3d_path || null
   const deviceId = device?.asset_id || device?.id
   const deviceName = device?.asset_name
   const modelName = device?.asset_name || device?.name
@@ -146,6 +151,10 @@ export function Model3DUploader({ device, canManage, showToast, onChange, onClos
   // `download` attribute alone cannot do this across origins.
   const downloadUrl = path ? model3dDownloadUrl(path) : null
 
+  // The machine's model went while a lane's dialog was open: the parent closes it, and until then
+  // there is no drop zone to offer.
+  if (modelOf && !path) return null
+
   return (
     <>
       <Modal
@@ -164,9 +173,13 @@ export function Model3DUploader({ device, canManage, showToast, onChange, onClos
               <div className="model-file-name">
                 <span className="model-file-name-text">{modelFileName(path)}</span>
                 <span>{size !== null ? formatFileSize(size) : 'size unavailable'}</span>
-                <HelpTip text={MODEL_STORAGE_NOTE}>
-                  <IconGlobe size={11} /> Public
-                </HelpTip>
+                {modelOf ? (
+                  <span>{`${modelOf.asset_name || modelOf.name}'s model`}</span>
+                ) : (
+                  <HelpTip text={MODEL_STORAGE_NOTE}>
+                    <IconGlobe size={11} /> Public
+                  </HelpTip>
+                )}
               </div>
               {/* Outside the `canManage` gate: reading a public-read object is not a write, and
                   Operators and Auditors are the roles most likely to open a model. */}
@@ -257,14 +270,17 @@ export function Model3DUploader({ device, canManage, showToast, onChange, onClos
           </Tooltip>
         )}
 
-        <input
-          ref={inputRef}
-          type="file"
-          accept={MODEL_3D_EXTENSIONS.join(',')}
-          style={{ display: 'none' }}
-          onChange={(e) => handleFile(e.target.files?.[0])}
-          data-testid="model-3d-input"
-        />
+        {/* Not drawn for another device's model: nothing here may attach a file to it. */}
+        {!modelOf && (
+          <input
+            ref={inputRef}
+            type="file"
+            accept={MODEL_3D_EXTENSIONS.join(',')}
+            style={{ display: 'none' }}
+            onChange={(e) => handleFile(e.target.files?.[0])}
+            data-testid="model-3d-input"
+          />
+        )}
       </Modal>
       {path && confirmRemove && (
         <ConfirmModal

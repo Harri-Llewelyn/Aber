@@ -13,7 +13,7 @@ export default function check() {
   const viewer = read('frontend/src/components/common/Model3DViewer.jsx');
   const help = read('help/pages/devices.md');
   const problems365 = [];
-  const after = tab.match(/label: 'View History', icon: <\w+ size=\{13\} \/>,\s*to: deviceHistoryUrl\([^)]*\),\s*title: [^\n]+\n\s*\},\s*(?:\/\*[\s\S]*?\*\/\s*)?\{\s*label: [^\n]*'View 3D Model'[^\n]*'Add 3D Model…'/);
+  const after = tab.match(/label: 'View History', icon: <\w+ size=\{13\} \/>,\s*to: deviceHistoryUrl\([^)]*\),\s*title: [^\n]+\n\s*\},\s*(?:\/\*[\s\S]*?\*\/\s*)?(?:\([^\n]*\) && )?\{\s*label: [^\n]*'View 3D Model'[^\n]*'Add 3D Model…'/);
   if (!after) problems365.push("DevicesTab.jsx has no action right after View History whose label is 'View 3D Model' with a model and 'Add 3D Model…' without one");
   if (/Model3DLabel|model-section|beforeActions=/.test(tab)) problems365.push('DevicesTab.jsx still draws a 3D Model section in the drawer (Model3DLabel, model-section or beforeActions)');
   for (const word of ['Download', 'Replace', 'Remove', 'Public']) {

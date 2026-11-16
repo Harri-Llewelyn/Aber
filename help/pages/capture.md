@@ -16,6 +16,7 @@ Use this page to record what the broker actually carried, and play it back later
 - **The strips above the list** show a recording or a playback that is queued or running, on every tab. They also show one that has just failed. **Stop** ends a running recording early and keeps what it has recorded, or stops a running playback. If the ingestion service has not reported on a recording for two minutes, Stop ends it and nothing from it is stored. Nothing shows there when nothing is in progress.
 - **Play back…** is in the details panel of a subject with a stored capture. It publishes the capture as the **Playback gateway**, through the real broker and the real ingestion path. The capture's timestamps are shifted so it starts now.
 - The playback dialog names the Playback gateway, and asks for a **Device mapping** and a **Speed**. The Playback gateway is the only one a capture can be played back onto, and no one can mark another gateway as one. The mapping moves each captured device onto its own **replay lane** on that gateway. Playback refuses a real device, and it refuses the lane of a different device. So replayed traffic is always visibly not live traffic.
+- **A replay lane has no 3D model of its own.** On the Devices page, its details panel shows the model of the device it was recorded from, and only when that device has one. You cannot add, replace or remove a model on a lane. Do that on the device, and the lane follows at once.
 
 ## What the states mean
 
