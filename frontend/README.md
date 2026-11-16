@@ -1920,7 +1920,7 @@ text and a flag's true and false.
 | `height` | The plot's height in pixels, 140 by default |
 | `yRange` | A number chart's value scale, `[low, high]`, or null for uPlot's own: charts that compare share one (`sharedScale()`). Pass the same array while it is the same: a new one draws the chart again |
 | `label`, `head` | `label` names the chart in place of the metric and unit. `head` is what the title line shows in place of that name, such as a status dot and a link: the figure keeps `label` as its name |
-| `plugins` | uPlot plugins for a number chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state or flag band takes none |
+| `plugins` | uPlot plugins for a number chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state or flag band is not drawn by uPlot: it shades the `bands` the alert plugins carry, in the DOM |
 | `note` | Which read the chart shows, in the head, when the status line says another (`readWords()`), or null |
 | `derived` | True for a derived metric: a `DerivedTag` beside the title, and "a derived metric" in the summary ([History's derived metrics](#historys-derived-metrics)) |
 
@@ -2257,7 +2257,7 @@ its current value; Export saves its values. The database's rules are in
 `common/alertBands.js`). With each read the charts make, the hook reads the device's alerts over
 the same window and builds `alertBands()`: each occurrence clipped to the window, a still-firing
 one running to the read's moment, where the lines stop. `alertBandsPlugin()` passes them to every
-number chart through `plugins`.
+chart through `plugins`, and carries the bands it shades (`bands`, read by `bandsOf()`).
 
 - **Inside the plot area only**, from `bbox`, so a band lines up with the text strips' gutters.
   Under the series, a translucent fill of `--danger`. Over them, a solid `--danger` edge where the
@@ -2268,7 +2268,19 @@ number chart through `plugins`.
   names each alert firing at that moment (`bandText()`). The row above the charts keys the shading
   in words with a link to the Alerts tab for the device and window (`AlertKey`).
 - **A failed read shades nothing.** The charts go on, and the read's thunk lets a stub without the
-  method read as no alerts. A state or flag band is not drawn by uPlot and is not shaded.
+  method read as no alerts.
+- **A state or flag band shades the same bands in the DOM** (`StateBand`'s `alerts`, which
+  `TimeSeriesChart` takes from its plugins with `bandsOf()`), so a plot and a band read one
+  `alertBands()` and cannot disagree about a span, its edges or its name. `bandBox()` places each as
+  percentages of the window. `.chart-alerts` is a layer over the runs and the dotted marks, translucent
+  at `ALERT_FILL_ALPHA` (12%, as the plot's fill), with the solid `--danger` edge where the occurrence
+  starts or ends inside the window (`chart-alert-starts`, `chart-alert-ends`). It takes no pointer, so
+  the runs' readout, a drag across the band and the hatching work as before. A run's name sits in the
+  middle of the band, so the alert's name takes a row of its own under it, `--danger-text` on the
+  fill (`themeContrast.test.js`), where its band is 48px wide (`NAMED_PX`, as on the plot). A band
+  with alerts is that row taller (`chart-box-states-alerted`, 50px against 34px); one without is not.
+  The head names each alert firing under the pointer after the run, "Alert: …" with `bandText()`, as
+  the plot's readout does; the readout itself cannot sit in a band, whose box clips.
 
 ---
 

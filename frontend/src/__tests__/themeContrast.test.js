@@ -139,6 +139,8 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger-text on an acknowledged banner', '--danger-text', on(paint('.context-alert-critical.context-alert-acknowledged'), surface), AA_TEXT],
     ['acknowledged edge on card',       '--danger-soft-border', card,                                   AA_LARGE],
     ['danger badge on hover',           '--danger-text',  on(paint('.badge-critical'), glass(card)),    AA_TEXT],
+    // An alert's name under a text or flag band, on the shading's fill, as the plot names it inside the plot.
+    ['alert name under a band',         '--danger-text',  on(paint('.chart-alert'), card),              AA_TEXT],
     // --warning/--success remain the border/icon colours, where 3:1 is the bar.
     ['--warning icon on card',        '--warning',      card,                              AA_LARGE],
     ['--success icon on card',        '--success',      card,                              AA_LARGE],

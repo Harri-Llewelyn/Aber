@@ -6135,6 +6135,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .chart-flag-false { --tone: var(--chart-false-edge); --tone-fill: var(--chart-false); }
 .chart-box-states { height: 34px; }
 .chart-states { position: absolute; inset: 4px 0; }
+/* A band an alert fired over has a row under it for the alert's name, clear of the runs' names. */
+.chart-box-states-alerted { height: 50px; }
+.chart-box-states-alerted .chart-states { bottom: 20px; }
 .chart-state {
   position: absolute;
   top: 0;
@@ -6176,6 +6179,41 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   height: 4px;
   pointer-events: none;
   background: repeating-linear-gradient(90deg, var(--text-primary) 0 2px, transparent 2px 4px);
+}
+/* The periods an alert was firing, over a band as the plot shades them (alertBands.js): the fill and
+   the solid edge in --danger, the name in --danger-text, under the band in a row of its own. The
+   layer takes no pointer, so hovering and dragging reach the runs. */
+.chart-alerts {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: -16px;
+  pointer-events: none;
+}
+.chart-alert {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  min-width: 2px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.chart-alert-starts { border-left: 2px solid var(--danger); }
+.chart-alert-ends { border-right: 2px solid var(--danger); }
+.chart-alert-name {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--danger-text);
 }
 .chart-state-carried {
   position: absolute;

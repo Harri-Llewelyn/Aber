@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { OverflowText } from './OverflowText'
+import { NAMED_PX, bandBox } from './alertBands'
 import { NEAR_HUE_DEG, changeWords, durationWords, hueGap, shareWords, stateHue } from '../../utils/history'
 
 /** Under this many pixels a run keeps its colour but no name: padding and an ellipsis leave a lone ellipsis. */
@@ -28,10 +29,16 @@ const hueOf = (state) => ({ '--state-hue': stateHue(state) })
  * pointer. A bucket that held more than one value (`marks`) is dotted along its foot. With `flag`,
  * the runs are true and false, drawn in the two flag colours of the theme, never hashed.
  *
+ * `alerts` are the bands an alert was firing (alertBands()), shaded as the plot's are: a layer over
+ * the runs, translucent, with a solid edge where an occurrence starts and ends inside the window,
+ * and each alert's name in a row under the band where it fits, clear of the runs' names. The
+ * container leaves that row (`chart-box-states-alerted`, App.css). The layer takes no pointer, so
+ * hovering and dragging reach the runs.
+ *
  * It takes the runs (stateRuns(), or a change read's) and the window, and fills the width it is
  * given, so a chart, or a lane of History's Overview, can place it on any time scale.
  */
-export function StateBand({ runs, marks = [], start, end, flag = false }) {
+export function StateBand({ runs, marks = [], start, end, flag = false, alerts = [] }) {
   const ref = useRef(null)
   const [px, setPx] = useState(0)
   useEffect(() => {
@@ -73,6 +80,23 @@ export function StateBand({ runs, marks = [], start, end, flag = false }) {
         )
       })}
       {marks.map(m => <span key={m.startMs} className="chart-state-mixed" style={part(m.startMs, m.endMs, whole)} />)}
+      {alerts.length > 0 && (
+        <div className="chart-alerts" aria-hidden="true">
+          {alerts.map(b => {
+            const { left, width } = bandBox(b, start, end)
+            const named = !(px > 0 && (width / 100) * px < NAMED_PX)
+            return (
+              <div
+                key={`${b.id}-${b.from}`}
+                className={`chart-alert${b.startsInside ? ' chart-alert-starts' : ''}${b.endsInside ? ' chart-alert-ends' : ''}`}
+                style={{ left: `${left}%`, width: `${width}%` }}
+              >
+                {named && <span className="chart-alert-name">{b.name}</span>}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

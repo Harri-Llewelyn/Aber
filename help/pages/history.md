@@ -156,7 +156,8 @@ Each chart is titled with the metric's name, with its unit in brackets when the 
 - **Pointing at a state's or a flag's band** shows the stretch under the pointer, for example **4 Nov 10:05 – 10:40 · RUNNING, 35 min**, and how much of it was carried forward. A stretch of a few seconds is found from a few pixels away.
 - **Now** marks the present moment on a window that runs on past it, such as today's. The part after it is hatched and says **No readings yet**.
 - **A shaded red stretch** means an alert on the device was firing then. A solid line marks where it started and where it ended, when that is inside the window. Its name is written inside the stretch when there is room. Point at it to read which alert it was, its severity and when it fired. Several alerts at once shade the same stretch more deeply.
-- **The line above the charts** then also says how many alerts fired in the window, for example **Shaded while an alert was firing: 2 alerts in this window**. Select it to list them on the [Alerts](#alerts) tab. A state's or a flag's band is not shaded.
+- **A state's or a flag's band** is shaded the same way, over its runs. A row under the band holds each alert's name, so the name never covers a run's. Point at the band to read the alert after the run, for example **Alert: Spindle Overload, warning · 4 Nov 10:05 – 10:40, 35 min**. A band no alert fired over has no row, and is no taller.
+- **The line above the charts** then also says how many alerts fired in the window, for example **Shaded while an alert was firing: 2 alerts in this window**. Select it to list them on the [Alerts](#alerts) tab.
 
 A chart with nothing to draw says **No readings in this window, and none before it**.
 

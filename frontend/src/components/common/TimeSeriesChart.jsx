@@ -28,6 +28,7 @@ import { createPortal } from 'react-dom'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { DerivedTag } from './DerivedTag'
+import { bandText, bandsAt, bandsOf } from './alertBands'
 import { NumberKey } from './NumberKey'
 import { StateBand, StateBandKey } from './StateBand'
 import { clockWords } from '../../utils/timeWindow'
@@ -40,6 +41,9 @@ const DAY_S = 24 * 60 * 60
 
 /** No plugins: hoisted, so a chart without any is not drawn again on each render. */
 const NO_PLUGINS = Object.freeze([])
+
+/** No alert bands: hoisted, so a band without any is not drawn again on each render. */
+const NO_BANDS = Object.freeze([])
 
 /** How near the pointer, in pixels, a run thinner than this either side is found (runNear()). */
 const HOVER_SLACK_PX = 4
@@ -209,8 +213,9 @@ function BandMark({ band }) {
  * buckets, and its mean and median over time (numberFigures()); pointing at an entry marks it on the
  * plot. `band` is a drag's band, which the page shades on every chart; uPlot's own drag
  * selection stays off. `plugins` are uPlot plugins the page adds to a number chart, such as the
- * periods an alert was firing; a band is not drawn by uPlot and takes none. Pass the same array
- * while they are the same: a new one draws the chart again. `yRange` is a number chart's value
+ * periods an alert was firing; a band is not drawn by uPlot, so it shades the `bands` those plugins
+ * carry itself, and names the alerts under the pointer in the head. Pass the same array while they
+ * are the same: a new one draws the chart again. `yRange` is a number chart's value
  * scale, `[low, high]`, the same across charts that share one (sharedScale()); it too is the same
  * array while it is the same. `label` names the chart in place of its metric and unit, and `head`
  * is what the title line shows in place of that name (a link, a status dot), so a machine's chart
@@ -236,6 +241,7 @@ export function TimeSeriesChart({
   const [runHover, setRunHover] = useState(null)
   const [markHover, setMarkHover] = useState(null)
   const [keyMark, setKeyMark] = useState(null)
+  const [alertHover, setAlertHover] = useState(NO_BANDS)
   const plotRef = useRef(null)
   const palette = useChartPalette()
   const drawn = series.kind === 'number'
@@ -252,6 +258,8 @@ export function TimeSeriesChart({
   )
   const key = useMemo(() => (isState ? stateKey(stateShares(runs)) : null), [isState, runs])
   const changes = useMemo(() => (isFlag ? changeCount(series, runs) : null), [isFlag, series, runs])
+  // A band is not a plot, so it shades the bands its plugins carry (alertBands.js) itself.
+  const alerts = useMemo(() => (isState ? bandsOf(plugins) : NO_BANDS), [isState, plugins])
   const keyEntries = useMemo(() => {
     const figures = drawn ? numberFigures(series, starts, { now }) : null
     return figures ? numberKey(figures, starts, minutes, unit) : []
@@ -291,8 +299,11 @@ export function TimeSeriesChart({
 
   const fraction = nowFraction(start, end, now)
   const range = validRangeWords(validRange, unit)
+  // On a band the head also names each alert firing under the pointer, as the plot's readout does.
+  const alertWords = alertHover.length ? `Alert: ${alertHover.map(bandText).join('; ')}` : null
+  const bandWords = markHover ? markWords(markHover, minutes, series.kind) : runHover ? runWords(runHover, minutes) : null
   const hovered = isState
-    ? (markHover ? markWords(markHover, minutes, series.kind) : runHover ? runWords(runHover, minutes) : null)
+    ? ([bandWords, alertWords].filter(Boolean).join(' — ') || null)
     : hover === null ? null
       : starts[hover.idx] !== undefined ? hoverWords(starts[hover.idx], series, hover.idx, unit, minutes) : null
   const headWords = hovered ?? latestWords(series, starts, minutes, unit)
@@ -309,6 +320,7 @@ export function TimeSeriesChart({
     const mark = marks.find(m => t >= m.startMs && t < m.endMs) ?? null
     setMarkHover(mark)
     setRunHover(mark ? null : runNear(runs, t, HOVER_SLACK_PX * msPerPx))
+    if (alerts.length || alertHover.length) setAlertHover(bandsAt(alerts, t))
   }
 
   /** A key entry's mark, placed from the plot's own scales: a ring at a bucket's value, or a level. */
@@ -338,12 +350,12 @@ export function TimeSeriesChart({
         {drawn && <div ref={boxRef} className="chart-box" style={{ height }} hidden={failed} />}
         {isState && (
           <div
-            className="chart-box chart-box-states"
+            className={`chart-box chart-box-states${alerts.length ? ' chart-box-states-alerted' : ''}`}
             style={{ marginLeft: PLOT_LEFT_PX, marginRight: PLOT_RIGHT_PX, width: 'auto' }}
             onPointerMove={pointAt}
-            onPointerLeave={() => { setRunHover(null); setMarkHover(null) }}
+            onPointerLeave={() => { setRunHover(null); setMarkHover(null); setAlertHover(NO_BANDS) }}
           >
-            <StateBand runs={runs} marks={marks} start={start} end={end} flag={isFlag} />
+            <StateBand runs={runs} marks={marks} start={start} end={end} flag={isFlag} alerts={alerts} />
             {(fraction !== null || band) && (
               <div className="chart-overlay">
                 {fraction !== null && <NowMarker fraction={fraction} now={now} />}

@@ -9,6 +9,7 @@ import path from 'node:path'
 import { render, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { StateBand, StateBandKey } from '../components/common/StateBand'
+import { NAMED_PX } from '../components/common/alertBands'
 import { NEAR_HUE_DEG, changeCount, hueGap, stateHue, stateKey, stateShares } from '../utils/history'
 import { declaration } from '../test/themeColours'
 
@@ -24,8 +25,8 @@ const run = (state, from, to, carried = []) => ({
   carried: carried.map(([a, b]) => ({ startMs: T0 + a * MIN, endMs: T0 + b * MIN })),
 })
 
-const draw = (runs, marks = [], flag = false) => {
-  const { container } = render(<StateBand runs={runs} marks={marks} flag={flag} {...WINDOW} />)
+const draw = (runs, marks = [], flag = false, alerts = []) => {
+  const { container } = render(<StateBand runs={runs} marks={marks} flag={flag} alerts={alerts} {...WINDOW} />)
   return [...container.querySelectorAll('.chart-state')]
 }
 const box = (el) => ({ left: parseFloat(el.style.left), width: parseFloat(el.style.width) })
@@ -171,5 +172,66 @@ describe("a flag's key", () => {
   it("leaves a state's key as it was: no time, no count", () => {
     const { container } = render(<StateBandKey stateKey={key()} />)
     expect(items(container)).toEqual(['true96%', 'false4%'])
+  })
+})
+
+describe('the shading of an alert over a band', () => {
+  /** A firing period as alertBands() gives it, `from` and `to` in minutes into the window. */
+  const alert = (id, from, to, over = {}) => ({
+    id, name: over.name ?? 'Spindle Overload', severity: 'warning', from: T0 + from * MIN, to: T0 + to * MIN,
+    starts: T0 + from * MIN, ends: T0 + to * MIN, firing: false, startsInside: true, endsInside: true, ...over,
+  })
+  const shades = (container) => [...container.querySelectorAll('.chart-alert')]
+
+  it.each([
+    ['a text band', false, [run('RUNNING', 0, 600), run('IDLE', 600, 1000)]],
+    ['a flag band', true, [run('true', 0, 600), run('false', 600, 1000)]],
+  ])('draws %s the alert over the time range it was firing, and none without one', (_, flag, runs) => {
+    const { container } = render(<StateBand runs={runs} flag={flag} alerts={[alert('a', 250, 400)]} {...WINDOW} />)
+    const [shade] = shades(container)
+    expect(shades(container)).toHaveLength(1)
+    expect(box(shade)).toEqual({ left: 25, width: 15 })
+    expect(shade.closest('.chart-alerts').getAttribute('aria-hidden')).toBe('true')
+    cleanup()
+    const bare = render(<StateBand runs={runs} flag={flag} {...WINDOW} />)
+    expect(bare.container.querySelector('.chart-alerts')).toBeNull()
+    expect(shades(bare.container)).toHaveLength(0)
+  })
+
+  it('marks an occurrence\'s own start and end with a solid edge, and not the window\'s', () => {
+    const { container } = render(<StateBand
+      runs={[run('A', 0, 1000)]}
+      alerts={[alert('a', 100, 200), alert('b', 0, 300, { startsInside: false }), alert('c', 800, 1000, { endsInside: false, firing: true, ends: null })]}
+      {...WINDOW}
+    />)
+    const [a, b, c] = shades(container)
+    expect([a, b, c].map(x => [x.classList.contains('chart-alert-starts'), x.classList.contains('chart-alert-ends')]))
+      .toEqual([[true, true], [false, true], [true, false]])
+  })
+
+  it('names the alert where its band is wide enough, as the plot does, and otherwise only shades', () => {
+    const { container } = render(<StateBand runs={[run('A', 0, 1000)]} alerts={[alert('wide', 100, 300), alert('thin', 500, 520, { name: 'Coolant Low' })]} {...WINDOW} />)
+    // 200px and 20px wide: a name needs 48px (NAMED_PX), as on the plot.
+    const [wide, thin] = shades(container)
+    expect(NAMED_PX).toBe(48)
+    expect(wide.textContent).toBe('Spindle Overload')
+    expect(thin.textContent).toBe('')
+    expect(thin.style.width).toBe('2%')
+  })
+
+  it('leaves the runs, their names, their hairlines and their hatching as they were, and takes no pointer', () => {
+    const runs = [run('RUNNING', 0, 300, [[100, 300]]), run('IDLE', 300, 305), run('FAULT', 305, 1000)]
+    const plain = draw(runs)
+    const before = plain.map(r => [r.className, r.textContent, r.style.cssText])
+    cleanup()
+    const { container } = render(<StateBand runs={runs} alerts={[alert('a', 50, 400)]} {...WINDOW} />)
+    const after = [...container.querySelectorAll('.chart-state')].map(r => [r.className, r.textContent, r.style.cssText])
+    expect(after).toEqual(before)
+    expect(container.querySelectorAll('.chart-state-carried')).toHaveLength(1)
+    // The layer is the band's last child, over the runs and the marks, and App.css gives it no pointer.
+    expect(container.querySelector('.chart-states').lastElementChild.classList.contains('chart-alerts')).toBe(true)
+    expect(declaration(APP_CSS, '.chart-alerts', 'pointer-events')).toBe('none')
+    expect(Number(declaration(APP_CSS, '.chart-alerts', 'z-index'))).toBeGreaterThan(Number(declaration(APP_CSS, '.chart-state-mixed', 'z-index')))
+    expect(declaration(APP_CSS, '.chart-box-states-alerted', 'height')).toBe('50px')
   })
 })
