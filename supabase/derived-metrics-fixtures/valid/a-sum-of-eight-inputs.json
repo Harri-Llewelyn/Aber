@@ -1,0 +1,43 @@
+{
+  "about": "The most inputs a sum takes.",
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Sum",
+      "kind": "sum",
+      "inputs": [
+        {
+          "metric": "@LOAD_1@",
+          "sign": 1
+        },
+        {
+          "metric": "@LOAD_2@",
+          "sign": 1
+        },
+        {
+          "metric": "@LOAD_3@",
+          "sign": 1
+        },
+        {
+          "metric": "@LOAD_4@",
+          "sign": 1
+        },
+        {
+          "metric": "@LOAD_5@",
+          "sign": 1
+        },
+        {
+          "metric": "@LOAD_6@",
+          "sign": 1
+        },
+        {
+          "metric": "@LOAD_7@",
+          "sign": 1
+        },
+        {
+          "metric": "@LOAD_8@",
+          "sign": 1
+        }
+      ]
+    }
+  ]
+}

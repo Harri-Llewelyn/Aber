@@ -1,0 +1,10 @@
+{
+  "about": "A deprecated metric is still an input, as the table has it.",
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@DEPRECATED_INPUT@"
+    }
+  ]
+}

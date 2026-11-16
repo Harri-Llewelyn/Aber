@@ -1,0 +1,13 @@
+{
+  "about": "A key a derived metric does not take.",
+  "path": "$[0].mode",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@",
+      "mode": "fast"
+    }
+  ]
+}

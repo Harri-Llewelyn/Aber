@@ -1,0 +1,10 @@
+{
+  "about": "A name need not have a group.",
+  "document": [
+    {
+      "name": "Standalone_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

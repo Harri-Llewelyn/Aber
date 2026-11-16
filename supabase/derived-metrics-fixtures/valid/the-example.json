@@ -1,0 +1,34 @@
+{
+  "about": "The example in docs/derived-metrics.md.",
+  "document": [
+    {
+      "name": "Test_0297_Guard/Parts_Per_Hour_Example",
+      "description": "Parts made per hour, from the controller's part counter.",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    },
+    {
+      "name": "Test_0297_Guard/Time_In_Pick_Bin_A",
+      "kind": "time_in_state",
+      "input": "@STATE_FREE@",
+      "states": [
+        "PICK_BIN_A"
+      ]
+    },
+    {
+      "name": "Test_0297_Guard/Net_Power",
+      "description": "Phase A less phase B.",
+      "kind": "sum",
+      "inputs": [
+        {
+          "metric": "@PHASE_A@",
+          "sign": 1
+        },
+        {
+          "metric": "@PHASE_B@",
+          "sign": -1
+        }
+      ]
+    }
+  ]
+}

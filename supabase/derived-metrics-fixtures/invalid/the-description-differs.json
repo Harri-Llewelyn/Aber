@@ -1,0 +1,13 @@
+{
+  "about": "A name that exists with this definition and another description.",
+  "path": "$[0].description",
+  "database": true,
+  "document": [
+    {
+      "name": "@DERIVED@",
+      "description": "Something else.",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

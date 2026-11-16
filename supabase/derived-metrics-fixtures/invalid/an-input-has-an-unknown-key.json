@@ -1,0 +1,22 @@
+{
+  "about": "A key an input does not take.",
+  "path": "$[0].inputs[0].weight",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Sum",
+      "kind": "sum",
+      "inputs": [
+        {
+          "metric": "@PHASE_A@",
+          "sign": 1,
+          "weight": 2
+        },
+        {
+          "metric": "@PHASE_B@",
+          "sign": 1
+        }
+      ]
+    }
+  ]
+}

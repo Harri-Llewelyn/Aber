@@ -1,0 +1,10 @@
+{
+  "about": "A counter rate with only its required keys.",
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

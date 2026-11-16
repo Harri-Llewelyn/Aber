@@ -1,0 +1,12 @@
+{
+  "about": "A space in a name.",
+  "path": "$[0].name",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

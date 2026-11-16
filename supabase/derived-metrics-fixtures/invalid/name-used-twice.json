@@ -1,0 +1,20 @@
+{
+  "about": "Two derived metrics of one name, which only the whole file shows.",
+  "path": "$[1].name",
+  "database": true,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    },
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "time_in_state",
+      "input": "@STATE_TEXT@",
+      "states": [
+        "ACTIVE"
+      ]
+    }
+  ]
+}

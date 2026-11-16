@@ -1,0 +1,15 @@
+{
+  "about": "A state written as a YAML boolean, not as text.",
+  "path": "$[0].states[0]",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Share",
+      "kind": "time_in_state",
+      "input": "@STATE_BOOL@",
+      "states": [
+        true
+      ]
+    }
+  ]
+}

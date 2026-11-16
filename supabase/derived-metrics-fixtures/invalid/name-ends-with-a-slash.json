@@ -1,0 +1,12 @@
+{
+  "about": "A name does not end with a slash.",
+  "path": "$[0].name",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "about": "A group that differs from an existing one only in case.",
+  "path": "$[0].name",
+  "database": true,
+  "document": [
+    {
+      "name": "test_0297_guard/Another_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "about": "No name.",
+  "path": "$[0].name",
+  "database": false,
+  "document": [
+    {
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

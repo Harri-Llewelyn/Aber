@@ -4037,6 +4037,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `acknowledge_alert()` | `0231` | no | An Operator's write as much as a manager's: acknowledging an alert changes no platform state. |
 | `app_approvals()` | `0217` | no | A read: who allows an app. |
 | `apply_automations()` | `0256` | yes | Applies a document of automations (a preview too: the same call) |
+| `apply_derived_metrics()` | `0297` | yes | Adds a document of derived metrics (a preview too: the same call) |
 | `apply_device_schemas()` | `0295` | yes | Applies a document of device schemas (a preview too: the same call; schema:manage) |
 | `approve_proposal()` | `0165` | yes | Applies a proposed change |
 | `audit_trail_backup_job_ids_matching()` | `0001` | no | A read: the Audit Trail's search. |

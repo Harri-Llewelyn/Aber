@@ -1,0 +1,12 @@
+{
+  "about": "A kind there is not.",
+  "path": "$[0].kind",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "average",
+      "input": "@COUNTER@"
+    }
+  ]
+}

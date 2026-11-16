@@ -1,0 +1,12 @@
+{
+  "about": "An empty name.",
+  "path": "$[0].name",
+  "database": false,
+  "document": [
+    {
+      "name": "",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

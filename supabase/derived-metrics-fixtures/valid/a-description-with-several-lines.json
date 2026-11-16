@@ -1,0 +1,11 @@
+{
+  "about": "A description may run over lines.",
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@",
+      "description": "Parts per hour.\nFrom the part counter."
+    }
+  ]
+}

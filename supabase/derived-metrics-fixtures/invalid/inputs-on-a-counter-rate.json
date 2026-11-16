@@ -1,0 +1,22 @@
+{
+  "about": "Inputs belong to a sum.",
+  "path": "$[0].inputs",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@",
+      "inputs": [
+        {
+          "metric": "@PHASE_A@",
+          "sign": 1
+        },
+        {
+          "metric": "@PHASE_B@",
+          "sign": 1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "about": "The inputs of a sum share one unit.",
+  "path": "$[0].inputs",
+  "database": true,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Sum",
+      "kind": "sum",
+      "inputs": [
+        {
+          "metric": "@PHASE_A@",
+          "sign": 1
+        },
+        {
+          "metric": "@PHASE_KW@",
+          "sign": 1
+        }
+      ]
+    }
+  ]
+}

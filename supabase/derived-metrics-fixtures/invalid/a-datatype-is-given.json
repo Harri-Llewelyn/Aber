@@ -1,0 +1,13 @@
+{
+  "about": "The datatype is always Double.",
+  "path": "$[0].datatype",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@",
+      "datatype": 10
+    }
+  ]
+}

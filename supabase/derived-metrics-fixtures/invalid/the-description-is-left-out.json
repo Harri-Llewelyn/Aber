@@ -1,0 +1,12 @@
+{
+  "about": "A name that exists with a description, and a file with none.",
+  "path": "$[0].name",
+  "database": true,
+  "document": [
+    {
+      "name": "@DERIVED@",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "about": "A text where a derived metric is expected.",
+  "path": "$[0]",
+  "database": false,
+  "document": [
+    "Test_0297_Guard/New_Rate"
+  ]
+}

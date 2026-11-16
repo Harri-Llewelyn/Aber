@@ -1,0 +1,13 @@
+{
+  "about": "A number for a description.",
+  "path": "$[0].description",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@",
+      "description": 5
+    }
+  ]
+}

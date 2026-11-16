@@ -1,0 +1,12 @@
+{
+  "about": "A name a measured metric holds.",
+  "path": "$[0].name",
+  "database": true,
+  "document": [
+    {
+      "name": "@MEASURED_HELD@",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

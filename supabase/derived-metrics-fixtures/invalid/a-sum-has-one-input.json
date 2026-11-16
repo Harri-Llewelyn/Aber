@@ -1,0 +1,17 @@
+{
+  "about": "A sum of one input.",
+  "path": "$[0].inputs",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Sum",
+      "kind": "sum",
+      "inputs": [
+        {
+          "metric": "@PHASE_A@",
+          "sign": 1
+        }
+      ]
+    }
+  ]
+}
