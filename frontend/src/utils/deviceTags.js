@@ -89,15 +89,16 @@ export function modelledMetricsAcross(schemaOrSchemas) {
   return evaluable ? union : null
 }
 
-/** The tag applied to a device publishing metrics its schema does not account for. */
+/** The finding on a device publishing metrics its schema does not account for. */
 export const UNMODELLED_TAG = 'Unmodelled'
 
 /**
- * The device-type tags implied by its schema: the distinct groups of the metrics it models. Drawn
- * from the schema rather than from what the device last published, so a provisioned device is
- * tagged before its first birth and an unmodelled metric confers no tag.
+ * A device's metric groups: the distinct groups of the metrics its schemas model, sorted. Drawn
+ * from the schema rather than from what the device last published, so a provisioned device has
+ * them before its first birth and an unmodelled metric confers none. The findings against a device
+ * are not groups; see deviceFindings().
  */
-export function deviceGroupTags(device, schemaOrSchemas) {
+export function deviceTagList(device, schemaOrSchemas) {
   const modelled = modelledMetricsAcross(schemaOrSchemas)
   if (!modelled) return []
 
@@ -109,7 +110,7 @@ export function deviceGroupTags(device, schemaOrSchemas) {
   return [...groups].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
 }
 
-/** The tag applied to a device reporting a value outside its metric's declared vocabulary. */
+/** The finding on a device reporting a value outside its metric's declared vocabulary. */
 export const OUT_OF_VOCABULARY_TAG = 'Out of vocabulary'
 
 /**
@@ -153,46 +154,32 @@ export function hasOutOfVocabularyValues(latestValues, catalog) {
 }
 
 /**
- * Every tag a device carries: its schema's metric groups, then `Unmodelled` and `Out of vocabulary`
- * last, since those are findings. `latestValues` and `catalog` are optional: without telemetry the
- * finding is absent rather than clean.
+ * The findings against a device, each with the metrics behind it: `Unmodelled` (metrics its last
+ * birth declared that none of its schemas model) and `Out of vocabulary` (last values outside the
+ * metric's permitted values). Every metric is `{ name }`; an Out of vocabulary one also carries
+ * `value` and `permitted`. Empty when there is none. `latestValues` and `catalog` are optional:
+ * without telemetry the second finding is absent rather than clean.
  */
-export function deviceTagList(device, schemaOrSchemas, latestValues, catalog) {
-  const tags = deviceGroupTags(device, schemaOrSchemas)
-  if (hasUnmodelledMetrics(device, schemaOrSchemas)) tags.push(UNMODELLED_TAG)
-  if (hasOutOfVocabularyValues(latestValues, catalog)) tags.push(OUT_OF_VOCABULARY_TAG)
-  return tags
+export function deviceFindings(device, schemaOrSchemas, latestValues, catalog) {
+  const findings = []
+  const unmodelled = unmodelledMetrics(device, schemaOrSchemas)
+  if (unmodelled.length > 0) findings.push({ tag: UNMODELLED_TAG, metrics: unmodelled.map(name => ({ name })) })
+  const outside = outOfVocabularyMetrics(latestValues, catalog)
+  if (outside.length > 0) findings.push({ tag: OUT_OF_VOCABULARY_TAG, metrics: outside })
+  return findings
 }
 
-/** Whether a device carries a given tag. */
-export function deviceHasTag(device, schemaOrSchemas, tag, latestValues, catalog) {
+/** Whether a device carries a given metric group. */
+export function deviceHasTag(device, schemaOrSchemas, tag) {
   if (!tag) return true
-  return deviceTagList(device, schemaOrSchemas, latestValues, catalog).includes(tag)
+  return deviceTagList(device, schemaOrSchemas).includes(tag)
 }
 
-/**
- * Every tag present across a fleet, for a filter. Unmodelled is offered only when a device has it.
- *
- * `latestFor` is a function from device to its last values, not a map: telemetry is keyed on
- * `sparkplug_id`, a device row on its uuid, and a wrong key produces no finding rather than an
- * error.
- */
-export function availableTags(devices, schemas, latestFor, catalog) {
+/** Every metric group present across a fleet, sorted, for a filter. */
+export function availableTags(devices, schemas) {
   const groups = new Set()
-  let anyUnmodelled = false
-  let anyOutOfVocabulary = false
-
   for (const device of devices || []) {
-    const attached = schemasForDevice(device, schemas)
-    for (const tag of deviceGroupTags(device, attached)) groups.add(tag)
-    if (!anyUnmodelled && hasUnmodelledMetrics(device, attached)) anyUnmodelled = true
-    if (!anyOutOfVocabulary && typeof latestFor === 'function') {
-      anyOutOfVocabulary = hasOutOfVocabularyValues(latestFor(device), catalog)
-    }
+    for (const tag of deviceTagList(device, schemasForDevice(device, schemas))) groups.add(tag)
   }
-
-  const sorted = [...groups].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-  if (anyUnmodelled) sorted.push(UNMODELLED_TAG)
-  if (anyOutOfVocabulary) sorted.push(OUT_OF_VOCABULARY_TAG)
-  return sorted
+  return [...groups].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
 }

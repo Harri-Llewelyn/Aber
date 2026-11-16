@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   modelledMetrics, unmodelledMetrics, hasUnmodelledMetrics,
-  deviceGroupTags, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
+  deviceTagList, deviceFindings, deviceHasTag, availableTags, UNMODELLED_TAG, OUT_OF_VOCABULARY_TAG
 } from '../utils/deviceTags'
 
 const builderSchema = {
@@ -96,49 +96,47 @@ describe('unmodelledMetrics', () => {
   })
 })
 
-describe('deviceGroupTags', () => {
+describe('deviceTagList', () => {
   it('is the distinct groups of the metrics the schema models', () => {
-    expect(deviceGroupTags(device(), builderSchema)).toEqual(['Axes'])
+    expect(deviceTagList(device(), builderSchema)).toEqual(['Axes'])
   })
 
-  it('gives a device several tags from a single schema', () => {
-    // The reason multiple schemas per device were not needed to support multiple tags.
+  it('gives a device several groups from a single schema', () => {
+    // One schema is enough for a device to have several groups.
     const mixed = {
       schema_definition: {
         properties: { 'Axes/C/ANGLE': {}, 'Environmental/HUMIDITY_RELATIVE': {}, 'Axes/X/POSITION': {} }
       }
     }
-    expect(deviceGroupTags(device(), mixed)).toEqual(['Axes', 'Environmental'])
+    expect(deviceTagList(device(), mixed)).toEqual(['Axes', 'Environmental'])
   })
 
-  it('ignores ungrouped metrics — a flat name confers no tag', () => {
+  it('ignores ungrouped metrics — a flat name confers no group', () => {
     const flat = { schema_definition: { properties: { temperature: {}, 'Axes/C/ANGLE': {} } } }
-    expect(deviceGroupTags(device(), flat)).toEqual(['Axes'])
+    expect(deviceTagList(device(), flat)).toEqual(['Axes'])
   })
 
-  it('tags a provisioned device before its first birth', () => {
-    // Drawn from the schema, not from observation, so a device can be found by type while you
-    // are still waiting for it to appear.
-    expect(deviceGroupTags(device({ last_birth_metrics: null }), builderSchema)).toEqual(['Axes'])
+  it('gives a provisioned device its groups before its first birth', () => {
+    // Drawn from the schema, not from observation, so a device can be found by its metric groups while
+    // you are still waiting for it to appear.
+    expect(deviceTagList(device({ last_birth_metrics: null }), builderSchema)).toEqual(['Axes'])
   })
 
   it('is empty without a schema, or with one that cannot be evaluated', () => {
-    expect(deviceGroupTags(device(), null)).toEqual([])
-    expect(deviceGroupTags(device(), { schema_definition: { type: 'object' } })).toEqual([])
+    expect(deviceTagList(device(), null)).toEqual([])
+    expect(deviceTagList(device(), { schema_definition: { type: 'object' } })).toEqual([])
   })
 })
 
-describe('deviceTagList', () => {
-  it('appends Unmodelled, last, when the device publishes beyond its schema', () => {
+describe('deviceTagList: the groups only', () => {
+  it('leaves a device publishing beyond its schema with its groups alone', () => {
+    // Unmodelled is a finding, not a metric group: it is deviceFindings()'s, so the Metric groups
+    // filter and column never offer it.
     const d = device({ last_birth_metrics: ['Axes/C/ANGLE', 'Environmental/HUMIDITY_RELATIVE'] })
-    expect(deviceTagList(d, builderSchema)).toEqual(['Axes', UNMODELLED_TAG])
+    expect(deviceTagList(d, builderSchema)).toEqual(['Axes'])
   })
 
-  it('omits Unmodelled for a conforming device', () => {
-    expect(deviceTagList(device(), builderSchema)).toEqual(['Axes'])
-  })
-
-  it('does not let an unmodelled metric confer its own group as a tag', () => {
+  it('does not let an unmodelled metric confer its own group', () => {
     // Otherwise publishing Environmental/HUMIDITY_RELATIVE outside the schema would quietly
     // make it an Environmental device, legitimising the drift instead of surfacing it.
     const d = device({ last_birth_metrics: ['Axes/C/ANGLE', 'Environmental/HUMIDITY_RELATIVE'] })
@@ -146,11 +144,54 @@ describe('deviceTagList', () => {
   })
 })
 
+describe('deviceFindings', () => {
+  const CATALOG = [{ name: 'Axes/C/ANGLE', permitted_values: ['0', '90'] }]
+
+  it('is empty for a device that conforms and reports legal values', () => {
+    expect(deviceFindings(device(), builderSchema, { 'Axes/C/ANGLE': '90' }, CATALOG)).toEqual([])
+  })
+
+  it('names Unmodelled with the metrics the last birth declared outside the schemas', () => {
+    const d = device({ last_birth_metrics: ['Axes/C/ANGLE', 'Environmental/HUMIDITY_RELATIVE', 'Zed'] })
+    expect(deviceFindings(d, builderSchema)).toEqual([
+      { tag: UNMODELLED_TAG, metrics: [{ name: 'Environmental/HUMIDITY_RELATIVE' }, { name: 'Zed' }] }
+    ])
+  })
+
+  it('names Out of vocabulary with each metric, its value and what is permitted', () => {
+    const found = deviceFindings(device(), builderSchema, { 'Axes/C/ANGLE': '45' }, CATALOG)
+    expect(found).toEqual([
+      { tag: OUT_OF_VOCABULARY_TAG, metrics: [{ name: 'Axes/C/ANGLE', value: '45', permitted: ['0', '90'] }] }
+    ])
+  })
+
+  it('lists both, Unmodelled first, when a device has both', () => {
+    const d = device({ last_birth_metrics: ['Axes/C/ANGLE', 'Zed'] })
+    expect(deviceFindings(d, builderSchema, { 'Axes/C/ANGLE': '45' }, CATALOG).map(f => f.tag))
+      .toEqual([UNMODELLED_TAG, OUT_OF_VOCABULARY_TAG])
+  })
+
+  it('leaves Out of vocabulary out, rather than clean, when no telemetry was loaded', () => {
+    expect(deviceFindings(device(), builderSchema)).toEqual([])
+    expect(deviceFindings(device(), builderSchema, null, CATALOG)).toEqual([])
+  })
+
+  it('clears Unmodelled the moment the schema models the metric, with no new birth', () => {
+    const d = device({ last_birth_metrics: ['Axes/C/ANGLE', 'Zed'] })
+    const widened = {
+      ...builderSchema,
+      schema_definition: { properties: { ...builderSchema.schema_definition.properties, Zed: {} } }
+    }
+    expect(deviceFindings(d, builderSchema)).toHaveLength(1)
+    expect(deviceFindings(d, widened)).toEqual([])
+  })
+})
+
 describe('deviceHasTag', () => {
-  it('matches group and Unmodelled tags alike', () => {
+  it('matches a metric group, and never a finding', () => {
     const d = device({ last_birth_metrics: ['Axes/C/ANGLE', 'Environmental/HUMIDITY_RELATIVE'] })
     expect(deviceHasTag(d, builderSchema, 'Axes')).toBe(true)
-    expect(deviceHasTag(d, builderSchema, UNMODELLED_TAG)).toBe(true)
+    expect(deviceHasTag(d, builderSchema, UNMODELLED_TAG)).toBe(false)
     expect(deviceHasTag(d, builderSchema, 'Environmental')).toBe(false)
   })
 
@@ -163,15 +204,22 @@ describe('deviceHasTag', () => {
 describe('availableTags', () => {
   const schemas = [builderSchema]
 
-  it('collects every tag across the fleet, deduplicated', () => {
+  it('collects every metric group across the fleet, deduplicated', () => {
     const fleet = [device({ asset_id: 'a' }), device({ asset_id: 'b' })]
     expect(availableTags(fleet, schemas)).toEqual(['Axes'])
   })
 
-  it('offers Unmodelled only when some device actually has it', () => {
-    expect(availableTags([device()], schemas)).toEqual(['Axes'])
+  it('offers groups only: a device with a finding adds no entry', () => {
     const drifting = device({ last_birth_metrics: ['Axes/C/ANGLE', 'Environmental/HUMIDITY_RELATIVE'] })
-    expect(availableTags([device(), drifting], schemas)).toEqual(['Axes', UNMODELLED_TAG])
+    expect(availableTags([device(), drifting], schemas)).toEqual(['Axes'])
+  })
+
+  it('sorts the groups regardless of case', () => {
+    const mixed = {
+      schema_uuid: 'schema-2',
+      schema_definition: { properties: { 'oee/A': {}, 'Controller/B': {}, 'Axes/C': {} } }
+    }
+    expect(availableTags([device({ submodel_schema_ids: ['schema-2'] })], [mixed])).toEqual(['Axes', 'Controller', 'oee'])
   })
 
   it('is empty for an unschematised fleet, so the filter can be disabled', () => {

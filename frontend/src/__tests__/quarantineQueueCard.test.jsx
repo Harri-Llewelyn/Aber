@@ -273,11 +273,11 @@ describe('the Registered tab', () => {
     expect(screen.queryByRole('group', { name: 'Gateway' })).toBeNull()
   })
 
-  it('holds lifecycle, type, schema, gateway and cell in the Filters popover', async () => {
+  it('holds lifecycle, metric groups, schema, gateway and cell in the Filters popover', async () => {
     await show([device()])
 
     openFilters()
-    for (const name of ['Lifecycle', 'Type', 'Schema', 'Gateway', 'Cell']) {
+    for (const name of ['Lifecycle', 'Metric groups', 'Schema', 'Gateway', 'Cell']) {
       expect(filterList(name)).toBeInTheDocument()
     }
   })

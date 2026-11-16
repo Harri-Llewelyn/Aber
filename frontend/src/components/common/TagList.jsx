@@ -3,8 +3,8 @@ import { Tooltip } from './Tooltip'
 
 /**
  * A tag list that collapses past `limit`, with a "+N" control to reveal the rest. Priority tags are
- * floated to the front before the cut and never collapsed: `deviceTagList()` appends `Unmodelled`
- * last, and that is the tag that requires action. Each entry is `{ key, content, className?,
+ * floated to the front before the cut, so a list collapsed past `limit` shows them first: the Cells
+ * page pins an archived gateway. Each entry is `{ key, content, className?,
  * style?, title?, priority?, label? }`; `title` is the entry's tooltip, for a pointer, and `label`
  * is what the overflow tooltip reads, which differs from `key` where the identity is a UUID.
  * An entry with `parts: [{ key, content, className? }]` instead of `content` is drawn as that many

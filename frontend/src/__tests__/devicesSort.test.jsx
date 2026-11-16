@@ -8,7 +8,7 @@ import { tabLink } from '../test/tabBar'
 /**
  * Sorting the Devices page's two tables by a column (#801): the Registered roster and the Quarantine
  * queue. A column sorts on what its cell shows, so the fixtures sit where that differs from the field
- * underneath: a status an alert outranks, a type read off the schema's metric groups, a cell by its
+ * underneath: a status an alert outranks, metric groups read off the schemas, a cell by its
  * name rather than its id, a lane by its label, a time by its instant.
  */
 
@@ -50,7 +50,7 @@ const CELLS = [
   { cell_id: 'cell-a', cell_name: 'Line 10', is_archived: false },
   { cell_id: 'cell-b', cell_name: 'Line 9', is_archived: false }
 ]
-// A device's Type is the groups of the metrics its schema models. Each schema is named against the
+// A device's Metric groups are the groups of the metrics its schema models. Each schema is named against the
 // order of its tags, so a sort on the schema's name comes out differently.
 const SCHEMAS = [
   { schema_uuid: 'schema-press', schema_name: 'Zeta Press', schema_definition: { properties: { 'Hydraulic/PRESSURE': {}, 'Axes/LOAD': {} } } },
@@ -58,7 +58,7 @@ const SCHEMAS = [
   { schema_uuid: 'schema-lathe', schema_name: 'Mid Lathe', schema_definition: { properties: { 'Spindle/SPEED': {} } } }
 ]
 
-// Running, in Line 10 through its gateway, typed Energy.
+// Running, in Line 10 through its gateway, in the Energy group.
 const drill = device({
   asset_id: 'aaaaaaaa-0000-4000-8000-000000000001', asset_name: 'Drill_Online',
   sparkplug_id: 'devaaaaaaaa000040008001', submodel_schema_ids: ['schema-meter']
@@ -74,7 +74,7 @@ const press = device({
   sparkplug_id: 'devcccccccc000040008003', submodel_schema_ids: ['schema-press'],
   location_scope: 'site_wide', location_source: 'site_wide', effective_cell_id: null
 })
-// Went quiet; no schema, so no Type; no gateway and no cell, so Unassigned.
+// Went quiet; no schema, so no Metric groups; no gateway and no cell, so Unassigned.
 const mill = device({
   asset_id: 'dddddddd-0000-4000-8000-000000000004', asset_name: 'Mill_Offline',
   sparkplug_id: 'devdddddddd000040008004', status: 'OFFLINE', submodel_schema_ids: [],
@@ -175,17 +175,17 @@ describe('Devices: sorting the Registered roster by a column (#801)', () => {
     expect(sortInAddress()).toBe('-status')
   })
 
-  it('sorts Type by the tags the row shows, not the schema behind them, with a device that has none last either way', async () => {
+  it('sorts Metric groups by the groups the row shows, not the schema behind them, with a device that has none last either way', async () => {
     await show()
 
-    sortBy('Type')
+    sortBy('Metric groups')
     expect(listed()).toEqual(['Press_Alarm', 'Drill_Online', 'Lathe_Overdue', 'Mill_Offline'])
-    expect(sortInAddress()).toBe('type')
+    expect(sortInAddress()).toBe('group')
 
-    sortBy('Type')
+    sortBy('Metric groups')
     expect(listed()).toEqual(['Lathe_Overdue', 'Drill_Online', 'Press_Alarm', 'Mill_Offline'])
-    expect(header('Type')).toHaveAttribute('aria-sort', 'descending')
-    expect(sortInAddress()).toBe('-type')
+    expect(header('Metric groups')).toHaveAttribute('aria-sort', 'descending')
+    expect(sortInAddress()).toBe('-group')
   })
 
   it('sorts Cell by the cell\'s name in natural order, a lane by its label, and a device no cell resolves to last either way', async () => {
