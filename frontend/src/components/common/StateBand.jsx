@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { OverflowText } from './OverflowText'
-import { NEAR_HUE_DEG, hueGap, shareWords, stateHue } from '../../utils/history'
+import { NEAR_HUE_DEG, changeWords, durationWords, hueGap, shareWords, stateHue } from '../../utils/history'
 
 /** Under this many pixels a run keeps its colour but no name: padding and an ellipsis leave a lone ellipsis. */
 const NAMED_RUN_PX = 36
@@ -26,12 +26,13 @@ const hueOf = (state) => ({ '--state-hue': stateHue(state) })
  * to tell apart (NEAR_HUE_DEG). A carried stretch is hatched. A run under NAMED_RUN_PX keeps its
  * colour and no name, at least 1px wide so a brief state is never lost; the head names it under
  * the pointer.
- * A bucket that held more than one value (`marks`) is dotted along its foot.
+ * A bucket that held more than one value (`marks`) is dotted along its foot. With `flag`, the runs
+ * are true and false, drawn in the two flag colours of the theme, never hashed.
  *
  * It takes the runs (stateRuns(), or a change read's) and the window, and fills the width it is
  * given, so a chart, or a lane of History's Overview, can place it on any time scale.
  */
-export function StateBand({ runs, marks = [], start, end }) {
+export function StateBand({ runs, marks = [], start, end, flag = false }) {
   const ref = useRef(null)
   const [px, setPx] = useState(0)
   useEffect(() => {
@@ -54,16 +55,17 @@ export function StateBand({ runs, marks = [], start, end }) {
         const named = !(px > 0 && wide < NAMED_RUN_PX)
         const after = runs[i - 1]?.endMs === r.startMs ? runs[i - 1] : null
         const before = runs[i + 1]?.startMs === r.endMs
-        const apart = after && wide >= DIVIDED_RUN_PX && hueGap(after.state, r.state) < NEAR_HUE_DEG
+        const apart = !flag && after && wide >= DIVIDED_RUN_PX && hueGap(after.state, r.state) < NEAR_HUE_DEG
         const classes = [
           'chart-state',
+          flag ? `chart-flag-${r.state}` : '',
           named ? '' : 'chart-state-thin',
           after ? '' : 'chart-state-first',
           before ? '' : 'chart-state-last',
           apart ? 'chart-state-divided' : '',
         ].filter(Boolean).join(' ')
         return (
-          <span key={r.from} className={classes} style={{ ...part(r.startMs, r.endMs, whole, before ? OVERLAP_PCT : 0), ...hueOf(r.state) }}>
+          <span key={r.from} className={classes} style={{ ...part(r.startMs, r.endMs, whole, before ? OVERLAP_PCT : 0), ...(flag ? null : hueOf(r.state)) }}>
             {r.carried.map(c => (
               <span key={c.startMs} className="chart-state-carried" style={part(c.startMs, c.endMs, own)} />
             ))}
@@ -79,17 +81,25 @@ export function StateBand({ runs, marks = [], start, end }) {
 /**
  * Under a state's band: each value with its colour and its share of the charted time, then the
  * others, and a note for each mark the band carries. `stateKey` is stateKey() of the runs' shares.
+ * A flag's key (`flag`) says each value's time as well, and `changes`, changeCount()'s, how many
+ * times it changed, as at least that many when only buckets were read.
  */
-export function StateBandKey({ stateKey: key, carried, mixed }) {
+export function StateBandKey({ stateKey: key, carried, mixed, flag = false, changes = null }) {
   return (
     <ul className="chart-state-key">
       {key.shown.map(s => (
-        <li key={s.state} className="chart-state-key-value" style={hueOf(s.state)}>
+        <li key={s.state} className={`chart-state-key-value${flag ? ` chart-flag-${s.state}` : ''}`} style={flag ? undefined : hueOf(s.state)}>
           <span className="chart-state-swatch" aria-hidden="true" />
           <OverflowText className="chart-state-key-name">{s.state}</OverflowText>
           <span className="chart-state-share">{shareWords(s.share)}</span>
+          {flag && <span className="chart-state-time">{durationWords(s.ms)}</span>}
         </li>
       ))}
+      {changes && (
+        <li className="chart-state-key-plain chart-state-key-changes">
+          <span className="chart-state-key-name">{changeWords(changes)}</span>
+        </li>
+      )}
       {key.others && (
         <li className="chart-state-key-plain">
           <span className="chart-state-swatch" aria-hidden="true" />

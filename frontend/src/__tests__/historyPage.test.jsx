@@ -773,8 +773,12 @@ describe('every change of a text or a flag', () => {
       : { metric_name: name, read: 'changes', change_ts: [at(MIN), at(10 * MIN), at(10 * MIN + 30000)], val_string: ['RUNNING', 'IDLE', 'RUNNING'], val_bool: [null, null, null], carried_string: 'RUNNING', carried_bool: null, n_changes: 3, raw_from: at(-DAY) })))
   }
   const DAY = 24 * 60 * MIN
-  const flagPlot = () => plots.find(p => p.opts.scales.y.range?.[0] === -0.2 && !p.destroyed)
-  const lastChangeRead = () => api.readTelemetryChanges.mock.calls.at(-1)[0]
+  /** The pointer on a strip's box at `percent` of its width, the box being 600px wide. */
+  const pointAt = (figure, percent) => {
+    const box = figure.querySelector('.chart-box-states')
+    box.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 34, right: 600, bottom: 34 })
+    fireEvent.pointerMove(box, { clientX: (percent / 100) * 600 })
+  }
 
   beforeEach(() => {
     api.get.mockImplementation((p) => {
@@ -799,24 +803,52 @@ describe('every change of a text or a flag', () => {
     expect(api.readTelemetryChanges.mock.calls.map(([a]) => [a.metricNames, a.bucketMinutes])).toEqual([[['Controller/EXECUTION', 'Door/OPEN'], 60]])
   })
 
-  it("steps a flag at each change's own time, the value carried in dashed up to the first", async () => {
+  it("draws a flag as a band of true and false at each change's own time, the value carried in hatched up to the first", async () => {
     await visit(`/history/device/${CELL}?range=1h`)
     await screen.findByText(/text and flags show every change/)
-    const from = Date.parse(lastChangeRead().from) / 1000
-    const { data, opts } = flagPlot()
-    const [xs, , , read, held] = data
-    expect(xs.slice(0, 4).map(x => x - from)).toEqual([0, 300, 320, 1800])
-    expect(xs).toHaveLength(5)
-    expect(read).toEqual([null, 1, 0, 1, 1])
-    expect(held).toEqual([0, 1, null, null, null])
-    // No band: a flag of every change holds one value at a time.
-    expect(opts.bands).toEqual([])
-    // The run at the pointer's time, not the change nearest it, to the second.
-    const figure = screen.getByRole('figure', { name: 'Door/OPEN' })
-    const u = { cursor: { idx: 2, left: 310 }, posToVal: (px) => from + px }
-    act(() => { opts.hooks.setCursor[0](u) })
+    const figure = await screen.findByRole('figure', { name: 'Door/OPEN' })
+    await waitFor(() => expect(figure.querySelectorAll('.chart-state')).toHaveLength(4))
+    // Only the number is a uPlot chart: a flag has no step line.
+    expect(plots.filter(p => !p.destroyed)).toHaveLength(1)
+    expect(figure.querySelector('.chart-box-states').style.marginLeft).toBe(`${PLOT_LEFT_PX}px`)
+    const runs = [...figure.querySelectorAll('.chart-state')]
+    const word = (r) => r.className.match(/chart-flag-(true|false)/)[1]
+    expect(runs.map(word)).toEqual(['false', 'true', 'false', 'true'])
+    expect(runs.map(r => r.textContent)).toEqual(['false', 'true', 'false', 'true'])
+    expect(runs.some(r => r.style.getPropertyValue('--state-hue'))).toBe(false)
+    // 20 s of true, 5 minutes into the hour, at its own place on the window.
+    const [first, open] = runs
+    expect(parseFloat(open.style.left)).toBeCloseTo((5 / 60) * 100, 1)
+    expect(parseFloat(open.style.width)).toBeCloseTo((20 / 3600) * 100, 1)
+    // False was carried in: hatched up to the first change, at 5 minutes.
+    const [held] = first.querySelectorAll('.chart-state-carried')
+    expect(parseFloat(held.style.width)).toBeCloseTo(100, 5)
+    expect(parseFloat(first.style.width)).toBeCloseTo((5 / 60) * 100, 1)
+    expect(figure.querySelector('.history-chart-read')).toBeNull()
+  })
+
+  it("keys a flag's time and share in each value, and how many times it changed", async () => {
+    await visit(`/history/device/${CELL}?range=1h`)
+    const figure = await screen.findByRole('figure', { name: 'Door/OPEN' })
+    await waitFor(() => expect(figure.querySelectorAll('.chart-state')).toHaveLength(4))
+    const items = [...figure.querySelectorAll('.chart-state-key li')].map(li => li.textContent)
+    // true holds 30 min 20 s of the hour and false the 29 min 40 s: the key's time rounds to the minute.
+    expect(items).toEqual([expect.stringMatching(/^true\d+%\d+ min$/), expect.stringMatching(/^false\d+%\d+ min$/), '3 changes', 'carried forward'])
+    const values = [...figure.querySelectorAll('.chart-state-key-value')].map(li => li.className)
+    expect(values.map(c => c.match(/chart-flag-(true|false)/)[1])).toEqual(['true', 'false'])
+    expect(screen.getByRole('img', { name: 'Door/OPEN' }))
+      .toHaveAccessibleDescription(/, every change\. Latest true, since .+\. 3 changes in this window\. Time in each value: true \d+% \(\d+ min\), false \d+% \(\d+ min\)\./)
+  })
+
+  it('names the run under the pointer, to the second, and the latest again once it leaves', async () => {
+    await visit(`/history/device/${CELL}?range=1h`)
+    const figure = await screen.findByRole('figure', { name: 'Door/OPEN' })
+    await waitFor(() => expect(figure.querySelectorAll('.chart-state')).toHaveLength(4))
+    const [, open] = figure.querySelectorAll('.chart-state')
+    // 20 s is 3px of 600: found from the middle of it.
+    pointAt(figure, parseFloat(open.style.left) + parseFloat(open.style.width) / 2)
     expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/ · true, 20 s$/)
-    act(() => { opts.hooks.setCursor[0]({ cursor: { idx: null } }) })
+    fireEvent.pointerLeave(figure.querySelector('.chart-box-states'))
     expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/^Latest true · since /)
   })
 
@@ -859,7 +891,7 @@ describe('every change of a text or a flag', () => {
       .toHaveAccessibleDescription(/, the last value in each 1-minute bucket, past the 2,000-change cap\. .*1 of \d+ buckets held more than one value, and show the last\./)
   })
 
-  it("marks a flag's bucket that held both values as a band from false to true", async () => {
+  it("marks a flag's bucket that held both values along the foot of its band, and counts its changes as at least", async () => {
     api.readTelemetryChanges.mockImplementation(({ from, bucketMinutes, metricNames }) => Promise.resolve(metricNames.map(name => {
       const first = Math.floor(Date.parse(from) / (bucketMinutes * MIN)) * bucketMinutes * MIN
       return { metric_name: name, read: 'reading_cap', marked_ts: [new Date(first + 2 * MIN).toISOString()], marked_values: [2] }
@@ -867,15 +899,15 @@ describe('every change of a text or a flag', () => {
     await visit(`/history/device/${CELL}?range=1h`)
     expect(await screen.findByText('3 metrics, in 1-minute buckets; text and flags show the last value in each 1-minute bucket, past the 20,000-reading cap')).toBeInTheDocument()
     expect(document.querySelector('.history-chart-read')).toBeNull()
-    const { data, opts } = flagPlot()
-    expect(opts.bands).toHaveLength(1)
-    const [, max, min] = data
-    // Bucket 2 held both; bucket 1 held only true, and bucket 3 only true.
-    expect([max[2], min[2]]).toEqual([1, 0])
-    expect([max[1], min[1], max[3], min[3]]).toEqual([1, 1, 1, 1])
     const figure = screen.getByRole('figure', { name: 'Door/OPEN' })
-    act(() => { opts.hooks.setCursor[0]({ cursor: { idx: 2 } }) })
-    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/ · false, both values in this bucket$/)
+    // The flag is true in odd buckets, so each bucket is a run of its own: 60 buckets, 59 changes between them.
+    await waitFor(() => expect(figure.querySelectorAll('.chart-state').length).toBeGreaterThanOrEqual(59))
+    const marks = figure.querySelectorAll('.chart-state-mixed')
+    expect(marks).toHaveLength(1)
+    expect([...figure.querySelectorAll('.chart-state-key li')].map(li => li.textContent)).toContain('at least 59 changes')
+    pointAt(figure, parseFloat(marks[0].style.left) + parseFloat(marks[0].style.width) / 2)
+    expect(figure.querySelector('.history-chart-hover')).toHaveTextContent(/ · both values in this bucket, (true|false) last$/)
+    expect(screen.getByRole('img', { name: 'Door/OPEN' })).toHaveAccessibleDescription(/At least 59 changes in this window\./)
   })
 
   it('says a window older than raw retention shows the last value in each bucket, and when raw starts', async () => {

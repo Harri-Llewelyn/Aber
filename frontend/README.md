@@ -1847,7 +1847,8 @@ arrived over the window, a lane per device, before anything is charted. Its arit
 **`common/TimeSeriesChart.jsx` is the one time-series chart**, on uPlot, which later tabs reuse.
 It draws the bucket's average as the line and its minimum to maximum as a band. A carried bucket
 is on a dashed line, never on the solid one, so a quiet stretch never reads as a measured one. A
-flag steps between false and true, and a state is a strip of its runs in text.
+state and a flag are not lines: each is one band of its runs (`common/StateBand.jsx`), a state's in
+text and a flag's true and false.
 
 - **The head** reads the bucket under the pointer, and otherwise the latest reading
   (`latestWords()`): the newest bucket a reading arrived in, never a carried one, with its `last`
@@ -1874,14 +1875,24 @@ flag steps between false and true, and a state is a strip of its runs in text.
   and counts the rest as others. The head reads the run under the pointer (`runWords()`). A run
   under 36px has no name (`chart-state-thin`), and every run is at least 1px wide (`min-width`),
   over its neighbours when thinner, so a change of seconds over a day still shows.
+- **A flag** is the same band with `flag`: its runs' `state` is `flagWord()`, "true" or "false", and
+  App.css colours a run from two fixed tokens per theme (`--chart-true`, `--chart-false` and their
+  edges), never the hash. True is a lit blue and false a dim amber, 2.0:1 apart in lightness in the
+  dark theme and 1.6:1 in the light, 90° or more apart in hue; `themeContrast.test.js` holds the label
+  at AA on each fill and each edge at 3:1 on the card. The runs name `true` and `false`, never a schema's
+  words: nothing in the dashboard labels a Boolean's values (the schema builder's `permitted_values` is
+  a vocabulary check, not a label). Its key (`StateBandKey` with `flag`) says each value's share and
+  time (`durationWords()`), then `changeCount()`: the places one run gives way to another, exact for a
+  change read, and `atLeast` for a bucket read, which shows each bucket's last value only. A spell
+  shorter than a bucket is missed there, so the shares are over buckets too, and the help says so.
 - **Every change** (`changeSeries()`): a text's or a flag's series laid on its changes' own times,
   with `runs`, `exact`, each value's real stretch. `starts` are the window's start when a value was
-  carried in, each change, and where the last run stops, so a flag's stepped line steps when the
-  value did, and its carried start is dashed. The head reads the run at the pointer's time
+  carried in, each change, and where the last run stops, so a run starts when the value did, and its
+  carried start is hatched. The head reads the run at the pointer's time
   (`runNear()`, which prefers a run thinner than 8px within 4px of it) to the second. A bucket
-  series may carry `marked` (`markBuckets()`): a flag's bucket that held both values is the band
-  from false to true, and a state's is dotted along the strip's foot (`chart-state-mixed`), named
-  in the key and read under the pointer (`markWords()`).
+  series may carry `marked` (`markBuckets()`): a text's or a flag's bucket that held more than one
+  value is dotted along the band's foot (`chart-state-mixed`), named in the key and read under the
+  pointer (`markWords()`).
 
 | Prop | What it is |
 | :--- | :--- |
@@ -1898,7 +1909,7 @@ flag steps between false and true, and a state is a strip of its runs in text.
 | `height` | The plot's height in pixels, 140 by default |
 | `yRange` | A number chart's value scale, `[low, high]`, or null for uPlot's own: charts that compare share one (`sharedScale()`). Pass the same array while it is the same: a new one draws the chart again |
 | `label`, `head` | `label` names the chart in place of the metric and unit. `head` is what the title line shows in place of that name, such as a status dot and a link: the figure keeps `label` as its name |
-| `plugins` | uPlot plugins for a number or flag chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state strip takes none |
+| `plugins` | uPlot plugins for a number chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state or flag band takes none |
 | `note` | Which read the chart shows, in the head, when the status line says another (`readWords()`), or null |
 | `derived` | True for a derived metric: a `DerivedTag` beside the title, and "a derived metric" in the summary ([History's derived metrics](#historys-derived-metrics)) |
 
@@ -1939,7 +1950,7 @@ Metric tabs reuse: `common/SmallMultiples.jsx`, `common/HourHeatmap.jsx`, `commo
   `HISTORY_CHANGE_SERIES`, and draws every change per machine as the Device tab does.
 - **`SmallMultiples` draws one chart a member on one scale.** `sharedScale()` is the lowest minimum to the highest
   maximum across every number series, padded by 8%, and is each chart's `yRange`; the line above the charts says it
-  in words. A flag's scale is its own. The time axis, the cursor (`syncKey`) and the zoom band are shared, as on the Device
+  in words. A text or flag band has no scale. The time axis, the cursor (`syncKey`) and the zoom band are shared, as on the Device
   tab: `useChartBand()` holds the drag, which both tabs use. A member's title line is its status dot
   (`DeviceStatusDot`, as the Site Map draws it, with "Offline" in words), its name as an `OverflowText` link to its
   charts on the Device tab, and the alert shading from one `alert_occurrences()` read for every machine
@@ -2235,7 +2246,7 @@ its current value; Export saves its values. The database's rules are in
 `common/alertBands.js`). With each read the charts make, the hook reads the device's alerts over
 the same window and builds `alertBands()`: each occurrence clipped to the window, a still-firing
 one running to the read's moment, where the lines stop. `alertBandsPlugin()` passes them to every
-number and flag chart through `plugins`.
+number chart through `plugins`.
 
 - **Inside the plot area only**, from `bbox`, so a band lines up with the text strips' gutters.
   Under the series, a translucent fill of `--danger`. Over them, a solid `--danger` edge where the
@@ -2246,7 +2257,7 @@ number and flag chart through `plugins`.
   names each alert firing at that moment (`bandText()`). The row above the charts keys the shading
   in words with a link to the Alerts tab for the device and window (`AlertKey`).
 - **A failed read shades nothing.** The charts go on, and the read's thunk lets a stub without the
-  method read as no alerts. A state strip is not drawn by uPlot and is not shaded.
+  method read as no alerts. A state or flag band is not drawn by uPlot and is not shaded.
 
 ---
 

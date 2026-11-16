@@ -9,7 +9,7 @@ import {
   validRanges, withAlpha, STATE_KEY_MAX, durationWords, keyWords, latestReading, latestWords, momentWords, runWords,
   shareWords, hueGap, NEAR_HUE_DEG, stateHue, stateKey, stateRuns, stateShares, TEXT_BUCKET_MIN_PX, datatypeKind, readPlan, readableResolution,
   OTHER_GROUP, metricGroups, changeSeries, markBuckets, markedStretches, momentSecondsWords, readWords, runNear, spanWords,
-  stateReadLine,
+  stateReadLine, flagWord, changeCount, changeWords, markWords,
 } from '../utils/history'
 import { deviceHistoryUrl } from '../routes'
 
@@ -272,6 +272,11 @@ describe("a chart's series", () => {
     const flags = chartSeries([row(0, { last_bool: true }), row(1, { last_bool: false, is_carried: true })], starts)
     expect(flags.kind).toBe('flag')
     expect(flags.avg.slice(0, 2)).toEqual([1, 0])
+    // A flag is drawn as runs of true and false, as a state is of its text.
+    expect(flags.states.slice(0, 3)).toEqual(['true', 'false', null])
+    expect(flagWord(true)).toBe('true')
+    expect(flagWord(false)).toBe('false')
+    expect(flagWord(null)).toBeNull()
     const states = chartSeries([row(0, { last_string: 'ACTIVE' }), row(1, { last_string: 'READY' })], starts)
     expect(states.kind).toBe('state')
     expect(states.states.slice(0, 3)).toEqual(['ACTIVE', 'READY', null])
@@ -515,9 +520,11 @@ describe('every change of a text or a flag', () => {
     expect(series.carried).toEqual([true, false, false, false, false])
     expect(splitCarried(series)).toEqual({ read: [null, 1, 0, 1, 1], held: [0, 1, null, null, null] })
     expect(series.runs.map(r => [r.state, r.startMs - T0, r.endMs - T0, r.carried.length])).toEqual([
-      [false, 0, 5 * MINUTE, 1], [true, 5 * MINUTE, 5 * MINUTE + 20000, 0], [false, 5 * MINUTE + 20000, 30 * MINUTE, 0], [true, 30 * MINUTE, HOUR, 0],
+      ['false', 0, 5 * MINUTE, 1], ['true', 5 * MINUTE, 5 * MINUTE + 20000, 0], ['false', 5 * MINUTE + 20000, 30 * MINUTE, 0], ['true', 30 * MINUTE, HOUR, 0],
     ])
+    expect(series.states).toEqual(['false', 'true', 'false', 'true', 'true'])
     expect(series.changes).toBe(3)
+    expect(changeCount(series, series.runs)).toEqual({ count: 3, atLeast: false })
   })
 
   it("draws a text's runs from their real start to their real end, a first reading of the value carried in continuing its run", () => {
@@ -549,8 +556,8 @@ describe('every change of a text or a flag', () => {
     const { series } = changeSeries(flagRow(), span)
     const runs = series.runs
     // 20 s of true at 5 min: found from 5:30 only with 15 s of slack, not with 4.
-    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 4000).state).toBe(false)
-    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 15000).state).toBe(true)
+    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 4000).state).toBe('false')
+    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 15000).state).toBe('true')
     expect(runNear(runs, T0 + 20 * MINUTE)).toBe(runs[2])
     expect(runNear(runs, T0 + 2 * HOUR)).toBeNull()
   })
@@ -569,12 +576,14 @@ describe('every change of a text or a flag', () => {
     expect(latestWords(none, [], 1)).toBe('No reading in this window')
   })
 
-  it('marks a bucket that held more than one value, a flag as a band from false to true', () => {
+  it('marks a bucket that held more than one value, a flag as a text, along the foot of its band', () => {
     const starts = bucketStarts(T0, T0 + 4 * MINUTE, 1)
     const flag = chartSeries(starts.map((s, i) => ({ bucket_ts: new Date(s * 1000).toISOString(), last_bool: i % 2 === 0, n_rows: 1 })), starts)
     const marked = markBuckets(flag, starts, { read: 'change_cap', marked_ts: [at(MINUTE)], marked_values: [2] })
     expect(marked.marked).toEqual([0, 2, 0, 0])
-    expect([marked.min, marked.max]).toEqual([[1, 0, 1, 0], [1, 1, 1, 0]])
+    expect(markedStretches(marked, starts, { ...span, minutes: 1 }).map(m => [(m.startMs - T0) / MINUTE, m.values, m.last])).toEqual([[1, 2, false]])
+    expect(markWords({ startMs: T0 + MINUTE, endMs: T0 + 2 * MINUTE, values: 2, last: false }, 1, 'flag'))
+      .toBe(`${momentWords(T0 + MINUTE, 1)} – ${momentWords(T0 + 2 * MINUTE, 1).split(' ').pop()} · both values in this bucket, false last`)
     const state = chartSeries(starts.map(s => ({ bucket_ts: new Date(s * 1000).toISOString(), last_string: 'RUN', n_rows: 1 })), starts)
     const text = markBuckets(state, starts, { read: 'reading_cap', marked_ts: [at(2 * MINUTE)], marked_values: [3] })
     expect(markedStretches(text, starts, { ...span, minutes: 1 }).map(m => [(m.startMs - T0) / MINUTE, (m.endMs - T0) / MINUTE, m.values, m.last]))
@@ -594,6 +603,28 @@ describe('every change of a text or a flag', () => {
     expect(stateReadLine([{ kind: 'text', words: 'every change' }])).toEqual({ line: 'text shows every change', words: 'every change' })
     expect(stateReadLine([{ kind: 'flag', words: 'x' }, { kind: 'flag', words: 'every change' }]).line).toBe('flags show every change')
     expect(stateReadLine([{ kind: 'flag', words: 'x' }, { kind: 'text', words: 'y' }])).toEqual({ line: 'text and flags show x', words: 'x' })
+  })
+
+  it("says a flag's time in each value, and how many times it changed, in the key's words and the summary's", () => {
+    const flag = chartSeries(Array.from({ length: 10 }, (_, i) => ({
+      bucket_ts: new Date(T0 + i * MINUTE).toISOString(), last_bool: i < 6 || i === 9, n_rows: 1, is_carried: i === 3,
+    })), bucketStarts(T0, T0 + 10 * MINUTE, 1))
+    const starts = bucketStarts(T0, T0 + 10 * MINUTE, 1)
+    const runs = stateRuns(flag, starts, { start: T0, end: T0 + 10 * MINUTE, now: T0 + DAY, minutes: 1 })
+    expect(runs.map(r => [r.state, (r.endMs - r.startMs) / MINUTE])).toEqual([['true', 6], ['false', 3], ['true', 1]])
+    const key = stateKey(stateShares(runs))
+    expect(keyWords(key)).toBe('true 70%, false 30%')
+    expect(keyWords(key, { times: true })).toBe('true 70% (7 min), false 30% (3 min)')
+    // A bucket read shows each bucket's last value only, so two changes is the least it proves.
+    expect(changeCount(flag, runs)).toEqual({ count: 2, atLeast: true })
+    expect(changeWords({ count: 2, atLeast: true })).toBe('at least 2 changes')
+    expect(changeWords({ count: 1, atLeast: false })).toBe('1 change')
+    expect(changeWords({ count: 0, atLeast: false })).toBe('0 changes')
+    const resolution = HISTORY_RESOLUTIONS[0]
+    const summary = chartSummary({
+      metric: 'Door/OPEN', windowText: 'Last 10 minutes', resolution, series: flag, starts, span: { start: T0, end: T0 + 10 * MINUTE, now: T0 + DAY },
+    })
+    expect(summary).toContain('Time in each value: true 70% (7 min), false 30% (3 min). At least 2 changes in this window.')
   })
 
   it("gives a screen reader every change's count and each value's share", () => {

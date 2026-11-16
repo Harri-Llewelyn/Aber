@@ -101,6 +101,13 @@
   --chart-state-c:      0.065;
   --chart-state-edge-l: 0.70;
   --chart-state-edge-c: 0.115;
+  /* A flag's two colours, fixed, not hashed: true a lit blue, false a dim amber, so they differ in
+     lightness (2.0:1) as well as hue, and the name stays in every run wide enough. The label clears
+     5.7:1 on true and 11.5:1 on false, and each edge 7:1 on the card. */
+  --chart-true:       #175d9b;
+  --chart-true-edge:  #67b0f9;
+  --chart-false:      #472400;
+  --chart-false-edge: #f3ae58;
   /* History's Overview: a block's shade, fewer readings to more, a sequential blue ramp checked with
      the dataviz validator against this card. Sparse blocks recede toward the card and dense ones are
      a calm light blue. The step nearest the card clears 2:1 (2.08:1), the floor for an ordered ramp;
@@ -216,6 +223,12 @@
   --chart-state-c:      0.045;
   --chart-state-edge-l: 0.60;
   --chart-state-edge-c: 0.10;
+  /* The same two on the light card: true a mid blue, false a pale amber (1.6:1 apart in lightness).
+     The label clears 9.6:1 and 15:1, and each edge 5:1 on the card. */
+  --chart-true:       #91c3f6;
+  --chart-true-edge:  #006bbb;
+  --chart-false:      #ffebc2;
+  --chart-false-edge: #a35e16;
   /* Overview's shades on the white card, the same ramp darkening with the count; the step nearest
      the card clears 2:1 (2.11:1). */
   --coverage-1: #86b6ef;
@@ -6117,6 +6130,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   --tone-fill: oklch(var(--chart-state-l) var(--chart-state-c) var(--state-hue));
 }
 .chart-state-key-plain { --tone: var(--text-dim); }
+/* A flag's runs and key entries take the theme's two flag colours (--chart-true, --chart-false). */
+.chart-flag-true  { --tone: var(--chart-true-edge);  --tone-fill: var(--chart-true); }
+.chart-flag-false { --tone: var(--chart-false-edge); --tone-fill: var(--chart-false); }
 .chart-box-states { height: 34px; }
 .chart-states { position: absolute; inset: 4px 0; }
 .chart-state {
@@ -6184,6 +6200,10 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .chart-state-key li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
 .chart-state-key-name { max-width: 16rem; font-family: var(--font-mono); color: var(--text-primary); }
 .chart-state-share { font-variant-numeric: tabular-nums; }
+/* A flag's time in a value, after its share; and how many times it changed, last in the key. */
+.chart-state-time { font-variant-numeric: tabular-nums; }
+.chart-state-time::before { content: "·"; margin-right: 6px; }
+.chart-state-key-changes .chart-state-key-name { font-family: inherit; color: inherit; }
 .chart-state-swatch {
   flex-shrink: 0;
   width: 10px;

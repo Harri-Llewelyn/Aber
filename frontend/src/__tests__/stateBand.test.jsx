@@ -8,8 +8,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { render, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { StateBand } from '../components/common/StateBand'
-import { NEAR_HUE_DEG, hueGap, stateHue } from '../utils/history'
+import { StateBand, StateBandKey } from '../components/common/StateBand'
+import { NEAR_HUE_DEG, changeCount, hueGap, stateHue, stateKey, stateShares } from '../utils/history'
 import { declaration } from '../test/themeColours'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
@@ -24,8 +24,8 @@ const run = (state, from, to, carried = []) => ({
   carried: carried.map(([a, b]) => ({ startMs: T0 + a * MIN, endMs: T0 + b * MIN })),
 })
 
-const draw = (runs, marks = []) => {
-  const { container } = render(<StateBand runs={runs} marks={marks} {...WINDOW} />)
+const draw = (runs, marks = [], flag = false) => {
+  const { container } = render(<StateBand runs={runs} marks={marks} flag={flag} {...WINDOW} />)
   return [...container.querySelectorAll('.chart-state')]
 }
 const box = (el) => ({ left: parseFloat(el.style.left), width: parseFloat(el.style.width) })
@@ -128,5 +128,48 @@ describe('the band of a state', () => {
     const { container } = render(<StateBand runs={[run('A', 0, 500)]} marks={[{ startMs: T0 + 100 * MIN, endMs: T0 + 150 * MIN }]} {...WINDOW} />)
     expect(box(container.querySelector('.chart-state-mixed'))).toEqual({ left: 10, width: 5 })
     expect(declaration(APP_CSS, '.chart-state-mixed', 'z-index')).toBe('2')
+  })
+})
+
+describe('the band of a flag', () => {
+  it('draws true and false in their two fixed colours, never hashed, and parts them with no hairline', () => {
+    const runs = draw([run('true', 0, 200), run('false', 200, 210), run('true', 210, 600), run('false', 600, 1000)], [], true)
+    expect(runs.map(r => r.className.match(/chart-flag-(true|false)/)[1])).toEqual(['true', 'false', 'true', 'false'])
+    expect(runs.some(r => r.style.getPropertyValue('--state-hue'))).toBe(false)
+    expect(runs.some(r => r.classList.contains('chart-state-divided'))).toBe(false)
+    expect(runs.map(r => r.textContent)).toEqual(['true', '', 'true', 'false'])
+    expect(declaration(APP_CSS, '.chart-flag-true', '--tone-fill')).toBe('var(--chart-true)')
+  })
+
+  it('is as flush, rounded and thin-run safe as a state', () => {
+    const [a, b] = draw([run('true', 0, 500), run('false', 500, 1000)], [], true)
+    expect(a.classList.contains('chart-state-first')).toBe(true)
+    expect(b.classList.contains('chart-state-last')).toBe(true)
+    expect(box(a).left + box(a).width).toBeGreaterThan(box(b).left)
+  })
+})
+
+describe("a flag's key", () => {
+  const key = () => {
+    const runs = [run('true', 0, 960), run('false', 960, 1000)]
+    return stateKey(stateShares(runs))
+  }
+  const items = (container) => [...container.querySelectorAll('.chart-state-key li')].map(li => li.textContent)
+
+  it('says each value, its share and its time, then how many times it changed', () => {
+    const { container } = render(<StateBandKey stateKey={key()} flag changes={changeCount({ runs: [] }, [run('true', 0, 1), run('false', 1, 2), run('true', 2, 3)])} />)
+    expect(items(container)).toEqual(['true96%16 h', 'false4%40 min', '2 changes'])
+    expect([...container.querySelectorAll('.chart-state-key-value')].map(li => li.classList.contains('chart-flag-true'))).toEqual([true, false])
+    expect(container.querySelector('.chart-state-key-value').style.getPropertyValue('--state-hue')).toBe('')
+  })
+
+  it('says at least that many when only buckets were read, and one change in the singular', () => {
+    const { container } = render(<StateBandKey stateKey={key()} flag changes={changeCount({}, [run('true', 0, 1), run('false', 1, 2)])} />)
+    expect(items(container).at(-1)).toBe('at least 1 change')
+  })
+
+  it("leaves a state's key as it was: no time, no count", () => {
+    const { container } = render(<StateBandKey stateKey={key()} />)
+    expect(items(container)).toEqual(['true96%', 'false4%'])
   })
 })

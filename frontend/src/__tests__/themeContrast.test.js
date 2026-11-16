@@ -716,6 +716,48 @@ describe("a state band's neighbours, whose hues are a hash's", () => {
   })
 })
 
+describe("a flag band's two colours, true and false", () => {
+  /** A colour's hue on the HSL wheel, in degrees. */
+  const hueOf = ([r, g, b]) => {
+    const [lo, hi] = [Math.min(r, g, b), Math.max(r, g, b)]
+    if (hi === lo) return 0
+    const d = hi - lo
+    const h = hi === r ? ((g - b) / d) % 6 : hi === g ? (b - r) / d + 2 : (r - g) / d + 4
+    return (h * 60 + 360) % 360
+  }
+  /** The smaller of the two ways round the wheel. */
+  const gap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b))
+  const DIFFERENT = 1.5
+
+  it.each(Object.entries(THEMES))('%s: the label clears AA on each fill and each edge 3:1 on the card', (_, t) => {
+    const card = rgb(t['--bg-card'])
+    const label = rgb(t['--text-primary'])
+    for (const value of ['true', 'false']) {
+      expect(contrast(label, rgb(t[`--chart-${value}`])), `the label on ${value}`).toBeGreaterThanOrEqual(AA_TEXT)
+      expect(contrast(rgb(t[`--chart-${value}-edge`]), card), `the edge of ${value} on the card`).toBeGreaterThanOrEqual(AA_LARGE)
+    }
+  })
+
+  it.each(Object.entries(THEMES))('%s: true and false differ in lightness and in hue, so a monochrome screen or a colour-blind eye still tells them apart', (_, t) => {
+    const [on, off] = ['true', 'false'].map(v => rgb(t[`--chart-${v}`]))
+    expect(contrast(on, off)).toBeGreaterThanOrEqual(DIFFERENT)
+    expect(gap(hueOf(on), hueOf(off))).toBeGreaterThanOrEqual(90)
+    const [onEdge, offEdge] = ['true', 'false'].map(v => rgb(t[`--chart-${v}-edge`]))
+    expect(gap(hueOf(onEdge), hueOf(offEdge))).toBeGreaterThanOrEqual(90)
+  })
+
+  it('names both as tokens in both themes, and sets a flag run and its key from them', () => {
+    for (const value of ['true', 'false']) {
+      for (const name of [`--chart-${value}`, `--chart-${value}-edge`]) {
+        expect(BLOCKS.dark[name], `${name} in the dark block`).toBeTruthy()
+        expect(BLOCKS.light[name], `${name} in the light block`).toBeTruthy()
+      }
+      expect(declaration(APP_CSS, `.chart-flag-${value}`, '--tone')).toBe(`var(--chart-${value}-edge)`)
+      expect(declaration(APP_CSS, `.chart-flag-${value}`, '--tone-fill')).toBe(`var(--chart-${value})`)
+    }
+  })
+})
+
 describe("History's Overview shades, fewer readings to more", () => {
   /*
    * An ordered (sequential) ramp is read by its order, not by each step on its own: the rule the
