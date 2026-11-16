@@ -5413,7 +5413,8 @@ i3X address space.
   where it is missing, so a replay scans nothing and keeps the constraint's oid. `btrim` removes
   spaces only: a name of tabs or line breaks is still stored. The areas' and cells' own CHECKs
   (`areas_name_topic_safe`, `cells_name_topic_safe`) refuse an empty name and do not trim it, so a
-  name of spaces is a name there.
+  name of spaces was a name there until `0291`, which adds `areas_name_not_blank` and
+  `cells_name_not_blank` beside them.
 - **A row that is already blank is named, never renamed.** Adding a CHECK scans the table and fails on
   such a row with a message that names none. So the file looks first, in each table whose CHECK is not
   there yet, and raises one error that names every blank row: its table, id, Sparkplug id and what
