@@ -5159,8 +5159,10 @@ The Device, Overview and Cell views of History each export through one function,
 **`export_telemetry(from_ts, to_ts, asset_ids, metric_names, resolution)`**. The database holds the
 rules, not the button: an Operator reads the charts and cannot export, and a call that skips the
 dashboard meets the same refusals. It returns one `jsonb` document: `columns`, `rows` (time, asset
-id, metric, value, unit), `row_count`, `truncated`, `read_from`, `read_to`, `raw_from`, `max_rows`
-and `audit_id`. The browser writes the CSV from it.
+id, metric, value, unit), `row_count`, `truncated`, `read_from`, `read_to`, `raw_from`, `max_rows`,
+`audit_id` and, since `0296`, `derived`. The browser writes the CSV from it. This section is the function
+as `0279` declared it. `0296` declares it again and reads a derived metric through `derived_series()`
+(`0282`) too, with every check below as it was.
 
 - **It refuses, before it reads anything:** a caller who is not an Administrator or a Shopfloor Manager
   (`42501`, with the roles in words); a session that has not given its second factor while that is
@@ -5255,7 +5257,8 @@ A derived metric ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) has
 `0267` keeps its definition, and nothing is stored. **`derived_series(from_ts, to_ts, bucket, asset_ids,
 metric_names)`** computes it where it is read, from each input's `telemetry_carried()` at one minute,
 and **`derived_current(asset_ids, metric_names)`** gives its current value. They are the one
-computation of a derived metric: a chart, the Devices drawer and an automation read the same number.
+computation of a derived metric: a chart, the Devices drawer, an automation and an export (`0296`) read
+the same number.
 
 - **A counter rate** is the increase per hour. A minute's increase is its carried last value less the
   minute before's; **a fall is a reset, and the new value counts as the increase**. A bucket's rate is
