@@ -27,7 +27,6 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
 
   const isGateway = item.entity_type === 'GATEWAY'
   const [assetName, setAssetName] = useState(item.asset_name)
-  const connMethod = 'Sparkplug B'
   // The gateway it arrived through, else the first the picker offers. An archived gateway is never
   // the default: the picker leaves it out, and the database refuses it.
   const offered = gateways.filter(g => !g.is_archived)
@@ -58,7 +57,6 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
 
   const handleSave = () => decide('approve', () => onApprove(item.asset_id, {
     asset_name: assetName,
-    connection_method: connMethod,
     active_gateway_id: gatewayId,
     cell_id: cellId,
     area_id: scope === SCOPE_AREA_WIDE ? location.area_id : '',

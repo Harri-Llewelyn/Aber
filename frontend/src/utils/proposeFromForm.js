@@ -27,7 +27,6 @@ export const PROPOSAL_FORMS = {
     fields: {
       asset_name: 'name',
       description: 'description',
-      connection_method: 'connection_method',
       cell_id: 'cell_id',
       area_id: 'area_id',
       location_scope: 'location_scope'

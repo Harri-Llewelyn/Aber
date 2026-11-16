@@ -4025,7 +4025,8 @@ const apiMethods = {
         name: body.asset_name,
         description: emptyToNull(body.description),
         gateway_id: gatewayIdFrom(body),
-        connection_method: emptyToNull(body.connection_method),
+        // Written only when the caller names it. The column is deprecated, and the dashboard sends none.
+        ...('connection_method' in body ? { connection_method: emptyToNull(body.connection_method) } : {}),
         // NO `schema_id`: schemas are attached afterwards through PUT .../schemas.
         // NO `status`. It is observed, never asserted: ingestion writes ONLINE on a DBIRTH, and the
         // column defaults to OFFLINE for a device that has not connected. Sending one here claims a

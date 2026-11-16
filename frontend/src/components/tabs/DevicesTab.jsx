@@ -185,7 +185,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [catalog, setCatalog] = useState([])
   // A device's type is derived from its schema's metric groups (utils/deviceTags.js).
   // A new device follows its gateway, so it starts with no cell and no area of its own.
-  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_GATEWAY })
+  const [blank]                 = useState({ asset_id: '', asset_name: '', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_GATEWAY })
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
   const [lifecycle, setLifecycle] = useUrlList('lifecycle', LIFECYCLE_DEFAULT, { allowed: LIFECYCLE_VALUES, aliases: LIFECYCLE_ALIASES })
@@ -329,7 +329,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       const payload = {
         asset_name: form.asset_name,
         description: form.description || '',
-        connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
         // '' is no cell or area, which api.js turns into NULL. All three keys are always sent
         // because the form always shows the one picker that sets them.
@@ -1494,8 +1493,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               </div>
             )}
 
-            {/* No connection-method picker: ingestion is a Sparkplug B MQTT subscriber and nothing
-                acts on the column. */}
+            {/* No connection-method field: every device reaches Aber over Sparkplug B, so the form
+                sends no connection_method. */}
 
             {/* The rationale, only when proposing: it is written to an approver who has not stood
                 in front of the machine. */}
@@ -1763,8 +1762,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           },
           // Each derived metric its inputs make possible, with its current value and its window.
           ...[derivedValuesField({ device: selectedDevice, schemas, catalog })].filter(Boolean),
-          /* Connection method is not shown: nothing writes it and nothing acts on it. The column
-             stays; this is a UI omission. */
+          /* Connection method is not shown: every device reaches Aber over Sparkplug B, and nothing
+             acts on the column. The column is deprecated, and the dashboard writes none. */
           {
             label: 'Description',
             value: selectedDevice.description || null,
