@@ -44,6 +44,9 @@ This page is the catalog of metrics that every schema is built from. A metric is
 - The dialog says why **Add Derived Metric** is greyed. An input may be missing, the inputs of a sum may have unlike units, or a state may be one the metric cannot report. A device may also declare the name. Choose another name then, because the device and Aber would put readings in one series.
 - A derived metric has no semantic id, no standard and no permitted values. Its definition says where its value comes from.
 - **A derived metric cannot be changed.** Neither can its definition, its name or its unit. To change one, add a new derived metric. Then deprecate the old one, and name the new one as its replacement. A deprecated derived metric moves to the Deprecated Metrics tab.
+- **A box at the start of each row** on the Derived tab ticks the metric for **Export**. The box in the heading ticks every row shown. It is separate from opening a row's drawer.
+- **Export** saves derived metrics as `derived-metrics.yaml`. With none ticked, it saves every derived metric. With some ticked, it says how many, such as **Export (2)**, and saves those. A deprecated one is left out. Any role can export.
+- **Upload** reads a `.yaml` file and opens it in the editor. **New in YAML** opens the same editor empty. Both need the Administrator role, as **Add Derived Metric** does. [Move derived metrics as a file](#move-derived-metrics-as-a-file) says how.
 - **Uncatalogued** lists the metric names your devices declare that no catalog row has. A device declares its metrics in its birth certificate when it connects. The tab's label shows how many names there are, so **Uncatalogued (0)** means the catalog covers every device.
 - Each row shows the name, how many devices declare it, and which ones. Select a device to open it on the Devices page. A device still waiting for approval is marked **quarantined**. A long list shows three devices: select **more** to see the rest.
 - **Datatype** is how the devices' birth certificates encode the value. It shows "—" when no birth certificate gave the metric a value. **Last Declared** is the last time one of these devices changed the set of metrics it declares.
@@ -52,6 +55,27 @@ This page is the catalog of metrics that every schema is built from. A metric is
 - **Catalogue** is greyed out for a name the catalog cannot hold, such as one with a space. Its tooltip says which characters to remove. Rename the metric on the device instead.
 - **Search**, on the Uncatalogued tab, finds a metric by its name. It does not search device names.
 - The list leaves out archived devices and replay lanes. It also leaves out Sparkplug's control metrics, such as `Device Control/Rebirth`, because they are commands rather than readings. A deprecated metric counts as catalogued.
+
+## Move derived metrics as a file
+
+1. Tick the derived metrics to move, or tick none for all of them. Choose **Export**.
+2. Open `derived-metrics.yaml` in an editor. Change what you want to add.
+3. Choose **Upload** on this site or another, and pick the file. It opens in the editor. **New in YAML** opens it empty.
+4. Choose **Add Derived Metrics**. Aber checks the whole file and lists each metric.
+5. Read the list. Each metric is **New**, **Unchanged** or **Refused**. A refused metric names the line to fix. Fix it, and choose **Add Derived Metrics** again.
+6. Choose **Add 2 Derived Metrics**, with your own count. All of the file is added, or none of it. The toast links to what it added.
+
+Things to know:
+
+- **An upload only adds.** It never edits a derived metric and never deletes one. A metric the file leaves out stays as it is.
+- **A metric that exists is Unchanged** when the file gives it the same definition and description. The order of the states, or of a sum's inputs, does not matter.
+- **Another definition is refused.** A definition is fixed once saved. Add the new one under a new name. Then deprecate the old one, and choose the new one as **Superseded By**.
+- **Another description is refused too.** A description cannot be edited on this page. Make the file say what is saved, or use a new name.
+- **An input this site lacks is refused by name.** The list names every one at once. Add each to the catalog first. Aber does not add it for you.
+- **The file gives no unit and no datatype.** Aber works the unit out from the inputs, as **Add Derived Metric** does. Every other refusal is that dialog's own sentence.
+- **A state is text.** Put `"true"` and `"false"` in quotes.
+
+[The file format](../../docs/derived-metrics.md) lists every key.
 
 ## What the states mean
 

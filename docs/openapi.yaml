@@ -2695,6 +2695,80 @@ paths:
                 items: { type: object }
         '401': { description: 'Not authenticated; `anon` may not call it.' }
 
+  /rest/v1/rpc/apply_derived_metrics:
+    post:
+      tags: [Registry]
+      summary: Check a document of derived metrics, and add it
+      description: |
+        The one call that validates and adds a derived metrics file (`0297`). The browser parses the YAML
+        into JSON and sends the list; the database checks every field, resolves every input against the
+        catalogue, runs the catalogue's own checks on each new metric, and checks the caller's right. The
+        file format is in
+        [`docs/derived-metrics.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/docs/derived-metrics.md),
+        and the dashboard serves its JSON Schema at `/json-schema/derived-metrics.schema.json`.
+
+        It answers one result per derived metric: its `status` (`new`, `unchanged` or `refused`) and, for
+        a refusal, `reasons`, each with a JSON `path` such as `$[0].inputs[1].metric`. All or nothing:
+        with any refusal nothing is written, and with `p_dry_run` true nothing is written either, so a
+        preview and an add are the same call.
+
+        It never edits and never deletes, since a definition is fixed once saved. A name the catalogue
+        lacks is added. A name that exists with the same definition and description is `unchanged`. A name
+        that exists with another definition or description, a measured metric's name and a deprecated
+        derived metric's name are refused. A file never gives the unit or the datatype: the catalogue works
+        the unit out from the inputs, and a derived metric is a Double. Each metric added is one `INSERT`
+        row in the Audit Trail, by the catalogue's trigger; an unchanged metric writes none.
+
+        An Administrator may call it, and with the second-factor switch on their session must have given
+        its code. A machine identity may not.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_doc, p_dry_run]
+              properties:
+                p_doc: { type: array, items: { type: object }, description: 'The derived metrics, as the JSON Schema describes them. At most 1,000.' }
+                p_dry_run: { type: boolean, description: 'True to preview and write nothing; false to add.' }
+      responses:
+        '200':
+          description: One result per derived metric, in the document's order. A document that is not a list answers one refused result with the path `$`.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DerivedMetricResult' }
+        '400': { description: '`p_dry_run` missing (`22023`).' }
+        '403': { description: 'Not an Administrator, or the second factor is required (`42501`).' }
+
+  /rest/v1/rpc/derived_metrics_document:
+    post:
+      tags: [Registry]
+      summary: Read the derived metrics in the document's shape
+      description: |
+        The derived metrics rendered to the shape `apply_derived_metrics` takes (`0297`), a list ordered by
+        name: every derived metric, or those of the metric ids given. A deprecated one is not in it.
+        `apply_derived_metrics` of the list reports every metric `unchanged`. Every signed-in role may call
+        it.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                p_ids: { type: array, nullable: true, items: { type: string, format: uuid }, description: 'The metric ids to render. Null renders every derived metric.' }
+      responses:
+        '200':
+          description: The derived metrics, each with its name, description, kind and definition.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+
   /rest/v1/rpc/set_automation_enabled:
     post:
       tags: [Registry]
@@ -8758,6 +8832,26 @@ components:
             type: object
             properties:
               path: { type: string, example: '$[0].metrics[1].minimum' }
+              message: { type: string }
+
+    DerivedMetricResult:
+      type: object
+      description: |
+        What `apply_derived_metrics` made of one derived metric of the document (0297).
+      properties:
+        index: { type: integer, nullable: true, description: 'Its place in the document. Null for a refusal of the document as a whole.' }
+        name: { type: string, nullable: true, description: 'Its `name`, or null where the name is itself refused.' }
+        status: { type: string, enum: [new, unchanged, refused] }
+        id: { type: string, format: uuid, nullable: true, description: 'The catalogue row made, once added. For an unchanged metric, the row it was compared with.' }
+        units: { type: string, nullable: true, description: 'The unit the metric has, or for a new one would have: the unit its inputs give. Null for a time in state, which has none.' }
+        derivation: { type: object, nullable: true, description: 'The definition as it is or would be saved: its `kind` and its `input`, `states` or `inputs`. Null for a refusal.' }
+        reasons:
+          type: array
+          description: 'For a refusal, each reason with the JSON path it is at.'
+          items:
+            type: object
+            properties:
+              path: { type: string, example: '$[0].inputs[1].metric' }
               message: { type: string }
 
     DeviceNameplate:

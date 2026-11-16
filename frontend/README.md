@@ -2339,6 +2339,33 @@ drawer: neither the drawer nor the detail dialog offers **Download JSON**. The f
   metric in the order a file reads best. It holds the version in force of each lineage ticked, since a
   schema is found by its name and a draft is not in force.
 
+### Derived metrics read and write YAML
+
+**The Metrics page's Derived tab reads and writes YAML with the same machinery, and is the first page that
+hosts the editor for a file it uploads.** Its toolbar has **Upload**, **Export**, **New in YAML** and
+**Add Derived Metric**, which stays. A row's box ticks it for **Export** (**Export (2)**), which saves them,
+or every derived metric listed with none ticked. The format is `docs/derived-metrics.md`.
+
+- **Upload opens the editor, and checking is a second step.** `DerivedMetricsEditorModal` holds
+  `AutomationEditor` with `public/json-schema/derived-metrics.schema.json` as its schema, and **New in YAML**
+  opens it empty. **Add Derived Metrics** opens `ApplyDerivedMetricsModal` over it, which is
+  `ApplySchemasModal`'s pattern on the same parts (`useApplyPreview()`, `describeApply()`, `ApplyResults`).
+  A refused line is marked in the editor when the preview is closed (`onChecked`), as the Automations page
+  marks the lines of its Save. The editor's text is lost with the dialog.
+- **A property says what a derived metric cannot do there.** `x-derived-says`, on a property marked
+  `"x-completes": "metric"`, is what its hover says when the name is a derived metric. The device schemas'
+  hover says no schema can model one. This file's says no derived metric is built on another.
+- **The preview only adds.** Its statuses are **New**, **Unchanged** and **Refused**: there is no
+  **Changed**, because a definition is fixed once saved, so a changed one is refused with the way to a new
+  metric. The note says how a metric is computed and its unit (`derivedResultNote()`); the unit is the
+  database's, from the inputs.
+- **The state is a hook.** `hooks/useDerivedMetricsYaml.js` holds the ticks, the export, the file chosen
+  and the editor's text, so `MetricsTab` only draws them. The dialog toasts the success itself, as the
+  Schemas upload does: one metric links to its row on the Derived tab, several to the tab. Export toasts
+  too, linking to the tab.
+- **The export is rendered, never kept.** `renderDerivedMetricsYaml()` writes the keys in the order a file
+  reads best, from `derived_metrics_document()`, which leaves out a deprecated metric.
+
 ### The Automations editor draws in a shadow root
 
 **CodeMirror writes `<style>` elements into the document it is mounted in, and the dashboard's
@@ -2358,9 +2385,10 @@ paragraph together.
 - **It is not a keyboard trap.** `Tab` is not bound, so it moves on; indenting is by `Enter`'s
   auto-indent and spaces. `Ctrl Space` asks for completion.
 - **Loaded with the page.** The editor and the schema are in the Automations chunk, and `yaml` in the
-  chunks of the Automations and Schemas pages, not the main bundle. Neither package's files carry a notice the build keeps, so `AutomationEditor.jsx` and
-  `utils/automationYaml.js` open with theirs as `/*!` comments (`NOTICE.md`, check 322,
-  `legalComments.test.js`).
+  chunks of the Automations, Schemas and Metrics pages, not the main bundle. The Metrics page loads the
+  editor only when Upload or New in YAML first opens it (`lazy()` in `MetricsTab`). Neither package's
+  files carry a notice the build keeps, so `AutomationEditor.jsx` and `utils/automationYaml.js` open with
+  theirs as `/*!` comments (`NOTICE.md`, check 322, `legalComments.test.js`).
 - **jsdom lays nothing out**, so a test of the editor stubs the two measurements CodeMirror asks a `Range`
   for (`automationEditor.test.jsx`), and finds the view with `EditorView.findFromDOM()` in the shadow root.
 
