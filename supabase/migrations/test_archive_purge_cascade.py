@@ -82,7 +82,8 @@ class PurgeCascadeTests(unittest.TestCase):
         )
         # Not archived at all, and filed in the cell explicitly.
         self.cur.execute(
-            "INSERT INTO public.devices (id, name, gateway_id, cell_id) VALUES (%s, 'Purge Test Device', %s, %s);",
+            "INSERT INTO public.devices (id, name, gateway_id, cell_id, location_scope)"
+            " VALUES (%s, 'Purge Test Device', %s, %s, 'cell');",
             (DEVICE, GATEWAY, CELL),
         )
         self.cur.execute(

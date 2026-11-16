@@ -25,7 +25,7 @@ import { ExpandButton } from '../common/ExpandButton'
 import { ExpandedPlanModal } from '../common/PlanViewer'
 import {
   SCOPE_SITE_WIDE, WIDE_SCOPES, SOURCE_UNASSIGNED,
-  SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell
+  SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell, isSiteWideSource
 } from '../../utils/cellResolution'
 import { areaWideInService, inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { isPlaced } from '../../utils/areaPlans'
@@ -193,11 +193,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   const alerts = useMemo(() => alertIndex(activeAlerts), [activeAlerts])
 
   // The derived lanes that belong to no area. None is a row in `cells`: Unassigned is the absence
-  // of a decision, Site-Wide an assertion, Simulated a fact about the gateway. Replay lanes are not
-  // here: a replay is not now.
+  // of a decision, Site-Wide an assertion (a device's own, or its gateway's, which it follows),
+  // Simulated a fact about the gateway. Replay lanes are not here: a replay is not now.
   const laneDevices = useMemo(() => ({
     [SOURCE_UNASSIGNED]: liveAssets.filter(a => a.location_source === SOURCE_UNASSIGNED),
-    [SOURCE_SITE_WIDE]: liveAssets.filter(a => a.location_source === SOURCE_SITE_WIDE),
+    [SOURCE_SITE_WIDE]: liveAssets.filter(a => isSiteWideSource(a.location_source)),
     [SOURCE_SIMULATED]: liveAssets.filter(a => a.location_source === SOURCE_SIMULATED)
   }), [liveAssets])
 

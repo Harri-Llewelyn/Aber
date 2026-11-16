@@ -127,9 +127,10 @@ class Base(unittest.TestCase):
         did = str(uuid.uuid4())
         name = f"Test_0198_Dev_{did[:8]}"
         self.cur.execute(
-            "INSERT INTO public.devices (id, name, gateway_id, cell_id, status, is_quarantined, "
-            "quarantine_reason, first_dbirth_at) VALUES (%s, %s, %s, %s, %s, %s, %s, now());",
-            (did, name, gateway_id, cell_id, status, quarantined, "test" if quarantined else None),
+            "INSERT INTO public.devices (id, name, gateway_id, cell_id, location_scope, status, is_quarantined, "
+            "quarantine_reason, first_dbirth_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now());",
+            (did, name, gateway_id, cell_id, "cell" if cell_id else "gateway", status, quarantined,
+             "test" if quarantined else None),
         )
         if archived:
             self.cur.execute("UPDATE public.devices SET is_archived = true WHERE id = %s;", (did,))
@@ -298,7 +299,7 @@ class NothingMovesIntoAnArchivedCell(Base):
 
     def test_a_device_is_not_created_in_it(self):
         self._refused(pg_errors.CheckViolation, "which is archived", "Shopfloor_Manager",
-                      "INSERT INTO public.devices (name, cell_id) VALUES ('Test_0198_New', %s);",
+                      "INSERT INTO public.devices (name, cell_id, location_scope) VALUES ('Test_0198_New', %s, 'cell');",
                       (self.archived,))
 
     def test_a_gateway_is_not_moved_in_or_created_in_it(self):
@@ -322,8 +323,10 @@ class NothingMovesIntoAnArchivedCell(Base):
 
     def test_un_filing_still_works(self):
         device, _ = self._device(cell_id=self.live)
+        # A device that is not in a cell follows its gateway: the cell and the scope go together.
         self.assertEqual(self._call("Shopfloor_Manager",
-                                    "UPDATE public.devices SET cell_id = NULL WHERE id = %s;", (device,)), 1)
+                                    "UPDATE public.devices SET cell_id = NULL, location_scope = 'gateway' "
+                                    "WHERE id = %s;", (device,)), 1)
 
 
 class NoDeviceIsAssignedToAnArchivedGateway(Base):

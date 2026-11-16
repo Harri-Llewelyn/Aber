@@ -437,18 +437,43 @@ class RelocateDevices(unittest.TestCase):
         """
         A drop says where the machine IS. It says nothing about which connector reaches it, and
         expressing a location by rewiring the data path is the coupling archived migration 0036
-        removed. Unassigned is reached by clearing the explicit cell, never by detaching a gateway.
+        removed. A device stops being pinned to a cell by following its gateway, never by detaching it.
         """
         self.cur.execute("INSERT INTO public.gateways (name) VALUES ('T_GW') RETURNING id;")
         gw = self.cur.fetchone()[0]
         self.cur.execute("UPDATE public.devices SET gateway_id = %s WHERE id = %s;",
                          (gw, self.devices[0]))
-        self._relocate([self._move(self.devices[0], None)])
+        self._relocate([self._move(self.devices[0], None, scope="gateway")])
         self.cur.execute("SELECT gateway_id, cell_id FROM public.devices WHERE id = %s;",
                          (self.devices[0],))
         gateway_id, cell_id = self.cur.fetchone()
         self.assertEqual(gateway_id, gw, "the batch detached the device's gateway")
         self.assertIsNone(cell_id)
+
+    def test_a_gateway_move_clears_the_cell_and_the_area_and_the_device_follows_its_gateway(self):
+        """
+        Follow Gateway names no place of its own (devices_follow_gateway_has_no_place), so the move
+        clears what the batch also carries rather than refusing "follow the gateway, in cell B".
+        """
+        result = self._relocate([self._move(self.devices[0], self.cell_b, scope="gateway")])
+        self.assertEqual(result["applied"], 1, result)
+        self.cur.execute("SELECT cell_id, area_id, location_scope FROM public.devices WHERE id = %s;",
+                         (self.devices[0],))
+        self.assertEqual(self.cur.fetchone(), (None, None, "gateway"))
+        self.cur.execute("SELECT location_source FROM public.device_locations WHERE device_id = %s;",
+                         (self.devices[0],))
+        self.assertEqual(self.cur.fetchone()[0], "unassigned")
+
+    def test_a_cell_move_with_no_cell_is_refused_in_words_and_applies_nothing(self):
+        """Cell requires a cell (devices_cell_scope_names_a_cell); the batch says so before the CHECK does."""
+        with self.assertRaises(psycopg2.Error) as ctx:
+            self._relocate([self._move(self.devices[1], self.cell_b),
+                            self._move(self.devices[0], None, scope="cell")])
+        self.assertEqual(ctx.exception.pgcode, "22004")
+        self.assertIn("must name cell_id", str(ctx.exception))
+        self.cur.execute("SELECT count(*) FROM public.devices WHERE id = ANY(%s::uuid[]) AND cell_id = %s;",
+                         ([str(self.devices[0]), str(self.devices[1])], self.cell_a))
+        self.assertEqual(self.cur.fetchone()[0], 2, "the refused batch moved a device")
 
     def test_a_no_op_move_is_reported_unchanged_and_writes_no_trail_row(self):
         """

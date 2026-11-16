@@ -51,7 +51,7 @@ const SKIP_SENTENCES = {
   lane: ({ source }) => (source === SOURCE_SHADOW
     ? 'it is a replay lane, a recording of a device, not a place on the plant.'
     : 'it is a simulated device, not a place on the plant.'),
-  unassigned: () => 'nothing says where it is. Put it in a cell in Edit Details, or make it Area-Wide or Site-Wide.',
+  unassigned: () => 'nothing says where it is. Give its gateway a location, or choose one for it in Edit Details.',
   cell_unfiled: () => 'its cell is in no area. Put the cell in an area on the Cells page.',
   unsafe_name: unsafeName,
 }

@@ -179,7 +179,7 @@ class ProposalCase(unittest.TestCase):
             for device_id, name in ((DEVICE, "Proposal_Test_Device"),
                                     (DEVICE_TWO, "Proposal_Test_Device_Two")):
                 cur.execute(
-                    "INSERT INTO public.devices (id, name, cell_id) VALUES (%s, %s, %s) "
+                    "INSERT INTO public.devices (id, name, cell_id, location_scope) VALUES (%s, %s, %s, 'cell') "
                     "ON CONFLICT (id) DO NOTHING;",
                     (device_id, name, CELL),
                 )

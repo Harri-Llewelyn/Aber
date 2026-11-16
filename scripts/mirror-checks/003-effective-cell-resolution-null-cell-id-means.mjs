@@ -1,7 +1,7 @@
 import { compare, lastDefinition, need, ok, problems, read } from './lib.mjs';
 
-// 3. Effective cell resolution. NULL cell_id means inherit, so the COALESCE precedence is the rule:
-// device first, gateway second.
+// 3. Effective cell resolution. The COALESCE precedence is the rule for the arms that name a cell of
+// their own: device first, gateway second. A device that follows its gateway is check 105's.
 export default function check() {
   const js = read('frontend/src/utils/cellResolution.js');
   const view = lastDefinition(
@@ -49,10 +49,10 @@ export default function check() {
       ok.push('cellResolution: shadow resolves ahead of simulated on both sides');
     }
 
-    // The seven location_source labels are a closed set the UI switches on. `THEN` and `ELSE`,
+    // The ten location_source labels are a closed set the UI switches on. `THEN` and `ELSE`,
     // because 'unassigned' is the CASE's fall-through. The alternation is spelled out so adding a
     // lane is a deliberate edit here too.
-    const sqlSources = [...new Set([...body.matchAll(/(?:THEN|ELSE) '(site_wide|area_wide|explicit|inherited|unassigned|simulated|shadow)'::text/g)].map((m) => m[1]))].sort();
+    const sqlSources = [...new Set([...body.matchAll(/(?:THEN|ELSE) '(site_wide|area_wide|explicit|inherited|followed_cell|followed_area|followed_site|unassigned|simulated|shadow)'::text/g)].map((m) => m[1]))].sort();
     const jsSources = [...new Set([...js.matchAll(/export const SOURCE_[A-Z_]+ = '([a-z_]+)'/g)].map((m) => m[1]))].sort();
     compare('cellResolution', 'location_source labels', jsSources.join(','), sqlSources.join(','));
   }

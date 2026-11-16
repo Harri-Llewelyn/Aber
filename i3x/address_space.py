@@ -43,6 +43,7 @@ SOURCE_SIMULATED = "simulated"
 SOURCE_SITE_WIDE = "site_wide"
 SOURCE_AREA_WIDE = "area_wide"
 SOURCE_EXPLICIT = "explicit"
+SOURCE_FOLLOWED_SITE = "followed_site"
 SOURCE_UNASSIGNED = "unassigned"
 
 # One synthetic parent per lane: (elementId, displayName, description). A lane is a fact about the
@@ -760,7 +761,7 @@ def placement(
         return cell_id
     if area_id and area_id in area_ids:
         return area_id
-    if cell_id or area_id or source == SOURCE_SITE_WIDE:
+    if cell_id or area_id or source in (SOURCE_SITE_WIDE, SOURCE_FOLLOWED_SITE):
         return SITE_ELEMENT_ID
     return UNASSIGNED_ELEMENT_ID
 

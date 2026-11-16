@@ -155,10 +155,10 @@ class WindowsBase(unittest.TestCase):
     def make_device(self, name, cell_id=None, gateway_id=None, online=False):
         device_id = str(uuid.uuid4())
         self.cur.execute(
-            "INSERT INTO public.devices (id, name, cell_id, gateway_id, status, first_dbirth_at)"
-            " VALUES (%s, %s, %s, %s, %s, %s);",
-            (device_id, name, cell_id, gateway_id, "ONLINE" if online else None,
-             "2026-11-01T00:00:00Z" if online else None))
+            "INSERT INTO public.devices (id, name, cell_id, location_scope, gateway_id, status, first_dbirth_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s);",
+            (device_id, name, cell_id, "cell" if cell_id else "gateway", gateway_id,
+             "ONLINE" if online else None, "2026-11-01T00:00:00Z" if online else None))
         return device_id
 
     def sparkplug_id(self, entity_type, row_id):
@@ -588,8 +588,10 @@ class WhatAWindowCovers(WindowsBase):
         self.assertEqual(self.active(inherited)[1], window)
         self.assertFalse(self.active(loose)[0])
         # Out of the cell, the alert is no longer suppressed; into it, it is. Nothing else is written.
-        self.cur.execute("UPDATE public.devices SET cell_id = %s WHERE id = %s;", (self.other_cell, self.device))
-        self.cur.execute("UPDATE public.devices SET cell_id = %s WHERE id = %s;", (self.cell, self.loose))
+        self.cur.execute("UPDATE public.devices SET cell_id = %s, location_scope = 'cell' WHERE id = %s;",
+                         (self.other_cell, self.device))
+        self.cur.execute("UPDATE public.devices SET cell_id = %s, location_scope = 'cell' WHERE id = %s;",
+                         (self.cell, self.loose))
         self.assertFalse(self.active(filed)[0])
         self.assertTrue(self.active(loose)[0])
 

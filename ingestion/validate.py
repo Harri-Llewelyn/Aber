@@ -786,13 +786,13 @@ def seed_supabase():
 
     # Seed the registered devices. sparkplug_id is a generated column, so it comes back on the
     # insert -- these are the ids the simulated gateways will publish under. Plant device B names
-    # its cell itself; every other device inherits its gateway's.
+    # its cell itself; every other device follows its gateway's place.
     for label, key, placement in (
         (VAL_KNOWN_DEVICE, "known", {}),
         (VAL_MISMATCH_DEVICE, "mismatch", {}),
         (VAL_ALIAS_DEVICE, "alias", {}),
         (VAL_PLANT_A_DEVICE, "plant_a", {}),
-        (VAL_PLANT_B_DEVICE, "plant_b", {"cell_id": cell_id}),
+        (VAL_PLANT_B_DEVICE, "plant_b", {"cell_id": cell_id, "location_scope": "cell"}),
         (VAL_WITHDRAWN_DEVICE, "withdrawn", {}),
     ):
         # NO `status`: the column defaults to OFFLINE, which is what a device the broker has never

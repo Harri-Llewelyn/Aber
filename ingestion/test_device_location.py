@@ -1,23 +1,24 @@
 # suite:
 #   lanes: unit
-#   why: Pins the invariant that the daemon never writes an asset's location. devices.cell_id is
-#     NULL-means-inherit with no column default (archived migration 0036), which only holds while
+#   why: Pins the invariant that the daemon never writes an asset's location. A device arrives
+#     following its gateway (location_scope's default, 0293) with no cell, which only holds while
 #     nothing writes a value on an operator's behalf -- and a regression here would be silent:
-#     devices would simply stop inheriting and the Unassigned queue would stop filling.
+#     devices would simply stop following their gateway and the Unassigned queue would stop filling.
 
 """
 Unit tests pinning ONE invariant: the ingestion daemon never writes an asset's location.
 
-`devices.cell_id` (archived migration 0036) is NULL-means-inherit, and it has no column default precisely
-so that inheritance stays reachable. That only holds if nothing writes a value on an operator's
-behalf -- and the daemon is the one writer with no operator present. A quarantined device must
-therefore arrive with no cell and no scope assertion, so that approving it onto a gateway lets it
-inherit that gateway's cell, and so that a device nobody has filed yet shows up in the Unassigned
+A device follows its gateway unless told otherwise: `devices.location_scope` defaults to `gateway`
+(0293) and `devices.cell_id` has no default. That only holds if nothing writes a value on an
+operator's behalf -- and the daemon is the one writer with no operator present. A quarantined device
+must therefore arrive with no cell and no scope assertion, so that approving it onto a gateway lets
+it take that gateway's place, and so that a device nobody has filed yet shows up in the Unassigned
 queue rather than looking as though someone had already answered.
 
 This is an invariant test rather than a behaviour test: there is no `cell_id` in ingestion.py at
 all, and the point is that there never is one. A future change that starts defaulting a location
-here would be silent -- devices would simply stop inheriting, and the queue would stop filling.
+here would be silent -- devices would simply stop following their gateway, and the queue would stop
+filling.
 
 Same stubbing approach as test_declared_metrics.py: the daemon's heavy imports are replaced
 before ingestion.py is loaded, since none of them are reachable from the code under test.
@@ -124,10 +125,10 @@ class DeviceLocationInvariantTest(unittest.TestCase):
     def test_quarantined_device_has_no_cell(self):
         """
         The load-bearing case. An auto-discovered device is inserted with no operator present,
-        so it must express no opinion about where it is: NULL cell_id means "inherit", and
-        approve-quarantine sets gateway_id, so the device lands in its gateway's cell the moment
-        it is approved. A value written here would win the COALESCE and pin the device wherever
-        ingestion guessed, forever.
+        so it must express no opinion about where it is: a device with no cell follows its gateway,
+        and approve-quarantine sets gateway_id, so the device lands in its gateway's place the
+        moment it is approved. A value written here would pin the device wherever ingestion
+        guessed, forever.
         """
         ingestion.quarantine_new_device(
             "dev000000000000000000abc", "gwy000000000000000000abc",
@@ -147,12 +148,12 @@ class DeviceLocationInvariantTest(unittest.TestCase):
             ingestion.REASON_UNKNOWN_DEVICE, FakePayload(FakeMetric("temperature"))
         )
         record = self._inserted()[0]
-        self.assertEqual(record.get("location_scope", "cell"), "cell")
+        self.assertEqual(record.get("location_scope", "gateway"), "gateway")
 
     def test_quarantined_device_still_records_its_edge_node(self):
         """
         Regression guard on the surrounding behaviour: the arriving gateway is what an approved
-        device inherits its cell FROM, so dropping it would make the NULL above unrecoverable
+        device takes its place FROM, so dropping it would make the NULL above unrecoverable
         rather than merely undecided.
         """
         ingestion.quarantine_new_device(
@@ -229,7 +230,7 @@ class DeviceLocationInvariantTest(unittest.TestCase):
                 self.assertNotIn(
                     column, payload,
                     "ingestion wrote %s -- location is the operator's to set, and a value "
-                    "written here defeats NULL-means-inherit" % column
+                    "written here pins the device away from its gateway" % column
                 )
 
 

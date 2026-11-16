@@ -1,20 +1,23 @@
 /**
  * Where an asset is, as opposed to how its data gets here. `device -> gateway` is the data path;
- * `device -> cell` is a location overlay. A device's effective cell is its own `cell_id`, else its
- * gateway's, else nothing; a site-wide or area-wide asset has none by assertion.
+ * `device -> cell` is a location overlay. A device is in the cell it names, or it follows its
+ * gateway and takes the gateway's place (its cell, its area, the whole site, or none), or it is
+ * Area-Wide or Site-Wide by assertion and has no cell.
  *
  * The ISA-95 rungs above the cell: a cell files into an area (`cells.area_id`), and a device's
- * effective area is its effective cell's, unless the device is area-wide and names one itself. The
- * site is one setting, not a column.
+ * effective area is its effective cell's, unless the device is area-wide and names one itself, or
+ * follows a gateway that is. The site is one setting, not a column.
  *
- * Mirror of `public.device_locations` in supabase/migrations/0001_baseline_schema.sql; the view is
- * the authority. Field names are the view's own snake_case, so a row from the view and a
- * row derived here are interchangeable.
+ * Mirror of `public.device_locations` (0001, redeclared in 0293); the view is the authority. Field
+ * names are the view's own snake_case, so a row from the view and a row derived here are
+ * interchangeable.
  *
- * NULL cell_id means inherit. Unassigned is derived from the resolution running out of arms, never
- * stored.
+ * A scope of `gateway` is a device that follows its gateway, the default for a new one. A cell scope
+ * names its cell (`devices_cell_scope_names_a_cell`). Unassigned is derived from the resolution
+ * running out of arms, never stored.
  */
 
+export const SCOPE_GATEWAY = 'gateway'
 export const SCOPE_CELL = 'cell'
 export const SCOPE_AREA_WIDE = 'area_wide'
 export const SCOPE_SITE_WIDE = 'site_wide'
@@ -22,19 +25,26 @@ export const SCOPE_SITE_WIDE = 'site_wide'
 /** The scopes that assert the asset has no single cell. */
 export const WIDE_SCOPES = new Set([SCOPE_AREA_WIDE, SCOPE_SITE_WIDE])
 
-/** Mirrors the *_area_wide_names_its_area CHECKs: exactly the area-wide scope stores an area. */
+/**
+ * Mirrors the *_area_wide_names_its_area CHECKs: exactly the area-wide scope stores an area. A
+ * gateway's scope is never `gateway`; an absent scope reads as `cell`.
+ */
 export function normaliseScope(scope) {
-  return WIDE_SCOPES.has(scope) ? scope : SCOPE_CELL
+  return scope === SCOPE_GATEWAY || WIDE_SCOPES.has(scope) ? scope : SCOPE_CELL
 }
 
 /**
- * Which arm of the resolution answered. `explicit` and `inherited` look identical once resolved,
- * but only one moves when the gateway is reassigned. `shadow` and `simulated` are read off the
- * gateway: such an asset is unfileable rather than unfiled, which keeps Unassigned a queue that
- * drains.
+ * Which arm of the resolution answered. `explicit` and `followed_cell` can resolve to the same cell,
+ * but only the followed arms move when the gateway does. `inherited` is the view's older name for a
+ * cell the gateway supplied: nothing produces it now that a cell scope names its cell. `shadow` and
+ * `simulated` are read off the gateway: such an asset is unfileable rather than unfiled, which keeps
+ * Unassigned a queue that drains.
  */
 export const SOURCE_EXPLICIT = 'explicit'
 export const SOURCE_INHERITED = 'inherited'
+export const SOURCE_FOLLOWED_CELL = 'followed_cell'
+export const SOURCE_FOLLOWED_AREA = 'followed_area'
+export const SOURCE_FOLLOWED_SITE = 'followed_site'
 export const SOURCE_AREA_WIDE = 'area_wide'
 export const SOURCE_SITE_WIDE = 'site_wide'
 export const SOURCE_UNASSIGNED = 'unassigned'
@@ -44,6 +54,9 @@ export const SOURCE_SHADOW = 'shadow'
 const SOURCE_LABELS = {
   [SOURCE_EXPLICIT]: 'Set on device',
   [SOURCE_INHERITED]: 'From gateway',
+  [SOURCE_FOLLOWED_CELL]: 'From gateway',
+  [SOURCE_FOLLOWED_AREA]: 'Area-Wide',
+  [SOURCE_FOLLOWED_SITE]: 'Site-Wide',
   [SOURCE_AREA_WIDE]: 'Area-Wide',
   [SOURCE_SITE_WIDE]: 'Site-Wide',
   [SOURCE_UNASSIGNED]: 'Unassigned',
@@ -59,9 +72,23 @@ export function locationSourceLabel(source) {
 /**
  * The sources that resolve to no cell, as one set. Every consumer that reports devices with no cell
  * excludes these. `unassigned` is not in here: it also resolves to no cell, but it means nobody has
- * decided, which is what such a consumer counts.
+ * decided, which is what such a consumer counts. A device that follows an Area-Wide or a Site-Wide
+ * gateway is in here: its gateway decided.
  */
-export const NON_CELL_SOURCES = new Set([SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, SOURCE_SIMULATED, SOURCE_SHADOW])
+export const NON_CELL_SOURCES = new Set([
+  SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, SOURCE_FOLLOWED_AREA, SOURCE_FOLLOWED_SITE, SOURCE_SIMULATED, SOURCE_SHADOW
+])
+
+/** Whether the source is Site-Wide, by the device's own assertion or by its gateway's. */
+export const isSiteWideSource = (source) => source === SOURCE_SITE_WIDE || source === SOURCE_FOLLOWED_SITE
+
+/** Whether the source is Area-Wide, by the device's own assertion or by its gateway's. */
+export const isAreaWideSource = (source) => source === SOURCE_AREA_WIDE || source === SOURCE_FOLLOWED_AREA
+
+/** Whether the source took its place from the device's gateway, so it moves when the gateway does. */
+export const isFollowedSource = (source) =>
+  source === SOURCE_FOLLOWED_CELL || source === SOURCE_FOLLOWED_AREA || source === SOURCE_FOLLOWED_SITE ||
+  source === SOURCE_INHERITED
 
 /**
  * Whether a cell can be stored against this gateway. Mirrors `gateways_synthetic_has_no_cell`:
@@ -86,6 +113,17 @@ export function noCellReason(gateway) {
 }
 
 /**
+ * Which `followed_*` arm a device that follows `gateway` is on: the gateway's own scope first, then
+ * its cell, else nothing to follow. Mirror of the view's followed arms.
+ */
+function followedSource(gateway) {
+  if (gateway?.location_scope === SCOPE_SITE_WIDE) return SOURCE_FOLLOWED_SITE
+  if (gateway?.location_scope === SCOPE_AREA_WIDE) return SOURCE_FOLLOWED_AREA
+  if (gateway?.cell_id) return SOURCE_FOLLOWED_CELL
+  return SOURCE_UNASSIGNED
+}
+
+/**
  * Resolve one device against its serving gateway. `gateway` may be null: a device with no gateway
  * is unassigned, not an error. `cellsById` is optional and only feeds the area: a cell-scoped
  * device's area is its effective cell's, which is a lookup the view does with a join. Mirror of the
@@ -96,6 +134,7 @@ export function resolveDeviceLocation(device, gateway, cellsById) {
   const explicit = device?.cell_id || null
   const inherited = gateway?.cell_id || null
   const ownArea = device?.area_id || null
+  const following = scope === SCOPE_GATEWAY
 
   // Read off the gateway and inherited rather than stored; a device with no gateway yields false
   // for both.
@@ -106,7 +145,7 @@ export function resolveDeviceLocation(device, gateway, cellsById) {
   // and replayed assets belong to a lane, and `gateways_synthetic_has_no_cell` guarantees there is
   // no gateway cell to inherit.
   const wide = scope === SCOPE_SITE_WIDE || scope === SCOPE_AREA_WIDE
-  const effective = (shadow || simulated || wide) ? null : (explicit || inherited)
+  const effective = (shadow || simulated || wide) ? null : following ? inherited : (explicit || inherited)
 
   // Shadow before simulated, mirroring the view: a shadow gateway is necessarily simulated, so
   // testing simulated first would make the shadow lane unreachable.
@@ -115,13 +154,16 @@ export function resolveDeviceLocation(device, gateway, cellsById) {
   else if (simulated) source = SOURCE_SIMULATED
   else if (scope === SCOPE_SITE_WIDE) source = SOURCE_SITE_WIDE
   else if (scope === SCOPE_AREA_WIDE) source = SOURCE_AREA_WIDE
+  else if (following) source = followedSource(gateway)
   else if (explicit) source = SOURCE_EXPLICIT
   else if (inherited) source = SOURCE_INHERITED
   else source = SOURCE_UNASSIGNED
 
-  // The area: the asset's own for area-wide, the effective cell's otherwise, none for the lanes.
+  // The area: the asset's own for area-wide, the gateway's for a device that follows an Area-Wide
+  // one, the effective cell's otherwise, none for the lanes and a Site-Wide gateway's followers.
   let effectiveArea = null
   if (source === SOURCE_AREA_WIDE) effectiveArea = ownArea
+  else if (source === SOURCE_FOLLOWED_AREA) effectiveArea = gateway?.area_id || null
   else if (effective) effectiveArea = cellOf(cellsById, effective)?.area_id || null
 
   return {
@@ -180,24 +222,49 @@ export function needsCellAssignment(device, gateway) {
 
 export const UNASSIGNED_NO_GATEWAY = 'no_gateway'
 export const UNASSIGNED_GATEWAY_HAS_NO_CELL = 'gateway_has_no_cell'
-export const UNASSIGNED_GATEWAY_SITE_WIDE = 'gateway_site_wide'
 
 /**
- * Why a device is unassigned, or null. The three cases call for different fixes: a remote gateway
- * with no cell is fixed once on the Gateways page; a wide-scoped or host-run gateway cannot supply
- * a cell by inheritance, so each device is filed individually.
+ * Why a device is unassigned, or null. A device follows its gateway, so the two cases are the two
+ * things it can lack: a gateway, or a location on the gateway it has. Any gateway can be located on
+ * the Gateways page, a host-run one and a Site-Wide one included.
  */
 export function unassignedReason(device, gateway) {
   if (!isUnassigned(device, gateway)) return null
   if (!gateway) return UNASSIGNED_NO_GATEWAY
-  if (WIDE_SCOPES.has(gateway.location_scope) || gateway.deployment === 'host') return UNASSIGNED_GATEWAY_SITE_WIDE
   return UNASSIGNED_GATEWAY_HAS_NO_CELL
 }
 
 const UNASSIGNED_HINTS = {
-  [UNASSIGNED_NO_GATEWAY]: 'No gateway assigned — pick a cell for this device, or assign it a gateway.',
-  [UNASSIGNED_GATEWAY_HAS_NO_CELL]: 'Its gateway is not assigned to a cell — set one on the Gateways page, or pick a cell for this device.',
-  [UNASSIGNED_GATEWAY_SITE_WIDE]: 'Its gateway is a host-level proxy with no cell of its own — pick a cell for this device, or mark it Site-Wide or Area-Wide.'
+  [UNASSIGNED_NO_GATEWAY]: 'It has no gateway to follow — assign one, or choose a cell, Area-Wide or Site-Wide for this device.',
+  [UNASSIGNED_GATEWAY_HAS_NO_CELL]: 'Its gateway has no location — set one on the Gateways page, or choose one for this device.'
+}
+
+/**
+ * Where a device that follows `gateway` is now, as the forms say it under Follow Gateway: "Area-Wide
+ * in Assembly, from AssemblyFlow", or "Unassigned: AssemblyFlow has no location". `cells` and `areas`
+ * are the lists the page holds, as the API gives them (`cell_id`, `cell_name`, `area_id`,
+ * `area_name`); a name they lack reads as the thing itself, so the line never names a blank.
+ */
+export function followedPlaceLine(gateway, { cells = [], areas = [] } = {}) {
+  if (!gateway) return 'Unassigned: it has no gateway'
+  const from = gateway.gateway_name || gateway.name || 'its gateway'
+  const areaName = (id) => areas.find(a => (a.area_id ?? a.id) === id)?.area_name || 'an area'
+  const place = followedSource(gateway)
+  if (place === SOURCE_FOLLOWED_SITE) return `Site-Wide, from ${from}`
+  if (place === SOURCE_FOLLOWED_AREA) return `Area-Wide in ${areaName(gateway.area_id)}, from ${from}`
+  if (place === SOURCE_FOLLOWED_CELL) {
+    const cell = cells.find(c => (c.cell_id ?? c.id) === gateway.cell_id)
+    const area = cell?.area_id ? ` in ${areaName(cell.area_id)}` : ''
+    return `Cell ${cell?.cell_name || 'its cell'}${area}, from ${from}`
+  }
+  return `Unassigned: ${from} has no location`
+}
+
+/** What fixes a device whose Follow Gateway line says Unassigned. */
+export function followedPlaceFix(gateway) {
+  return gateway
+    ? 'Set a location on the gateway, or choose one for this device.'
+    : 'Assign a gateway that has a location, or choose one for this device.'
 }
 
 /** Actionable one-liner for an unassigned device, or null. */

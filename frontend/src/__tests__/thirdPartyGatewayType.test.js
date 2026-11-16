@@ -8,7 +8,7 @@ import {
 } from '../utils/credentialState'
 import {
   gatewayAcceptsCell, resolveDeviceLocation, unassignedReason, UNASSIGNED_GATEWAY_HAS_NO_CELL,
-  UNASSIGNED_GATEWAY_SITE_WIDE, SOURCE_INHERITED,
+  SOURCE_FOLLOWED_CELL,
 } from '../utils/cellResolution'
 import {
   BROKER_DIRECTORY_ID, brokerAddress, brokerRow, helpSourceUrl, primaryHostId, sourceRef,
@@ -66,19 +66,20 @@ describe("a Third-party gateway's credential", () => {
 })
 
 describe('where a Third-party gateway is', () => {
-  it('can be placed in a cell, and its devices inherit it, as a Remote gateway does', () => {
+  it('can be placed in a cell, and its devices that follow it take it, as a Remote gateway does', () => {
     const gateway = { ...THIRD_PARTY, cell_id: 'cell-1', location_scope: 'cell' }
     expect(gatewayAcceptsCell(gateway)).toBe(true)
-    const resolved = resolveDeviceLocation({ cell_id: null }, gateway)
+    const resolved = resolveDeviceLocation({ location_scope: 'gateway' }, gateway)
     expect(resolved.effective_cell_id).toBe('cell-1')
-    expect(resolved.location_source).toBe(SOURCE_INHERITED)
+    expect(resolved.location_source).toBe(SOURCE_FOLLOWED_CELL)
   })
 
-  it('is fixed once on the Gateways page when it has no cell, unlike a host-level proxy', () => {
-    expect(unassignedReason({}, { ...THIRD_PARTY, cell_id: null, location_scope: 'cell' }))
+  it('is fixed once on the Gateways page when it has no location, as a host-run gateway is', () => {
+    const follower = { location_scope: 'gateway' }
+    expect(unassignedReason(follower, { ...THIRD_PARTY, cell_id: null, location_scope: 'cell' }))
       .toBe(UNASSIGNED_GATEWAY_HAS_NO_CELL)
-    expect(unassignedReason({}, { deployment: 'host', cell_id: null, location_scope: 'cell' }))
-      .toBe(UNASSIGNED_GATEWAY_SITE_WIDE)
+    expect(unassignedReason(follower, { deployment: 'host', cell_id: null, location_scope: 'cell' }))
+      .toBe(UNASSIGNED_GATEWAY_HAS_NO_CELL)
   })
 })
 

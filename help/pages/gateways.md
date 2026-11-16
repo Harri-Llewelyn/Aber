@@ -2,7 +2,7 @@
 
 A gateway is the computer that talks to your machines and sends their data to the broker. Every device in Aber arrives through one. This page is where you create gateways, set them up, watch them and take them out of service.
 
-A gateway serves a cell, a whole area (**Area-Wide**) or the whole site (**Site-Wide**), and the devices reporting through it take that location. A Simulated gateway serves none of these: its devices go in the Simulated lane instead. In Sparkplug terms a gateway is an edge node. It is not a level of the ISA-95 hierarchy, which names the devices behind it and the places they stand in.
+A gateway serves a cell, a whole area (**Area-Wide**) or the whole site (**Site-Wide**). The devices reporting through it take that location when they are set to **Follow Gateway**, which a new device is. A Simulated gateway serves none of these: its devices go in the Simulated lane instead. In Sparkplug terms a gateway is an edge node. It is not a level of the ISA-95 hierarchy, which names the devices behind it and the places they stand in.
 
 ## What the controls do
 

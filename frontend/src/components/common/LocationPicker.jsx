@@ -1,22 +1,26 @@
 import React from 'react'
 import { Tooltip } from './Tooltip'
-import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, normaliseScope } from '../../utils/cellResolution'
+import { SCOPE_GATEWAY, SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, normaliseScope } from '../../utils/cellResolution'
 
 /**
- * True while the form's location cannot be written: Area-Wide with no area named.
- * `*_area_wide_names_its_area` would refuse the row, so the Save button reads this.
+ * True while the form's location cannot be written: Area-Wide with no area named, or, where
+ * `cellRequired`, In a cell with no cell. `*_area_wide_names_its_area` and
+ * `devices_cell_scope_names_a_cell` would refuse the row, so the Save button reads this. A gateway
+ * may be in no cell, so its form leaves `cellRequired` off.
  */
-export function locationIncomplete(form) {
-  return normaliseScope(form.location_scope) === SCOPE_AREA_WIDE && !form.area_id
+export function locationIncomplete(form, { cellRequired = false } = {}) {
+  const scope = normaliseScope(form.location_scope)
+  return (scope === SCOPE_AREA_WIDE && !form.area_id) || (cellRequired && scope === SCOPE_CELL && !form.cell_id)
 }
 
 /**
- * The form fields for a scope choice. The three scopes are exclusive
- * (`*_site_wide_has_no_cell`, `*_area_wide_has_no_cell`, `*_area_wide_names_its_area`), so
- * choosing one clears what the others store. The only area is chosen for Area-Wide without
- * asking; several leave `area_id` empty for the dropdown.
+ * The form fields for a scope choice. The scopes are exclusive
+ * (`*_site_wide_has_no_cell`, `*_area_wide_has_no_cell`, `*_area_wide_names_its_area`,
+ * `devices_follow_gateway_has_no_place`), so choosing one clears what the others store. The only
+ * area is chosen for Area-Wide without asking; several leave `area_id` empty for the dropdown.
  */
 function locationFieldsFor(scope, form, areas = []) {
+  if (scope === SCOPE_GATEWAY) return { location_scope: SCOPE_GATEWAY, cell_id: '', area_id: '' }
   if (scope === SCOPE_SITE_WIDE) return { location_scope: SCOPE_SITE_WIDE, cell_id: '', area_id: '' }
   if (scope === SCOPE_AREA_WIDE) {
     const areaId = areas.some(a => a.area_id === form.area_id)
@@ -28,26 +32,31 @@ function locationFieldsFor(scope, form, areas = []) {
 }
 
 /**
- * Where an asset is: in a cell, Area-Wide in one area, or Site-Wide. One exclusive choice,
- * then a dropdown only where the choice leaves more than one answer -- which cell, or which
- * area when there are several. Shared by the device and gateway forms; the callers differ
- * only in what the empty cell means (Inherit from the gateway, or No cell).
+ * Where an asset is: following its gateway, in a cell, Area-Wide in one area, or Site-Wide. One
+ * exclusive choice, then a dropdown only where the choice leaves more than one answer -- which
+ * cell, or which area when there are several. Shared by the device forms and the gateway form.
+ * `followGateway` offers Follow Gateway first, for a device: a gateway has no gateway to follow, and
+ * its form leaves the choice out and lets the cell stay empty (`cellEmptyLabel`).
  *
- * `disabled` withholds the whole control and shows it as In a cell with nothing chosen, which is
- * how a synthetic gateway's stored scope reads everywhere else (`device_locations` resolves
- * `simulated` ahead of it). The caller's hint beneath says why.
+ * `disabled` withholds the whole control and shows its first choice, which is how a synthetic
+ * gateway's stored scope reads everywhere else (`device_locations` resolves `simulated` ahead of
+ * it). The caller's hint beneath says why.
  */
 export function LocationPicker({
   idPrefix, form, onChange, cells = [], areas: allAreas = [], disabled = false,
-  cellEmptyLabel = '— No cell assigned —'
+  followGateway = false, cellEmptyLabel = '— No cell assigned —'
 }) {
   // The database refuses making anything Area-Wide in an archived area.
   const areas = allAreas.filter(a => !a.is_archived)
-  const scope = disabled ? SCOPE_CELL : normaliseScope(form.location_scope)
+  const scope = disabled ? (followGateway ? SCOPE_GATEWAY : SCOPE_CELL) : normaliseScope(form.location_scope)
   const chosenCell = cells.find(c => c.cell_id === form.cell_id)
   const choose = (next) => { if (!disabled) onChange(locationFieldsFor(next, form, areas)) }
 
   const choices = [
+    ...(followGateway ? [{
+      scope: SCOPE_GATEWAY, label: 'Follow Gateway',
+      title: 'Takes the place its gateway has, and moves when the gateway does'
+    }] : []),
     { scope: SCOPE_CELL, label: 'In a cell' },
     {
       scope: SCOPE_AREA_WIDE, label: 'Area-Wide', off: areas.length === 0,

@@ -1,4 +1,4 @@
-import { SCOPE_AREA_WIDE, SOURCE_AREA_WIDE } from './cellResolution'
+import { SCOPE_AREA_WIDE, isAreaWideSource } from './cellResolution'
 import { isShadowDevice } from './fleetCounts'
 
 /**
@@ -28,13 +28,14 @@ export function inServiceGateways(gateways) {
 }
 
 /**
- * The equipment in service that belongs to a whole area rather than to a cell in it. A simulated
- * gateway's stored scope is inert, and the Playback gateway is in no area, so neither is here.
+ * The equipment in service that belongs to a whole area rather than to a cell in it: a device that is
+ * Area-Wide or follows an Area-Wide gateway, and the gateway itself. A simulated gateway's stored
+ * scope is inert, and the Playback gateway is in no area, so neither is here.
  */
 export function areaWideInService(areaId, devices, gateways) {
   return {
     devices: inServiceDevices(devices)
-      .filter(d => d.location_source === SOURCE_AREA_WIDE && d.effective_area_id === areaId),
+      .filter(d => isAreaWideSource(d.location_source) && d.effective_area_id === areaId),
     gateways: inServiceGateways(gateways)
       .filter(g => !g.is_simulated && !g.is_shadow && g.location_scope === SCOPE_AREA_WIDE && g.area_id === areaId)
   }

@@ -120,7 +120,9 @@ class Base(unittest.TestCase):
         )
         return gateway_id
 
-    def make_device(self, name, gateway_id, cell_id=None, scope="cell", area_id=None, shadow_of=None):
+    def make_device(self, name, gateway_id, cell_id=None, scope=None, area_id=None, shadow_of=None):
+        # A device with a cell of its own is in it; one with none follows its gateway.
+        scope = scope or ("cell" if cell_id else "gateway")
         device_id = str(uuid.uuid4())
         self.cur.execute(
             "INSERT INTO public.devices (id, name, gateway_id, cell_id, location_scope, area_id, shadow_of) "

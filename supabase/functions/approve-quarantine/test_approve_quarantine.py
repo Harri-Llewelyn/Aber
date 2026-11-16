@@ -7,7 +7,7 @@
 Unit test suite for the approve-quarantine Supabase Edge Function.
 
 Covers the location patch composition, specifically that an unanswered cell is omitted rather than
-defaulted, which is what keeps devices.cell_id's NULL-means-inherit intact; and asserts against
+defaulted, which is what keeps a device arriving as Follow Gateway; and asserts against
 index.ts that the role gate takes the caller's role from public.user_roles through
 _shared/roles.ts. The lookup itself is tested in _shared/roles_test.ts.
 """
@@ -26,10 +26,9 @@ def evaluate_location_patch(body: dict) -> tuple[int, dict]:
     Python mirror of the cell_id / location_scope handling in index.ts.
 
     Returns (status, patch_fragment). The distinction that matters is between a key that is
-    ABSENT (the operator did not answer, so the column is not written and devices.cell_id stays
-    NULL-means-inherit) and one that is present but empty (the picker's explicit "Inherit"
-    option, written as NULL). Defaulting the absent case would turn inheritance off for every
-    device approved through this function.
+    ABSENT (the operator did not answer, so the column is not written and the device keeps
+    following its gateway) and one that is present but empty (written as NULL). Defaulting the
+    absent case would pin every device approved through this function to a place of its own.
     """
     patch: dict = {}
 
@@ -47,11 +46,18 @@ def evaluate_location_patch(body: dict) -> tuple[int, dict]:
             return 400, {}
         patch["area_id"] = trimmed or None
 
-    if "location_scope" in body:
-        scope = body["location_scope"]
-        if scope not in ("cell", "site_wide", "area_wide"):
+    # A cell named with no scope is a cell of the device's own.
+    answers_scope = "location_scope" in body
+    scope = body.get("location_scope")
+    if not answers_scope and patch.get("cell_id"):
+        answers_scope = True
+        scope = "cell"
+    if answers_scope:
+        if scope not in ("gateway", "cell", "site_wide", "area_wide"):
             return 400, {}
         if scope == "area_wide" and not patch.get("area_id"):
+            return 400, {}
+        if scope == "cell" and "cell_id" in body and not patch.get("cell_id"):
             return 400, {}
         patch["location_scope"] = scope
         if scope != "cell":
@@ -72,16 +78,39 @@ class TestApproveQuarantineLocation(unittest.TestCase):
         self.assertNotIn("location_scope", patch)
 
     def test_empty_cell_id_is_written_as_null(self):
-        """The picker's explicit Inherit option, which is different from not answering."""
+        """An explicitly empty cell is a cleared one, which is different from not answering."""
         status, patch = evaluate_location_patch({"cell_id": ""})
         self.assertEqual(status, 200)
         self.assertIsNone(patch["cell_id"])
+        self.assertNotIn("location_scope", patch)
 
-    def test_explicit_cell_is_written(self):
+    def test_a_cell_named_with_no_scope_is_a_cell_of_the_devices_own(self):
+        """
+        A device arrives following its gateway, and a cell beside that scope is refused by
+        devices_follow_gateway_has_no_place, so the request that named only a cell means In a cell.
+        """
         cell = "aaaaaaaa-0000-4000-8000-000000000000"
         status, patch = evaluate_location_patch({"cell_id": cell})
         self.assertEqual(status, 200)
         self.assertEqual(patch["cell_id"], cell)
+        self.assertEqual(patch["location_scope"], "cell")
+
+    def test_follow_gateway_clears_the_cell_and_the_area(self):
+        """Mirrors devices_follow_gateway_has_no_place."""
+        status, patch = evaluate_location_patch({
+            "cell_id": "aaaaaaaa-0000-4000-8000-000000000000",
+            "area_id": "bbbbbbbb-0000-4000-8000-000000000000",
+            "location_scope": "gateway"
+        })
+        self.assertEqual(status, 200)
+        self.assertIsNone(patch["cell_id"])
+        self.assertIsNone(patch["area_id"])
+        self.assertEqual(patch["location_scope"], "gateway")
+
+    def test_a_cell_scope_with_no_cell_is_rejected(self):
+        """Mirrors devices_cell_scope_names_a_cell: Cell requires a cell."""
+        status, _ = evaluate_location_patch({"cell_id": "", "location_scope": "cell"})
+        self.assertEqual(status, 400)
 
     def test_non_uuid_cell_is_rejected(self):
         status, _ = evaluate_location_patch({"cell_id": "Assembly Cell"})
@@ -119,7 +148,8 @@ class TestApproveQuarantineLocation(unittest.TestCase):
 
     def test_a_cell_scope_clears_any_area(self):
         status, patch = evaluate_location_patch({
-            "cell_id": "", "area_id": "bbbbbbbb-0000-4000-8000-000000000000", "location_scope": "cell"
+            "cell_id": "aaaaaaaa-0000-4000-8000-000000000000",
+            "area_id": "bbbbbbbb-0000-4000-8000-000000000000", "location_scope": "cell"
         })
         self.assertEqual(status, 200)
         self.assertIsNone(patch["area_id"])
@@ -144,19 +174,25 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
         # The write itself moved into an atomic RPC, so half of what this class guards now lives
         # in SQL. Both halves are still checked -- the invariant did not change, only its home.
         #
-        # Read from the LAST file that declares it, which is what the database runs. That used to
-        # be archived migration 0097, which dropped the baseline's form and redeclared it with the
-        # area parameters; since the third squash folded 0097 in, the baseline is the only
-        # declaration. The rule has not changed -- assert against the SQL the database actually runs -- only where that is.
-        migration = os.path.join(here, "..", "..", "migrations", "0001_baseline_schema.sql")
-        with open(migration, "r", encoding="utf-8") as handle:
-            self.rpc_sql = handle.read()
+        # Read from the LAST file that declares it, which is what the database runs: migrations
+        # replay in filename order, and a later CREATE OR REPLACE wins.
+        migrations = os.path.join(here, "..", "..", "migrations")
+        declaration = "CREATE OR REPLACE FUNCTION public.approve_quarantined_device("
+        self.rpc_sql = ""
+        for name in sorted(os.listdir(migrations)):
+            if not re.match(r"^[0-9]{4}_.*\.sql$", name):
+                continue
+            with open(os.path.join(migrations, name), "r", encoding="utf-8") as handle:
+                text = handle.read()
+            if declaration in text:
+                start = text.index(declaration)
+                self.rpc_sql = text[start:text.index("\n$$;", start)]
 
     def test_source_still_omits_location_when_not_supplied(self):
         """
-        `undefined` (not supplied) and an explicit empty value (the picker's "Inherit") are
-        different answers, and devices.cell_id is NULL-means-inherit with no column default --
-        so writing a value the operator did not choose would disable inheritance permanently.
+        `undefined` (not supplied) and an explicit empty value are different answers, and a
+        device arrives following its gateway -- so writing a value the operator did not choose
+        would pin it to a place of its own.
         """
         self.assertIn("cell_id !== undefined", self.source)
         self.assertIn("location_scope !== undefined", self.source)
@@ -173,21 +209,27 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
         self.assertIn("WHEN p_set_location_scope", self.rpc_sql)
         self.assertIn("WHEN p_set_area", self.rpc_sql)
 
-    def test_the_cell_is_still_cleared_for_site_wide(self):
+    def test_the_cell_is_still_cleared_for_site_wide_and_follow_gateway(self):
         """
-        Mirrors the devices_site_wide_has_no_cell CHECK. Clearing it means the caller gets an
-        approval rather than a constraint violation it has no way to interpret.
+        Mirrors the devices_site_wide_has_no_cell and devices_follow_gateway_has_no_place CHECKs.
+        Clearing it means the caller gets an approval rather than a constraint violation it has no
+        way to interpret.
         """
         self.assertIn(
-            "IF p_set_location_scope AND p_location_scope = 'site_wide' THEN", self.rpc_sql
+            "IF p_set_location_scope AND p_location_scope IN ('site_wide', 'gateway') THEN",
+            self.rpc_sql
         )
         self.assertIn("v_cell := NULL;", self.rpc_sql)
 
     def test_source_still_constrains_the_scope_to_the_check_constraint_values(self):
         self.assertIn(
-            'location_scope !== "cell" && location_scope !== "site_wide" && location_scope !== "area_wide"',
+            'scope !== "gateway" && scope !== "cell" && scope !== "site_wide" && scope !== "area_wide"',
             self.source
         )
+
+    def test_the_rpc_refuses_a_cell_scope_that_names_no_cell(self):
+        """Mirrors devices_cell_scope_names_a_cell, in the words of the area-wide refusal."""
+        self.assertIn("a cell device must name its cell", self.rpc_sql)
 
     def test_the_rpc_refuses_area_wide_without_an_area(self):
         """
