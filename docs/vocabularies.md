@@ -147,10 +147,12 @@ against the IDTA content hub, the ISA/ANSI webstore and the open223 project.
 | Standard | Verified identity | Namespace / semanticId base |
 |---|---|---|
 | Machinery | **OPC 40001-1** v1.04.2, 2026-11-02 | `http://opcfoundation.org/UA/Machinery/` |
+| Process Values | **OPC 40001-2** *OPC UA for Machinery, Part 2: Process Values* v1.00.0, 2023-05-01 | `http://opcfoundation.org/UA/Machinery/ProcessValues/` |
 | Robotics | **OPC 40010-1** v1.02, 2025-09-08 | `http://opcfoundation.org/UA/Robotics/` |
 | Machine Tools | **OPC 40501-1** v1.02.0, 2024-11-01 | `http://opcfoundation.org/UA/MachineTool/` |
 | Additive Manufacturing | **OPC 40540** v1.0.0, 2025-02-01 — **not 40450** | `http://opcfoundation.org/UA/AdditiveManufacturing/` |
 | Energy | **OPC 40001-4** *Machinery Part 4: Energy Management* v1.00, 2025-11-01 | `http://opcfoundation.org/UA/Machinery/Energy/` |
+| IA (read, not seeded) | `http://opcfoundation.org/UA/IA/` v1.01.4, 2025-05-23 — two definitions the Machine Tools and Energy NodeSets take from it | `http://opcfoundation.org/UA/IA/` |
 | Digital Nameplate | **IDTA 02006-3-0-1**, Oct 2025 | `https://admin-shell.io/idta/nameplate/3/0/Nameplate` |
 | PackML | **OPC 30050** *OPC UA for PackML* v1.01, 2020-10-08 — **the ISA document is not needed** | `http://opcfoundation.org/UA/PackML/` |
 | ASHRAE 223P | ontology `v1.0.0-2026`, **Apache-2.0**; the *standard* is still in public review | `http://data.ashrae.org/standard223#` |
@@ -161,11 +163,13 @@ inconsistently, and the Additive path 404s if you guess it:
 
 ```
 Machinery/Opc.Ua.Machinery.NodeSet2.xml
+Machinery/ProcessValues/Opc.Ua.Machinery.ProcessValues.NodeSet2.xml
 Robotics/Opc.Ua.Robotics.NodeSet2.xml
 MachineTool/Opc.Ua.MachineTool.NodeSet2.xml
 AdditiveManufacturing/Opc.Ua.AdditiveManufacturing.Nodeset2.xml
 Machinery/Energy/Opc.Ua.Machinery.Energy.NodeSet2.xml
 PackML/Opc.Ua.PackML.NodeSet2.xml
+IA/Opc.Ua.IA.NodeSet2.xml
 ```
 
 **The correction that matters: OPC 40450 is not Additive Manufacturing.** OPC 40450-1 is *OPC UA for
@@ -246,14 +250,25 @@ As with MTConnect's Apache-2.0, a licence covers the *vocabulary*, not a conform
 
 ## OPC UA companion specifications
 
-`opcua_vocabulary` holds six companion specifications, every row read from its NodeSet: OPC 40001
-Machinery, OPC 40010 Robotics, OPC 40501 Machine Tools, OPC 40540 Additive Manufacturing, OPC
-40001-4 Machinery Energy and OPC 30050 PackML. `scripts/generate-opcua-vocabulary.mjs` writes them
-into marked blocks in `0002_seed_data.sql`, with their `metric_groups` rows, and
-`scripts/check-opcua-seed-sync.mjs` verifies them in CI. The generator also writes the table's
-`COMMENT`, naming every specification the seed holds, and the check recomputes it, so a
-specification added by hand cannot leave the comment behind. The check also refuses an
-`opcua_vocabulary` row written outside the generated block.
+`opcua_vocabulary` holds seven companion specifications and 124 data points, every row read from its
+NodeSet:
+
+| Companion specification | Data points | Seeded by |
+| :--- | ---: | :--- |
+| OPC 30050 PackML | 19 | `0002` (16), `0300` (3) |
+| OPC 40001 Machinery | 19 | `0002` (9), `0300` (10) |
+| OPC 40001-2 Machinery Process Values | 8 | `0300` (8) |
+| OPC 40001-4 Machinery Energy | 8 | `0002` (6), `0300` (2) |
+| OPC 40010 Robotics | 26 | `0002` (15), `0300` (11) |
+| OPC 40501 Machine Tools | 33 | `0002` (23), `0300` (10) |
+| OPC 40540 Additive Manufacturing | 11 | `0002` (6), `0300` (5) |
+
+`scripts/generate-opcua-vocabulary.mjs` writes them into marked blocks in the migrations that seed
+them, with their `metric_groups` rows, and `scripts/check-opcua-seed-sync.mjs` verifies them in CI.
+The generator also writes the table's `COMMENT`, naming every specification seeded up to that
+block, and the check recomputes it, so a specification added by hand cannot leave the comment
+behind. The check also refuses an `opcua_vocabulary` row written outside a generated block, in any
+migration.
 
 - **The seed is curated, not dumped.** The NodeSets carry almost no descriptions — MachineTool
   declares 356 variables of which 18 have one, Machinery/Energy has 87 and none — so a bulk
@@ -264,6 +279,9 @@ specification added by hand cannot leave the comment behind. The check also refu
   ObjectType and the browse path below it, one declared component or property per step, such as
   Robotics `AxisType` → `ParameterSet` → `ActualPosition`. A step that names two nodes stops the
   build, because the NodeId becomes the row's identifier.
+- **A description follows the NodeSet's where it has one.** 30 of the 49 rows `0300` added take the
+  NodeSet's own `Description`, shortened. The other 19 are written from the specification's
+  reference page for the type, which the NodeSet links, or from the enumeration it defines.
 - **The NodeId is translated, not copied.** A NodeSet writes `ns=3;i=16662`, where `3` indexes
   that file's own `NamespaceUris` table. The generator writes `nsu=<that URI>;i=16662`, which means
   the same node outside the file, and refuses a node outside the row's own specification.
@@ -271,11 +289,44 @@ specification added by hand cannot leave the comment behind. The check also refu
   and the Add Metric form took a point's group from its first segment. The generator now writes
   each entry's curated group to `frontend/src/utils/opcuaGroups.generated.js`, and the check holds
   it to the rows and to the `metric_groups` the seed registers under OPC UA.
-- **The rows live in `0002_seed_data.sql`, not a migration of their own,** as the MTConnect
-  generator does with its vocabulary.
+- **The rows live in blocks, one for each migration that grew the vocabulary.** `0002` is released
+  and is not regenerated, so `0300` seeds the rows added since in a block of its own. Each entry
+  in the generator says which block seeds it (`since`), and each block is written from its own
+  entries. A block is written only while its migration has a note in `unreleased/migrations/`. After
+  the release the generator only verifies it, and stops if it would now read differently. The next
+  expansion adds a third block the same way: `scripts/lib/opcua-seed-blocks.mjs` has the rules.
+- **A group can be reworded.** `ProcessValue` was OPC 40540's group for in-process readings. OPC
+  40001-2's rows joined it in `0300`, so its description now covers both. `0002` still registers the
+  first text, and `0300` replaces it with an `UPDATE` guarded on that text, so a description an
+  Administrator edited is left alone. Both specifications list the group with one definition, and
+  the generator refuses two that differ.
+- **A type can come from another NodeSet.** A Machine Tools stacklight's mode is an enumeration of
+  IA, and Machinery Energy hangs its non-electrical totals from IA's `HasStatisticComponent`, a
+  subtype of `HasComponent`. The generator reads IA's NodeSet too, pinned as the others are. It
+  seeds nothing from it.
+- **An enumeration is a `String`, and its members are the permitted values.** A device publishes an
+  enumeration as the member's name. OPC 40540 `Function` says so in its description and lists the
+  four names: Undefined, Main, Ancillary and Consumable. The entry's `values` are held to the
+  NodeSet's definition, and the description has to name each. Enter them in the **Permitted
+  Values** field of Add Metric, as for PackML's states (below). The vocabulary table has no column
+  for them, so the form does not fill the field.
+- **Left out on purpose:**
+  - PackML's three count arrays, which are arrays of a structure that Sparkplug B cannot carry.
+  - Machine Tools `FeedOverride` on its monitoring type, which would clash with the seeded channel
+    `FeedOverride`, because the table is keyed on the specification and the name.
+  - Alarm and condition internals, state-machine scaffolding and placeholder members such as
+    `<Tool>`.
+  - OPC 40540's `RunInfoDataType`, a structure that no variable in the NodeSet uses.
+- **A printer is a machine tool, and its readings are process values.** OPC 40540's
+  `AdditiveManufacturingType` subtypes OPC 40501's `MachineToolType`, so the Machine Tools and
+  Machinery sections apply to a printer. Its `ProcessValueAMType` subtypes OPC 40001-2's
+  `ProcessValueType`: a chamber temperature or an oxygen level is a process value that the vendor
+  names, and the specification gives only its shape. MTConnect names what a printer measures.
 - **`companion_spec` spellings follow the existing `OPC 40001 Machinery` shape** and are permanent:
   `enforce_metric_group_spelling()` fixes the first spelling of the matching `metric_groups` rows.
 - **`standard` stays `'OPC UA'`**, so no new `STANDARDS` entry was needed in the frontend.
+- **i3X needs no change.** `metric_type_namespace()` already puts an id under
+  `http://opcfoundation.org/UA/` in that id's own namespace.
 
 ## IDTA Digital Nameplate
 
@@ -486,7 +537,7 @@ class lives only in a metric's name.
 
 | Question | Settled answer |
 |---|---|
-| One `opcua_vocabulary` for six specs, or one table each? | **One** — the PK is already `(companion_spec, name)` |
+| One `opcua_vocabulary` for seven specs, or one table each? | **One** — the PK is already `(companion_spec, name)` |
 | Is `permitted_values` frozen like `metric_catalog.name`? | **No.** Nothing is configured against it, and a value set widens between editions; freezing it forces a version event for a non-breaking change. A published schema keeps its own copy as `enum`. `name` stays immutable |
 | Where does nameplate data live? | **`device_nameplate`**, not `asset_config`, which ingestion rewrites from every DBIRTH |
 | IDTA templates: own table or rows in `schemas`? | **Own table.** `schemas` is deployment state; templates are reference data |

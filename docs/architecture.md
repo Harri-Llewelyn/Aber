@@ -210,7 +210,7 @@ made. The demo user accounts are seeded separately, by `supabase/seed.sql`.
 | :--- | :--- |
 | **Sparkplug B** | The wire protocol. Identity is `sparkplug_id`, carried in the topic |
 | **MTConnect** (2.x) | Machine-tool vocabulary — 249 data item types, 123 subtypes, 100 units, 126 component types |
-| **OPC UA** (40001, 40001-4, 40010, 30050, 40501, 40540) | Companion-specification data points: machinery, energy, robotics, PackML, machine tools, additive. Generated from OPC Foundation NodeSets by [`scripts/generate-opcua-vocabulary.mjs`](../scripts/generate-opcua-vocabulary.mjs) |
+| **OPC UA** (40001, 40001-2, 40001-4, 40010, 30050, 40501, 40540) | Companion-specification data points: machinery, process values, energy, robotics, PackML, machine tools, additive. Generated from OPC Foundation NodeSets by [`scripts/generate-opcua-vocabulary.mjs`](../scripts/generate-opcua-vocabulary.mjs) |
 | **ISO 22400** | Computed KPIs, which MTConnect and OPC UA deliberately exclude |
 | **ASHRAE 223P** | Building-system semantics — 640 concepts from the open223 ontology. ⚠ Still in public review |
 | **AAS / IEC 63278** | V3 export as JSON or AASX, and a live read-only repository API (`aas-api`, IDTA-01002), validated against the official IDTA schema |
