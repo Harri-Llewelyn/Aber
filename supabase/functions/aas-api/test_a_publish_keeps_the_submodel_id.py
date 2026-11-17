@@ -18,12 +18,12 @@ read the shell before and after. Skipped with no reachable stack.
 Run:  python supabase/functions/aas-api/test_a_publish_keeps_the_submodel_id.py
 """
 import base64
+import http.client
 import json
 import os
 import sys
 import unittest
-import urllib.error
-import urllib.request
+import urllib.parse
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -52,24 +52,27 @@ def b64url(value):
 
 
 def call(method, url, token, payload=None):
-    body = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url, data=body, method=method)
-    req.add_header("apikey", PUBLISHABLE_KEY)
-    req.add_header("Authorization", f"Bearer {token}")
+    """(status, parsed JSON) for one request to the stack: the URL is split and connected to, not opened."""
+    parts = urllib.parse.urlsplit(url)
+    connect = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+    headers = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}"}
+    body = None
     if payload is not None:
-        req.add_header("Content-Type", "application/json")
+        body = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
+    connection = connect(parts.hostname, parts.port, timeout=45)
     try:
-        with urllib.request.urlopen(req, timeout=45) as res:
-            raw = res.read() or b"{}"
-            return res.status, json.loads(raw)
-    except urllib.error.HTTPError as err:
-        raw = err.read() or b"{}"
+        connection.request(method, parts.path + (f"?{parts.query}" if parts.query else ""), body=body, headers=headers)
+        response = connection.getresponse()
+        raw = response.read() or b"{}"
         try:
-            return err.code, json.loads(raw)
+            return response.status, json.loads(raw)
         except json.JSONDecodeError:
-            return err.code, {"raw": raw.decode(errors="replace")}
+            return response.status, {"raw": raw.decode(errors="replace")}
     except OSError:
         return 0, {}
+    finally:
+        connection.close()
 
 
 def sign_in():
