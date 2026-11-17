@@ -168,7 +168,8 @@ export function EditMetricSemanticIdModal({
           <>
             <strong>{usageCount}</strong> schema{usageCount === 1 ? ' models' : 's model'} this
             metric. Every AAS shell exported from {usageCount === 1 ? 'it' : 'them'} will carry the
-            new id, so a consumer matching on the old one stops finding it.
+            new id, so a consumer matching on the old one stops finding it. To keep it found, add
+            the old id as a further ID.
           </>
         ) : (
           <>No schema models this metric yet, so no exported shell carries its id.</>
