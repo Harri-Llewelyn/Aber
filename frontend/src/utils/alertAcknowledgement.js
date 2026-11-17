@@ -1,5 +1,4 @@
-import { alertPage, deviceUrl, gatewayUrl } from '../routes'
-import { grafanaAlertUrl } from '../constants'
+import { alertPage, builtInAlertUrl, deviceUrl, gatewayUrl } from '../routes'
 
 /**
  * Acknowledging an alert: the reasons a person gives, who may acknowledge and withdraw, and the
@@ -49,7 +48,8 @@ export const mayWithdraw = (alert, role, userId) => isAcknowledged(alert) && (
 /**
  * Where a message about an alert leads, as its row in the counter does: the page alertPage() names
  * when it has one of its own (an automation's alert opens the automation), else the device or
- * gateway it is about, else its rule in Grafana (none for an alert Aber's evaluator raised, so null).
+ * gateway it is about, else its rule's entry on Automations › Built-in (null for an alert Aber's
+ * evaluator raised, which alertPage() has already answered).
  */
 export function alertSubjectUrl(alert) {
   const own = alertPage(alert)
@@ -57,5 +57,5 @@ export function alertSubjectUrl(alert) {
   const kind = alert?.entity_type || 'device'
   if (kind === 'device' && alert?.sparkplug_id) return deviceUrl(alert.sparkplug_id)
   if (kind === 'gateway' && alert?.sparkplug_id) return gatewayUrl(alert.sparkplug_id)
-  return grafanaAlertUrl(alert)
+  return builtInAlertUrl(alert)
 }

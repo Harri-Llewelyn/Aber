@@ -56,53 +56,44 @@ describe('context drawer alert banner', () => {
   })
 
   /**
-   * The deep link out. Its tooltip says thresholds and state history live in Grafana, so this is the one
-   * thing in the presentational panel that navigates on its own.
+   * The link to the rule's entry. The drawer opens the rule on Automations › Built-in, in this app,
+   * where its thresholds and help are; Grafana is one click further, from that drawer.
    */
-  describe('View in Grafana', () => {
-    it('is a real anchor to a new tab, so middle-click and copy-link work', () => {
+  describe('View rule', () => {
+    it('is a real anchor in this app, so middle-click and copy-link work, and opens no new tab', () => {
       panel({ alert })
-      const link = screen.getByRole('link', { name: /View in Grafana/i })
-      // The likeliest use of this link is pasting it to whoever owns the rule. A button with a
-      // window.open handler could not be pasted at all.
+      const link = screen.getByRole('link', { name: /View rule/i })
       expect(link.tagName).toBe('A')
-      expect(link).toHaveAttribute('target', '_blank')
-      expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+      expect(link).not.toHaveAttribute('target')
+      expect(screen.queryByRole('link', { name: /Grafana/i })).not.toBeInTheDocument()
     })
 
-    it('filters the alert list by rule name', () => {
-      panel({ alert })
-      const href = screen.getByRole('link', { name: /View in Grafana/i }).getAttribute('href')
-      expect(href).toContain('/alerting/list?search=')
-      const query = decodeURIComponent(new URL(href).searchParams.get('search'))
-      // Landing on every rule in the instance would be the same as not filtering at all.
-      expect(query).toBe('rule:"Thermal Excursion"')
+    it('opens the rule by its uid when the row carries one', () => {
+      panel({ alert: { ...alert, rule_uid: 'aber-gateway-stale' } })
+      expect(screen.getByRole('link', { name: /View rule/i })).toHaveAttribute('href', '/automations/built-in?rule=aber-gateway-stale')
     })
 
-    /**
-     * The device filter is the bug this guards against: /alerting/list searches rule definitions,
-     * so `label:sparkplug_id=` matches nothing and the ANDed filter returns an empty list, which
-     * reads as the alert having cleared.
-     */
-    it('does NOT filter on sparkplug_id, which matches no rule definition', () => {
+    it('searches the Built-in tab by the rule name for a row written before the uid was kept', () => {
       panel({ alert })
-      const href = screen.getByRole('link', { name: /View in Grafana/i }).getAttribute('href')
+      expect(screen.getByRole('link', { name: /View rule/i })).toHaveAttribute('href', '/automations/built-in?search=Thermal+Excursion')
+    })
+
+    it('does NOT filter on sparkplug_id, which names a device and not a rule', () => {
+      panel({ alert })
+      const href = screen.getByRole('link', { name: /View rule/i }).getAttribute('href')
       expect(href).not.toContain('sparkplug_id')
-      expect(href).not.toContain('label%3A')
       expect(href).not.toContain(alert.sparkplug_id)
     })
 
     it('still links somewhere useful when the alert carries no device id', () => {
-      // The webhook records an unattributable alert rather than dropping it, so this row occurs --
-      // and the link is unaffected by it, now that the device plays no part in the query.
+      // The webhook records an unattributable alert rather than dropping it, so this row occurs.
       panel({ alert: { ...alert, sparkplug_id: null } })
-      const href = screen.getByRole('link', { name: /View in Grafana/i }).getAttribute('href')
-      expect(href).toContain('rule%3A%22Thermal%20Excursion%22')
+      expect(screen.getByRole('link', { name: /View rule/i })).toHaveAttribute('href', '/automations/built-in?search=Thermal+Excursion')
     })
 
-    it('is not offered for an alert an automation raised, which has no rule in Grafana', () => {
+    it('is not offered for an alert an automation raised, which is no built-in rule', () => {
       panel({ alert: { ...alert, fingerprint: 'condition:5d1f0c1e-0000-4000-8000-000000000001:dev22:Spindle/LOAD', rule_uid: null } })
-      expect(screen.queryByRole('link', { name: /View in Grafana/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: /View rule/i })).not.toBeInTheDocument()
       // Its history is the History page's, as every alert's is.
       expect(screen.getByRole('link', { name: /Alert history/i })).toBeInTheDocument()
     })
