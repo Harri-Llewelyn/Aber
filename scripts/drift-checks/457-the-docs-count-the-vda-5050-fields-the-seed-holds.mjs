@@ -25,12 +25,12 @@ export default function check() {
   const section = doc.slice(doc.indexOf('## VDA 5050 (AGVs)'), doc.indexOf('## Definition of done'));
   if (!section.startsWith('## VDA 5050 (AGVs)')) problems457.push('docs/vocabularies.md has no "VDA 5050 (AGVs)" section');
   for (const [where, text, claim] of [
-    ['the section of docs/vocabularies.md', section, new RegExp(`\\*\\*${n} fields\\*\\*`)],
-    ['the scope boundaries of docs/vocabularies.md', doc, new RegExp(`fields that are readings: ${n} of them`)],
-    ['docs/openapi.yaml', read('docs/openapi.yaml'), new RegExp(`${n} fields of the VDA 5050 \`state\` message`)],
-    ['docs/architecture.md', read('docs/architecture.md'), new RegExp(`the ${n} scalar fields of the \`state\` message`)],
+    ['the section of docs/vocabularies.md', section, `**${n} fields**`],
+    ['the scope boundaries of docs/vocabularies.md', doc, `fields that are readings: ${n} of them`],
+    ['docs/openapi.yaml', read('docs/openapi.yaml'), `${n} fields of the VDA 5050 \`state\` message`],
+    ['docs/architecture.md', read('docs/architecture.md'), `the ${n} scalar fields of the \`state\` message`],
   ]) {
-    if (!claim.test(text)) problems457.push(`${where} does not say the vocabulary holds ${n} fields`);
+    if (!text.includes(claim)) problems457.push(`${where} does not say the vocabulary holds ${n} fields`);
   }
 
   const list = section.match(/keyed by its path in the message\*\*[^:]*:([\s\S]*?)Each has the schema's type/)?.[1] ?? '';

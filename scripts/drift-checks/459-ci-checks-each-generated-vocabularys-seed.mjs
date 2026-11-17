@@ -23,8 +23,13 @@ export default function check() {
       problems459.push(`scripts/generate-${name}-vocabulary.mjs has no scripts/check-${name}-seed-sync.mjs`);
       continue;
     }
-    const step = new RegExp(`run: \\|\\n\\s+node scripts/generate-${name}-vocabulary\\.mjs\\n\\s+node scripts/check-${name}-seed-sync\\.mjs\\n`);
-    if (!step.test(ci)) problems459.push(`.github/workflows/ci.yml does not run generate-${name}-vocabulary.mjs and then check-${name}-seed-sync.mjs in one step`);
+    // The generator's line, and the check's as the next line of the same `run: |` block.
+    const generate = `node scripts/generate-${name}-vocabulary.mjs\n`;
+    const at = ci.indexOf(generate);
+    const next = at < 0 ? '' : ci.slice(at + generate.length).trimStart();
+    if (at < 0 || !next.startsWith(`node scripts/check-${name}-seed-sync.mjs\n`)) {
+      problems459.push(`.github/workflows/ci.yml does not run generate-${name}-vocabulary.mjs and then check-${name}-seed-sync.mjs in one step`);
+    }
   }
   const checks = scripts.filter((f) => /^check-[a-z0-9]+-seed-sync\.mjs$/.test(f)).map((f) => f.slice('check-'.length, -'-seed-sync.mjs'.length));
   for (const name of checks.filter((c) => !generators.includes(c))) {

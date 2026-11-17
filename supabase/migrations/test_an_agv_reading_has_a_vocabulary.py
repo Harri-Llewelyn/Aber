@@ -163,21 +163,21 @@ class TestTheTableIsReferenceData(Vda5050TestCase):
         self.in_transaction(probe)
 
     def test_the_checks_refuse_a_row_that_is_not_what_the_generator_writes(self):
+        # (name, datatype, permitted_values, semantic_id)
         bad = {
-            "a datatype the form cannot carry": ("'x', 'Float', NULL, NULL, NULL, '" + BASE + "x'"),
-            "an id the VDA would have issued": ("'x', 'String', NULL, NULL, NULL, 'https://www.vda5050.org/x'"),
-            "an id for another version": ("'x', 'String', NULL, NULL, NULL, 'https://aber.local/semantics/vda5050/v2.0/State/x'"),
-            "an empty enum": ("'x', 'String', NULL, NULL, ARRAY[]::text[], '" + BASE + "x'"),
-            "an enum with a null in it": ("'x', 'String', NULL, NULL, ARRAY['A', NULL], '" + BASE + "x'"),
-            "a field twice": ("'driving', 'Boolean', NULL, NULL, NULL, '" + BASE + "driving'"),
+            "a datatype the form cannot carry": ("x", "Float", None, BASE + "x"),
+            "an id the VDA would have issued": ("x", "String", None, "https://www.vda5050.org/x"),
+            "an id for another version": ("x", "String", None, "https://aber.local/semantics/vda5050/v2.0/State/x"),
+            "an empty enum": ("x", "String", [], BASE + "x"),
+            "an enum with a null in it": ("x", "String", ["A", None], BASE + "x"),
+            "a field twice": ("driving", "Boolean", None, BASE + "driving"),
         }
-        for what, values in bad.items():
+        for what, params in bad.items():
             with self.subTest(what=what):
-                def probe(cur, values=values):
-                    cur.execute("SAVEPOINT s")
+                def probe(cur, params=params):
                     with self.assertRaises((psycopg2.errors.CheckViolation, psycopg2.errors.UniqueViolation)):
-                        cur.execute("INSERT INTO public.vda5050_vocabulary VALUES (" + values + ")")
-                    cur.execute("ROLLBACK TO SAVEPOINT s")
+                        cur.execute("INSERT INTO public.vda5050_vocabulary (name, datatype, permitted_values, semantic_id)"
+                                    " VALUES (%s, %s, %s, %s)", params)
                 self.in_transaction(probe)
 
 

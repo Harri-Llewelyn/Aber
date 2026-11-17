@@ -30,7 +30,10 @@ export default async function check() {
     problems.push('vda5050FieldName: found no metric_catalog_name_format or no seeded VDA 5050 field -- the file\'s shape changed, so this check is no longer checking anything');
     return;
   }
-  const format = new RegExp(nameFormat[1]);
+  // The CHECK's pattern, written as the migration has it, and the same pattern here as a literal:
+  // a change to the database's rule stops this check rather than being followed silently.
+  const format = /^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+)*$/;
+  compare('vda5050FieldName', 'the name format the form tests a name against', format.source.replaceAll('\\/', '/'), nameFormat[1]);
   const refused = rows.filter((name) => !format.test(`${standards.VDA5050_GROUP}/${standards.vda5050FieldType(name)}`));
   if (refused.length) {
     problems.push(`vda5050FieldName: the form names ${refused.slice(0, 5).join(', ')} so that metric_catalog_name_format refuses the name`);
