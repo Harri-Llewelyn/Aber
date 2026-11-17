@@ -83,7 +83,12 @@ const sizes = (group) => screen.getByRole('radiogroup', { name: `${group} bucket
 const segment = (group, name) => within(sizes(group)).getByRole('radio', { name })
 const checkedIn = (group) => within(sizes(group)).getAllByRole('radio').find(r => r.getAttribute('aria-checked') === 'true').textContent
 /** A group's heading named for what it says: its name, its charts, and the size it is read in. */
-const headingOf = (group, words) => screen.getByRole('button', { name: new RegExp(`^${group}, \\d+ charts?, ${words}`) })
+const headingOf = (group, words) => screen.getByRole('button', {
+  name: (name) => {
+    const rest = name.startsWith(`${group}, `) ? name.slice(group.length + 2).match(/^\d+ charts?, (.*)$/) : null
+    return Boolean(rest) && rest[1].startsWith(words)
+  },
+})
 
 describe("a group's bucket choice", () => {
   it('is on its heading, at the right-hand end, with Auto and the four sizes in one switch', async () => {
