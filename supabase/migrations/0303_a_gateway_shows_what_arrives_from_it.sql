@@ -8,6 +8,8 @@
 --     net._http_response, writes every row from it, and fires the next request to the address
 --     directory_prometheus_url() gives. Its PromQL is fixed here: one vector for each figure, summed
 --     by edge_node, which is the gateway's sparkplug_id.
+--   * gateway_is_readable(): whether the caller may read a gateway, under gateways' own policies. The
+--     table's row policy asks it, so whoever can see a gateway sees its figures.
 --   * gateway_arrivals: the table as the dashboard reads it. A row whose answer is more than 3
 --     minutes old reads NULL, so a stopped job reads not observed and never the last value.
 --   * gateway_devices_last_reading(): each device of a gateway with the time of its newest reading,
@@ -53,13 +55,32 @@ COMMENT ON COLUMN public.gateway_arrival_figures.messages_missed_last_hour IS
 COMMENT ON COLUMN public.gateway_arrival_figures.observed_at IS
   'When Prometheus evaluated the figures; NULL with them.';
 
--- Whoever can read the gateway reads its figures: the policy asks the gateway table, under the
--- caller's own policies, so it follows gateways' if they change. No role writes the table.
+-- Whoever can read the gateway reads its figures: the policy asks gateway_is_readable(), which reads
+-- the gateways table as the caller, under the caller's own policies, so it follows gateways' if they
+-- change. A function and not a subquery because replay_policy() compares the statement with the one
+-- pg_dump writes, and a subquery is written over several lines. No role writes the table.
+CREATE OR REPLACE FUNCTION public.gateway_is_readable(p_gateway_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $$
+  SELECT EXISTS (SELECT 1 FROM public.gateways g WHERE g.id = p_gateway_id);
+$$;
+
+ALTER FUNCTION public.gateway_is_readable(uuid) OWNER TO postgres;
+
+COMMENT ON FUNCTION public.gateway_is_readable(uuid) IS
+  'Whether the caller may read the gateway, under the gateways table''s own policies: the question the '
+  'row policy on gateway_arrival_figures asks, so that whoever can see a gateway sees its figures '
+  '(0303).';
+
+REVOKE ALL ON FUNCTION public.gateway_is_readable(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.gateway_is_readable(uuid) TO authenticated;
+
 REVOKE ALL ON TABLE public.gateway_arrival_figures FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON TABLE public.gateway_arrival_figures TO authenticated;
 
 SELECT public.replay_policy('public.gateway_arrival_figures', 'gateway_arrival_figures_select_authenticated', $ddl$
-CREATE POLICY gateway_arrival_figures_select_authenticated ON public.gateway_arrival_figures FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM public.gateways g WHERE g.id = gateway_arrival_figures.gateway_id));
+CREATE POLICY gateway_arrival_figures_select_authenticated ON public.gateway_arrival_figures FOR SELECT TO authenticated USING (public.gateway_is_readable(gateway_id));
 $ddl$);
 
 -- One row by CHECK (id), as directory_figures_probe: two requests in flight would race to write
@@ -329,8 +350,14 @@ BEGIN
     RAISE EXCEPTION '0303: gateway_arrival_figures has a write policy';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid = 'public.gateway_arrival_figures'::regclass
-                    AND polcmd = 'r' AND pg_get_expr(polqual, polrelid) LIKE '%gateways%') THEN
-    RAISE EXCEPTION '0303: gateway_arrival_figures'' policy does not ask the gateways table';
+                    AND polcmd = 'r' AND pg_get_expr(polqual, polrelid) LIKE '%gateway_is_readable%') THEN
+    RAISE EXCEPTION '0303: gateway_arrival_figures'' policy does not ask gateway_is_readable()';
+  END IF;
+  IF (SELECT prosecdef FROM pg_proc WHERE oid = 'public.gateway_is_readable(uuid)'::regprocedure)
+     OR has_function_privilege('anon', 'public.gateway_is_readable(uuid)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.gateway_is_readable(uuid)', 'EXECUTE')
+     OR pg_get_functiondef('public.gateway_is_readable(uuid)'::regprocedure) NOT LIKE '%public.gateways%' THEN
+    RAISE EXCEPTION '0303: gateway_is_readable() must read gateways as the caller, for authenticated and no one signed out';
   END IF;
   FOREACH v_name IN ARRAY ARRAY['public.gateway_arrival_figures', 'public.gateway_arrivals'] LOOP
     IF has_table_privilege('anon', v_name, 'SELECT') OR NOT has_table_privilege('authenticated', v_name, 'SELECT') THEN

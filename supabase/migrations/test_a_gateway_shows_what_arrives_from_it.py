@@ -436,6 +436,13 @@ class WhoReadsAndWrites(ArrivalsBase):
         self.cur.execute("SELECT count(*) FROM public.gateway_arrival_figures WHERE gateway_id = %s;", (hidden,))
         self.assertEqual(self.cur.fetchone()[0], 1, "the owner still holds the row; only the readers' view changed")
 
+    def test_gateway_is_readable_asks_the_gateways_table_as_the_caller(self):
+        self.assertEqual(self.as_person(OPERATOR_ID, "SELECT public.gateway_is_readable(%s);", (self.gw,)), [(True,)])
+        self.assertEqual(self.as_person(OPERATOR_ID, "SELECT public.gateway_is_readable(gen_random_uuid());"), [(False,)])
+        self.cur.execute("SELECT pg_get_expr(polqual, polrelid) LIKE '%gateway_is_readable(gateway_id)' FROM pg_policy"
+                         " WHERE polrelid = 'public.gateway_arrival_figures'::regclass;")
+        self.assertEqual(self.cur.fetchall(), [(True,)])
+
     def test_no_role_writes_the_figures(self):
         writes = (
             "UPDATE public.gateway_arrival_figures SET messages_per_second = 1;",
@@ -455,7 +462,8 @@ class WhoReadsAndWrites(ArrivalsBase):
         for sql in ("SELECT * FROM public.gateway_arrival_figures;",
                     "SELECT * FROM public.gateway_arrivals;",
                     "SELECT * FROM public.gateway_arrival_probe;",
-                    "SELECT * FROM public.gateway_devices_last_reading(gen_random_uuid());"):
+                    "SELECT * FROM public.gateway_devices_last_reading(gen_random_uuid());",
+                    "SELECT public.gateway_is_readable(gen_random_uuid());"):
             with self.subTest(sql=sql):
                 with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
                     self.as_person(NO_ROLE_ID, sql, role="anon")
