@@ -6053,7 +6053,6 @@ paths:
 
         A missing `semanticId` is **omitted, never emitted empty** — an empty `Reference` is
         invalid AAS. The unmapped count comes back in `stats`.
-
         A metric's further semantic ids (`/rest/v1/metric_semantic_ids`) are its Property's
         `supplementalSemanticIds`, each once and sorted, beside its own `semanticId`. The key is omitted
         when a metric has none, and for a metric with no `semanticId` of its own (AASd-118).
