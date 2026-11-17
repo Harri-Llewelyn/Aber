@@ -42,7 +42,7 @@ export default function check() {
     const sent = names(write.slice(write.indexOf('\n      properties:\n')));
     if (sent !== writable) problems449.push(`${SPEC}: MetricSemanticIdWrite documents "${sent}", the writer may send "${writable}"`);
     // The view's columns, from its first SELECT: the alias after AS, or the column's own name.
-    const view = sql.match(/CREATE OR REPLACE VIEW public\.metric_semantic_id_crosswalk[^\n]*\n SELECT ([\s\S]*?)\n   FROM public\.metric_catalog m/)?.[1] ?? '';
+    const view = sql.match(/CREATE OR REPLACE VIEW public\.metric_semantic_id_crosswalk[^\n]*\n SELECT ([\s\S]*?)\n {3}FROM public\.metric_catalog m/)?.[1] ?? '';
     const viewColumns = view.split(',\n').map((c) => c.trim().replace(/::text/g, '')).map((c) => c.match(/ AS ([a-z_]+)$/)?.[1] ?? c.replace(/^m\./, '')).sort().join(', ');
     const shown = names(crosswalk.slice(crosswalk.indexOf('\n      properties:\n')));
     if (viewColumns === '' || shown !== viewColumns) problems449.push(`${SPEC}: MetricSemanticIdCrosswalk documents "${shown}", ${FILE} gives the view "${viewColumns}"`);
