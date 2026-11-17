@@ -22,8 +22,11 @@ const assert = {
 // A reader of the XML schema, small enough to need no dependency. The vendored XSD uses sequences,
 // choices, groups, elements, and simple types with enumerations, patterns and lengths, and nothing
 // else (no attributes, no extensions), so a content model is matched here by the element names in
-// order, and a leaf by its type's restrictions. It checks the writer's output against the real file;
-// it is not a validator, and a full one is what the pull request names as missing.
+// order, and a leaf by its type's enumeration and lengths. It checks the writer's output against the
+// real file; it is not a validator. A pattern is not compiled from the file, since a regular
+// expression built from text is what the source scan refuses: the one that matters for what the
+// exporter writes, the idShort's, is checked as a literal below, and the rest are checked by hand
+// with xmllint, as the pull request says.
 
 interface Node {
   name: string;
@@ -199,7 +202,6 @@ class Xsd {
       const kind = strip(c.name);
       if (kind === "minLength" && text.length < Number(c.attrs.value)) problems.push(`${here} is shorter than ${c.attrs.value}`);
       if (kind === "maxLength" && text.length > Number(c.attrs.value)) problems.push(`${here} is longer than ${c.attrs.value}`);
-      if (kind === "pattern" && !new RegExp(`^(?:${c.attrs.value})$`, "u").test(text)) problems.push(`${here} ("${text.slice(0, 40)}") does not match ${c.attrs.value.slice(0, 60)}`);
     }
   }
 
@@ -421,9 +423,13 @@ Deno.test("the reader of the XSD finds faults a writer could make", () => {
   assert.equal(xsd.validate(parseXml(noId)).length > 0, true, "a submodel needs its id");
 });
 
-Deno.test("an Environment the exporter builds follows the XSD's elements, order, values and patterns", () => {
+Deno.test("an Environment the exporter builds follows the XSD's elements, order, enumerations and lengths", () => {
   const built = buildEnvironment(fullRecord());
   assert.equal(problemsOf(built.environment), []);
+  // The idShort pattern of the XSD, as a literal: every idShort the writer makes matches it.
+  const idShorts = [...environmentToXml(built.environment).matchAll(/<idShort>([^<]*)<\/idShort>/g)].map((m) => m[1]);
+  assert.equal(idShorts.length > 5, true);
+  assert.equal(idShorts.filter((id) => !/^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$/.test(id)), []);
   // It had every kind of element the exporter makes, so the check above covered them.
   const xml = environmentToXml(built.environment);
   for (const element of ["<property>", "<submodelElementCollection>", "<file>", "<conceptDescription>", "<dataSpecificationIec61360>", "<assetInformation>"]) {

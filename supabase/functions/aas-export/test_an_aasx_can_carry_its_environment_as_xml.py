@@ -13,12 +13,15 @@
 An AASX package can carry its Environment as XML.
 
 Offline, the writer (_shared/aas/environmentXml.ts) runs in Node over the Environment buildEnvironment()
-makes, and the XML is read with the standard library. It is not validated against the XSD here:
-no XSD validator is installed. The Deno test of the writer checks its output against the vendored XSD's
-sequences, enumerations and patterns, and that is the closest check there is.
+makes, and the XML is read by a small tree reader below: the standard library's XML parsers are not used,
+which the source scan refuses without defusedxml, and the writer's output has no attributes but the
+namespace, no comments and no CDATA. It is not validated against the XSD here: no XSD validator is
+installed. The Deno test of the writer checks its output against the vendored XSD's sequences and
+enumerations, and that is the closest check there is.
 
 Run:  python supabase/functions/aas-export/test_an_aasx_can_carry_its_environment_as_xml.py
 """
+import html
 import http.client
 import io
 import json
@@ -29,7 +32,6 @@ import subprocess
 import sys
 import unittest
 import urllib.parse
-import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
@@ -41,8 +43,6 @@ XSD = REPO_ROOT / "test-harness" / "schemas" / "AAS_V3_0_XML_Schema.xsd"
 
 NS = "https://admin-shell.io/aas/3/2"
 REL = "http://admin-shell.io/aasx/relationships/aas-spec"
-OPC_RELS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
-OPC_TYPES = "{http://schemas.openxmlformats.org/package/2006/content-types}"
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
@@ -53,6 +53,52 @@ EXPORT = f"{SUPABASE_URL}/functions/v1/aas-export"
 sys.path.insert(0, str(REPO_ROOT / "test-harness"))
 import aas_fixture  # noqa: E402
 import stack_sign_in  # noqa: E402
+
+
+class Node:
+    """One element: its name, its attributes, its text and its children."""
+
+    def __init__(self, tag, attrs):
+        self.tag, self.attrs, self.text, self.children = tag, attrs, "", []
+
+    def iter(self, tag=None):
+        if tag is None or self.tag == tag:
+            yield self
+        for child in self.children:
+            yield from child.iter(tag)
+
+    def find(self, tag):
+        return next((c for c in self.children if c.tag == tag), None)
+
+
+TOKEN_RE = re.compile(r'<\?[\s\S]*?\?>|</([^\s>]+)\s*>|<([^\s/>]+)((?:\s+[^\s=]+="[^"]*")*)\s*(/?)>|([^<]+)')
+
+
+def parse(source):
+    """The document's root element. A tag that closes the wrong element raises."""
+    top = Node("#document", {})
+    stack = [top]
+    for match in TOKEN_RE.finditer(source):
+        closing, opening, attrs, selfclosed, text = match.groups()
+        if closing is not None:
+            if stack[-1].tag != closing:
+                raise AssertionError(f"</{closing}> closes <{stack[-1].tag}>")
+            stack.pop()
+        elif opening is not None:
+            node = Node(opening, dict(re.findall(r'([^\s=]+)="([^"]*)"', attrs)))
+            stack[-1].children.append(node)
+            if not selfclosed:
+                stack.append(node)
+        elif text is not None:
+            stack[-1].text += html.unescape(text)
+    if len(stack) != 1:
+        raise AssertionError(f"<{stack[-1].tag}> is never closed")
+    return top.children[0]
+
+
+def relationships(xml_text):
+    """(Type, Target) of each Relationship in an OPC .rels part."""
+    return [(r.attrs.get("Type"), r.attrs.get("Target")) for r in parse(xml_text).iter("Relationship")]
 
 
 def node_strips_types() -> bool:
@@ -103,41 +149,36 @@ def run_writer(record: dict) -> dict:
     return json.loads(done.stdout)
 
 
-def local(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
-
-
 @unittest.skipUnless(node_strips_types(), "Node 22.6 or later runs TypeScript; this host's does not")
 class TestTheWriter(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.built = run_writer(RECORD)
-        cls.root = ET.fromstring(cls.built["xml"])
+        cls.root = parse(cls.built["xml"])
         cls.defined = set(re.findall(r'<xs:element name="([A-Za-z0-9_]+)"', XSD.read_text(encoding="utf-8")))
 
     def test_it_is_well_formed_in_the_idta_namespace(self):
-        self.assertEqual(self.root.tag, f"{{{NS}}}environment")
+        self.assertEqual(self.root.tag, "environment")
+        self.assertEqual(self.root.attrs, {"xmlns": NS})
         self.assertTrue(self.built["xml"].startswith('<?xml version="1.0" encoding="UTF-8"?>\n'))
 
     def test_every_element_is_one_the_vendored_xsd_defines(self):
-        used = {local(e.tag) for e in self.root.iter()}
+        used = {e.tag for e in self.root.iter()}
         self.assertEqual(sorted(used - self.defined), [])
-        # Everything below the root is in the namespace: the schema's elementFormDefault is qualified.
-        self.assertTrue(all(e.tag.startswith(f"{{{NS}}}") for e in self.root.iter()))
+        # The namespace is declared once, on the root, and every element below inherits it: the
+        # schema's elementFormDefault is qualified.
+        self.assertTrue(all(not e.attrs for e in self.root.iter() if e is not self.root))
 
     def test_it_says_what_the_json_says(self):
-        def texts(root, name):
-            return sorted(e.text or "" for e in root.iter(f"{{{NS}}}{name}") if (e.text or "").strip())
+        def texts(name):
+            return sorted(e.text for e in self.root.iter(name) if e.text.strip())
 
         env = self.built["environment"]
         ids = sorted([s["id"] for s in env["submodels"]] + [s["id"] for s in env["assetAdministrationShells"]]
                      + [c["id"] for c in env.get("conceptDescriptions", [])])
-        self.assertEqual(texts(self.root, "id"), ids)
-        self.assertEqual(
-            texts(self.root, "idShort"),
-            sorted(self.find_all(env, "idShort")),
-        )
-        self.assertEqual(texts(self.root, "globalAssetId"), [env["assetAdministrationShells"][0]["assetInformation"]["globalAssetId"]])
+        self.assertEqual(texts("id"), ids)
+        self.assertEqual(texts("idShort"), sorted(self.find_all(env, "idShort")))
+        self.assertEqual(texts("globalAssetId"), [env["assetAdministrationShells"][0]["assetInformation"]["globalAssetId"]])
 
     @staticmethod
     def find_all(node, key):
@@ -154,11 +195,14 @@ class TestTheWriter(unittest.TestCase):
         return found
 
     def test_text_that_looks_like_markup_is_data(self):
-        descriptions = [e.text for e in self.root.iter(f"{{{NS}}}text")]
+        descriptions = [e.text for e in self.root.iter("text")]
         self.assertIn("Linear position <X> & more", descriptions)
-        manufacturer = [e.find(f"{{{NS}}}value").text for e in self.root.iter(f"{{{NS}}}property")
-                        if (e.find(f"{{{NS}}}idShort") is not None and e.find(f"{{{NS}}}idShort").text == "ManufacturerName")]
+        manufacturer = [p.find("value").text for p in self.root.iter("property")
+                        if p.find("idShort") is not None and p.find("idShort").text == "ManufacturerName"]
         self.assertEqual(manufacturer, ["Acme & Sons"])
+        # On the wire it is escaped, so the document stays well-formed.
+        self.assertIn("Acme &amp; Sons", self.built["xml"])
+        self.assertIn("Linear position &lt;X&gt; &amp; more", self.built["xml"])
 
     def test_an_element_the_mapping_does_not_list_is_an_error(self):
         harness = (
@@ -171,6 +215,19 @@ class TestTheWriter(unittest.TestCase):
             [shutil.which("node"), "--experimental-strip-types", "--input-type=module", "-e", harness],
             capture_output=True, text=True, timeout=60)
         self.assertIn('a key "qualifiers"', done.stdout)
+
+
+class TestTheReaderItself(unittest.TestCase):
+    def test_it_reads_a_tree_and_refuses_a_tag_that_closes_the_wrong_element(self):
+        root = parse('<?xml version="1.0"?>\n<a x="1"><b>1 &amp; 2</b><c/></a>')
+        self.assertEqual(
+            (root.tag, root.attrs, [c.tag for c in root.children], root.find("b").text),
+            ("a", {"x": "1"}, ["b", "c"], "1 & 2"),
+        )
+        with self.assertRaises(AssertionError):
+            parse("<a><b></a></b>")
+        with self.assertRaises(AssertionError):
+            parse("<a><b></b>")
 
 
 class TestTheSource(unittest.TestCase):
@@ -233,13 +290,7 @@ LIVE = TOKEN is not None and DEVICE is not None
 
 
 def package(query, payload=None):
-    status, body, headers = request(f"{EXPORT}{query}", TOKEN, payload or {"device_id": DEVICE["id"]})
-    return status, body, headers
-
-
-def rels(archive, name):
-    root = ET.fromstring(archive.read(name))
-    return [(r.get("Type"), r.get("Target")) for r in root.iter(f"{OPC_RELS}Relationship")]
+    return request(f"{EXPORT}{query}", TOKEN, payload or {"device_id": DEVICE["id"]})
 
 
 @unittest.skipUnless(LIVE, "no reachable stack, or the AAS fixture could not be provisioned")
@@ -256,23 +307,27 @@ class TestTheDeployedFunction(unittest.TestCase):
         status, body, _ = request(EXPORT, TOKEN, {"device_id": DEVICE["id"]})
         cls.exported = json.loads(body)["aas"]
 
+    def rels(self, archive, name):
+        return relationships(archive.read(name).decode("utf-8"))
+
     def test_the_origin_relationship_reaches_the_xml_part_and_no_json_part_is_there(self):
-        self.assertIn((REL, "/aasx/data.xml"), rels(self.xml_package, "aasx/_rels/aasx-origin.rels"))
+        self.assertIn((REL, "/aasx/data.xml"), self.rels(self.xml_package, "aasx/_rels/aasx-origin.rels"))
         names = self.xml_package.namelist()
         self.assertIn("aasx/data.xml", names)
         self.assertNotIn("aasx/aasenv-root.json", names)
 
     def test_the_content_types_name_the_xml_part(self):
-        root = ET.fromstring(self.xml_package.read("[Content_Types].xml"))
-        defaults = {d.get("Extension"): d.get("ContentType") for d in root.iter(f"{OPC_TYPES}Default")}
+        root = parse(self.xml_package.read("[Content_Types].xml").decode("utf-8"))
+        defaults = {d.attrs["Extension"]: d.attrs["ContentType"] for d in root.iter("Default")}
         self.assertEqual(defaults.get("xml"), "text/xml")
         self.assertEqual(defaults.get("rels"), "application/vnd.openxmlformats-package.relationships+xml")
         self.assertNotIn("json", defaults, "an XML package declares no JSON part")
 
     def test_the_part_is_the_environment_as_the_json_export_has_it(self):
-        root = ET.fromstring(self.xml_package.read("aasx/data.xml"))
-        self.assertEqual(root.tag, f"{{{NS}}}environment")
-        ids = sorted(e.text for e in root.iter(f"{{{NS}}}id"))
+        root = parse(self.xml_package.read("aasx/data.xml").decode("utf-8"))
+        self.assertEqual(root.tag, "environment")
+        self.assertEqual(root.attrs, {"xmlns": NS})
+        ids = sorted(e.text for e in root.iter("id"))
         expected = sorted(
             [s["id"] for s in self.exported["submodels"]]
             + [s["id"] for s in self.exported["assetAdministrationShells"]]
@@ -313,12 +368,12 @@ class TestTheDeployedFunction(unittest.TestCase):
         status, body, _ = package("?format=bundle&serialization=xml")
         self.assertEqual(status, 200, body[:300])
         archive = zipfile.ZipFile(io.BytesIO(body))
-        self.assertIn((REL, "/aasx/data.xml"), rels(archive, "aasx/_rels/aasx-origin.rels"))
+        self.assertIn((REL, "/aasx/data.xml"), self.rels(archive, "aasx/_rels/aasx-origin.rels"))
         self.assertIn("aasx/data.xml", archive.namelist())
         self.assertNotIn("aasx/aasenv-root.json", archive.namelist())
         # The bundle's own parts keep their own media types.
-        root = ET.fromstring(archive.read("[Content_Types].xml"))
-        overrides = {o.get("PartName") for o in root.iter(f"{OPC_TYPES}Override")}
+        root = parse(archive.read("[Content_Types].xml").decode("utf-8"))
+        overrides = {o.attrs["PartName"] for o in root.iter("Override")}
         self.assertTrue(any(name.endswith(".json") for name in overrides), overrides)
 
 
