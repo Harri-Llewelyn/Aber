@@ -104,6 +104,13 @@
   --chart-state-c:      0.065;
   --chart-state-edge-l: 0.70;
   --chart-state-edge-c: 0.115;
+  /* A flag's two colours, fixed, not hashed: true a lit blue, false a dim amber, so they differ in
+     lightness (2.0:1) as well as hue, and the name stays in every run wide enough. The label clears
+     5.7:1 on true and 11.5:1 on false, and each edge 7:1 on the card. */
+  --chart-true:       #175d9b;
+  --chart-true-edge:  #67b0f9;
+  --chart-false:      #472400;
+  --chart-false-edge: #f3ae58;
   /* History's Overview: a block's shade, fewer readings to more, a sequential blue ramp checked with
      the dataviz validator against this card. Sparse blocks recede toward the card and dense ones are
      a calm light blue. The step nearest the card clears 2:1 (2.08:1), the floor for an ordered ramp;
@@ -221,6 +228,12 @@
   --chart-state-c:      0.045;
   --chart-state-edge-l: 0.60;
   --chart-state-edge-c: 0.10;
+  /* The same two on the light card: true a mid blue, false a pale amber (1.6:1 apart in lightness).
+     The label clears 9.6:1 and 15:1, and each edge 5:1 on the card. */
+  --chart-true:       #91c3f6;
+  --chart-true-edge:  #006bbb;
+  --chart-false:      #ffebc2;
+  --chart-false-edge: #a35e16;
   /* Overview's shades on the white card, the same ramp darkening with the count; the step nearest
      the card clears 2:1 (2.11:1). */
   --coverage-1: #86b6ef;
@@ -6134,46 +6147,102 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   font-size: 12px;
   color: var(--text-muted);
 }
-/* A state metric: each run of one value is a box across its stretch of the window, named in text,
+/* A state metric: one band of its runs across the window, each run named in text where it fits and
    filled with its value's colour: the hue the element carries (`--state-hue`, its text's hash) at
    the theme's lightness and chroma, the edge a lighter or darker step, the text in the text colour.
-   A carried stretch inside it is hatched instead of filled, as a number chart dashes one. */
+   The runs meet with no gap; the edge runs along the band's top and foot, and across its two ends,
+   which are the only rounded corners. A carried stretch inside a run is hatched instead of filled,
+   as a number chart dashes one. */
 .chart-state,
 .chart-state-key-value {
   --tone: oklch(var(--chart-state-edge-l) var(--chart-state-edge-c) var(--state-hue));
   --tone-fill: oklch(var(--chart-state-l) var(--chart-state-c) var(--state-hue));
 }
 .chart-state-key-plain { --tone: var(--text-dim); }
+/* A flag's runs and key entries take the theme's two flag colours (--chart-true, --chart-false). */
+.chart-flag-true  { --tone: var(--chart-true-edge);  --tone-fill: var(--chart-true); }
+.chart-flag-false { --tone: var(--chart-false-edge); --tone-fill: var(--chart-false); }
 .chart-box-states { height: 34px; }
 .chart-states { position: absolute; inset: 4px 0; }
+/* A band an alert fired over has a row under it for the alert's name, clear of the runs' names. */
+.chart-box-states-alerted { height: 50px; }
+.chart-box-states-alerted .chart-states { bottom: 20px; }
 .chart-state {
   position: absolute;
   top: 0;
   bottom: 0;
   display: flex;
   align-items: center;
-  min-width: 0;
+  min-width: 1px;
   overflow: hidden;
   padding: 0 6px;
-  border: 1px solid var(--tone);
-  border-radius: var(--radius-xs);
+  border: solid var(--tone);
+  border-width: 1px 0;
   background: var(--tone-fill);
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-primary);
 }
 .chart-state > .overflow-text { position: relative; }
-/* A run too narrow to name: its own width, at least 2px, a fill and a leading edge, so a change of
-   seconds over a day still shows; the head names it under the pointer. */
-.chart-state.chart-state-thin { min-width: 2px; padding: 0; border-width: 0 0 0 1px; border-radius: 0; }
+.chart-state-first {
+  border-left-width: 1px;
+  border-top-left-radius: var(--radius-xs);
+  border-bottom-left-radius: var(--radius-xs);
+}
+.chart-state-last {
+  border-right-width: 1px;
+  border-top-right-radius: var(--radius-xs);
+  border-bottom-right-radius: var(--radius-xs);
+}
+/* A run too narrow to name: its own width, at least 1px, over its neighbours, so a change of seconds
+   over a day still shows; the head names it under the pointer. */
+.chart-state.chart-state-thin { z-index: 1; padding: 0; }
+/* Two neighbours whose hues are too near to tell apart (NEAR_HUE_DEG), the later wide enough to spare it. */
+.chart-state-divided { box-shadow: inset 1px 0 0 var(--tone); }
 /* A bucket that held more than one value, past the change read's cap: dotted along the strip's foot,
    over the box that shows the bucket's last value. */
 .chart-state-mixed {
   position: absolute;
+  z-index: 2;
   bottom: 0;
   height: 4px;
   pointer-events: none;
   background: repeating-linear-gradient(90deg, var(--text-primary) 0 2px, transparent 2px 4px);
+}
+/* The periods an alert was firing, over a band as the plot shades them (alertBands.js): the fill and
+   the solid edge in --danger, the name in --danger-text, under the band in a row of its own. The
+   layer takes no pointer, so hovering and dragging reach the runs. */
+.chart-alerts {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: -16px;
+  pointer-events: none;
+}
+.chart-alert {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  min-width: 2px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.chart-alert-starts { border-left: 2px solid var(--danger); }
+.chart-alert-ends { border-right: 2px solid var(--danger); }
+.chart-alert-name {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--danger-text);
 }
 .chart-state-carried {
   position: absolute;
@@ -6198,13 +6267,47 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .chart-state-key li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
 .chart-state-key-name { max-width: 16rem; font-family: var(--font-mono); color: var(--text-primary); }
 .chart-state-share { font-variant-numeric: tabular-nums; }
+/* A flag's time in a value, after its share; and how many times it changed, last in the key. */
+.chart-state-time { font-variant-numeric: tabular-nums; }
+.chart-state-time::before { content: "·"; margin-right: 6px; }
+.chart-state-key-changes .chart-state-key-name { font-family: inherit; color: inherit; }
+/* A number chart's key, in the text key's place and style: its lowest and highest with their buckets,
+   and its mean and median over time. An entry lights while the pointer is on it, and the chart marks
+   what it names: a ring on a bucket's value, or a dotted line across at a level. */
+.chart-number-key { gap: 2px 18px; }
+.chart-number-key-entry { flex-wrap: wrap; padding: 0 4px; margin: 0 -4px; border-radius: var(--radius-xs); }
+.chart-number-key-label { color: var(--text-muted); }
+.chart-number-key-entry:hover { background: var(--bg-glass); }
+.chart-number-key-value { font-family: var(--font-mono); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.chart-number-key-when::before { content: "·"; margin-right: 6px; }
+.chart-point-mark {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid var(--text-primary);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--bg-card);
+  pointer-events: none;
+}
+.chart-level-mark {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--text-primary);
+  pointer-events: none;
+}
 .chart-state-swatch {
   flex-shrink: 0;
   width: 10px;
   height: 10px;
   border: 1px solid var(--tone);
   border-radius: 2px;
-  background: var(--tone);
+  background: var(--tone-fill, var(--tone));
 }
 .chart-state-swatch-carried {
   background: repeating-linear-gradient(45deg, var(--tone) 0 1px, transparent 1px 4px), var(--bg-card);

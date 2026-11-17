@@ -9,8 +9,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect, afterAll } from 'vitest'
-import { alertBandPalette, alertBands, alertBandsPlugin, bandText, bandsAt } from '../components/common/alertBands'
+import {
+  ALERT_FILL_ALPHA, NAMED_PX, alertBandPalette, alertBands, alertBandsPlugin, bandBox, bandText, bandsAt, bandsOf,
+} from '../components/common/alertBands'
 import { occurrenceRow } from '../utils/alertHistory'
+import { declaration } from '../test/themeColours'
 
 const MACHINE_TZ = process.env.TZ
 process.env.TZ = 'Europe/London'
@@ -76,6 +79,40 @@ describe('the band maths', () => {
     const [done, firing] = alertBands([row('a', '09:40', '10:15'), row('b', '11:00', null, { severity: 'critical' })], span)
     expect(bandText(done)).toBe('Spindle Overload, warning · 2 Nov 09:40 – 10:15, 35 min')
     expect(bandText(firing)).toBe('Spindle Overload, critical · since 2 Nov 11:00, firing')
+  })
+})
+
+describe('a band in the DOM', () => {
+  const bands = alertBands([row('a', '10:30', '10:45'), row('b', '09:00', '10:20'), row('c', '11:00', null)], span)
+
+  it('places each band across the window as percentages, from the same bands the plot is given', () => {
+    // 10:00 to 12:00 is 120 minutes: 10:30 to 10:45 starts a quarter in and is an eighth wide.
+    const [a, b, c] = [bands.find(x => x.id === 'a'), bands.find(x => x.id === 'b'), bands.find(x => x.id === 'c')]
+    expect(bandBox(a, START, END)).toEqual({ left: 25, width: 12.5 })
+    // One that began before the window starts at its edge.
+    expect(bandBox(b, START, END)).toEqual({ left: 0, width: (20 / 120) * 100 })
+    // One still firing runs to now, 11:30.
+    expect(bandBox(c, START, END)).toEqual({ left: 50, width: (30 / 120) * 100 })
+  })
+
+  it('is carried by the plugin, so a state or flag band shades what the plot shades', () => {
+    const plugin = alertBandsPlugin(bands, { palette: PAINT })
+    expect(plugin.bands).toBe(bands)
+    expect(bandsOf([plugin]).map(x => x.id)).toEqual(['b', 'a', 'c'])
+    // Several plugins' bands together, in order of start; none for no plugin or a plugin with none.
+    const other = alertBandsPlugin(alertBands([row('d', '10:05', '10:10')], span), { palette: PAINT })
+    expect(bandsOf([plugin, other]).map(x => x.id)).toEqual(['b', 'd', 'a', 'c'])
+    expect(bandsOf([])).toEqual([])
+    expect(bandsOf(undefined)).toEqual([])
+    expect(bandsOf([{ hooks: {} }])).toEqual([])
+  })
+
+  it('has the plot\'s fill, and names an alert in a band as wide as the plot\'s', () => {
+    const APP_CSS = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../App.css'), 'utf8')
+    expect(declaration(APP_CSS, '.chart-alert', 'background')).toBe(`color-mix(in srgb, var(--danger) ${ALERT_FILL_ALPHA * 100}%, transparent)`)
+    expect(declaration(APP_CSS, '.chart-alert-starts', 'border-left')).toBe('2px solid var(--danger)')
+    expect(declaration(APP_CSS, '.chart-alert-name', 'color')).toBe('var(--danger-text)')
+    expect(NAMED_PX).toBe(48)
   })
 })
 

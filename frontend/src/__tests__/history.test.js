@@ -7,9 +7,9 @@ import {
   bucketStarts, chartPalette, chartSeries, chartSummary, deviceHistoryPath, deviceMatches, deviceMetrics, historyDevices,
   historyPath, inReads, nowFraction, pickResolution, pickedAddress, resolutionFor, splitCarried, validRangeWords,
   validRanges, withAlpha, STATE_KEY_MAX, durationWords, keyWords, latestReading, latestWords, momentWords, runWords,
-  shareWords, stateHue, stateKey, stateRuns, stateShares, TEXT_BUCKET_MIN_PX, datatypeKind, readPlan, readableResolution,
+  shareWords, hueGap, NEAR_HUE_DEG, stateHue, stateKey, stateRuns, stateShares, TEXT_BUCKET_MIN_PX, datatypeKind, readPlan, readableResolution,
   OTHER_GROUP, metricGroups, changeSeries, markBuckets, markedStretches, momentSecondsWords, readWords, runNear, spanWords,
-  stateReadLine,
+  stateReadLine, flagWord, changeCount, changeWords, markWords, numberFigures, numberKey,
 } from '../utils/history'
 import { deviceHistoryUrl } from '../routes'
 
@@ -272,6 +272,11 @@ describe("a chart's series", () => {
     const flags = chartSeries([row(0, { last_bool: true }), row(1, { last_bool: false, is_carried: true })], starts)
     expect(flags.kind).toBe('flag')
     expect(flags.avg.slice(0, 2)).toEqual([1, 0])
+    // A flag is drawn as runs of true and false, as a state is of its text.
+    expect(flags.states.slice(0, 3)).toEqual(['true', 'false', null])
+    expect(flagWord(true)).toBe('true')
+    expect(flagWord(false)).toBe('false')
+    expect(flagWord(null)).toBeNull()
     const states = chartSeries([row(0, { last_string: 'ACTIVE' }), row(1, { last_string: 'READY' })], starts)
     expect(states.kind).toBe('state')
     expect(states.states.slice(0, 3)).toEqual(['ACTIVE', 'READY', null])
@@ -311,7 +316,8 @@ describe("a chart's text for a screen reader", () => {
       metric: 'Spindle/LOAD', unit: 'kW', windowText: 'Today, Mon 2 Nov', resolution, series, starts,
       validRange: { minimum: 0, maximum: 120 },
     })).toBe(`Spindle/LOAD (kW), Today, Mon 2 Nov, in 5-minute buckets. Latest 45 kW, in the bucket from ${bucket(1)}.`
-      + ' Lowest 30.1 kW, highest 52 kW. 2 of 4 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
+      + ' Lowest 30.1 kW, highest 52 kW. Mean 43.81 kW and median 44.5 kW over time.'
+      + ' 2 of 4 buckets had no reading and carry the last one forward. Valid range 0 to 120 kW.')
   })
 
   it('says when no reading arrived in the window, and the value carried into it', () => {
@@ -321,7 +327,7 @@ describe("a chart's text for a screen reader", () => {
     ], starts)
     expect(chartSummary({ metric: 'Axis/X', unit: 'mm', windowText: 'Last 1 hour', resolution, series, starts }))
       .toBe('Axis/X (mm), Last 1 hour, in 5-minute buckets. No reading in this window; 7 mm is carried forward from before it.'
-        + ' Lowest 7 mm, highest 7 mm. 2 of 4 buckets had no reading and carry the last one forward.')
+        + ' Lowest 7 mm, highest 7 mm. Mean 7 mm and median 7 mm over time. 2 of 4 buckets had no reading and carry the last one forward.')
   })
 
   it('says when a series has nothing to show', () => {
@@ -384,6 +390,69 @@ describe('the latest reading', () => {
   })
 })
 
+describe("a number chart's figures", () => {
+  const starts = bucketStarts(T0, T0 + 6 * MINUTE, 1)
+  const at = (i, values) => ({ bucket_ts: new Date(T0 + i * MINUTE).toISOString(), ...values })
+  const read = (i, avg, min, max) => at(i, { avg_double: avg, min_double: min, max_double: max, last_double: avg, n_rows: 3, is_carried: false })
+  const carried = (i, v) => at(i, { avg_double: v, min_double: v, max_double: v, last_double: v, n_rows: 0, is_carried: true })
+
+  it('takes the lowest and highest from the buckets own, and the mean and median over the buckets averages, carried included and the future out', () => {
+    // Five buckets before now: 10 read, 20 read, 20 carried twice, then 50 read. A sixth starts at now, with a value of its own.
+    const series = chartSeries([
+      read(0, 10, 8, 12), read(1, 20, 18, 25), carried(2, 20), carried(3, 20), read(4, 50, 40, 61), read(5, 100, 99, 101),
+    ], starts)
+    const figures = numberFigures(series, starts, { now: T0 + 5 * MINUTE })
+    // Held for 5 minutes: (10 + 20 + 20 + 20 + 50) / 5 = 24, and the middle of 10, 20, 20, 20, 50 is 20.
+    expect(figures.mean).toBe(24)
+    expect(figures.median).toBe(20)
+    // The mean of the readings alone would be (10 + 20 + 50) / 3 = 26.7, which leans to where the value moved.
+    expect(figures.lowest).toEqual({ value: 8, i: 0, carried: false })
+    expect(figures.highest).toEqual({ value: 61, i: 4, carried: false })
+    // With no clock, the sixth counts: (120 + 100) / 6, and its 101 is the highest.
+    expect(numberFigures(series, starts).mean).toBeCloseTo(220 / 6, 10)
+    expect(numberFigures(series, starts).highest.value).toBe(101)
+  })
+
+  it('takes the middle of the two middle averages when the count is even', () => {
+    const series = chartSeries([read(0, 10, 10, 10), read(1, 40, 40, 40), read(2, 30, 30, 30), read(3, 20, 20, 20)], starts)
+    expect(numberFigures(series, starts).median).toBe(25)
+    expect(numberFigures(series, starts).mean).toBe(25)
+  })
+
+  it('names a bucket read before a carried one where they tie, and says when an extreme was carried', () => {
+    const tie = chartSeries([carried(0, 70), read(1, 30, 25, 70), read(2, 40, 30, 45)], starts)
+    expect(numberFigures(tie, starts).highest).toEqual({ value: 70, i: 1, carried: false })
+    expect(numberFigures(tie, starts).lowest).toEqual({ value: 25, i: 1, carried: false })
+    const quiet = chartSeries([carried(0, 7), carried(1, 7)], starts)
+    const figures = numberFigures(quiet, starts)
+    expect(figures.lowest).toEqual({ value: 7, i: 0, carried: true })
+    const entries = numberKey(figures, starts, 1, 'kW')
+    expect(entries.find(e => e.id === 'lowest').when).toBe(`${momentWords(T0, 1)}, carried forward`)
+  })
+
+  it('has none for a series with no value before now', () => {
+    expect(numberFigures(chartSeries([], starts), starts)).toBeNull()
+    expect(numberFigures(chartSeries([read(5, 1, 1, 1)], starts), starts, { now: T0 + 5 * MINUTE })).toBeNull()
+  })
+
+  it('keys the lowest, highest, mean and median, each with the unit as the head says it, and what hovering one marks', () => {
+    const series = chartSeries([
+      read(0, 10, 8, 12), read(1, 20, 18, 25), carried(2, 20), carried(3, 20), read(4, 50, 40, 61),
+    ], starts)
+    const entries = numberKey(numberFigures(series, starts, { now: T0 + 5 * MINUTE }), starts, 1, 'kW')
+    expect(entries.map(e => [e.id, e.label, e.value, e.when])).toEqual([
+      ['lowest', 'min', '8 kW', momentWords(T0, 1)],
+      ['highest', 'max', '61 kW', momentWords(T0 + 4 * MINUTE, 1)],
+      ['mean', 'mean', '24 kW', 'over time'],
+      ['median', 'median', '20 kW', 'over time'],
+    ])
+    // An extreme is marked at its bucket and value; the other two as a level across the window.
+    expect(entries.map(e => e.mark)).toEqual([
+      { at: T0, value: 8 }, { at: T0 + 4 * MINUTE, value: 61 }, { at: null, value: 24 }, { at: null, value: 20 },
+    ])
+  })
+})
+
 describe("a state chart's runs and key", () => {
   const starts = bucketStarts(T0, T0 + 10 * MINUTE, 1)
   const series = (values, carried = []) => ({
@@ -441,6 +510,14 @@ describe("a state chart's runs and key", () => {
     // A uniform spread puts 100 in each; none here is under 60 or over 140.
     expect(Math.min(...perSector)).toBeGreaterThan(60)
     expect(Math.max(...perSector)).toBeLessThan(140)
+  })
+
+  it('measures how near two values hues are, the short way round the wheel', () => {
+    expect(hueGap('RUNNING', 'RUNNING')).toBe(0)
+    expect(hueGap('RUNNING', 'IDLE')).toBe(Math.min(Math.abs(127 - 301), 360 - Math.abs(127 - 301)))
+    expect(hueGap('FAULT', 'IDLE')).toBe(360 - (301 - 10))
+    expect(hueGap('PICK_BIN_A', 'IDLE')).toBe(hueGap('IDLE', 'PICK_BIN_A'))
+    expect(NEAR_HUE_DEG).toBeLessThan(180)
   })
 
   it('says a sliver of a share as under one per cent', () => {
@@ -507,9 +584,11 @@ describe('every change of a text or a flag', () => {
     expect(series.carried).toEqual([true, false, false, false, false])
     expect(splitCarried(series)).toEqual({ read: [null, 1, 0, 1, 1], held: [0, 1, null, null, null] })
     expect(series.runs.map(r => [r.state, r.startMs - T0, r.endMs - T0, r.carried.length])).toEqual([
-      [false, 0, 5 * MINUTE, 1], [true, 5 * MINUTE, 5 * MINUTE + 20000, 0], [false, 5 * MINUTE + 20000, 30 * MINUTE, 0], [true, 30 * MINUTE, HOUR, 0],
+      ['false', 0, 5 * MINUTE, 1], ['true', 5 * MINUTE, 5 * MINUTE + 20000, 0], ['false', 5 * MINUTE + 20000, 30 * MINUTE, 0], ['true', 30 * MINUTE, HOUR, 0],
     ])
+    expect(series.states).toEqual(['false', 'true', 'false', 'true', 'true'])
     expect(series.changes).toBe(3)
+    expect(changeCount(series, series.runs)).toEqual({ count: 3, atLeast: false })
   })
 
   it("draws a text's runs from their real start to their real end, a first reading of the value carried in continuing its run", () => {
@@ -541,8 +620,8 @@ describe('every change of a text or a flag', () => {
     const { series } = changeSeries(flagRow(), span)
     const runs = series.runs
     // 20 s of true at 5 min: found from 5:30 only with 15 s of slack, not with 4.
-    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 4000).state).toBe(false)
-    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 15000).state).toBe(true)
+    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 4000).state).toBe('false')
+    expect(runNear(runs, T0 + 5 * MINUTE + 30000, 15000).state).toBe('true')
     expect(runNear(runs, T0 + 20 * MINUTE)).toBe(runs[2])
     expect(runNear(runs, T0 + 2 * HOUR)).toBeNull()
   })
@@ -561,12 +640,14 @@ describe('every change of a text or a flag', () => {
     expect(latestWords(none, [], 1)).toBe('No reading in this window')
   })
 
-  it('marks a bucket that held more than one value, a flag as a band from false to true', () => {
+  it('marks a bucket that held more than one value, a flag as a text, along the foot of its band', () => {
     const starts = bucketStarts(T0, T0 + 4 * MINUTE, 1)
     const flag = chartSeries(starts.map((s, i) => ({ bucket_ts: new Date(s * 1000).toISOString(), last_bool: i % 2 === 0, n_rows: 1 })), starts)
     const marked = markBuckets(flag, starts, { read: 'change_cap', marked_ts: [at(MINUTE)], marked_values: [2] })
     expect(marked.marked).toEqual([0, 2, 0, 0])
-    expect([marked.min, marked.max]).toEqual([[1, 0, 1, 0], [1, 1, 1, 0]])
+    expect(markedStretches(marked, starts, { ...span, minutes: 1 }).map(m => [(m.startMs - T0) / MINUTE, m.values, m.last])).toEqual([[1, 2, false]])
+    expect(markWords({ startMs: T0 + MINUTE, endMs: T0 + 2 * MINUTE, values: 2, last: false }, 1, 'flag'))
+      .toBe(`${momentWords(T0 + MINUTE, 1)} – ${momentWords(T0 + 2 * MINUTE, 1).split(' ').pop()} · both values in this bucket, false last`)
     const state = chartSeries(starts.map(s => ({ bucket_ts: new Date(s * 1000).toISOString(), last_string: 'RUN', n_rows: 1 })), starts)
     const text = markBuckets(state, starts, { read: 'reading_cap', marked_ts: [at(2 * MINUTE)], marked_values: [3] })
     expect(markedStretches(text, starts, { ...span, minutes: 1 }).map(m => [(m.startMs - T0) / MINUTE, (m.endMs - T0) / MINUTE, m.values, m.last]))
@@ -586,6 +667,28 @@ describe('every change of a text or a flag', () => {
     expect(stateReadLine([{ kind: 'text', words: 'every change' }])).toEqual({ line: 'text shows every change', words: 'every change' })
     expect(stateReadLine([{ kind: 'flag', words: 'x' }, { kind: 'flag', words: 'every change' }]).line).toBe('flags show every change')
     expect(stateReadLine([{ kind: 'flag', words: 'x' }, { kind: 'text', words: 'y' }])).toEqual({ line: 'text and flags show x', words: 'x' })
+  })
+
+  it("says a flag's time in each value, and how many times it changed, in the key's words and the summary's", () => {
+    const flag = chartSeries(Array.from({ length: 10 }, (_, i) => ({
+      bucket_ts: new Date(T0 + i * MINUTE).toISOString(), last_bool: i < 6 || i === 9, n_rows: 1, is_carried: i === 3,
+    })), bucketStarts(T0, T0 + 10 * MINUTE, 1))
+    const starts = bucketStarts(T0, T0 + 10 * MINUTE, 1)
+    const runs = stateRuns(flag, starts, { start: T0, end: T0 + 10 * MINUTE, now: T0 + DAY, minutes: 1 })
+    expect(runs.map(r => [r.state, (r.endMs - r.startMs) / MINUTE])).toEqual([['true', 6], ['false', 3], ['true', 1]])
+    const key = stateKey(stateShares(runs))
+    expect(keyWords(key)).toBe('true 70%, false 30%')
+    expect(keyWords(key, { times: true })).toBe('true 70% (7 min), false 30% (3 min)')
+    // A bucket read shows each bucket's last value only, so two changes is the least it proves.
+    expect(changeCount(flag, runs)).toEqual({ count: 2, atLeast: true })
+    expect(changeWords({ count: 2, atLeast: true })).toBe('at least 2 changes')
+    expect(changeWords({ count: 1, atLeast: false })).toBe('1 change')
+    expect(changeWords({ count: 0, atLeast: false })).toBe('0 changes')
+    const resolution = HISTORY_RESOLUTIONS[0]
+    const summary = chartSummary({
+      metric: 'Door/OPEN', windowText: 'Last 10 minutes', resolution, series: flag, starts, span: { start: T0, end: T0 + 10 * MINUTE, now: T0 + DAY },
+    })
+    expect(summary).toContain('Time in each value: true 70% (7 min), false 30% (3 min). At least 2 changes in this window.')
   })
 
   it("gives a screen reader every change's count and each value's share", () => {

@@ -345,3 +345,70 @@ describe("the Device tab's shading", () => {
     expect(screen.queryByText(/Shaded while an alert was firing/)).not.toBeInTheDocument()
   })
 })
+
+describe("the Device tab's shading of a text and a flag band", () => {
+  const lathe = { asset_id: LATHE, asset_name: 'Lathe 3', last_birth_metrics: ['Spindle/LOAD', 'Door/OPEN', 'Controller/EXECUTION'] }
+
+  beforeEach(() => {
+    api.get.mockImplementation((path) => (path.startsWith('/api/v1/devices') ? Promise.resolve([lathe, devices[1]]) : routeGet(path)))
+    api.readCarriedTelemetry.mockImplementation(({ from, metricNames }) => Promise.resolve(metricNames.map(name => ({
+      bucket_ts: from, metric_name: name,
+      avg_double: name === 'Spindle/LOAD' ? 40 : null, min_double: name === 'Spindle/LOAD' ? 39 : null, max_double: name === 'Spindle/LOAD' ? 41 : null,
+      last_double: name === 'Spindle/LOAD' ? 40 : null,
+      last_string: name === 'Controller/EXECUTION' ? 'RUNNING' : null, last_bool: name === 'Door/OPEN' ? true : null,
+      n_rows: 1, is_carried: false,
+    }))))
+  })
+
+  /** The pointer on a band's box at `percent` of its width, the box being 600px wide. */
+  const pointAt = (figure, percent) => {
+    const box = figure.querySelector('.chart-box-states')
+    box.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 50, right: 600, bottom: 50 })
+    fireEvent.pointerMove(box, { clientX: (percent / 100) * 600 })
+    return box
+  }
+
+  it.each(['Door/OPEN', 'Controller/EXECUTION'])('shades %s with the alerts the number chart is shaded with, over the time each fired', async (metric) => {
+    await visit(`/history/device/${LATHE}`)
+    const figure = await screen.findByRole('figure', { name: metric })
+    await waitFor(() => expect(figure.querySelectorAll('.chart-alert')).toHaveLength(4))
+    // The window is the last 24 hours to 12:00, so 10:30 to 10:50 starts 22.5 hours in and is 20 minutes wide.
+    const overload = [...figure.querySelectorAll('.chart-alert')].find(shade => shade.textContent === 'Spindle Overload')
+    expect(parseFloat(overload.style.left)).toBeCloseTo((22.5 / 24) * 100, 5)
+    expect(parseFloat(overload.style.width)).toBeCloseTo((20 / 1440) * 100, 5)
+    // One still firing runs to now, 12:00, the window's end.
+    const coolant = [...figure.querySelectorAll('.chart-alert')].find(shade => shade.textContent === 'Coolant Low')
+    expect(parseFloat(coolant.style.left) + parseFloat(coolant.style.width)).toBeCloseTo(100, 5)
+    expect(figure.querySelector('.chart-box-states').classList.contains('chart-box-states-alerted')).toBe(true)
+    // The number chart is shaded by its plugin as before, and has no DOM layer of its own.
+    await waitFor(() => expect(plots.at(-1).opts.plugins).toHaveLength(1))
+    expect(screen.getByRole('figure', { name: 'Spindle/LOAD' }).querySelector('.chart-alert')).toBeNull()
+  })
+
+  it('names, in the head, each alert firing under the pointer, as the plot\'s readout does, and says the run too', async () => {
+    await visit(`/history/device/${LATHE}`)
+    const figure = await screen.findByRole('figure', { name: 'Door/OPEN' })
+    await waitFor(() => expect(figure.querySelectorAll('.chart-alert')).toHaveLength(4))
+    const head = () => figure.querySelector('.history-chart-hover')
+    const box = pointAt(figure, (22 + 40 / 60) / 24 * 100)
+    expect(head()).toHaveTextContent('Alert: Spindle Overload, warning · 2 Nov 10:30 – 10:50, 20 min')
+    // Two alerts at once, each named; the platform's ran from the evening before to 08:00, so not 09:50.
+    pointAt(figure, (21 + 50 / 60) / 24 * 100)
+    expect(head()).toHaveTextContent(/^Alert: Gateway Stale, info · 2 Nov 09:40 – 10:15, 35 min$/)
+    // Under no alert, the head is the latest reading again.
+    pointAt(figure, (22 + 55 / 60) / 24 * 100)
+    expect(head()).toHaveTextContent(/^Latest true · /)
+    pointAt(figure, (22 + 40 / 60) / 24 * 100)
+    fireEvent.pointerLeave(box)
+    expect(head()).toHaveTextContent(/^Latest true · /)
+  })
+
+  it('shades a band with nothing, and leaves it its height, where no alert fired or the read fails', async () => {
+    api.readAlertOccurrences.mockRejectedValue(new Error('no'))
+    await visit(`/history/device/${LATHE}`)
+    const figure = await screen.findByRole('figure', { name: 'Controller/EXECUTION' })
+    await act(async () => {})
+    expect(figure.querySelector('.chart-alerts')).toBeNull()
+    expect(figure.querySelector('.chart-box-states').classList.contains('chart-box-states-alerted')).toBe(false)
+  })
+})

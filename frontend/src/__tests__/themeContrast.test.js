@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { tokenBlocks, themeTokens, resolveColour, over, declaration } from '../test/themeColours'
 import { AUDIT_TRAIL_CLASSES } from '../constants'
+import { NEAR_HUE_DEG } from '../utils/history'
 
 /**
  * WCAG contrast guard for the theme tokens. A token that looks right in the theme it was authored
@@ -138,6 +139,8 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--danger-text on an acknowledged banner', '--danger-text', on(paint('.context-alert-critical.context-alert-acknowledged'), surface), AA_TEXT],
     ['acknowledged edge on card',       '--danger-soft-border', card,                                   AA_LARGE],
     ['danger badge on hover',           '--danger-text',  on(paint('.badge-critical'), glass(card)),    AA_TEXT],
+    // An alert's name under a text or flag band, on the shading's fill, as the plot names it inside the plot.
+    ['alert name under a band',         '--danger-text',  on(paint('.chart-alert'), card),              AA_TEXT],
     // --warning/--success remain the border/icon colours, where 3:1 is the bar.
     ['--warning icon on card',        '--warning',      card,                              AA_LARGE],
     ['--success icon on card',        '--success',      card,                              AA_LARGE],
@@ -692,6 +695,68 @@ describe("a state chart's colour, at every hue its values can hash to", () => {
     }
     expect(worstLabel).toBeGreaterThanOrEqual(AA_TEXT)
     expect(worstEdge).toBeGreaterThanOrEqual(AA_LARGE)
+  })
+})
+
+describe("a state band's neighbours, whose hues are a hash's", () => {
+  /*
+   * Two runs side by side are told apart by their colour when their fills differ by about 0.03 in
+   * OKLab, which at one lightness and chroma is 2 C sin(gap / 2) for a hue gap. The fills are inside
+   * sRGB at every hue (above), so that is their distance. Neighbours closer than NEAR_HUE_DEG get a
+   * hairline; the band draws none between the rest.
+   */
+  const TOLD_APART = 0.03
+  const fillsApart = (t, gap) => 2 * Number(t['--chart-state-c']) * Math.sin((gap * Math.PI) / 360)
+
+  it.each(Object.entries(THEMES))('%s: two fills NEAR_HUE_DEG apart differ plainly, and two 20 degrees apart do not', (_, t) => {
+    expect(fillsApart(t, NEAR_HUE_DEG)).toBeGreaterThanOrEqual(TOLD_APART)
+    expect(fillsApart(t, 20)).toBeLessThan(TOLD_APART)
+  })
+
+  it('draws the hairline in the run\'s own edge colour, which stands out from the card in both themes', () => {
+    expect(declaration(APP_CSS, '.chart-state-divided', 'box-shadow')).toBe('inset 1px 0 0 var(--tone)')
+  })
+})
+
+describe("a flag band's two colours, true and false", () => {
+  /** A colour's hue on the HSL wheel, in degrees. */
+  const hueOf = ([r, g, b]) => {
+    const [lo, hi] = [Math.min(r, g, b), Math.max(r, g, b)]
+    if (hi === lo) return 0
+    const d = hi - lo
+    const h = hi === r ? ((g - b) / d) % 6 : hi === g ? (b - r) / d + 2 : (r - g) / d + 4
+    return (h * 60 + 360) % 360
+  }
+  /** The smaller of the two ways round the wheel. */
+  const gap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b))
+  const DIFFERENT = 1.5
+
+  it.each(Object.entries(THEMES))('%s: the label clears AA on each fill and each edge 3:1 on the card', (_, t) => {
+    const card = rgb(t['--bg-card'])
+    const label = rgb(t['--text-primary'])
+    for (const value of ['true', 'false']) {
+      expect(contrast(label, rgb(t[`--chart-${value}`])), `the label on ${value}`).toBeGreaterThanOrEqual(AA_TEXT)
+      expect(contrast(rgb(t[`--chart-${value}-edge`]), card), `the edge of ${value} on the card`).toBeGreaterThanOrEqual(AA_LARGE)
+    }
+  })
+
+  it.each(Object.entries(THEMES))('%s: true and false differ in lightness and in hue, so a monochrome screen or a colour-blind eye still tells them apart', (_, t) => {
+    const [on, off] = ['true', 'false'].map(v => rgb(t[`--chart-${v}`]))
+    expect(contrast(on, off)).toBeGreaterThanOrEqual(DIFFERENT)
+    expect(gap(hueOf(on), hueOf(off))).toBeGreaterThanOrEqual(90)
+    const [onEdge, offEdge] = ['true', 'false'].map(v => rgb(t[`--chart-${v}-edge`]))
+    expect(gap(hueOf(onEdge), hueOf(offEdge))).toBeGreaterThanOrEqual(90)
+  })
+
+  it('names both as tokens in both themes, and sets a flag run and its key from them', () => {
+    for (const value of ['true', 'false']) {
+      for (const name of [`--chart-${value}`, `--chart-${value}-edge`]) {
+        expect(BLOCKS.dark[name], `${name} in the dark block`).toBeTruthy()
+        expect(BLOCKS.light[name], `${name} in the light block`).toBeTruthy()
+      }
+      expect(declaration(APP_CSS, `.chart-flag-${value}`, '--tone')).toBe(`var(--chart-${value}-edge)`)
+      expect(declaration(APP_CSS, `.chart-flag-${value}`, '--tone-fill')).toBe(`var(--chart-${value})`)
+    }
   })
 })
 

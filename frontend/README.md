@@ -1904,13 +1904,29 @@ arrived over the window, a lane per device, before anything is charted. Its arit
 **`common/TimeSeriesChart.jsx` is the one time-series chart**, on uPlot, which later tabs reuse.
 It draws the bucket's average as the line and its minimum to maximum as a band. A carried bucket
 is on a dashed line, never on the solid one, so a quiet stretch never reads as a measured one. A
-flag steps between false and true, and a state is a strip of its runs in text.
+state and a flag are not lines: each is one band of its runs (`common/StateBand.jsx`), a state's in
+text and a flag's true and false.
 
 - **The head** reads the bucket under the pointer, and otherwise the latest reading
   (`latestWords()`): the newest bucket a reading arrived in, never a carried one, with its `last`
   value and the bucket's start, since a bucket is not a reading's timestamp.
-- **A state** is `stateRuns()`, clipped to the window and to now. Each value's colour comes from
-  its text: `stateHue()` hashes it (djb2, then murmur3's finaliser, so names a character apart do
+- **A number's key** (`common/NumberKey.jsx`) is under the chart, in the text key's place and style:
+  `numberKey()`'s four entries for `numberFigures()`. The lowest and highest come from the buckets' own
+  `min_double` and `max_double`, so they are the true extremes at any bucket size, with the bucket
+  each was in (a bucket read before a carried one wins a tie, and a carried one says so). The mean and
+  median are over time: each bucket counts once, carried buckets included and any at or after `now`
+  left out, over the buckets' averages. Under report by exception a reading comes when a value moves,
+  so a mean of the readings leans to where it moved, and this does not; it is at the bucket's
+  resolution. Each carries the unit as the head does (`readingWords()`). Pointing at an entry hands
+  its `mark` to the chart, which places it with the plot's own `valToPos()` in the `u-over` layer
+  (`chart-point-mark`, `chart-level-mark`); the words carry every figure, so hover is an aid only.
+  `chartSummary()` adds the mean and the median. Text and flags keep their own keys.
+- **A state** is `stateRuns()`, clipped to the window and to now, drawn by `common/StateBand.jsx`:
+  one band of its runs, edge to edge, on the window's own scale. It takes the runs and the window
+  alone, so a lane of Overview can place it as a chart does. The runs meet with no gap; only a
+  band's two ends are rounded (`chart-state-first`, `chart-state-last`), a break in the readings
+  ending one band and starting the next, and the edge runs along its top and foot. Each value's
+  colour comes from its text: `stateHue()` hashes it (djb2, then murmur3's finaliser, so names a character apart do
   not land a degree apart) to a hue, which the box carries as `--state-hue` through React's style,
   the CSSOM, so the CSP is unchanged. App.css draws it as `oklch()` of the theme's
   `--chart-state-l` and `--chart-state-c` and that hue, with a stronger edge. The same value is the
@@ -1918,21 +1934,33 @@ flag steps between false and true, and a state is a strip of its runs in text.
   At those tokens every hue is inside sRGB, the label clears 7.4:1 (dark) and 13:1 (light) on its
   box, and the edge 3:1 on the card; `themeContrast.test.js` walks all 360 hues. A hash is not a
   meaning: two values can land near each other (about one pair in twelve within 15°), and IDLE is
-  not grey, so each box keeps its name and colour is never the only cue. `colourLiterals.test.js`
-  allows an `oklch()` of three tokens alone, which writes no colour. A carried stretch inside a run
+  not grey, so each run keeps its name where it fits and colour is never the only cue. Two
+  neighbours within `NEAR_HUE_DEG` (40°) are not told apart side by side, which
+  `themeContrast.test.js` measures in both themes, so the later run takes a hairline in its edge
+  colour (`chart-state-divided`), never on a run under 4px, which it would fill. No other run has a
+  divider. `colourLiterals.test.js` allows an `oklch()` of three tokens alone, which writes no colour. A carried stretch inside a run
   is hatched. Under the strip, `stateKey()` names the `STATE_KEY_MAX` (6) values with the most time
-  and counts the rest as others. The head reads the run under the pointer (`runWords()`). A box
-  under 24px keeps its colour and edge at its own width, at least 2px, and no name
-  (`chart-state-thin`), so a change of seconds over a day still shows and none is drawn wider than
-  its time.
+  and counts the rest as others. The head reads the run under the pointer (`runWords()`). A run
+  under 36px has no name (`chart-state-thin`), and every run is at least 1px wide (`min-width`),
+  over its neighbours when thinner, so a change of seconds over a day still shows.
+- **A flag** is the same band with `flag`: its runs' `state` is `flagWord()`, "true" or "false", and
+  App.css colours a run from two fixed tokens per theme (`--chart-true`, `--chart-false` and their
+  edges), never the hash. True is a lit blue and false a dim amber, 2.0:1 apart in lightness in the
+  dark theme and 1.6:1 in the light, 90° or more apart in hue; `themeContrast.test.js` holds the label
+  at AA on each fill and each edge at 3:1 on the card. The runs name `true` and `false`, never a schema's
+  words: nothing in the dashboard labels a Boolean's values (the schema builder's `permitted_values` is
+  a vocabulary check, not a label). Its key (`StateBandKey` with `flag`) says each value's share and
+  time (`durationWords()`), then `changeCount()`: the places one run gives way to another, exact for a
+  change read, and `atLeast` for a bucket read, which shows each bucket's last value only. A spell
+  shorter than a bucket is missed there, so the shares are over buckets too, and the help says so.
 - **Every change** (`changeSeries()`): a text's or a flag's series laid on its changes' own times,
   with `runs`, `exact`, each value's real stretch. `starts` are the window's start when a value was
-  carried in, each change, and where the last run stops, so a flag's stepped line steps when the
-  value did, and its carried start is dashed. The head reads the run at the pointer's time
+  carried in, each change, and where the last run stops, so a run starts when the value did, and its
+  carried start is hatched. The head reads the run at the pointer's time
   (`runNear()`, which prefers a run thinner than 8px within 4px of it) to the second. A bucket
-  series may carry `marked` (`markBuckets()`): a flag's bucket that held both values is the band
-  from false to true, and a state's is dotted along the strip's foot (`chart-state-mixed`), named
-  in the key and read under the pointer (`markWords()`).
+  series may carry `marked` (`markBuckets()`): a text's or a flag's bucket that held more than one
+  value is dotted along the band's foot (`chart-state-mixed`), named in the key and read under the
+  pointer (`markWords()`).
 
 | Prop | What it is |
 | :--- | :--- |
@@ -1943,13 +1971,13 @@ flag steps between false and true, and a state is a strip of its runs in text.
 | `now` | The clock. Inside the window, a Now line and label, and a hatched "No readings yet" after it |
 | `minutes` | The bucket's width: a state strip's runs, and the times the head says |
 | `validRange` | `{ minimum, maximum }` from the schemas, or null: a dotted line labelled "valid range" |
-| `summary` | `chartSummary()`: the metric, the window, the resolution, the latest reading and its bucket, the lowest and highest, a state's shares, the carried buckets and the valid range, for a screen reader |
+| `summary` | `chartSummary()`: the metric, the window, the resolution, the latest reading and its bucket, the lowest and highest, the mean and median over time, a state's shares, the carried buckets and the valid range, for a screen reader |
 | `syncKey` | Charts sharing it share the cursor, so every chart of a device shows the same moment |
 | `band` | A drag's band, `{ lo, hi, mid, words }` (fractions of the window, and `bandWords()`), shaded over the plot or the strip, or null |
 | `height` | The plot's height in pixels, 140 by default |
 | `yRange` | A number chart's value scale, `[low, high]`, or null for uPlot's own: charts that compare share one (`sharedScale()`). Pass the same array while it is the same: a new one draws the chart again |
 | `label`, `head` | `label` names the chart in place of the metric and unit. `head` is what the title line shows in place of that name, such as a status dot and a link: the figure keeps `label` as its name |
-| `plugins` | uPlot plugins for a number or flag chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state strip takes none |
+| `plugins` | uPlot plugins for a number chart, such as the alert bands, or none. A new array draws the chart again, so pass the same one while it is the same. A state or flag band is not drawn by uPlot: it shades the `bands` the alert plugins carry, in the DOM |
 | `note` | Which read the chart shows, in the head, when the status line says another (`readWords()`), or null |
 | `derived` | True for a derived metric: a `DerivedTag` beside the title, and "a derived metric" in the summary ([History's derived metrics](#historys-derived-metrics)) |
 
@@ -1990,7 +2018,7 @@ Metric tabs reuse: `common/SmallMultiples.jsx`, `common/HourHeatmap.jsx`, `commo
   `HISTORY_CHANGE_SERIES`, and draws every change per machine as the Device tab does.
 - **`SmallMultiples` draws one chart a member on one scale.** `sharedScale()` is the lowest minimum to the highest
   maximum across every number series, padded by 8%, and is each chart's `yRange`; the line above the charts says it
-  in words. A flag's scale is its own. The time axis, the cursor (`syncKey`) and the zoom band are shared, as on the Device
+  in words. A text or flag band has no scale. The time axis, the cursor (`syncKey`) and the zoom band are shared, as on the Device
   tab: `useChartBand()` holds the drag, which both tabs use. A member's title line is its status dot
   (`DeviceStatusDot`, as the Site Map draws it, with "Offline" in words), its name as an `OverflowText` link to its
   charts on the Device tab, and the alert shading from one `alert_occurrences()` read for every machine
@@ -2286,7 +2314,7 @@ its current value; Export saves its values. The database's rules are in
 `common/alertBands.js`). With each read the charts make, the hook reads the device's alerts over
 the same window and builds `alertBands()`: each occurrence clipped to the window, a still-firing
 one running to the read's moment, where the lines stop. `alertBandsPlugin()` passes them to every
-number and flag chart through `plugins`.
+chart through `plugins`, and carries the bands it shades (`bands`, read by `bandsOf()`).
 
 - **Inside the plot area only**, from `bbox`, so a band lines up with the text strips' gutters.
   Under the series, a translucent fill of `--danger`. Over them, a solid `--danger` edge where the
@@ -2297,7 +2325,19 @@ number and flag chart through `plugins`.
   names each alert firing at that moment (`bandText()`). The row above the charts keys the shading
   in words with a link to the Alerts tab for the device and window (`AlertKey`).
 - **A failed read shades nothing.** The charts go on, and the read's thunk lets a stub without the
-  method read as no alerts. A state strip is not drawn by uPlot and is not shaded.
+  method read as no alerts.
+- **A state or flag band shades the same bands in the DOM** (`StateBand`'s `alerts`, which
+  `TimeSeriesChart` takes from its plugins with `bandsOf()`), so a plot and a band read one
+  `alertBands()` and cannot disagree about a span, its edges or its name. `bandBox()` places each as
+  percentages of the window. `.chart-alerts` is a layer over the runs and the dotted marks, translucent
+  at `ALERT_FILL_ALPHA` (12%, as the plot's fill), with the solid `--danger` edge where the occurrence
+  starts or ends inside the window (`chart-alert-starts`, `chart-alert-ends`). It takes no pointer, so
+  the runs' readout, a drag across the band and the hatching work as before. A run's name sits in the
+  middle of the band, so the alert's name takes a row of its own under it, `--danger-text` on the
+  fill (`themeContrast.test.js`), where its band is 48px wide (`NAMED_PX`, as on the plot). A band
+  with alerts is that row taller (`chart-box-states-alerted`, 50px against 34px); one without is not.
+  The head names each alert firing under the pointer after the run, "Alert: …" with `bandText()`, as
+  the plot's readout does; the readout itself cannot sit in a band, whose box clips.
 
 ---
 

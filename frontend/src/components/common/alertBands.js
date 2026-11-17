@@ -2,7 +2,10 @@
  * The periods an alert was firing, as bands across a chart's window, and the uPlot plugin that
  * shades them on History's charts. The bands are pure arithmetic, unit-tested; the plugin draws
  * them on the plot area only, where the time scale is, so they line up with the text strips'
- * gutters (PLOT_LEFT_PX, PLOT_RIGHT_PX). frontend/README.md, "History's Alerts tab".
+ * gutters (PLOT_LEFT_PX, PLOT_RIGHT_PX). A state or flag band is not drawn by uPlot, so StateBand
+ * shades the same bands in the DOM: the plugin carries them (`bands`, bandsOf()), so both read
+ * one alertBands(), and the fill, the edges, the names and the readout are the same words.
+ * frontend/README.md, "History's Alerts tab".
  */
 import { clockWords } from '../../utils/timeWindow'
 import { durationWords, momentWords, withAlpha } from '../../utils/history'
@@ -33,6 +36,19 @@ export function alertBands(rows, { start, end, now }) {
   return out.sort((a, b) => a.from - b.from || a.to - b.to)
 }
 
+/** How opaque the shading's fill is, over a plot and over a band alike (App.css's `.chart-alert`). */
+export const ALERT_FILL_ALPHA = 0.12
+
+/**
+ * Where a band lies across the window [start, end), as percentages for a DOM layer: `{ left,
+ * width }`. The bands are clipped to the window already (alertBands()), so these are the plugin's
+ * x positions on the plot area, whose time scale is the window.
+ */
+export function bandBox(band, start, end) {
+  const span = end - start
+  return { left: ((band.from - start) / span) * 100, width: ((band.to - band.from) / span) * 100 }
+}
+
 /** The bands over moment `t`, in milliseconds. */
 export const bandsAt = (bands, t) => bands.filter(b => t >= b.from && t < b.to)
 
@@ -57,11 +73,11 @@ export function bandText(band) {
 export function alertBandPalette(read = (name) => getComputedStyle(document.documentElement).getPropertyValue(name)) {
   const token = (name) => String(read(name) || '').trim()
   const edge = token('--danger')
-  return { fill: withAlpha(edge, 0.12), edge, text: token('--danger-text'), font: `11px ${token('--font-mono') || 'monospace'}` }
+  return { fill: withAlpha(edge, ALERT_FILL_ALPHA), edge, text: token('--danger-text'), font: `11px ${token('--font-mono') || 'monospace'}` }
 }
 
 /** The narrowest band, in CSS pixels, whose alert is named inside it. */
-const NAMED_PX = 48
+export const NAMED_PX = 48
 
 /** `text` cut with an ellipsis to fit `width` canvas pixels, or '' when not even one letter does. */
 function fitted(ctx, text, width) {
@@ -80,7 +96,8 @@ function fitted(ctx, text, width) {
  * never differs by colour alone. While the pointer is on this chart, a readout at the plot's foot
  * names each alert firing at that moment (bandText()). Each chart a plot of its own state, so one
  * plugin serves every chart of a device. Tokens are read as each plot starts, which a theme switch
- * makes happen again.
+ * makes happen again. The plugin's `bands` are the ones it shades, for a chart that is not a plot
+ * (bandsOf()).
  */
 export function alertBandsPlugin(bands, { palette = alertBandPalette } = {}) {
   const plots = new WeakMap()
@@ -176,5 +193,8 @@ export function alertBandsPlugin(bands, { palette = alertBandPalette } = {}) {
     plots.delete(u)
   }
 
-  return { hooks: { init: [init], drawClear: [fill], draw: [mark], setCursor: [hover], destroy: [destroy] } }
+  return { bands, hooks: { init: [init], drawClear: [fill], draw: [mark], setCursor: [hover], destroy: [destroy] } }
 }
+
+/** The bands of a chart's `plugins` (alertBandsPlugin()), in order of start: what a state or flag band shades. */
+export const bandsOf = (plugins) => (plugins || []).flatMap(p => p?.bands ?? []).sort((a, b) => a.from - b.from || a.to - b.to)
