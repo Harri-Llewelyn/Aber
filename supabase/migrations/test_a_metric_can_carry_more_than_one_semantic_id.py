@@ -130,13 +130,13 @@ class SupplementalBase(unittest.TestCase):
     def email(user_id):
         return f"{user_id[-4:]}@supplemental-semantic-ids.test"
 
-    def claims(self, user_id, aal="aal1", role="authenticated"):
+    def claims(self, user_id, aal="aal1"):
         self.cur.execute("RESET ROLE;")
-        claims = {"sub": user_id, "role": role, "aal": aal}
+        claims = {"sub": user_id, "role": "authenticated", "aal": aal}
         if user_id != MACHINE_ID:
             claims["email"] = self.email(user_id)
         self.cur.execute("SELECT set_config('request.jwt.claims', %s, true);", (json.dumps(claims),))
-        self.cur.execute(f"SET LOCAL ROLE {role};")
+        self.cur.execute("SET LOCAL ROLE authenticated;")
 
     def owner(self):
         self.cur.execute("RESET ROLE;")

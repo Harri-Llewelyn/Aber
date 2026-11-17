@@ -17,13 +17,12 @@ which skips the checks and says why. Without a reachable stack every check skips
 The subject is the AAS conformance device (test-harness/aas_fixture.py), provisioned at pinned ids as the
 other AAS suites do. The further ids are added to `Systems/TEMPERATURE` and taken away again at the end.
 """
+import http.client
 import json
 import os
 import sys
 import unittest
-import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -53,38 +52,34 @@ import aas_fixture  # noqa: E402  -- after sys.path, by necessity
 import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 
-def rest(token, method, path, payload=None, prefer=None):
-    """One PostgREST call as the signed-in person; (status, parsed body)."""
-    body = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(f"{SUPABASE_URL}/rest/v1{path}", data=body, method=method)
-    req.add_header("apikey", PUBLISHABLE_KEY)
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Content-Type", "application/json")
+def call(token, method, path, payload=None, prefer=None, timeout=45):
+    """One call to the gateway as the signed-in person; (status, parsed body, or the text when it is not JSON)."""
+    headers = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     if prefer:
-        req.add_header("Prefer", prefer)
+        headers["Prefer"] = prefer
+    body = json.dumps(payload).encode() if payload is not None else None
+    gateway = urllib.parse.urlsplit(SUPABASE_URL)
+    connect = http.client.HTTPSConnection if gateway.scheme == "https" else http.client.HTTPConnection
+    connection = connect(gateway.hostname, gateway.port, timeout=timeout)
     try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            raw = res.read()
-            return res.status, json.loads(raw) if raw else []
-    except urllib.error.HTTPError as err:
-        raw = err.read() or b"{}"
-        try:
-            return err.code, json.loads(raw)
-        except json.JSONDecodeError:
-            return err.code, {"raw": raw.decode(errors="replace")}
+        connection.request(method, path, body=body, headers=headers)
+        response = connection.getresponse()
+        status, text = response.status, response.read().decode(errors="replace")
+    finally:
+        connection.close()
+    try:
+        return status, json.loads(text) if text else []
+    except ValueError:
+        return status, {"raw": text[:300]}
+
+
+def rest(token, method, path, payload=None, prefer=None):
+    """One PostgREST call; (status, parsed body)."""
+    return call(token, method, f"/rest/v1{path}", payload, prefer)
 
 
 def export(token, device_id):
-    body = json.dumps({"device_id": device_id}).encode()
-    req = urllib.request.Request(f"{SUPABASE_URL}/functions/v1/aas-export", data=body, method="POST")
-    req.add_header("apikey", PUBLISHABLE_KEY)
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=60) as res:
-            return res.status, json.loads(res.read() or b"{}")
-    except urllib.error.HTTPError as err:
-        return err.code, {"raw": (err.read() or b"").decode(errors="replace")[:300]}
+    return call(token, "POST", "/functions/v1/aas-export", {"device_id": device_id}, timeout=60)
 
 
 def sign_in():

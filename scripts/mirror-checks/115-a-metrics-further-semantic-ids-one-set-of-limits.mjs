@@ -1,4 +1,4 @@
-import { compare, lastDefinition, need, read, SCHEMA } from './lib.mjs';
+import { compare, lastDefinition, need, problems, read, SCHEMA } from './lib.mjs';
 
 // 115. A metric's further semantic ids, one set of limits in two places (0299): the most a metric
 // carries, and the longest id and source, in enforce_metric_semantic_id() and the table's CHECKs, and in
@@ -13,7 +13,13 @@ export default function check() {
   const sourceCheck = need(SCHEMA, /CONSTRAINT metric_semantic_ids_source_valid\s+CHECK \(\(\(source IS NULL\) OR \(\(source = btrim\(source\)\) AND \(char_length\(source\) >= 1\) AND \(char_length\(source\) <= (\d+)\)\)\)\)/,
     'metric_semantic_ids_source_valid in the migrations');
   const js = read('frontend/src/utils/furtherSemanticIds.js');
-  const constant = (name) => need(js, new RegExp(`export const ${name} = (\\d+)`), `${name} in frontend/src/utils/furtherSemanticIds.js`);
+  // Each exported number constant by name, from one fixed pattern.
+  const constants = new Map([...js.matchAll(/^export const ([A-Z_]+) = (\d+)$/gm)].map((m) => [m[1], m[2]]));
+  const constant = (name) => {
+    if (constants.has(name)) return [null, constants.get(name)];
+    problems.push(`could not find ${name} in frontend/src/utils/furtherSemanticIds.js -- the file's shape changed, so this check is no longer checking anything`);
+    return null;
+  };
   const jsMax = constant('MAX_FURTHER_SEMANTIC_IDS');
   const jsId = constant('FURTHER_ID_MAX_LENGTH');
   const jsSource = constant('FURTHER_SOURCE_MAX_LENGTH');

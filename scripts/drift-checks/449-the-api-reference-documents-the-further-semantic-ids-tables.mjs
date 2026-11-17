@@ -17,11 +17,15 @@ export default function check() {
     const head = `\n${' '.repeat(indent)}${key}:\n`;
     const start = spec.indexOf(head);
     if (start < 0) return undefined;
-    const rest = spec.slice(start + head.length);
-    const end = rest.search(new RegExp(`\\n {0,${indent}}\\S`));
-    return end < 0 ? rest : rest.slice(0, end);
+    const lines = spec.slice(start + head.length).split('\n');
+    // The block ends at the next line indented no deeper than its own key.
+    const depth = (line) => line.length - line.trimStart().length;
+    let n = 0;
+    while (n < lines.length && (lines[n].trim() === '' || depth(lines[n]) > indent)) n += 1;
+    return lines.slice(0, n).join('\n');
   };
-  const names = (text, indent) => [...text.matchAll(new RegExp(`^ {${indent}}([a-z_]+):`, 'gm'))].map((m) => m[1]).sort().join(', ');
+  // The keys of a schema's properties: each at eight spaces, one to a line.
+  const names = (text) => [...text.matchAll(/^ {8}([a-z_]+):/gm)].map((m) => m[1]).sort().join(', ');
 
   const columns = [...(sql.match(/CREATE TABLE IF NOT EXISTS public\.metric_semantic_ids \(\n([\s\S]*?)\n {4}CONSTRAINT /)?.[1] ?? '')
     .matchAll(/^ {4}([a-z_]+) /gm)].map((m) => m[1]);
@@ -31,16 +35,16 @@ export default function check() {
   const crosswalk = block('MetricSemanticIdCrosswalk', 4);
   if (!row || !write || !crosswalk) problems449.push(`${SPEC} lacks MetricSemanticId, MetricSemanticIdWrite or MetricSemanticIdCrosswalk`);
   else {
-    const documented = names(row.slice(row.indexOf('\n      properties:\n')), 8);
+    const documented = names(row.slice(row.indexOf('\n      properties:\n')));
     if (documented !== [...columns].sort().join(', ')) problems449.push(`${SPEC}: MetricSemanticId documents the columns "${documented}", ${FILE} gives the table "${[...columns].sort().join(', ')}"`);
     // What a writer may send: every column but the two the database stamps.
     const writable = columns.filter((c) => !['created_at', 'created_by'].includes(c)).sort().join(', ');
-    const sent = names(write.slice(write.indexOf('\n      properties:\n')), 8);
+    const sent = names(write.slice(write.indexOf('\n      properties:\n')));
     if (sent !== writable) problems449.push(`${SPEC}: MetricSemanticIdWrite documents "${sent}", the writer may send "${writable}"`);
     // The view's columns, from its first SELECT: the alias after AS, or the column's own name.
     const view = sql.match(/CREATE OR REPLACE VIEW public\.metric_semantic_id_crosswalk[^\n]*\n SELECT ([\s\S]*?)\n   FROM public\.metric_catalog m/)?.[1] ?? '';
     const viewColumns = view.split(',\n').map((c) => c.trim().replace(/::text/g, '')).map((c) => c.match(/ AS ([a-z_]+)$/)?.[1] ?? c.replace(/^m\./, '')).sort().join(', ');
-    const shown = names(crosswalk.slice(crosswalk.indexOf('\n      properties:\n')), 8);
+    const shown = names(crosswalk.slice(crosswalk.indexOf('\n      properties:\n')));
     if (viewColumns === '' || shown !== viewColumns) problems449.push(`${SPEC}: MetricSemanticIdCrosswalk documents "${shown}", ${FILE} gives the view "${viewColumns}"`);
     // The types and the limits the CHECKs hold.
     const types = [...(sql.match(/metric_semantic_ids_type_valid\s+CHECK \(\(semantic_id_type = ANY \(ARRAY\[([^\]]*)\]\)\)\)/)?.[1] ?? '').matchAll(/'([A-Za-z]+)'/g)].map((m) => m[1]).sort().join(', ');
@@ -57,7 +61,7 @@ export default function check() {
   const path = block('/rest/v1/metric_semantic_ids', 2);
   if (!path) problems449.push(`${SPEC} has no /rest/v1/metric_semantic_ids`);
   for (const m of sql.matchAll(/^CREATE POLICY metric_semantic_ids_\w+ ON public\.metric_semantic_ids FOR (\w+) /gm)) {
-    if (path && !new RegExp(`^ {4}${verbs[m[1]]}:`, 'm').test(path)) problems449.push(`${SPEC}: /rest/v1/metric_semantic_ids documents no ${verbs[m[1]]}, which the ${m[1]} policy admits`);
+    if (path && !path.split('\n').includes(`    ${verbs[m[1]]}:`)) problems449.push(`${SPEC}: /rest/v1/metric_semantic_ids documents no ${verbs[m[1]]}, which the ${m[1]} policy admits`);
   }
   if (!block('/rest/v1/metric_semantic_id_crosswalk', 2)) problems449.push(`${SPEC} has no /rest/v1/metric_semantic_id_crosswalk`);
 
