@@ -11,6 +11,7 @@ import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
 import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_CLASSES, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
+import { lineageVersionLabel } from './utils/schemaVersion';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
 import { ALLOWED_HOSTS_KEY, DELIVERY_LOG_LIMIT, EMAIL_MIN_SEVERITY_KEY, EMAIL_ROLES_KEY } from './utils/notifications';
@@ -3708,6 +3709,10 @@ const apiMethods = {
       return (data || []).map(s => ({
         schema_uuid: s.id,
         schema_name: s.schema_name,
+        // The first version's name, which every version of the lineage carries (0298): the Submodel
+        // id and every label that names a schema by its lineage read it.
+        lineage_name: s.lineage_name ?? s.schema_name,
+        lineage_root_id: s.lineage_root_id ?? s.id,
         description: s.description,
         schema_definition: s.schema_definition,
         semantic_id: s.semantic_id ?? null,
@@ -3849,7 +3854,7 @@ const apiMethods = {
           'id,name,description,connection_method,cell_id,area_id,location_scope,model_3d_path,is_archived',
           'id', deviceIds),
         readByIds('device_nameplate', '*', 'device_id', deviceIds),
-        readByIds('schemas', 'id,schema_name,version,status,parent_schema_id', 'id', idsOf('schemas')),
+        readByIds('schemas', 'id,schema_name,lineage_name,version,status,parent_schema_id', 'id', idsOf('schemas')),
         readByIds('areas', 'id,name,description,icon', 'id', idsOf('areas')),
         readByIds('cells', 'id,name,icon,area_id,plan_x,plan_y,description', 'id',
           idsOf('cells')),
@@ -3868,7 +3873,7 @@ const apiMethods = {
         devices:          { found: devices,  label: d => d.name },
         device_nameplate: { found: devices,  label: d => d.name,
                             current: id => (nameplates ? nameplates.get(id) || {} : null) },
-        schemas:          { found: schemas,  label: s => `${s.schema_name} v${s.version}` },
+        schemas:          { found: schemas,  label: lineageVersionLabel },
         areas:            { found: areas,    label: a => a.name },
         cells:            { found: cells,    label: c => c.name },
         gateways:         { found: gateways, label: g => g.name || g.sparkplug_id }

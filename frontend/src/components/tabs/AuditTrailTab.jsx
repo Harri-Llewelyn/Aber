@@ -630,10 +630,11 @@ export function snapshotIdentity(event) {
     const value = read(field)
     if (value === null || value === undefined || value === '') continue
 
-    // A schema's version is part of its identity -- a lineage shares `schema_name` and differs
-    // ONLY in `version` -- so it is returned separately rather than appended. Appended, it is the
-    // end of the string, and the end of the string is what a 260px label ellipsises away: sixteen
-    // versions of one schema drew sixteen lanes reading `VALIDATE_Schema_Robot_St…`.
+    // A schema's version is part of its identity. Each version has a name of its own (`X`, `X_v2`),
+    // so the lanes of one lineage differ only in the end of the name and in `version`, and the
+    // version is returned separately rather than appended. Appended, it is the end of the string,
+    // which is what a 260px label ellipsises away: sixteen versions of one schema drew sixteen
+    // lanes reading `VALIDATE_Schema_Robot_St…`.
     if (field === 'schema_name') {
       const version = read('version')
       return {
