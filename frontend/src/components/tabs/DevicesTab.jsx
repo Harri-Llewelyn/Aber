@@ -62,9 +62,10 @@ import { unsTopicField, UnsRenameNote } from '../common/UnsPlace'
 import { derivedValuesField } from '../common/DeviceDerivedValues'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import {
-  unmodelledMetrics, schemaIdsForDevice, schemasForDevice, deviceTagList, availableTags, UNMODELLED_TAG,
+  schemaIdsForDevice, schemasForDevice, deviceTagList, deviceFindings, availableTags, UNMODELLED_TAG,
   outOfVocabularyMetrics, OUT_OF_VOCABULARY_TAG
 } from '../../utils/deviceTags'
+import { oldDevicesLinkChanges, STATUS_OUT_OF_VOCABULARY, STATUS_UNMODELLED } from '../../utils/devicesAddress'
 import { assignableSchemas, isAssignableSchema, schemaStatus, statusLabel } from '../../utils/schemaVersion'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
@@ -94,7 +95,7 @@ import {
   IconZap
 } from '../common/Icons'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
-import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { navigate, queryOf, useUrl, useUrlList, useUrlState, useUrlTab, withQuery } from '../../hooks/useUrlState'
 import {
   LIFECYCLE_ALIASES, LIFECYCLE_DEFAULT, LIFECYCLE_OPTIONS, LIFECYCLE_VALUES, applyFacets, lifecycleChanged, lifecycleOf
 } from '../../utils/listFilters'
@@ -115,13 +116,14 @@ const CELL_FILTER_SITE_WIDE = '__site_wide__'
 /** No list filter chosen. */
 const NONE = Object.freeze([])
 
-/** The Status filter's values: a device can be several at once (offline and unmodelled). */
+/** The Status filter's values: a device can be several at once (offline and unmodelled). The last two are findings. */
 const STATUS_OPTIONS = [
   { value: 'online', label: 'Online' },
   { value: 'offline', label: 'Offline / DDEATH' },
   { value: 'unborn', label: 'Awaiting first birth' },
   { value: 'overdue', label: 'Awaiting first birth (24h+)' },
-  { value: 'unmodelled', label: 'Publishing unmodelled metrics' },
+  { value: STATUS_UNMODELLED, label: 'Publishing unmodelled metrics' },
+  { value: STATUS_OUT_OF_VOCABULARY, label: 'Out of vocabulary' },
 ]
 const STATUS_VALUES = STATUS_OPTIONS.map(o => o.value)
 
@@ -183,7 +185,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // issued id, as telemetry.asset_id is, never on the id a device publishes under.
   const [latestBySparkplugId, setLatestBySparkplugId] = useState(new Map())
   const [catalog, setCatalog] = useState([])
-  // A device's type is derived from its schema's metric groups (utils/deviceTags.js).
+  // A device's metric groups are derived from its schemas (utils/deviceTags.js).
   // A new device follows its gateway, so it starts with no cell and no area of its own.
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_GATEWAY })
   const [areas, setAreas]       = useState([])
@@ -229,10 +231,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     return () => { cancelled = true }
   }, [docRefreshKey])
 
-  /** This device's last reported values, by its issued id. */
-  const latestFor = (device) =>
-    latestBySparkplugId.get(deviceIds(device).issued) || null
-
   /**
    * A device row shaped for the edit form. `schema_ids` is every schema attached to it, so the
    * picker shows the whole set and saving writes it back as device_submodels rows.
@@ -245,7 +243,15 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [searchQuery, setSearchQuery] = useUrlState('search')
   const [schemaFilter, setSchemaFilter] = useUrlList('schema', NONE, { allowed: loading ? null : schemas.map(s => s.schema_uuid) })
   const [statusFilter, setStatusFilter] = useUrlList('status', NONE, { allowed: STATUS_VALUES })
-  const [tagFilter, setTagFilter] = useUrlList('type')
+  const [tagFilter, setTagFilter] = useUrlList('group')
+  // An old `?type=` link, from when the Type filter held the findings, is rewritten once to the
+  // Metric groups and Status filters (utils/devicesAddress.js).
+  const url = useUrl()
+  const oldLink = oldDevicesLinkChanges(queryOf(url))
+  const oldLinkText = oldLink ? JSON.stringify(oldLink) : ''
+  useEffect(() => {
+    if (oldLinkText) navigate(withQuery(JSON.parse(oldLinkText)), { replace: true })
+  }, [oldLinkText])
   const [gatewayFilter, setGatewayFilter] = useUrlList('gateway', NONE, { allowed: loading ? null : gateways.map(g => g.gateway_id) })
   const [cellFilter, setCellFilter] = useUrlList('cell', NONE, {
     allowed: loading ? null : [CELL_FILTER_UNASSIGNED, CELL_FILTER_SITE_WIDE, ...cells.map(c => c.cell_id)]
@@ -409,6 +415,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
   /** The schema rows the form has ticked: what the device will be judged against once saved. */
   const formSchemas = schemas.filter(s => (form.schema_ids || []).includes(s.schema_uuid))
+  const formGroups = deviceTagList(editing, formSchemas)
 
   // In-flight state for the form. Reject's and Restore's are their dialogs'.
   const [saving, runSave] = usePendingAction()
@@ -534,30 +541,37 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     return () => { cancelled = true }
   }, [outOfVocabularyIds])
 
-  /**
-   * The Out of vocabulary tag's TagList entry: which last values are outside their permitted values,
-   * and, where the Audit Trail holds a schema rejection for the device, a link to its rejections.
-   */
-  const outOfVocabularyTag = (a) => {
-    const listed = outOfVocabularyMetrics(latestFor(a), catalog).map(f => `${f.name} = ${f.value}`).join(', ')
-    const linked = rejectedIds.has(a.asset_id)
-    return {
-      key: OUT_OF_VOCABULARY_TAG,
-      className: 'badge badge-sm badge-neutral',
-      title: `Last value outside the permitted values: ${listed}.` +
-        (linked ? " Opens this device's schema rejections in the Audit Trail." : ''),
-      content: linked
-        ? <RouteLink className="count-link" to={schemaRejectionsUrl(a.asset_id)}>{OUT_OF_VOCABULARY_TAG}</RouteLink>
-        : OUT_OF_VOCABULARY_TAG
-    }
-  }
-
-  // Metrics declared at the last birth that the schema does not model. Derived, so adding the
-  // metric to the schema clears it on the next poll. See utils/deviceTags.js.
-  const unmodelledFor = useCallback(
-    (a) => unmodelledMetrics(a, schemasForDevice(a, schemas)),
-    [schemas]
+  // The findings against a device, each with its metrics: Unmodelled (declared at the last birth,
+  // outside its schemas) and Out of vocabulary (a last value outside its permitted values). Derived,
+  // so adding the metric to the schema clears the first on the next poll. See utils/deviceTags.js.
+  const findingsFor = useCallback(
+    (a) => deviceFindings(a, schemasForDevice(a, schemas), latestBySparkplugId.get(deviceIds(a).issued) || null, catalog),
+    [schemas, latestBySparkplugId, catalog]
   )
+
+  /**
+   * A finding as a warning badge, in the roster's Status cell and the drawer's subtitle. Its hover
+   * text lists the metrics; Unmodelled shows their count. Out of vocabulary links to the device's
+   * schema rejections where the Audit Trail holds one.
+   */
+  const findingBadge = (a, finding) => {
+    const unmodelled = finding.tag === UNMODELLED_TAG
+    const linked = !unmodelled && rejectedIds.has(a.asset_id)
+    const listed = finding.metrics.map(m => (unmodelled ? m.name : `${m.name} = ${m.value}`)).join(', ')
+    const title = unmodelled
+      ? `Declared at its last birth but not in the device's schemas: ${listed}`
+      : `Last value outside the permitted values: ${listed}.` +
+        (linked ? " Opens this device's schema rejections in the Audit Trail." : '')
+    return (
+      <Badge key={finding.tag} tone="warning" size="sm" icon={<IconAlertTriangle size={10} />} title={title}>
+        {unmodelled
+          ? `${finding.tag} (${finding.metrics.length})`
+          : linked
+            ? <RouteLink className="count-link" to={schemaRejectionsUrl(a.asset_id)}>{finding.tag}</RouteLink>
+            : finding.tag}
+      </Badge>
+    )
+  }
 
   // Indexes for the three lookups that run per device row, memoised so they survive renders that
   // changed no list.
@@ -575,10 +589,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   )
 
   // A device an operator needs to act on: quarantined, past its provisioning window with no birth
-  // (24h+), publishing unmodelled metrics, or with a location finding. No device resolves to an
-  // archived cell: the database refuses the archive while one does.
+  // (24h+), carrying a finding (unmodelled metrics, a value out of vocabulary), or with a location
+  // finding. No device resolves to an archived cell: the database refuses the archive while one does.
   const needsAttention = (a) =>
-    a.is_quarantined || isProvisioningOverdue(a) || unmodelledFor(a).length > 0 ||
+    a.is_quarantined || isProvisioningOverdue(a) || findingsFor(a).length > 0 ||
     // Location findings. Unassigned is the work queue that should drain; a mismatch is "this
     // resolved to something, but look at it".
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
@@ -590,13 +604,17 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
    * "Never seen" is distinct from offline: the row exists but no DBIRTH has ever arrived, and
    * "Offline / DDEATH" is a claim about something the device sent.
    */
-  const statusesOf = (a) => [
-    deviceLifecycleStatus(a) === DEVICE_STATUS.ONLINE && !a.is_archived && 'online',
-    deviceLifecycleStatus(a) === DEVICE_STATUS.OFFLINE && !isNeverSeen(a) && 'offline',
-    isNeverSeen(a) && 'unborn',
-    isProvisioningOverdue(a) && 'overdue',
-    unmodelledFor(a).length > 0 && 'unmodelled',
-  ].filter(Boolean)
+  const statusesOf = (a) => {
+    const findings = findingsFor(a).map(f => f.tag)
+    return [
+      deviceLifecycleStatus(a) === DEVICE_STATUS.ONLINE && !a.is_archived && 'online',
+      deviceLifecycleStatus(a) === DEVICE_STATUS.OFFLINE && !isNeverSeen(a) && 'offline',
+      isNeverSeen(a) && 'unborn',
+      isProvisioningOverdue(a) && 'overdue',
+      findings.includes(UNMODELLED_TAG) && STATUS_UNMODELLED,
+      findings.includes(OUT_OF_VOCABULARY_TAG) && STATUS_OUT_OF_VOCABULARY,
+    ].filter(Boolean)
+  }
 
   /**
    * The cell lanes a device is in: its RESOLVED cell, not the explicit override, or every device that
@@ -617,7 +635,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     { key: 'lifecycle', chosen: lifecycle, values: lifecycleOf },
     // Matches any attached schema, so a device carrying several is found by each of them.
     { key: 'schema', chosen: schemaFilter, values: a => schemasForDevice(a, schemas).map(sc => sc.schema_uuid) },
-    { key: 'type', chosen: tagFilter, values: a => deviceTagList(a, schemasForDevice(a, schemas), latestFor(a), catalog) },
+    { key: 'group', chosen: tagFilter, values: a => deviceTagList(a, schemasForDevice(a, schemas)) },
     { key: 'gateway', chosen: gatewayFilter, values: a => [a.active_gateway_id || ''] },
     { key: 'cell', chosen: cellFilter, values: cellLanesOf },
     { key: 'status', chosen: statusFilter, values: statusesOf },
@@ -640,9 +658,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     }
     return true
   }), [
-    assets, lifecycle, schemaFilter, schemas, tagFilter, latestBySparkplugId, catalog,
-    gatewayFilter, cellFilter, gatewayById, attentionOnly, showShadows, statusFilter, searchQuery,
-    unmodelledFor, cellById,
+    assets, lifecycle, schemaFilter, schemas, tagFilter, gatewayFilter, cellFilter, gatewayById,
+    attentionOnly, showShadows, statusFilter, searchQuery, findingsFor, cellById,
   ])
 
   // Each column sorts on what its cell shows. Status puts a firing alert first, the worst severity
@@ -663,9 +680,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         return (alertState(alert) === 'acknowledged' ? STATUS_RANK_ACKNOWLEDGED : 0) + severity
       }
     },
-    type: {
+    group: {
       type: 'text',
-      value: a => deviceTagList(a, schemasForDevice(a, schemas), latestBySparkplugId.get(deviceIds(a).issued) || null, catalog).join(', ')
+      value: a => deviceTagList(a, schemasForDevice(a, schemas)).join(', ')
     },
     cell: {
       type: 'text',
@@ -673,7 +690,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         ? locationSourceLabel(a.location_source)
         : cellById.get(a.effective_cell_id)?.cell_name || null)
     }
-  }), [alertFor, schemas, latestBySparkplugId, catalog, cellById])
+  }), [alertFor, schemas, cellById])
   const [filteredAssets, rosterSort] = useSortableRows(matchingAssets, rosterSortColumns, { active: view === 'registered' })
   const [quarantineRows, quarantineSort] = useSortableRows(quarantine, QUARANTINE_SORT, { active: view === 'quarantine' })
 
@@ -682,7 +699,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // dependencies.
   const attentionCount = useMemo(
     () => assets.filter(a => !a.is_quarantined && needsAttention(a)).length,
-    [assets, gatewayById, cellById, unmodelledFor]
+    [assets, gatewayById, cellById, findingsFor]
   )
   // Counted across every device, not the filtered list: it is the number the toggle reveals.
   // Quarantined lanes are excluded as attentionCount excludes them.
@@ -690,11 +707,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     () => assets.filter(a => !a.is_quarantined && a.shadow_of).length,
     [assets]
   )
-  // Walks every device's schemas and last-birth metrics for the tag dropdown. `latestFor` is
-  // rebuilt every render, so `latestBySparkplugId` is the dependency.
+  // Walks every device's schemas for the Metric groups filter.
   const tagOptions = useMemo(
-    () => availableTags(assets, schemas, latestFor, catalog),
-    [assets, schemas, latestBySparkplugId, catalog]
+    () => availableTags(assets, schemas),
+    [assets, schemas]
   )
   // The roster's own rows: everything but the queue, and the replay lanes unless they are shown.
   // The empty state reads it to tell none yet from none matching.
@@ -912,7 +928,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           width="md"
         />
 
-        <Tooltip text="Devices late with their first birth, publishing unmodelled metrics, with no cell, or in a cell apart from their gateway's.">
+        <Tooltip text="Devices late with their first birth, publishing unmodelled metrics or values out of vocabulary, with no cell, or in a cell apart from their gateway's.">
           <button
             className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setAttentionOnly(v => !v)}
@@ -936,15 +952,15 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           />
 
           <FilterList
-            label="Type"
-            plural="types"
+            label="Metric groups"
+            plural="metric groups"
             options={tagOptions.map(t => ({ value: t, label: t }))}
             value={tagFilter}
             onChange={setTagFilter}
-            counts={facetCounts.type}
+            counts={facetCounts.group}
             tip={tagOptions.length === 0
-              ? 'No device has a type yet. A type comes from the metric groups its schema models.'
-              : 'A device\'s types come from the metric groups its schema models.'}
+              ? 'No device has a metric group yet. A device\'s groups come from the schemas attached to it.'
+              : 'A device\'s metric groups come from the schemas attached to it: the part of each metric name before its first /.'}
           />
 
           <FilterList
@@ -1028,13 +1044,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 <tr>
                   <SortHeader sort={rosterSort} column="name">Name</SortHeader>
                   <SortHeader sort={rosterSort} column="uuid" title="The id to quote in a query, a ticket or an API call. The Sparkplug id is derived from it.">Device UUID</SortHeader>
-                  <SortHeader sort={rosterSort} column="status">Status</SortHeader>
-                  <SortHeader sort={rosterSort} column="type" style={{ width: 'auto' }} title="The metric groups the device's schema models. Unmodelled counts metrics its last birth declared outside it.">Type</SortHeader>
+                  <SortHeader sort={rosterSort} column="status" title="Its lifecycle state, any alert, and any finding. Sorts by the alert, then the lifecycle state.">Status</SortHeader>
+                  <SortHeader sort={rosterSort} column="group" style={{ width: 'auto' }} title="The metric groups the device's schemas model: the part of each metric name before its first /.">Metric groups</SortHeader>
                   <SortHeader sort={rosterSort} column="cell" title="The device's own cell if it has one, otherwise its gateway's. A cell set on the device stays if the gateway moves.">Cell</SortHeader>
                 </tr>
               </thead>
               <tbody>
                 {filteredAssets.map(a => {
+                  const findingBadges = findingsFor(a).map(finding => findingBadge(a, finding))
                   return (
                     <React.Fragment key={a.asset_id}>
                       {/* Clicks originating on a button, link or input inside the row are ignored
@@ -1070,7 +1087,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         </td>
                         <td>
                           {a.is_archived ? (
-                            <ArchivedBadge size="sm" />
+                            <div className="badge-col">
+                              <ArchivedBadge size="sm" />
+                              {findingBadges}
+                            </div>
                           ) : (
                             // Resolved by utils/deviceStatus.js, so this cell, the drawer and the
                             // Site Map chip agree.
@@ -1116,6 +1136,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                                       {alert.severity === 'critical' ? 'ALARM' : 'WARNING'}
                                     </Badge>
                                   )}
+                                  {/* The findings follow the state and the alert: they are facts about
+                                      the device's data, not about the connection. */}
+                                  {findingBadges}
                                 </div>
                               )
                             })()
@@ -1123,27 +1146,15 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         </td>
                         <td>
                           {(() => {
-                            const schema = schemasForDevice(a, schemas)
-                            const tags = deviceTagList(a, schema, latestFor(a), catalog)
-                            const extra = unmodelledMetrics(a, schema)
+                            const tags = deviceTagList(a, schemasForDevice(a, schemas))
                             if (tags.length === 0) return '—'
 
-                            // Collapsed past four: a tri-standard schema yields six or more tags.
-                            // `priority` keeps Unmodelled visible, since deviceTagList() appends it
-                            // last.
-                            const entries = tags.map(tag => tag === UNMODELLED_TAG ? {
-                              key: tag,
-                              priority: true,
-                              className: 'badge badge-sm badge-warning',
-                              title: `Declared at its last birth but absent from schema '${schema?.schema_name}': ${extra.join(', ')}`,
-                              content: <><IconAlertTriangle size={10} /> {tag} ({extra.length})</>
-                            } : tag === OUT_OF_VOCABULARY_TAG ? outOfVocabularyTag(a) : {
+                            // Collapsed past four: a tri-standard schema yields six or more groups.
+                            return <TagList limit={4} tags={tags.map(tag => ({
                               key: tag,
                               className: 'badge badge-sm badge-neutral',
                               content: tag
-                            })
-
-                            return <TagList limit={4} tags={entries}/>
+                            }))} />
                           })()}
                         </td>
                         <td style={{ maxWidth: '170px' }}>
@@ -1385,23 +1396,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               )
             })()}
 
-            <div className="form-group">
-              <label className="form-label">Device Type / Classification <span className="form-hint-inline">(derived)</span></label>
-              {/* flexWrap is load-bearing: a tri-standard schema derives six tags, and the count
-                  grows with the schema. */}
-              <div className="form-control derived-tags">
-                {(() => {
-                  const preview = deviceTagList(editing, formSchemas)
-                  if (preview.length === 0) {
-                    return <span className="cell-meta">Assign a schema below to classify this device</span>
-                  }
-                  return preview.map(t => (
-                    <Badge key={t} size="sm">{t}</Badge>
-                  ))
-                })()}
-              </div>
-            </div>
-
             {/* A fieldset of checkboxes: the legend names the group to a screen reader, and Tab and
                 Space work without a custom widget. */}
             <fieldset className="form-group schema-picker">
@@ -1428,6 +1422,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   ))
                 })()}
               </div>
+              {/* What the ticked schemas make of the device, as text: nothing here can be typed
+                  into. Absent while no ticked schema models a group. */}
+              {formGroups.length > 0 && (
+                <p className="form-static schema-groups">Metric groups these schemas model: {formGroups.join(', ')}</p>
+              )}
               {/* The contract every DDATA value is judged against comes first; the quarantine hint
                   second, since suggestMatches() weights a modelled-metric overlap above name
                   similarity. */}
@@ -1621,6 +1620,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               return <Badge tone={badge.tone} size="sm" title={badge.title}>{badge.label}</Badge>
             })()}
             {selectedDevice.is_archived && <ArchivedBadge size="sm" />}
+            {/* A finding is a warning beside the state it qualifies. */}
+            {findingsFor(selectedDevice).map(finding => findingBadge(selectedDevice, finding))}
           </>
         )}
         fields={selectedDevice ? [
@@ -1756,10 +1757,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             help: 'The metric contract(s) this device is judged against. Opens on the Schemas page.'
           },
           {
-            label: 'Classification',
-            value: deviceTagList(selectedDevice, schemasForDevice(selectedDevice, schemas), latestFor(selectedDevice), catalog).join(', ') || null,
+            label: 'Metric groups',
+            value: deviceTagList(selectedDevice, schemasForDevice(selectedDevice, schemas)).join(', ') || null,
             full: true,
-            help: "Derived from the metric groups this device's schema models, plus any live findings."
+            help: "The metric groups this device's schemas model: the part of each metric name before its first /."
           },
           // Each derived metric its inputs make possible, with its current value and its window.
           ...[derivedValuesField({ device: selectedDevice, schemas, catalog })].filter(Boolean),

@@ -7576,14 +7576,8 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 
 .form-hint-inline { font-weight: 400; font-size: 11px; color: var(--text-muted); }
 
-/* The read-only preview of a device's derived type tags. */
-.derived-tags {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-glass);
-}
+/* The device form's line of metric groups, under the schema checklist it follows. */
+.schema-groups { margin-top: 6px; }
 
 /* The device form's schema picker: a fieldset of checkboxes, scrolling once the registry is long. */
 .schema-picker {

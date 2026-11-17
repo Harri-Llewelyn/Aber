@@ -267,7 +267,7 @@ describe('the Devices page', () => {
     await show()
     const panel = openFiltersPanel()
     expect([...panel.querySelectorAll('.filter-section .group-heading-label')].map(l => l.textContent))
-      .toEqual(['Lifecycle', 'Type', 'Schema', 'Gateway', 'Cell'])
+      .toEqual(['Lifecycle', 'Metric groups', 'Schema', 'Gateway', 'Cell'])
     expect(expanded()).toEqual(['Lifecycle'])
     expect(heading('Lifecycle')).toHaveAccessibleName('Lifecycle, Active')
   })

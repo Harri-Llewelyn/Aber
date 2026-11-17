@@ -727,7 +727,7 @@ describe('The panel is the single home for entity actions', () => {
     expect(p.queryByText('Launch UI')).toBeNull()
   })
 
-  it('leaves no ACTIONS column on the devices table, and lets Type take the width', async () => {
+  it('leaves no ACTIONS column on the devices table, and lets Metric groups take the width', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
@@ -737,9 +737,9 @@ describe('The panel is the single home for entity actions', () => {
     const headers = [...document.querySelectorAll('.page-main th')].map(h => h.textContent)
     expect(headers).not.toContain('Actions')
     expect(headers).not.toContain('Serving Edge Gateway')
-    // Five columns left, and Type is the one told to absorb the freed width.
-    const typeHeader = [...document.querySelectorAll('.page-main th')].find(h => h.textContent === 'Type')
-    expect(typeHeader.style.width).toBe('auto')
+    // Five columns left, and Metric groups is the one told to absorb the freed width.
+    const groupsHeader = [...document.querySelectorAll('.page-main th')].find(h => h.textContent === 'Metric groups')
+    expect(groupsHeader.style.width).toBe('auto')
   })
 
   it('marks a destructive action apart from the reads above it', async () => {
@@ -1055,7 +1055,7 @@ describe('Context panel layout invariants', () => {
     expect(fields).toHaveLength(1)
     expect([...fields[0].querySelectorAll('dt')].map(dt => dt.textContent)).toEqual([
       'Device UUID', 'Sparkplug Device ID', 'Sparkplug Topic Path',
-      'Serving Gateway', 'Location', 'Unified Namespace Topic', 'Schema', 'Classification', 'Description'
+      'Serving Gateway', 'Location', 'Unified Namespace Topic', 'Schema', 'Metric groups', 'Description'
     ])
 
     // Nothing between the fields and the actions, and nothing of the model in the drawer.

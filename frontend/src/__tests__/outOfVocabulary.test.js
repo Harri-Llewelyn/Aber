@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  outOfVocabularyMetrics, hasOutOfVocabularyValues, deviceTagList, availableTags,
+  outOfVocabularyMetrics, hasOutOfVocabularyValues, deviceTagList, deviceFindings, availableTags,
   OUT_OF_VOCABULARY_TAG, UNMODELLED_TAG
 } from '../utils/deviceTags'
 import { deviceIds } from '../utils/sparkplugId'
@@ -83,42 +83,40 @@ describe('outOfVocabularyMetrics', () => {
   })
 })
 
-describe('the tag it produces', () => {
+describe('the finding it produces', () => {
   const schema = {
     schema_uuid: 's1',
     schema_definition: { properties: { 'Controller/EXECUTION': { type: 'string' } } }
   }
   const device = { asset_id: 'd1', submodel_schema_ids: ['s1'], last_birth_metrics: ['Controller/EXECUTION'] }
+  const tagsOf = (latest) => deviceFindings(device, schema, latest, CATALOG).map(f => f.tag)
 
-  it('is appended after the classification tags', () => {
-    const tags = deviceTagList(device, schema, { 'Controller/EXECUTION': 'RUNNING' }, CATALOG)
-    expect(tags[tags.length - 1]).toBe(OUT_OF_VOCABULARY_TAG)
-    expect(tags).toContain('Controller')
+  it('is a finding with the metric, its value and the permitted values, not a metric group', () => {
+    const [finding] = deviceFindings(device, schema, { 'Controller/EXECUTION': 'RUNNING' }, CATALOG)
+    expect(finding.tag).toBe(OUT_OF_VOCABULARY_TAG)
+    expect(finding.metrics).toEqual([{
+      name: 'Controller/EXECUTION', value: 'RUNNING', permitted: CATALOG[0].permitted_values
+    }])
+    // The groups carry no finding.
+    expect(deviceTagList(device, schema)).toEqual(['Controller'])
   })
 
   it('is absent when the device reports legal values', () => {
-    expect(deviceTagList(device, schema, { 'Controller/EXECUTION': 'ACTIVE' }, CATALOG))
-      .not.toContain(OUT_OF_VOCABULARY_TAG)
+    expect(tagsOf({ 'Controller/EXECUTION': 'ACTIVE' })).not.toContain(OUT_OF_VOCABULARY_TAG)
   })
 
   it('is absent when the caller loaded no telemetry, rather than assumed clean', () => {
-    expect(deviceTagList(device, schema)).not.toContain(OUT_OF_VOCABULARY_TAG)
+    expect(deviceFindings(device, schema).map(f => f.tag)).not.toContain(OUT_OF_VOCABULARY_TAG)
   })
 
   it('coexists with Unmodelled rather than replacing it', () => {
     const drifted = { ...device, last_birth_metrics: ['Controller/EXECUTION', 'Something/ELSE'] }
-    const tags = deviceTagList(drifted, schema, { 'Controller/EXECUTION': 'RUNNING' }, CATALOG)
-    expect(tags).toContain(UNMODELLED_TAG)
-    expect(tags).toContain(OUT_OF_VOCABULARY_TAG)
+    const tags = deviceFindings(drifted, schema, { 'Controller/EXECUTION': 'RUNNING' }, CATALOG).map(f => f.tag)
+    expect(tags).toEqual([UNMODELLED_TAG, OUT_OF_VOCABULARY_TAG])
   })
 
-  it('is offered as a filter only when some device actually has it', () => {
-    const clean = () => ({ 'Controller/EXECUTION': 'ACTIVE' })
-    const dirty = () => ({ 'Controller/EXECUTION': 'RUNNING' })
-    expect(availableTags([device], [schema], clean, CATALOG)).not.toContain(OUT_OF_VOCABULARY_TAG)
-    expect(availableTags([device], [schema], dirty, CATALOG)).toContain(OUT_OF_VOCABULARY_TAG)
-    // No resolver at all: the option is not offered rather than being offered and matching nothing.
-    expect(availableTags([device], [schema])).not.toContain(OUT_OF_VOCABULARY_TAG)
+  it('is never a Metric groups choice, whoever has it', () => {
+    expect(availableTags([device], [schema])).toEqual(['Controller'])
   })
 })
 
@@ -134,8 +132,7 @@ describe('the readings a device is judged by', () => {
   }
 
   it('are found by the issued id, so a device publishing its own id has the finding', () => {
-    expect(deviceTagList(device, null, latestFor(device), CATALOG)).toContain(OUT_OF_VOCABULARY_TAG)
-    expect(availableTags([device], [], latestFor, CATALOG)).toContain(OUT_OF_VOCABULARY_TAG)
+    expect(deviceFindings(device, null, latestFor(device), CATALOG).map(f => f.tag)).toEqual([OUT_OF_VOCABULARY_TAG])
   })
 
   it('are not stored under the published id', () => {

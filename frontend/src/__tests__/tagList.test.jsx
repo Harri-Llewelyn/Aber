@@ -42,8 +42,8 @@ describe('TagList', () => {
   })
 
   it('never collapses a priority tag, however late it appears in the list', () => {
-    // deviceTagList() appends Unmodelled LAST, so a plain truncation would hide precisely the tag
-    // that calls for action and keep the six that are merely descriptive.
+    // A pinned entry is the one that calls for action, however late it is built: a plain truncation
+    // would hide it and keep the six that are merely descriptive.
     render(<TagList tags={[...SIX, tag('Unmodelled', { priority: true })]} limit={2} />)
 
     // Seven tags, two shown (Unmodelled pinned first, then Axes), so five remain hidden.
