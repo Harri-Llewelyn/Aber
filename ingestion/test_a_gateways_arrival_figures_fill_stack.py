@@ -147,7 +147,10 @@ class TheFiguresFill(unittest.TestCase):
         cls.owner = owner_connection()
         cls.owner.autocommit = True
 
-        cls.live = cls.online_gateways()
+        # ARRIVAL_FIGURES_OWN_GATEWAY=1 publishes as the fixture even while a gateway is online, so the
+        # path CI takes can be run on a dev stack whose own gateways are publishing.
+        forced = os.getenv("ARRIVAL_FIGURES_OWN_GATEWAY", "").lower() in ("1", "true", "yes")
+        cls.live = [] if forced else cls.online_gateways()
         cls.own = not cls.live
         if cls.own:
             cls.live = [cls._publish_as_a_fixture_gateway()]
