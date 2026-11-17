@@ -203,7 +203,7 @@ Upstream: [`github.com/admin-shell-io/aas-specs`](https://github.com/admin-shell
 Only the tests read them: the AAS export suite validates the JSON export against the JSON schema, and
 the XML writer's test reads the XSD. They are in no runtime image. `test-harness/Dockerfile` copies
 the folder into the `aber/test-runner` image, which runs the conformance suites and is not part of
-the deployed stack.
+the deployed stack. The folder's README is copied with them, and gives the licence's address.
 
 ## TimescaleDB — Timescale License
 
