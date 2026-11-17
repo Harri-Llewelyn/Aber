@@ -11,7 +11,9 @@ The six exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-l
 [the ASHRAE 223P ontology](#the-ashrae-223p-ontology--apache-license-20),
 [the MTConnect schema](#mtconnect-the-devices-schema-and-the-definitions-read-from-it) and
 [the VDA 5050 state schema](#vda-5050-the-state-schema-and-the-fields-read-from-it), which keep their own
-licences. The licence texts in [`licenses/`](licenses/) are copied verbatim from the projects they
+licences. [The OPC UA NodeSets](#opc-ua-the-companion-specification-nodesets-and-the-descriptions-derived-from-them)
+are not a seventh: nothing of them is kept here, only text derived from them, and this licence covers
+that text. The licence texts in [`licenses/`](licenses/) are copied verbatim from the projects they
 belong to. The two written offers of source there (`SOURCE`) are Aber's own.
 
 It does **not** cover the third-party software Aber runs, which is under its own licences. What
@@ -507,6 +509,45 @@ a binary form, so here it is as the file gives it:
 AMT's SysML model (`mtconnect/mtconnect_sysml_model`) is not read. It has no licence file, and its
 own terms allow copying only in the form received, without modifications. Taking its documentation
 into a seed would be a modification, so the definitions come from the schema repository instead.
+
+### OPC UA: the companion specification NodeSets and the descriptions derived from them
+
+The OPC UA vocabulary is read from the NodeSet2 XML files the OPC Foundation publishes in
+[`OPCFoundation/UA-Nodeset`](https://github.com/OPCFoundation/UA-Nodeset). Every file there carries
+the OPC Foundation MIT License 1.00 in its own header. `scripts/generate-opcua-vocabulary.mjs` reads
+the companion specifications it pins, and the seed rows it writes hold what it reads: each data
+point's browse name, datatype and NodeId. A row's description is curated in the generator, shortened
+from the NodeSet's own text where the NodeSet has one.
+
+Nothing of the NodeSets is kept in this repository, only text derived from them. So they are not one
+of the exceptions in the scope above: the MIT licence of this repository covers the rows as they
+stand. The OPC Foundation's licence asks for its notice in all copies of the Software and of
+substantial portions of it, so the notice is kept here, as one NodeSet's header gives it. The year
+and the holder named in the copyright line differ from file to file, and newer files name OPC
+Federation AISBL and carry an SPDX identifier for the same licence.
+
+> Copyright (c) 2005-2024 The OPC Foundation, Inc. All rights reserved.
+>
+> OPC Foundation MIT License 1.00
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+> associated documentation files (the "Software"), to deal in the Software without restriction,
+> including without limitation the rights to use, copy, modify, merge, publish, distribute,
+> sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+> NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+> NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+> DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+> OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+>
+> The complete license agreement can be found here: http://opcfoundation.org/License/MIT/1.00/
+
+Adopting the vocabulary is not a claim of OPC UA compliance, which is a certification of a server's
+behaviour.
 
 ### VDA 5050: the state schema and the fields read from it
 

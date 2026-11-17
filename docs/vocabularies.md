@@ -260,7 +260,7 @@ in a derived work, and every licence was read rather than assumed:
 
 | Source | Licence | Asserted by |
 |---|---|---|
-| OPC 40001-1, 40010-1, 40501-1, 40540, 40001-4, 30050 NodeSets | OPC Foundation MIT License 1.00 | file header |
+| The OPC UA companion specification NodeSets the generator reads | OPC Foundation MIT License 1.00, which every NodeSet in `OPCFoundation/UA-Nodeset` carries | file header |
 | IDTA 02006-3-0-1 Digital Nameplate | free IDTA publication | IDTA content hub |
 | ASHRAE 223P ontology | Apache-2.0 | `dcterms:license` in the ontology |
 | VDA 5050 `state.schema` | MIT, copyright 2024 Verband der Automobilindustrie | the repository's `LICENSE.txt` at the tag |

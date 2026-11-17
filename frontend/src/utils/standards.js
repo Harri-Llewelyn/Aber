@@ -33,7 +33,7 @@ export const STANDARD_OPTIONS = [
   {
     value: STANDARDS.OPCUA,
     label: 'OPC UA',
-    hint: 'Companion specification data points — OPC 40001 Machinery and OPC 40010 Robotics.'
+    hint: 'OPC UA companion specification data points, such as Machinery and Robotics.'
   },
   {
     value: STANDARDS.ASHRAE223,
