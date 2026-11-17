@@ -468,8 +468,9 @@ export const isAutomationAlert = (alert) => String(alert?.fingerprint ?? '').sta
  * `label:sparkplug_id=` filter (a label on evaluated series) would match nothing. An alert an
  * automation raised has no rule there, and answers null.
  *
- * Only the Built-in drawer's View in Grafana calls this. Every other surface that shows a platform
- * alert opens that drawer instead (builtInAlertUrl in routes.js), and a test holds it to that.
+ * Only the Built-in tab calls this: its drawer's View in Grafana, and the notice for a uid no built-in
+ * rule has. Every other surface that shows a platform alert opens that drawer instead (builtInAlertUrl
+ * in routes.js), and a test holds it to that.
  */
 export const grafanaAlertUrl = (alert) => {
   if (isAutomationAlert(alert)) return null

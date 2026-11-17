@@ -39,6 +39,12 @@ export const QUERY_SOURCE_WORDS = {
 export const evaluatedByGrafana = (rule) => rule?.evaluator === 'grafana'
 
 /**
+ * Whether Grafana evaluates the built-in alerts, which is what the notice for a uid no built-in rule has
+ * needs to offer View in Grafana: a site's own rules live there while it does.
+ */
+export const grafanaEvaluatesBuiltIns = BUILT_IN_RULES.some(evaluatedByGrafana)
+
+/**
  * The `alertname` label Grafana puts on an instance of a rule it could not evaluate (a datasource
  * that is down, a query that fails). grafana-alert-webhook records one as an alert named "<rule>
  * could not be evaluated" and keeps the labels as sent, so this is how the row is told from the

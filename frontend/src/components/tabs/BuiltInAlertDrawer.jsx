@@ -88,8 +88,8 @@ function Occurrences({ uid, version, firingIds }) {
 /**
  * One built-in rule's drawer, beside the Built-in tab's table: the rule as its file writes it, then
  * its recent occurrences, a link to its help entry, and View in Grafana while Grafana evaluates it.
- * That action is the one place in the dashboard that builds a Grafana address for a platform alert;
- * every other surface opens this drawer instead.
+ * That action and the Built-in tab's notice for an unlisted uid are the only places in the dashboard that
+ * build a Grafana address for a platform alert; every other surface opens this drawer instead.
  *
  * @param {object} rule One entry of BUILT_IN_RULES, or null when the drawer is closed.
  *

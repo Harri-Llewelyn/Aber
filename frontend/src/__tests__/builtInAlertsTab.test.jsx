@@ -220,6 +220,28 @@ describe('the Built-in tab', () => {
     expect(screen.getByText(/no built-in alert with the uid/)).toHaveTextContent('aber-site-written-rule')
     expect(screen.queryByRole('complementary', { name: /alert rule/ })).toBeNull()
   })
+
+  it("offers View in Grafana for that uid, where a site's own rules live, as a real anchor in a new tab", async () => {
+    await show({ url: '/automations/built-in?rule=site-lathe-hot' })
+    const notice = screen.getByText(/no built-in alert with the uid/)
+    expect(notice).toHaveTextContent("where a site's own rules live")
+    const link = within(notice).getByRole('link', { name: /View in Grafana/ })
+    expect(link).toHaveAttribute('href', `${GRAFANA_URL}/alerting/grafana/site-lathe-hot/view`)
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('escapes the uid in that link, so a uid from the address cannot leave the rule view', async () => {
+    await show({ url: `/automations/built-in?rule=${encodeURIComponent('../../admin')}` })
+    const link = within(screen.getByText(/no built-in alert with the uid/)).getByRole('link', { name: /View in Grafana/ })
+    expect(new URL(link.getAttribute('href')).pathname).toBe('/alerting/grafana/..%2F..%2Fadmin/view')
+  })
+
+  it('offers no such link for a rule the tab lists, which has its drawer', async () => {
+    await show({ url: `/automations/built-in?rule=${STALE}` })
+    await screen.findByRole('complementary', { name: 'Gateway Stale alert rule' })
+    expect(screen.queryByText(/no built-in alert with the uid/)).toBeNull()
+  })
 })
 
 describe('a rule\'s drawer', () => {

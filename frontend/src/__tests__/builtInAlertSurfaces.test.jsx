@@ -16,7 +16,8 @@ import { AUTOMATIONS_TABS, tabHref } from '../navigation'
  * one: the toast, the alert counter, the drawer's alert banner, the message about it and the desktop
  * notification. A row with no rule uid, from before #1004, opens the tab searched by the alert's
  * name. An automation's alert keeps its own page. Grafana is one click further, from the rule's
- * drawer, and nothing else builds an address there for a platform alert.
+ * drawer or the tab's notice for an unlisted uid, and nothing else builds an address there for a
+ * platform alert.
  */
 
 const platform = {
@@ -91,8 +92,8 @@ describe('where a platform alert leads', () => {
 
 /**
  * A source scan, because the failure is somebody adding a link to Grafana for an alert: the one place
- * that builds such an address is the rule's drawer (its View in Grafana), and constants.js, which
- * defines the function. The words "Open in Grafana" are left to Toast.jsx, which words any message
+ * that builds such an address is the Built-in tab: the rule's drawer (its View in Grafana) and the
+ * notice for a uid no built-in rule has, besides constants.js, which defines the function. The words "Open in Grafana" are left to Toast.jsx, which words any message
  * whose destination is outside the app; no alert produces one now.
  */
 describe('nothing else builds a Grafana address for a platform alert', () => {
@@ -104,15 +105,16 @@ describe('nothing else builds a Grafana address for a platform alert', () => {
   })
   const files = sources(SRC).map(p => [path.relative(SRC, p).split(path.sep).join('/'), fs.readFileSync(p, 'utf8')])
   const DRAWER = 'components/tabs/BuiltInAlertDrawer.jsx'
+  const TAB = 'components/tabs/BuiltInAlerts.jsx'
 
   it('finds the sources, so this cannot check nothing', () => {
     expect(files.length).toBeGreaterThan(200)
     expect(files.some(([f]) => f === DRAWER)).toBe(true)
   })
 
-  it('calls grafanaAlertUrl only from the drawer, which defines nothing', () => {
+  it('calls grafanaAlertUrl only from the Built-in tab: its drawer, and its notice for an unlisted uid', () => {
     const callers = files.filter(([f, text]) => f !== 'constants.js' && text.includes('grafanaAlertUrl')).map(([f]) => f)
-    expect(callers).toEqual([DRAWER])
+    expect(callers.sort()).toEqual([DRAWER, TAB].sort())
   })
 
   it("writes Grafana's alerting paths only in constants.js", () => {
@@ -127,9 +129,12 @@ describe('nothing else builds a Grafana address for a platform alert', () => {
     expect(wording).toEqual(['components/common/Toast.jsx'])
   })
 
-  it('has the drawer say View in Grafana, the one action that opens Grafana for an alert', () => {
+  it('has the drawer say View in Grafana, and the notice offer it only while Grafana evaluates the built-ins', () => {
     const drawer = files.find(([f]) => f === DRAWER)[1]
     expect(drawer).toMatch(/label: 'View in Grafana'/)
     expect(drawer).toMatch(/evaluatedByGrafana\(rule\)/)
+    const tab = files.find(([f]) => f === TAB)[1]
+    expect(tab).toMatch(/grafanaEvaluatesBuiltIns &&/)
+    expect(tab).toMatch(/View in Grafana/)
   })
 })

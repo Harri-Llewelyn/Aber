@@ -2417,14 +2417,16 @@ changes anything. Its help is `help/pages/built-in-alerts.md`, one section for e
   evaluates it. Under them are the rule's newest occurrences (`api.readBuiltInOccurrences()`, five), and the
   actions **View Help**, which opens `pages/built-in-alerts` at the heading that is the rule's title, and
   **View in Grafana**, offered while `evaluator` is `grafana`. A uid this release does not ship, such as a
-  rule a site wrote itself, opens the tab with a notice and no drawer.
+  rule a site wrote itself or one a release has retired, opens the tab with a notice and no drawer, and the
+  notice offers **View in Grafana** for that uid, where a site's own rules live.
 - **Every surface that shows a platform alert opens its drawer**, by `builtInAlertUrl()` in `routes.js`:
   the toast (`alertToastUrl()`), the counter's platform-wide rows, the drawer banner's **View rule**, the
   message about an alert (`alertSubjectUrl()`) and the desktop notification (`alertOpener()`). A row written
   before `rule_uid` (0220) opens the tab searched by the alert's name. An automation's alert answers null, and
-  keeps its own page. **View in Grafana** is the one place that builds a Grafana address for a platform alert
-  (`grafanaAlertUrl()`); `builtInAlertSurfaces.test.jsx` reads the source for any other, and check 464 holds the
-  five surfaces.
+  keeps its own page. **View in Grafana**, in the drawer and in the notice for an unlisted uid, is the only
+  place that builds a Grafana address for a platform alert (`grafanaAlertUrl()`, offered while
+  `grafanaEvaluatesBuiltIns`); `builtInAlertSurfaces.test.jsx` reads the source for any other, and check 464
+  holds the five surfaces.
 - **`built-in` is a path segment, as an automation's id is**, so an automation with that id opens with
   `?open=1`, as one named `new` does (`automationUrl()`). The tab's `help` in `navigation.jsx` names its own
   help page, which drift check 16 allows.

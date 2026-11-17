@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { api } from '../../api'
-import { REALTIME_ENABLED, refreshInterval } from '../../constants'
+import { REALTIME_ENABLED, grafanaAlertUrl, refreshInterval } from '../../constants'
 import { useUrlState } from '../../hooks/useUrlState'
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
@@ -10,7 +10,7 @@ import { BuiltInStateBadge } from '../common/BuiltInStateBadge'
 import { ClearFilters } from '../common/ClearFilters'
 import { rowSelectHandler } from '../common/ContextPanel'
 import { EmptyState } from '../common/EmptyState'
-import { IconAlertTriangle, IconZap } from '../common/Icons'
+import { IconAlertTriangle, IconExternalLink, IconZap } from '../common/Icons'
 import { OverflowText } from '../common/OverflowText'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
@@ -19,7 +19,8 @@ import { BuiltInAlertDrawer } from './BuiltInAlertDrawer'
 import { severityOf } from '../../utils/alertHistory'
 import { holdSeconds } from '../../utils/automations'
 import {
-  BUILT_IN_RULES, EVALUATOR_WORDS, SEVERITY_RANK, SUBJECT_WORDS, builtInRule, builtInSearchText, builtInStates, holdWords,
+  BUILT_IN_RULES, EVALUATOR_WORDS, SEVERITY_RANK, SUBJECT_WORDS, builtInRule, builtInSearchText, builtInStates, grafanaEvaluatesBuiltIns,
+  holdWords,
 } from '../../utils/builtInAlerts'
 
 /** The sortable columns; with none chosen, the rules are in the file's order, group by group. */
@@ -125,6 +126,16 @@ export function BuiltInAlerts({ head, showToast }) {
               <div>
                 This release has no built-in alert with the uid <span className="mono">{ruleUid}</span>. A rule
                 written on this site, or one a release has retired, is not listed here.
+                {grafanaEvaluatesBuiltIns && (
+                  <>
+                    {' '}
+                    {/* A real anchor, as the drawer's action is: where a site's own rules live. */}
+                    <a href={grafanaAlertUrl({ rule_uid: ruleUid })} target="_blank" rel="noopener noreferrer">
+                      View in Grafana <IconExternalLink size={11} aria-hidden="true" />
+                    </a>
+                    , where a site's own rules live.
+                  </>
+                )}
               </div>
             </div>
           )}

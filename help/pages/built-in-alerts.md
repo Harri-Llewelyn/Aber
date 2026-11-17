@@ -29,7 +29,7 @@ Select a row to open its drawer. The table then keeps only **Alert**, **Severity
 
 An alert about the platform opens its rule here, from the counter in the top bar or from a message. An alert about a gateway or a device opens that gateway or device. Its drawer has **View rule**, which opens the rule here.
 
-Some alerts are raised for a site's own rules, which this release does not ship. Their link opens this tab with a note saying so.
+Some alerts are raised for a site's own rules, which this release does not ship. Their link opens this tab with a note saying so. The note has **View in Grafana**, where a site's own rules live.
 
 ## Platform Conditions
 

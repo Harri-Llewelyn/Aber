@@ -2481,8 +2481,8 @@ produces, and the fingerprint is half of the occurrence key.
 The dashboard opens a platform alert's rule on Automations › Built-in by its uid
 (`builtInAlertUrl()`, `frontend/src/routes.js`), and a row with none opens the tab searched by the
 rule's name. Grafana is one click further: the rule's drawer has View in Grafana, which opens
-`/alerting/grafana/<uid>/view` (`grafanaAlertUrl()`, `frontend/src/constants.js`), the one place that
-builds a Grafana address for an alert. An alert an automation raised has a `condition:` fingerprint
+`/alerting/grafana/<uid>/view` (`grafanaAlertUrl()`, `frontend/src/constants.js`), and so does the tab's
+notice for a uid no built-in rule has. Those are the only places that build a Grafana address for an alert. An alert an automation raised has a `condition:` fingerprint
 and no rule: `builtInAlertUrl()` answers null for it, and no surface links to Grafana (0271).
 
 **The shape lives in `0001`.** `0001` states `platform_alerts_active` with a column list and replays
