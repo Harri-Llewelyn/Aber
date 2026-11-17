@@ -8,6 +8,7 @@
  */
 import { sparkplugToXsd } from "./sparkplugToXsd.ts";
 import { modelContentType, modelFileName } from "./model3dContentType.ts";
+import { assignSubmodelKeys } from "./submodelKeys.ts";
 
 // Configuration, read at module load and so per worker: main/index.ts spawns one worker per
 // function with only the variables its registry entry names, so both aas-export and aas-api must
@@ -555,6 +556,15 @@ export async function loadDeviceRecord(
 
 // Construction
 
+export interface SchemaSubmodels {
+  schemaId: string;
+  rootId: string;
+  /** False for a draft attached beside the version in force, whose key carries its version. */
+  kept: boolean;
+  /** `OperationalTelemetry` and `KeyPerformanceIndicators`, whichever the schema made. */
+  ids: Record<string, string>;
+}
+
 export interface BuiltShell {
   /** The AAS Part 5 Environment: what an AASX package holds and what AAS tools accept as JSON. */
   environment: Record<string, unknown>;
@@ -563,6 +573,11 @@ export interface BuiltShell {
   /** The single shell, already inside `environment`, for the same reason. */
   shell: Record<string, unknown>;
   stats: Record<string, unknown>;
+  /**
+   * Each attached schema, the lineage it belongs to and the Submodel ids it made by role. aas-api
+   * answers a previous version's id from the entry with `kept` of the same lineage.
+   */
+  schemaSubmodels: SchemaSubmodels[];
   /** `devices.model_3d_path`, or null. aas-export needs it to decide whether to bundle. */
   modelPath: string | null;
   modelUrl: string | null;
@@ -721,6 +736,21 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
   let telemetryTotal = 0;
   let kpiTotal = 0;
 
+  // The key in each Submodel's id comes from the schema's lineage, so a publish leaves it where it
+  // was. `lineage_name` and `lineage_root_id` are on every row since 0298; a row without them (a
+  // fixture) is its own lineage.
+  const { keys: submodelKeys, clashes: keyClashes, current } = assignSubmodelKeys(
+    schemas.map((schema) => ({
+      id: String(schema.id),
+      rootId: String(schema.lineage_root_id ?? schema.id),
+      rootKey: toIdShort(String(schema.lineage_name || schema.schema_name || ""), "Submodel"),
+      version: Number(schema.version) || 1,
+      status: String(schema.status ?? "active"),
+      declaredKey: keyBySchema.get(String(schema.id)) ?? null,
+    })),
+  );
+  const schemaSubmodels: SchemaSubmodels[] = [];
+
   for (const schema of schemas) {
     const modelled = modelledMetrics(
       (schema.schema_definition as Record<string, unknown> | null) ?? null,
@@ -737,33 +767,43 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     telemetryTotal += telemetryProps.length;
     kpiTotal += kpiProps.length;
 
-    // The operator's chosen idShort where device_submodels carries one, otherwise derived from
-    // the schema name. Derived rather than stored by default, so it cannot drift from the name.
-    const declaredKey = keyBySchema.get(String(schema.id));
-    const baseKey = declaredKey || toIdShort(String(schema.schema_name || ""), "Submodel");
+    const baseKey = submodelKeys.get(String(schema.id)) as string;
     const single = schemas.length === 1;
+    // The schema version that produced the Submodel: a consumer that cached one sees it move.
+    const administration = { version: String(Number(schema.version) || 1) };
+    const made: SchemaSubmodels = {
+      schemaId: String(schema.id),
+      rootId: String(schema.lineage_root_id ?? schema.id),
+      kept: current.has(String(schema.id)),
+      ids: {},
+    };
+    schemaSubmodels.push(made);
 
     if (telemetryProps.length > 0) {
       const elements = [collection("Metrics", telemetryProps)];
       if (linkedSegment) elements.push(collection("Segments", [linkedSegment]));
+      made.ids.OperationalTelemetry = submodelId(`${baseKey}/OperationalTelemetry`);
       submodels.push({
         modelType: "Submodel",
-        id: submodelId(`${baseKey}/OperationalTelemetry`),
+        id: made.ids.OperationalTelemetry,
         // Keeps the well-known idShort while only one schema is attached, so a consumer looking
         // for OperationalTelemetry still finds it; qualifies it once there is more than one.
         idShort: single ? "OperationalTelemetry" : `${baseKey}_OperationalTelemetry`,
         kind: "Instance",
+        administration,
         semanticId: semanticReference((schema.semantic_id as string | null) ?? null),
         submodelElements: elements.filter(Boolean),
       });
     }
 
     if (kpiProps.length > 0) {
+      made.ids.KeyPerformanceIndicators = submodelId(`${baseKey}/KeyPerformanceIndicators`);
       submodels.push({
         modelType: "Submodel",
-        id: submodelId(`${baseKey}/KeyPerformanceIndicators`),
+        id: made.ids.KeyPerformanceIndicators,
         idShort: single ? "KeyPerformanceIndicators" : `${baseKey}_KeyPerformanceIndicators`,
         kind: "Instance",
+        administration,
         submodelElements: kpiProps,
       });
     }
@@ -862,6 +902,9 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     kpi_metrics: kpiTotal,
     derived_metrics: derivedRows.length,
     unmapped_semantic_ids: unmappedCount,
+    // Keys that were taken, by another lineage with the same name or by a declared key, and were
+    // qualified with a short form of their lineage's id to stay apart.
+    submodel_key_clashes: keyClashes,
     concept_descriptions: conceptDescriptions.length,
     has_3d_model: Boolean(modelPath),
     // A warning here and not a refusal: in the JSON export the URL is visible to the caller, and a
@@ -872,5 +915,5 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
       : {}),
   };
 
-  return { environment, submodels, shell, stats, modelPath, modelUrl };
+  return { environment, submodels, shell, stats, schemaSubmodels, modelPath, modelUrl };
 }
