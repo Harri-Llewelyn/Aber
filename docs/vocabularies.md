@@ -90,6 +90,17 @@ before proposing a change:
   key chain into a model that one text column cannot hold and the exporter cannot emit. The form
   infers IRDI for any ISO/IEC 11179-6 shape, the IEC CDD `0112/2///61987#ABA565#009` and an ECLASS
   pair joined by `/` included, and ExpandedNodeId for `nsu=<namespace URI>;i=<id>`.
+- **A metric can carry further semantic ids.** A concept often has several published ids, and
+  `metric_catalog.semantic_id` holds the one the metric was named from. The others are rows of
+  `metric_semantic_ids` (`0299`), each with its own type from the same three and an optional
+  source, at most ten a metric and none equal to its own id. The exporter writes them as the
+  Property's `supplementalSemanticIds`, beside the `semanticId`, through the same
+  `semanticReference()`, and a ConceptDescription for each. So a site whose submodel template names
+  a quantity by an ECLASS IRDI adds that IRDI to a metric named from an OPC UA ExpandedNodeId, and
+  keeps both. The metric's own id stays primary: the REST API, i3X and a schema's metric list read
+  it, and the `metric_semantic_id_crosswalk` view answers which metric carries a concept, across
+  both. Making a template's element id the primary one inside a schema built from that template is
+  Build Schema from Template's rule, not this table's.
   **Each id also gets a `ConceptDescription`** in the
   Environment (`buildConceptDescriptions()`, #460), because most resolve nowhere (`aber.local`, an
   operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,
@@ -304,7 +315,8 @@ its tests.
 
 Values resolve **device-first**, joined on `semantic_id` rather than metric name: where a device
 publishes OPC 40001 Machinery `Manufacturer` / `SerialNumber` / `YearOfConstruction`, that is what
-the shell reports, and the table fills the gaps.
+the shell reports, and the table fills the gaps. A metric carrying the Machinery id as a further
+semantic id answers too, after any metric that carries it as its own.
 
 **The editor is a modal opened from a device's drawer**, **Digital Nameplate…**, between
 **Configuration Parameters** and **Export…** (one dialog for AAS JSON, an AASX package and a
