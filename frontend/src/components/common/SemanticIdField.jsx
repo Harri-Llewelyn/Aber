@@ -16,7 +16,9 @@ const HELP = {
     + 'is worse than none.',
   metric: 'The published id of the concept this metric measures, which the AAS export carries so a '
     + "consumer can match it with other systems' data. Clearing it leaves the metric unmapped, "
-    + 'which is legitimate.'
+    + 'which is legitimate.',
+  further: 'Another published id of the concept the metric measures, such as the one a submodel '
+    + "template names it by. The AAS export carries it beside the metric's own id."
 }
 
 const TYPE_HELP = 'How to read the id: IRI for a URL or URN, IRDI for an ECLASS or IEC CDD code, '
@@ -25,7 +27,8 @@ const TYPE_HELP = 'How to read the id: IRI for a URL or URN, IRDI for an ECLASS 
 
 const PLACEHOLDER = {
   schema: 'e.g. https://admin-shell.io/idta/nameplate/3/0/Nameplate',
-  metric: 'e.g. nsu=http://opcfoundation.org/UA/Machinery/;i=6002'
+  metric: 'e.g. nsu=http://opcfoundation.org/UA/Machinery/;i=6002',
+  further: 'e.g. 0112/2///61987#ABA951#009'
 }
 
 const LABEL_ROW = { display: 'flex', alignItems: 'center', marginBottom: '7px' }
@@ -44,7 +47,9 @@ const LABEL = { marginBottom: 0 }
  * `candidates` (utils/semanticIdSources.js) add a search beside the field; choosing one sends its id
  * and reference type through `onChange`, and typing stays open for ids no source holds. The search
  * is over the list given, not the server. `ownStandard` is the subject's provenance: a metric carries
- * one id, so an id only another standard holds is named under the field as a replacement.
+ * one id, so an id only another standard holds is named under the field as a replacement. The
+ * `further` subject is the id of a metric's further ids: it is not optional, since it is added
+ * with its own button, and no id replaces another.
  */
 export function SemanticIdField({
   idPrefix, subject = 'schema', semanticId = '', semanticIdType = '', onChange, readOnly = false,
@@ -69,7 +74,7 @@ export function SemanticIdField({
       : { matches: [], total: 0 }),
     [picking, candidates, query, ownStandard]
   )
-  const foreign = readOnly ? null : foreignConcept(candidates, semanticId, ownStandard)
+  const foreign = readOnly || subject === 'further' ? null : foreignConcept(candidates, semanticId, ownStandard)
 
   const toggleRef = useRef(null)
   const closePicker = () => { setPicking(false); setQuery('') }
@@ -100,7 +105,8 @@ export function SemanticIdField({
               ? <span className="form-label" style={LABEL}>Semantic ID</span>
               : (
                 <label className="form-label" style={LABEL} htmlFor={idFor}>
-                  Semantic ID <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span>
+                  {subject === 'further' ? 'Further Semantic ID' : 'Semantic ID'}
+                  {subject !== 'further' && <> <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span></>}
                 </label>
               )}
             <HelpTip text={HELP[subject]} label="What a semantic ID is for" />
@@ -128,7 +134,7 @@ export function SemanticIdField({
           <div style={LABEL_ROW}>
             {readOnly
               ? <span className="form-label" style={LABEL}>Reference Type</span>
-              : <label className="form-label" style={LABEL} htmlFor={typeFor}>Reference Type</label>}
+              : <label className="form-label" style={LABEL} htmlFor={typeFor}>{subject === 'further' ? 'Further Reference Type' : 'Reference Type'}</label>}
             <HelpTip text={TYPE_HELP} label="What the reference type says" />
           </div>
           {readOnly ? (
@@ -196,9 +202,11 @@ export function SemanticIdField({
             aria-label="Search the vocabularies and templates"
           />
           <div className="semantic-id-picker-note">
-            {ownStandard
-              ? `A metric carries one semantic id: another standard's concept replaces the ${ownStandard} one, and the metric stays ${ownStandard} by provenance.`
-              : 'Choosing a concept sets the id and its reference type. You can still type any id.'}
+            {subject === 'further'
+              ? 'Choosing a concept fills in its id and reference type. Press Add to keep it. You can still type any id.'
+              : ownStandard
+                ? `A metric carries one semantic id: another standard's concept replaces the ${ownStandard} one, and the metric stays ${ownStandard} by provenance.`
+                : 'Choosing a concept sets the id and its reference type. You can still type any id.'}
           </div>
           {query.trim() !== '' && total === 0 && (
             <div className="semantic-id-picker-note">

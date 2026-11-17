@@ -187,6 +187,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset', group: 'model' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset', group: 'model' },
+  // A metric's further semantic ids, added or removed (0299); the entity id is the metric's, so they
+  // share its lane.
+  { kind: 'METRIC SEMANTIC ID', table: 'metric_semantic_ids', label: 'Metric semantic IDs', domain: 'asset', group: 'model' },
   // An automation's acts (0256), one lane per automation, in the asset lane: an Administrator or a
   // Shopfloor Manager writes it and every role reads it.
   { kind: 'AUTOMATION',       table: 'automations',        label: 'Automations',        domain: 'asset', group: 'model' },
@@ -283,12 +286,12 @@ export const AUDIT_TRAIL_CLASSES = ['created', 'operational', 'configuration', '
  */
 export const AUDIT_TRAIL_ACTION_KINDS = [
   // The audit trigger, on every table it is attached to.
-  ['INSERT', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'], ['created']],
+  ['INSERT', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'metric_semantic_ids', 'schemas', 'device_nameplate'], ['created']],
   ['INSERT', ['device_submodels', 'system_settings', 'service_principals', 'broker_accounts'], ['configuration']],
-  ['UPDATE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'],
+  ['UPDATE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'metric_semantic_ids', 'schemas', 'device_nameplate'],
     ['operational', 'configuration', 'lifecycle']],
   ['UPDATE', ['device_submodels', 'system_settings'], ['configuration']],
-  ['DELETE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'], ['lifecycle']],
+  ['DELETE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'metric_semantic_ids', 'schemas', 'device_nameplate'], ['lifecycle']],
   ['DELETE', ['device_submodels', 'system_settings', 'broker_accounts'], ['configuration']],
   // The plant and the model.
   ['SCHEMA_REJECTION', ['devices'], ['configuration']],

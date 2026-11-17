@@ -477,6 +477,7 @@ const SECTION_ICONS = {
   APP:                IconGlobe,
   SCHEMA:             IconClipboardList,
   METRIC:             IconTag,
+  'METRIC SEMANTIC ID': IconTag,
   SETTING:            IconSettings,
   RECORDING:          IconRecord,
   CAPTURE:            IconFileText,

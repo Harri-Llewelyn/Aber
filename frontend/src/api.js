@@ -40,7 +40,8 @@ const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Namepla
 /**
  * Which nameplate fields a device can answer for itself, and the OPC 40001 Machinery concept that
  * answers them, by its ExpandedNodeId. Mirrors OPC_MACHINERY and the exporter's resolution order in
- * supabase/functions/_shared/aas/shell.ts (a published value wins over a stored one). Keyed by
+ * supabase/functions/_shared/aas/shell.ts (a published value wins over a stored one, and a metric
+ * carrying the id as its own answers before one carrying it as a further id). Keyed by
  * `device_nameplate` column.
  */
 const NAMEPLATE_PUBLISHED_BY = new Map([
@@ -3310,7 +3311,9 @@ const apiMethods = {
      * Everything the nameplate editor needs, in one round trip: the template's element list, the
      * stored row, and what the device publishes for itself. The AAS exporter prefers a
      * device-published value over a stored one, so the form shows which fields the device already
-     * answers. The join is on `semantic_id`, as the exporter does it.
+     * answers. The join is on `semantic_id`, as the exporter does it: a metric carries the concept as
+     * its own id or as a further one (`metric_semantic_id_crosswalk` answers across both, and its
+     * rows come primary first).
      */
     if (path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)) {
       const deviceId = path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)[1];
@@ -3321,13 +3324,18 @@ const apiMethods = {
             .select('id_short, semantic_id, semantic_id_type, description, is_mandatory, ordinal')
             .eq('template_id', NAMEPLATE_TEMPLATE_ID)
             .order('ordinal', { ascending: true }),
-          supabase.from('metric_catalog').select('name, semantic_id').not('semantic_id', 'is', null)
+          supabase.from('metric_semantic_id_crosswalk')
+            .select('metric_name, semantic_id, held_as')
+            .in('semantic_id', [...NAMEPLATE_PUBLISHED_BY.values()])
         ]);
       if (templateError) throw templateError;
 
       const bySemanticId = new Map();
-      for (const metric of catalog || []) {
-        if (!bySemanticId.has(metric.semantic_id)) bySemanticId.set(metric.semantic_id, metric.name);
+      const byOwnIdFirst = [...(catalog || [])]
+        .sort((a, b) => (a.held_as === 'primary' ? 0 : 1) - (b.held_as === 'primary' ? 0 : 1)
+          || String(a.metric_name).localeCompare(String(b.metric_name)));
+      for (const metric of byOwnIdFirst) {
+        if (!bySemanticId.has(metric.semantic_id)) bySemanticId.set(metric.semantic_id, metric.metric_name);
       }
       const wanted = [...NAMEPLATE_PUBLISHED_BY.values()]
         .map(id => bySemanticId.get(id)).filter(Boolean);
@@ -3659,8 +3667,23 @@ const apiMethods = {
     }
 
     if (path.startsWith('/api/v1/metric-catalog')) {
-      const { data, error } = await supabase.from('metric_catalog').select('*').order('name', { ascending: true });
+      // The further semantic ids (0299) arrive beside the rows. Tolerated: a refused read, or a
+      // database without the table, leaves every metric with none rather than the page with nothing.
+      const [{ data, error }, furtherRows] = await Promise.all([
+        supabase.from('metric_catalog').select('*').order('name', { ascending: true }),
+        supabase.from('metric_semantic_ids')
+          .select('metric_id, semantic_id, semantic_id_type, source')
+          .order('semantic_id', { ascending: true })
+          .then(result => (result.error ? [] : result.data || []), () => [])
+      ]);
       if (error) throw error;
+      const furtherByMetric = new Map();
+      for (const row of furtherRows) {
+        furtherByMetric.set(row.metric_id, [
+          ...(furtherByMetric.get(row.metric_id) || []),
+          { semantic_id: row.semantic_id, semantic_id_type: row.semantic_id_type, source: row.source ?? null }
+        ]);
+      }
       return (data || []).map(m => ({
         metric_uuid: m.id,
         name: m.name,
@@ -3678,6 +3701,9 @@ const apiMethods = {
         // legitimate state for a local extension: no vocabulary names it.
         semantic_id: m.semantic_id ?? null,
         semantic_id_type: m.semantic_id_type ?? null,
+        // The other published ids of the same concept, by id: `{ semantic_id, semantic_id_type,
+        // source }`. The AAS export carries them as the Property's supplementalSemanticIds.
+        further_semantic_ids: furtherByMetric.get(m.id) || [],
         // The values a discrete metric may report, as text; NULL is no closed set. The schema
         // builders copy them into `enum`, and the Devices page's Out of vocabulary tag reads them.
         permitted_values: m.permitted_values ?? null,
@@ -4314,10 +4340,16 @@ const apiMethods = {
     const id = parts[parts.length - 1];
 
     /**
-     * Correct a catalog metric's semantic id pair, its permitted values, or both: each only when the
-     * body names it, so an edit of one never blanks the other. `name` and `datatype` are never sent:
-     * devices publish them, and enforce_metric_catalog_immutability() refuses both regardless. No row
-     * back means RLS refused the UPDATE (Administrator only), so it is not a success.
+     * Correct a catalog metric's semantic id pair, its permitted values, its further semantic ids
+     * (`{ remove: [id], add: [{ semantic_id, semantic_id_type, source }] }`), or any of them: each
+     * only when the body names it, so an edit of one never blanks the others. `name` and `datatype`
+     * are never sent: devices publish them, and enforce_metric_catalog_immutability() refuses both
+     * regardless. No row back means RLS refused the write (Administrator only), so it is not a success.
+     *
+     * The writes go in the order the database's rules ask for: further ids removed, then the row
+     * changed, then further ids added. An id that takes over as the metric's own is no longer one of
+     * its further ids when the row changes, and an added id meets the metric's new own id. There is no
+     * transaction across them, so a refusal after the first says what was already saved.
      */
     if (/^\/api\/v1\/metric-catalog\/[^/]+$/.test(path)) {
       const change = {
@@ -4326,16 +4358,50 @@ const apiMethods = {
           permitted_values: permittedValuesColumn(body.permitted_values)
         })
       };
-      const { data, error } = await supabase
-        .from('metric_catalog').update(change).eq('id', id).select();
-      if (error) throw error;
-      if (!data?.length) {
+      const removed = body?.further_semantic_ids?.remove || [];
+      const added = body?.further_semantic_ids?.add || [];
+      const notChanged = () => new Error(
+        'Metric not changed — it may no longer exist, or you may not have permission to change ' +
+        'the catalog.'
+      );
+      const saved = [];
+      try {
+        if (removed.length > 0) {
+          const { data: gone, error } = await supabase
+            .from('metric_semantic_ids').delete().eq('metric_id', id).in('semantic_id', removed).select();
+          if (error) throw error;
+          if ((gone?.length || 0) < removed.length) throw notChanged();
+          saved.push('the further ids you removed were removed');
+        }
+        let row = { id };
+        if (Object.keys(change).length > 0) {
+          const { data, error } = await supabase
+            .from('metric_catalog').update(change).eq('id', id).select();
+          if (error) throw error;
+          if (!data?.length) throw notChanged();
+          row = data[0];
+          saved.push('the metric’s own change was saved');
+        }
+        if (added.length > 0) {
+          const { data: made, error } = await supabase.from('metric_semantic_ids').insert(
+            added.map(a => ({
+              metric_id: id,
+              semantic_id: String(a.semantic_id ?? '').trim(),
+              semantic_id_type: a.semantic_id_type,
+              source: emptyToNull(String(a.source ?? '').trim())
+            }))
+          ).select();
+          if (error) throw error;
+          if (!made?.length) throw notChanged();
+        }
+        return row;
+      } catch (err) {
+        if (saved.length === 0) throw err;
         throw new Error(
-          'Metric not changed — it may no longer exist, or you may not have permission to change ' +
-          'the catalog.'
+          `${err.message} Part of the save was made: ${saved.join(', and ')}. ` +
+          'Close this and open Edit again to see the metric as it is.'
         );
       }
-      return data[0];
     }
 
     // Editing a draft version: its metric set, description and semantic id. No status guard here
