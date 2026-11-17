@@ -385,7 +385,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml`, then the i3X conformance suite through Traefik over HTTPS (*The install and upgrade rehearsals*, below) |
 | **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d, twice (`es256`, `hs256`): the last release installed as published, its values completed by the checkout's `setup.mjs`, then `helm upgrade` to the checkout |
 | **secret-scan** | gitleaks over the history of the commit under test and the working tree, on every push (*The secret scans*, below) |
-| **static-analysis** | The other eight checks of [`docs/static-analysis.md`](static-analysis.md), in pinned containers; skipped with the end-to-end stack on a documentation-only push |
+| **static-analysis** | The other nine checks of [`docs/static-analysis.md`](static-analysis.md), ShellCheck over the shell scripts (`npm run lint:sh`) among them, in pinned containers; skipped with the end-to-end stack on a documentation-only push |
 
 **k8s-validation and static-analysis sit behind the `changes` gate**: most of the workflow's minutes are
 spent there, and a change that touches only documentation cannot alter what they assert. The gate fails

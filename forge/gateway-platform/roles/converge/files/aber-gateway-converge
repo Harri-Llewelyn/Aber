@@ -148,6 +148,7 @@ install_trust() {
     return 0
   fi
 
+  # shellcheck disable=SC2012 # the names are the root-NN.pem files written above, and the guard above found at least one
   count=$(ls "$tmp"/root-*.pem | wc -l | tr -d ' ')
   for root in "$tmp"/root-*.pem; do
     if ! openssl x509 -noout -in "$root" >/dev/null 2>&1; then

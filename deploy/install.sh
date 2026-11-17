@@ -961,6 +961,7 @@ then run this again."
 # downloading an image or creating its containers (more time is the cure), failing a download, or
 # something its own messages explain. Called only once the wait has failed.
 not_ready_reason() {
+  # shellcheck disable=SC2016 # the single quotes are meant: $k and $v are go-template variables, not the shell's
   nr_selector=$(kc -n aber get "$1" -o go-template='{{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' 2>/dev/null) || nr_selector=
   nr_states=
   nr_events=

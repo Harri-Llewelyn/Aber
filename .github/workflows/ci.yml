@@ -2360,7 +2360,7 @@ jobs:
       - name: Scan The Tested Commit's History And The Working Tree
         run: npm run scan:secrets -- --history=head
 
-  # The other eight checks in docs/static-analysis.md. Gated like k8s-validation: they judge code,
+  # The other nine checks in docs/static-analysis.md. Gated like k8s-validation: they judge code,
   # and a documentation-only push cannot change what they find. Each runs in a pinned container or
   # from a pinned lockfile, so the runner needs Docker (present), Node and Helm.
   static-analysis:
