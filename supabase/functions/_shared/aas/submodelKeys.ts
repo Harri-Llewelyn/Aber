@@ -44,8 +44,8 @@ export function shortRootId(rootId: string): string {
  *   published. With no version in force the highest version keeps it. A draft alone keeps it too.
  * - A key that is still taken, by a declared one or by another lineage with the same name, is
  *   qualified with a short form of its lineage's root id and counted. The order is declared keys
- *   first, then by root id (a stable order that does not move when a version is published or
- *   another schema is attached), so the same device always gets the same keys.
+ *   first, then by root id, which a publish never changes, so the same device gets the same keys
+ *   until a schema with the same key is attached or detached. Set `submodel_key` to pin one.
  */
 export function assignSubmodelKeys(schemas: KeyedSchema[]): SubmodelKeys {
   const byLineage = new Map<string, KeyedSchema[]>();
