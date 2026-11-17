@@ -28,7 +28,8 @@ export default function check() {
 
   // The notice is the comment at the top of the file, and NOTICE.md reproduces it as a quotation.
   const squash = (text) => text.replace(/\s+/g, ' ').trim();
-  const header = bytes.toString('utf8').match(/<!--([\s\S]*?)-->/)?.[1];
+  const xsd = bytes.toString('utf8');
+  const header = xsd.includes('<!--') ? xsd.slice(xsd.indexOf('<!--') + 4, xsd.indexOf('-->')) : null;
   const notice = read('NOTICE.md').split('\n').filter((line) => line.startsWith('>'))
     .map((line) => line.replace(/^> ?/, '')).join('\n');
   if (!header || !header.includes('Redistribution and use in source and binary forms')) {

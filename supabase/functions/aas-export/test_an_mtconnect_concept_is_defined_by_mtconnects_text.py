@@ -15,14 +15,13 @@ AAS_TEST_PASSWORD). The export is of the fixture device test-harness/aas_fixture
 telemetry metrics include Controller/EXECUTION; the fixture is removed afterwards. With no stack the
 tests skip.
 """
+import http.client
 import json
 import os
 import re
 import sys
 import unittest
-import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -59,22 +58,30 @@ def sign_in():
     return data.get("access_token") if status == 200 and isinstance(data, dict) else None
 
 
+def call(method, path, token, payload=None, timeout=30):
+    """One request to the stack as the signed-in person, answered as its decoded JSON."""
+    target = urllib.parse.urlsplit(SUPABASE_URL)
+    connect = http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection
+    connection = connect(target.hostname, target.port, timeout=timeout)
+    try:
+        connection.request(method, path, body=json.dumps(payload) if payload is not None else None,
+                           headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}",
+                                    "Content-Type": "application/json"})
+        response = connection.getresponse()
+        raw = response.read()
+        if response.status >= 400:
+            raise AssertionError(f"{method} {path} answered {response.status}: {raw[:300]!r}")
+        return json.loads(raw or b"[]")
+    finally:
+        connection.close()
+
+
 def get_json(path, token):
-    request = urllib.request.Request(f"{SUPABASE_URL}{path}")
-    request.add_header("apikey", PUBLISHABLE_KEY)
-    request.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read() or b"[]")
+    return call("GET", path, token)
 
 
 def export_environment(token, device_id):
-    body = json.dumps({"device_id": device_id}).encode()
-    request = urllib.request.Request(f"{SUPABASE_URL}/functions/v1/aas-export", data=body, method="POST")
-    request.add_header("apikey", PUBLISHABLE_KEY)
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.loads(response.read())["aas"]
+    return call("POST", "/functions/v1/aas-export", token, {"device_id": device_id}, timeout=60)["aas"]
 
 
 TOKEN = sign_in()
