@@ -5092,6 +5092,14 @@ a.chip { text-decoration: none; }
   margin-top: 4px;
 }
 
+/* A gateway's device list once the devices' last readings are read: a row for each device, its chip
+   at the start and the time of its last reading at the end, the muted words of an empty field when
+   there is none to give. A name too long for the row cuts and the time stays whole. */
+.context-device-list-readings { flex-direction: column; flex-wrap: nowrap; gap: 6px; }
+.context-device-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.context-device-row > .chip { min-width: 0; }
+.context-device-last { font-size: 11px; color: var(--text-muted); white-space: nowrap; flex: none; }
+
 /* The Devices drawer's derived metrics: a name, its tag, and its value with the window it is over. */
 .derived-values { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .derived-values li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }

@@ -1381,6 +1381,33 @@ const apiMethods = {
   },
 
   /**
+   * What Prometheus holds for one gateway's edge node (0303): messages per second over 5 minutes,
+   * and the sequence gaps and messages missed in the last hour, from `gateway_arrivals`. Null for a
+   * gateway with no row. A NULL figure was not observed within the last 3 minutes, and is never the
+   * last value.
+   */
+  gatewayArrivals: async (gatewayId) => {
+    const { data, error } = await supabase
+      .from('gateway_arrivals')
+      .select('messages_per_second,sequence_gaps_last_hour,messages_missed_last_hour,observed_at')
+      .eq('gateway_id', gatewayId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read what arrives from the gateway');
+    return data || null;
+  },
+
+  /**
+   * Each device of a gateway that is not archived, with the time of its newest reading (0303), read
+   * from the historian over the FDW: `[{ device_id, last_reading_at }]`, the time null for a device
+   * with no reading. Throws when the historian cannot be reached, which is not the same as none.
+   */
+  gatewayDevicesLastReading: async (gatewayId) => {
+    const { data, error } = await supabase.rpc('gateway_devices_last_reading', { p_gateway_id: gatewayId });
+    if (error) throw new Error(error.message || 'Could not read when the devices last reported');
+    return data || [];
+  },
+
+  /**
    * History's read (0233): every series of `assetIds` times `metricNames` over [from, to), one row
    * per bucket of `bucketMinutes`, a quiet bucket carried forward and marked `is_carried`.
    * `assetIds` are device UUIDs or Sparkplug ids, as the telemetry routes take them. Throws on a
