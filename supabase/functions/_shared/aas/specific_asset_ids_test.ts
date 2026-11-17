@@ -197,10 +197,14 @@ const AAS_SCHEMA: Schema = JSON.parse(
 
 const resolve = (ref: string): Schema => AAS_SCHEMA.definitions[ref.slice("#/definitions/".length)];
 
-// The one string pattern the schema's identifiers carry: XML 1.0 characters. A pattern that is not
-// this one is reported, not skipped.
+// The one string pattern the schema's identifiers carry: XML 1.0 characters, as the schema writes it.
+// A pattern that is not this one is reported, not skipped. A value is tested against the same set
+// written as one character class over code points, which cannot backtrack as the schema's
+// alternation of surrogate pairs can.
+const XML_CHARS_PATTERN =
+  String.raw`^([\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd]|\ud800[\udc00-\udfff]|[\ud801-\udbfe][\udc00-\udfff]|\udbff[\udc00-\udfff])*$`;
 // deno-lint-ignore no-control-regex
-const XML_CHARS = /^([\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd]|\ud800[\udc00-\udfff]|[\ud801-\udbfe][\udc00-\udfff]|\udbff[\udc00-\udfff])*$/;
+const XML_CHARS = /^[\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\u{10000}-\u{10ffff}]*$/u;
 
 /** What a value breaks in a schema: `$ref`, `allOf`, `properties`, `required`, enum, string and array limits. */
 function violations(node: unknown, schema: Schema, path: string, out: string[] = []): string[] {
@@ -211,7 +215,7 @@ function violations(node: unknown, schema: Schema, path: string, out: string[] =
     if (typeof node !== "string") return [...out, `${path}: not a string`];
     if (node.length < (schema.minLength ?? 0)) out.push(`${path}: shorter than ${schema.minLength}`);
     if (node.length > (schema.maxLength ?? Infinity)) out.push(`${path}: longer than ${schema.maxLength}`);
-    if (schema.pattern && schema.pattern !== XML_CHARS.source) out.push(`${path}: has a pattern this test does not know`);
+    if (schema.pattern && schema.pattern !== XML_CHARS_PATTERN) out.push(`${path}: has a pattern this test does not know`);
     else if (schema.pattern && !XML_CHARS.test(node)) out.push(`${path}: breaks its pattern`);
   }
   if (schema.type === "array") {
