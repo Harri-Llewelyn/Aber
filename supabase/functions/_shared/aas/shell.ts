@@ -115,6 +115,16 @@ export function semanticReference(semanticId?: string | null) {
 }
 
 /**
+ * The `supplementalSemanticIds` of an element: a Reference for each further id of the same concept,
+ * each once and never the element's own, or undefined when there are none, so `JSON.stringify` drops
+ * the key (the list is `minItems: 1`). All three id types export as `semanticReference()` does.
+ */
+export function supplementalReferences(ids?: readonly string[] | null, ownId?: string | null) {
+  const distinct = [...new Set((ids ?? []).filter((id) => id && id !== ownId))];
+  return distinct.length > 0 ? distinct.map((id) => semanticReference(id)) : undefined;
+}
+
+/**
  * AAS idShort: the metamodel's pattern is ^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$. It must start with
  * a letter (prefixing a digit-leading name with `_` is still invalid; "3-Axis Mill" is an ordinary
  * device name) and be at least two characters.
@@ -131,7 +141,11 @@ export function property(
   idShort: string,
   valueType: string,
   value: unknown,
-  opts: { semanticId?: string | null; description?: string | null } = {},
+  opts: {
+    semanticId?: string | null;
+    supplementalSemanticIds?: readonly string[] | null;
+    description?: string | null;
+  } = {},
 ) {
   return {
     modelType: "Property",
@@ -141,6 +155,10 @@ export function property(
     // value, so an unpublished metric omits `value` entirely rather than carrying null.
     value: value === null || value === undefined ? undefined : String(value),
     semanticId: semanticReference(opts.semanticId),
+    // Only beside a semanticId (AASd-118): a further id without one has no concept to be further to.
+    supplementalSemanticIds: opts.semanticId
+      ? supplementalReferences(opts.supplementalSemanticIds, opts.semanticId)
+      : undefined,
     description: opts.description
       ? [{ language: "en", text: String(opts.description).slice(0, 1023) }]
       : undefined,
@@ -295,16 +313,27 @@ export function sparkplugToIec61360(
   return IEC61360_BY_SPARKPLUG[code];
 }
 
-/** Every GlobalReference a semanticId in `node` names, sorted, each once. */
+/**
+ * Every GlobalReference a semanticId or a supplementalSemanticIds list in `node` names, sorted, each
+ * once.
+ */
 export function referencedSemanticIds(node: unknown): string[] {
   const ids = new Set<string>();
+  type Reference = { keys?: { type?: string; value?: string }[] };
   const walk = (value: unknown) => {
     if (Array.isArray(value)) {
       value.forEach(walk);
     } else if (value && typeof value === "object") {
-      const keys = (value as { semanticId?: { keys?: { type?: string; value?: string }[] } })
-        .semanticId?.keys ?? [];
-      for (const key of keys) if (key.type === "GlobalReference" && key.value) ids.add(key.value);
+      const { semanticId, supplementalSemanticIds } = value as {
+        semanticId?: Reference;
+        supplementalSemanticIds?: Reference[];
+      };
+      const further = Array.isArray(supplementalSemanticIds) ? supplementalSemanticIds : [];
+      for (const reference of [semanticId, ...further]) {
+        for (const key of reference?.keys ?? []) {
+          if (key.type === "GlobalReference" && key.value) ids.add(key.value);
+        }
+      }
       Object.values(value).forEach(walk);
     }
   };
@@ -436,14 +465,34 @@ export function buildConceptDescriptions(
 }
 
 /**
+ * The further semantic ids of each metric (`metric_semantic_ids`), by the metric's id: each list
+ * sorted and without repeats, so two exports of one device agree.
+ */
+export function supplementalIdsByMetric(
+  rows: readonly SupplementalSemanticId[] | undefined,
+): Map<string, string[]> {
+  const byMetric = new Map<string, string[]>();
+  for (const row of rows ?? []) {
+    if (!row.metric_id || !row.semantic_id) continue;
+    const ids = byMetric.get(String(row.metric_id)) ?? [];
+    if (!ids.includes(row.semantic_id)) ids.push(row.semantic_id);
+    byMetric.set(String(row.metric_id), ids);
+  }
+  for (const ids of byMetric.values()) ids.sort();
+  return byMetric;
+}
+
+/**
  * The semantic ids a shell built from these rows can reference, besides the nameplate template's:
- * those of the catalog metrics the attached schemas model, and the schemas' own. The loader reads
- * `concept_definitions` for exactly these, so it must cover what buildEnvironment() references.
+ * those of the catalog metrics the attached schemas model, their further ids, and the schemas' own.
+ * The loader reads `concept_definitions` for exactly these, so it must cover what buildEnvironment()
+ * references.
  */
 export function conceptIdsFor(
-  rows: Pick<DeviceRecord, "catalog" | "schemas">,
+  rows: Pick<DeviceRecord, "catalog" | "schemas"> & Partial<Pick<DeviceRecord, "supplemental">>,
 ): string[] {
   const catalogByName = new Map(rows.catalog.map((m) => [String(m.name), m]));
+  const supplemental = supplementalIdsByMetric(rows.supplemental);
   const ids = new Set<string>();
   for (const schema of rows.schemas) {
     if (schema.semantic_id) ids.add(String(schema.semantic_id));
@@ -451,8 +500,11 @@ export function conceptIdsFor(
       (schema.schema_definition as Record<string, unknown> | null) ?? null,
     );
     for (const name of modelled) {
-      const id = catalogByName.get(name)?.semantic_id;
-      if (id) ids.add(String(id));
+      const metric = catalogByName.get(name);
+      const id = metric?.semantic_id;
+      if (!id) continue;
+      ids.add(String(id));
+      for (const further of supplemental.get(String(metric?.id)) ?? []) ids.add(further);
     }
   }
   return [...ids].sort();
@@ -470,8 +522,17 @@ export interface DeviceRecord {
   nameplate: Record<string, unknown> | null;
   templates: { id_short: string; semantic_id: string; description?: string | null }[];
   schemas: Record<string, unknown>[];
+  /** The further semantic ids of the catalog's metrics, as `metric_semantic_ids` holds them. */
+  supplemental?: SupplementalSemanticId[];
   /** `concept_definitions` rows for the ids conceptIdsFor() names. */
   definitions: ConceptDefinition[];
+}
+
+/** A row of `metric_semantic_ids`: another published id of the concept a catalog metric measures. */
+export interface SupplementalSemanticId {
+  metric_id: string;
+  semantic_id: string;
+  semantic_id_type?: string | null;
 }
 
 /** A row of `concept_definitions`: a vocabulary's own name and text for a semantic id. */
@@ -514,6 +575,7 @@ export async function loadDeviceRecord(
     { data: gatewayRows },
     { data: nameplateRows },
     { data: templateRows },
+    { data: supplementalRows },
   ] = await Promise.all([
     client.from("asset_config").select("*").eq("asset_id", device.sparkplug_id),
     client.from("device_schemas").select("schema_id, submodel_key").eq("device_id", device.id),
@@ -524,6 +586,8 @@ export async function loadDeviceRecord(
     client.from("device_nameplate").select("*").eq("device_id", device.id),
     client.from("idta_submodel_templates").select("id_short, semantic_id, description")
       .eq("template_id", NAMEPLATE_TEMPLATE_ID),
+    // Without rows (an error, or a database that lacks the table) each metric exports its own id alone.
+    client.from("metric_semantic_ids").select("metric_id, semantic_id, semantic_id_type"),
   ]);
 
   const links = linkRows ?? [];
@@ -534,7 +598,11 @@ export async function loadDeviceRecord(
 
   // One query for every vocabulary definition the shell can use. Without rows (an error, or a
   // database that lacks the view) each definition falls back to the catalog text.
-  const conceptIds = conceptIdsFor({ catalog: catalogRows ?? [], schemas: schemaRows ?? [] });
+  const conceptIds = conceptIdsFor({
+    catalog: catalogRows ?? [],
+    schemas: schemaRows ?? [],
+    supplemental: supplementalRows ?? [],
+  });
   const { data: definitionRows } = conceptIds.length > 0
     ? await client.from("concept_definitions").select("semantic_id, name, definition, standard")
       .in("semantic_id", conceptIds)
@@ -549,6 +617,7 @@ export async function loadDeviceRecord(
     nameplate: nameplateRows?.[0] ?? null,
     templates: templateRows ?? [],
     schemas: schemaRows ?? [],
+    supplemental: supplementalRows ?? [],
     definitions: definitionRows ?? [],
   };
 }
@@ -575,6 +644,7 @@ export interface BuiltShell {
 export function buildEnvironment(record: DeviceRecord): BuiltShell {
   const { device, config, links, catalog, gateway, nameplate, templates, schemas, definitions } =
     record;
+  const supplementalByMetric = supplementalIdsByMetric(record.supplemental);
 
   const keyBySchema = new Map<string, string | null>(
     links.map((l) => [String(l.schema_id), l.submodel_key ?? null]),
@@ -602,7 +672,11 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
 
   let unmappedCount = 0;
 
-  /** One AAS Property per catalogued metric name. */
+  /**
+   * One AAS Property per catalogued metric name: the metric's own id is its semanticId and its
+   * further ids are its supplementalSemanticIds. Not here: a template's element id as the primary
+   * one inside a schema built from that template, which Build Schema from Template adds.
+   */
   const propertyFor = (name: string) => {
     const metric = catalogByName.get(name);
     const semanticId = (metric?.semantic_id as string | null) ?? null;
@@ -613,7 +687,11 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
         toIdShort(name, "Metric"),
         sparkplugToXsd(metric?.datatype as number | undefined),
         valueFor(name),
-        { semanticId, description: (metric?.description as string | null) ?? null },
+        {
+          semanticId,
+          supplementalSemanticIds: supplementalByMetric.get(String(metric?.id)),
+          description: (metric?.description as string | null) ?? null,
+        },
       ),
     };
   };
@@ -627,10 +705,18 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     templates.map((row) => [String(row.id_short), String(row.semantic_id)]),
   );
 
+  // A metric carrying the id as its own answers before one carrying it as a further id, so adding a
+  // further id never moves a field from the metric that was answering it.
   const catalogBySemanticId = new Map<string, Record<string, unknown>>();
   for (const metric of catalog) {
     const id = metric.semantic_id as string | null;
     if (id && !catalogBySemanticId.has(id)) catalogBySemanticId.set(id, metric);
+  }
+  for (const metric of catalog) {
+    if (!metric.semantic_id) continue;
+    for (const id of supplementalByMetric.get(String(metric.id)) ?? []) {
+      if (!catalogBySemanticId.has(id)) catalogBySemanticId.set(id, metric);
+    }
   }
   /** The device's own answer for a concept, or null when it publishes nothing for it. */
   const publishedValue = (semanticId: string): unknown => {
