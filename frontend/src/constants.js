@@ -416,7 +416,7 @@ export const GITHUB_REPO_URL = readSetting(
 ).replace(/\/+$/, '');
 
 /**
- * Grafana, as the browser reaches it, for the "View in Grafana" link on an active alert. The
+ * Grafana, as the browser reaches it, for the "View in Grafana" action in a built-in alert's drawer. The
  * default is 3002 (`npm run dev:forward` puts it there; the frontend has 3000). Same value as
  * GRAFANA_PUBLIC_URL, which the seed registers as the OAuth redirect origin, so a deployment that
  * moves Grafana sets both. A fallback is kept for the reason GITHUB_REPO_URL keeps one.
@@ -467,6 +467,9 @@ export const isAutomationAlert = (alert) => String(alert?.fingerprint ?? '').sta
  * the alert list searched by the rule's name. That search reads rule definitions, so a
  * `label:sparkplug_id=` filter (a label on evaluated series) would match nothing. An alert an
  * automation raised has no rule there, and answers null.
+ *
+ * Only the Built-in drawer's View in Grafana calls this. Every other surface that shows a platform
+ * alert opens that drawer instead (builtInAlertUrl in routes.js), and a test holds it to that.
  */
 export const grafanaAlertUrl = (alert) => {
   if (isAutomationAlert(alert)) return null
