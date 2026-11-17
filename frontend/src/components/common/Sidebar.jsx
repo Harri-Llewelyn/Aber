@@ -5,6 +5,7 @@ import { useUrl } from '../../hooks/useUrlState'
 import { IconChevronDown, IconChevronUp, IconChevronsDownUp } from './Icons'
 import { RouteLink } from './RouteLink'
 import { Tooltip } from './Tooltip'
+import { signalFromParts } from '../../utils/navSignal'
 
 /** How long the pointer rests on the rail before hover mode opens it. A pointer crossing takes less. */
 export const RAIL_OPEN_DELAY_MS = 150
@@ -167,9 +168,11 @@ export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`
 const countText = (n) => (n > 99 ? '99+' : n)
 
 /**
- * A page's own entry. A page with work waiting takes the warning colour and its number, and says
- * why in its tooltip and label (the count is aria-hidden: the label already carries it). Otherwise
- * the tooltip is the page's name, while the rail is too narrow to show it.
+ * A page's own entry. A page with work waiting takes its signal's colour (warning, or danger for a
+ * firing alert) and its number, and says why in its tooltip and label (the count is aria-hidden: the
+ * label already carries it). Where there are two conditions the number is the more urgent one's and
+ * the words name both. Otherwise the tooltip is the page's name, while the rail is too narrow to
+ * show it.
  * `ariaCurrent` is what the current page's link says: `page`, or `true` while the tab beneath it
  * is the one marked `page`.
  */
@@ -186,7 +189,7 @@ function PageLink({ page, href, current, signal, onNavigate, expanded, ariaCurre
     >
       <span className="sidebar-item-icon">{page.icon}</span>
       <span className="sidebar-item-label">{page.label}</span>
-      {signal?.count > 0 && <span className="sidebar-item-count" aria-hidden="true">{countText(signal.count)}</span>}
+      {signal?.count > 0 && <span className={`sidebar-item-count sidebar-item-count-${signal.tone}`} aria-hidden="true">{countText(signal.count)}</span>}
     </RouteLink>
   )
 }
@@ -199,13 +202,21 @@ function PageLink({ page, href, current, signal, onNavigate, expanded, ariaCurre
  * and the page's own tab bar is one click away. The tabs carry no tooltips: one on every entry
  * would flash as the pointer moves down the rail.
  *
- * While the list is on screen the page's signal moves to the tab it is about (`signalTab`), with
- * the tab bar's words ("Quarantine, 3 waiting"), so no number shows twice.
+ * While the list is on screen each of the page's signals moves to the tab it is about (`signalTabs`),
+ * with the tab's words ("Quarantine, 3 waiting"), so no number shows twice. A page with two signals
+ * carries one on each of two tabs, and its own entry shows only what no tab carries.
  */
 function SidebarPage({ page, href, current, signal, onNavigate, currentTabId, open, onToggle, expanded }) {
   const listId = `sidebar-tabs-${page.id}`
   const shown = open && expanded
-  const onTab = Boolean(shown && signal && page.pageTabs.some(t => t.id === page.signalTab))
+  const onTabs = new Map()
+  const rest = {}
+  for (const [key, part] of Object.entries(signal?.parts ?? {})) {
+    const tabId = page.signalTabs?.[key]
+    if (shown && tabId && page.pageTabs.some(t => t.id === tabId)) onTabs.set(tabId, part)
+    else rest[key] = part
+  }
+  const rowSignal = onTabs.size > 0 ? signalFromParts(rest) : signal
 
   return (
     <div>
@@ -214,7 +225,7 @@ function SidebarPage({ page, href, current, signal, onNavigate, currentTabId, op
           page={page}
           href={href}
           current={current}
-          signal={onTab ? null : signal}
+          signal={rowSignal}
           onNavigate={onNavigate}
           expanded={expanded}
           ariaCurrent={shown ? 'true' : 'page'}
@@ -234,17 +245,17 @@ function SidebarPage({ page, href, current, signal, onNavigate, currentTabId, op
       <ul id={listId} className="sidebar-tabs" aria-label={`${page.label} tabs`} hidden={!shown}>
         {page.pageTabs.map(tab => {
           const here = current && tab.id === currentTabId
-          const waiting = onTab && tab.id === page.signalTab ? signal.count : 0
+          const part = onTabs.get(tab.id)
           return (
             <li key={tab.id}>
               <RouteLink
                 to={tabHref(page.id, tab.id)}
-                className={`sidebar-tab${here ? ' active' : ''}${waiting > 0 ? ` sidebar-tab-${signal.tone}` : ''}`}
+                className={`sidebar-tab${here ? ' active' : ''}${part ? ` sidebar-tab-${part.tone}` : ''}`}
                 aria-current={here ? 'page' : undefined}
-                aria-label={waiting > 0 ? `${tab.label}, ${waiting} waiting` : undefined}
+                aria-label={part ? `${tab.label}, ${part.tabNote ?? part.note}` : undefined}
               >
                 <span className="sidebar-tab-label">{tab.label}</span>
-                {waiting > 0 && <span className="sidebar-tab-count" aria-hidden="true">{countText(waiting)}</span>}
+                {part && <span className={`sidebar-tab-count sidebar-tab-count-${part.tone}`} aria-hidden="true">{countText(part.count)}</span>}
               </RouteLink>
             </li>
           )

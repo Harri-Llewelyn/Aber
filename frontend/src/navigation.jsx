@@ -1,5 +1,6 @@
 import React from 'react'
 import { PERMISSION_UUIDS } from './constants'
+import { leadKey } from './utils/navSignal'
 import { STANDARDS } from './utils/standards'
 import { pathSegments, pathSlug } from './hooks/useUrlState'
 import {
@@ -188,9 +189,10 @@ export const NAV_GROUPS = [
 ]
 
 /*
- * The pages. `pageTabs` is a page's tabs, from the lists above. `signalTab` is the tab the rail's
- * signal for the page is about (hooks/useNavSignals.js): while the sidebar lists the page's tabs,
- * the count shows on that tab instead of on the page.
+ * The pages. `pageTabs` is a page's tabs, from the lists above. `signalTabs` says which tab each of
+ * the page's signals is about (hooks/useNavSignals.js): the signal's part, by its key, to the tab's
+ * id. While the sidebar lists the page's tabs, each count shows on its own tab instead of on the
+ * page. A page can carry one signal on each of its tabs.
  */
 export const TABS = [
   { id: 'site-map',       label: 'Site Map',       group: 'home',    icon: <IconMap size={16} /> },
@@ -198,7 +200,7 @@ export const TABS = [
   { id: 'history',        label: 'History',        group: 'home',    icon: <IconChartLine size={16} />, pageTabs: HISTORY_TABS },
   // Gated on `proposal:create`: an Auditor holds neither it nor a decision gate, and RLS would
   // return them their own proposals, of which they can have none.
-  { id: 'approvals',      label: 'Approvals',      group: 'work',    icon: <IconInbox size={16} />, permission: PERMISSION_UUIDS.PROPOSAL_CREATE, pageTabs: APPROVALS_TABS, signalTab: 'open' },
+  { id: 'approvals',      label: 'Approvals',      group: 'work',    icon: <IconInbox size={16} />, permission: PERMISSION_UUIDS.PROPOSAL_CREATE, pageTabs: APPROVALS_TABS, signalTabs: { proposals: 'open' } },
 
   // The ISA-95 order, top down: an area holds cells, a cell holds gateways and devices. The
   // glyphs read the same way: the map is the site, the factory an area, the grid its cells. The
@@ -206,7 +208,7 @@ export const TABS = [
   { id: 'areas',          label: 'Areas',          group: 'assets',  icon: <IconFactory size={16} /> },
   { id: 'cells',          label: 'Cells',          group: 'assets',  icon: <IconLayoutDashboard size={16} /> },
   { id: 'gateways',       label: 'Gateways',       group: 'assets',  icon: <IconRadio size={16} /> },
-  { id: 'devices',        label: 'Devices',        group: 'assets',  icon: <IconCpu size={16} />, pageTabs: DEVICES_TABS, signalTab: 'quarantine' },
+  { id: 'devices',        label: 'Devices',        group: 'assets',  icon: <IconCpu size={16} />, pageTabs: DEVICES_TABS, signalTabs: { alerts: 'registered', quarantine: 'quarantine' } },
 
   { id: 'schemas',        label: 'Schemas',        group: 'model',   icon: <IconClipboardList size={16} /> },
   // IconTag, not IconGauge (which already means a metrology cell) and not IconActivity (which
@@ -298,6 +300,13 @@ export function groupedNav(visibleTabs) {
 
 /** A page's tabs, or an empty list for a page without them. */
 export const pageTabsOf = (pageId) => TABS.find(t => t.id === pageId)?.pageTabs || []
+
+/**
+ * The tab a page's rail entry should open: the one its signal leads with (the most urgent
+ * condition), or '' for the bare page. Devices leads with its firing alerts on Registered, the bare
+ * page, and with quarantine on Quarantine.
+ */
+export const signalTabOf = (page, signal) => page?.signalTabs?.[leadKey(signal)] || ''
 
 /** A tab's address, as useUrlTab writes it: the bare page for the first tab. */
 export function tabHref(pageId, tabId) {

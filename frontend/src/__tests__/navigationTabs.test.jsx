@@ -10,8 +10,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   TABS, DEVICES_TABS, APPROVALS_TABS, METRICS_TABS, VOCABULARY_TABS, CAPTURE_TABS, ARCHIVES_TABS,
   SYSTEM_TABS, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ACCESS_CONTROL_TABS, SETTINGS_TABS, PROFILE_TABS,
-  currentTabOf, pageTabsOf, pageTitleOf, tabHref,
+  currentTabOf, pageTabsOf, pageTitleOf, signalTabOf, tabHref,
 } from '../navigation'
+import { signalFromParts } from '../utils/navSignal'
 import { pathSlug } from '../hooks/useUrlState'
 import { CARDS } from '../searchIndex'
 import { VIEWS as DEVICE_VIEWS } from '../components/tabs/DevicesTab'
@@ -71,11 +72,30 @@ describe('one list per page', () => {
   })
 
   it('points each rail signal at a tab its page has', () => {
-    for (const page of TABS.filter(t => t.signalTab)) {
-      expect(pageTabsOf(page.id).map(t => t.id)).toContain(page.signalTab)
+    for (const page of TABS.filter(t => t.signalTabs)) {
+      for (const tabId of Object.values(page.signalTabs)) {
+        expect(pageTabsOf(page.id).map(t => t.id)).toContain(tabId)
+      }
     }
-    expect(TABS.find(t => t.id === 'devices').signalTab).toBe('quarantine')
-    expect(TABS.find(t => t.id === 'approvals').signalTab).toBe('open')
+    expect(TABS.find(t => t.id === 'approvals').signalTabs).toEqual({ proposals: 'open' })
+  })
+
+  it('carries one signal on each of the two tabs of Devices: firing alerts on Registered, quarantine on Quarantine', () => {
+    const devices = TABS.find(t => t.id === 'devices')
+    expect(devices.signalTabs).toEqual({ alerts: 'registered', quarantine: 'quarantine' })
+    // No two signals share a tab, so each count is on a tab of its own.
+    expect(new Set(Object.values(devices.signalTabs)).size).toBe(Object.keys(devices.signalTabs).length)
+  })
+
+  it('names the tab a rail entry opens: the lead condition tab, or the bare page', () => {
+    const devices = TABS.find(t => t.id === 'devices')
+    const part = (tone) => ({ tone, count: 1, note: 'x' })
+    expect(signalTabOf(devices, signalFromParts({ quarantine: part('warning') }))).toBe('quarantine')
+    expect(signalTabOf(devices, signalFromParts({ quarantine: part('warning'), alerts: part('danger') }))).toBe('registered')
+    expect(tabHref('devices', signalTabOf(devices, signalFromParts({ alerts: part('danger') })))).toBe('/devices')
+    expect(tabHref('devices', signalTabOf(devices, signalFromParts({ quarantine: part('warning') })))).toBe('/devices/quarantine')
+    expect(tabHref('gateways', signalTabOf(TABS.find(t => t.id === 'gateways'), signalFromParts({ offline: part('warning') })))).toBe('/gateways')
+    expect(tabHref('devices', signalTabOf(devices, null))).toBe('/devices')
   })
 
   it('lists the standards in the order the Vocabulary page draws them, by their slugs', () => {

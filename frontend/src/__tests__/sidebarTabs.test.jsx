@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Sidebar, RAIL_OPEN_DELAY_MS } from '../components/common/Sidebar'
 import { TABS, SETTINGS_TABS, tabIsVisible } from '../navigation'
 import { navigate } from '../hooks/useUrlState'
+import { signalFromParts } from '../utils/navSignal'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
 
@@ -25,7 +26,8 @@ const chevron = (page) => screen.getByRole('button', { name: `Show the ${page} t
 const tabList = (page) => document.getElementById(chevron(page).getAttribute('aria-controls'))
 const entry = (page, name) => within(tabList(page)).getByRole('link', { name })
 
-const QUARANTINE = { tone: 'warning', count: 3, note: '3 devices awaiting zero-touch onboarding approval' }
+const QUARANTINE = signalFromParts({ quarantine: { tone: 'warning', count: 3, note: '3 devices awaiting zero-touch onboarding approval', tabNote: '3 waiting' } })
+const ALERTS = { tone: 'danger', count: 2, note: '2 devices with a firing alert', tabNote: '2 with a firing alert' }
 
 const renderRail = (props = {}) => render(
   <Sidebar tabs={adminTabs()} currentTab="site-map" mode="expanded" {...props} />
@@ -196,9 +198,73 @@ describe('counts', () => {
     expect(numbers()).toHaveLength(1)
   })
 
+  describe('two signals on one page', () => {
+    const BOTH = signalFromParts({ quarantine: QUARANTINE.parts.quarantine, alerts: ALERTS })
+
+    it('show the more urgent count on a closed page, and name both in its title and label', () => {
+      renderRail({ signals: { devices: BOTH } })
+      const devices = pageLink('Devices')
+      const words = 'Devices — 2 devices with a firing alert · 3 devices awaiting zero-touch onboarding approval'
+      expect(devices).toHaveAttribute('aria-label', words)
+      // The title is the shared tooltip, which a focus shows.
+      fireEvent.focus(devices, { relatedTarget: document.body })
+      expect(screen.getByRole('tooltip')).toHaveTextContent(words)
+      expect(devices).toHaveClass('sidebar-item-danger')
+      expect(devices).not.toHaveClass('sidebar-item-warning')
+      // One number, the alerts': never the two added into 5.
+      expect(devices.querySelector('.sidebar-item-count')).toHaveTextContent('2')
+      expect(devices.querySelector('.sidebar-item-count')).toHaveClass('sidebar-item-count-danger')
+      expect(numbers().map(n => n.textContent)).toEqual(['2'])
+    })
+
+    it('put each count on its own tab while the page has its tabs listed, and none on the page', () => {
+      renderRail({ signals: { devices: BOTH } })
+      fireEvent.click(chevron('Devices'))
+      const registered = entry('Devices', 'Registered, 2 with a firing alert')
+      const quarantine = entry('Devices', 'Quarantine, 3 waiting')
+      expect(registered.querySelector('.sidebar-tab-count')).toHaveTextContent('2')
+      expect(registered).toHaveClass('sidebar-tab-danger')
+      expect(registered.querySelector('.sidebar-tab-count')).toHaveClass('sidebar-tab-count-danger')
+      expect(quarantine.querySelector('.sidebar-tab-count')).toHaveTextContent('3')
+      expect(quarantine).toHaveClass('sidebar-tab-warning')
+      const devices = within(primary()).getByRole('link', { name: 'Devices' })
+      expect(devices.querySelector('.sidebar-item-count')).toBeNull()
+      expect(devices).not.toHaveClass('sidebar-item-danger')
+      expect(numbers().map(n => n.textContent)).toEqual(['2', '3'])
+    })
+
+    it('put a lone alert count on Registered and leave Quarantine plain', () => {
+      renderRail({ signals: { devices: signalFromParts({ alerts: ALERTS }) } })
+      fireEvent.click(chevron('Devices'))
+      expect(entry('Devices', 'Registered, 2 with a firing alert')).toHaveClass('sidebar-tab-danger')
+      expect(entry('Devices', 'Quarantine')).not.toHaveClass('sidebar-tab-warning')
+      expect(numbers().map(n => n.textContent)).toEqual(['2'])
+    })
+
+    it('keep the counts on the page when it has no tabs to carry them', () => {
+      const gateways = signalFromParts({
+        alerts: { tone: 'danger', count: 1, note: '1 gateway with a firing alert' },
+        offline: { tone: 'warning', count: 2, note: '2 gateways offline' },
+      })
+      renderRail({ signals: { gateways } })
+      // Gateways has no tabs, so its entry shows the more urgent count and names both.
+      const link = pageLink('Gateways')
+      expect(link).toHaveAttribute('aria-label', 'Gateways — 1 gateway with a firing alert · 2 gateways offline')
+      expect(link).toHaveClass('sidebar-item-danger')
+      expect(link.querySelector('.sidebar-item-count')).toHaveTextContent('1')
+    })
+
+    it('stay on the page while the hover rail is shut, where the tabs cannot show', () => {
+      window.history.replaceState(null, '', '/devices')
+      renderRail({ currentTab: 'devices', mode: 'hover', signals: { devices: BOTH } })
+      expect(pageLink('Devices').querySelector('.sidebar-item-count')).toHaveTextContent('2')
+      expect(numbers().map(n => n.textContent)).toEqual(['2'])
+    })
+  })
+
   it('put Approvals\' waiting proposals on Awaiting a decision', () => {
     window.history.replaceState(null, '', '/approvals')
-    renderRail({ currentTab: 'approvals', signals: { approvals: { tone: 'warning', count: 2, note: '2 proposals waiting for a decision' } } })
+    renderRail({ currentTab: 'approvals', signals: { approvals: signalFromParts({ proposals: { tone: 'warning', count: 2, note: '2 proposals waiting for a decision', tabNote: '2 waiting' } }) } })
     expect(entry('Approvals', 'Awaiting a decision, 2 waiting')).toHaveAttribute('aria-current', 'page')
     expect(entry('Approvals', 'Decided')).not.toHaveClass('sidebar-tab-warning')
   })
