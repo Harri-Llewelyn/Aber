@@ -125,7 +125,7 @@ give way.
 | Reported | Derived from |
 | :--- | :--- |
 | published/s | the generator's own count of `publish()` calls that returned success |
-| received/s | `aber_ingestion_messages_total{msg_type="ddata"}` — what reached the daemon |
+| received/s | `aber_ingestion_messages_total{msg_type="ddata"}`, summed over its `edge_node` series — what reached the daemon |
 | written/s | `aber_ingestion_messages_written_total` — what the historian committed |
 | rows/s | `aber_ingestion_metrics_written_total`, which is `written/s × metrics per message` |
 | queue end | `aber_ingestion_write_queue_depth`, the gauge that answers the whole exercise |

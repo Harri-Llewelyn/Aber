@@ -62,6 +62,15 @@ _labelled = {}           # (metric, labelnames) -> Counter, created on first use
 _labelled_lock = threading.Lock()
 _histograms = {}         # metric -> Histogram
 _scrape_time = None      # the _ScrapeTimeCollector instance
+_started_nodes = set()   # edge nodes whose loss series exist at zero, under _labelled_lock
+
+# The two per-edge-node loss counters. An edge node's series for each is made at zero when its
+# first message is counted: a counter that first appears at its first loss shows Prometheus no
+# increase, so the first gap in an hour would read as none.
+NODE_LOSS_COUNTERS = (
+    "aber_ingestion_sequence_gaps_total",
+    "aber_ingestion_sequence_messages_missed_total",
+)
 
 
 def _families():
@@ -114,11 +123,12 @@ def reset():
     decremented, so a fresh registry is the only way back to zero -- which is also why this is
     public rather than a `_counters.clear()` reached into from outside.
     """
-    global REGISTRY, _by_metric, _labelled, _histograms, _scrape_time
+    global REGISTRY, _by_metric, _labelled, _histograms, _scrape_time, _started_nodes
     REGISTRY = CollectorRegistry()
     _by_metric = {}
     _labelled = {}
     _histograms = {}
+    _started_nodes = set()
 
     for metric, labelnames in _families().items():
         _by_metric[metric] = Counter(metric, _help(metric), labelnames, registry=REGISTRY)
@@ -136,10 +146,11 @@ def reset():
     # `messages_<type>` is written per message type by ingestion.py already, so the msg_type
     # dimension costs nothing at the call site -- it is derived from a convention that was there
     # first. Declared here rather than in COUNTER_MAP because the label VALUES are open: a new
-    # Sparkplug message type needs no table entry.
+    # Sparkplug message type needs no table entry, and the edge node is whoever publishes, named
+    # at the call site. A message whose topic names none counts under edge_node="".
     _by_metric["aber_ingestion_messages_total"] = Counter(
-        "aber_ingestion_messages_total", _help("aber_ingestion_messages_total"), ["msg_type"],
-        registry=REGISTRY)
+        "aber_ingestion_messages_total", _help("aber_ingestion_messages_total"),
+        ["msg_type", "edge_node"], registry=REGISTRY)
 
     _by_metric[UNMAPPED] = Counter(UNMAPPED, _help(UNMAPPED), ["counter"], registry=REGISTRY)
 
@@ -154,17 +165,20 @@ def reset():
 # ---------------------------------------------------------------------------------------------
 # Recording
 # ---------------------------------------------------------------------------------------------
-def count(name: str, n: int = 1):
+def count(name: str, n: int = 1, edge_node: str = None):
     """
     Add to a monotonic counter, by the flat name the call site uses.
+
+    `edge_node` is read only for a `messages_<type>` name, which publishes one series for each edge
+    node and type; None and "" both count under edge_node="".
 
     An unknown name lands under the catch-all rather than raising: a counter is a report about
     something that already happened, and the daemon must not fail on the way to filing one.
 
     THE ORDER OF THE BRANCHES BELOW IS LOAD-BEARING. `messages_total` is both a `messages_` name and
     an EXPORTED_LABELLED_INSTEAD one; tested the other way round it would publish as
-    aber_ingestion_messages_total{msg_type="total"}, which double-counts every message against the
-    per-type series it is the sum of.
+    aber_ingestion_messages_total{msg_type="total",edge_node=""}, which double-counts every message
+    against the per-type series it is the sum of.
     """
     if n <= 0:
         return
@@ -173,8 +187,11 @@ def count(name: str, n: int = 1):
         # here as well would give a scraper two ways to count one event.
         return
     if name.startswith("messages_"):
+        node = edge_node or ""
         _by_metric["aber_ingestion_messages_total"].labels(
-            msg_type=name[len("messages_"):]).inc(n)
+            msg_type=name[len("messages_"):], edge_node=node).inc(n)
+        if node and node not in _started_nodes:
+            _start_node_loss_series(node)
         return
     mapped = COUNTER_MAP.get(name)
     if mapped is None:
@@ -195,6 +212,11 @@ def count_labelled(name: str, labels: dict, n: int = 1):
     """
     if n <= 0:
         return
+    _labelled_family(name, labels).labels(**labels).inc(n)
+
+
+def _labelled_family(name: str, labels: dict):
+    """The family `count_labelled` adds to, made when it is first asked for."""
     labelnames = tuple(sorted(labels))
     key = (name, labelnames)
     family = _labelled.get(key)
@@ -206,7 +228,18 @@ def count_labelled(name: str, labels: dict, n: int = 1):
             if family is None:
                 family = Counter(name, HELP.get(name, name), labelnames, registry=REGISTRY)
                 _labelled[key] = family
-    family.labels(**labels).inc(n)
+    return family
+
+
+def _start_node_loss_series(edge_node: str):
+    """Make `edge_node`'s two loss series at zero, once. See NODE_LOSS_COUNTERS."""
+    with _labelled_lock:
+        if edge_node in _started_nodes:
+            return
+        _started_nodes.add(edge_node)
+    for name in NODE_LOSS_COUNTERS:
+        labels = {"edge_node": edge_node}
+        _labelled_family(name, labels).labels(**labels)
 
 
 def observe_write_seconds(seconds: float):
@@ -304,7 +337,9 @@ def counter_snapshot() -> dict:
     for metric, family in list(_by_metric.items()):
         for sample in _samples(family):
             if metric == "aber_ingestion_messages_total":
-                out[f"messages_{sample.labels['msg_type']}"] = int(sample.value)
+                # One series per edge node and type, summed back to the type the STATS line names.
+                flat = f"messages_{sample.labels['msg_type']}"
+                out[flat] = out.get(flat, 0) + int(sample.value)
             elif metric == UNMAPPED:
                 out[sample.labels["counter"]] = int(sample.value)
             else:

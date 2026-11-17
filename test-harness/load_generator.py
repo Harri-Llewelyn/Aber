@@ -318,9 +318,10 @@ def parse_exposition(text, at=None):
     """
     The exposition as {name: value} for plain series and {name: {labels: value}} for labelled ones.
 
-    Labelled series are keyed by the label string as exposed, so a caller asks for
-    `sample.labelled['aber_ingestion_messages_total']['msg_type="ddata"']` -- the daemon
-    lowercases the type, so `Sample.received_of` is the way to ask rather than a literal.
+    Labelled series are keyed by the label string as exposed, such as
+    `edge_node="gwy1",msg_type="ddata"` -- the daemon lowercases the type and labels each message
+    with its edge node, and the exposition lists the labels in name order. `Sample.received_of` is
+    the way to ask for a message type, and `label_values()` reads a key, rather than a literal.
     """
     plain, labelled = {}, defaultdict(dict)
     for line in text.splitlines():
@@ -337,6 +338,28 @@ def parse_exposition(text, at=None):
         else:
             plain[name] = number
     return Sample(plain, labelled, time.time() if at is None else at)
+
+
+def label_values(labels):
+    """
+    The pairs of one label string, as a dict, for example {"edge_node": "gwy1", "msg_type": "ddata"}
+    from the string `edge_node="gwy1",msg_type="ddata"`. An escaped quote or backslash in a value is
+    read as the character it stands for.
+    """
+    out, i = {}, 0
+    while i < len(labels):
+        eq = labels.find('="', i)
+        if eq < 0:
+            break
+        name, j, value = labels[i:eq].strip(", "), eq + 2, []
+        while j < len(labels) and labels[j] != '"':
+            if labels[j] == "\\" and j + 1 < len(labels):
+                j += 1
+            value.append(labels[j])
+            j += 1
+        out[name] = "".join(value)
+        i = j + 1
+    return out
 
 
 def scrape():
@@ -415,12 +438,14 @@ class Sample:
         The daemon counts `messages_<msg_type.lower()>`, so its label reads `msg_type="ddata"`
         while the topic and the Sparkplug specification both say DDATA. Matching case-sensitively
         on the topic's spelling silently returns zero, which reads as "the daemon received
-        nothing" -- indistinguishable from a broker that dropped the lot.
+        nothing" -- indistinguishable from a broker that dropped the lot. The same goes for
+        matching the whole label string: each message is also labelled with its edge node, so the
+        type is read out of the labels and every edge node's series is summed.
         """
-        wanted = {f'msg_type="{t.lower()}"' for t in types}
+        wanted = {t.lower() for t in types}
         total = 0.0
         for labels, value in self.labelled.get("aber_ingestion_messages_total", {}).items():
-            if labels.lower() in wanted:
+            if label_values(labels).get("msg_type", "").lower() in wanted:
                 total += value
         return total
 
@@ -1422,11 +1447,7 @@ def main():
     while time.time() - birth_started < arguments.birth_timeout:
         time.sleep(2)
         sample = scrape()
-        consumed = sum(
-            value - birth_before.labelled.get("aber_ingestion_messages_total", {}).get(labels, 0.0)
-            for labels, value in sample.labelled.get("aber_ingestion_messages_total", {}).items()
-            if labels.lower() in ('msg_type="dbirth"', 'msg_type="nbirth"')
-        )
+        consumed = sample.received_of("DBIRTH", "NBIRTH") - birth_before.received_of("DBIRTH", "NBIRTH")
         if consumed >= births:
             break
     birth_seconds = time.time() - birth_started

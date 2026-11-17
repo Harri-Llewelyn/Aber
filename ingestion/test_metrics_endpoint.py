@@ -241,9 +241,10 @@ class ExpositionTestCase(unittest.TestCase):
 
     def test_msg_type_is_derived_from_the_existing_per_type_counters(self):
         # ingestion.py already writes `messages_<type>`; the dimension costs nothing at the site.
+        # No edge node is named here, so each counts under edge_node="".
         exported = self.counted(messages_ddata=10, messages_nbirth=2)
-        self.assertIn('aber_ingestion_messages_total{msg_type="ddata"} 10.0', exported)
-        self.assertIn('aber_ingestion_messages_total{msg_type="nbirth"} 2.0', exported)
+        self.assertIn('aber_ingestion_messages_total{edge_node="",msg_type="ddata"} 10.0', exported)
+        self.assertIn('aber_ingestion_messages_total{edge_node="",msg_type="nbirth"} 2.0', exported)
 
     def test_the_flat_total_is_not_exported_beside_the_labelled_series(self):
         """

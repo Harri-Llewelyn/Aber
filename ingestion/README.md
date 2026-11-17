@@ -2427,8 +2427,11 @@ than raised.
 **Every series `COUNTER_MAP` declares is present at zero from startup**, not from its first event —
 labelled ones included. A counter whose series springs into existence at 1 has no previous sample
 for `rate()` to compare against, so the step from no drops to some would be invisible for one scrape
-interval. `aber_ingestion_messages_total{msg_type=…}` is the exception: its label values are whatever
-the fleet publishes, so they cannot be declared in advance.
+interval. `aber_ingestion_messages_total{msg_type=…,edge_node=…}` is the exception: its label values
+are whatever the fleet publishes, so they cannot be declared in advance. An edge node's two loss
+series (`aber_ingestion_sequence_gaps_total` and `…_messages_missed_total`) are made at zero when its
+first message is counted, for the same reason: a counter that first appears at its first loss
+shows Prometheus no increase.
 
 The `STATS` log line remains, and still reports by the **flat** names the call sites use
 (`dropped_gateway_binding=+3(12)`). The two answer different questions: this endpoint is for a
@@ -2441,7 +2444,7 @@ the line, so a drop counter appearing there at all is still the signal.
 
 | Metric | Labels | A non-zero value means |
 | :--- | :--- | :--- |
-| `aber_ingestion_messages_total` | `msg_type` | Messages acted on, after parsing and the command-topic filter. **Flat is the signal**: a running daemon consuming nothing. |
+| `aber_ingestion_messages_total` | `msg_type`, `edge_node` | Messages acted on, after parsing and the command-topic filter, one series for each edge node and type. **Flat is the signal**: a running daemon consuming nothing. **Sum it**: `sum(rate(…[5m]))` is the stack, and `sum by (edge_node)(…)` is each gateway, which the gateway drawer reads. A topic with no edge node level counts under `edge_node=""`; a host's `STATE` message has none and is not counted. |
 | `aber_ingestion_metrics_written_total` | — | Metric samples written to the historian. |
 | `aber_ingestion_messages_written_total` | — | DDATA messages whose telemetry the historian committed. Divided by `aber_ingestion_write_seconds_count` it is messages per transaction: 1 while the writer keeps up, rising as it batches. |
 | `aber_ingestion_messages_dropped_total` | `reason` | **Telemetry that was NOT recorded.** Under report-by-exception nothing restates it. See the reasons below. |
@@ -2555,7 +2558,7 @@ looks wrong.
 
 | Alert | Expression | For | Why this threshold |
 | :--- | :--- | :--- | :--- |
-| Ingestion consuming nothing | `rate(aber_ingestion_messages_total[5m]) == 0` | 10m | A running daemon with no traffic. On a plant that is always publishing this is the highest-value rule here, and it is the one the heartbeat file cannot express. |
+| Ingestion consuming nothing | `sum(rate(aber_ingestion_messages_total[5m])) == 0` | 10m | A running daemon with no traffic. On a plant that is always publishing this is the highest-value rule here, and it is the one the heartbeat file cannot express. |
 | Telemetry being dropped | `sum(rate(aber_ingestion_messages_dropped_total[5m])) > 0` | 5m | Any sustained drop rate. Not "above a threshold" — the correct number is zero. A historian restart drops nothing while the queue holds it ([*Connection handling*](#connection-handling)), so what fires this is an outage longer than the queue holds, or any other reason. |
 | Binding rejections rising | `rate(aber_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
 | Historian unreachable | `aber_ingestion_db_connected == 0` | 2m | Telemetry is queued now, and dropped once the queue is full ([how long it holds](#connection-handling)). The `for` is 2m because a restart is over within it. |
