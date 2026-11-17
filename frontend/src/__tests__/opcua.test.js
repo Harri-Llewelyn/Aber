@@ -121,6 +121,7 @@ describe('opcuaSections', () => {
     const seeded = [
       'OPC 30050 PackML',
       'OPC 40001 Machinery',
+      'OPC 40001-2 Machinery Process Values',
       'OPC 40001-4 Machinery Energy',
       'OPC 40010 Robotics',
       'OPC 40501 Machine Tools',
