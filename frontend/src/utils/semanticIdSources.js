@@ -10,6 +10,7 @@ import {
 } from './standards'
 import { kpiByName } from './iso22400'
 import { suggestedGroup } from './opcua'
+import { fieldType } from './vda5050'
 
 /**
  * An MTConnect data item type's suggestion: its concept id, shared by every metric of that type.
@@ -41,10 +42,11 @@ export function vocabularySuggestion(standard, entryName, semanticId) {
  * The suggestion Add Metric makes for a catalog row's standard and type, so Edit can offer it back.
  * The type is the last name segment once a trailing `sub_type` is removed, as archived migration 0142 finds
  * it. OPC UA names shared by two companion specifications are told apart by the group each point
- * suggests (`suggestedGroup()`). `null` for a local extension, or an entry the vocabulary no
- * longer holds.
+ * suggests (`suggestedGroup()`). A VDA 5050 field is found by the part of the name after the group,
+ * its path with slashes, the longest that names one. `null` for a local extension, or an entry the
+ * vocabulary no longer holds.
  */
-export function suggestionForMetric(metric, { mtconnect, iso22400, opcua } = {}) {
+export function suggestionForMetric(metric, { mtconnect, iso22400, opcua, vda5050 } = {}) {
   const segments = (metric?.name || '').split('/')
   if (metric?.sub_type && segments.length > 1 && segments[segments.length - 1] === metric.sub_type) {
     segments.pop()
@@ -65,6 +67,12 @@ export function suggestionForMetric(metric, { mtconnect, iso22400, opcua } = {})
       const ids = new Set((grouped.length > 0 ? grouped : named).map(p => p.semantic_id))
       return ids.size === 1 ? vocabularySuggestion(STANDARDS.OPCUA, type, [...ids][0]) : null
     }
+    case STANDARDS.VDA5050: {
+      const named = (vda5050 || [])
+        .filter(f => f.semantic_id && (metric.name === fieldType(f) || metric.name.endsWith('/' + fieldType(f))))
+        .sort((a, b) => fieldType(b).length - fieldType(a).length)
+      return named.length > 0 ? vocabularySuggestion(STANDARDS.VDA5050, named[0].name, named[0].semantic_id) : null
+    }
     // ASHRAE 223P is a reference here: its classes name equipment, not readings, so it suggests no id.
     default:
       return null
@@ -77,12 +85,13 @@ export const templateSource = (row) =>
 
 /**
  * Every concept the picker offers, as `{ standard, label, semanticId, semanticIdType, detail }`:
- * MTConnect data item types, ISO 22400 KPIs, OPC UA data points and the IDTA template elements.
+ * MTConnect data item types, ISO 22400 KPIs, OPC UA data points, VDA 5050 fields and the IDTA
+ * template elements.
  * No ASHRAE 223P class: 223P is a reference here, and a class names equipment, not a reading. A
  * template records its element's reference type; a vocabulary id is typed by its shape. MTConnect
  * ids are derived, so choosing a metric's own type here gives exactly its suggestion.
  */
-export function semanticIdCandidates({ mtconnect, iso22400, opcua, templates } = {}) {
+export function semanticIdCandidates({ mtconnect, iso22400, opcua, vda5050, templates } = {}) {
   const candidates = []
   const add = (standard, label, semanticId, semanticIdType, detail) => {
     const id = (semanticId || '').trim()
@@ -98,6 +107,7 @@ export function semanticIdCandidates({ mtconnect, iso22400, opcua, templates } =
   }
   for (const k of iso22400 || []) add(STANDARDS.ISO22400, k.name, k.semantic_id, '', k.description)
   for (const p of opcua || []) add(STANDARDS.OPCUA, p.name, p.semantic_id, '', p.companion_spec)
+  for (const f of vda5050 || []) add(STANDARDS.VDA5050, f.name, f.semantic_id, '', f.description)
   for (const t of templates || []) add(templateSource(t), t.id_short, t.semantic_id, t.semantic_id_type, t.description)
   return candidates
 }

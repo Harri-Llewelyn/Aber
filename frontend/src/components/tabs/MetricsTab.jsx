@@ -37,6 +37,7 @@ import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '..
 import {
   conceptByName, ashrae223Prefill, ashrae223Sections, metricConcepts
 } from '../../utils/ashrae223'
+import { fieldByName, fieldByType, fieldType, vda5050Prefill, vda5050Sections } from '../../utils/vda5050'
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { Modal } from '../common/Modal'
@@ -229,6 +230,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [isoVocabulary, setIsoVocabulary]     = useState([])
   const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
   const [s223Vocabulary, setS223Vocabulary] = useState([])
+  const [vdaVocabulary, setVdaVocabulary] = useState([])
   // IDTA template elements, which the semantic id picker offers beside the vocabularies.
   const [templateElements, setTemplateElements] = useState([])
   const [referenceLoaded, setReferenceLoaded] = useState(false)
@@ -327,10 +329,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       api.get('/api/v1/iso22400-vocabulary'),
       api.get('/api/v1/opcua-vocabulary'),
       api.get('/api/v1/ashrae223-vocabulary'),
+      api.get('/api/v1/vda5050-vocabulary'),
       api.get('/api/v1/idta-submodel-templates'),
-    ]).then(([voc, iso, opc, s223, templates]) => {
+    ]).then(([voc, iso, opc, s223, vda, templates]) => {
       if (!current) return
       setVocabulary(voc); setIsoVocabulary(iso); setOpcuaVocabulary(opc); setS223Vocabulary(s223)
+      setVdaVocabulary(vda || [])
       setTemplateElements(templates); setReferenceLoaded(true)
     })
     return () => { current = false }
@@ -338,9 +342,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
   // Everything the semantic id picker offers, built once per read rather than on each keystroke.
   const semanticIdChoices = useMemo(() => semanticIdCandidates({
-    mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary,
+    mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, vda5050: vdaVocabulary,
     templates: templateElements
-  }), [vocabulary, isoVocabulary, opcuaVocabulary, templateElements])
+  }), [vocabulary, isoVocabulary, opcuaVocabulary, vdaVocabulary, templateElements])
 
   /**
    * Turn a suggested group name into the two fields the picker needs. A vocabulary can suggest a
@@ -377,6 +381,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       vocabCategory: prefill.category || '',
       vocabSemanticId: prefill.semanticId || '',
       semanticIdOwn: keepTypedSemanticId(m.semanticIdOwn),
+      // A VDA 5050 field carries its enum's values (or none); the other prefills leave the field to the operator.
+      permittedValues: prefill.permittedValues ?? m.permittedValues,
       // Only fill a description that is still empty, so the vocabulary's blurb never overwrites
       // something the operator has already written.
       description: m.description || prefill.description || ''
@@ -441,11 +447,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     } else if (entry.standard === STANDARDS.ASHRAE223) {
       const concept = conceptByName(s223Vocabulary, entry.name)
       if (concept) applyPrefill(ashrae223Prefill(concept))
+    } else if (entry.standard === STANDARDS.VDA5050) {
+      const field = fieldByName(vdaVocabulary, entry.name)
+      if (field) applyPrefill(vda5050Prefill(field))
     }
 
     onConsumeVocabularyEntry?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingVocabularyEntry, loaded, referenceLoaded, isoVocabulary, opcuaVocabulary, s223Vocabulary])
+  }, [pendingVocabularyEntry, loaded, referenceLoaded, isoVocabulary, opcuaVocabulary, s223Vocabulary, vdaVocabulary])
 
   /** Selecting an entry in the type picker prefills everything that entry determines. */
   const handleTypeChange = (value) => {
@@ -461,6 +470,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     if (newMetric.standard === STANDARDS.ASHRAE223) {
       const concept = conceptByName(s223Vocabulary, value)
       if (concept) return applyPrefill(ashrae223Prefill(concept))
+    }
+    if (newMetric.standard === STANDARDS.VDA5050) {
+      const field = fieldByType(vdaVocabulary, value)
+      if (field) return applyPrefill(vda5050Prefill(field))
     }
     // An MTConnect type, or a vocabulary picker set back to empty: no row's id applies any more.
     setNewMetric(m => ({
@@ -527,7 +540,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       group: keepGroup ? m.group : '',
       newGroup: keepGroup ? m.newGroup : '',
       type: '', companionSpec: '', customType: '', customCategory: BLANK_METRIC.customCategory,
-      subType: '', units: '', vocabCategory: '', vocabSemanticId: '', semanticIdOwn: null
+      subType: '', units: '', vocabCategory: '', vocabSemanticId: '', semanticIdOwn: null,
+      // The values a VDA 5050 enum filled in were that field's; any other standard's are the operator's own.
+      permittedValues: m.standard === STANDARDS.VDA5050 ? '' : m.permittedValues
     }))
   }
 
@@ -709,6 +724,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const isIso = newMetric.standard === STANDARDS.ISO22400
   const isOpcua = newMetric.standard === STANDARDS.OPCUA
   const isAshrae = newMetric.standard === STANDARDS.ASHRAE223
+  const isVda = newMetric.standard === STANDARDS.VDA5050
   const isCustomStandard = newMetric.standard === STANDARDS.CUSTOM
 
   // Unset after a 223P prefill, or after a group change orphaned an OPC UA data point. The select
@@ -761,6 +777,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // The Concept picker's sections, by superclass as on the Vocabulary page. Relations are left
   // out: they are predicates, not things a point can be attached to.
   const ashraeSections = ashrae223Sections(metricConcepts(s223Vocabulary))
+  // The Field picker's sections, as the Vocabulary page draws them.
+  const vdaSections = vda5050Sections(vdaVocabulary)
   // The MTConnect UnitEnum plus whatever the current selection prefilled: ISO 22400 uses HOUR and
   // OPC UA carries UNECE codes, which MTConnect need not list.
   const mtconnectUnits = unitNames(vocabulary)
@@ -829,7 +847,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         : isIso ? 'Choose a KPI'
           : isOpcua ? 'Choose a data point'
             : isAshrae ? 'Choose a concept'
-              : 'Choose a data item type')
+              : isVda ? 'Choose a field'
+                : 'Choose a data item type')
     : newMetric.group === NEW_GROUP && newMetric.newGroup.trim() === '' ? 'Name the new group'
       : null
 
@@ -1509,7 +1528,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               </Tooltip>
             </div>
 
-            {/* One slot, four vocabularies. The Standard selector decides which fills it, so the
+            {/* One slot, five vocabularies. The Standard selector decides which fills it, so the
                 label changes with it. */}
             {isMTConnect && (
               <div className="form-group" style={{ flex: '1 1 200px' }}>
@@ -1613,6 +1632,31 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                       <optgroup key={section.key} label={`${section.title} (${section.entries.length})`}>
                         {section.entries.map(c => (
                           <option key={c.name} value={c.name}>{c.label || c.name}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </Tooltip>
+              </div>
+            )}
+
+            {isVda && (
+              <div className="form-group" style={{ flex: '1 1 220px' }}>
+                <label className="form-label" htmlFor="metric-type">Field <RequiredMark /></label>
+                <Tooltip text={fieldByType(vdaVocabulary, newMetric.type)?.description
+                  || 'Choosing a field fills in the group, the name, the datatype and the semantic id. VDA 5050 3.0 calls the vehicle a mobile robot.'}>
+                  <select
+                    id="metric-type"
+                    aria-required="true"
+                    className="form-control"
+                    value={newMetric.type}
+                    onChange={e => handleTypeChange(e.target.value)}
+                  >
+                    <option value="">— Select a field —</option>
+                    {vdaSections.map(section => (
+                      <optgroup key={section.key} label={section.title + ' (' + section.entries.length + ')'}>
+                        {section.entries.map(f => (
+                          <option key={f.name} value={fieldType(f)}>{f.name}</option>
                         ))}
                       </optgroup>
                     ))}

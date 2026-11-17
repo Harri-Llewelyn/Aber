@@ -277,6 +277,13 @@ jobs:
           node scripts/generate-ashrae223-vocabulary.mjs
           node scripts/check-ashrae223-seed-sync.mjs
 
+      # VDA 5050 publishes its messages as JSON Schema, so the vocabulary is read from the copy of
+      # state.schema kept in scripts/vocabularies/, which the generator refuses to read changed.
+      - name: Verify VDA 5050 Vocabulary Seed Is In Sync
+        run: |
+          node scripts/generate-vda5050-vocabulary.mjs
+          node scripts/check-vda5050-seed-sync.mjs
+
       # Checks counts, lists, links and pinned versions only; never reasoning. A stale count is worse
       # than no count because a reader cannot tell it is stale.
       - name: Verify Documentation Matches The Repository

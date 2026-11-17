@@ -176,8 +176,9 @@ paths:
         Exactly the namespaces the served types belong to: the local one, the relationship
         namespace, and each one a metric type takes from its catalog row's semantic id.
 
-        MTConnect and ISO 22400 ids are minted here, so their namespaces are local
-        (`https://aber.local/semantics/mtconnect/v2.0`, `https://aber.local/semantics/iso22400`).
+        MTConnect, ISO 22400 and VDA 5050 ids are minted here, so their namespaces are local
+        (`https://aber.local/semantics/mtconnect/v2.0`, `https://aber.local/semantics/iso22400`,
+        `https://aber.local/semantics/vda5050/v3.0`).
         An OPC UA id is the ExpandedNodeId its NodeSet publishes (`nsu=<namespace URI>;i=<id>`),
         in the namespace after `nsu=`; an ASHRAE 223P id is the ontology's own. A scalar type
         adapted from either is an in-exact implementation of that namespace, marked as the i3X

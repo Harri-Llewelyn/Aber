@@ -4,20 +4,20 @@ This page holds reference vocabularies: the published sets of terms that industr
 
 ## What the controls do
 
-- **The four standard tabs**, MTConnect, ISO 22400, OPC UA and ASHRAE 223P, each show one standard's entries in the same card. Switching tab keeps the search text, so the same search can be tried on each standard in turn.
-- **Point at a tab**, or move to it with the keyboard, to read what that standard covers. What each standard is, and what to watch for in it, is under **The four standards** below.
+- **The five standard tabs**, MTConnect, ISO 22400, OPC UA, ASHRAE 223P and VDA 5050, each show one standard's entries in the same card. Switching tab keeps the search text, so the same search can be tried on each standard in turn.
+- **Point at a tab**, or move to it with the keyboard, to read what that standard covers. What each standard is, and what to watch for in it, is under **The five standards** below.
 - **Search** filters the selected standard by name and by the text shown on hover. For example, an ISO 22400 KPI is found by its formula. A search opens the sections that match.
-- **The sections** group each standard's entries. MTConnect has data item types, components, sub types and units. ISO 22400 has KPI families, OPC UA has companion specifications, and ASHRAE 223P has superclasses. Sections start collapsed.
+- **The sections** group each standard's entries. MTConnect has data item types, components, sub types and units. ISO 22400 has KPI families, OPC UA has companion specifications, ASHRAE 223P has superclasses, and VDA 5050 has the parts of the vehicle state. Sections start collapsed.
 - A section header shows **N in use** when catalog metrics already use N of its entries. Where a section needs explaining, a **?** sits beside its title. A header stays at the top of the card while its entries scroll under it.
 - **Expand all** is at the start of the line above the sections, at the far left. It opens every section of the selected standard, and reads **Collapse all** while any is open. Collapse all also closes the sections a search opened, and keeps the search.
 - **Click an entry** to start a catalog metric from it. An entry you can click shows a **+** when you point at it or tab to it. It opens the Add Metric dialog on the Metrics page, with the type, the semantic identifier and the reference type already filled in.
 - This saves typing the identifiers by hand. They are long and exact, and a typing mistake in one goes unnoticed.
-- Only some entries can be clicked. In MTConnect, these are data item types, not components, sub types or units. Every ISO 22400 KPI and every OPC UA data point can be clicked. In ASHRAE 223P, classes can be clicked, but relations cannot.
+- Only some entries can be clicked. In MTConnect, these are data item types, not components, sub types or units. Every ISO 22400 KPI, every OPC UA data point and every VDA 5050 field can be clicked. In ASHRAE 223P, classes can be clicked, but relations cannot.
 - Entries already in use are ticked, and you can still click them. Clicking needs the Administrator role; without it the entries are read-only.
 - **ASHRAE 223P is a reference here.** Clicking a 223P class opens Add Metric in the BMS group, with the class as the type. It fills in no semantic identifier, datatype or units. Choose those yourself. A class names a piece of equipment, such as a temperature sensor, not the reading it takes. A 223P class is ticked when a 223P metric is named after it.
 - **A unit** in the MTConnect vocabulary is listed by its code, such as CELSIUS. The Metrics page shows it with its symbol, **°C (CELSIUS)**, and History shows the symbol alone.
 
-## The four standards
+## The five standards
 
 ### MTConnect
 
@@ -48,6 +48,18 @@ The semantic concepts that ASHRAE 223P defines for building systems: HVAC, elect
 
 - **It is a reference, not a source of ids.** `Fan` names a piece of equipment, not a reading. You choose the datatype, units and id yourself, such as a QUDT quantity kind.
 - **It is still in public review.** These concepts come from the open223 pre-publication ontology. They may change before ASHRAE 223 is published.
+
+### VDA 5050
+
+The readings an automated guided vehicle (AGV) reports in the `state` message of VDA 5050. They are generated from the JSON Schema the VDA publishes, at version 3.0.0. VDA 5050 3.0 calls the vehicle a mobile robot.
+
+- **A field is a reading.** `powerSupply.stateOfCharge` is the battery's charge. `driving` says whether the vehicle is moving. Point at a field to read the VDA's description of it.
+- **A field is picked whole.** Click one to start a metric in the AGV group. The field's path becomes the name, so `velocity.vx` becomes `AGV/velocity/vx`. The datatype, the semantic identifier and the values of an enum, such as the seven operating modes, are filled in.
+- **The unit is not filled in.** The VDA writes `m/s`, and a metric's unit is an MTConnect unit name. Choose it yourself.
+- **Its semantic ids are local.** The VDA publishes no ids, so this deployment makes one for each field. Point at a field to see it.
+- **Only readings are here.** The message header, the order fields and the lists, such as `loads` and `errors`, are left out. A list cannot be a metric, and a device's identity comes from its Sparkplug topic.
+- **A position is a reading on the device.** It is never the cell the device is in.
+- **This lists the readings and nothing more.** A vehicle must still publish them as Sparkplug B metrics. Connecting a fleet that speaks VDA 5050 is separate work.
 
 ## Why this is a separate page from Metrics and Schemas
 

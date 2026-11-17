@@ -3612,6 +3612,17 @@ const apiMethods = {
       return data || [];
     }
 
+    if (path.startsWith('/api/v1/vda5050-vocabulary')) {
+      // Reference data (migration 0302), generated from the VDA's state schema at tag 3.0.0 and
+      // read-only to the app. Keyed by the field's path, so that is the order.
+      const { data, error } = await supabase
+        .from('vda5050_vocabulary')
+        .select('*')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    }
+
     if (path.startsWith('/api/v1/opcua-vocabulary')) {
       // Reference data (seeded by 0002_seed_data.sql). Ordered by spec then name so the panel's
       // sections arrive already grouped. `node_id` and `semantic_id` are the same ExpandedNodeId.

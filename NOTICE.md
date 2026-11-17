@@ -5,10 +5,12 @@
 The MIT licence in [`LICENSE`](LICENSE) covers the work in this repository: the Helm chart, the SQL in [`timescaledb/`](timescaledb/) and
 [`supabase/migrations/`](supabase/migrations/), the frontend, the ingestion, playback and i3X
 services, the Node-RED flows, the Grafana dashboard definitions, the scripts and the documentation.
-The four exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20),
+The six exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20),
 [the dashboard's fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11),
-[the icon glyphs it copies](#the-dashboards-icons--lucide-isc-and-feather-mit) and
-[the ASHRAE 223P ontology](#the-ashrae-223p-ontology--apache-license-20), which keep their own
+[the icon glyphs it copies](#the-dashboards-icons--lucide-isc-and-feather-mit),
+[the ASHRAE 223P ontology](#the-ashrae-223p-ontology--apache-license-20),
+[the MTConnect schema](#mtconnect-the-devices-schema-and-the-definitions-read-from-it) and
+[the VDA 5050 state schema](#vda-5050-the-state-schema-and-the-fields-read-from-it), which keep their own
 licences. The licence texts in [`licenses/`](licenses/) are copied verbatim from the projects they
 belong to. The two written offers of source there (`SOURCE`) are Aber's own.
 
@@ -505,3 +507,36 @@ a binary form, so here it is as the file gives it:
 AMT's SysML model (`mtconnect/mtconnect_sysml_model`) is not read. It has no licence file, and its
 own terms allow copying only in the form received, without modifications. Taking its documentation
 into a seed would be a modification, so the definitions come from the schema repository instead.
+
+### VDA 5050: the state schema and the fields read from it
+
+[`scripts/vocabularies/vda5050-3.0.0-state.schema`](scripts/vocabularies/vda5050-3.0.0-state.schema) is
+`json_schemas/state.schema` at tag `3.0.0` of [`github.com/VDA5050/VDA5050`](https://github.com/VDA5050/VDA5050),
+copyright 2024 Verband der Automobilindustrie. It is unmodified, byte for byte, and its licence is the MIT
+licence the repository carries, whose text is beside it in
+[`LICENSE-vda5050-MIT.txt`](scripts/vocabularies/LICENSE-vda5050-MIT.txt). The MIT licence above, which
+covers the rest of this repository, does not cover the file, and its copyright holder is the VDA's.
+
+`scripts/generate-vda5050-vocabulary.mjs` builds the `vda5050_vocabulary` rows from it, in migration
+`0302`: each field's name, type and description, and an enum's values. The VDA's own text is in those rows
+and in the definition an AAS export gives each concept, so the licence's notice is kept with them:
+
+> Copyright 2024 Verband der Automobilindustrie
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+> associated documentation files (the “Software”), to deal in the Software without restriction,
+> including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
+> and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
+> subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or substantial
+> portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+> LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+> NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+> WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+> SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The VDA's README says its published PDF prevails where the schema and the PDF differ, so adopting the
+vocabulary claims nothing about conformance to VDA 5050.

@@ -28,6 +28,33 @@ regenerated file can't be used. This copy is the source of the seed.
 3. Regenerate the seed and review its diff.
 4. Update `docs/vocabularies.md` and `NOTICE.md`.
 
+## `vda5050-3.0.0-state.schema`: the VDA 5050 state message
+
+`scripts/generate-vda5050-vocabulary.mjs` builds the `vda5050_vocabulary` seed, in migration `0302`,
+from this file. The generator refuses any other file: it checks the SHA-256 below, then that the file
+is the `state` schema.
+
+| | |
+| :--- | :--- |
+| What | The JSON Schema of the VDA 5050 `state` message, version 3.0.0 |
+| Copyright | 2024 Verband der Automobilindustrie |
+| Licence | MIT, in the repository. The text is in [`LICENSE-vda5050-MIT.txt`](LICENSE-vda5050-MIT.txt) |
+| From | [`VDA5050/VDA5050`](https://github.com/VDA5050/VDA5050), `json_schemas/state.schema` at tag `3.0.0` (2026-03-18) |
+| SHA-256 | `f00d6620e0d1d20efa99f8ce3bd1a25a578f0c01e96cc9b52548259f4847d307` (34,506 bytes) |
+| Changes | None. The file is byte for byte what the tag holds |
+
+**Why it is kept here.** CI then needs no network, which is the pattern the ASHRAE 223P ontology set.
+The VDA's README says its published PDF prevails where the schema and the PDF differ.
+
+**Moving to a newer release.** When the VDA publishes one:
+
+1. Diff its `state.schema` against this file, field by field, and read its licence.
+2. Replace this file and update `SCHEMA_SHA256` and `VDA_VERSION` in the generator. A field the
+   release adds stops the build until `scripts/lib/vda5050-vocabulary.mjs` keeps or excludes it.
+3. Regenerate and review the diff. The ids are pinned to the major line, so a minor release keeps
+   them; a new major line is a new namespace and a new migration.
+4. Update `docs/vocabularies.md` and `NOTICE.md`.
+
 ## `MTConnectDevices_2.7.xsd`: the MTConnect Devices schema
 
 `scripts/generate-mtconnect-vocabulary.mjs` reads `DataItemEnumEnum` in this file for the text that

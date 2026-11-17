@@ -11,10 +11,10 @@ The standard vocabulary layer covers the five asset classes on the target pilot 
 machining tools, robots, AGVs, 3D printers, and a BMS — and adopts IDTA Submodel templates so
 exported AAS shells carry published semantic identifiers rather than locally minted ones.
 
-Five standards were added to the original MTConnect and ISO 22400 pair: **OPC 40501-1** (Machine
+Six standards were added to the original MTConnect and ISO 22400 pair: **OPC 40501-1** (Machine
 Tools), **OPC 40540** (Additive Manufacturing), **OPC 40001-4** (Machinery Energy Management),
-**PackML** (OPC 30050), and **ASHRAE 223P** — see *Verified identities and namespaces* below for
-how each was confirmed, and for the one that was wrong.
+**PackML** (OPC 30050), **ASHRAE 223P**, and **VDA 5050** (AGVs) — see *Verified identities and
+namespaces* below for how each was confirmed, and for the one that was wrong.
 
 Every addition follows the existing **"vocabulary, not catalog"** stance of `mtconnect_vocabulary`,
 `iso22400_vocabulary` and `opcua_vocabulary`: reference data describing what a standard *defines*,
@@ -59,14 +59,18 @@ does. They are [`supabase/example-metrics.sql`](../supabase/example-metrics.sql)
   [A derived metric is a catalogue row](../supabase/README.md#a-derived-metric-is-a-catalogue-row-0267).
   Its values are computed when they are read, by `derived_series()`, and nothing is stored
   ([how](../supabase/README.md#history-draws-a-derived-metric-from-the-minutes-0282)).
-- **AGVs are the one gap the five vocabularies leave, and VDA 5050 does not fill it here.** VDA 5050
-  is a complete bidirectional MQTT interface with its own topic tree keyed on
-  manufacturer + serialNumber, so it fails the vocabulary test and would introduce a second identity
-  path competing with `sparkplug_id`. If AGV telemetry is needed, take only the `state` message's
-  scalar fields (`batteryCharge`, `driving`, `paused`, `velocity`, `operatingMode`, `lastNodeId`) as
-  a vocabulary and put the protocol in a Node-RED edge adapter republishing to `spBv1.0/#`. The same
-  verdict applies to BACnet for the BMS. AGV *position* is telemetry, never `devices.cell_id` —
-  writing it there fires `log_audit_trail_event()` on every update.
+- **AGVs have a vocabulary, from VDA 5050's `state` message, and the protocol is still not Aber's.**
+  VDA 5050 is a complete bidirectional MQTT interface with its own topic tree keyed on
+  manufacturer + serialNumber, so as a whole it fails the vocabulary test and would introduce a
+  second identity path competing with `sparkplug_id`. What is taken is the `state` message's scalar
+  fields that are readings: 24 of them, generated from the JSON Schema the VDA publishes under MIT
+  (tag 3.0.0) into `vda5050_vocabulary` ([below](#vda-5050-agvs)). Version 3.0.0 renamed the fields
+  the 2.x documents use: the battery level is `powerSupply.stateOfCharge` (it was `batteryCharge`),
+  the position is `mobileRobotPosition` and the emergency stop `safetyState.activeEmergencyStop`.
+  3.0 also calls the vehicle a mobile robot. The protocol itself would go in a Node-RED edge adapter
+  republishing to `spBv1.0/#` (#307), which is not built. The same verdict applies to BACnet for the
+  BMS. AGV *position* is telemetry, never `devices.cell_id` — writing it there fires
+  `log_audit_trail_event()` on every update. Where an asset is belongs to the place model (#321).
 
 ## Extension points
 
@@ -95,24 +99,25 @@ before proposing a change:
   operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,
   `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text; `unitId` is unset) and a
   `dataType` derived from the Sparkplug datatype. **The definition is the vocabulary's own text**
-  wherever one defines the id. `concept_definitions` (`0169`, redeclared by `0301`) unions the
-  IDTA, ASHRAE 223P, OPC UA, ISO 22400 and MTConnect descriptions, in that order of precedence. So a
-  223P class such as `TemperatureSensor` is defined by 223P, not by the description of a metric
-  carrying it. An MTConnect data item type is defined by the text MTConnect publishes for it:
-  POSITION is "point along an axis in a cartesian coordinate system.", not the description of
-  whichever axis a metric names. An id no vocabulary holds but a known authority issues defers to
-  that authority, whatever the metrics carrying it say: the QUDT quantity kinds the example 223P
-  readings carry are defined as, for example, "Temperature, as QUDT defines it." (`ID_AUTHORITIES`
-  in `shell.ts`, one entry per authority). Any other id, such as one an Administrator typed, takes
-  the catalog description only when every live metric carrying the id agrees on it. A new
-  standard's ids are covered with no code change; its definitions need an arm in the view.
+  wherever one defines the id. `concept_definitions` (`0169`, redeclared by `0301` and `0302`) unions
+  the IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect and VDA 5050 descriptions, in that order of
+  precedence. So a 223P class such as `TemperatureSensor` is defined by 223P, not by the description
+  of a metric carrying it. An MTConnect data item type is defined by the text MTConnect publishes
+  for it: POSITION is "point along an axis in a cartesian coordinate system.", not the description of
+  whichever axis a metric names. A VDA 5050 field is defined by the schema's description of it. An
+  id no vocabulary holds but a known authority issues defers to that authority, whatever the
+  metrics carrying it say: the QUDT quantity kinds the example 223P readings carry are defined as,
+  for example, "Temperature, as QUDT defines it." (`ID_AUTHORITIES` in `shell.ts`, one entry per
+  authority). Any other id, such as one an Administrator typed, takes the catalog description only
+  when every live metric carrying the id agrees on it. A new standard's ids are covered with no
+  code change; its definitions need an arm in the view.
 
 ## How a vocabulary entry becomes a metric
 
 Three decisions shape every metric the form creates from a vocabulary, whatever the standard:
 
-- **A metric's semantic id names the concept, not the metric.** ISO 22400 and OPC UA take the
-  vocabulary row's id, and 223P, a reference here, gives none. An MTConnect metric takes its data
+- **A metric's semantic id names the concept, not the metric.** ISO 22400, OPC UA and VDA 5050 take
+  the vocabulary row's id, and 223P, a reference here, gives none. An MTConnect metric takes its data
   item type's id,
   `…/mtconnect/v2.0/DataItemType/<TYPE>`, so `Axes/X/POSITION` and `Axes/W/POSITION` share one;
   the component path, instance and subType stay in the name and `sub_type` (#457). A custom
@@ -122,12 +127,14 @@ Three decisions shape every metric the form creates from a vocabulary, whatever 
   CHECK-constrained to `SAMPLE`, `EVENT` or `CONDITION` (or null). MTConnect rows carry their own;
   `utils/opcua.js` translates an OPC UA point (a number is a `SAMPLE`, anything else an `EVENT`,
   and nothing maps to `CONDITION`, because OPC UA models faults as alarms, which are not ingested);
-  `utils/iso22400.js` files every KPI as a `SAMPLE`; ASHRAE 223P leaves it null, because a 223P
-  concept is a class of thing, not an observation.
+  `utils/iso22400.js` files every KPI as a `SAMPLE`; `utils/vda5050.js` follows OPC UA's rule for a
+  field's datatype; ASHRAE 223P leaves it null, because a 223P concept is a class of thing, not an
+  observation.
 - **The Add Metric form offers three Sparkplug datatypes: Double, Boolean and String.** An OPC UA
   integer type (`Int16` to `UInt64`, `Byte`) therefore becomes `Double`, and an unknown or
   specification-defined type becomes `String`, the lossless choice (`sparkplugDatatypeFor()` in
-  `utils/opcua.js`). The vocabulary row keeps the type the NodeSet declares.
+  `utils/opcua.js`). The vocabulary row keeps the type the NodeSet declares. A VDA 5050 field is
+  the same: its row says `Int64` for a JSON integer, and the form offers a Double.
 
 ---
 
@@ -154,6 +161,7 @@ against the IDTA content hub, the ISA/ANSI webstore and the open223 project.
 | Digital Nameplate | **IDTA 02006-3-0-1**, Oct 2025 | `https://admin-shell.io/idta/nameplate/3/0/Nameplate` |
 | PackML | **OPC 30050** *OPC UA for PackML* v1.01, 2020-10-08 — **the ISA document is not needed** | `http://opcfoundation.org/UA/PackML/` |
 | ASHRAE 223P | ontology `v1.0.0-2026`, **Apache-2.0**; the *standard* is still in public review | `http://data.ashrae.org/standard223#` |
+| VDA 5050 | **VDA 5050 3.0.0**, the `state` message's JSON Schema (tag `3.0.0`, 2026-03-18), **MIT** | `https://aber.local/semantics/vda5050/v3.0/State/` (minted here: the VDA issues none) |
 | QUDT quantity kinds | *QUDT Quantity Kind Vocabulary* **3.5.2**; five IRIs cited, nothing seeded | `http://qudt.org/vocab/quantitykind/` |
 
 The generator pins the NodeSet paths. Upstream capitalises `NodeSet2` and `Nodeset2`
@@ -230,6 +238,12 @@ regenerated the file: the release above is gone from it, and the new file report
 its version and declares no licence. Without a declared licence it can't be used here. The folder's
 [README](../scripts/vocabularies/README.md) gives the steps for moving to a newer release.
 
+**VDA 5050's `state` schema is kept the same way,** at
+[`scripts/vocabularies/vda5050-3.0.0-state.schema`](../scripts/vocabularies/vda5050-3.0.0-state.schema),
+with the VDA's MIT licence beside it, pinned by SHA-256. It is `json_schemas/state.schema` at tag `3.0.0` of
+`VDA5050/VDA5050`, byte for byte. The VDA's README says its published PDF prevails where the two
+differ, so the vocabulary reads the machine-readable half and claims nothing about conformance.
+
 **MTConnect's definitions are read from a kept copy of the 2.7 XSD** (#779), at
 [`scripts/vocabularies/MTConnectDevices_2.7.xsd`](../scripts/vocabularies/MTConnectDevices_2.7.xsd),
 pinned by SHA-256. `DataItemEnumEnum` documents 248 of the 249 data item types. The model's markup
@@ -249,6 +263,7 @@ in a derived work, and every licence was read rather than assumed:
 | OPC 40001-1, 40010-1, 40501-1, 40540, 40001-4, 30050 NodeSets | OPC Foundation MIT License 1.00 | file header |
 | IDTA 02006-3-0-1 Digital Nameplate | free IDTA publication | IDTA content hub |
 | ASHRAE 223P ontology | Apache-2.0 | `dcterms:license` in the ontology |
+| VDA 5050 `state.schema` | MIT, copyright 2024 Verband der Automobilindustrie | the repository's `LICENSE.txt` at the tag |
 | MTConnect `MTConnectDevices_2.7.xsd` (the definitions) | BSD-style licence from AMT, in the file; the repository is Apache-2.0 | header of the file, and the repository's licence |
 | QUDT quantity kinds (five IRIs cited, not seeded) | CC BY 4.0, attribution to QUDT.org | `dcterms:rights` in the vocabulary's graph metadata |
 
@@ -467,6 +482,60 @@ never by a reading's description or as 223P's. i3X files their types in the loca
 provenance, and a second field saying what a point is attached to (its 223P class). Until then the
 class lives only in a metric's name.
 
+## VDA 5050 (AGVs)
+
+Built as migration `0302`: `vda5050_vocabulary` with **24 fields**, generated by
+`scripts/generate-vda5050-vocabulary.mjs` into a marked block of that migration and guarded by
+`scripts/check-vda5050-seed-sync.mjs`, plus `STANDARDS.VDA5050`, `utils/vda5050.js`, a Vocabulary-page
+tab, a Field picker in Add Metric, an API route and an i3X namespace. AGVs were the one pilot asset
+class with no vocabulary. Like 223P it has a table of its own: it is not an OPC UA companion
+specification, so filing it in `opcua_vocabulary` would misstate where it came from.
+
+- **The source is the schema the VDA publishes, not its PDF.** `json_schemas/state.schema` at tag
+  `3.0.0`, kept in `scripts/vocabularies/` (see above). The generator walks it from the root,
+  resolves each `$ref`, follows object properties and does not enter an array.
+- **A row is a scalar field that is a reading, keyed by its path in the message** (`name`, with a dot
+  between the levels): `driving`, `paused`, `newBaseRequest`, `operatingMode`, `lastNodeId`,
+  `distanceSinceLastNode`, `velocity.vx`, `.vy`, `.omega`, `powerSupply.stateOfCharge`,
+  `.batteryVoltage`, `.batteryCurrent`, `.batteryHealth`, `.charging`, `.range`,
+  `safetyState.activeEmergencyStop`, `.fieldViolation`, and `mobileRobotPosition.x`, `.y`, `.theta`,
+  `.mapId`, `.localized`, `.localizationScore`, `.deviationRange`. Each has the schema's type and
+  description. An enum's values become `permitted_values`, as PackML's states do: `operatingMode` has
+  seven, `activeEmergencyStop` three.
+- **What the walk leaves out is decided by name, with the reason.** Every scalar leaf is kept or
+  excluded in `scripts/lib/vda5050-vocabulary.mjs`, and a leaf in neither stops the build, so a
+  release that adds a field is read rather than absorbed. The arrays (`loads`, `errors`,
+  `actionStates`, `nodeStates`, `edgeStates` and the rest) are lists of structures, and Sparkplug B has
+  no composite type, so the generator refuses them as the OPC UA generator refuses STRUCTURE
+  datatypes. The header (`headerId`, `timestamp`, `version`, `manufacturer`, `serialNumber`) is left
+  out because a device's identity comes from its Sparkplug topic, and the order flow (`orderId`,
+  `orderUpdateId`, `lastNodeSequenceId`) because Aber does not run orders. So is
+  `plannedPath.trajectory.degree`, a number inside a route's curve.
+- **Datatypes:** a JSON number is a Double, an integer an Int64, and a boolean and a string are a
+  Boolean and a String. All 24 are numbers, booleans or strings. None is an integer today, so the
+  Int64 mapping is declared and never used; the Add Metric form would offer it as a Double.
+- **Ids are minted here,** `https://aber.local/semantics/vda5050/v3.0/State/<path>`, because the VDA
+  issues none. They follow MTConnect's rule: this deployment's namespace, pinned to the major line,
+  then the kind of thing named (the `state` message) and the name. A later message from the same
+  schema would take its own segment.
+- **The group is `AGV`.** `enforce_metric_group_spelling()` makes the first spelling permanent. `AGV`
+  is the word this document and the pilot shopfloor use, and it cannot be confused with OPC 40010's
+  robots. A metric is `AGV/<the path with slashes>`, so `velocity.vx` is `AGV/velocity/vx`; a name
+  cannot hold a dot. The group's description, the tab's tooltip and the help say that VDA 5050 3.0
+  calls the vehicle a mobile robot.
+- **Definitions follow the rows.** `concept_definitions` has a VDA 5050 arm, last, since these ids
+  are minted under `aber.local` as ISO 22400's and MTConnect's are. Three position fields
+  (`mobileRobotPosition.x`, `.y`, `.theta`) carry a unit and no description in the schema. They have
+  none here, and an export defines them by the catalog's text, as it does an id no vocabulary holds.
+- **The unit is the schema's keyword, and Add Metric does not fill it in.** `unit` holds `m/s`, `rad`
+  and the rest as the VDA writes them. A metric's unit is an MTConnect UnitEnum name, so the form
+  leaves **Units** to the operator until units for these readings are crosswalked (#942).
+- **Position stays telemetry.** `mobileRobotPosition` is a reading on the device, never
+  `devices.cell_id`.
+- **Nothing speaks VDA 5050.** The vocabulary names the readings. A vehicle must still publish them
+  as Sparkplug B metrics, and the edge adapter that would do it is the catalogue of edge connectors'
+  business (#307).
+
 ---
 
 ## Definition of done — applies to every vocabulary
@@ -508,6 +577,10 @@ class lives only in a metric's name.
 | Which `category` does a non-MTConnect metric get? | MTConnect's: `SAMPLE`, `EVENT` or `CONDITION`, translated per standard; 223P leaves it null |
 | Which datatypes can the form create? | Double, Boolean and String; OPC UA integers become Double |
 | Which group do 223P metrics file under? | **`BMS`**, the one group registered under ASHRAE 223P (#456) |
+| Where does VDA 5050 go: rows in `opcua_vocabulary`, or a table of its own? | **Its own, `vda5050_vocabulary`**, as 223P has one: it is not an OPC UA companion specification (#941) |
+| Which VDA 5050 fields are rows? | The 24 scalar fields of the `state` message that are readings. No array (Sparkplug B has no composite type), no header, no order flow (#941) |
+| Which group do VDA 5050 metrics file under, and why that spelling? | **`AGV`**, the word the pilot shopfloor uses; it cannot be confused with OPC 40010's robots, and the first spelling is permanent. The group says that 3.0 calls the vehicle a mobile robot (#941) |
+| Does a VDA 5050 field fill in its unit? | **No.** The schema's keyword is the VDA's spelling, not an MTConnect UnitEnum name; units for these readings are #942's (#941) |
 | Is a 223P class a metric's semantic id? | **No.** 223P is a reference: a class names equipment, not a reading. Use starts a metric under `BMS` with no id, and the example readings carry QUDT quantity kinds (#461) |
 | Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. Not one of the eight registered formulas is computable from the catalogued metrics, and moving the arithmetic to Grafana or Node-RED does not change that. Was a roadmap item; retired |
 | What is an OPC UA semantic id? | **The ExpandedNodeId the NodeSet publishes**, `nsu=<namespace URI>;i=<id>`, as `node_id` and `semantic_id` both, typed `ExpandedNodeId`. Not `<namespace URI><name>`, an IRI the OPC Foundation never issued (#458) |

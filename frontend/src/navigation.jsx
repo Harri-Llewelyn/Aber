@@ -56,7 +56,7 @@ export const METRICS_TABS = [
 ]
 
 /** The standards in the page's order; each tab's tooltip is its standard's own hint (VocabularyPanel). */
-export const VOCABULARY_TABS = [STANDARDS.MTCONNECT, STANDARDS.ISO22400, STANDARDS.OPCUA, STANDARDS.ASHRAE223]
+export const VOCABULARY_TABS = [STANDARDS.MTCONNECT, STANDARDS.ISO22400, STANDARDS.OPCUA, STANDARDS.ASHRAE223, STANDARDS.VDA5050]
   .map(label => ({ id: pathSlug(label), label }))
 
 /** The two subjects a capture records, then the recordings and playbacks that have finished. */

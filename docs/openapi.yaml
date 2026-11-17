@@ -48,7 +48,7 @@ info:
     write verbs are revoked from every application role including `service_role`.
 
     The reference vocabularies (`mtconnect_vocabulary`, `iso22400_vocabulary`,
-    `opcua_vocabulary`, `ashrae223_vocabulary`, `idta_submodel_templates`) and the
+    `opcua_vocabulary`, `ashrae223_vocabulary`, `vda5050_vocabulary`, `idta_submodel_templates`) and the
     `concept_definitions` view over them are `SELECT`-only for `authenticated`; `anon` is revoked.
 
     ### PostgREST conventions
@@ -3541,6 +3541,35 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/ASHRAE223Concept' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
+  /rest/v1/vda5050_vocabulary:
+    get:
+      tags: [Registry]
+      summary: Read the VDA 5050 AGV readings
+      description: |
+        24 fields of the VDA 5050 `state` message that are readings, generated from its JSON Schema
+        (tag `3.0.0`, MIT) by `scripts/generate-vda5050-vocabulary.mjs`. Reference data: a row is a
+        field the standard defines. VDA 5050 3.0 calls the vehicle a mobile robot.
+
+        `name` is the field's path in the message, with a dot between the levels:
+        `powerSupply.stateOfCharge`. A metric is `AGV/<the path with slashes>`, so `velocity.vx` is
+        `AGV/velocity/vx`. The lists (`loads`, `errors`, `actionStates`), the message header and the
+        order flow are not rows.
+
+        **The ids are minted here,** under `https://aber.local/semantics/vda5050/v3.0/State/`: the VDA
+        issues none. `description` and `unit` are the schema's own, and null where it gives none.
+        `unit` is the VDA's spelling (`m/s`), not an MTConnect unit name.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - { name: datatype, in: query, schema: { type: string }, description: 'e.g. `eq.Boolean`' }
+      responses:
+        '200':
+          description: VDA 5050 fields.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/VDA5050Field' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/idta_submodel_templates:
     get:
       tags: [Registry]
@@ -3574,12 +3603,13 @@ paths:
       summary: Read each vocabulary concept's own definition
       description: |
         A view: one row per semantic id a vocabulary defines, with that vocabulary's own text.
-        It unions the IDTA templates, ASHRAE 223P, OPC UA, ISO 22400 and MTConnect. A row with no
-        text is left out, so an MTConnect data item type the XSD does not document has none.
+        It unions the IDTA templates, ASHRAE 223P, OPC UA, ISO 22400, MTConnect and VDA 5050. A row
+        with no text is left out, so an MTConnect data item type the XSD does not document has none,
+        nor does a VDA 5050 field the schema does not describe.
 
         **An id held by two vocabularies takes the first** in the order IDTA, ASHRAE 223P, OPC UA,
-        ISO 22400, MTConnect: the one whose ids are issued furthest from this deployment. No id is
-        shared today.
+        ISO 22400, MTConnect, VDA 5050: the one whose ids are issued furthest from this deployment.
+        No id is shared today.
 
         The AAS exporter reads it for each ConceptDescription's `definition`. Filter by
         `?semantic_id=in.(…)`.
@@ -3587,7 +3617,7 @@ paths:
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
         - { name: semantic_id, in: query, schema: { type: string }, description: 'e.g. `eq.http://data.ashrae.org/standard223#TemperatureSensor`' }
-        - { name: standard, in: query, schema: { type: string }, description: '`eq.IDTA` | `eq.ASHRAE 223P` | `eq.OPC UA` | `eq.ISO 22400` | `eq.MTConnect`' }
+        - { name: standard, in: query, schema: { type: string }, description: '`eq.IDTA` | `eq.ASHRAE 223P` | `eq.OPC UA` | `eq.ISO 22400` | `eq.MTConnect` | `eq.VDA 5050`' }
       responses:
         '200':
           description: Concept definitions.
@@ -8203,6 +8233,17 @@ components:
         subclass_of: { type: string, nullable: true, example: Equipment, description: 'Immediate s223 superclass, or null at the top of the hierarchy.' }
         semantic_id: { type: string, example: 'http://data.ashrae.org/standard223#Fan', description: 'Issued by ASHRAE. A CHECK constrains every row to this namespace.' }
 
+    VDA5050Field:
+      type: object
+      readOnly: true
+      properties:
+        name: { type: string, example: powerSupply.stateOfCharge, description: 'The field''s path in the `state` message, with a dot between the levels. The key.' }
+        datatype: { type: string, enum: [Double, Int64, Boolean, String], description: 'The Sparkplug B datatype: a JSON number is a Double, an integer an Int64.' }
+        unit: { type: string, nullable: true, example: m/s, description: 'The schema''s own unit keyword, as the VDA writes it. Not an MTConnect unit name.' }
+        description: { type: string, nullable: true, description: 'The schema''s description of the field, on one line. Null where the schema gives none (`mobileRobotPosition.x`, `.y`, `.theta`).' }
+        permitted_values: { type: array, nullable: true, items: { type: string }, example: [MANUAL, REMOTE, NONE], description: 'An enum field''s values, in the schema''s order.' }
+        semantic_id: { type: string, example: 'https://aber.local/semantics/vda5050/v3.0/State/powerSupply.stateOfCharge', description: 'Minted by this deployment, not issued by the VDA. A CHECK constrains every row to this namespace.' }
+
     IDTASubmodelTemplateElement:
       type: object
       readOnly: true
@@ -8224,7 +8265,7 @@ components:
         semantic_id: { type: string, example: 'http://data.ashrae.org/standard223#TemperatureSensor', description: 'Unique in the view.' }
         name: { type: string, example: TemperatureSensor, description: 'The concept''s key in its vocabulary: the IDTA idShort, or the vocabulary row''s name.' }
         definition: { type: string, example: 'A `Sensor` that `observes` a `QuantifiableObservableProperty` that represents a measure of temperature.' }
-        standard: { type: string, enum: [IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect] }
+        standard: { type: string, enum: [IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect, VDA 5050] }
 
     UserSettings:
       type: object

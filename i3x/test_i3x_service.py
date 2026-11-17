@@ -5693,6 +5693,7 @@ class TestNamespaces(unittest.TestCase):
     VOCABULARIES = {
         "mtconnect_vocabulary": "https://aber.local/semantics/mtconnect/v2.0",
         "iso22400_vocabulary": "https://aber.local/semantics/iso22400",
+        "vda5050_vocabulary": "https://aber.local/semantics/vda5050/v3.0",
         "opcua_vocabulary": None,
         "ashrae223_vocabulary": "http://data.ashrae.org/standard223?projection=i3X",
     }
@@ -5724,7 +5725,8 @@ class TestNamespaces(unittest.TestCase):
         ))
         base = constants["LOCAL_SEMANTIC_NAMESPACE"]
         minted = {constants[name].replace("${LOCAL_SEMANTIC_NAMESPACE}", base)
-                  for name in ("MTCONNECT_SEMANTIC_NAMESPACE", "ISO22400_SEMANTIC_NAMESPACE")}
+                  for name in ("MTCONNECT_SEMANTIC_NAMESPACE", "ISO22400_SEMANTIC_NAMESPACE",
+                               "VDA5050_SEMANTIC_NAMESPACE")}
         self.assertEqual(set(A._LOCAL_STANDARD_NAMESPACES), minted)
 
 

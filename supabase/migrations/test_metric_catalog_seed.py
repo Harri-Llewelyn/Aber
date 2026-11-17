@@ -599,7 +599,7 @@ class TestConceptDefinitions(unittest.TestCase):
     # Every vocabulary with a description column, and the spelling the view gives its standard.
     DESCRIBED = (("idta_submodel_templates", "IDTA"), ("ashrae223_vocabulary", "ASHRAE 223P"),
                  ("opcua_vocabulary", "OPC UA"), ("iso22400_vocabulary", "ISO 22400"),
-                 ("mtconnect_vocabulary", "MTConnect"))
+                 ("mtconnect_vocabulary", "MTConnect"), ("vda5050_vocabulary", "VDA 5050"))
 
     @classmethod
     def setUpClass(cls):

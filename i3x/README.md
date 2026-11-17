@@ -207,8 +207,9 @@ The mappings that are decisions rather than mechanics:
   type. A schema is a JSON Schema written here even when its metrics come from MTConnect or OPC UA,
   so its type is local, as are the synthetic types; the relationships have their own namespace. A
   metric's type is its `metric_catalog` row, whose semantic id says where the concept is defined:
-  - MTConnect and ISO 22400 ids are minted here, so their namespaces are local:
-    `https://aber.local/semantics/mtconnect/v2.0` and `https://aber.local/semantics/iso22400`.
+  - MTConnect, ISO 22400 and VDA 5050 ids are minted here, so their namespaces are local:
+    `https://aber.local/semantics/mtconnect/v2.0`, `https://aber.local/semantics/iso22400` and
+    `https://aber.local/semantics/vda5050/v3.0`.
   - An OPC UA id is the ExpandedNodeId its NodeSet publishes, `nsu=<namespace URI>;i=<id>`,
     whose namespace is the URI after `nsu=`, and an ASHRAE 223P id is the ontology's own. A
     scalar type adapted from one is an in-exact implementation of that namespace, which the guide
