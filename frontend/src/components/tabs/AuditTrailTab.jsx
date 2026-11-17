@@ -2376,8 +2376,9 @@ export function AuditTrailTab({ userRole, showToast }) {
                                       /* Neither the join nor a snapshot could name it: the shortened
                                          id, monospaced. */
                                       : <span className="trail-lane-name trail-lane-unnamed mono">{shortId(lane.entityId)}</span>}
-                                    {/* Must survive truncation: a schema lineage shares its name and
-                                        differs only here. */}
+                                    {/* Must survive truncation: each version of a schema has a name of
+                                        its own, and they differ only at the end, which is what a long
+                                        name loses. */}
                                     {lane.qualifier && (
                                       <span className="trail-lane-qualifier">{lane.qualifier}</span>
                                     )}

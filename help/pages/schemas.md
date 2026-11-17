@@ -41,7 +41,7 @@ You can also **export** schemas as a YAML file and **upload** one. That moves a 
 
 Things to know:
 
-- **A schema is found by its name.** Its versions are `Robot_Arm_Schema`, `Robot_Arm_Schema_v2` and so on. The file names the schema without the version.
+- **A schema is found by its name.** Its versions are `Robot_Arm_Schema`, `Robot_Arm_Schema_v2` and so on. The file names the schema without the version. When a version's name is taken, Aber numbers it further, such as `Robot_Arm_Schema_v2_2`. The file then keeps that whole name.
 - **A schema that does not exist is made, as version 1 and in force.** That is how **Build Schema from Catalog** makes one.
 - **A changed schema becomes a new draft.** A published version is never edited. The draft is named, numbered and linked as **Create Version** does it, with the file's `change_description`. Open it with **Edit Draft**, and publish it when you are ready.
 - **A schema with a draft already refuses a different change.** Publish or discard the draft, then upload again.
