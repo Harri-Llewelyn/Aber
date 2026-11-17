@@ -697,6 +697,29 @@ height is not known, and above the actions it could push Edit Details off the dr
   - **Remote** loses none. Where it has not reported a figure the row says *Not set*. Its three
     forge rows show only once they hold a value: as *Not set* on a new appliance they would add
     three rows to its drawer.
+- **A group of rows a reader seldom needs opens on request, and says its worst state while it is
+  closed.** A Remote gateway's drawer reached Launch UI 1,301px down, where a 1920×917 page leaves
+  760px. Its seven appliance rows (CA Expires, Disk Free, Memory Available, Load (1m), Flow,
+  Platform and Custom) are one group, **Health**, closed when the drawer opens. Health Reported and
+  Runtime Uptime, which a heartbeat fills, stay outside it.
+  - **`ContextPanel` takes a group as a field**: `{ group, id, summary, tone, fields }`. Its heading
+    is a `GroupHeading`, a button with `aria-expanded` that a keyboard reaches. The rows stay in the
+    page and are `hidden` while it is closed, as History's groups are. `id` is distinct for each
+    entity, so a drawer that shows another gateway starts closed. Nothing is remembered: no other
+    drawer section keeps its state either.
+  - **A row joins the block by `health: true`**, and `foldHealthRows()` (`utils/gatewayHealth.js`)
+    folds the rows the kind shows (`gatewayShowsRow()`) into one group. A kind that shows none has
+    no block, and nor has a gateway that has not reported its health. A new row of the same kind
+    (how much the gateway sends, which devices still report) is marked the same way.
+  - **The summary is the worst state in words, never a colour alone.** "Disk 3.0 GiB free" or "CA
+    expires in 12d", with "and 2 more" when others need attention, or "Nothing needs attention".
+    The tone adds a circle (danger) or a triangle (warning) and the tone's text colour.
+    `gatewayHealthProblems()` is the one answer that the rows' colours and the summary both read.
+    Disk follows the Gateway Fleet Health dashboard, amber under 5 GiB and red under 1 GiB; memory
+    and load have no threshold anywhere, so the summary never names them.
+  - **The block alone does not bring both actions into view at 1920×917.** On the fixture gateway
+    Launch UI starts at 1,018px and Archive Gateway ends at 1,163px, against 760px of drawer. What
+    is left is the Repository paragraph, the three forge rows and the identifiers.
 - **A missing repository is one line.** `GatewayRepositoryPanel` draws the drawer's field shape:
   the label *Repository* with a help tip, then one muted line such as *None: edit it in Node-RED*.
   The reason is in the tip, in about 35 words. Every case without a repository does the same:

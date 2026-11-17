@@ -5004,6 +5004,23 @@ a.chip { text-decoration: none; }
 .context-field-value.context-field-danger { color: var(--danger); }
 
 .context-field-empty { color: var(--text-muted); font-style: italic; }
+.context-field-value.context-field-warning { color: var(--warning-text); }
+
+/* A drawer's group of fields that opens on request (ContextPanel `group`): a GroupHeading at the
+   drawer's inset with its rows under it, as the other fields are. While it is closed the heading's
+   summary names the worst state in words; its tone adds an icon of its own shape and the tone's
+   colour to them. */
+.context-field-group { margin-top: 9px; }
+.context-field-group + .context-panel-fields { margin-top: 9px; }
+.context-field-group-heading { padding: 4px 6px; margin: 0 -6px; width: calc(100% + 12px); gap: 6px; border-radius: var(--radius-sm); }
+.context-field-group-heading:hover { background: var(--bg-glass); }
+.context-field-group-heading:focus-visible { outline-offset: 0; }
+.context-field-group-fields { padding-top: 7px; }
+.context-field-group-fields[hidden] { display: none; }
+.context-field-group-danger .group-heading-icon,
+.context-field-group-danger .group-heading-detail { color: var(--danger-text); }
+.context-field-group-warning .group-heading-icon,
+.context-field-group-warning .group-heading-detail { color: var(--warning-text); }
 
 /* Two to a row in a drawer wide enough for two 200px columns, one in a narrower one, in every
    drawer. The label, the primary action and a danger action take the whole row. */
