@@ -488,9 +488,9 @@ const SPECS = [
       // and carry no unit of their own here: the carrier decides it.
       ...since('0300', [
         { group: 'Energy', type: 'INonElectricalEnergyType', name: 'NeEnergyImportHp',
-          description: 'Accumulated non-electrical energy the machine takes in, for example as heat or gas, in double precision (Hp is the specification\'s suffix for that form). Monotonic, so it is a counter to difference rather than a value to read. No unit is offered because it follows the carrier: choose one when the metric is created.' },
+          description: 'Accumulated non-electrical energy the machine takes in, for example as heat or gas, as a Double. Monotonic, so it is a counter to difference rather than a value to read. No unit is offered because it follows the carrier: choose one when the metric is created.' },
         { group: 'Energy', type: 'INonElectricalEnergyType', name: 'NeEnergyExportHp',
-          description: 'Accumulated non-electrical energy the machine gives out, the other direction of NeEnergyImportHp, in double precision. A counter to difference, and its unit is chosen when the metric is created.' }
+          description: 'Accumulated non-electrical energy the machine gives out, the other direction of NeEnergyImportHp, as a Double. A counter to difference, and its unit is chosen when the metric is created.' }
       ])
     ]
   },
@@ -508,7 +508,7 @@ const SPECS = [
     groups: { ProcessValue: PROCESS_VALUE_GROUP },
     entries: since('0300', [
       { group: 'ProcessValue', type: 'ProcessValueType', name: 'AnalogSignal',
-        description: 'The process value itself: the reading. The specification puts its unit and range in the signal\'s EngineeringUnits and EURange properties, so here the unit is chosen when the metric is created. Its limits and its percentage are rows of their own below.' },
+        description: 'The process value itself: the reading. The specification puts its unit and range in the signal\'s EngineeringUnits and EURange properties, so here the unit is chosen when the metric is created. Its limits and its percentage are rows of their own.' },
       { group: 'ProcessValue', type: 'ProcessValueType', name: 'ProcessValueSetpoint',
         description: 'The desired value, which the server may or may not control. AnalogSignal is the reading it is compared with.' },
       { group: 'ProcessValue', type: 'ProcessValueType', name: 'Status',

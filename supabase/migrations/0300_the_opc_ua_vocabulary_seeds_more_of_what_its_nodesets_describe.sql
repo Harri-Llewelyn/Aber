@@ -63,7 +63,7 @@ UPDATE public.metric_groups SET description = 'OPC UA process values -- OPC 4000
 -- -------------------------------------------------------------------------------------------------
 -- 2. Data points
 -- -------------------------------------------------------------------------------------------------
--- >>> BEGIN GENERATED opcua_vocabulary_rows -- 49 rows, sha256:86b932097069a07c
+-- >>> BEGIN GENERATED opcua_vocabulary_rows -- 49 rows, sha256:b3263198229d9416
 -- GENERATED from the OPC Foundation NodeSet2 XML by scripts/generate-opcua-vocabulary.mjs.
 -- Do not edit these rows by hand: change ENTRIES in that script and re-run it. Browse names,
 -- datatypes and NodeIds are read from the NodeSet; the selection, prose and units are curated.
@@ -341,21 +341,21 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
   datatype    = EXCLUDED.datatype,
   unit        = EXCLUDED.unit,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.opcua_vocabulary VALUES ('NeEnergyImportHp', 'OPC 40001-4 Machinery Energy', 'nsu=http://opcfoundation.org/UA/Machinery/Energy/;i=6001', 'Accumulated non-electrical energy the machine takes in, for example as heat or gas, in double precision (Hp is the specification''s suffix for that form). Monotonic, so it is a counter to difference rather than a value to read. No unit is offered because it follows the carrier: choose one when the metric is created.', 'Double', NULL, 'nsu=http://opcfoundation.org/UA/Machinery/Energy/;i=6001')
+INSERT INTO public.opcua_vocabulary VALUES ('NeEnergyImportHp', 'OPC 40001-4 Machinery Energy', 'nsu=http://opcfoundation.org/UA/Machinery/Energy/;i=6001', 'Accumulated non-electrical energy the machine takes in, for example as heat or gas, as a Double. Monotonic, so it is a counter to difference rather than a value to read. No unit is offered because it follows the carrier: choose one when the metric is created.', 'Double', NULL, 'nsu=http://opcfoundation.org/UA/Machinery/Energy/;i=6001')
 ON CONFLICT (companion_spec, name) DO UPDATE SET
   node_id     = EXCLUDED.node_id,
   description = EXCLUDED.description,
   datatype    = EXCLUDED.datatype,
   unit        = EXCLUDED.unit,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.opcua_vocabulary VALUES ('NeEnergyExportHp', 'OPC 40001-4 Machinery Energy', 'nsu=http://opcfoundation.org/UA/Machinery/Energy/;i=6009', 'Accumulated non-electrical energy the machine gives out, the other direction of NeEnergyImportHp, in double precision. A counter to difference, and its unit is chosen when the metric is created.', 'Double', NULL, 'nsu=http://opcfoundation.org/UA/Machinery/Energy/;i=6009')
+INSERT INTO public.opcua_vocabulary VALUES ('NeEnergyExportHp', 'OPC 40001-4 Machinery Energy', 'nsu=http://opcfoundation.org/UA/Machinery/Energy/;i=6009', 'Accumulated non-electrical energy the machine gives out, the other direction of NeEnergyImportHp, as a Double. A counter to difference, and its unit is chosen when the metric is created.', 'Double', NULL, 'nsu=http://opcfoundation.org/UA/Machinery/Energy/;i=6009')
 ON CONFLICT (companion_spec, name) DO UPDATE SET
   node_id     = EXCLUDED.node_id,
   description = EXCLUDED.description,
   datatype    = EXCLUDED.datatype,
   unit        = EXCLUDED.unit,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.opcua_vocabulary VALUES ('AnalogSignal', 'OPC 40001-2 Machinery Process Values', 'nsu=http://opcfoundation.org/UA/Machinery/ProcessValues/;i=6033', 'The process value itself: the reading. The specification puts its unit and range in the signal''s EngineeringUnits and EURange properties, so here the unit is chosen when the metric is created. Its limits and its percentage are rows of their own below.', 'Double', NULL, 'nsu=http://opcfoundation.org/UA/Machinery/ProcessValues/;i=6033')
+INSERT INTO public.opcua_vocabulary VALUES ('AnalogSignal', 'OPC 40001-2 Machinery Process Values', 'nsu=http://opcfoundation.org/UA/Machinery/ProcessValues/;i=6033', 'The process value itself: the reading. The specification puts its unit and range in the signal''s EngineeringUnits and EURange properties, so here the unit is chosen when the metric is created. Its limits and its percentage are rows of their own.', 'Double', NULL, 'nsu=http://opcfoundation.org/UA/Machinery/ProcessValues/;i=6033')
 ON CONFLICT (companion_spec, name) DO UPDATE SET
   node_id     = EXCLUDED.node_id,
   description = EXCLUDED.description,
