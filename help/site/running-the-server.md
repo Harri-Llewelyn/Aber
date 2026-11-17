@@ -213,6 +213,11 @@ plus the asset's `sparkplug_id`. Once a shell has left the site, whoever importe
 identifiers.
 Changing the IRI would then give every asset a new identity.
 
+A shell also names its asset by its serial number, its manufacturer's product URI and its Sparkplug
+id. They are the shell's `specificAssetIds`. They don't use the base IRI, so changing the IRI
+doesn't change them. A replay lane has none, because a lane is a recording of a device and not a
+second device.
+
 The twelve built images resolve automatically to the chart's `appVersion`, which the release sets
 equal to the chart version. Chart 1.8.0 can only pull images 1.8.0, so there is nothing to line up
 by hand and no `latest` tag to drift onto.

@@ -8773,6 +8773,29 @@ also needs its origin in `global.corsExtraOrigins`, as any browser client of the
 `SELECT TO authenticated USING (true)`, so the token decides whether a caller is let in, not what
 it sees.
 
+**A shell names its asset by more than its `globalAssetId`.** `assetInformation.specificAssetIds`
+lists the serial number (`partInstanceId`), the manufacturer's product URI (`uriOfTheProduct`) and
+the Sparkplug id (`sparkplugId`), in that order. A client that holds the number printed on a
+machine can match it to the shell. The first two are the Digital Nameplate's own values, with the
+Nameplate's semantic ids (`0112/2///61987#ABA951#009` and `0112/2///61987#ABN590#002`). The
+Sparkplug id has none. An id with no value is left out, and so is the key when none has one.
+`aas-export` and `aas-api` build the list in one function, `buildSpecificAssetIds()` in
+`_shared/aas/shell.ts`. It takes identifiers, not a device row, so a shell that is not a device can
+name its own.
+
+- **`partInstanceId` is Catena-X's name for a serial number.** Its `manufacturerPartId` is not
+  written, because `device_nameplate` has no article-number column.
+- **The names are permanent once Discovery indexes them.** It matches on them, so a rename is a
+  break.
+- **A replay lane lists none.** A lane republishes its original's DBIRTH, so it would carry the
+  original's serial number. A lookup would then return the asset and every lane recorded from it.
+  A lane is a recording of an asset, not a second asset.
+- **The product URI is the one the Nameplate shows.** That is the device's own value when it
+  publishes one, and `device_nameplate.uri_of_the_product` otherwise.
+- **Nothing else about identity changes.** `globalAssetId`, the shell's id and the submodels' ids
+  are still `<AAS_BASE_IRI><sparkplug_id>` and what follows it. The specific ids do not use the base
+  IRI, so changing it leaves them alone.
+
 **What is not served:**
 
 - the Registry and Discovery interfaces;

@@ -5936,6 +5936,12 @@ paths:
         A missing `semanticId` is **omitted, never emitted empty** — an empty `Reference` is
         invalid AAS. The unmapped count comes back in `stats`.
 
+        **The shell names its asset by more than its `globalAssetId`.**
+        `assetInformation.specificAssetIds` lists the serial number (`partInstanceId`), the
+        manufacturer's product URI (`uriOfTheProduct`) and the Sparkplug id (`sparkplugId`), in that
+        order. The first two are the Nameplate's values, with the Nameplate's semantic ids. One with
+        no value is left out, and so is the key when none has one. A replay lane lists none.
+
         `?format=aasx` returns an OPC/ISO 29500 ZIP whose packaged Environment is
         byte-identical to the JSON export, except that a bundled 3D model's `File.value` is
         rewritten to the part name.
@@ -6212,8 +6218,11 @@ paths:
         - bearerAuth: []
       summary: Get a shell's AssetInformation
       description: |
-        `assetKind` and the `globalAssetId` — the identifier the whole shell hangs off, derived
-        as `<AAS_BASE_IRI><sparkplug_id>`.
+        `assetKind`, the `globalAssetId` — the identifier the whole shell hangs off, derived
+        as `<AAS_BASE_IRI><sparkplug_id>` — and `specificAssetIds`: the serial number
+        (`partInstanceId`), the manufacturer's product URI (`uriOfTheProduct`) and the Sparkplug id
+        (`sparkplugId`), in that order. The first two carry the Nameplate's semantic ids. One with no
+        value is left out, and a replay lane has no `specificAssetIds` at all.
       parameters:
         - name: aasIdentifier
           in: path
