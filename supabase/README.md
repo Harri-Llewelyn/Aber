@@ -2666,8 +2666,10 @@ one-row `directory_figures_probe`, so the two collectors never read each other's
   answers and not others.
 - **The query is fixed in the function.** Nothing from a browser becomes PromQL.
 - **A series that appears only at its first event reads 0 while ingestion is scraped.**
-  `aber_ingestion_messages_total{msg_type}` and `aber_ingestion_sequence_messages_missed_total`
-  have no series until something happens. `or sum(aber_ingestion_up) * 0` makes them 0 while the
+  `aber_ingestion_messages_total{msg_type,edge_node}` and `aber_ingestion_sequence_messages_missed_total`
+  have no series until something happens. (`0303` adds the `edge_node` label, which the sums here
+  add up, and reads the same counters for each gateway with `sum by (edge_node)`: see *A gateway
+  shows what arrives from it (0303)*.) `or sum(aber_ingestion_up) * 0` makes them 0 while the
   daemon answers its scrape, and leaves them absent while it does not. The panel's `or vector(0)`
   would claim a zero nobody observed.
 - **`sum` and `min` across ingestion pods.** One pod runs, but a restart leaves two series in the

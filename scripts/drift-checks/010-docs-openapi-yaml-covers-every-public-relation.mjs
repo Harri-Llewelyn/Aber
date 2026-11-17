@@ -23,6 +23,10 @@ export default function check() {
       'one row holding the in-flight pg_net request id for refresh_directory_figures() (0223), as ' +
       'directory_liveness_probe holds liveness\'s. RLS on with no policy and nothing granted to ' +
       'anon/authenticated; the System page reads the figures from directory_figures',
+    gateway_arrival_probe:
+      'one row holding the in-flight pg_net request id for refresh_gateway_arrivals() (0303), as ' +
+      'directory_figures_probe holds the System page\'s. RLS on with no policy and nothing granted ' +
+      'to anon/authenticated; the Gateways drawer reads the figures from gateway_arrivals',
     gateway_revocation_requests:
       'the in-flight pg_net request id behind each archived gateway\'s revocation stamp (0158). RLS ' +
       'on with no policy, nothing granted to anon/authenticated, and service_role may only read it: ' +

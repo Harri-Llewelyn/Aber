@@ -1254,7 +1254,8 @@ Three rules matter more than the rest:
   blocking it drops every notification with no error, no queue and no log — the first sign is an
   operator noticing alerts stopped weeks earlier. CI asserts this flow specifically.
 - **`supabase-db → prometheus:9090`.** `refresh_directory_liveness()` asks Prometheus which targets
-  are up, and `refresh_directory_figures()` asks for the System page's figures, both through
+  are up, `refresh_directory_figures()` asks for the System page's figures, and
+  `refresh_gateway_arrivals()` for each gateway's messages, gaps and misses in its drawer, all through
   `pg_net` from the database. Blocked, the replies never arrive: each run sets every service row to
   `UNKNOWN` and every figure to not observed, which reads as nothing being scraped. CI asserts this
   flow too.
