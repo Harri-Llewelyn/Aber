@@ -14,10 +14,10 @@ export default function check() {
   const writer = read('supabase/functions/_shared/aas/environmentXml.ts');
 
   const made = [...new Set([...shell.matchAll(/modelType: "(\w+)"/g)].map((m) => m[1]))].sort();
-  const elements = [...(writer.match(/const ELEMENT_SHAPES[\s\S]*?\n\};/)?.[0] ?? '').matchAll(/^  (\w+): \[/gm)].map((m) => m[1]);
-  const contents = [...(writer.match(/const CONTENT_SHAPES[\s\S]*?\n\};/)?.[0] ?? '').matchAll(/^  (\w+): "/gm)].map((m) => m[1]);
+  const elements = [...(writer.match(/const ELEMENT_SHAPES[\s\S]*?\n\};/)?.[0] ?? '').matchAll(/^ {2}(\w+): \[/gm)].map((m) => m[1]);
+  const contents = [...(writer.match(/const CONTENT_SHAPES[\s\S]*?\n\};/)?.[0] ?? '').matchAll(/^ {2}(\w+): "/gm)].map((m) => m[1]);
   const shapes = new Set(['AssetAdministrationShell', 'Submodel', 'ConceptDescription']);
-  const shapeKeys = [...(writer.match(/const SHAPES[\s\S]*?\n\};/)?.[0] ?? '').matchAll(/^  (\w+): \[/gm)].map((m) => m[1]);
+  const shapeKeys = [...(writer.match(/const SHAPES[\s\S]*?\n\};/)?.[0] ?? '').matchAll(/^ {2}(\w+): \[/gm)].map((m) => m[1]);
   for (const kind of shapes) {
     const shape = kind.charAt(0).toLowerCase() + kind.slice(1);
     if (!shapeKeys.includes(shape)) problems447.push(`environmentXml.ts has no shape ${shape}`);
