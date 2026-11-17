@@ -19,6 +19,7 @@ sequences, enumerations and patterns, and that is the closest check there is.
 
 Run:  python supabase/functions/aas-export/test_an_aasx_can_carry_its_environment_as_xml.py
 """
+import http.client
 import io
 import json
 import os
@@ -27,8 +28,7 @@ import shutil
 import subprocess
 import sys
 import unittest
-import urllib.error
-import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -198,18 +198,20 @@ class TestTheSource(unittest.TestCase):
 
 
 def request(url, token, payload=None):
+    """(status, body, lower-cased headers) for one POST to the stack: the URL is split and connected to."""
+    parts = urllib.parse.urlsplit(url)
+    connect = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+    headers = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     body = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("apikey", PUBLISHABLE_KEY)
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Content-Type", "application/json")
+    connection = connect(parts.hostname, parts.port, timeout=60)
     try:
-        with urllib.request.urlopen(req, timeout=60) as res:
-            return res.status, res.read(), {k.lower(): v for k, v in res.headers.items()}
-    except urllib.error.HTTPError as err:
-        return err.code, err.read(), {k.lower(): v for k, v in err.headers.items()}
+        connection.request("POST", parts.path + (f"?{parts.query}" if parts.query else ""), body=body, headers=headers)
+        response = connection.getresponse()
+        return response.status, response.read(), {k.lower(): v for k, v in response.getheaders()}
     except OSError:
         return 0, b"", {}
+    finally:
+        connection.close()
 
 
 def sign_in():
