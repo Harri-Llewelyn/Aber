@@ -1910,7 +1910,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           metric={editTarget}
           usageCount={usageCountFor(editTarget.name)}
           suggestion={suggestionForMetric(editTarget, {
-            mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary
+            mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, vda5050: vdaVocabulary
           })}
           candidates={semanticIdChoices}
           onConfirm={handleEditMetric}
