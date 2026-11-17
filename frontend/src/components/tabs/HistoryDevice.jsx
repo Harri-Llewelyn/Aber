@@ -6,6 +6,7 @@ import { ReplayLanesCheck } from '../common/ReplayLanesCheck'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { TimeSeriesChart } from '../common/TimeSeriesChart'
+import { ChartTimeline } from '../common/ChartTimeline'
 import { RefreshButton } from '../common/RefreshButton'
 import { ClearFilters } from '../common/ClearFilters'
 import { ActionButton } from '../common/ActionButton'
@@ -171,8 +172,8 @@ function metaWords({ names, total, groups, refused, reads, stateLine, textRead }
 const WIDTH_SETTLE_MS = 300
 
 /**
- * The Device tab with a device chosen: one chart per metric over the window, stacked on one time
- * axis. The toolbar's Metrics filter narrows the charts, and Buckets takes Auto, the finest the row
+ * The Device tab with a device chosen: one chart per metric over the window, stacked under one time
+ * axis (ChartTimeline). The toolbar's Metrics filter narrows the charts, and Buckets takes Auto, the finest the row
  * cap allows for the metrics chosen, or a coarser one. Both are in the address, with the window.
  * The page says which resolution it shows. Text and flag metrics take the change read
  * (telemetry_changes()) beside the bucket read, and draw every change at its own time while raw
@@ -188,8 +189,8 @@ const WIDTH_SETTLE_MS = 300
  * check is on (`showLanes`, `?replay=1`); the device charted now is always listed.
  *
  * The window zooms as the Audit Trail's does: Zoom in and Zoom out in the time control, and a drag
- * across any chart, which shades the band on every chart and sets it as the window on release, as a
- * new history entry, so Back undoes it.
+ * across any chart or the axis, which shades the band on every chart, says it on the axis, and sets
+ * it as the window on release, as a new history entry, so Back undoes it.
  *
  * The charts are grouped by their catalog datatype (metricGroups()), each group under a heading that
  * opens and closes it. A closed group only hides its charts: the reads, the row cap and the Metrics
@@ -492,9 +493,10 @@ export function HistoryDevice({
               <AlertKey count={new Set(alerts.bands.map(b => b.id)).size} to={alertsAddress(win, { assets: [deviceIds(device).issued] })} />
             )}
           </div>
-          {/* A press on a chart or a strip and a drag zooms (useBandDrag). */}
+          {/* The one time axis, then the groups under it. A press on the axis, a chart or a strip and
+              a drag zooms (useBandDrag). */}
           <div className="trail-scroll">
-          <div className="history-groups" onPointerDown={startBand}>
+          <ChartTimeline className="history-groups" start={reading.start} end={reading.end} now={now} band={shownBand} onPointerDown={startBand}>
             {chartGroups.map(g => {
               const open = !closedGroups.has(g.key)
               const id = `${groupsId}-${g.key}`
@@ -536,7 +538,7 @@ export function HistoryDevice({
                 </section>
               )
             })}
-          </div>
+          </ChartTimeline>
           </div>
         </>
       )}

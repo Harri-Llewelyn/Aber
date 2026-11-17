@@ -1795,8 +1795,41 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   `group`, so its checklist draws them under the same headings.
 - **The charts scroll inside the card**, as Overview's lanes do (`.card-fill-scroll.trail-timeline`,
   then `.trail-scroll`): the toolbar and the row above the charts stay, and a group's heading pins
-  while its charts are in view. A chart is its box's width, so a scrollbar narrows it
-  (`TimeSeriesChart` resizes uPlot on its box), and never sideways.
+  under the time axis while its charts are in view. A chart is its box's width, so a scrollbar
+  narrows it (`TimeSeriesChart` resizes uPlot on its box), and never sideways.
+- **One time axis is over the charts** (`common/ChartTimeline.jsx`: `ChartTimeline` is a
+  `TimelineProvider` and a `ChartAxis` over the groups, in the scroller as `.history-groups`). The axis
+  is `position: sticky; top: 0` on the base surface, as the Audit Trail's `.trail-axis` is, and the
+  headings pin under it by `--chart-axis-height` (24px, 44px while the window reaches past now).
+  Its track takes the plot area's two gutters, `PLOT_LEFT_PX` and `PLOT_RIGHT_PX`, through
+  `--plot-left` and `--plot-right`, which `ChartTimeline` sets from the constants: a tick is above
+  the same time in every plot area and strip. It is `aria-hidden`; each chart's summary names the
+  window. `TimelineProvider` is the page's state and draws nothing, so a page whose lanes have an
+  axis of their own can provide it alone.
+  - **The ticks** are `timelineTicks()` (`utils/timelineAxis.js`): round local times from a ladder of
+    steps (seconds, minutes and hours from local midnight, then days, Mondays, months, years). It
+    takes the finest step whose ticks are as far apart as the longest label needs (`labelPx()`, 7px
+    a glyph, plus `COMFORT_GAP_PX`) and `MIN_TICK_SPACE_PX`, and where no two labels, as drawn, are
+    closer than `TICK_GAP_PX` (14px). A label at an end is held inside the axis. The axis measures
+    its track with a `ResizeObserver`, so a narrower one takes fewer ticks: Day at 360px is 00:00,
+    12:00, 00:00. A span with no step that fits takes the coarsest, thinned from the left.
+  - **Now and the future** have a row of their own under the labels, only while the window reaches
+    past now: the Now badge (`.trail-now`) at the start of the hatch and, when it is
+    `FUTURE_WORDS_PX` wide beyond the badge, "No readings yet" once. The badge never covers a label.
+  - **A chart under it** (`useChartTimeline()` is not null) draws no time labels: `axes[0]` is
+    `size: 0`, with no tick marks and empty labels, and its `splits` read the page's ticks, so the
+    gridlines are under every label, moved by `redraw()` when the ticks change and never by building
+    the chart again. It keeps a thin Now line and the hatch (`.chart-future`, empty), is shorter by
+    the room its own axis took (`TIMED_SAVED_PX`, 25px, with `TIMED_PAD_PX` above and below the
+    plot), and has `cursor.y: false`, so its pointer is a vertical line. A chart outside a
+    `ChartTimeline` draws its own axis, Now badge and words as before: the Metric, Cell and Area
+    tabs.
+  - **One pointer** is `{ at, by }` in the provider, `by` being `plot`, `strip` or `axis`. A number
+    chart publishes its uPlot cursor (`syncKey` still syncs one number chart to the next). A strip
+    and the axis publish from `pointermove`; the number charts put their cursor there with
+    `setCursor(…, true, false)`, which fires the head's hook and publishes nothing, so a cursor
+    is never echoed. A strip derives its run, mark and alerts from `at` and draws `.chart-cursor`;
+    the axis says `pointerWords()` in a `.trail-band-words` pill, except while a band is drawn.
 - **Refresh** is `RefreshButton` with `HISTORY_REFRESH_EVERY` (Off, 30 s, 1 min, 5 min; no 10 s,
   since each read reads every chart again). The interval is the page's state, as Logs keeps it, so
   it outlasts a change of device. `usePolling` runs it only while the window reaches now
@@ -1807,9 +1840,10 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   metrics chosen and the window, resolved to ISO bounds as it opens. It is for an Administrator or
   a Shopfloor Manager, and for a window within `history.export_max_days`; every rule is in
   [History's Export](#historys-export).
-- **Zoom** is the time control's `zoom` and a drag across any chart (`useChartBand`, shared with the Cell
-  tab, over `useBandDrag` on each `.u-over` and state strip, which are the window's width). The page holds the band and every chart
-  shades it (`band`, `.chart-band` with the trail's look) with `bandWords()`; a release calls
+- **Zoom** is the time control's `zoom` and a drag across any chart or the axis (`useChartBand`, shared with the Cell
+  tab, over `useBandDrag` on each `.u-over`, state strip and `.chart-axis-track`, which are the window's width). The page holds the
+  band and every chart shades it (`band`, `.chart-band` with the trail's look); the axis says its words once
+  (`.trail-band-words`, `bandWords()`), where a chart outside a `ChartTimeline` says them itself; a release calls
   `setWin(bandWindow(start, end, axisMs), { replace: false })`, so Back undoes it, keeping the
   metrics and the buckets. uPlot's own selection stays off: one band covers the number charts and
   the state strips alike, and Escape, the 4px click and touch behave as on the Audit Trail.

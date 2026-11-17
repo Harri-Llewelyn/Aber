@@ -1,8 +1,8 @@
 /**
  * Zooming History, as the Audit Trail zooms: Zoom in and Zoom out in the time control, and a drag
  * across a chart's plot area or a state's strip, which shades the band on every chart, says what it
- * covers, and on release sets that stretch as the window (`from` and `to`) as a new history entry,
- * so Back undoes it. A press that moves less than BAND_DRAG_PX is a click, Escape drops a band, and
+ * covers once, on the shared time axis, and on release sets that stretch as the window (`from` and
+ * `to`) as a new history entry, so Back undoes it. A press that moves less than BAND_DRAG_PX is a click, Escape drops a band, and
  * touch starts none. In London's zone on Monday 2 November 2026 at 15:20.
  */
 import React from 'react'
@@ -94,7 +94,7 @@ const show = async (device = LATHE, search = '?span=day&at=2026-11-02') => {
 }
 const plotAreas = () => [...document.querySelectorAll('.u-over')]
 const bands = () => [...document.querySelectorAll('.chart-band')]
-const bandWords = () => [...document.querySelectorAll('.chart-band-words')].map(w => w.textContent)
+const bandWords = () => [...document.querySelectorAll('.chart-band-words, .chart-axis .trail-band-words')].map(w => w.textContent)
 const search = () => window.location.search
 const mouse = (clientX, extra = {}) => ({ pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, clientX, ...extra })
 const timeControl = () => screen.getByRole('group', { name: 'Time window' })
@@ -127,7 +127,7 @@ describe('a drag across a chart', () => {
     fireEvent.pointerMove(plotAreas()[0], mouse(xAt(10, 40)))
     expect(bands()).toHaveLength(2)
     expect(bands().map(b => b.parentElement)).toEqual(plotAreas())
-    expect(bandWords()).toEqual(['10:05 – 10:40, 35 min', '10:05 – 10:40, 35 min'])
+    expect(bandWords()).toEqual(['10:05 – 10:40, 35 min'])
     expect(search()).toBe('?span=day&at=2026-11-02')
 
     fireEvent.pointerUp(plotAreas()[0], mouse(xAt(10, 40)))

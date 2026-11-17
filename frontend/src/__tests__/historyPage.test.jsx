@@ -206,23 +206,31 @@ describe("a device's charts", () => {
     expect(plots[0].opts.scales.x.range).toEqual([new Date(2026, 10, 2).getTime() / 1000, new Date(2026, 10, 3).getTime() / 1000])
   })
 
-  it('marks now and hatches the rest of a window that runs past it', async () => {
+  it('marks now once, on the shared axis, and hatches the rest of a window that runs past it on every chart', async () => {
     await visit(`/history/device/${LATHE}?span=day`)
     await waitFor(() => expect(plots).toHaveLength(2))
-    const over = plots[0].over
-    await waitFor(() => expect(within(over).getByText(/^Now \d\d:\d\d$/)).toBeInTheDocument())
-    const now = within(over).getByText(/^Now /)
+    // One badge for the page, which is not in a chart.
+    const now = await within(document.querySelector('.chart-axis')).findByText(/^Now \d\d:\d\d$/)
+    expect(screen.getAllByText(/^Now \d\d:\d\d$/)).toHaveLength(1)
     const start = new Date(); start.setHours(0, 0, 0, 0)
     const end = new Date(start); end.setDate(end.getDate() + 1)
     const expected = ((Date.now() - start) / (end - start)) * 100
     expect(Math.abs(parseFloat(now.style.left) - expected)).toBeLessThan(1)
-    expect(over.querySelector('.chart-future').style.left).toBe(now.style.left)
+    // Each chart keeps the hatch and its thin line at the same place, and says nothing in it.
+    for (const { over } of plots) {
+      const future = over.querySelector('.chart-future')
+      expect(future.style.left).toBe(now.style.left)
+      expect(future).toBeEmptyDOMElement()
+      expect(over.querySelector('.chart-now')).toBeNull()
+    }
   })
 
   it('draws no now marker on a window that ends at now', async () => {
     await visit(`/history/device/${LATHE}`)
     await waitFor(() => expect(plots).toHaveLength(2))
+    expect(screen.queryByText(/^Now /)).not.toBeInTheDocument()
     expect(within(plots[0].over).queryByText(/^Now /)).not.toBeInTheDocument()
+    expect(document.querySelector('.chart-axis-future-row')).toBeNull()
   })
 
   it('follows a theme switch without a reload', async () => {
@@ -1088,7 +1096,8 @@ describe('more charts than the card holds', () => {
     expect(rule('.trail-scroll')).toMatch(/overflow-x: hidden;[\s\S]*overflow-y: auto;/)
     const head = rule('.history-group-head')
     expect(head).toMatch(/position: sticky;/)
-    expect(head).toMatch(/top: 0;/)
+    // Under the page's one time axis, which pins first (App.css, ChartTimeline).
+    expect(head).toMatch(/top: var\(--chart-axis-height, 0px\);/)
     // Over a chart's band words and alert readout, which sit at z-index 2.
     expect(Number(head.match(/z-index: (\d+);/)?.[1])).toBeGreaterThan(2)
     // A chart holds its absolute screen-reader summary, so the summary scrolls with it rather than

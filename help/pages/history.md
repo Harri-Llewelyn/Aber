@@ -4,7 +4,7 @@ History shows a site's readings over a period you choose. Open it to see how a d
 
 The page opens on **Overview**, its first tab. It shows where readings arrived from every device over the window, before anything is charted. The other tabs:
 
-- **Device** draws one chart for each metric of one device, stacked down the page on the same time axis. Point at a chart to read the value at that moment; every chart shows the same moment. Otherwise each chart's title line shows its latest reading.
+- **Device** draws one chart for each metric of one device, stacked down the page under one time axis. Point at a chart, a band or the axis to read the value at that moment; every chart shows the same moment. Otherwise each chart's title line shows its latest reading. See [The time axis](#the-time-axis).
 - **Metric** compares one metric across every device that reports it, wherever the devices sit. See [The Metric tab](#the-metric-tab-one-metric-across-devices).
 - **Cell** compares one metric across every machine in a cell. A chart for each machine sits on the same scale, so the odd one stands out. Below them, a grid shows the metric's mean at each hour of the day. See [The Cell tab](#the-cell-tab-comparing-the-machines-in-a-cell).
 - **Area** compares one metric across the cells in an area. Each cell's chart is its mean or its total. See [The Area tab](#the-area-tab-comparing-the-cells-in-an-area).
@@ -104,14 +104,26 @@ The address keeps the device, the window, the metrics and the bucket size, so a 
 
 The charts are grouped by the type of value each metric holds, as the Metrics page names it, in this order: **Double**, **Float**, the whole numbers (**Int8** to **UInt64**), **Boolean**, **String** and **Text**, then any other type. A metric the Metrics page does not list is under **Other**, last. Each group's name says how many charts it holds.
 
-With many charts, they scroll inside the card. The line above them stays in view, and so does the name of the group you are scrolling through.
+With many charts, they scroll inside the card. The line above them stays in view, and so do the time axis and the name of the group you are scrolling through.
 
 Closing a group only hides its charts. The **Metrics** filter, the bucket size and what the page reads stay the same. This browser remembers which groups you closed, on every device's page, but a link you share opens them all. The **Metrics** list in the toolbar is grouped the same way.
 
+## The time axis
+
+One time axis sits above the charts, as on the Audit Trail. It stays in view while the charts scroll under it. It lines up with every chart, so one time is at one place all the way down the page.
+
+- **The labels** are round times: the hours on a day, the days on a week, the dates on a month, the months on a year. A narrow screen gets fewer labels. No two labels are closer than 14 pixels, so they never run together.
+- **Now** is a badge under the labels, on a window that runs on past it, such as today's. The part after it is hatched. The axis says **No readings yet** there, once, when the part is wide enough for the words.
+- **Each chart** keeps its gridlines at the labels, a thin line at now, and its own hatched part. It draws no labels of its own.
+- **Point at a chart, a band or the axis** to draw one line through every chart and band. The axis says the time under the pointer. Each chart's title line reads its own value at that time.
+- **Press on the axis and drag** to zoom, as on a chart. See [Zooming in on a stretch](#zooming-in-on-a-stretch).
+
+The Metric, Cell and Area tabs keep a time axis under each chart.
+
 ## Zooming in on a stretch
 
-1. Press on a chart, or on a state's or a flag's band, and drag across the stretch you want. A shaded band follows the pointer, on every chart.
-2. Read the band's words, such as **10:05 – 10:40, 35 min**. They say what the charts will show.
+1. Press on a chart, on a state's or a flag's band, or on the time axis, and drag across the stretch you want. A shaded band follows the pointer, on every chart.
+2. Read the band's words on the axis, such as **10:05 – 10:40, 35 min**. They say what the charts will show.
 3. Let go. The charts show that stretch, in smaller buckets where the shorter window allows.
 4. To go back to the window before, select **Back** in your browser.
 
@@ -163,7 +175,7 @@ Each chart is titled with the metric's name, with its unit in brackets when the 
 - **The key** under a state's band lists each state with its colour and its share of the charted time, the most first. Time after now does not count. The key names the six states with the most time; the rest are counted together as **others**.
 - **A flag's key** gives each value's share and its time, then how many times the flag changed in the window. For example, it says **true 96%** and **23 h 2 min** for true, **false 4%** and **58 min** for false, and **41 changes**. A flag read in buckets says **at least 41 changes**: see [When a chart shows its buckets instead](#when-a-chart-shows-its-buckets-instead).
 - **Pointing at a state's or a flag's band** shows the stretch under the pointer, for example **4 Nov 10:05 – 10:40 · RUNNING, 35 min**, and how much of it was carried forward. A stretch of a few seconds is found from a few pixels away.
-- **Now** marks the present moment on a window that runs on past it, such as today's. The part after it is hatched and says **No readings yet**.
+- **Now** marks the present moment on a window that runs on past it, such as today's. The part after it is hatched. On the Device tab the time axis shows the badge and the words: see [The time axis](#the-time-axis). On the other tabs each chart says **No readings yet** in its own hatched part.
 - **A shaded red stretch** means an alert on the device was firing then. A solid line marks where it started and where it ended, when that is inside the window. Its name is written inside the stretch when there is room. Point at it to read which alert it was, its severity and when it fired. Several alerts at once shade the same stretch more deeply.
 - **A state's or a flag's band** is shaded the same way, over its runs. A row under the band holds each alert's name, so the name never covers a run's. Point at the band to read the alert after the run, for example **Alert: Spindle Overload, warning · 4 Nov 10:05 – 10:40, 35 min**. A band no alert fired over has no row, and is no taller.
 - **The line above the charts** then also says how many alerts fired in the window, for example **Shaded while an alert was firing: 2 alerts in this window**. Select it to list them on the [Alerts](#alerts) tab.
