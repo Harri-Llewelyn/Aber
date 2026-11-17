@@ -213,6 +213,10 @@ plus the asset's `sparkplug_id`. Once a shell has left the site, whoever importe
 identifiers.
 Changing the IRI would then give every asset a new identity.
 
+A Submodel built from a schema keeps its id when you publish a new version of the schema. Its
+`administration.version` says which version made it. The AAS API still answers the ids that carried
+a version's name until 1.10.0, and a file holds only the current one.
+
 The twelve built images resolve automatically to the chart's `appVersion`, which the release sets
 equal to the chart version. Chart 1.8.0 can only pull images 1.8.0, so there is nothing to line up
 by hand and no `latest` tag to drift onto.
