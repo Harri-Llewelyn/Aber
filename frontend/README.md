@@ -1473,7 +1473,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
-| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Export CSV, on the Device, Overview, Metric, Cell and Area tabs, is the readings export ([History's Export](#historys-export)). Cell compares one metric across a cell's machines on one scale, with an hour-of-day heatmap (`HistoryCell`, [History's Cell tab](#historys-cell-tab)) |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked under one time axis (`ChartTimeline`), each head showing its latest reading. Export CSV, on the Device, Overview, Metric, Cell and Area tabs, is the readings export ([History's Export](#historys-export)). Cell compares one metric across a cell's machines on one scale, with an hour-of-day heatmap (`HistoryCell`, [History's Cell tab](#historys-cell-tab)) |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
@@ -1746,24 +1746,44 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   flags take the change read beside it (below).
 - **The row cap picks the resolution.** `pickResolution()` takes the finest of `HISTORY_RESOLUTIONS`
   (`api.js`: the rollups' 1 minute, 5 minutes and 1 hour, then 1 day) whose rows, buckets times
-  the metrics chosen, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from
+  the metrics of one group, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from
   the one holding the window's start, on the epoch grid the rollups use. When no resolution fits
-  every metric, the coarsest reads them in parts. The page says which it shows ("3 of 10 metrics,
-  in 1-minute buckets").
-- **Buckets** (`HISTORY_BUCKETS`, `?bucket=`) is Auto, `pickResolution()`'s pick, or one size, in
-  a `ToolbarPopover` as the time window is. `resolutionFor()` reads a coarser size with every
-  metric in one read. A finer one would pass the cap: `bucketOptions()` lists it `aria-disabled`
-  with `TOO_MANY_BUCKETS` as its tooltip, and an address naming one is read at Auto's pick, the
-  status line saying so. A toolbar keeps no `<select>` (check 193), so this is not one.
-- **Text reads apart under Auto** (`readPlan()`). A metric's kind is known before it is read, from
-  its catalog datatype (`datatypeKind()`: String, Text and UUID are text, Boolean a flag, the rest
-  numbers). Text metrics read at `readableResolution()`: the finest whose buckets are each at least
+  every metric of a group, the coarsest reads them in parts. The status line says how many metrics
+  are charted ("3 of 10 metrics", then ", read in 4 parts" when a group took more than one read),
+  and each group's heading says the size that group is read in.
+- **Each group has its bucket choice** (`HistoryGroupHead`, `common/HistoryGroupHead.jsx`: the
+  `GroupHeading` and, at the row's right-hand end, a `SegmentedControl` named "Double buckets", the
+  shared heading row of History's chart pages). Its options are `bucketOptions()`: Auto, then each
+  of `HISTORY_RESOLUTIONS` by `BUCKET_SEGMENT_LABELS` ("1 min", "5 min", "1 hour", "1 day"), each
+  with its words, "5-minute buckets", as its tooltip. A size finer than the finest the group's own
+  rows allow is `unavailable` (`aria-disabled`, still a tab stop) with `TOO_MANY_BUCKETS` as its
+  tooltip; Auto's tooltip says the size it takes now. `SegmentedControl` needed no change: it
+  already offers an unavailable segment with its reason, as the time window's does, and its other
+  users look and behave as they did. The heading's `detail` says the size read ("5-minute buckets"),
+  and where the choice was too fine for the window, "5-minute buckets, as 1-minute buckets are too
+  many here": the group reads at Auto and the switch keeps the choice. The toolbar has no Buckets
+  control (check 193 keeps a toolbar free of a `<select>`; this is not one).
+- **The choices are in the address** (`?bucket=Double:5m,String:1h`, `useBucketChoices()`): one
+  entry for each group that is not Auto, the group named as its heading names it, the colon
+  written as a colon (`withBucketColons()`). `parseBuckets()` and `bucketsText()` read and write
+  them. Each change replaces the history entry, as a filter does. A link naming a group the device
+  has none of keeps its entry, which another device's group of that name takes. An older link, one
+  size for every chart (`?bucket=5m`), reads as that size for every group of the device and the
+  address is rewritten to one entry for each, replacing the entry. Clear filters writes none. A
+  closed group keeps its entry and its switch.
+- **Each group is a read of its own** (`readPlan()`: `groups` of `{ key, names, text, bucket }`, one
+  for each `metricGroups()` group of the metrics charted). A group counts its own row cap. Under
+  Auto, a text group reads at `readableResolution()`: the finest whose buckets are each at least
   `TEXT_BUCKET_MIN_PX` (3px) across the chart and whose rows fit the cap, since one-minute buckets
-  over a day run a strip's words together. The width is a chart box's, measured at each read; a
-  change of width settles for 300 ms and reads the text again only when it changes their pick.
-  Numbers, flags and a metric the catalog does not know keep `pickResolution()` for their own
-  count. The status line says "3 metrics, in 1-minute buckets; text in 5-minute buckets", and each
-  chart's summary names its own bucket. A Buckets choice reads every chart at it, text included.
+  over a day run a strip's words together. A metric's kind is known before it is read, from its
+  catalog datatype (`datatypeKind()`: String, Text and UUID are text, Boolean a flag, the rest
+  numbers). The width is a chart box's, measured at each read; a change of width settles for
+  300 ms and reads a text group again only when it changes its pick under Auto. Every other group
+  reads at `pickResolution()` for its own metrics. A size chosen reads the group at it, every
+  metric in one read, when it is as coarse as the group's `pickResolution()` or coarser: a text
+  group may read finer than its readable Auto. A finer one would pass the cap, so the group reads
+  at its own Auto and the plan's `refused` names the size. Each chart's summary names its own
+  bucket.
 - **Text and flags take the change read too** (`readPlan()`'s `changes`, whatever the buckets):
   `api.readTelemetryChanges()`, the RPC `telemetry_changes()` (`0254`), beside the bucket read, in
   parts of `HISTORY_CHANGE_SERIES` (50), on each group's buckets. A row that is every change is
@@ -1783,11 +1803,12 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   over them (`?metric=`, `useUrlList`); nothing chosen charts every one. A name the device does not
   have is dropped from the address, so a device switched to keeps the names it shares.
 - **Clear filters** counts and resets the window (off `DEFAULT_HISTORY_WINDOW`), the metrics and
-  the buckets. The device is the page's subject, not a filter, and stays.
+  the buckets (one filter, whichever groups have a choice). The device is the page's subject, not a
+  filter, and stays.
 - **The charts are grouped by catalog datatype** (`metricGroups()`), each group named as the
   Metrics page names the type (`datatypeLabel()`) and in `GROUP_ORDER`: Double, Float, the
   integers, Boolean, String, Text, any other type by its code, then Other for a metric the catalog
-  does not know. Each group is a `GroupHeading` with its count, which opens and closes it, and
+  does not know. Each group is a `HistoryGroupHead` (a `GroupHeading` with its count, which opens and closes it, and its bucket choice), and
   `ExpandAllToggle` does every group from the start of the row above the charts (`groups-header`), as the Audit Trail has it over its sections. A closed
   group only unmounts its charts: the reads, the row cap and the Metrics filter are unchanged. Which
   are closed is kept in this browser (`CLOSED_GROUPS_KEY`, localStorage, by datatype code, read and
@@ -1856,7 +1877,7 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   check to the next device. A link to a lane's charts sets the check, once for each lane opened
   (`HistoryTab`'s `openedLane`), and the lane charts either way: unticking it later removes the
   other lanes from the lists and leaves this one.
-- **The address** is `/history/device/<id>` with the window's keys, `metric`, `bucket` and `replay`;
+- **The address** is `/history/device/<id>` with the window's keys, `metric`, `bucket` (the groups' choices, above) and `replay`;
   `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.
 

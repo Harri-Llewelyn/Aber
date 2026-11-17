@@ -3,7 +3,8 @@ import { HISTORY_CHANGE_READINGS, HISTORY_MAX_CHANGES, HISTORY_MAX_ROWS, HISTORY
 import { pathSegments } from '../hooks/useUrlState'
 import { windowFromQuery, windowToQuery } from '../utils/timeWindow'
 import {
-  DEFAULT_HISTORY_WINDOW, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, bucketCount, bucketOptions,
+  BUCKET_SEGMENT_LABELS, DEFAULT_HISTORY_WINDOW, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_MANY_BUCKETS,
+  bucketCount, bucketOptions,
   bucketStarts, chartPalette, chartSeries, chartSummary, deviceHistoryPath, deviceMatches, deviceMetrics, historyDevices,
   historyPath, inReads, nowFraction, pickResolution, pickedAddress, resolutionFor, splitCarried, validRangeWords,
   validRanges, withAlpha, STATE_KEY_MAX, durationWords, keyWords, latestReading, latestWords, momentWords, runWords,
@@ -81,12 +82,17 @@ describe('the Buckets choice', () => {
     expect(resolutionFor(T0, T0 + 5001 * DAY, 1, '1d')).toEqual({ resolution: null, refused: null })
   })
 
-  it("turns off each size finer than Auto's pick, and none coarser", () => {
-    const on = (auto) => bucketOptions(auto).map(o => [o.value, o.on])
-    expect(on(pickResolution(T0, T0 + DAY, 4))).toEqual([['auto', true], ['1m', false], ['5m', true], ['1h', true], ['1d', true]])
-    expect(on(pickResolution(T0, T0 + DAY, 1))).toEqual([['auto', true], ['1m', true], ['5m', true], ['1h', true], ['1d', true]])
-    expect(on(null)).toEqual([['auto', true], ['1m', false], ['5m', false], ['1h', false], ['1d', false]])
-    expect(bucketOptions(null).map(o => o.label)).toEqual(['Auto buckets', '1-minute buckets', '5-minute buckets', '1-hour buckets', '1-day buckets'])
+  it("offers each size as a segment, and turns off each size finer than the row cap allows, none coarser", () => {
+    const off = (cap) => bucketOptions(cap).map(o => [o.id, Boolean(o.unavailable)])
+    expect(off(pickResolution(T0, T0 + DAY, 4))).toEqual([['auto', false], ['1m', true], ['5m', false], ['1h', false], ['1d', false]])
+    expect(off(pickResolution(T0, T0 + DAY, 1))).toEqual([['auto', false], ['1m', false], ['5m', false], ['1h', false], ['1d', false]])
+    expect(off(null)).toEqual([['auto', false], ['1m', true], ['5m', true], ['1h', true], ['1d', true]])
+    expect(bucketOptions(null).map(o => o.label)).toEqual(['Auto', '1 min', '5 min', '1 hour', '1 day'])
+    // Each size's tooltip says it in words, and a size too fine says why instead.
+    const options = bucketOptions(pickResolution(T0, T0 + DAY, 4), { autoWords: 'Auto words' })
+    expect(options.map(o => o.description)).toEqual(['Auto words', '1-minute buckets', '5-minute buckets', '1-hour buckets', '1-day buckets'])
+    expect(options[1].unavailable).toBe(TOO_MANY_BUCKETS)
+    expect(Object.keys(BUCKET_SEGMENT_LABELS)).toEqual(HISTORY_BUCKETS.slice(1))
   })
 })
 
@@ -114,26 +120,43 @@ describe("a text chart's buckets", () => {
     expect(readableResolution(T0, T0 + 365 * DAY, 1, 300)).toMatchObject({ id: '1d' })
   })
 
-  it('reads text apart under Auto, and the rest as before', () => {
-    const plan = readPlan(T0, T0 + DAY, { names: ['A', 'B', 'S'], textNames: new Set(['S']), widthPx: 960 })
-    expect(plan.groups.map(g => [g.names, g.resolution.id, Boolean(g.text)])).toEqual([[['A', 'B'], '1m', false], [['S'], '5m', true]])
-    expect(plan.refused).toBeNull()
-    expect(readPlan(T0, T0 + DAY, { names: ['S'], textNames: new Set(['S']) }).groups.map(g => g.resolution.id)).toEqual(['5m'])
+  it('reads each group at its own size under Auto, and text apart, in buckets wide enough to read', () => {
+    const groups = [{ key: '10', names: ['A', 'B'] }, { key: '12', names: ['S'], text: true }]
+    const plan = readPlan(T0, T0 + DAY, { groups, widthPx: 960 })
+    expect(plan.groups.map(g => [g.key, g.names, g.resolution.id, g.text, g.bucket, g.refused])).toEqual([
+      ['10', ['A', 'B'], '1m', false, 'auto', null], ['12', ['S'], '5m', true, 'auto', null],
+    ])
+    expect(readPlan(T0, T0 + DAY, { groups: [{ key: '12', names: ['S'], text: true }] }).groups.map(g => g.resolution.id)).toEqual(['5m'])
     // Narrower than 864 px, a day's five-minute buckets are under 3 px, so text reads hourly.
-    expect(readPlan(T0, T0 + DAY, { names: ['S'], textNames: new Set(['S']), widthPx: 800 }).groups.map(g => g.resolution.id)).toEqual(['1h'])
+    expect(readPlan(T0, T0 + DAY, { groups: [{ key: '12', names: ['S'], text: true }], widthPx: 800 }).groups.map(g => g.resolution.id)).toEqual(['1h'])
   })
 
-  it('reads every metric at a Buckets choice, text included, and apart again when the choice is too fine', () => {
-    const chosen = readPlan(T0, T0 + DAY, { names: ['A', 'S'], textNames: new Set(['S']), bucket: '5m', widthPx: 960 })
-    expect(chosen.groups.map(g => [g.names, g.resolution.id])).toEqual([[['A', 'S'], '5m']])
-    // Four metrics over a day are too many at 1 minute, so Auto reads them, text apart.
-    const refused = readPlan(T0, T0 + DAY, { names: ['A', 'B', 'C', 'S'], textNames: new Set(['S']), bucket: '1m', widthPx: 960 })
-    expect(refused.refused).toMatchObject({ id: '1m' })
-    expect(refused.groups.map(g => g.resolution.id)).toEqual(['1m', '5m'])
+  it("counts each group's own row cap, not the page's", () => {
+    // Four metrics over a day are 5,764 one-minute rows: together they read at 5 minutes, as two groups of two at 1.
+    const four = readPlan(T0, T0 + DAY, { groups: [{ key: 'a', names: ['A', 'B', 'C', 'D'] }] })
+    expect(four.groups.map(g => g.resolution.id)).toEqual(['5m'])
+    const two = readPlan(T0, T0 + DAY, { groups: [{ key: 'a', names: ['A', 'B'] }, { key: 'b', names: ['C', 'D'] }] })
+    expect(two.groups.map(g => [g.names, g.resolution.id, g.resolution.perRead])).toEqual([[['A', 'B'], '1m', 2], [['C', 'D'], '1m', 2]])
   })
 
-  it('refuses a window too long for one series even in day buckets', () => {
-    expect(readPlan(T0, T0 + 5001 * DAY, { names: ['A'], textNames: new Set() })).toMatchObject({ problem: true })
+  it("reads a group at the size chosen for it, text included, and at Auto's again when that size is too fine", () => {
+    const groups = [{ key: 'a', names: ['A', 'B'], bucket: '1h' }, { key: 's', names: ['S'], text: true, bucket: '1m' }, { key: 'c', names: ['C'] }]
+    const plan = readPlan(T0, T0 + DAY, { groups, widthPx: 960 })
+    // A coarser size than Auto's reads the group at it with every metric in one read; text may read finer than it would under Auto.
+    expect(plan.groups.map(g => [g.resolution.id, g.resolution.perRead, g.bucket, g.refused])).toEqual([['1h', 2, '1h', null], ['1m', 1, '1m', null], ['1m', 1, 'auto', null]])
+    // Four metrics over a day are too many at 1 minute: the group reads at Auto, and names the size refused.
+    const refused = readPlan(T0, T0 + DAY, { groups: [{ key: 'a', names: ['A', 'B', 'C', 'D'], bucket: '1m' }] })
+    expect(refused.groups[0]).toMatchObject({ resolution: { id: '5m' }, refused: { id: '1m' }, bucket: '1m' })
+    // Refused, text falls back to its own Auto, the readable size.
+    const text = readPlan(T0, T0 + DAY, { groups: [{ key: 's', names: ['A', 'B', 'C', 'D'], text: true, bucket: '1m' }], widthPx: 800 })
+    expect(text.groups[0]).toMatchObject({ resolution: { id: '1h' }, refused: { id: '1m' } })
+    // A size this page does not know is Auto.
+    expect(readPlan(T0, T0 + DAY, { groups: [{ key: 'a', names: ['A'], bucket: '2m' }] }).groups[0]).toMatchObject({ bucket: 'auto', refused: null })
+  })
+
+  it('leaves a group with no metric out, and refuses a window too long for one series even in day buckets', () => {
+    expect(readPlan(T0, T0 + DAY, { groups: [{ key: 'a', names: [] }] }).groups).toEqual([])
+    expect(readPlan(T0, T0 + 5001 * DAY, { groups: [{ key: 'a', names: ['A'] }] })).toMatchObject({ problem: true })
   })
 })
 
@@ -178,6 +201,8 @@ describe("History's address", () => {
     expect(pickedAddress('dev0123', win, { metrics: ['Spindle/LOAD', 'Axis,X'], bucket: '1h' }))
       .toBe('/history/device/dev0123?range=7d&metric=Spindle%2FLOAD,Axis%252CX&bucket=1h')
     expect(pickedAddress('dev0123', DEFAULT_HISTORY_WINDOW, { metrics: [], bucket: 'auto' })).toBe('/history/device/dev0123')
+    // One entry for each group that is not Auto, its colons written as colons.
+    expect(pickedAddress('dev0123', win, { bucket: 'Double:5m,String:1h' })).toBe('/history/device/dev0123?range=7d&bucket=Double:5m,String:1h')
   })
 
   it('writes no window when it is the one History opens on, Last 24 hours', () => {
@@ -568,12 +593,13 @@ describe('every change of a text or a flag', () => {
 
   it('chooses the change read for the text and the flags, whatever the buckets', () => {
     const states = new Set(['S', 'F'])
-    const auto = readPlan(T0, T0 + DAY, { names: ['A', 'F', 'S'], textNames: new Set(['S']), stateNames: states, widthPx: 960 })
-    expect(auto.groups.map(g => [g.names, g.resolution.id, g.changes])).toEqual([[['A', 'F'], '1m', ['F']], [['S'], '5m', ['S']]])
-    const chosen = readPlan(T0, T0 + DAY, { names: ['A', 'F', 'S'], textNames: new Set(['S']), stateNames: states, bucket: '1h' })
-    expect(chosen.groups.map(g => [g.resolution.id, g.changes])).toEqual([['1h', ['F', 'S']]])
+    const groups = [{ key: '10', names: ['A'] }, { key: '11', names: ['F'] }, { key: '12', names: ['S'], text: true }]
+    const auto = readPlan(T0, T0 + DAY, { groups, stateNames: states, widthPx: 960 })
+    expect(auto.groups.map(g => [g.names, g.resolution.id, g.changes])).toEqual([[['A'], '1m', []], [['F'], '1m', ['F']], [['S'], '5m', ['S']]])
+    const chosen = readPlan(T0, T0 + DAY, { groups: groups.map(g => ({ ...g, bucket: '1h' })), stateNames: states })
+    expect(chosen.groups.map(g => [g.resolution.id, g.changes])).toEqual([['1h', []], ['1h', ['F']], ['1h', ['S']]])
     // Without kinds, nothing takes it.
-    expect(readPlan(T0, T0 + DAY, { names: ['A'] }).groups[0].changes).toEqual([])
+    expect(readPlan(T0, T0 + DAY, { groups: [{ key: 'a', names: ['A'] }] }).groups[0].changes).toEqual([])
   })
 
   it("lays a flag's steps on its changes' own times, the value carried in up to the first", () => {

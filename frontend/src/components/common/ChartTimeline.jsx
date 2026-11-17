@@ -34,10 +34,10 @@ export function TimelineProvider({ start, end, now, band = null, children }) {
   return <TimelineContext.Provider value={value}>{children}</TimelineContext.Provider>
 }
 
-/** A readout's class near either end of the axis, which holds it inside, as the Audit Trail's band words are. */
 /** The width of the Now badge, "Now 15:20", which the future part's words come after. */
 const NOW_BADGE_PX = 76
 
+/** A readout's class near either end of the axis, which holds it inside, as the Audit Trail's band words are. */
 const heldBy = (f) => (f > 0.85 ? ' trail-band-words-end' : f < 0.15 ? ' trail-band-words-start' : '')
 
 /**
@@ -48,8 +48,7 @@ const heldBy = (f) => (f > 0.85 ? ' trail-band-words-end' : f < 0.15 ? ' trail-b
  * charts'), so a tick is above the same time in every plot area and strip. A press and a drag on
  * it zooms, as on a chart (`.chart-axis-track` is a track of useChartBand). Sticky, as the Audit
  * Trail's axis is; the group headings pin under it by `--chart-axis-height`. It is hidden from
- * assistive technology: each chart's summary names the window, and the Audit Trail's ticks are
- * tooltips of the same times.
+ * assistive technology: each chart's summary names the window.
  */
 export function ChartAxis() {
   const { start, end, now, ticks, pointer, point, clear, band, axisPx, setAxisPx } = useChartTimeline()

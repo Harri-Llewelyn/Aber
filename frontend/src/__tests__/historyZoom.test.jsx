@@ -147,7 +147,7 @@ describe('a drag across a chart', () => {
     expect(bandWords()).toEqual(['13:00 – 14:00, 1 h'])
     fireEvent.pointerUp(plotAreas()[0], mouse(xAt(13)))
     expect(Object.fromEntries(new URLSearchParams(search()))).toEqual({
-      metric: 'Spindle/LOAD', bucket: '1h', from: '2026-11-02T13:00', to: '2026-11-02T14:00',
+      metric: 'Spindle/LOAD', bucket: 'Other:1h', from: '2026-11-02T13:00', to: '2026-11-02T14:00',
     })
   })
 

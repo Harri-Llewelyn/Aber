@@ -154,7 +154,9 @@ describe("a device's charts", () => {
     // Two metrics over Last 24 hours: 1,441 one-minute buckets each, 2,882 rows, under 5,000.
     expect(args).toMatchObject({ bucketMinutes: 1, assetIds: [LATHE], metricNames: ['Spindle/LOAD', 'Spindle/SPEED'] })
     expect(Date.parse(args.to) - Date.parse(args.from)).toBe(24 * 60 * 60 * 1000)
-    expect(await screen.findByText('2 metrics, in 1-minute buckets')).toBeInTheDocument()
+    // The status line counts the metrics; each group's heading says its size.
+    expect(await screen.findByText('2 metrics')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Other, 2 charts, 1-minute buckets' })).toBeInTheDocument()
   })
 
   it('draws one chart per metric, named with its unit, with a summary a screen reader is given', async () => {
@@ -346,13 +348,9 @@ describe('the toolbar', () => {
   const THREE_DAYS = 'from=2026-10-01T00:00&to=2026-10-04T00:00'
   const metricOf = (search) => new URLSearchParams(search).get('metric')
   const lastRead = () => api.readCarriedTelemetry.mock.calls[api.readCarriedTelemetry.mock.calls.length - 1][0]
-  const bucketButton = () => screen.getByRole('button', { name: /^Buckets: / })
-  const bucketChoices = async () => {
-    fireEvent.click(bucketButton())
-    const panel = await screen.findByRole('dialog', { name: 'Choose the bucket size' })
-    return within(panel).getAllByRole('button')
-  }
-  const offered = (buttons) => buttons.map(b => [b.textContent, b.getAttribute('aria-disabled') === 'true'])
+  // The choice of the group the device's two metrics are in, the catalog not knowing their type: Other.
+  const sizes = () => screen.getByRole('radiogroup', { name: 'Other buckets' })
+  const offered = () => within(sizes()).getAllByRole('radio').map(b => [b.textContent, b.getAttribute('aria-disabled') === 'true'])
   const choose = async (label) => {
     fireEvent.click(screen.getByRole('button', { name: /^Metrics: / }))
     const panel = await screen.findByRole('dialog', { name: 'Metrics' })
@@ -366,7 +364,10 @@ describe('the toolbar', () => {
     expect(within(actions).getByRole('button', { name: /Clear filters \(1\)/ })).toBeInTheDocument()
     expect(actions.lastElementChild).toBe(within(actions).getByRole('group', { name: 'Refresh' }))
     expect(screen.getByRole('button', { name: 'Metrics: All metrics' })).toBeInTheDocument()
-    expect(bucketButton()).toHaveAccessibleName('Buckets: Auto buckets')
+    // Buckets are on each group's heading, not in the toolbar.
+    expect(within(bar).queryByRole('button', { name: /^Buckets/ })).toBeNull()
+    expect(within(bar).queryByRole('radiogroup', { name: /buckets/i })).toBeNull()
+    expect(within(sizes()).getByRole('radio', { name: 'Auto' })).toBeChecked()
   })
 
   it("offers the device's metrics, and charts only those chosen, in the address", async () => {
@@ -375,16 +376,17 @@ describe('the toolbar', () => {
     await choose('Spindle/SPEED')
     await waitFor(() => expect(lastRead()).toMatchObject({ metricNames: ['Spindle/SPEED'] }))
     expect(metricOf(window.location.search)).toBe('Spindle/SPEED')
-    expect(await screen.findByText('1 of 2 metrics, in 1-minute buckets')).toBeInTheDocument()
+    expect(await screen.findByText('1 of 2 metrics')).toBeInTheDocument()
     await waitFor(() => expect(screen.getAllByRole('figure')).toHaveLength(1))
     expect(screen.getByRole('figure', { name: 'Spindle/SPEED (rpm)' })).toBeInTheDocument()
   })
 
   it('gives fewer metrics finer buckets: the row cap counts the metrics chosen', async () => {
     await visit(`/history/device/${LATHE}?${THREE_DAYS}`)
-    expect(await screen.findByText('2 metrics, in 5-minute buckets')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Other, 2 charts, 5-minute buckets' })).toBeInTheDocument()
     await choose('Spindle/LOAD')
-    expect(await screen.findByText('1 of 2 metrics, in 1-minute buckets')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Other, 1 chart, 1-minute buckets' })).toBeInTheDocument()
+    expect(screen.getByText('1 of 2 metrics')).toBeInTheDocument()
     expect(lastRead()).toMatchObject({ bucketMinutes: 1, metricNames: ['Spindle/LOAD'] })
   })
 
@@ -396,54 +398,55 @@ describe('the toolbar', () => {
   })
 
   it('keeps the metrics and the buckets on switching device, where the next device has the metrics', async () => {
-    await visit(`/history/device/${LATHE}?range=1h&metric=Spindle/LOAD,Spindle/SPEED&bucket=5m`)
+    await visit(`/history/device/${LATHE}?range=1h&metric=Spindle/LOAD,Spindle/SPEED&bucket=Other:5m`)
     fireEvent.click(screen.getByRole('button', { name: 'Device: Lathe 3' }))
     const panel = await screen.findByRole('dialog', { name: 'Choose a device' })
     const link = within(panel).getByRole('link', { name: /Mill 2/ })
     const query = new URL(link.getAttribute('href'), 'http://x').searchParams
-    expect(Object.fromEntries(query)).toEqual({ range: '1h', metric: 'Spindle/LOAD,Spindle/SPEED', bucket: '5m' })
+    expect(Object.fromEntries(query)).toEqual({ range: '1h', metric: 'Spindle/LOAD,Spindle/SPEED', bucket: 'Other:5m' })
+    // The choices' colons are written as colons, so the link reads as the address does.
+    expect(link.getAttribute('href')).toContain('bucket=Other:5m')
     act(() => { window.history.pushState({}, '', link.getAttribute('href')); window.dispatchEvent(new PopStateEvent('popstate')) })
     await waitFor(() => expect(lastRead()).toMatchObject({ assetIds: [MILL], metricNames: ['Spindle/LOAD'], bucketMinutes: 5 }))
     await waitFor(() => expect(metricOf(window.location.search)).toBe('Spindle/LOAD'))
   })
 
-  it('offers Auto, then each bucket size, and reads at the one chosen, in the address', async () => {
+  it("offers Auto, then each bucket size, on the group's heading, and reads at the one chosen, in the address", async () => {
     await visit(`/history/device/${LATHE}?span=day&at=2026-11-02`)
     await waitFor(() => expect(lastRead()).toMatchObject({ bucketMinutes: 1 }))
-    const choices = await bucketChoices()
-    expect(offered(choices)).toEqual([
-      ['Auto buckets', false], ['1-minute buckets', false], ['5-minute buckets', false], ['1-hour buckets', false], ['1-day buckets', false],
-    ])
-    expect(choices[0]).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(choices[3])
+    expect(offered()).toEqual([['Auto', false], ['1 min', false], ['5 min', false], ['1 hour', false], ['1 day', false]])
+    expect(within(sizes()).getByRole('radio', { name: 'Auto' })).toBeChecked()
+    fireEvent.click(within(sizes()).getByRole('radio', { name: '1 hour' }))
     await waitFor(() => expect(lastRead()).toMatchObject({ bucketMinutes: 60 }))
-    expect(new URLSearchParams(window.location.search).get('bucket')).toBe('1h')
-    expect(await screen.findByText('2 metrics, in 1-hour buckets')).toBeInTheDocument()
-    expect(bucketButton()).toHaveAccessibleName('Buckets: 1-hour buckets')
+    expect(new URLSearchParams(window.location.search).get('bucket')).toBe('Other:1h')
+    expect(window.location.search).toContain('bucket=Other:1h')
+    expect(await screen.findByRole('button', { name: 'Other, 2 charts, 1-hour buckets' })).toBeInTheDocument()
+    expect(within(sizes()).getByRole('radio', { name: '1 hour' })).toBeChecked()
   })
 
   it('offers a size finer than Auto takes, but off, and says why', async () => {
     await visit(`/history/device/${LATHE}?${THREE_DAYS}`)
-    await screen.findByText('2 metrics, in 5-minute buckets')
-    const choices = await bucketChoices()
-    expect(offered(choices)).toEqual([
-      ['Auto buckets', false], ['1-minute buckets', true], ['5-minute buckets', false], ['1-hour buckets', false], ['1-day buckets', false],
-    ])
-    expect(choices[1]).toHaveAccessibleDescription('Too many buckets for this window: choose fewer metrics or a shorter window.')
+    await screen.findByRole('button', { name: 'Other, 2 charts, 5-minute buckets' })
+    expect(offered()).toEqual([['Auto', false], ['1 min', true], ['5 min', false], ['1 hour', false], ['1 day', false]])
+    const fine = within(sizes()).getByRole('radio', { name: '1 min' })
+    expect(fine).toHaveAccessibleDescription('Too many buckets for this window: choose fewer metrics or a shorter window.')
     const reads = api.readCarriedTelemetry.mock.calls.length
-    fireEvent.click(choices[1])
+    fireEvent.click(fine)
     expect(new URLSearchParams(window.location.search).get('bucket')).toBeNull()
     expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(reads)
   })
 
-  it('reads a link that asks for too fine a size at Auto, and says so', async () => {
-    await visit(`/history/device/${LATHE}?${THREE_DAYS}&bucket=1m`)
-    expect(await screen.findByText('2 metrics, in 5-minute buckets: 1-minute buckets are too many for this window')).toBeInTheDocument()
+  it('reads a link that asks for too fine a size at Auto, and says so on the heading', async () => {
+    await visit(`/history/device/${LATHE}?${THREE_DAYS}&bucket=Other:1m`)
+    expect(await screen.findByRole('button', { name: 'Other, 2 charts, 5-minute buckets, as 1-minute buckets are too many here' })).toBeInTheDocument()
     expect(lastRead()).toMatchObject({ bucketMinutes: 5 })
+    // The choice stays in the address and on the switch, for the window that fits it.
+    expect(new URLSearchParams(window.location.search).get('bucket')).toBe('Other:1m')
+    expect(within(sizes()).getByRole('radio', { name: '1 min' })).toBeChecked()
   })
 
   it('counts and clears the window, the metrics and the buckets, and keeps the device', async () => {
-    await visit(`/history/device/${LATHE}?range=7d&metric=Spindle/LOAD&bucket=1h`)
+    await visit(`/history/device/${LATHE}?range=7d&metric=Spindle/LOAD&bucket=Other:1h`)
     const clear = await screen.findByRole('button', { name: /Clear filters \(3\)/ })
     fireEvent.click(clear)
     await waitFor(() => expect(window.location.pathname + window.location.search).toBe(`/history/device/${LATHE}`))
@@ -704,9 +707,14 @@ describe("a text chart's buckets under Auto", () => {
     get() { return this.classList?.contains('chart-box') ? px : this.classList?.contains('history-body') ? px + 32 : 0 },
   })
 
-  it('reads text apart, in buckets each at least 3 px wide, and says so', async () => {
+  /** A group's heading, named for what it says: its name, its charts, and the size it is read in. */
+  const readIn = (name) => screen.getByRole('button', { name })
+
+  it('reads text apart, in buckets each at least 3 px wide, and says so on its heading', async () => {
     await visit(`/history/device/${ROBOT}`)
-    expect(await screen.findByText('2 metrics, in 1-minute buckets; text in 5-minute buckets')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'String, 1 chart, 5-minute buckets' })).toBeInTheDocument()
+    expect(readIn('Double, 1 chart, 1-minute buckets')).toBeInTheDocument()
+    expect(screen.getByText('2 metrics')).toBeInTheDocument()
     // 960 px across a day: 288 five-minute buckets are 3.3 px; 1,440 one-minute ones would be 0.7.
     expect(readsOf()).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 5]])
     expect(screen.getByRole('img', { name: 'Controller/EXECUTION' })).toHaveAccessibleDescription(/, in 5-minute buckets\./)
@@ -716,7 +724,7 @@ describe("a text chart's buckets under Auto", () => {
   it('measures the page: a narrower one gives text wider buckets', async () => {
     widthIs(150)
     await visit(`/history/device/${ROBOT}?range=1h`)
-    expect(await screen.findByText('2 metrics, in 1-minute buckets; text in 5-minute buckets')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'String, 1 chart, 5-minute buckets' })).toBeInTheDocument()
     expect(readsOf()).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 5]])
   })
 
@@ -725,7 +733,7 @@ describe("a text chart's buckets under Auto", () => {
     window.ResizeObserver = class { constructor(cb) { this.cb = cb; watchers.push(this) } observe() {} disconnect() {} }
     widthIs(960)
     await visit(`/history/device/${ROBOT}?range=1h`)
-    await screen.findByText('2 metrics, in 1-minute buckets')
+    await screen.findByRole('button', { name: 'String, 1 chart, 1-minute buckets' })
     const before = api.readCarriedTelemetry.mock.calls.length
     const page = watchers.find(w => w.cb)
     // From here the settle timer is moved on by hand. A waitFor or a findBy waits on a timer of its
@@ -742,19 +750,20 @@ describe("a text chart's buckets under Auto", () => {
     expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(before)
     await settle()
     vi.useRealTimers()
-    await waitFor(() => expect(screen.getByText('2 metrics, in 1-minute buckets; text in 5-minute buckets')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'String, 1 chart, 5-minute buckets' })).toBeInTheDocument())
     expect(readsOf().slice(before)).toEqual([[['Arm/TORQUE'], 1], [['Controller/EXECUTION'], 5]])
   })
 
-  it('reads every chart at a Buckets choice, text included', async () => {
+  it("reads each group at a link's one size, text included: an older link meant every chart", async () => {
     await visit(`/history/device/${ROBOT}?bucket=5m`)
-    expect(await screen.findByText('2 metrics, in 5-minute buckets')).toBeInTheDocument()
-    expect(readsOf()).toEqual([[['Arm/TORQUE', 'Controller/EXECUTION'], 5]])
+    expect(await screen.findByRole('button', { name: 'Double, 1 chart, 5-minute buckets' })).toBeInTheDocument()
+    expect(readIn('String, 1 chart, 5-minute buckets')).toBeInTheDocument()
+    expect(readsOf()).toEqual([[['Arm/TORQUE'], 5], [['Controller/EXECUTION'], 5]])
   })
 
-  it('reads a metric the catalog does not know as before, with the numbers', async () => {
+  it('reads the metrics the catalog does not know together, as a group of their own', async () => {
     await visit(`/history/device/${LATHE}`)
-    await screen.findByText('2 metrics, in 1-minute buckets')
+    await screen.findByRole('button', { name: 'Other, 2 charts, 1-minute buckets' })
     expect(readsOf()).toEqual([[['Spindle/LOAD', 'Spindle/SPEED'], 1]])
   })
 })
@@ -804,15 +813,16 @@ describe('every change of a text or a flag', () => {
 
   it('asks for the changes of the text and the flags, on the buckets each reads at, beside the bucket read', async () => {
     await visit(`/history/device/${CELL}?range=1h`)
-    expect(await screen.findByText('3 metrics, in 1-minute buckets; text and flags show every change')).toBeInTheDocument()
+    expect(await screen.findByText('3 metrics; text and flags show every change')).toBeInTheDocument()
     expect(api.readTelemetryChanges.mock.calls.map(([a]) => [a.metricNames, a.bucketMinutes])).toEqual([[['Door/OPEN'], 1], [['Controller/EXECUTION'], 1]])
-    expect(api.readCarriedTelemetry.mock.calls.map(([a]) => a.metricNames)).toEqual([['Arm/TORQUE', 'Door/OPEN'], ['Controller/EXECUTION']])
-    // Whatever the buckets: a choice reads them at it, and the changes still.
+    // One read for each group: a number, a flag and a text.
+    expect(api.readCarriedTelemetry.mock.calls.map(([a]) => a.metricNames)).toEqual([['Arm/TORQUE'], ['Door/OPEN'], ['Controller/EXECUTION']])
+    // Whatever the buckets: a choice reads each group at it, and the changes still.
     cleanup()
     api.readTelemetryChanges.mockClear()
-    await visit(`/history/device/${CELL}?range=1h&bucket=1h`)
-    expect(await screen.findByText('3 metrics, in 1-hour buckets; text and flags show every change')).toBeInTheDocument()
-    expect(api.readTelemetryChanges.mock.calls.map(([a]) => [a.metricNames, a.bucketMinutes])).toEqual([[['Controller/EXECUTION', 'Door/OPEN'], 60]])
+    await visit(`/history/device/${CELL}?range=1h&bucket=Boolean:1h,String:1h`)
+    expect(await screen.findByText('3 metrics; text and flags show every change')).toBeInTheDocument()
+    expect(api.readTelemetryChanges.mock.calls.map(([a]) => [a.metricNames, a.bucketMinutes])).toEqual([[['Door/OPEN'], 60], [['Controller/EXECUTION'], 60]])
   })
 
   it("draws a flag as a band of true and false at each change's own time, the value carried in hatched up to the first", async () => {
@@ -888,7 +898,7 @@ describe('every change of a text or a flag', () => {
       return { metric_name: r.metric_name, read: 'change_cap', n_changes: 2500, marked_ts: [new Date(first + 10 * MIN).toISOString()], marked_values: [3], raw_from: r.raw_from }
     })))
     await visit(`/history/device/${CELL}?range=1h`)
-    expect(await screen.findByText('3 metrics, in 1-minute buckets; text and flags show every change')).toBeInTheDocument()
+    expect(await screen.findByText('3 metrics; text and flags show every change')).toBeInTheDocument()
     const figure = screen.getByRole('figure', { name: 'Controller/EXECUTION' })
     expect(figure.querySelector('.history-chart-read')).toHaveTextContent('the last value in each 1-minute bucket, past the 2,000-change cap')
     const marks = figure.querySelectorAll('.chart-state-mixed')
@@ -909,7 +919,7 @@ describe('every change of a text or a flag', () => {
       return { metric_name: name, read: 'reading_cap', marked_ts: [new Date(first + 2 * MIN).toISOString()], marked_values: [2] }
     })))
     await visit(`/history/device/${CELL}?range=1h`)
-    expect(await screen.findByText('3 metrics, in 1-minute buckets; text and flags show the last value in each 1-minute bucket, past the 20,000-reading cap')).toBeInTheDocument()
+    expect(await screen.findByText('3 metrics; text and flags show the last value in each 1-minute bucket, past the 20,000-reading cap')).toBeInTheDocument()
     expect(document.querySelector('.history-chart-read')).toBeNull()
     const figure = screen.getByRole('figure', { name: 'Door/OPEN' })
     // The flag is true in odd buckets, so each bucket is a run of its own: 60 buckets, 59 changes between them.
@@ -927,7 +937,7 @@ describe('every change of a text or a flag', () => {
       { metric_name: name, read: 'retention', raw_from: new Date(2026, 9, 23, 6).toISOString() }))))
     await visit(`/history/device/${CELL}?range=1h`)
     const kept = new Date(2026, 9, 23, 6).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-    expect(await screen.findByText(`3 metrics, in 1-minute buckets; text and flags show the last value in each 1-minute bucket, older than raw retention (kept from ${kept})`)).toBeInTheDocument()
+    expect(await screen.findByText(`3 metrics; text and flags show the last value in each 1-minute bucket, older than raw retention (kept from ${kept})`)).toBeInTheDocument()
     expect(document.querySelectorAll('.chart-state-mixed')).toHaveLength(0)
   })
 })
@@ -951,9 +961,9 @@ describe("the charts' groups", () => {
   })
   afterEach(() => { window.localStorage.removeItem(CLOSED_GROUPS_KEY) })
 
-  /** A group's heading, named "String, 1 chart": its label, then its count as a screen reader hears it. */
+  /** A group's heading, named "String, 1 chart, 5-minute buckets": its label, its count and its size as a screen reader hears them. */
   const heading = (label) => screen.getByRole('button', {
-    name: (name) => name.startsWith(`${label}, `) && /^\d+ charts?$/.test(name.slice(label.length + 2)),
+    name: (name) => name.startsWith(`${label}, `) && /^\d+ charts?, \d+-(minute|hour|day) buckets/.test(name.slice(label.length + 2)),
   })
   const groupNames = () => [...document.querySelectorAll('.history-group')].map(g => g.getAttribute('aria-label'))
   const chartsIn = (name) => [...document.querySelector(`.history-group[aria-label="${name}"]`).querySelectorAll('figure')]
@@ -979,7 +989,7 @@ describe("the charts' groups", () => {
     expect(chartsIn('String')).toEqual([])
     expect(screen.getAllByRole('figure')).toHaveLength(4)
     // Closing a group is not a filter: the line still counts every metric.
-    expect(screen.getByText('5 metrics, in 5-minute buckets')).toBeInTheDocument()
+    expect(screen.getByText('5 metrics')).toBeInTheDocument()
     expect(api.readCarriedTelemetry).toHaveBeenCalledTimes(reads)
     expect(window.location.pathname + window.location.search).toBe(address)
     expect(JSON.parse(window.localStorage.getItem(CLOSED_GROUPS_KEY))).toEqual(['12'])
@@ -1083,7 +1093,7 @@ describe('more charts than the card holds', () => {
     expect(scroller).not.toContainElement(document.querySelector('.groups-header'))
     expect(scroller).not.toContainElement(screen.getByRole('button', { name: /Collapse all/ }))
     const status = document.querySelector('.history-meta')
-    expect(status).toHaveTextContent(/^12 metrics, in /)
+    expect(status).toHaveTextContent(/^12 metrics$/)
     expect(scroller).not.toContainElement(status)
     expect(document.querySelector('.groups-header')).not.toContainElement(document.querySelector('.filter-bar'))
     expect(body).not.toContainElement(document.querySelector('.filter-bar'))

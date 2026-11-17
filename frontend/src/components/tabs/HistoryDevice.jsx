@@ -12,8 +12,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { ActionButton } from '../common/ActionButton'
 import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { FilterDropdown } from '../common/FilterChecklist'
-import { Tooltip } from '../common/Tooltip'
-import { GroupHeading } from '../common/GroupHeading'
+import { HistoryGroupHead } from '../common/HistoryGroupHead'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -33,11 +32,12 @@ import { splitDerived, unitOf } from '../../utils/derivedMetric'
 import {
   EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportWindowProblem, mayExportReadings,
 } from '../../utils/telemetryExport'
-import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
+import { navigate, useUrlList } from '../../hooks/useUrlState'
+import { useBucketChoices } from '../../hooks/useBucketChoices'
 import { holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
-  DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_BUCKETS, HISTORY_RANGES, HISTORY_REFRESH_EVERY,
-  HISTORY_SPANS, TOO_MANY_BUCKETS, bucketOptions, bucketStarts, changeSeries, chartSeries, chartSummary, datatypeKind,
+  DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW, ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY,
+  HISTORY_SPANS, bucketOptions, bucketStarts, changeSeries, chartSeries, chartSummary, datatypeKind,
   derivedReadProblem, deviceMatches, deviceMetrics, inReads, markBuckets, metricGroups, pickResolution, pickedAddress, readPlan,
   readWords, readableResolution, stateReadLine, telemetryKey, validRanges,
 } from '../../utils/history'
@@ -46,7 +46,8 @@ import {
 const CLOCK_MS = 60 * 1000
 
 /**
- * The toolbar's device: its name, opening a list of the others to chart instead, at the same view.
+ * The toolbar's device: its name, opening a list of the others to chart instead, at the same view
+ * (`bucket` is the address's bucket choices, which the next device keeps for the groups it has).
  * The list leaves out replay lanes until its Show replay lanes check is on, except the device
  * charted now. The check is offered while a lane exists (`laneCount`).
  */
@@ -90,41 +91,6 @@ function DeviceSwitcher({ device, devices, win, chosen, bucket, showLanes, setSh
   )
 }
 
-/**
- * Buckets in the toolbar: Auto or one size, in the time window's popover frame. A size finer than
- * Auto's pick is listed but off (`aria-disabled`, keeping its Tab stop), and its tooltip says why.
- */
-function BucketChoice({ value, options, onChange }) {
-  const chosen = options.find(o => o.value === value) ?? options[0]
-  return (
-    <ToolbarPopover
-      label="Choose the bucket size"
-      buttonLabel={`Buckets: ${chosen.label}`}
-      buttonClass="btn btn-sm btn-ghost control-sm history-bucket-pick"
-      tip="Auto takes the finest buckets that fit one read of the metrics chosen"
-      button={<OverflowText>{chosen.label}</OverflowText>}
-    >
-      {({ close }) => (
-        <div className="history-bucket-choices" role="group" aria-label="Buckets">
-          {options.map(o => (
-            <Tooltip key={o.value} text={o.on ? null : TOO_MANY_BUCKETS}>
-              <button
-                type="button"
-                className={`btn btn-sm ${o.value === value ? 'btn-primary' : 'btn-ghost'}${o.on ? '' : ' btn-disabled'}`}
-                aria-pressed={o.value === value}
-                aria-disabled={o.on ? undefined : 'true'}
-                onClick={() => { if (o.on) { onChange(o.value); close() } }}
-              >
-                {o.label}
-              </button>
-            </Tooltip>
-          ))}
-        </div>
-      )}
-    </ToolbarPopover>
-  )
-}
-
 /** A unit for each metric, from the catalog, by name. */
 const unitsOf = (catalog) => new Map((catalog || []).map(m => [m.name, unitOf(m)]))
 
@@ -154,28 +120,30 @@ function writeClosedGroups(keys) {
 const ALL_METRICS = Object.freeze([])
 
 /**
- * The status line: how many metrics are charted, of how many, in which buckets, the text charts'
- * when they read apart in others, and which read the text and flag charts show (`stateLine`,
- * stateReadLine()) when the change read answered for them.
+ * The status line: how many metrics are charted, of how many, in how many parts when one read could
+ * not carry them (`reads`, over the groups), and which read the text and flag charts show
+ * (`stateLine`, stateReadLine()) when the change read answered for them. Each group's own bucket
+ * size is on its heading.
  */
-function metaWords({ names, total, groups, refused, reads, stateLine, textRead }) {
+function metaWords({ names, total, groupCount, reads, stateLine }) {
   const count = names.length < total ? `${names.length} of ${total} metrics` : `${total} metric${total === 1 ? '' : 's'}`
-  const main = groups.find(g => !g.text) ?? groups[0]
-  const text = !textRead && groups.find(g => g.text && g !== main && g.resolution.id !== main.resolution.id)
-  const why = refused ? `: ${refused.words} are too many for this window` : ''
-  const parts = reads > groups.length ? `, read in ${reads} parts` : ''
+  const parts = reads > groupCount ? `, read in ${reads} parts` : ''
   const states = stateLine ? `; ${stateLine.line}` : ''
-  return `${count}, in ${main.resolution.words}${why}${text ? `; text in ${text.resolution.words}` : ''}${parts}${states}`
+  return `${count}${parts}${states}`
 }
+
+/** What a group's heading says it is read in: its size, and the one chosen when that was too fine. */
+const readInWords = (g) => (g.refused ? `${g.resolution.words}, as ${g.refused.words} are too many here` : g.resolution.words)
 
 /** How long a change of width settles before the text charts' buckets are picked again. */
 const WIDTH_SETTLE_MS = 300
 
 /**
  * The Device tab with a device chosen: one chart per metric over the window, stacked under one time
- * axis (ChartTimeline). The toolbar's Metrics filter narrows the charts, and Buckets takes Auto, the finest the row
- * cap allows for the metrics chosen, or a coarser one. Both are in the address, with the window.
- * The page says which resolution it shows. Text and flag metrics take the change read
+ * axis (ChartTimeline). The toolbar's Metrics filter narrows the charts, and each group's heading
+ * has its own bucket choice: Auto, the finest the row cap allows for that group's metrics (text
+ * the finest that is readable), or a coarser size. Both are in the address, with the window. Each
+ * heading says which size its group is read in. Text and flag metrics take the change read
  * (telemetry_changes()) beside the bucket read, and draw every change at its own time while raw
  * telemetry holds the window and the cap allows; otherwise their buckets, marked, and the status
  * line or the chart says why. A read is made again when the device, the window, the
@@ -206,7 +174,9 @@ export function HistoryDevice({
   const units = useMemo(() => unitsOf(catalog), [catalog])
   const kinds = useMemo(() => new Map((catalog || []).map(m => [m.name, datatypeKind(m.datatype)])), [catalog])
   const [chosen, setChosen] = useUrlList('metric', ALL_METRICS, { allowed: metrics })
-  const [bucket, setBucket] = useUrlState('bucket', 'auto', { allowed: HISTORY_BUCKETS })
+  // Every group of the device's metrics, which the buckets' choices are named by; the charted groups follow `names`.
+  const allGroups = useMemo(() => metricGroups(metrics, catalog), [metrics, catalog])
+  const { choices, raw: bucketText, choose: chooseBucket, clear: clearBuckets } = useBucketChoices(allGroups.map(g => g.label))
   const names = useMemo(() => (chosen.length ? metrics.filter(m => chosen.includes(m)) : metrics), [metrics, chosen])
   const [reading, setReading] = useState(null)
   const [exporting, setExporting] = useState(null)
@@ -233,6 +203,8 @@ export function HistoryDevice({
   }
 
   const namesKey = names.join('\n')
+  // The choices of the groups charted, by value: another group's choice reads nothing.
+  const choicesKey = metricGroups(names, catalog).map(g => `${g.label}:${choices.get(g.label) ?? 'auto'}`).join('\n')
   const textKey = [...textNames].join('\n')
   const statesKey = [...stateNames].join('\n')
   const windowKey = JSON.stringify(win)
@@ -244,14 +216,18 @@ export function HistoryDevice({
       setReading({ problem: 'Set both ends of the custom range to chart it.' })
       return
     }
-    const plan = readPlan(start.getTime(), end.getTime(), { names, textNames, stateNames, bucket, widthPx: chartPx() })
+    // One read for each group, at its own size and counting its own rows (readPlan()).
+    const groupsToRead = metricGroups(names, catalog).map(g => ({
+      key: g.key, names: g.names, text: textNames.has(g.names[0]), bucket: choices.get(g.label) ?? 'auto',
+    }))
+    const plan = readPlan(start.getTime(), end.getTime(), { groups: groupsToRead, stateNames, widthPx: chartPx() })
     if (plan.problem) {
       setReading({ problem: 'This window is too long to chart. At 1-day buckets, one metric would need more buckets than one read may carry. Choose a shorter window.' })
       return
     }
-    const { groups, refused } = plan
+    const { groups } = plan
     const resolutionOf = new Map(groups.flatMap(g => g.names.map(n => [n, g.resolution])))
-    const span = { start: start.getTime(), end: end.getTime(), groups, resolutionOf, refused, at, names, windowText: windowWords(win, at) }
+    const span = { start: start.getTime(), end: end.getTime(), groups, resolutionOf, at, names, windowText: windowWords(win, at) }
     if (names.length === 0) {
       setReading({ ...span, byMetric: new Map(), changes: new Map(), reads: 0 })
       return
@@ -298,7 +274,7 @@ export function HistoryDevice({
     }
     // The window and the metrics by value: a new object of the same window is the same read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device.asset_id, namesKey, textKey, statesKey, windowKey, bucket, catalog])
+  }, [device.asset_id, namesKey, textKey, statesKey, windowKey, choicesKey, catalog])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -319,12 +295,15 @@ export function HistoryDevice({
     watcher.observe(body)
     return () => { watcher.disconnect(); clearTimeout(timer) }
   }, [])
-  // A width that changes the text charts' buckets reads them again; any other width reads nothing.
+  // A width that changes a text group's buckets under Auto reads them again; any other width reads nothing.
   useEffect(() => {
-    const text = reading?.groups?.find(g => g.text)
-    if (settledPx === null || !text) return
-    const pick = readableResolution(reading.start, reading.end, text.names.length, settledPx)
-    if (pick && pick.id !== text.resolution.id) read().catch(() => {})
+    if (settledPx === null || !reading?.groups) return
+    const moved = reading.groups.some((g) => {
+      if (!g.text || !(g.bucket === 'auto' || g.refused)) return false
+      const pick = readableResolution(reading.start, reading.end, g.names.length, settledPx)
+      return pick && pick.id !== g.resolution.id
+    })
+    if (moved) read().catch(() => {})
     // On a settled width only: a new read settles `reading` and must not re-pick by itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settledPx])
@@ -333,11 +312,9 @@ export function HistoryDevice({
   const live = holdsNow(win, now)
   usePolling(read, every * 1000, live && every > 0)
 
-  // What Buckets offers for the window and the metrics chosen now: Auto's pick and coarser.
+  // The window as it stands now, for what each group's heading offers: its sizes from the finest its rows allow.
   const { start: shownStart, end: shownEnd } = windowBounds(win, now)
-  const auto = shownStart && shownEnd && shownEnd > shownStart
-    ? pickResolution(shownStart.getTime(), shownEnd.getTime(), names.length)
-    : null
+  const windowFits = Boolean(shownStart && shownEnd && shownEnd > shownStart)
 
   const canExport = mayExportReadings(userRole)
   const exportDays = exportMaxDays(useSetting(EXPORT_MAX_DAYS_KEY, EXPORT_MAX_DAYS))
@@ -369,8 +346,9 @@ export function HistoryDevice({
     return next
   })
 
-  const filterCount = [!sameWindow(win, DEFAULT_HISTORY_WINDOW), chosen.length > 0, bucket !== 'auto'].filter(Boolean).length
-  const clear = () => { setWin(DEFAULT_HISTORY_WINDOW); setChosen(ALL_METRICS); setBucket('auto') }
+  const bucketsChosen = [...choices.values()].some(id => id !== 'auto')
+  const filterCount = [!sameWindow(win, DEFAULT_HISTORY_WINDOW), chosen.length > 0, bucketsChosen].filter(Boolean).length
+  const clear = () => { setWin(DEFAULT_HISTORY_WINDOW); setChosen(ALL_METRICS); clearBuckets() }
 
   const charts = useMemo(() => {
     if (!reading?.byMetric) return []
@@ -416,7 +394,7 @@ export function HistoryDevice({
     <>
       <div className="filter-bar">
         <DeviceSwitcher
-          device={device} devices={devices} win={win} chosen={chosen} bucket={bucket}
+          device={device} devices={devices} win={win} chosen={chosen} bucket={bucketText}
           showLanes={showLanes} setShowLanes={setShowLanes} laneCount={laneCount}
         />
         <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} zoom />
@@ -431,7 +409,6 @@ export function HistoryDevice({
           width="sm"
           tip="Chart only the metrics you choose. Fewer metrics fit finer buckets."
         />
-        <BucketChoice value={bucket} options={bucketOptions(auto)} onChange={setBucket} />
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
           <ActionButton
@@ -484,8 +461,7 @@ export function HistoryDevice({
             />
             <p className="history-meta" role="status">
               {metaWords({
-                names: reading.names, total: metrics.length, groups: reading.groups, refused: reading.refused, reads: reading.reads,
-                stateLine, textRead: charts.some(c => c.read && c.kind === 'text'),
+                names: reading.names, total: metrics.length, groupCount: reading.groups.length, reads: reading.reads, stateLine,
               })}
               {reading.loading && ' · reading again…'}
             </p>
@@ -501,18 +477,31 @@ export function HistoryDevice({
               const open = !closedGroups.has(g.key)
               const id = `${groupsId}-${g.key}`
               const shown = g.charts
+              const readGroup = reading.groups.find(r => r.key === g.key)
+              // What this group offers now: the finest size its own rows allow, and what Auto takes.
+              const cap = windowFits ? pickResolution(shownStart.getTime(), shownEnd.getTime(), g.names.length) : null
+              const text = textNames.has(g.names[0])
+              const autoAt = windowFits && text ? readableResolution(shownStart.getTime(), shownEnd.getTime(), g.names.length, settledPx ?? chartPx()) : cap
+              const autoWords = autoAt
+                ? `Auto takes the finest buckets that ${text ? 'stay readable and ' : ''}fit one read of this group's metrics: ${autoAt.words} now.`
+                : null
               return (
                 <section key={g.key} className="history-group" aria-label={g.label}>
-                  <div className="history-group-head">
-                    <GroupHeading
-                      open={open}
-                      onToggle={() => setGroupsOpen([g.key], !open)}
-                      label={g.label}
-                      count={shown.length}
-                      countLabel={`${shown.length} ${shown.length === 1 ? 'chart' : 'charts'}`}
-                      controls={id}
-                    />
-                  </div>
+                  <HistoryGroupHead
+                    open={open}
+                    onToggle={() => setGroupsOpen([g.key], !open)}
+                    label={g.label}
+                    count={shown.length}
+                    countLabel={`${shown.length} ${shown.length === 1 ? 'chart' : 'charts'}`}
+                    detail={readGroup ? readInWords(readGroup) : undefined}
+                    controls={id}
+                    buckets={{
+                      label: `${g.label} buckets`,
+                      value: choices.get(g.label) ?? 'auto',
+                      options: bucketOptions(cap, { autoWords }),
+                      onChange: (size) => chooseBucket(g.label, size),
+                    }}
+                  />
                   <div id={id} className="history-charts" hidden={!open}>
                     {open && shown.map(c => (
                       <TimeSeriesChart
