@@ -277,6 +277,12 @@ jobs:
           node scripts/generate-ashrae223-vocabulary.mjs
           node scripts/check-ashrae223-seed-sync.mjs
 
+      # The Built-in tab lists the alert rules from the file that provisions them, read when the
+      # bundle is built and committed as JSON (the frontend image cannot see grafana/). A stale copy
+      # lists rules the file no longer holds, or misses one it does.
+      - name: Verify The Built-in Alerts List Is Current
+        run: node scripts/generate-built-in-alerts.mjs --check
+
       # Checks counts, lists, links and pinned versions only; never reasoning. A stale count is worse
       # than no count because a reader cannot tell it is stale.
       - name: Verify Documentation Matches The Repository
