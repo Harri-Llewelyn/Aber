@@ -19,13 +19,12 @@ deployed functions agree with each other and with the vendored IDTA schema.
 Run:  python supabase/functions/aas-export/test_specific_asset_ids.py
 """
 import base64
+import http.client
 import json
 import os
 import sys
 import unittest
-import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -35,7 +34,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@aber.local")
 DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "aber123")
-API_BASE = f"{SUPABASE_URL}/functions/v1/aas-api"
+API_BASE = "/functions/v1/aas-api"
 
 # The nameplate elements' IRDIs, as 0002 seeds them and as the Nameplate itself carries them.
 SERIAL_NUMBER_IRDI = "0112/2///61987#ABA951#009"
@@ -59,27 +58,27 @@ def b64url(value: str) -> str:
     return base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
 
 
-def request(method: str, url: str, token: str, payload: dict | None = None, headers: dict | None = None):
-    """(status, parsed JSON) for one call as `token`'s holder; a transport failure is status 0."""
+def request(method: str, path: str, token: str, payload: dict | None = None, headers: dict | None = None):
+    """(status, parsed JSON) for one call through the gateway as `token`'s holder; status 0 when it cannot be reached."""
+    request_headers = {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}", **(headers or {})}
     body = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url, data=body, method=method)
-    req.add_header("apikey", PUBLISHABLE_KEY)
-    req.add_header("Authorization", f"Bearer {token}")
-    if payload is not None:
-        req.add_header("Content-Type", "application/json")
-    for key, value in (headers or {}).items():
-        req.add_header(key, value)
+    if body is not None:
+        request_headers["Content-Type"] = "application/json"
+    gateway = urllib.parse.urlsplit(SUPABASE_URL)
+    connect = http.client.HTTPSConnection if gateway.scheme == "https" else http.client.HTTPConnection
+    connection = connect(gateway.hostname, gateway.port, timeout=45)
     try:
-        with urllib.request.urlopen(req, timeout=45) as res:
-            return res.status, json.loads(res.read() or b"{}")
-    except urllib.error.HTTPError as err:
-        raw = err.read() or b"{}"
-        try:
-            return err.code, json.loads(raw)
-        except json.JSONDecodeError:
-            return err.code, {"raw": raw.decode(errors="replace")}
+        connection.request(method, path, body=body, headers=request_headers)
+        response = connection.getresponse()
+        status, raw = response.status, response.read() or b"{}"
     except OSError:
         return 0, {}
+    finally:
+        connection.close()
+    try:
+        return status, json.loads(raw)
+    except json.JSONDecodeError:
+        return status, {"raw": raw.decode(errors="replace")}
 
 
 def sign_in() -> str | None:
@@ -110,7 +109,7 @@ def set_nameplate(serial_number: str | None, uri_of_the_product: str | None) -> 
     """The fixture's two identity columns, exactly one row changed. None clears a column."""
     status, rows = request(
         "PATCH",
-        f"{SUPABASE_URL}/rest/v1/device_nameplate?device_id=eq.{aas_fixture.DEVICE_UUID}",
+        f"/rest/v1/device_nameplate?device_id=eq.{aas_fixture.DEVICE_UUID}",
         TOKEN,
         {"serial_number": serial_number, "uri_of_the_product": uri_of_the_product},
         {"Prefer": "return=representation"},
@@ -123,8 +122,7 @@ class Served:
     """One device's shell as aas-export writes it and as aas-api serves it, read together."""
 
     def __init__(self):
-        status, body = request("POST", f"{SUPABASE_URL}/functions/v1/aas-export", TOKEN,
-                               {"device_id": DEVICE["id"]})
+        status, body = request("POST", "/functions/v1/aas-export", TOKEN, {"device_id": DEVICE["id"]})
         assert status == 200, f"aas-export returned {status}: {body}"
         self.exported = body["aas"]
         self.shell = self.exported["assetAdministrationShells"][0]
