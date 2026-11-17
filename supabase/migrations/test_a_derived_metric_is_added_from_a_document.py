@@ -1,14 +1,15 @@
 # suite:
 #   lanes: db
-#   why: 0297 -- who adds a document of derived metrics (an Administrator, with the second factor, and
-#     no machine identity or other role); apply_derived_metrics() (a dry run and a refusal write
-#     nothing, new and unchanged are told apart, nothing is edited or deleted, a changed definition
-#     or description and a name that is taken are refused and say what to do, every input the
-#     catalogue lacks is named at once, every other refusal is the table's own words); the Audit
-#     Trail rows; and the round trip through derived_metrics_document().
+#   why: 0297 -- who applies a document of derived metrics (an Administrator, with the second factor,
+#     and no machine identity or other role); apply_derived_metrics() (a dry run and a refusal write
+#     nothing, new, changed and unchanged are told apart, a description is the one thing that changes
+#     and a file that leaves it out clears it, nothing is deleted, a changed definition and a name that
+#     is taken are refused and say what to do, every input the catalogue lacks is named at once, every
+#     other refusal is the table's own words); the Audit Trail rows; and the round trip through
+#     derived_metrics_document().
 
 """
-A derived metric is added from a document (0297).
+A derived metric is added, or its description changed, from a document (0297).
 
     python supabase/migrations/test_a_derived_metric_is_added_from_a_document.py
 
@@ -16,22 +17,24 @@ Requires a migrated Supabase database (54322 by default; `npm run test:db` start
 
 What is held here:
 
-  * Who adds: an Administrator, as the catalogue's insert policy asks. A Shopfloor Manager, an
+  * Who applies: an Administrator, as the catalogue's insert and update policies ask. A Shopfloor Manager, an
     Operator, an Auditor, a person with no role, a machine identity and anon are refused. With
     security.require_mfa_for_managers on, an Administrator needs a session that gave its code. Every
     signed-in role reads derived_metrics_document().
   * apply_derived_metrics(): a dry run writes nothing; one refusal writes nothing at all; a new metric
     is a Double with its definition and the unit the trigger works out; one that exists with the same
     definition and description is unchanged, whatever the order of its states or its inputs, and
-    writes nothing. It never edits and never deletes: another definition or description under a name
-    that exists, a measured metric's name and a deprecated one's are refused, and each says what to do.
+    writes nothing. One with the same definition and another description is changed: the result says
+    so with the description before and after, the apply sets it and nothing else, and a file that
+    leaves the description out clears it. It never deletes: another definition under a name that
+    exists, a measured metric's name and a deprecated one's are refused, and each says what to do.
   * What a document may say: no unit and no datatype, the keys of the kind and no others, an input the
     catalogue lacks or that is derived refused by name (every one in one pass), a deprecated input
     accepted as the table accepts it.
   * Every other refusal is enforce_derived_metric()'s own: each reason is the very sentence a direct
     INSERT raises, at the line of the input or the states it names.
-  * The Audit Trail: one INSERT row for each metric added, naming the person, and none for a dry run,
-    an unchanged metric or a refusal.
+  * The Audit Trail: one INSERT row for each metric added and one UPDATE row for each changed, naming
+    the person, and none for a dry run, an unchanged metric or a refusal.
   * derived_metrics_document(): the derived metrics in name order, a deprecated one not among them;
     apply_derived_metrics() of it reports every metric unchanged.
 
@@ -242,6 +245,15 @@ class Access(DerivedBase):
         self.assertEqual(self.derived_rows(), before)
         self.assertEqual(self.apply([rate()], user_id=ADMIN_ID)[0]["status"], "new")
 
+    def test_only_an_administrator_changes_a_description(self):
+        for user_id in (MANAGER_ID, OPERATOR_ID, AUDITOR_ID, NOBODY_ID, MACHINE_ID):
+            for dry_run in (True, False):
+                with self.subTest(user=user_id, dry_run=dry_run):
+                    self.assertRefused("42501", self.apply, [rate(RATE, description="Mine.")], dry_run, user_id)
+        self.assertEqual(self.row(RATE)[3], RATE_DESCRIPTION)
+        self.assertEqual(self.apply([rate(RATE, description="Theirs.")], user_id=ADMIN_ID)[0]["status"], "changed")
+        self.assertEqual(self.row(RATE)[3], "Theirs.")
+
     def test_the_function_and_the_table_agree_on_who_may_add(self):
         """The catalogue's insert policy refuses the roles the function refuses, and admits the one it admits."""
         for user_id in (MANAGER_ID, OPERATOR_ID, AUDITOR_ID):
@@ -251,6 +263,15 @@ class Access(DerivedBase):
                                    (f"{T}/By_Hand", json.dumps({"kind": "counter_rate", "input": PARTS})))
         self.as_person(ADMIN_ID, "INSERT INTO public.metric_catalog (name, datatype, derivation) VALUES (%s, 10, %s::jsonb);",
                        (f"{T}/By_Hand", json.dumps({"kind": "counter_rate", "input": PARTS})))
+
+    def test_the_update_policy_asks_what_the_function_asks(self):
+        """A direct UPDATE of a description is the Administrator's too, as the function's change is."""
+        for user_id in (MANAGER_ID, OPERATOR_ID, AUDITOR_ID):
+            with self.subTest(user=user_id):
+                self.as_person(user_id, "UPDATE public.metric_catalog SET description = 'By hand' WHERE name = %s;", (RATE,))
+                self.assertEqual(self.row(RATE)[3], RATE_DESCRIPTION, "a row the policy hides is not updated")
+        self.as_person(ADMIN_ID, "UPDATE public.metric_catalog SET description = 'By hand' WHERE name = %s;", (RATE,))
+        self.assertEqual(self.row(RATE)[3], "By hand")
 
     def test_anon_is_refused(self):
         self.cur.execute("SAVEPOINT anon_call;")
@@ -266,6 +287,11 @@ class Access(DerivedBase):
             err = self.assertRefused("42501", self.apply, [rate()], dry_run, ADMIN_ID)
             self.assertEqual(err.diag.message_detail, "mfa_required")
         self.assertEqual(self.apply([rate()], user_id=ADMIN_ID, aal="aal2")[0]["status"], "new")
+        for dry_run in (True, False):
+            err = self.assertRefused("42501", self.apply, [rate(RATE, description="Mine.")], dry_run, ADMIN_ID)
+            self.assertEqual(err.diag.message_detail, "mfa_required")
+        self.assertEqual(self.row(RATE)[3], RATE_DESCRIPTION)
+        self.assertEqual(self.apply([rate(RATE, description="Mine.")], user_id=ADMIN_ID, aal="aal2")[0]["status"], "changed")
         # Reading is not a write.
         self.assertEqual([m["name"] for m in self.document(user_id=OPERATOR_ID)], [f"{T}/New_Rate", RATE])
 
@@ -339,20 +365,98 @@ class Applying(DerivedBase):
         self.assertIn("deprecate", message)
         self.assertIn("Superseded By", message)
         self.assertEqual(self.apply([rate(RATE, PHASE_A, description=RATE_DESCRIPTION)], dry_run=False)[0]["status"], "refused")
-        self.assertEqual(self.row(RATE), before, "an upload never edits")
+        self.assertEqual(self.row(RATE), before, "a refusal writes nothing")
 
-    def test_a_changed_description_is_refused_and_says_where_it_cannot_be_edited(self):
+    def test_another_definition_with_another_description_is_refused_for_the_definition_alone(self):
         before = self.row(RATE)
-        results = self.apply([rate(RATE, description="Something else.")])
+        results = self.apply([rate(RATE, PHASE_A, description="Something else.")])
         (path, message), = self.reasons(results)
-        self.assertEqual(path, "$[0].description")
-        self.assertIn("another description", message)
-        self.assertIn("never edits", message)
-        self.assertIn("cannot edit a description", message)
-        # A file that leaves the description out says another thing than a metric that has one.
-        (path, _), = self.reasons(self.apply([rate(RATE)]))
-        self.assertEqual(path, "$[0].name")
+        self.assertEqual((results[0]["status"], path), ("refused", "$[0].name"))
+        self.assertIn("another definition", message)
+        self.assertEqual((results[0]["changes"], results[0]["before"], results[0]["after"]), ([], {}, {}))
         self.assertEqual(self.row(RATE), before)
+
+    def test_a_changed_description_is_a_change_and_a_dry_run_writes_nothing(self):
+        before = (self.derived_rows(), self.audit())
+        results = self.apply([rate(RATE, description="Something else.")], dry_run=True)
+        self.assertEqual((self.derived_rows(), self.audit()), before)
+        (result,) = results
+        self.assertEqual((result["status"], result["reasons"], result["id"], result["units"]),
+                         ("changed", [], self.row(RATE)[0], "COUNT/HOUR"))
+        self.assertEqual(result["changes"], ["description"])
+        self.assertEqual(result["before"], {"description": RATE_DESCRIPTION})
+        self.assertEqual(result["after"], {"description": "Something else."})
+        self.assertEqual(result["derivation"], {"kind": "counter_rate", "input": PARTS})
+
+    def test_applying_a_changed_description_sets_it_and_nothing_else_and_files_one_update_row(self):
+        before_row = self.row(RATE)
+        before_audit = len(self.audit())
+        (result,) = self.apply([rate(RATE, description="  Something else.  ")])
+        self.assertEqual((result["status"], result["changes"], result["after"]),
+                         ("changed", ["description"], {"description": "Something else."}))
+        after_row = self.row(RATE)
+        # id, name, datatype, description, units, derivation, deprecated, superseded_by, semantic_id, standard
+        self.assertEqual(after_row[3], "Something else.")
+        self.assertEqual(after_row[:3] + after_row[4:], before_row[:3] + before_row[4:])
+        (row,) = self.audit()[before_audit:]
+        self.assertEqual(row, ("UPDATE", before_row[0], ADMIN_ID, "user", RATE))
+        self.cur.execute("SELECT old_data ->> 'description', new_data ->> 'description' FROM public.audit_trail"
+                         " WHERE entity_type = 'metric_catalog' AND entity_id = %s AND action = 'UPDATE';", (before_row[0],))
+        self.assertEqual(self.cur.fetchall(), [(RATE_DESCRIPTION, "Something else.")])
+
+    def test_the_same_file_again_is_all_unchanged(self):
+        document = [rate(RATE, description="Something else."), rate(f"{T}/Added_With_It", description="Added.")]
+        self.assertEqual([r["status"] for r in self.apply(document)], ["changed", "new"])
+        before = (self.derived_rows(), self.audit())
+        again = self.apply(document)
+        self.assertEqual([(r["status"], r["changes"], r["before"], r["after"]) for r in again],
+                         [("unchanged", [], {}, {})] * 2)
+        self.assertEqual((self.derived_rows(), self.audit()), before)
+
+    def test_a_file_that_leaves_the_description_out_clears_it(self):
+        (result,) = self.apply([rate(RATE)], dry_run=True)
+        self.assertEqual((result["status"], result["changes"]), ("changed", ["description"]))
+        self.assertEqual((result["before"], result["after"]), ({"description": RATE_DESCRIPTION}, {"description": None}))
+        self.assertEqual(self.row(RATE)[3], RATE_DESCRIPTION, "a dry run clears nothing")
+        self.apply([rate(RATE)])
+        self.assertIsNone(self.row(RATE)[3])
+        self.assertEqual([r["status"] for r in self.apply([rate(RATE)])], ["unchanged"])
+        # An empty one says the same as none, and a description where there was none is a change too.
+        self.assertEqual([r["status"] for r in self.apply([rate(RATE, description="  ")])], ["unchanged"])
+        (result,) = self.apply([rate(RATE, description="Back again.")])
+        self.assertEqual((result["status"], result["before"], result["after"]),
+                         ("changed", {"description": None}, {"description": "Back again."}))
+        self.assertEqual(self.row(RATE)[3], "Back again.")
+
+    def test_a_description_with_only_space_apart_is_unchanged(self):
+        before = (self.derived_rows(), self.audit())
+        self.assertEqual([r["status"] for r in self.apply([rate(RATE, description=f"  {RATE_DESCRIPTION}\n")])], ["unchanged"])
+        self.assertEqual((self.derived_rows(), self.audit()), before)
+
+    def test_a_changed_description_keeps_the_definition_as_stored(self):
+        self.apply([share(f"{T}/Two_States", MODE, ["AUTO", "MANUAL"], description="First.")])
+        before = self.row(f"{T}/Two_States")
+        (result,) = self.apply([share(f"{T}/Two_States", MODE, ["MANUAL", "AUTO"], description="Second.")])
+        self.assertEqual(result["status"], "changed")
+        after = self.row(f"{T}/Two_States")
+        self.assertEqual(after[5], before[5])
+        self.assertEqual(after[5]["states"], ["AUTO", "MANUAL"])
+        self.assertEqual((before[3], after[3]), ("First.", "Second."))
+
+    def test_a_new_metric_and_an_unchanged_one_have_no_changes(self):
+        results = self.apply([rate(), rate(RATE, description=RATE_DESCRIPTION)], dry_run=True)
+        self.assertEqual([(r["status"], r["changes"], r["before"], r["after"]) for r in results],
+                         [("new", [], {}, {}), ("unchanged", [], {}, {})])
+
+    def test_a_change_and_a_refusal_in_one_file_write_nothing(self):
+        before = (self.derived_rows(), self.audit())
+        for dry_run in (True, False):
+            with self.subTest(dry_run=dry_run):
+                results = self.apply([rate(RATE, description="Something else."), rate(f"{T}/Gone", NOTHING), rate()],
+                                     dry_run=dry_run)
+                self.assertEqual([r["status"] for r in results], ["changed", "refused", "new"])
+                self.assertEqual((self.derived_rows(), self.audit()), before)
+        self.assertEqual(self.row(RATE)[3], RATE_DESCRIPTION)
 
     def test_a_name_a_measured_metric_holds_is_refused(self):
         (path, message), = self.reasons(self.apply([rate(HELD)]))
@@ -396,7 +500,7 @@ class Applying(DerivedBase):
         self.assertEqual((self.derived_rows(), self.audit()), before)
         self.assertEqual([r["id"] for r in results], [None, None, None])
 
-    def test_it_never_edits_and_never_deletes(self):
+    def test_it_never_deletes(self):
         before = self.derived_rows()
         self.apply([rate()])
         after = self.derived_rows()
@@ -522,12 +626,32 @@ class AuditTrail(DerivedBase):
         self.assertEqual([entity for _, entity, _, _, _ in rows], [r["id"] for r in results])
         self.assertEqual({(changed_by, source) for _, _, changed_by, source, _ in rows}, {(ADMIN_ID, "user")})
 
+    def test_one_update_row_for_each_metric_changed_naming_the_person(self):
+        before = len(self.audit())
+        results = self.apply([rate(RATE, description="Something else."), rate()])
+        rows = self.audit()[before:]
+        self.assertEqual([(a, n) for a, _, _, _, n in rows], [("UPDATE", RATE), ("INSERT", f"{T}/New_Rate")])
+        self.assertEqual([entity for _, entity, _, _, _ in rows], [r["id"] for r in results])
+        self.assertEqual({(changed_by, source) for _, _, changed_by, source, _ in rows}, {(ADMIN_ID, "user")})
+
     def test_a_dry_run_an_unchanged_metric_and_a_refusal_write_none(self):
         before = self.audit()
         self.apply([rate()], dry_run=True)
+        self.apply([rate(RATE, description="Something else.")], dry_run=True)
         self.apply([rate(RATE, description=RATE_DESCRIPTION)])
         self.apply([rate(f"{T}/Gone", NOTHING)])
+        self.apply([rate(RATE, description="Something else."), rate(f"{T}/Gone", NOTHING)])
         self.assertEqual(self.audit(), before)
+
+    def test_a_change_adds_no_audit_action_class_or_domain_of_its_own(self):
+        """The row is the catalogue's UPDATE, which the classifiers already file: the asset lane, and the class of any edit of a metric."""
+        self.apply([rate(RATE, description="Something else.")])
+        self.cur.execute("SELECT audit_domain, public.audit_event_class(action, entity_type, audit_domain, old_data, new_data)"
+                         "  FROM public.audit_trail WHERE entity_type = 'metric_catalog' AND action = 'UPDATE' AND entity_id = %s;",
+                         (self.row(RATE)[0],))
+        self.assertEqual(self.cur.fetchall(), [("asset", "operational")])
+        self.cur.execute("SELECT classes FROM public.audit_trail_action_kinds() WHERE action = 'UPDATE' AND entity_type = 'metric_catalog';")
+        self.assertIn("operational", self.cur.fetchone()[0])
 
 
 class RoundTrip(DerivedBase):

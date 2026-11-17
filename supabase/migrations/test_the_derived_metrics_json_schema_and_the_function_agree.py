@@ -2,8 +2,9 @@
 #   lanes: db
 #   why: 0297 -- every fixture in supabase/derived-metrics-fixtures/ through the JSON Schema the
 #     dashboard serves (jsonschema) and through apply_derived_metrics(..., true): both accept each
-#     valid one, both refuse each invalid one, or the schema accepts what only the database can know.
-#     Every field of the schema is described and every object closed.
+#     valid one, both refuse each invalid one, or the schema accepts what only the database can know,
+#     and both accept each changed one, which the function reports as a change with its before and
+#     after. Every field of the schema is described and every object closed.
 
 """
 The derived metrics JSON Schema and apply_derived_metrics() agree (0297).
@@ -26,9 +27,12 @@ WHAT IS HELD. Every file under supabase/derived-metrics-fixtures/ is one documen
   * invalid/, with "database": false: the schema refuses it, and the function reports a reason at
     the path the fixture names.
   * invalid/, with "database": true: what only the database can know (an input that is not in the
-    catalogue, derived or of the wrong datatype, units that differ, a name that exists, a name used
-    twice). The schema accepts it, as it must, and the function reports a reason at the path the
-    fixture names.
+    catalogue, derived or of the wrong datatype, units that differ, a name that exists with another
+    definition, a name used twice). The schema accepts it, as it must, and the function reports a
+    reason at the path the fixture names.
+  * changed/: a name that exists with its definition and another description, or none. The schema
+    accepts it, and apply_derived_metrics(doc, true) refuses nothing and reports the metric changed,
+    with the description the fixture names as "before" and as "after".
 
 The fixtures name the metrics they need as @COUNTER@ and the like, and a long text as @X4001@
 (4,001 characters), filled in from rows this suite makes. The schema is also held to its own rules:
@@ -96,9 +100,10 @@ REQUIRED = {
         "an-input-of-a-sum-is-not-in-the-catalogue", "input-is-derived",
         "a-counter-rate-of-a-text-metric", "a-time-in-state-of-a-number", "a-state-the-input-cannot-report",
         "a-state-a-boolean-cannot-report", "a-sum-of-unlike-units", "the-name-is-a-measured-metric",
-        "the-name-is-a-deprecated-derived-metric", "the-definition-differs", "the-description-differs",
+        "the-name-is-a-deprecated-derived-metric", "the-definition-differs",
         "a-group-in-another-case", "the-second-is-refused",
     ],
+    "changed": ["the-description-differs", "the-description-is-left-out"],
     "valid": ["the-example", "minimal", "an-empty-list", "a-time-in-state-of-a-boolean",
               "a-sum-that-opens-with-a-minus", "a-sum-of-eight-inputs", "two-derived-metrics", "an-input-that-is-deprecated"],
 }
@@ -214,6 +219,21 @@ class Agreement(unittest.TestCase):
                 self.assertIn(fixture["path"], paths, f"{name}: the reasons are at {paths}")
                 self.assertIn("refused", [r["status"] for r in results])
 
+    def test_every_changed_document_is_accepted_by_both_and_reported_as_a_change(self):
+        fixtures = load_fixtures("changed")
+        self.assertGreaterEqual(len(fixtures), len(REQUIRED["changed"]))
+        for name, fixture in fixtures:
+            with self.subTest(fixture=name):
+                document = fixture["document"]
+                errors = sorted(pointer(e) + ": " + e.message for e in self.validator.iter_errors(document))
+                self.assertEqual(errors, [], f"the schema refuses {name}")
+                results = self.preview(document)
+                self.assertEqual(self.reasons(results), [], f"apply_derived_metrics() refuses {name}")
+                self.assertEqual([r["status"] for r in results], ["changed"] * len(document))
+                (result,) = results
+                self.assertEqual((result["changes"], result["before"], result["after"]),
+                                 (["description"], fixture["before"], fixture["after"]))
+
     def test_a_refusal_carries_a_sentence_a_person_can_act_on(self):
         for name, fixture in load_fixtures("invalid"):
             for path, message in self.reasons(self.preview(fixture["document"])):
@@ -224,7 +244,7 @@ class Agreement(unittest.TestCase):
                     self.assertLessEqual(len(message.split()), 45, message)
 
     def test_each_refusal_the_vocabulary_makes_has_a_fixture(self):
-        for kind in ("invalid", "valid"):
+        for kind in ("invalid", "valid", "changed"):
             have = {path.stem for path in (FIXTURES / kind).glob("*.json")}
             for name in REQUIRED[kind]:
                 with self.subTest(kind=kind, fixture=name):

@@ -8,7 +8,7 @@
   "$defs": {
     "derivedMetric": {
       "title": "Derived metric",
-      "description": "One derived metric. Its definition is fixed once it is saved. An upload adds a derived metric that does not exist, leaves one that is the same, and refuses a name that exists with another definition. It never edits or deletes one.",
+      "description": "One derived metric. Its definition is fixed once it is saved. An upload adds a derived metric that does not exist and refuses a name that exists with another definition. It changes the description of one that exists, and never deletes one.",
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "kind"],
@@ -20,7 +20,7 @@
           "examples": ["Controller/PARTS_PER_HOUR"]
         },
         "description": {
-          "description": "What the value means, in your words, up to 4,000 characters. Optional. An upload does not change the description of a metric that exists.",
+          "description": "What the value means, in your words, up to 4,000 characters. Optional. For a metric that exists, an upload sets this description: leave it out and the description is cleared.",
           "type": "string",
           "maxLength": 4000,
           "examples": ["Parts made per hour, from the controller's part counter."]

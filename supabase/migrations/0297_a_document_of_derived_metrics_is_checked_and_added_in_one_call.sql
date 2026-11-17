@@ -1,23 +1,26 @@
 -- 0297: A document of derived metrics is checked and added in one call.
 --
 -- A derived metric (0267) was added one at a time in Add Derived Metric, so a site's derived metrics
--- could not be read as one list, reviewed, or taken to another site. The Metrics page's Derived tab
--- now exports them as YAML and takes an upload, through the editor and the preview the Automations
--- and Schemas pages use. The browser parses a person's YAML into JSON and hands it to one function.
+-- could not be read as one list, reviewed, or taken to another site, and its description could not be
+-- changed at all. The Metrics page's Derived tab now exports them as YAML and takes an upload, through
+-- the editor and the preview the Automations and Schemas pages use. The browser parses a person's YAML into JSON and hands it to one function.
 -- The database is the authority: it checks every field, resolves every input against the catalogue,
 -- and saves each row through the table's own checks. The browser's JSON Schema is a convenience that a
 -- guard test holds to it.
 --
 --   * apply_derived_metrics(p_doc, p_dry_run) answers one result per derived metric: its name, its
---     status (new, unchanged or refused) and, for a refusal, reasons that each carry a JSON path the
---     editor maps back to a line, such as $[0].inputs[1].metric. All or nothing: with any refusal, or
---     with p_dry_run true, it writes nothing, so the upload preview is the same call. It never edits
---     and never deletes.
---   * A definition is fixed once saved (0267), so an upload only ever adds. A name the catalogue lacks
---     is a new derived metric. A name it has with the same definition and description is unchanged,
---     whatever the order of the states or the inputs of a sum. A name it has with another definition,
---     or another description, is refused and says what to do. So is a name a measured metric holds,
---     and a deprecated derived metric's.
+--     status (new, changed, unchanged or refused), what it changes (the document keys that differ, as
+--     apply_automations() gives them, with their values before and after) and, for a refusal, reasons
+--     that each carry a JSON path the editor maps back to a line, such as $[0].inputs[1].metric. All or
+--     nothing: with any refusal, or with p_dry_run true, it writes nothing, so the upload preview is
+--     the same call. It never deletes.
+--   * A definition is fixed once saved (0267), so a description is the one thing an upload changes. A
+--     name the catalogue lacks is a new derived metric. A name it has with the same definition and
+--     description is unchanged, whatever the order of the states or the inputs of a sum. A name it has
+--     with the same definition and another description is changed: the file says what is saved, so a
+--     file that leaves the description out clears it, and the preview shows the description before and
+--     after. A name it has with another definition is refused and says what to do. So is a name a
+--     measured metric holds, and a deprecated derived metric's.
 --   * What a file says is the name, the description and the definition: kind, input, states, or the
 --     inputs of a sum. It never says the unit or the datatype: the table's trigger works out the
 --     unit from the inputs and a derived metric is a Double.
@@ -30,9 +33,10 @@
 --     order, leaving out the deprecated. apply_derived_metrics() of that document reports every
 --     metric unchanged.
 --   * One writer, with the catalogue's own gate: an Administrator, and the second factor
---     (require_mfa()), as metric_catalog_insert_privileged asks. A machine identity holds no role.
---     The Audit Trail row of a metric added is the catalogue's own trigger's: one INSERT for each,
---     naming the person. No audit action, class or domain is added.
+--     (require_mfa()), as metric_catalog_insert_privileged and metric_catalog_update_privileged ask. A
+--     machine identity holds no role. The Audit Trail row of a metric added or changed is the
+--     catalogue's own trigger's: one INSERT or one UPDATE for each, naming the person. No audit action,
+--     class or domain is added.
 --
 -- Reasoning: supabase/README.md, "A document of derived metrics is checked and added in one call
 -- (0297)". Idempotent.
@@ -110,7 +114,9 @@ COMMENT ON FUNCTION public.derived_metric_document_of(text, text, jsonb) IS
 -- 2. Checking a document
 -- -------------------------------------------------------------------------------------------------
 -- Reads the catalogue and writes nothing. A file is bounded: 1,000 derived metrics. For each, in
--- order: {index, key, verdict, reasons, id, units, canon}. The verdict is new, unchanged or refused.
+-- order: {index, key, verdict, reasons, id, units, changes, before, after, canon}. The verdict is new,
+-- changed, unchanged or refused. A changed metric has the same definition and another description:
+-- `changes` names the keys that differ and `before` and `after` their values, empty for the rest.
 -- `canon` is the metric as it would be saved (name, description, definition), and null with a
 -- refusal. It is checked field by field and every reason is collected, so a person fixes a file in
 -- one pass. The reasons are the shape automations_parse() gives (automation_reason() and
@@ -149,6 +155,7 @@ DECLARE
   v_in_paths   text[];
   v_problem    text;
   v_found      boolean;
+  v_changed    boolean;
   v_verdict    text;
   v_have       public.metric_catalog;
   v_cat        public.metric_catalog;
@@ -334,8 +341,10 @@ BEGIN
       END IF;
     END IF;
 
-    -- The name against the catalogue: a name it has is never edited, so it is unchanged or refused.
+    -- The name against the catalogue: a name it has keeps its definition, so it is unchanged, changed
+    -- in its description, or refused.
     v_found := false;
+    v_changed := false;
     v_have := NULL;
     IF v_name IS NOT NULL THEN
       SELECT * INTO v_have FROM public.metric_catalog m WHERE m.name = v_name;
@@ -354,9 +363,8 @@ BEGIN
           '`%s` already exists with another definition, and a definition is fixed once saved. Add this one under a new name, then deprecate `%s`, choosing the new one as Superseded By.', v_name, v_name));
       ELSIF v_def IS NOT NULL AND v_desc_ok
             AND public.derived_metric_description(v_have.description) IS DISTINCT FROM v_desc THEN
-        v_reasons := v_reasons || public.automation_reason(
-          CASE WHEN v_item ? 'description' THEN v_path || '.description' ELSE v_path || '.name' END, format(
-          '`%s` already has another description. An upload never edits a metric, and the Metrics page cannot edit a description. Say what is saved, or add this one under a new name.', v_name));
+        -- The definition is the same, so the description is all there is to change.
+        v_changed := true;
       END IF;
     ELSIF v_def IS NOT NULL THEN
       -- A new metric: every input is a measured metric the catalogue holds.
@@ -374,11 +382,17 @@ BEGIN
     END IF;
 
     v_verdict := CASE WHEN jsonb_array_length(v_reasons) > 0 THEN 'refused'
+                      WHEN v_changed THEN 'changed'
                       WHEN v_found THEN 'unchanged' ELSE 'new' END;
     v_out := v_out || jsonb_build_object(
       'index', i, 'key', v_name, 'verdict', v_verdict, 'reasons', v_reasons,
-      'id', CASE WHEN v_verdict = 'unchanged' THEN v_have.id END,
-      'units', CASE WHEN v_verdict = 'unchanged' THEN v_have.units END,
+      'id', CASE WHEN v_verdict IN ('unchanged', 'changed') THEN v_have.id END,
+      'units', CASE WHEN v_verdict IN ('unchanged', 'changed') THEN v_have.units END,
+      'changes', CASE WHEN v_verdict = 'changed' THEN '["description"]'::jsonb ELSE '[]'::jsonb END,
+      'before', CASE WHEN v_verdict = 'changed'
+                     THEN jsonb_build_object('description', public.derived_metric_description(v_have.description))
+                     ELSE '{}'::jsonb END,
+      'after', CASE WHEN v_verdict = 'changed' THEN jsonb_build_object('description', v_desc) ELSE '{}'::jsonb END,
       'canon', CASE WHEN v_verdict = 'refused' THEN NULL
                     ELSE jsonb_build_object('name', v_name, 'description', v_desc, 'derivation', v_def) END);
   END LOOP;
@@ -391,11 +405,12 @@ REVOKE ALL ON FUNCTION public.derived_metrics_parse(jsonb) FROM PUBLIC, anon, au
 
 COMMENT ON FUNCTION public.derived_metrics_parse(jsonb) IS
   'Checks a document of derived metrics and writes nothing: for each, {index, key, verdict, reasons, '
-  'id, units, canon}. The verdict is new, unchanged (the name exists with this definition and '
-  'description, in any order of states or inputs) or refused. canon is the metric as it would be saved, '
-  'null with a refusal. Every reason is collected, each with a JSON path. Refuses a key it does not '
-  'know, a name a measured or a deprecated metric holds, another definition or description under a '
-  'name that exists, and an input the catalogue lacks or that is derived. What the '
+  'id, units, changes, before, after, canon}. The verdict is new, unchanged (the name exists with this '
+  'definition and description, in any order of states or inputs), changed (the same definition and '
+  'another description: changes is [''description''], before and after hold the two) or refused. canon '
+  'is the metric as it would be saved, null with a refusal. Every reason is collected, each with a '
+  'JSON path. Refuses a key it does not know, a name a measured or a deprecated metric holds, another '
+  'definition under a name that exists, and an input the catalogue lacks or that is derived. What the '
   'table''s own checks decide is apply_derived_metrics()''s. Called by it (0297).';
 
 -- Where in the file an enforce_derived_metric() refusal belongs, from the words it gave: the input it
@@ -452,8 +467,10 @@ COMMENT ON FUNCTION public.derived_metric_refusal_path(text, jsonb, text, text) 
 -- holds no role. Every field is checked before anything is written, and one refusal anywhere writes
 -- nothing. A new metric is first saved in a subtransaction that is undone, which runs the very checks
 -- of the table's triggers and constraints, as Add Derived Metric's insert does, and reads the unit the
--- trigger gives it. Then, with no refusal and p_dry_run false, each is saved. An existing metric is
--- never touched. Each INSERT is one row of the catalogue's audit trigger, naming the person.
+-- trigger gives it. Then, with no refusal and p_dry_run false, each new one is saved and each changed
+-- one has its description set: nothing else of an existing metric is touched, and the table's trigger
+-- refuses any other change. Each INSERT or UPDATE is one row of the catalogue's audit trigger, naming
+-- the person.
 CREATE OR REPLACE FUNCTION public.apply_derived_metrics(p_doc jsonb, p_dry_run boolean) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -476,7 +493,7 @@ DECLARE
   v_us      text[]    := ARRAY[]::text[];
 BEGIN
   IF v_uid IS NULL OR NOT public.has_role(ARRAY['Administrator']) THEN
-    RAISE EXCEPTION 'Only an Administrator may add derived metrics.'
+    RAISE EXCEPTION 'Only an Administrator may apply derived metrics.'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
   PERFORM public.require_mfa();
@@ -515,20 +532,25 @@ BEGIN
 
     v_work := v_work || jsonb_build_object(
       'index', v_item -> 'index', 'name', v_item -> 'key', 'status', v_status, 'id', v_id,
-      'units', v_units, 'derivation', v_canon -> 'derivation', 'reasons', v_reasons, 'canon', v_canon);
+      'units', v_units, 'derivation', v_canon -> 'derivation', 'changes', v_item -> 'changes',
+      'before', v_item -> 'before', 'after', v_item -> 'after', 'reasons', v_reasons, 'canon', v_canon);
   END LOOP;
 
   IF NOT p_dry_run AND NOT v_refused THEN
     FOR v_item IN SELECT x FROM jsonb_array_elements(v_work) x LOOP
-      IF v_item ->> 'status' <> 'new' THEN CONTINUE; END IF;
       v_canon := v_item -> 'canon';
-      INSERT INTO public.metric_catalog (name, datatype, description, derivation)
-      VALUES (v_canon ->> 'name', c_datatype, v_canon ->> 'description', v_canon -> 'derivation')
-      RETURNING id, units INTO v_id, v_units;
-      -- What was made, by its place in the file, for the result.
-      v_at := array_append(v_at, (v_item ->> 'index')::integer);
-      v_ids := array_append(v_ids, v_id);
-      v_us := array_append(v_us, v_units);
+      IF v_item ->> 'status' = 'changed' THEN
+        UPDATE public.metric_catalog SET description = v_canon ->> 'description'
+         WHERE id = (v_item ->> 'id')::uuid;
+      ELSIF v_item ->> 'status' = 'new' THEN
+        INSERT INTO public.metric_catalog (name, datatype, description, derivation)
+        VALUES (v_canon ->> 'name', c_datatype, v_canon ->> 'description', v_canon -> 'derivation')
+        RETURNING id, units INTO v_id, v_units;
+        -- What was made, by its place in the file, for the result.
+        v_at := array_append(v_at, (v_item ->> 'index')::integer);
+        v_ids := array_append(v_ids, v_id);
+        v_us := array_append(v_us, v_units);
+      END IF;
     END LOOP;
   END IF;
 
@@ -545,14 +567,17 @@ REVOKE ALL ON FUNCTION public.apply_derived_metrics(jsonb, boolean) FROM PUBLIC,
 GRANT EXECUTE ON FUNCTION public.apply_derived_metrics(jsonb, boolean) TO authenticated;
 
 COMMENT ON FUNCTION public.apply_derived_metrics(jsonb, boolean) IS
-  'Checks a document of derived metrics and adds what is new: an Administrator behind the second factor '
-  '(42501 otherwise). Answers one result per metric, {index, name, status, id, units, '
-  'derivation, reasons}: status new, unchanged or refused, and for a refusal reasons, each {path, '
-  'message} with a JSON path such as $[0].inputs[1].metric. All or nothing: with any refusal, or with '
-  'p_dry_run true, nothing is written, so a preview and an apply are one call. Never edits and never '
-  'deletes: a name that exists with another definition or description is refused. A new metric is '
-  'saved in a subtransaction that is undone, so every refusal of the table''s own checks is given in '
-  'its words. One INSERT is one Audit Trail row, by the catalogue''s trigger (0297).';
+  'Checks a document of derived metrics and applies it: an Administrator behind the second factor '
+  '(42501 otherwise). Answers one result per metric, {index, name, status, id, units, derivation, '
+  'changes, before, after, reasons}: status new, changed, unchanged or refused. A changed metric has '
+  'the same definition and another description, which a file that leaves it out clears: changes is '
+  '[''description''] and before and after hold the two. For a refusal, reasons, each {path, message} '
+  'with a JSON path such as $[0].inputs[1].metric. All or nothing: with any refusal, or with '
+  'p_dry_run true, nothing is written, so a preview and an apply are one call. Adds what is new, sets '
+  'the description of what changed and never deletes: a name that exists with another definition is '
+  'refused. A new metric is saved in a subtransaction that is undone, so every refusal of the '
+  'table''s own checks is given in its words. One INSERT or UPDATE is one Audit Trail row, by the '
+  'catalogue''s trigger (0297).';
 
 -- -------------------------------------------------------------------------------------------------
 -- 4. Reading them back
@@ -601,6 +626,15 @@ BEGIN
   END IF;
   IF position('PERFORM public.require_mfa();' IN v_src) = 0 THEN
     RAISE EXCEPTION '0297: % does not ask for the second factor', v_fn;
+  END IF;
+  -- It changes a description and nothing else of a metric that exists: one UPDATE, of that column, and
+  -- no DELETE.
+  IF position('UPDATE public.metric_catalog SET description = ' IN v_src) = 0
+     OR length(v_src) - length(replace(v_src, 'UPDATE public.', '')) <> length('UPDATE public.') THEN
+    RAISE EXCEPTION '0297: % does not make the one UPDATE of a description', v_fn;
+  END IF;
+  IF position('DELETE FROM' IN v_src) > 0 THEN
+    RAISE EXCEPTION '0297: % deletes', v_fn;
   END IF;
   FOREACH v_fn IN ARRAY ARRAY['public.apply_derived_metrics(jsonb, boolean)', 'public.derived_metrics_document(uuid[])',
                               'public.derived_metric_document_of(text, text, jsonb)', 'public.derived_metric_description(text)'] LOOP

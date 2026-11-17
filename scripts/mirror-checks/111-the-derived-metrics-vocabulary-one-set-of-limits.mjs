@@ -67,12 +67,18 @@ export default function check() {
   }
 
   // The statuses the two functions give each metric, all of which the preview draws with the words the
-  // Automations preview uses (RESULT_STATUSES). A changed one is not among them: an upload only adds.
+  // Automations preview uses (RESULT_STATUSES), and the keys a change names, each of them a key the file has.
   const sql = [...new Set([...parse.body.matchAll(/'(new|unchanged|refused|changed)'/g), ...apply.body.matchAll(/'(new|unchanged|refused|changed)'/g)].map((m) => m[1]))].sort();
   const statuses = need(read('frontend/src/utils/automations.js'), /export const RESULT_STATUSES = \[([\s\S]*?)\n\]/, 'RESULT_STATUSES in utils/automations.js');
   if (statuses) {
     const drawn = [...statuses[1].matchAll(/value: '([a-z]+)'/g)].map((m) => m[1]);
-    compare('derivedMetricsVocabulary', `the statuses the preview draws and apply_derived_metrics() gives (${apply.file}), none of them changed`,
-      sql.filter((s) => drawn.includes(s) && s !== 'changed').join(', '), sql.join(', '));
+    compare('derivedMetricsVocabulary', `the statuses the preview draws and the two functions give (${apply.file})`,
+      sql.filter((s) => drawn.includes(s)).join(', '), sql.join(', '));
+  }
+  const changing = need(parse.body, /'changes', CASE WHEN v_verdict = 'changed' THEN '\[([^\]]*)\]'::jsonb/, `the keys a change names in derived_metrics_parse() (${parse.file})`);
+  if (changing) {
+    const named = [...changing[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+    compare('derivedMetricsVocabulary', `the keys a change names in derived_metrics_parse() (${parse.file}) and the keys of the schema`,
+      named.filter((k) => k in props).join(', '), named.join(', '));
   }
 }

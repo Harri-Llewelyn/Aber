@@ -1,0 +1,12 @@
+{
+  "about": "A name that exists with a description, and a file with none: the description is cleared, shown before and after.",
+  "before": { "description": "Parts per hour." },
+  "after": { "description": null },
+  "document": [
+    {
+      "name": "@DERIVED@",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}
