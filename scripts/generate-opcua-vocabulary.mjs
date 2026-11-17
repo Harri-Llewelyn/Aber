@@ -52,8 +52,9 @@
  *   * each block is written from its own entries and no others;
  *   * a block is WRITTEN only while its migration is unreleased (its note is in unreleased/migrations/),
  *     and otherwise only VERIFIED: a released block that would now read differently stops the run, so a
- *     moved NodeSet or an edited entry can never rewrite a migration that has shipped. The correction
- *     goes in the next block, whose rows replace the installed ones (`ON CONFLICT ... DO UPDATE`);
+ *     moved NodeSet or an edited entry can never rewrite a migration that has shipped. (Revising a
+ *     row a released block seeded is not built yet: scripts/lib/opcua-seed-blocks.mjs says what it
+ *     needs.);
  *   * a group reworded after it was registered says so in its definition (`{ description, was, since }`),
  *     and the block named by `since` carries an UPDATE guarded on the old text.
  *

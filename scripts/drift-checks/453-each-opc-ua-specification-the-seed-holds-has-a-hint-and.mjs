@@ -16,7 +16,7 @@ export default function check() {
   const number = (spec) => spec.match(/^OPC (\d+(?:-\d+)?)/)?.[1];
 
   const source = read('frontend/src/utils/opcua.js');
-  const hints = new Map([...(source.match(/const hints = \{([\s\S]*?)\n  \}/)?.[1] ?? '').matchAll(/^ {4}'([^']+)': '((?:[^'\\]|\\.)*)',?$/gm)].map((m) => [m[1], m[2]]));
+  const hints = new Map([...(source.match(/const hints = \{([\s\S]*?)\n {2}\}/)?.[1] ?? '').matchAll(/^ {4}'([^']+)': '((?:[^'\\]|\\.)*)',?$/gm)].map((m) => [m[1], m[2]]));
   const help = read('help/pages/vocabulary.md').match(/\n### OPC UA\n([\s\S]*?)\n### /)?.[1] ?? '';
   const helpIntro = help.split('\n').find((line) => line.startsWith('Data points from the OPC UA companion specifications')) ?? '';
   const architecture = read('docs/architecture.md').split('\n').find((line) => line.startsWith('| **OPC UA** (')) ?? '';
