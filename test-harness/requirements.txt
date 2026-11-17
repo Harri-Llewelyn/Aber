@@ -1,0 +1,11 @@
+# Python packages the unit lane's tests import, and no image ships. CI installs this file before
+# `node scripts/run-python-suites.mjs --lane unit`; on a laptop, `pip install -r test-harness/requirements.txt`.
+# Pinned exactly, as the runtime requirements are. Neither belongs in ingestion/requirements.txt or
+# i3x/requirements.txt, which the runtime images install.
+#
+# xmlschema validates the XML an AASX package carries against test-harness/schemas/AAS_V3_0_XML_Schema.xsd
+# (test_the_xml_environment_validates_against_the_idta_xsd.py). MIT; pure Python; 4.3.2 is from 2026-06-30.
+xmlschema==4.3.2
+# xmlschema's one runtime dependency (it asks for >=5.1.3, <6), pinned so a resolver cannot move it.
+# MIT; pure Python; 5.1.4 is from 2026-08-08.
+elementpath==5.1.4

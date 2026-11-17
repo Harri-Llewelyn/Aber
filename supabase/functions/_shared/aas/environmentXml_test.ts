@@ -25,8 +25,8 @@ const assert = {
 // order, and a leaf by its type's enumeration and lengths. It checks the writer's output against the
 // real file; it is not a validator. A pattern is not compiled from the file, since a regular
 // expression built from text is what the source scan refuses: the one that matters for what the
-// exporter writes, the idShort's, is checked as a literal below, and the rest are checked by hand
-// with xmllint, as the pull request says.
+// exporter writes, the idShort's, is checked as a literal below. The validator is xmlschema, in the
+// unit lane: test_the_xml_environment_validates_against_the_idta_xsd.py.
 
 interface Node {
   name: string;

@@ -6,7 +6,10 @@ import { fail, pass, read } from './lib.mjs';
 // another value names both; the XML part is `aasx/data.xml`, the name AAS Part 5 gives a data file, with
 // the media type for an XML part and the one aas-spec relationship the JSON part has. The writer's
 // namespace is the vendored XSD's target namespace, which is also the JSON schema's `$id`: one
-// IDTA-01001-3-2 under two file names, from the commit the folder's README names.
+// IDTA-01001-3-2 under two file names, from the commit the folder's README names. Both carry the
+// licence's address where they travel (CC BY 4.0). The XML is validated against the XSD by the unit
+// lane, with xmlschema and its one dependency pinned exactly in test-harness/requirements.txt, which CI
+// installs before the lane, and the suite fails rather than skips under CI when xmlschema is missing.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
   const problems446 = [];
@@ -48,9 +51,28 @@ export default function check() {
   }
   if (!/CC BY 4\.0/.test(readme.slice(readme.indexOf('# Vendored AAS V3 XML Schema')))) problems446.push("the README does not record the XSD's CC BY 4.0 licence");
 
+  for (const mark of [readme.slice(0, readme.indexOf('## Do not hand-edit it')), readme.slice(readme.indexOf('# Vendored AAS V3 XML Schema'))]) {
+    if (!mark.includes('https://creativecommons.org/licenses/by/4.0/')) problems446.push("a licence row of test-harness/schemas/README.md does not carry CC BY 4.0's address");
+  }
+
+  const pins = Object.fromEntries([...read('test-harness/requirements.txt').matchAll(/^([A-Za-z0-9_.-]+)==(\d+(?:\.\d+)*)$/gm)].map((m) => [m[1].toLowerCase(), m[2]]));
+  for (const name of ['xmlschema', 'elementpath']) {
+    if (!pins[name]) problems446.push(`test-harness/requirements.txt does not pin ${name} exactly`);
+  }
+  const ci = read('.github/workflows/ci.yml');
+  const install = ci.indexOf('pip install -r test-harness/requirements.txt');
+  const lane = ci.indexOf('node scripts/run-python-suites.mjs --lane unit');
+  if (install < 0 || lane < 0 || install > lane) problems446.push('CI does not install test-harness/requirements.txt before the unit lane runs');
+  if (!read('scripts/audit-dependencies.mjs').includes("'test-harness/requirements.txt'")) problems446.push('scripts/audit-dependencies.mjs does not audit test-harness/requirements.txt');
+  const suite = read('supabase/functions/aas-export/test_the_xml_environment_validates_against_the_idta_xsd.py');
+  if (!/lanes: unit\b/.test(suite) || !suite.includes('os.environ.get("CI")') || !suite.includes('raise unittest.SkipTest(missing)')) {
+    problems446.push('the xmlschema suite is not a unit-lane suite that fails under CI and skips off it when xmlschema is missing');
+  }
+  if (!suite.includes('xmlschema.XMLSchema(str(XSD))') || !suite.includes('AAS_V3_0_XML_Schema.xsd')) problems446.push('the xmlschema suite does not load the vendored XSD');
+
   if (problems446.length) {
     fail('the XML package, its API reference and its vendored schema disagree:\n' + problems446.map((p) => `        ${p}`).join('\n'));
   } else {
-    pass(`aas-export takes serialization json (the default) or xml, as the API reference lists; the XML part is aasx/data.xml, text/xml, reached by the aas-spec relationship; the writer's namespace is the XSD's, and the JSON schema's $id, from commit ${commit.slice(0, 8)} with its licence in the README`);
+    pass(`aas-export takes serialization json (the default) or xml, as the API reference lists; the XML part is aasx/data.xml, text/xml, reached by the aas-spec relationship; the writer's namespace is the XSD's, and the JSON schema's $id, from commit ${commit.slice(0, 8)} with its licence and its address in the README; the unit lane validates the XML with xmlschema ${pins.xmlschema} and elementpath ${pins.elementpath}, installed by CI before it`);
   }
 }

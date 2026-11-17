@@ -15,9 +15,9 @@ An AASX package can carry its Environment as XML.
 Offline, the writer (_shared/aas/environmentXml.ts) runs in Node over the Environment buildEnvironment()
 makes, and the XML is read by a small tree reader below: the standard library's XML parsers are not used,
 which the source scan refuses without defusedxml, and the writer's output has no attributes but the
-namespace, no comments and no CDATA. It is not validated against the XSD here: no XSD validator is
-installed. The Deno test of the writer checks its output against the vendored XSD's sequences and
-enumerations, and that is the closest check there is.
+namespace, no comments and no CDATA. It is not validated against the XSD here:
+test_the_xml_environment_validates_against_the_idta_xsd.py does that, with xmlschema. The Deno test
+of the writer also checks its output against the XSD's sequences and enumerations.
 
 Run:  python supabase/functions/aas-export/test_an_aasx_can_carry_its_environment_as_xml.py
 """
