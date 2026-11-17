@@ -1,5 +1,6 @@
 import { plural } from './format'
 import { SHARE_UNIT, derivationText, isShare } from './derivedMetric'
+import { changeWords } from './automations'
 
 /*
  * What the Derived tab works out for itself about a file of derived metrics: the name an export is
@@ -20,10 +21,12 @@ export const derivedSchemaComment = (origin) => `# yaml-language-server: $schema
 
 /**
  * What an apply would do to one derived metric, in words, for the preview: a new one says how it is
- * computed and in what unit; an unchanged one says it is already there. Null for a refusal, which
- * lists its reasons.
+ * computed and in what unit; an unchanged one says it is already there; a changed one names what it
+ * changes, and the preview draws the old and the new beneath. Null for a refusal, which lists its
+ * reasons.
  */
 export function derivedResultNote(result) {
+  if (result.status === 'changed') return result.changes?.length > 0 ? `changes ${changeWords(result.changes)}` : null
   if (result.status === 'new' || result.status === 'unchanged') {
     const unit = isShare(result.derivation) ? SHARE_UNIT : result.units
     const how = `${derivationText(result.derivation)}${unit ? `, in ${unit}` : ''}`
@@ -36,13 +39,22 @@ export function derivedResultNote(result) {
 export const derivedResultName = (result) =>
   result.name ?? (result.index === null || result.index === undefined ? 'The file' : `Derived metric ${result.index + 1}`)
 
-/** The results an apply wrote: the new derived metrics. */
-export const writtenDerived = (results) => (results || []).filter(r => r.status === 'new')
+/** The results an apply wrote: the new derived metrics and the changed ones. */
+export const writtenDerived = (results) => (results || []).filter(r => r.status === 'new' || r.status === 'changed')
 
-/** What an upload says in its toast: the one metric by its name, or how many were added, from `source` (a file's name) when there is one. */
+/**
+ * What an upload says in its toast: the one metric by its name and what became of it, or how many were
+ * added and how many changed, from `source` (a file's name) when there is one.
+ */
 export function appliedDerivedWords(results, source = null) {
   const written = writtenDerived(results)
+  const added = written.filter(r => r.status === 'new').length
+  const changed = written.length - added
   const from = source ? ` from ${source}` : ''
-  if (written.length === 1) return `Derived metric '${written[0].name}' added to the catalog${from}`
-  return `Added ${plural(written.length, 'derived metric')} to the catalog${from}`
+  if (written.length === 1) {
+    return added === 1 ? `Derived metric '${written[0].name}' added to the catalog${from}` : `Derived metric '${written[0].name}' changed${from}`
+  }
+  if (changed === 0) return `Added ${plural(added, 'derived metric')} to the catalog${from}`
+  if (added === 0) return `Changed ${plural(changed, 'derived metric')}${from}`
+  return `Applied ${plural(written.length, 'derived metric')}${from} (${added} added, ${changed} changed)`
 }

@@ -11,7 +11,7 @@ import { tabUrl } from '../routes'
  * Export, the export itself, the file chosen for Upload, and the editor that holds a file or a new one.
  * `listed` is every derived metric the tab lists (what Export holds with none ticked), `shown` what the
  * search leaves of them (what the heading's box ticks), `reload` reads the catalog again after metrics
- * are added.
+ * are added or changed.
  *
  * Returns the tick state (`ticked`, `pickedIds`, `allShown`, `headBox`, `toggle`, `toggleAllShown`), the
  * actions (`exportYaml`, `chooseFile`, `newFile`, `onFile`) and the editor's state (`editing`: the text
@@ -75,7 +75,7 @@ export function useDerivedMetricsYaml({ listed, shown, showToast, reload }) {
     }
   }
 
-  /** The metrics are in the catalog now: close the editor and read it again. */
+  /** The metrics are applied: close the editor and read the catalog again. */
   const applied = () => {
     setEditing(null)
     reload()

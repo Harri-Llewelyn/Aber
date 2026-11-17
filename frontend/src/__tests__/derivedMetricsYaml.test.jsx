@@ -13,9 +13,9 @@ import { tooltipOf } from '../test/tooltips'
 /**
  * Export, Upload and New in YAML on the Derived tab. Export saves the derived metrics ticked, or every
  * one listed ("Export (2)"), as derived-metrics.yaml. Upload and New in YAML open the Automations page's
- * editor on the file or on nothing; Add Derived Metrics checks the text, shows each metric as new,
- * unchanged or refused with the line of every reason, and adds only on confirm, ending in a toast that
- * links to what it made. The dialog Add Derived Metric stays.
+ * editor on the file or on nothing; Apply Derived Metrics checks the text, shows each metric as new,
+ * changed (a description, before and after), unchanged or refused with the line of every reason, and
+ * applies only on confirm, ending in a toast that links to what it added or changed. The dialog Add Derived Metric stays.
  */
 
 vi.mock('../api', async () => {
@@ -93,6 +93,11 @@ const FILE_TEXT = [
 const NEW = {
   index: 0, name: 'Controller/PARTS_PER_SHIFT', status: 'new', id: null, units: 'COUNT/HOUR', reasons: [],
   derivation: { kind: 'counter_rate', input: 'Controller/PART_COUNT' },
+}
+const CHANGED = {
+  index: 0, name: 'Controller/PARTS_PER_HOUR', status: 'changed', id: 'd1', units: 'COUNT/HOUR', reasons: [],
+  derivation: { kind: 'counter_rate', input: 'Controller/PART_COUNT' },
+  changes: ['description'], before: { description: 'Parts an hour' }, after: { description: 'Parts made each hour' },
 }
 const UNCHANGED = {
   index: 1, name: 'Controller/UPTIME', status: 'unchanged', id: 'd2', units: null, reasons: [],
@@ -226,41 +231,41 @@ describe('Export', () => {
 })
 
 describe('Upload', () => {
-  it('opens the editor with the file, and checks nothing until Add Derived Metrics is chosen', async () => {
+  it('opens the editor with the file, and checks nothing until Apply Derived Metrics is chosen', async () => {
     await openDerived()
     await upload(file(FILE_TEXT))
     const d = topDialog()
     expect(d.getByRole('heading', { name: 'Edit derived-metrics.yaml' })).toBeInTheDocument()
     expect(editorText()).toBe(FILE_TEXT)
     expect(api.applyDerivedMetrics).not.toHaveBeenCalled()
-    expect(document.querySelector('.modal-lead')).toHaveTextContent('never edited')
+    expect(document.querySelector('.modal-lead')).toHaveTextContent('only a description can change')
   })
 
   it('previews each metric as new or unchanged, in words, and confirms with the count it adds', async () => {
     api.applyDerivedMetrics.mockResolvedValue([NEW, UNCHANGED])
     await openDerived()
     await upload(file(FILE_TEXT))
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
     expect(api.applyDerivedMetrics).toHaveBeenCalledTimes(1)
     expect(api.applyDerivedMetrics.mock.calls[0][1]).toBe(true)
     expect(api.applyDerivedMetrics.mock.calls[0][0].map(m => m.name)).toEqual(['Controller/PARTS_PER_SHIFT', 'Controller/UPTIME'])
     expect(dialogs()).toHaveLength(2)
     const d = topDialog()
-    expect(d.getByRole('heading', { name: /Add derived-metrics\.yaml/ })).toBeInTheDocument()
+    expect(d.getByRole('heading', { name: /Apply derived-metrics\.yaml/ })).toBeInTheDocument()
     expect(d.getByText('1 new, 1 unchanged')).toBeInTheDocument()
     expect(d.getByText('rate of Controller/PART_COUNT, per hour, in COUNT/HOUR')).toBeInTheDocument()
     expect(d.getByText('already here: share of time Controller/EXECUTION is ACTIVE, in % of the time')).toBeInTheDocument()
-    expect(d.getByRole('button', { name: 'Add 1 Derived Metric' })).toBeEnabled()
-    expect(document.querySelectorAll('.modal-lead')[1]).toHaveTextContent('all of it or none')
+    expect(d.getByRole('button', { name: 'Apply 1 Derived Metric' })).toBeEnabled()
+    expect(document.querySelectorAll('.modal-lead')[1]).toHaveTextContent('Applies the whole file, all of it or none. A definition is fixed once saved, so only a description can change, shown before and after. It deletes nothing.')
   })
 
-  it('adds the whole file in one call with false, when confirmed, and ends with a toast that opens the metric', async () => {
+  it('applies the whole file in one call with false, when confirmed, and ends with a toast that opens the metric', async () => {
     api.applyDerivedMetrics.mockResolvedValueOnce([NEW, UNCHANGED]).mockResolvedValueOnce([{ ...NEW, id: 'made-id' }, UNCHANGED])
     await openDerived()
     await upload(file(FILE_TEXT))
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
     const reads = api.get.mock.calls.length
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add 1 Derived Metric' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply 1 Derived Metric' })) })
     expect(api.applyDerivedMetrics).toHaveBeenCalledTimes(2)
     expect(api.applyDerivedMetrics.mock.calls[1][1]).toBe(false)
     expect(showToast).toHaveBeenCalledWith(
@@ -276,9 +281,65 @@ describe('Upload', () => {
     api.applyDerivedMetrics.mockResolvedValueOnce([NEW, two]).mockResolvedValueOnce([{ ...NEW, id: 'one-id' }, two])
     await openDerived()
     await upload(file(FILE_TEXT))
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add 2 Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply 2 Derived Metrics' })) })
     expect(showToast).toHaveBeenCalledWith('Added 2 derived metrics to the catalog from derived-metrics.yaml', 'success', { to: tabUrl('metrics', 'derived') })
+  })
+
+  it('shows a changed description before and after, in words, and the button says Apply', async () => {
+    api.applyDerivedMetrics.mockResolvedValue([CHANGED, { ...UNCHANGED, index: 1 }])
+    await openDerived()
+    await upload(file(FILE_TEXT))
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
+    const d = topDialog()
+    expect(d.getByText('1 changed, 1 unchanged')).toBeInTheDocument()
+    const heads = [...document.querySelectorAll('.apply-result-head')].map(h => h.textContent)
+    expect(heads[0]).toMatch(/^ChangedController\/PARTS_PER_HOUR\s*changes description$/)
+    const changes = within(d.getByRole('list', { name: 'What changes in Controller/PARTS_PER_HOUR' }))
+    expect(changes.getByText('Description')).toBeInTheDocument()
+    expect(changes.getByText('Before').nextElementSibling).toHaveTextContent('Parts an hour')
+    expect(changes.getByText('After').nextElementSibling).toHaveTextContent('Parts made each hour')
+    expect(d.getByRole('button', { name: 'Apply 1 Derived Metric' })).toBeEnabled()
+    expect(api.applyDerivedMetrics.mock.calls[0][1]).toBe(true)
+  })
+
+  it('says None where the file leaves a description out, or the metric had none', async () => {
+    const cleared = { ...CHANGED, after: { description: null } }
+    const given = { ...CHANGED, index: 1, name: 'Controller/UPTIME', id: 'd2', before: { description: null }, after: { description: 'Time running' } }
+    api.applyDerivedMetrics.mockResolvedValue([cleared, given])
+    await openDerived()
+    await upload(file(FILE_TEXT))
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
+    const d = topDialog()
+    const first = within(d.getByRole('list', { name: 'What changes in Controller/PARTS_PER_HOUR' }))
+    expect(first.getByText('After').nextElementSibling).toHaveTextContent('None')
+    expect(first.getByText('Before').nextElementSibling).toHaveTextContent('Parts an hour')
+    const second = within(d.getByRole('list', { name: 'What changes in Controller/UPTIME' }))
+    expect(second.getByText('Before').nextElementSibling).toHaveTextContent('None')
+    expect(second.getByText('After').nextElementSibling).toHaveTextContent('Time running')
+    expect(d.getByRole('button', { name: 'Apply 2 Derived Metrics' })).toBeEnabled()
+  })
+
+  it('applies a changed description on confirm, and the toast opens the one metric it changed', async () => {
+    api.applyDerivedMetrics.mockResolvedValue([CHANGED])
+    await openDerived()
+    await upload(file(FILE_TEXT))
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply 1 Derived Metric' })) })
+    expect(api.applyDerivedMetrics.mock.calls[1][1]).toBe(false)
+    expect(showToast).toHaveBeenCalledWith(
+      "Derived metric 'Controller/PARTS_PER_HOUR' changed from derived-metrics.yaml", 'success', { to: metricUrl('d1', false, true) })
+    expect(document.querySelector('dialog')).toBeNull()
+  })
+
+  it('counts what was added and what was changed in the toast, and links to the tab for several', async () => {
+    api.applyDerivedMetrics.mockResolvedValue([{ ...NEW, id: 'made-id', index: 1 }, CHANGED])
+    await openDerived()
+    await upload(file(FILE_TEXT))
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply 2 Derived Metrics' })) })
+    expect(showToast).toHaveBeenCalledWith(
+      'Applied 2 derived metrics from derived-metrics.yaml (1 added, 1 changed)', 'success', { to: tabUrl('metrics', 'derived') })
   })
 
   it('lists a refused metric with every reason and its line, adds nothing, and leaves the editor to fix it', async () => {
@@ -291,7 +352,7 @@ describe('Upload', () => {
     ])
     await openDerived()
     await upload(file(FILE_TEXT))
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
     const d = topDialog()
     const heads = [...document.querySelectorAll('.apply-result-head')].map(h => h.textContent)
     expect(heads[0]).toMatch(/^Refused/)
@@ -299,7 +360,7 @@ describe('Upload', () => {
     expect(d.getByText('Line 3')).toBeInTheDocument()
     expect(d.getByText(/Controller\/NOTHING is not in the catalogue/)).toBeInTheDocument()
     expect(document.querySelector('.modal-problem')).toHaveTextContent('1 derived metric refused. Fix the lines named above, then try again.')
-    expect(d.getByRole('button', { name: 'Add 0 Derived Metrics' })).toBeDisabled()
+    expect(d.getByRole('button', { name: 'Apply 0 Derived Metrics' })).toBeDisabled()
     expect(api.applyDerivedMetrics).toHaveBeenCalledTimes(1)
     // Closing the preview leaves the editor, with the text as it was, to fix.
     fireEvent.click(d.getByRole('button', { name: 'Cancel' }))
@@ -315,48 +376,48 @@ describe('Upload', () => {
     }])
     await openDerived()
     await upload(file(FILE_TEXT))
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
     const d = topDialog()
     expect(d.getByText('Line 4')).toBeInTheDocument()
     expect(d.getByText(message)).toBeInTheDocument()
   })
 
-  it('shows a refusal the add itself gives, as the database worded it, and toasts nothing', async () => {
+  it('shows a refusal the apply itself gives, as the database worded it, and toasts nothing', async () => {
     api.applyDerivedMetrics.mockResolvedValueOnce([NEW, UNCHANGED]).mockRejectedValueOnce(new Error('A second factor is required: enrol one under Profile.'))
     await openDerived()
     await upload(file(FILE_TEXT))
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add 1 Derived Metric' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply 1 Derived Metric' })) })
     expect(topDialog().getByText('A second factor is required: enrol one under Profile.')).toBeInTheDocument()
     expect(showToast).not.toHaveBeenCalled()
   })
 
-  it('shows what another writer changed since the preview, when the add refuses a metric', async () => {
+  it('shows what another writer changed since the preview, when the apply refuses a metric', async () => {
     const refused = [{ index: 0, name: 'Controller/PARTS_PER_SHIFT', status: 'refused', reasons: [{ path: '$[0].name', message: '`Controller/PARTS_PER_SHIFT` is a measured metric.' }] }]
     api.applyDerivedMetrics.mockResolvedValueOnce([NEW, UNCHANGED]).mockResolvedValueOnce(refused)
     await openDerived()
     await upload(file(FILE_TEXT))
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add 1 Derived Metric' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply 1 Derived Metric' })) })
     expect(topDialog().getByText(/is a measured metric/)).toBeInTheDocument()
     expect(showToast).not.toHaveBeenCalled()
     expect(dialogs()).toHaveLength(2)
   })
 
-  it('says nothing would be added, and holds Add, for a file that is what the site has', async () => {
+  it('says nothing would change, and holds Apply, for a file that is what the site has', async () => {
     api.applyDerivedMetrics.mockResolvedValue([UNCHANGED])
     await openDerived()
     await upload(file(FILE_TEXT))
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
     const d = topDialog()
-    expect(d.getByText('Every derived metric here is already as the file says. Nothing would be added.')).toBeInTheDocument()
-    expect(d.getByRole('button', { name: 'Add 0 Derived Metrics' })).toBeDisabled()
+    expect(d.getByText('Every derived metric here is already as the file says. Nothing would change.')).toBeInTheDocument()
+    expect(d.getByRole('button', { name: 'Apply 0 Derived Metrics' })).toBeDisabled()
   })
 
   it('names the line of a syntax error in the file without asking the database', async () => {
     await openDerived()
     await upload(file('- name: a\n  kind: sum\n  kind: sum\n'))
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
     expect(topDialog().getByText('Line 3')).toBeInTheDocument()
     expect(api.applyDerivedMetrics).not.toHaveBeenCalled()
   })
@@ -379,7 +440,7 @@ describe('Upload', () => {
     expect(input).toHaveAttribute('accept', expect.stringContaining('.yaml'))
   })
 
-  it('closes the editor with Cancel and adds nothing', async () => {
+  it('closes the editor with Cancel and applies nothing', async () => {
     await openDerived()
     await upload(file(FILE_TEXT))
     fireEvent.click(topDialog().getByRole('button', { name: 'Cancel' }))
@@ -389,30 +450,30 @@ describe('Upload', () => {
 })
 
 describe('New in YAML', () => {
-  it('opens the same editor empty, and holds Add Derived Metrics until something is written', async () => {
+  it('opens the same editor empty, and holds Apply Derived Metrics until something is written', async () => {
     await openDerived()
     fireEvent.click(screen.getByRole('button', { name: /New in YAML/ }))
     await editorOpen('New Derived Metrics in YAML')
     const d = topDialog()
     expect(d.getByRole('heading', { name: 'New Derived Metrics in YAML' })).toBeInTheDocument()
     expect(editorText()).toBe('')
-    const add = d.getByRole('button', { name: 'Add Derived Metrics' })
+    const add = d.getByRole('button', { name: 'Apply Derived Metrics' })
     expect(add).toBeDisabled()
     expect(tooltipOf(add)).toBe('Write at least one derived metric')
     typeIn(FILE_TEXT)
-    await waitFor(() => expect(d.getByRole('button', { name: 'Add Derived Metrics' })).toBeEnabled())
+    await waitFor(() => expect(d.getByRole('button', { name: 'Apply Derived Metrics' })).toBeEnabled())
   })
 
-  it('checks what was written, and adds it without a file name in the toast', async () => {
+  it('checks what was written, and applies it without a file name in the toast', async () => {
     api.applyDerivedMetrics.mockResolvedValueOnce([NEW, UNCHANGED]).mockResolvedValueOnce([{ ...NEW, id: 'made-id' }, UNCHANGED])
     await openDerived()
     fireEvent.click(screen.getByRole('button', { name: /New in YAML/ }))
     await editorOpen('New Derived Metrics in YAML')
     typeIn(FILE_TEXT)
-    await waitFor(() => expect(topDialog().getByRole('button', { name: 'Add Derived Metrics' })).toBeEnabled())
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add Derived Metrics' })) })
-    expect(topDialog().getByRole('heading', { name: 'Add derived metrics' })).toBeInTheDocument()
-    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Add 1 Derived Metric' })) })
+    await waitFor(() => expect(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })).toBeEnabled())
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
+    expect(topDialog().getByRole('heading', { name: 'Apply derived metrics' })).toBeInTheDocument()
+    await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply 1 Derived Metric' })) })
     expect(showToast).toHaveBeenCalledWith("Derived metric 'Controller/PARTS_PER_SHIFT' added to the catalog", 'success', { to: metricUrl('made-id', false, true) })
   })
 

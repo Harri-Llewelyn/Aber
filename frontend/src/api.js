@@ -2294,14 +2294,16 @@ const apiMethods = {
   },
 
   /**
-   * Check a parsed document of derived metrics, or add it (`dryRun` false): one result per metric,
-   * `{ index, name, status, id, units, derivation, reasons }`, status new, unchanged or refused, each
-   * reason `{ path, message }`. All or nothing: with a refusal, or a dry run, nothing is written. It
-   * never edits or deletes, and a name that exists with another definition is refused.
+   * Check a parsed document of derived metrics, or apply it (`dryRun` false): one result per metric,
+   * `{ index, name, status, id, units, derivation, changes, before, after, reasons }`, status new,
+   * changed, unchanged or refused, each reason `{ path, message }`. A changed metric has the same
+   * definition and another description: `changes` is `['description']`, `before` and `after` hold
+   * the two. All or nothing: with a refusal, or a dry run, nothing is written. It never deletes, and a
+   * name that exists with another definition is refused.
    */
   applyDerivedMetrics: async (document, dryRun) => {
     const { data, error } = await supabase.rpc('apply_derived_metrics', { p_doc: document, p_dry_run: dryRun });
-    if (error) throw new Error(error.message || 'Could not add the derived metrics');
+    if (error) throw new Error(error.message || 'Could not apply the derived metrics');
     return data ?? [];
   },
 

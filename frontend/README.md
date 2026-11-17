@@ -2348,21 +2348,25 @@ or every derived metric listed with none ticked. The format is `docs/derived-met
 
 - **Upload opens the editor, and checking is a second step.** `DerivedMetricsEditorModal` holds
   `AutomationEditor` with `public/json-schema/derived-metrics.schema.json` as its schema, and **New in YAML**
-  opens it empty. **Add Derived Metrics** opens `ApplyDerivedMetricsModal` over it, which is
+  opens it empty. **Apply Derived Metrics** opens `ApplyDerivedMetricsModal` over it, which is
   `ApplySchemasModal`'s pattern on the same parts (`useApplyPreview()`, `describeApply()`, `ApplyResults`).
   A refused line is marked in the editor when the preview is closed (`onChecked`), as the Automations page
   marks the lines of its Save. The editor's text is lost with the dialog.
 - **A property says what a derived metric cannot do there.** `x-derived-says`, on a property marked
   `"x-completes": "metric"`, is what its hover says when the name is a derived metric. The device schemas'
   hover says no schema can model one. This file's says no derived metric is built on another.
-- **The preview only adds.** Its statuses are **New**, **Unchanged** and **Refused**: there is no
-  **Changed**, because a definition is fixed once saved, so a changed one is refused with the way to a new
-  metric. The note says how a metric is computed and its unit (`derivedResultNote()`); the unit is the
-  database's, from the inputs.
+- **The preview changes a description and nothing else.** Its statuses are **New**, **Changed**, **Unchanged**
+  and **Refused**. A definition is fixed once saved, so a changed one is refused with the way to a new
+  metric, and what **Changed** means is a description: the same definition under the name with another
+  description, or none, since a file says what is saved. `ApplyResults` takes an optional `changesOf(result)`
+  (`resultChanges()` reads a result's `changes`, `before` and `after`) and draws each changed key under the
+  result's head with **Before** and **After** in words, and None for an empty side, so the change reads
+  without colour. The Schemas and Automations dialogs do not pass it. The note says how a metric is computed
+  and its unit (`derivedResultNote()`); the unit is the database's, from the inputs.
 - **The state is a hook.** `hooks/useDerivedMetricsYaml.js` holds the ticks, the export, the file chosen
   and the editor's text, so `MetricsTab` only draws them. The dialog toasts the success itself, as the
-  Schemas upload does: one metric links to its row on the Derived tab, several to the tab. Export toasts
-  too, linking to the tab.
+  Schemas upload does, counting what was added and what changed: one metric, added or changed, links to
+  its row on the Derived tab, several to the tab. Export toasts too, linking to the tab.
 - **The export is rendered, never kept.** `renderDerivedMetricsYaml()` writes the keys in the order a file
   reads best, from `derived_metrics_document()`, which leaves out a deprecated metric.
 

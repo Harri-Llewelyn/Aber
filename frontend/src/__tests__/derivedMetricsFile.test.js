@@ -49,12 +49,22 @@ describe('the words of a preview and a toast', () => {
   const rate = { index: 0, name: 'A/RATE', status: 'new', units: 'COUNT/HOUR', derivation: { kind: 'counter_rate', input: 'A/COUNT' }, reasons: [] }
   const share = { index: 1, name: 'A/SHARE', status: 'unchanged', units: null, derivation: { kind: 'time_in_state', input: 'A/MODE', states: ['ON', 'OFF'] }, reasons: [] }
   const total = { index: 2, name: 'A/TOTAL', status: 'new', units: 'W', derivation: { kind: 'sum', inputs: [{ metric: 'A/X', sign: 1 }, { metric: 'A/Y', sign: -1 }] }, reasons: [] }
+  const edited = {
+    index: 3, name: 'A/EDITED', status: 'changed', id: 'e1', units: 'COUNT/HOUR', derivation: { kind: 'counter_rate', input: 'A/COUNT' }, reasons: [],
+    changes: ['description'], before: { description: 'Old.' }, after: { description: 'New.' },
+  }
+  const editedToo = { ...edited, index: 4, name: 'A/EDITED_TOO', id: 'e2' }
 
   it('says how a new metric is computed and in what unit, and that an unchanged one is already here', () => {
     expect(derivedResultNote(rate)).toBe('rate of A/COUNT, per hour, in COUNT/HOUR')
     expect(derivedResultNote(share)).toBe('already here: share of time A/MODE is ON or OFF, in % of the time')
     expect(derivedResultNote(total)).toContain('A/X')
     expect(derivedResultNote(total)).toMatch(/, in W$/)
+  })
+
+  it('names what a changed metric changes, and leaves the old and new value to the list', () => {
+    expect(derivedResultNote(edited)).toBe('changes description')
+    expect(derivedResultNote({ ...edited, changes: [] })).toBeNull()
   })
 
   it('says nothing more of a refusal, which lists its reasons', () => {
@@ -67,11 +77,21 @@ describe('the words of a preview and a toast', () => {
     expect(derivedResultName({ index: null, name: null })).toBe('The file')
   })
 
-  it('counts what an apply wrote as the new ones, and the toast says them', () => {
+  it('counts what an apply wrote as the new ones and the changed ones, and the toast says them', () => {
     expect(writtenDerived([rate, share, total]).map(r => r.name)).toEqual(['A/RATE', 'A/TOTAL'])
+    expect(writtenDerived([rate, share, edited]).map(r => r.name)).toEqual(['A/RATE', 'A/EDITED'])
     expect(appliedDerivedWords([rate, share], 'derived-metrics.yaml')).toBe("Derived metric 'A/RATE' added to the catalog from derived-metrics.yaml")
     expect(appliedDerivedWords([rate, share])).toBe("Derived metric 'A/RATE' added to the catalog")
     expect(appliedDerivedWords([rate, total], 'derived-metrics.yaml')).toBe('Added 2 derived metrics to the catalog from derived-metrics.yaml')
+  })
+
+  it('says a changed metric changed, and counts both when a file does both', () => {
+    expect(appliedDerivedWords([edited, share], 'derived-metrics.yaml')).toBe("Derived metric 'A/EDITED' changed from derived-metrics.yaml")
+    expect(appliedDerivedWords([edited])).toBe("Derived metric 'A/EDITED' changed")
+    expect(appliedDerivedWords([edited, editedToo], 'derived-metrics.yaml')).toBe('Changed 2 derived metrics from derived-metrics.yaml')
+    expect(appliedDerivedWords([rate, edited, editedToo], 'derived-metrics.yaml'))
+      .toBe('Applied 3 derived metrics from derived-metrics.yaml (1 added, 2 changed)')
+    expect(appliedDerivedWords([rate, edited])).toBe('Applied 2 derived metrics (1 added, 1 changed)')
   })
 
   it('names the file and the schema line the way the Automations page does', () => {

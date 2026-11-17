@@ -12,8 +12,8 @@ import { derivedSchemaComment } from '../../utils/derivedMetricsFile'
 /**
  * The Derived tab's YAML editor, in a dialog: derived metrics written, or a file read, as the
  * Automations page's editor shows them, with completion and hover from this site's catalogue and the
- * published JSON Schema, and a mark on each line the database refused. **Add Derived Metrics** checks
- * the text and shows what it would add before anything is written (ApplyDerivedMetricsModal); a refused
+ * published JSON Schema, and a mark on each line the database refused. **Apply Derived Metrics** checks
+ * the text and shows what it would do before anything is written (ApplyDerivedMetricsModal); a refused
  * line is marked here when that dialog is closed. Nothing is saved by closing it. The text starts as
  * `text`: a file's, or empty for a new file.
  *
@@ -21,7 +21,7 @@ import { derivedSchemaComment } from '../../utils/derivedMetricsFile'
  * @param {string} [source] The uploaded file's name, which the preview and the toast repeat; none for a new file.
  * @param {Array} catalog The metric catalog as the page reads it, for completion and hover.
  * @param {Function} showToast
- * @param {Function} onApplied Called with the results once the derived metrics are added; the caller closes the dialog.
+ * @param {Function} onApplied Called with the results once the derived metrics are applied; the caller closes the dialog.
  * @param {Function} onClose
  */
 export function DerivedMetricsEditorModal({ text: initial, source = null, catalog, showToast, onApplied, onClose }) {
@@ -43,7 +43,7 @@ export function DerivedMetricsEditorModal({ text: initial, source = null, catalo
         title={source ? `Edit ${source}` : 'New Derived Metrics in YAML'}
         icon={<IconTag size={18} />}
         size="wide"
-        lead="Write each derived metric under a dash, with its name, kind and inputs. Nothing is added until you check the file and confirm what it would add. A derived metric that exists is never edited."
+        lead="Write each derived metric under a dash, with its name, kind and inputs. Nothing is applied until you check the file and confirm what it would do. A definition is fixed once saved, so only a description can change."
         onClose={onClose}
         footer={(
           <>
@@ -51,10 +51,10 @@ export function DerivedMetricsEditorModal({ text: initial, source = null, catalo
             <ActionButton
               className="btn btn-primary"
               disabled={text.trim() === ''}
-              title={text.trim() === '' ? 'Write at least one derived metric' : 'Check the YAML, and see what adding it would do, before anything is written'}
+              title={text.trim() === '' ? 'Write at least one derived metric' : 'Check the YAML, and see what applying it would do, before anything is written'}
               onClick={() => setChecking(true)}
             >
-              Add Derived Metrics
+              Apply Derived Metrics
             </ActionButton>
           </>
         )}
@@ -70,6 +70,7 @@ export function DerivedMetricsEditorModal({ text: initial, source = null, catalo
           />
           <p className="automation-note">
             A definition is fixed once saved, and the unit comes from the inputs, so a file gives neither a unit nor a datatype.
+            The file says what is saved, so leaving out a description clears the one a metric has.
             Press <code>Ctrl Space</code> for completion.
           </p>
           <div className="automation-schema-line">

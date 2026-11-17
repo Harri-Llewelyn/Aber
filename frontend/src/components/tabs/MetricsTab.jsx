@@ -1104,7 +1104,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     className="btn btn-primary btn-sm"
                     permitted={canManageSchema}
                     deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
-                    title="Choose a derived-metrics.yaml file. It opens in the editor, and is checked and shown to you before anything is added"
+                    title="Choose a derived-metrics.yaml file. It opens in the editor, and is checked and shown to you before anything is saved"
                     onClick={yaml.chooseFile}
                   >
                     <IconUpload size={13} aria-hidden="true" /> Upload
@@ -1123,7 +1123,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     className="btn btn-primary btn-sm"
                     permitted={canManageSchema}
                     deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
-                    title="Write derived metrics as YAML in an editor, as the Automations page does. Nothing is added until you confirm what it would add"
+                    title="Write derived metrics as YAML in an editor, as the Automations page does. Nothing is saved until you confirm what it would do"
                     onClick={yaml.newFile}
                   >
                     <IconPlus size={13} aria-hidden="true" /> New in YAML
