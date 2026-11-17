@@ -57,11 +57,12 @@ export const METRICS_TABS = [
 
 /**
  * The Automations page. `built-in` is a path segment as an automation's id is, so an automation
- * with that id opens by `automationUrl()`, which says it is the automation with `?open=1`.
+ * with that id opens by `automationUrl()`, which says it is the automation with `?open=1`. `help` names
+ * a tab's own page of help in help/pages/ (drift check 16 allows one), which the tab's drawers open.
  */
 export const AUTOMATIONS_TABS = [
   { id: 'automations', label: 'Automations', description: "The site's own rules: each watches a device's reading and raises an alert. Write one as YAML, or upload a file of them." },
-  { id: 'built-in', label: 'Built-in', description: 'The alerts Aber raises about itself, from the rules this release ships, and which are firing. Read-only: nothing here changes.' },
+  { id: 'built-in', label: 'Built-in', description: 'The alerts Aber raises about itself, from the rules this release ships, and which are firing. Read-only: nothing here changes.', help: 'built-in-alerts' },
 ]
 
 /** The standards in the page's order; each tab's tooltip is its standard's own hint (VocabularyPanel). */

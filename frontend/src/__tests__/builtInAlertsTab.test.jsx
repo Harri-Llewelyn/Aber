@@ -6,6 +6,10 @@ import { BuiltInAlertDrawer } from '../components/tabs/BuiltInAlertDrawer'
 import { GRAFANA_URL } from '../constants'
 import { api } from '../api'
 import { BUILT_IN_RULES, builtInRule } from '../utils/builtInAlerts'
+import { HELP_FILES } from '../help'
+import { helpTarget, onHelpRequest } from '../help/openHelp'
+import { slugify } from '../help/syntax'
+import { BUILT_IN_HELP_FILE } from '../components/tabs/BuiltInAlertDrawer'
 import { tabLinks } from '../test/tabBar'
 import { tooltipOf } from '../test/tooltips'
 
@@ -269,6 +273,15 @@ describe('a rule\'s drawer', () => {
     expect(tooltipOf(within(drawer).getByRole('button', { name: /View Help/ }))).toMatch(/what to check first/)
   })
 
+  it("opens the help entry at the rule's own heading", async () => {
+    const drawer = await open()
+    const requests = []
+    const stop = onHelpRequest(target => requests.push(target))
+    fireEvent.click(within(drawer).getByRole('button', { name: /View Help/ }))
+    stop()
+    expect(requests).toEqual([{ file: 'pages/built-in-alerts', anchor: 'gateway-stale' }])
+  })
+
   it('offers no View in Grafana for a rule something else evaluates', () => {
     const rule = { ...builtInRule(STALE), evaluator: 'prometheus' }
     render(<BuiltInAlertDrawer rule={rule} state={{ firing: 0, notEvaluated: 0 }} firingIds={null} onClose={() => {}} onCopy={() => {}} />)
@@ -280,6 +293,18 @@ describe('a rule\'s drawer', () => {
     render(<BuiltInAlertDrawer rule={null} state={null} firingIds={null} onClose={() => {}} onCopy={() => {}} />)
     expect(document.querySelector('.context-panel')).not.toHaveClass('context-panel-open')
     expect(document.querySelector('.context-field')).toBeNull()
+  })
+})
+
+describe('its help page', () => {
+  const headings = (file) => HELP_FILES[file].tokens.filter(token => token.type === 'heading').map(token => token.id)
+
+  it("is bundled, and each rule's title is a heading in it, which is where View Help opens", () => {
+    expect(BUILT_IN_HELP_FILE).toBe('pages/built-in-alerts')
+    expect(helpTarget(BUILT_IN_HELP_FILE)).toEqual({ file: BUILT_IN_HELP_FILE, anchor: null })
+    const ids = new Set(headings(BUILT_IN_HELP_FILE))
+    const missing = BUILT_IN_RULES.filter(rule => !ids.has(slugify(rule.title))).map(rule => rule.uid)
+    expect(missing).toEqual([])
   })
 })
 

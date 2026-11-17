@@ -26,8 +26,12 @@ function part1() {
       .filter((f) => f.endsWith('.md'))
       .map((f) => f.replace(/\.md$/, ''));
 
+    // A tab may have a page of help of its own, named by `help: '<file>'` in its entry (the Built-in
+    // tab's, one section for each alert): that file names a tab, and is as much a page's as any.
+    const tabHelp = [...nav.matchAll(/\bhelp:\s*'([a-z-]+)'/g)].map((m) => m[1]);
     const unhelped = pages.filter((p) => !helpFiles.includes(p));
-    const orphaned = helpFiles.filter((f) => !pages.includes(f));
+    const orphaned = helpFiles.filter((f) => !pages.includes(f) && !tabHelp.includes(f));
+    const unfiled = tabHelp.filter((f) => !helpFiles.includes(f));
 
     if (unhelped.length) {
       fail(
@@ -44,8 +48,12 @@ function part1() {
       );
     }
 
-    if (!unhelped.length && !orphaned.length) {
-      pass(`all ${pages.length} navigable page(s) have help in ${HELP_DIR}, and every file there names a page`);
+    if (unfiled.length) {
+      fail(`navigation.jsx names tab help ${unfiled.join(', ')}, and ${HELP_DIR} has no such file.`);
+    }
+
+    if (!unhelped.length && !orphaned.length && !unfiled.length) {
+      pass(`all ${pages.length} navigable page(s) have help in ${HELP_DIR}, and every file there names a page${tabHelp.length ? ` or a tab (${tabHelp.length})` : ''}`);
     }
   }
 }

@@ -8,6 +8,7 @@ import { RouteLink } from '../common/RouteLink'
 import { Tooltip } from '../common/Tooltip'
 import { IconBell, IconExternalLink, IconHelp } from '../common/Icons'
 import { openHelpAt } from '../../help/openHelp'
+import { AUTOMATIONS_TABS } from '../../navigation'
 import { slugify } from '../../help/syntax'
 import { ALERTS_PATH, severityOf } from '../../utils/alertHistory'
 import { formatDateTime, formatDuration, formatRelative } from '../../utils/format'
@@ -15,8 +16,8 @@ import {
   EVALUATOR_WORDS, QUERY_SOURCE_WORDS, evaluatedByGrafana, holdWords, isNotEvaluated, labelsText, occurrenceSubject,
 } from '../../utils/builtInAlerts'
 
-/** The help page with a section for each built-in alert, by the rule's title. */
-export const BUILT_IN_HELP_FILE = 'pages/built-in-alerts'
+/** The help page with a section for each built-in alert, by the rule's title: the Built-in tab's own. */
+export const BUILT_IN_HELP_FILE = `pages/${AUTOMATIONS_TABS.find(t => t.id === 'built-in').help}`
 
 /** A rule's query or queries, as the file writes them, each under what runs it. */
 function Queries({ queries }) {

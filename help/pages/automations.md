@@ -20,6 +20,12 @@ Open **Automations** in the sidebar. It has a group of its own, under **Vocabula
 
 Tick the box at the start of a row to pick it for **Export**.
 
+## The Built-in tab
+
+The page has a second tab, **Built-in**. It lists the alerts Aber raises about itself, such as a gateway that has gone quiet or a backup that is overdue. They are not automations. You cannot change them here.
+
+Select a row to read its rule and its recent alerts. [Built-in alerts](built-in-alerts.md) says what each one means and what to check first.
+
 ## Writing an automation
 
 1. Select **New Automation**. The editor opens on an example.
