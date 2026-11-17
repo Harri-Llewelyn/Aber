@@ -1,9 +1,9 @@
 ### From 1.9.0, an exported MTConnect concept is defined by MTConnect's text
 
 From 1.9.0, an AAS export defines each MTConnect data item type by the text MTConnect publishes for it.
-Before, it used the one description every live metric carrying the type agreed on, or else a sentence
-naming the type, such as "POSITION, as MTConnect defines it." The upgrade adds one column and changes no
-metric. There is nothing to run.
+Before, it used the one description every live metric carrying the type agreed on. Failing that, it used
+a sentence naming the type, such as "POSITION, as MTConnect defines it." The upgrade adds one column and
+changes no metric. There is nothing to run.
 
 - **What changes in a file you already export:** the `definition` of each MTConnect ConceptDescription.
   `POSITION` is now "point along an axis in a cartesian coordinate system." The ConceptDescription's id,
