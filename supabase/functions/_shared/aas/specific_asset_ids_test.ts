@@ -199,8 +199,8 @@ const resolve = (ref: string): Schema => AAS_SCHEMA.definitions[ref.slice("#/def
 
 // The one string pattern the schema's identifiers carry: XML 1.0 characters. A pattern that is not
 // this one is reported, not skipped.
-const XML_CHARS =
-  /^([\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd]|\ud800[\udc00-\udfff]|[\ud801-\udbfe][\udc00-\udfff]|\udbff[\udc00-\udfff])*$/;
+// deno-lint-ignore no-control-regex
+const XML_CHARS = /^([\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd]|\ud800[\udc00-\udfff]|[\ud801-\udbfe][\udc00-\udfff]|\udbff[\udc00-\udfff])*$/;
 
 /** What a value breaks in a schema: `$ref`, `allOf`, `properties`, `required`, enum, string and array limits. */
 function violations(node: unknown, schema: Schema, path: string, out: string[] = []): string[] {
