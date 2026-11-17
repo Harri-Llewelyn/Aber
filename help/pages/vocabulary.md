@@ -26,6 +26,7 @@ The words an MTConnect metric name is built from. They are generated from the `m
 - **It is a list of words, not of metrics.** It is what the standard makes available, not what your devices publish.
 - **Names are composed.** A metric is a component path plus a data item type. So `ANGLE` here becomes `Axes/C/ANGLE` in the catalog.
 - **Its semantic ids are local.** MTConnect publishes no ids, so this deployment makes one for each entry. Point at an entry to see it.
+- **A data item type shows its definition.** Point at one to read what MTConnect says it is. An AAS export gives the same text as the concept's definition. A type MTConnect does not describe, such as `ELEVATION`, shows its name alone.
 
 ### ISO 22400
 

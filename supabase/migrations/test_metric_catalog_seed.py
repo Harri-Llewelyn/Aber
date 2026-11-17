@@ -598,7 +598,8 @@ class TestConceptDefinitions(unittest.TestCase):
     SENSOR = "http://data.ashrae.org/standard223#TemperatureSensor"
     # Every vocabulary with a description column, and the spelling the view gives its standard.
     DESCRIBED = (("idta_submodel_templates", "IDTA"), ("ashrae223_vocabulary", "ASHRAE 223P"),
-                 ("opcua_vocabulary", "OPC UA"), ("iso22400_vocabulary", "ISO 22400"))
+                 ("opcua_vocabulary", "OPC UA"), ("iso22400_vocabulary", "ISO 22400"),
+                 ("mtconnect_vocabulary", "MTConnect"))
 
     @classmethod
     def setUpClass(cls):
@@ -646,11 +647,14 @@ class TestConceptDefinitions(unittest.TestCase):
                          "        OR c.standard IS DISTINCT FROM %s)", (standard,)))
                 self.assertEqual(missing, [])
 
-    def test_mtconnect_contributes_nothing_until_it_stores_definitions(self):
-        shared = self.in_transaction(lambda cur: self.fetch(
+    def test_mtconnect_contributes_only_the_rows_that_carry_text(self):
+        # 0301: a data item type is defined by the text MTConnect publishes. A row with none, such as
+        # a subtype or a unit, defines nothing.
+        textless = self.in_transaction(lambda cur: self.fetch(
             cur, "SELECT c.semantic_id FROM public.concept_definitions c"
-                 "  JOIN public.mtconnect_vocabulary v ON v.semantic_id = c.semantic_id"))
-        self.assertEqual(shared, [])
+                 "  JOIN public.mtconnect_vocabulary v ON v.semantic_id = c.semantic_id"
+                 " WHERE NULLIF(btrim(v.description), '') IS NULL"))
+        self.assertEqual(textless, [])
 
     def test_each_semantic_id_appears_once(self):
         twice = self.in_transaction(lambda cur: self.fetch(

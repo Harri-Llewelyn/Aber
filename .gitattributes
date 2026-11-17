@@ -52,3 +52,7 @@
 
 # The dashboard's fonts are Brotli-compressed, and bytes for the same reason.
 *.woff2 binary
+
+# A vendored upstream file is kept byte for byte, so its SHA-256 is the upstream one. The MTConnect
+# XSD is CRLF upstream, and the rule above would rewrite it to LF.
+scripts/vocabularies/MTConnectDevices_2.7.xsd -text

@@ -3574,7 +3574,9 @@ const apiMethods = {
       // 20260101000032_effectiveness_and_mtconnect_semantics.sql -- distinct from the observation-level
       // id a catalog metric carries, which is built from the whole metric name.
       return (data || []).map(v => ({
-        kind: v.kind, name: v.name, category: v.category, semantic_id: v.semantic_id ?? null
+        kind: v.kind, name: v.name, category: v.category, semantic_id: v.semantic_id ?? null,
+        // The text MTConnect publishes for a data item type (0301); null for every other kind.
+        description: v.description ?? null
       }));
     }
 

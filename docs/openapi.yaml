@@ -3443,6 +3443,9 @@ paths:
         Reference data, read-only: 249 data item types, 123 subtypes, 100 units and 126
         component types. Filter by `?kind=eq.DATA_ITEM_TYPE&category=eq.SAMPLE`.
 
+        A data item type's `description` is the text MTConnect publishes for it, from the 2.7 XSD,
+        in plain words. It is null for every other kind and for `ELEVATION`, which 2.8 added.
+
         **This is a vocabulary, not a catalog.** `ANGLE` is a type; `Axes/C/ANGLE` is the
         metric. Do not seed data item types into `metric_catalog`.
       parameters:
@@ -3571,13 +3574,12 @@ paths:
       summary: Read each vocabulary concept's own definition
       description: |
         A view: one row per semantic id a vocabulary defines, with that vocabulary's own text.
-        It unions the IDTA templates, ASHRAE 223P, OPC UA and ISO 22400. MTConnect contributes
-        nothing yet, because `mtconnect_vocabulary` has no description column. A row with no
-        text is left out.
+        It unions the IDTA templates, ASHRAE 223P, OPC UA, ISO 22400 and MTConnect. A row with no
+        text is left out, so an MTConnect data item type the XSD does not document has none.
 
         **An id held by two vocabularies takes the first** in the order IDTA, ASHRAE 223P, OPC UA,
-        ISO 22400: the one whose ids are issued furthest from this deployment. No id is shared
-        today.
+        ISO 22400, MTConnect: the one whose ids are issued furthest from this deployment. No id is
+        shared today.
 
         The AAS exporter reads it for each ConceptDescription's `definition`. Filter by
         `?semantic_id=in.(…)`.
@@ -3585,7 +3587,7 @@ paths:
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
         - { name: semantic_id, in: query, schema: { type: string }, description: 'e.g. `eq.http://data.ashrae.org/standard223#TemperatureSensor`' }
-        - { name: standard, in: query, schema: { type: string }, description: '`eq.IDTA` | `eq.ASHRAE 223P` | `eq.OPC UA` | `eq.ISO 22400`' }
+        - { name: standard, in: query, schema: { type: string }, description: '`eq.IDTA` | `eq.ASHRAE 223P` | `eq.OPC UA` | `eq.ISO 22400` | `eq.MTConnect`' }
       responses:
         '200':
           description: Concept definitions.
@@ -8164,6 +8166,7 @@ components:
         name: { type: string, example: ANGULAR_VELOCITY }
         category: { type: string, nullable: true, enum: [SAMPLE, EVENT, CONDITION], description: Populated for DATA_ITEM_TYPE rows only. }
         semantic_id: { type: string, nullable: true, description: 'The CONCEPT id, scoped by kind (…/v2.0/DataItemType/ANGLE). The namespace pins v2.0, the major line — not the generator''s SCHEMA_VERSION.' }
+        description: { type: string, nullable: true, description: 'What MTConnect says a data item type is, from `DataItemEnumEnum` in MTConnectDevices_2.7.xsd. Null for every other kind, and for a type the XSD does not document.' }
 
     ISO22400VocabularyEntry:
       type: object
@@ -8221,7 +8224,7 @@ components:
         semantic_id: { type: string, example: 'http://data.ashrae.org/standard223#TemperatureSensor', description: 'Unique in the view.' }
         name: { type: string, example: TemperatureSensor, description: 'The concept''s key in its vocabulary: the IDTA idShort, or the vocabulary row''s name.' }
         definition: { type: string, example: 'A `Sensor` that `observes` a `QuantifiableObservableProperty` that represents a measure of temperature.' }
-        standard: { type: string, enum: [IDTA, ASHRAE 223P, OPC UA, ISO 22400] }
+        standard: { type: string, enum: [IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect] }
 
     UserSettings:
       type: object

@@ -456,3 +456,52 @@ Adopting a standard's vocabulary is not a compliance claim. Locally-minted seman
 that has not been certified. The MTConnect Implementer License, and the equivalent programmes for
 the other bodies, are separate from anything granted here. See
 [`docs/vocabularies.md`](docs/vocabularies.md).
+
+### MTConnect: the Devices schema and the definitions read from it
+
+[`scripts/vocabularies/MTConnectDevices_2.7.xsd`](scripts/vocabularies/MTConnectDevices_2.7.xsd) is
+`MTConnectDevices_2.7.xsd` from [`github.com/mtconnect/schema`](https://github.com/mtconnect/schema),
+copyright 2008-2019 AMT – The Association For Manufacturing Technology. It is unmodified, byte for
+byte. The repository is Apache 2.0, and the file carries a BSD-style licence of its own in its
+header, which is the one that applies to it. The MIT licence above does not cover it.
+
+`scripts/generate-mtconnect-vocabulary.mjs` reads `DataItemEnumEnum` in it for the text that defines
+each data item type. Migration `0301` stores that text, rendered to plain words, in
+`mtconnect_vocabulary.description`, and an AAS export gives it as a ConceptDescription's definition.
+The licence asks for its notice in every copy of the source and in the documentation that comes with
+a binary form, so here it is as the file gives it:
+
+> Copyright (c) 2008-2019, AMT – The Association For Manufacturing Technology (“AMT”)
+> All rights reserved.
+>
+> Redistribution and use in source and binary forms, with or without
+> modification, are permitted provided that the following conditions are met:
+>     * Redistributions of source code must retain the above copyright
+>       notice, this list of conditions and the following disclaimer.
+>     * Redistributions in binary form must reproduce the above copyright
+>       notice, this list of conditions and the following disclaimer in the
+>       documentation and/or other materials provided with the distribution.
+>     * Neither the name of the AMT nor the
+>       names of its contributors may be used to endorse or promote products
+>       derived from this software without specific prior written permission.
+>
+> DISCLAIMER OF WARRANTY. ALL MTCONNECT MATERIALS AND SPECIFICATIONS PROVIDED
+> BY AMT, MTCONNECT OR ANY PARTICIPANT TO YOU OR ANY PARTY ARE PROVIDED "AS IS"
+> AND WITHOUT ANY WARRANTY OF ANY KIND. AMT, MTCONNECT, AND EACH OF THEIR
+> RESPECTIVE MEMBERS, OFFICERS, DIRECTORS, AFFILIATES, SPONSORS, AND AGENTS
+> (COLLECTIVELY, THE "AMT PARTIES") AND PARTICIPANTS MAKE NO REPRESENTATION OR
+> WARRANTY OF ANY KIND WHATSOEVER RELATING TO THESE MATERIALS, INCLUDING, WITHOUT
+> LIMITATION, ANY EXPRESS OR IMPLIED WARRANTY OF NONINFRINGEMENT,
+> MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+>
+> LIMITATION OF LIABILITY. IN NO EVENT SHALL AMT, MTCONNECT, ANY OTHER AMT
+> PARTY, OR ANY PARTICIPANT BE LIABLE FOR THE COST OF PROCURING SUBSTITUTE GOODS
+> OR SERVICES, LOST PROFITS, LOSS OF USE, LOSS OF DATA OR ANY INCIDENTAL,
+> CONSEQUENTIAL, INDIRECT, SPECIAL OR PUNITIVE DAMAGES OR OTHER DIRECT DAMAGES,
+> WHETHER UNDER CONTRACT, TORT, WARRANTY OR OTHERWISE, ARISING IN ANY WAY OUT OF
+> THIS AGREEMENT, USE OR INABILITY TO USE MTCONNECT MATERIALS, WHETHER OR NOT
+> SUCH PARTY HAD ADVANCE NOTICE OF THE POSSIBILITY OF SUCH DAMAGES.
+
+AMT's SysML model (`mtconnect/mtconnect_sysml_model`) is not read. It has no licence file, and its
+own terms allow copying only in the form received, without modifications. Taking its documentation
+into a seed would be a modification, so the definitions come from the schema repository instead.

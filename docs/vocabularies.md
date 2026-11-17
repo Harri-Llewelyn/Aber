@@ -95,17 +95,17 @@ before proposing a change:
   operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,
   `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text; `unitId` is unset) and a
   `dataType` derived from the Sparkplug datatype. **The definition is the vocabulary's own text**
-  wherever one defines the id. `concept_definitions` (`0169`) unions the IDTA, ASHRAE 223P, OPC UA
-  and ISO 22400 descriptions, in that order of precedence. So a 223P class such as
-  `TemperatureSensor` is defined by 223P, not by the description of a metric carrying it.
-  An id no vocabulary holds but a known authority issues defers to that authority, whatever the
-  metrics carrying it say: the QUDT quantity kinds the example 223P readings carry are defined as,
-  for example, "Temperature, as QUDT defines it." (`ID_AUTHORITIES` in `shell.ts`, one entry per
-  authority). MTConnect stores no definitions yet, so its ids, like any id an Administrator typed,
-  take the catalog description only when every live metric carrying the id agrees on it. The
-  POSITION metrics describe their own axes, so that concept's definition defers to MTConnect
-  instead. A new standard's ids are covered with no code change; its definitions need an arm in
-  the view.
+  wherever one defines the id. `concept_definitions` (`0169`, redeclared by `0301`) unions the
+  IDTA, ASHRAE 223P, OPC UA, ISO 22400 and MTConnect descriptions, in that order of precedence. So a
+  223P class such as `TemperatureSensor` is defined by 223P, not by the description of a metric
+  carrying it. An MTConnect data item type is defined by the text MTConnect publishes for it:
+  POSITION is "point along an axis in a cartesian coordinate system.", not the description of
+  whichever axis a metric names. An id no vocabulary holds but a known authority issues defers to
+  that authority, whatever the metrics carrying it say: the QUDT quantity kinds the example 223P
+  readings carry are defined as, for example, "Temperature, as QUDT defines it." (`ID_AUTHORITIES`
+  in `shell.ts`, one entry per authority). Any other id, such as one an Administrator typed, takes
+  the catalog description only when every live metric carrying the id agrees on it. A new
+  standard's ids are covered with no code change; its definitions need an arm in the view.
 
 ## How a vocabulary entry becomes a metric
 
@@ -230,6 +230,15 @@ regenerated the file: the release above is gone from it, and the new file report
 its version and declares no licence. Without a declared licence it can't be used here. The folder's
 [README](../scripts/vocabularies/README.md) gives the steps for moving to a newer release.
 
+**MTConnect's definitions are read from a kept copy of the 2.7 XSD** (#779), at
+[`scripts/vocabularies/MTConnectDevices_2.7.xsd`](../scripts/vocabularies/MTConnectDevices_2.7.xsd),
+pinned by SHA-256. `DataItemEnumEnum` documents 248 of the 249 data item types. The model's markup
+(`{{block(…)}}`, `{{term(…)}}`, `{{property(…)}}`, `{{cite(…)}}`, `{{termplural(…)}}`) is rendered to plain
+words, and a type with no documentation, ELEVATION, which 2.8 added, keeps none. The 2.8 JSON Schema,
+which the generator still reads for the names, carries no type documentation. The newest published XSD
+is 2.7. The model's own repository, `mtconnect/mtconnect_sysml_model`, is not a source: it has no
+licence file, and its terms allow copying only in the form received.
+
 ### Licences
 
 Every vocabulary comes from an open, machine-readable source whose licence permits redistribution
@@ -240,6 +249,7 @@ in a derived work, and every licence was read rather than assumed:
 | OPC 40001-1, 40010-1, 40501-1, 40540, 40001-4, 30050 NodeSets | OPC Foundation MIT License 1.00 | file header |
 | IDTA 02006-3-0-1 Digital Nameplate | free IDTA publication | IDTA content hub |
 | ASHRAE 223P ontology | Apache-2.0 | `dcterms:license` in the ontology |
+| MTConnect `MTConnectDevices_2.7.xsd` (the definitions) | BSD-style licence from AMT, in the file; the repository is Apache-2.0 | header of the file, and the repository's licence |
 | QUDT quantity kinds (five IRIs cited, not seeded) | CC BY 4.0, attribution to QUDT.org | `dcterms:rights` in the vocabulary's graph metadata |
 
 As with MTConnect's Apache-2.0, a licence covers the *vocabulary*, not a conformance claim.
