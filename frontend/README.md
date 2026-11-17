@@ -1352,7 +1352,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Page | Tabs in the path | Query keys (drawer last) |
 | :--- | :--- | :--- |
 | Site Map | | `archived`; the panel: `area`, `cell` or `lane` |
-| History | `overview` (the default, also the bare `/history`) or `device`, then the device's id (`/history/device/<id>`; `/history/device` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); the picker: `search`, `sort` |
+| History | `overview` (the default, also the bare `/history`) or `device`, then the device's id (`/history/device/<id>`; `/history/device` is the picker) | the time window (`span` and `at`, `range`, or `from` and `to`); `replay`; the picker: `search`, `sort` |
 | Areas | | `search`, `lifecycle`, `sort`; `area` |
 | Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
 | Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
@@ -1776,7 +1776,16 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   `setWin(bandWindow(start, end, axisMs), { replace: false })`, so Back undoes it, keeping the
   metrics and the buckets. uPlot's own selection stays off: one band covers the number charts and
   the state strips alike, and Escape, the 4px click and touch behave as on the Audit Trail.
-- **The address** is `/history/device/<id>` with the window's keys, `metric` and `bucket`;
+- **Replay lanes are out of the Device tab's two lists**, the picker with no device chosen and the
+  toolbar's switcher, until the Show replay lanes check is on, as on the Devices page: the same
+  `FilterCheck` in the same words (`utils/replayLanes.js`, drawn by `ReplayLanesCheck`) and the
+  same key, `?replay=1`. The picker holds it in a Filters panel and the switcher in its own panel,
+  and each offers it only while a lane exists (`isReplayLane()`: placed `shadow`, or a
+  `shadow_of`). The device charted now stays in the switcher's list, and the switcher carries the
+  check to the next device. A link to a lane's charts sets the check, once for each lane opened
+  (`HistoryTab`'s `openedLane`), and the lane charts either way: unticking it later removes the
+  other lanes from the lists and leaves this one.
+- **The address** is `/history/device/<id>` with the window's keys, `metric`, `bucket` and `replay`;
   `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.
 
@@ -1809,7 +1818,11 @@ arrived over the window, a lane per device, before anything is charted. Its arit
 - **The groups** (`overviewGroups()`) place devices as the Site Map does, from the same helpers
   (`inServiceDevices()`, `groupDevicesByCell()`, `areaWideInService()`, the location sources): each
   area in service with its cells and its Area-Wide devices, the cells in no area, then Site-Wide,
-  Simulated and Unassigned. Archived devices are left off, as on the Site Map. Each heading is a
+  Simulated, Replay lanes and Unassigned. Archived devices are left off, as on the Site Map.
+  **Replay lanes** (`REPLAY_LANES_GROUP`) are the devices placed `shadow`, the Playback gateway's.
+  The group is not an area or a cell, so the Site Map, the Areas page, the UNS topic and i3X never
+  see one. Overview leaves it out until Filters' Show replay lanes is on (`?replay=1`, the Devices
+  page's check, offered only while a lane exists), and then reads and draws its lanes as any other. Each heading is a
   `GroupHeading` with "4 devices" as its `detail`; a closed group draws one strip of its devices'
   counts merged and renders none of its lanes. Which are open is kept in this browser
   (`OVERVIEW_GROUPS_KEY`, `{ key: open }`, in try/catch); on a first visit every group is open

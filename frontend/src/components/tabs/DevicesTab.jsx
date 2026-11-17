@@ -36,6 +36,7 @@ import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { FiltersPopover } from '../common/FiltersPopover'
 import { FilterCheck, FilterDropdown, FilterList } from '../common/FilterChecklist'
+import { REPLAY_LANES_LABEL, REPLAY_LANES_TIP } from '../../utils/replayLanes'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -994,11 +995,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           {/* Shown only when there are any: it appears the moment a playback mints the first lane. */}
           {shadowCount > 0 && (
             <FilterCheck
-              label="Show replay lanes"
+              label={REPLAY_LANES_LABEL}
               checked={showShadows}
               onChange={setShowShadows}
               count={shadowCount}
-              tip="Playback makes one replay lane per device a capture recorded. They are hidden by default because they are not machines."
+              tip={REPLAY_LANES_TIP}
             />
           )}
         </FiltersPopover>

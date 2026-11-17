@@ -4,6 +4,8 @@ import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
+import { FiltersPopover } from '../common/FiltersPopover'
+import { ReplayLanesCheck } from '../common/ReplayLanesCheck'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { RouteLink } from '../common/RouteLink'
@@ -15,6 +17,7 @@ import { navigate, pathSegments, useUrl, useUrlList, useUrlState } from '../../h
 import { useTimeWindow } from '../../hooks/useTimeWindow'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { deviceIdentifiers } from '../../utils/sparkplugId'
+import { REPLAY_LANES_PARAM, isReplayLane } from '../../utils/replayLanes'
 import { unitSymbol } from '../../utils/units'
 import {
   AREA_PATH, AREA_TAB, CELL_PATH, CELL_TAB, DEFAULT_HISTORY_WINDOW, HISTORY_RANGES, HISTORY_SPANS, METRIC_PATH, METRIC_TAB, OVERVIEW_PATH,
@@ -46,13 +49,16 @@ const PICKER_SORT = {
 
 /**
  * The devices as a table, each a link to its charts: the Device tab with no device chosen. The
- * toolbar's search narrows it, and a heading sorts it.
+ * toolbar's search narrows it, and a heading sorts it. `hidden` is how many replay lanes the list
+ * leaves out, so an empty list can say they are why.
  */
-function DevicePicker({ devices, search, win }) {
+function DevicePicker({ devices, search, win, hidden }) {
   const matching = useMemo(() => devices.filter(d => deviceMatches(d, search)), [devices, search])
   const [shown, sort] = useSortableRows(matching, PICKER_SORT)
   if (devices.length === 0) {
-    return <EmptyState icon={<IconCpu size={36} />} message="No device is registered yet, so there is nothing to chart." />
+    return hidden > 0
+      ? <EmptyState icon={<IconCpu size={36} />} message="Only replay lanes are registered. Show them in Filters to chart one." />
+      : <EmptyState icon={<IconCpu size={36} />} message="No device is registered yet, so there is nothing to chart." />
   }
   if (shown.length === 0) {
     return <EmptyState icon={<IconCpu size={36} />} message={`No device matches "${search.trim()}".`} />
@@ -261,6 +267,8 @@ function AreaPicker({ areas, search, win }) {
  * for an Administrator or a Shopfloor Manager. The
  * address names the tab, the device and the window: `/history` and `/history/overview` are the
  * Overview, `/history/device` picks a device, and `/history/device/<id>?range=24h` charts one.
+ * Replay lanes are left out of Overview and the Device tab's lists until `?replay=1`, the Devices
+ * page's key, shows them; a lane's own address sets it, and charts the lane either way.
  * The Metric tab compares one metric across every device that reports it, `/history/metric` picks the
  * metric and `/history/metric/<name>?area=&cell=&devices=` compares them. The Cell tab compares one metric
  * across the machines of a cell, `/history/cell` picks the cell and `/history/cell/<id>?metric=…` compares
@@ -282,6 +290,8 @@ export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGatewa
   const areaId = areaIdFrom(segments)
   const [win, setWin] = useTimeWindow({ ranges: HISTORY_RANGES, fallback: DEFAULT_HISTORY_WINDOW, spans: HISTORY_SPANS })
   const [search, setSearch] = useUrlState('search', '')
+  // Replay lanes are out of the Device tab's lists until this is on, as on the Devices page.
+  const [showLanes, setShowLanes] = useUrlState(REPLAY_LANES_PARAM, false)
   const [loaded, setLoaded] = useState(null)
   const [error, setError] = useState(null)
   // The refresh timer, in seconds, as Logs keeps it: in the page, not the address.
@@ -304,6 +314,16 @@ export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGatewa
   const device = useMemo(
     () => (deviceId && loaded ? loaded.devices.find(d => deviceIdentifiers(d).includes(deviceId)) || null : null),
     [deviceId, loaded]
+  )
+
+  // A link to a lane's charts turns the check on, once for each lane opened: unticking it afterwards
+  // leaves the lane charted, and keeps it in the switcher's list.
+  const openedLane = tab === 'device' && device && isReplayLane(device) ? device.asset_id : null
+  useEffect(() => { if (openedLane) setShowLanes(true) }, [openedLane, setShowLanes])
+  const laneCount = useMemo(() => (loaded ? loaded.devices.filter(isReplayLane).length : 0), [loaded])
+  const pickable = useMemo(
+    () => (loaded ? loaded.devices.filter(d => showLanes || !isReplayLane(d)) : []),
+    [loaded, showLanes]
   )
 
   const cells = useMemo(() => (loaded ? historyCells(loaded.cells, loaded.devices, loaded.areas) : []), [loaded])
@@ -463,6 +483,9 @@ export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGatewa
                 setEvery={setEvery}
                 userRole={userRole}
                 showToast={showToast}
+                showLanes={showLanes}
+                setShowLanes={setShowLanes}
+                laneCount={laneCount}
               />
             ) : (
               <EmptyState icon={<IconCpu size={36} />} message="No device answers to this address. It may have been deleted.">
@@ -479,8 +502,13 @@ export function HistoryTab({ showToast, userRole, onSelectDevice, onSelectGatewa
                   ariaLabel="Find a device by its name, id, cell or area"
                 />
                 <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} />
+                {laneCount > 0 && (
+                  <FiltersPopover activeCount={showLanes ? 1 : 0} onClear={() => setShowLanes(false)}>
+                    <ReplayLanesCheck checked={showLanes} onChange={setShowLanes} count={laneCount} />
+                  </FiltersPopover>
+                )}
               </div>
-              <DevicePicker devices={loaded.devices} search={search} win={win} />
+              <DevicePicker devices={pickable} search={search} win={win} hidden={showLanes ? 0 : laneCount} />
             </>
           )}
         </div>

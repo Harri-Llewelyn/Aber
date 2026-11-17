@@ -6,6 +6,8 @@ import { SearchInput } from '../common/SearchInput'
 import { TimeWindowControl } from '../common/TimeWindowControl'
 import { RefreshButton } from '../common/RefreshButton'
 import { ClearFilters } from '../common/ClearFilters'
+import { FiltersPopover } from '../common/FiltersPopover'
+import { ReplayLanesCheck } from '../common/ReplayLanesCheck'
 import { GroupHeading } from '../common/GroupHeading'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
 import { EmptyState } from '../common/EmptyState'
@@ -23,6 +25,7 @@ import { useClickOutside } from '../../hooks/useClickOutside'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { navigate, useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { DEVICE_STATUS, deviceLifecycleStatus } from '../../utils/deviceStatus'
+import { REPLAY_LANES_PARAM } from '../../utils/replayLanes'
 import { bandWindow, clockWords, holdsNow, sameWindow, windowBounds, windowWords } from '../../utils/timeWindow'
 import {
   EXPORT_DENIED_TITLE, EXPORT_MAX_DAYS, EXPORT_MAX_DAYS_KEY, exportMaxDays, exportSizeProblem, exportWindowProblem,
@@ -30,7 +33,7 @@ import {
 } from '../../utils/telemetryExport'
 import {
   COVERAGE_KEY, COVERAGE_PER_READ, COVERAGE_STEPS, DEFAULT_CHART_PX, DEFAULT_HISTORY_WINDOW,
-  ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, TOO_LONG_FOR_MANY, overviewLimit, axisTicks, blockReadoutWords,
+  ENDED_WINDOW_REASON, HISTORY_RANGES, HISTORY_REFRESH_EVERY, HISTORY_SPANS, REPLAY_LANES_GROUP, TOO_LONG_FOR_MANY, overviewLimit, axisTicks, blockReadoutWords,
   blockWords, boxWords, bucketStarts, chartAddress, coverageBlock, coverageCounts, coverageRuns, coverageSteps, coverageSummary,
   deviceMatches, deviceMetrics, groupIsOpen, groupKeys, inReads, mergeCounts, nowFraction, overviewGroups, pickedAddress,
   readOverviewGroups, readWidth, readingsStopWords, telemetryKey, uncountedStretches, uncountedWords, writeOverviewGroups,
@@ -376,7 +379,9 @@ function SelectionPopover({ box, layerRef, words, keys, win, names, chartFor, ex
  * History's Overview: where readings arrived over the window, before anything is charted. The
  * Audit Trail's lane grid: a label column, then a track per row, under an axis. A row per device,
  * grouped as the Site Map places devices (overviewGroups()): each area and its cells, the cells in
- * no area, then Site-Wide, Simulated and Unassigned, each group a section row. A track is a strip of
+ * no area, then Site-Wide, Simulated, Replay lanes and Unassigned, each group a section row. The
+ * Replay lanes group is out until Filters' Show replay lanes is on (`?replay=1`, as on the Devices
+ * page), and the check is offered only while a lane exists. A track is a strip of
  * blocks, darker where more readings arrived, from telemetry_coverage() (0245), read for every
  * device at about one block per COVERAGE_BLOCK_PX of the track, in parts that fit its bound; the
  * block under the pointer is read out in words. A closed group's section row carries its devices'
@@ -397,7 +402,13 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
   useClockTick(CLOCK_MS)
   const now = Date.now()
   const [search, setSearch] = useUrlState('search', '')
-  const groups = useMemo(() => overviewGroups(devices, cells, areas), [devices, cells, areas])
+  const [showLanes, setShowLanes] = useUrlState(REPLAY_LANES_PARAM, false)
+  const everyGroup = useMemo(() => overviewGroups(devices, cells, areas), [devices, cells, areas])
+  const laneCount = everyGroup.find(g => g.key === REPLAY_LANES_GROUP)?.devices.length ?? 0
+  const groups = useMemo(
+    () => (showLanes ? everyGroup : everyGroup.filter(g => g.key !== REPLAY_LANES_GROUP)),
+    [everyGroup, showLanes]
+  )
   const placed = useMemo(() => groups.flatMap(g => g.devices), [groups])
   const keys = useMemo(() => placed.map(telemetryKey), [placed])
   const names = useMemo(() => new Map(placed.map(d => [telemetryKey(d), d.asset_name])), [placed])
@@ -548,8 +559,9 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
   })
   const tick = (key, on) => setTicked(prev => (on ? [...prev, key] : prev.filter(k => k !== key)))
 
-  const filterCount = [!sameWindow(win, DEFAULT_HISTORY_WINDOW), search.trim() !== ''].filter(Boolean).length
-  const clear = () => { setWin(DEFAULT_HISTORY_WINDOW); setSearch('') }
+  const lanesOn = showLanes && laneCount > 0
+  const filterCount = [!sameWindow(win, DEFAULT_HISTORY_WINDOW), search.trim() !== '', lanesOn].filter(Boolean).length
+  const clear = () => { setWin(DEFAULT_HISTORY_WINDOW); setSearch(''); setShowLanes(false) }
 
   // ---- The selection box -------------------------------------------------------------------------
   const drawn = reading?.counts ? { start: reading.start, ms: reading.end - reading.start } : null
@@ -741,6 +753,11 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
           ariaLabel="Find a device by its name, id, cell or area"
         />
         <TimeWindowControl value={win} onChange={setWin} ranges={HISTORY_RANGES} spans={HISTORY_SPANS} zoom limit={limit} />
+        {laneCount > 0 && (
+          <FiltersPopover activeCount={lanesOn ? 1 : 0} onClear={() => setShowLanes(false)}>
+            <ReplayLanesCheck checked={showLanes} onChange={setShowLanes} count={laneCount} />
+          </FiltersPopover>
+        )}
         <div className="filter-bar-actions">
           <ClearFilters count={filterCount} onClear={clear} />
           {/* The tick boxes' way to Chart, without a drag. */}
