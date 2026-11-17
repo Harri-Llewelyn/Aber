@@ -3,8 +3,9 @@ import { fail, pass, read } from './lib.mjs';
 // -------------------------------------------------------------------------------------------------
 // 431. The API reference documents the derived metrics calls as 0297 declares them: each function
 // granted to authenticated for a caller under its own path with the arguments it declares and no others,
-// and the result's schema with every key the function answers. No Audit Trail action is added: the rows
-// are the catalogue's own.
+// and the result's schema with every key the function answers and every status it gives, the change's
+// `changes`, `before` and `after` among them. No Audit Trail action is added: the rows are the
+// catalogue's own, an INSERT for a metric added and an UPDATE for one changed.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
   const SPEC = 'docs/openapi.yaml';
@@ -43,11 +44,11 @@ export default function check() {
   const result = spec.match(/^ {4}DerivedMetricResult:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
   // The keys apply_derived_metrics() gives each result, from the object it builds (it keeps `canon` to itself).
   const built = sql.match(/v_work := v_work \|\| jsonb_build_object\(([\s\S]*?)'canon', v_canon\);/)?.[1] ?? '';
-  for (const key of ['index', 'name', 'status', 'id', 'units', 'derivation', 'reasons']) {
+  for (const key of ['index', 'name', 'status', 'id', 'units', 'derivation', 'changes', 'before', 'after', 'reasons']) {
     if (!built.includes(`'${key}', `)) problems431.push(`${FUNCTIONS}: apply_derived_metrics() no longer gives a result its ${key}`);
     if (!result.split('\n').some((line) => line.startsWith(`${' '.repeat(8)}${key}:`))) problems431.push(`${SPEC}: DerivedMetricResult does not describe the result's ${key}`);
   }
-  const statuses = [...new Set([...sql.matchAll(/'(new|unchanged|refused)'/g)].map((m) => m[1]))].sort().join(', ');
+  const statuses = [...new Set([...sql.matchAll(/'(new|changed|unchanged|refused)'/g)].map((m) => m[1]))].sort().join(', ');
   const spoken = result.match(/status: \{ type: string, enum: \[([^\]]*)\] \}/)?.[1].split(',').map((s) => s.trim()).sort().join(', ');
   if (statuses !== spoken) problems431.push(`${SPEC}: DerivedMetricResult gives the statuses ${spoken}, ${FUNCTIONS} gives ${statuses}`);
   if (sql.includes("'AUTOMATION_") || /action\s*=\s*'[A-Z_]*METRIC[A-Z_]*'/.test(sql)) {

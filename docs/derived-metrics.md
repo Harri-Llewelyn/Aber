@@ -64,7 +64,7 @@ A file is a list of derived metrics. Each is a set of these keys.
 | Key | Required | What it is |
 | :--- | :--- | :--- |
 | `name` | Yes | The name, such as `Controller/PARTS_PER_HOUR`: letters, digits and underscores, with `/` between the parts. |
-| `description` | No | What the value means, up to 4,000 characters. |
+| `description` | No | What the value means, up to 4,000 characters. A file says what is saved: leave it out and a metric's description is cleared. |
 | `kind` | Yes | How the value is computed: `counter_rate`, `time_in_state` or `sum`. |
 | `input` | No | The catalogue metric a `counter_rate` or a `time_in_state` is computed from. Required for those two kinds. |
 | `states` | No | The values of the input that count as being in the state: a list of at least 1. Required for `time_in_state`. |
@@ -79,6 +79,10 @@ A file is a list of derived metrics. Each is a set of these keys.
 
 Things to know:
 
+- **A file says what is saved.** Where a metric already has a description and the file has none, the upload
+  clears it. The preview shows the description before and after, with **None** for an empty one, so the
+  change is read before it is applied. An export leaves an empty description out, so exporting and
+  uploading the same file changes nothing.
 - **A file never says the unit or the datatype.** Aber works the unit out from the inputs, and a derived
   metric is always a Double. A file with `units` or `datatype` is refused.
 - **A rate is the input's unit per hour.** A counter with no unit gives `COUNT/HOUR`.
@@ -102,21 +106,28 @@ Things to know:
 One function, `apply_derived_metrics(p_doc, p_dry_run)`, checks and applies a document. The page calls
 it twice: once with `p_dry_run` true for the preview, once with it false when the person confirms.
 
-- **It answers one result per derived metric:** its `name`, its `status` and its `units` and
-  `derivation`. For a refusal it gives `reasons` instead. The status is `new`, `unchanged` or `refused`.
+- **It answers one result per derived metric:** its `name`, its `status`, its `units` and
+  `derivation`, and what it `changes`. For a refusal it gives `reasons` instead. The status is `new`,
+  `changed`, `unchanged` or `refused`.
+- **A change lists the keys that differ,** as the Automations page's result does. `changes` is a list of
+  document keys, and `before` and `after` hold their old and new values. Today the only key is
+  `description`: `{"changes": ["description"], "before": {"description": "Parts per hour."},
+  "after": {"description": null}}`. The three are empty for any other status.
 - **Each reason has a `path` and a `message`.** The path is a JSON path, such as `$[0].inputs[1].metric`,
   which the editor maps back to a line.
 - **Every field is checked, and every reason is reported,** so a file is fixed in one pass. A file holds
   at most 1,000 derived metrics.
 - **All or nothing.** With any refusal, nothing is written. A preview writes nothing either.
-- **A file never edits and never deletes.** A definition is fixed once saved. So the file only adds:
+- **A file changes a description and deletes nothing.** A definition is fixed once saved, so the
+  description is the one thing that can change:
   - A name the catalogue lacks is added as a derived metric.
   - A name that exists with the same definition and description is reported `unchanged`, and writes
     nothing.
+  - A name that exists with the same definition and another description is reported `changed`. The
+    person accepts it by pressing the dialog's **Apply** button. The stored definition is kept as it is,
+    whatever the order of the file's states or inputs.
   - A name that exists with another definition is refused. The reason says to add the new one under a new
     name, then deprecate the old one, choosing the new one as **Superseded By**.
-  - A name that exists with another description is refused. A description cannot be edited on the Metrics
-    page, so the reason says to say what is saved, or to use a new name.
   - A name that a measured metric holds is refused. So is the name of a deprecated derived metric: restore
     it on the Metrics page, or choose a new name.
 - **An input the catalogue lacks is refused by name,** every one of them in the same pass. The preview does
@@ -132,8 +143,9 @@ or those of the metric ids given. A deprecated one is not exported.
 
 ## Who may, and what is recorded
 
-- **An Administrator may apply a file,** as only an Administrator may add a metric to the catalogue. With
+- **An Administrator may apply a file,** as only an Administrator may add a metric to the catalogue or change one. With
   the second-factor switch on, the session must have given its code. A machine identity may not. Every
   signed-in role may export.
-- **Each derived metric added is one row in the Audit Trail,** naming the person: an `INSERT` of the
-  metric, under Metric catalog. A preview, an unchanged metric and a refusal write none.
+- **Each derived metric added or changed is one row in the Audit Trail,** naming the person: an `INSERT`
+  of the metric, or an `UPDATE` that holds its description before and after, under Metric catalog. A
+  preview, an unchanged metric and a refusal write none.

@@ -16,4 +16,4 @@ The [device schemas reference](device-schemas.md) is the format of the file a pe
 Schemas page or uploads to it: its keys, and how an upload becomes a new draft version.
 
 The [derived metrics reference](derived-metrics.md) is the format of the file a person exports from the
-Metrics page's Derived tab or uploads to it: its keys, and why an upload only ever adds.
+Metrics page's Derived tab or uploads to it: its keys, and why a description is all an upload can change.
