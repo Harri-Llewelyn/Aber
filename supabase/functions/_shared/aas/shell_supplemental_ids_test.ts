@@ -211,7 +211,6 @@ function nameplateRecord(supplemental: DeviceRecord["supplemental"], carrier = "
 
 const serial = (rows: DeviceRecord) => {
   const exported = buildEnvironment(rows).submodels.find((s) => s.idShort === "DigitalNameplate");
-  // deno-lint-ignore no-explicit-any
   return (exported?.submodelElements as Anything[]).find((e) => e.idShort === "SerialNumber");
 };
 
