@@ -8265,3 +8265,46 @@ ol.gateway-steps {
 .capture-drop-icon { vertical-align: -2px; margin-right: 6px; }
 .capture-badge-lead { margin-right: 6px; }
 .capture-label-count { margin-left: 6px; }
+
+/* The Automations page's Built-in tab: its rows' state, and the rule drawer (tabs/BuiltInAlerts.jsx,
+   tabs/BuiltInAlertDrawer.jsx). New colours here would have to pass themeContrast.test.js; none are. */
+.built-in-state,
+.built-in-subtitle { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.built-in-queries { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.built-in-query-label { margin-bottom: 2px; font-size: 11px; color: var(--text-muted); }
+/* A query is read, not edited: wrapped, so the drawer never scrolls sideways, and its own scroll
+   when long. It takes focus, so a keyboard can reach what scrolls. */
+.built-in-pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.built-in-pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.built-in-labels > div { overflow-wrap: anywhere; }
+.built-in-occurrences { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.built-in-occurrences > .context-panel-section-label { margin-bottom: 0; }
+.built-in-occurrence-list { list-style: none; margin: 0; padding: 0; width: 100%; }
+.built-in-occurrence {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+.built-in-occurrence:first-child { border-top: none; padding-top: 2px; }
+.built-in-occurrence-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.built-in-occurrence-subject { font-size: 11px; color: var(--text-primary); overflow-wrap: anywhere; }
+.built-in-occurrence-meta { color: var(--text-muted); line-height: 1.35; }
+.built-in-occurrences-link { font-size: 12px; font-weight: 500; color: var(--accent-text); text-decoration: none; }
+.built-in-occurrences-link:hover,
+.built-in-occurrences-link:focus-visible { text-decoration: underline; text-underline-offset: 2px; }

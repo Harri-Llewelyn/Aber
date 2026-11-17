@@ -14,11 +14,14 @@ import { LoadingState } from '../common/LoadingState'
 import { OverflowText } from '../common/OverflowText'
 import { RouteLink } from '../common/RouteLink'
 import { SearchInput } from '../common/SearchInput'
+import { TabStrip } from '../common/TabStrip'
 import { SortHeader, ColumnHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { IconDownload, IconPlus, IconUpload, IconX, IconZap } from '../common/Icons'
 import { ApplyAutomationsModal } from '../modals/ApplyAutomationsModal'
 import { AutomationDetail } from './AutomationDetail'
+import { BuiltInAlerts } from './BuiltInAlerts'
+import { AUTOMATIONS_TABS, tabHref } from '../../navigation'
 import { AUTOMATION_FILE_MAX_BYTES, renderAutomationsYaml } from '../../utils/automationYaml'
 import { downloadBlob } from '../../utils/downloadBlob'
 import { formatDateTime, formatRelative, plural } from '../../utils/format'
@@ -323,8 +326,9 @@ function TriggerRedirect({ triggerId }) {
  * The Automations page: rules that watch a device's readings and raise an alert, each kept as rows
  * and written as YAML. `/automations` is the list, `/automations/<id>` one automation in the editor,
  * `/automations/new` the editor on an example, and `/automations?entity=<uuid>` the list of those
- * that apply to one device. Ungated: every role reads. Administrators and Shopfloor Managers write,
- * and for anyone else the page shows no control that would refuse them.
+ * that apply to one device. `/automations/built-in` is the Built-in tab: the alerts Aber raises about
+ * itself, read-only (BuiltInAlerts). Ungated: every role reads both. Administrators and Shopfloor
+ * Managers write, and for anyone else the page shows no control that would refuse them.
  */
 export function AutomationsTab({ showToast, userRole, hasPermission }) {
   const url = useUrl()
@@ -376,12 +380,37 @@ export function AutomationsTab({ showToast, userRole, hasPermission }) {
   }
 
   const newRoute = second === 'new' && !params.has('open')
+  // `?open=1` says the segment is an automation's id, as it does for `new`.
+  const builtIn = second === 'built-in' && !params.has('open')
+  const editing = second !== null && segments.length > 1 && !builtIn
+  const redirecting = !editing && !builtIn && Boolean(triggerId) && isUuid(triggerId)
+
+  // The heading and the tabs, on the two lists: an automation's editor has its own way back.
+  const head = (
+    <>
+      <CardHeading
+        icon={<IconZap size={15} />}
+        title="Automations"
+        description="Rules that watch a device's readings and raise an alert. Write one as YAML here, or upload a file of them. Built-in lists the alerts Aber raises about itself."
+      />
+      {!editing && !redirecting && (
+        <TabStrip
+          ariaLabel="Automations"
+          value={builtIn ? 'built-in' : 'automations'}
+          hrefFor={id => tabHref('automations', id)}
+          tabs={AUTOMATIONS_TABS}
+        />
+      )}
+    </>
+  )
+  if (builtIn) return <BuiltInAlerts head={head} showToast={showToast} />
+
   let body
-  if (second !== null && segments.length > 1) {
+  if (editing) {
     body = newRoute
       ? <AutomationDetail key="new" automationKey={null} showToast={showToast} canWrite={canWrite} hasPermission={hasPermission} onExport={exportAutomations} />
       : <AutomationDetail key={second} automationKey={second} showToast={showToast} canWrite={canWrite} hasPermission={hasPermission} onExport={exportAutomations} />
-  } else if (triggerId && isUuid(triggerId)) {
+  } else if (redirecting) {
     body = <TriggerRedirect triggerId={triggerId} />
   } else {
     body = (
@@ -399,11 +428,7 @@ export function AutomationsTab({ showToast, userRole, hasPermission }) {
     <div className="page-layout page-fill">
       <div className="page-main">
         <div className="card card-fill">
-          <CardHeading
-            icon={<IconZap size={15} />}
-            title="Automations"
-            description="Rules that watch a device's readings and raise an alert. Write one as YAML here, or upload a file of them."
-          />
+          {head}
           {body}
           <input
             ref={fileRef}

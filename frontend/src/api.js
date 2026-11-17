@@ -264,6 +264,9 @@ export const ALERT_HISTORY_LIMIT = 1000;
  */
 export const AUTOMATION_ALERT_LIMIT = 2000;
 
+/** How many of a built-in rule's newest occurrences its drawer lists. */
+export const BUILT_IN_OCCURRENCE_LIMIT = 5;
+
 /**
  * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so no
  * LIMIT is involved (see TELEMETRY_MAX_ROWS). At most COVERAGE_MAX_DEVICES a read. More than
@@ -2196,6 +2199,36 @@ const apiMethods = {
         .limit(AUTOMATION_ALERT_LIMIT)),
     ]);
     return { active: active.error ? [] : active.data ?? [], history: history.error ? [] : history.data ?? [] };
+  },
+
+  /**
+   * The alerts firing now that a rule raised, which the Built-in tab counts by `rule_uid`: every row of
+   * platform_alerts_active that has one, an acknowledged or suppressed alert included, as it still
+   * fires. An automation's alert has none. Throws when the read fails, so the tab says it does not
+   * know which are firing rather than calling every rule quiet.
+   */
+  readBuiltInAlerts: async ({ signal } = {}) => {
+    const query = supabase.from('platform_alerts_active')
+      .select('id, fingerprint, entity_type, sparkplug_id, alert_name, severity, summary, starts_at, rule_uid, labels')
+      .not('rule_uid', 'is', null);
+    const { data, error } = await (signal ? query.abortSignal(signal) : query);
+    if (error) throw new Error(error.message || 'Could not read the alerts that are firing');
+    return data ?? [];
+  },
+
+  /**
+   * The newest occurrences of one rule's alert, newest first: BUILT_IN_OCCURRENCE_LIMIT rows of
+   * platform_alerts with its `rule_uid`, those that could not be evaluated included.
+   */
+  readBuiltInOccurrences: async (uid, { signal } = {}) => {
+    const query = supabase.from('platform_alerts')
+      .select('id, fingerprint, entity_type, sparkplug_id, alert_name, severity, status, starts_at, ends_at, rule_uid, labels')
+      .eq('rule_uid', uid)
+      .order('starts_at', { ascending: false })
+      .limit(BUILT_IN_OCCURRENCE_LIMIT);
+    const { data, error } = await (signal ? query.abortSignal(signal) : query);
+    if (error) throw new Error(error.message || 'Could not read this rule\'s alerts');
+    return data ?? [];
   },
 
   /**
