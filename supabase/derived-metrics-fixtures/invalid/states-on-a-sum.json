@@ -1,0 +1,24 @@
+{
+  "about": "States belong to a time in state.",
+  "path": "$[0].states",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Sum",
+      "kind": "sum",
+      "inputs": [
+        {
+          "metric": "@PHASE_A@",
+          "sign": 1
+        },
+        {
+          "metric": "@PHASE_B@",
+          "sign": -1
+        }
+      ],
+      "states": [
+        "ACTIVE"
+      ]
+    }
+  ]
+}

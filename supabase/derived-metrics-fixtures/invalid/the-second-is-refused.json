@@ -1,0 +1,17 @@
+{
+  "about": "A good one first, and a refusal second: nothing is applied.",
+  "path": "$[1].input",
+  "database": true,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    },
+    {
+      "name": "Test_0297_Guard/Other_Rate",
+      "kind": "counter_rate",
+      "input": "@UNKNOWN@"
+    }
+  ]
+}

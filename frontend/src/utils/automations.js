@@ -233,3 +233,15 @@ export function appliedWords(results, source = null) {
 
 /** The keys a changed automation differs in, as a result's `changes` lists them. */
 export const changeWords = (changes) => (changes || []).join(', ')
+
+/**
+ * What a changed result differs in, for a dialog that shows it: one `{ key, label, before, after }` for each
+ * key of the result's `changes`, with the old and the new value from its `before` and `after`, null where there
+ * is none. The label is the key in words.
+ */
+export const resultChanges = (result) => (result?.changes || []).map(key => ({
+  key,
+  label: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
+  before: result.before?.[key] ?? null,
+  after: result.after?.[key] ?? null,
+}))

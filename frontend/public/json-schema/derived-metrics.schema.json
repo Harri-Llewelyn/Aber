@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aber derived metrics",
+  "description": "A list of derived metrics. A derived metric is a value Aber computes from other metrics, such as parts per hour. This file describes exactly what Aber accepts. Anything else is refused, not ignored. The database is the authority: it also checks each input against the catalogue, works out the unit, and refuses a name that is already used for something else.",
+  "type": "array",
+  "maxItems": 1000,
+  "items": { "$ref": "#/$defs/derivedMetric" },
+  "$defs": {
+    "derivedMetric": {
+      "title": "Derived metric",
+      "description": "One derived metric. Its definition is fixed once it is saved. An upload adds a derived metric that does not exist and refuses a name that exists with another definition. It changes the description of one that exists, and never deletes one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind"],
+      "properties": {
+        "name": {
+          "description": "The derived metric's name, such as Controller/PARTS_PER_HOUR: letters, digits and underscores, with a slash between the parts. A device must not publish it, and it cannot change once saved.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$",
+          "examples": ["Controller/PARTS_PER_HOUR"]
+        },
+        "description": {
+          "description": "What the value means, in your words, up to 4,000 characters. Optional. For a metric that exists, an upload sets this description: leave it out and the description is cleared.",
+          "type": "string",
+          "maxLength": 4000,
+          "examples": ["Parts made per hour, from the controller's part counter."]
+        },
+        "kind": {
+          "description": "How the value is computed. `counter_rate` is how fast a counter grows, per hour. `time_in_state` is the share of time a state metric spends in the states listed, from 0 to 1. `sum` adds and subtracts two or more numeric metrics that share one unit.",
+          "enum": ["counter_rate", "time_in_state", "sum"]
+        },
+        "input": {
+          "description": "The catalogue metric the value is computed from. For `counter_rate`, a numeric counter that counts up and resets to a lower value. For `time_in_state`, a string or boolean metric. It must be in the catalogue and measured, not derived. Not for `sum`.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$",
+          "x-completes": "metric",
+          "x-derived-says": "A derived metric. A derived metric cannot be built on another.",
+          "examples": ["Controller/PART_COUNT"]
+        },
+        "states": {
+          "description": "For `time_in_state`: the values of the input that count as being in the state, at least one, each once. A boolean input reports \"true\" or \"false\": write them in quotes. Where the input lists its permitted values, each must be one of them.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "examples": [["PICK_BIN_A"]]
+        },
+        "inputs": {
+          "description": "For `sum`: the numeric metrics it adds and takes away, two to eight, each once, in the unit they share. Not for the other kinds.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/input" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "counter_rate" } }, "required": ["kind"] },
+          "then": { "required": ["input"], "properties": { "states": false, "inputs": false } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "time_in_state" } }, "required": ["kind"] },
+          "then": { "required": ["input", "states"], "properties": { "inputs": false } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "sum" } }, "required": ["kind"] },
+          "then": { "required": ["inputs"], "properties": { "input": false, "states": false } }
+        }
+      ]
+    },
+    "input": {
+      "title": "Input",
+      "description": "One input of a sum: a catalogue metric and whether it is added or taken away.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "sign"],
+      "properties": {
+        "metric": {
+          "description": "The catalogue name of the input, such as Power/PHASE_A. It must be in the catalogue, numeric and measured, not derived, and in the same unit as the other inputs.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$",
+          "x-completes": "metric",
+          "x-derived-says": "A derived metric. A derived metric cannot be built on another."
+        },
+        "sign": {
+          "description": "1 to add the input to the total, -1 to take it away.",
+          "enum": [1, -1]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "about": "No kind.",
+  "path": "$[0].kind",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

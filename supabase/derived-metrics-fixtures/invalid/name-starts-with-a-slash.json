@@ -1,0 +1,12 @@
+{
+  "about": "A name does not start with a slash.",
+  "path": "$[0].name",
+  "database": false,
+  "document": [
+    {
+      "name": "/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

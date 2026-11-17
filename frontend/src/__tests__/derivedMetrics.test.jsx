@@ -71,7 +71,8 @@ const openTab = async (name) => {
   return document.querySelector('.card table')
 }
 
-const names = (table) => [...table.querySelectorAll('tbody tr:not(.table-group-row) td:first-child .mono')].map(el => el.textContent)
+// The name is the first cell, or the one after the box that ticks a row for Export.
+const names = (table) => [...table.querySelectorAll('tbody tr:not(.table-group-row) td:first-child .mono, tbody tr:not(.table-group-row) td.automation-select + td .mono')].map(el => el.textContent)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -117,7 +118,8 @@ describe('the Derived tab', () => {
   it('shows each row’s name, kind, definition in words and unit', async () => {
     renderTab()
     const derived = await openTab('Derived')
-    const rows = [...derived.querySelectorAll('tbody tr')].map(tr => [...tr.children].map(td => td.textContent))
+    // The first cell is the box that ticks the row for Export.
+    const rows = [...derived.querySelectorAll('tbody tr')].map(tr => [...tr.children].slice(1).map(td => td.textContent))
     expect(rows).toEqual([
       ['Controller/PARTS_PER_HOUR', 'Counter rate', 'rate of Controller/PART_COUNT, per hour', 'count/h (COUNT/HOUR)', 'Parts an hour'],
       ['Controller/UPTIME', 'Time in state', 'share of time Controller/EXECUTION is ACTIVE', '% of the time', '—'],

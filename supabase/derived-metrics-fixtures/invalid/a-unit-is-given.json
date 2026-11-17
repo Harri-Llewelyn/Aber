@@ -1,0 +1,13 @@
+{
+  "about": "The unit is worked out from the inputs, so a file never says it.",
+  "path": "$[0].units",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@",
+      "units": "COUNT/HOUR"
+    }
+  ]
+}

@@ -2293,6 +2293,30 @@ const apiMethods = {
     return data ?? [];
   },
 
+  /**
+   * Check a parsed document of derived metrics, or apply it (`dryRun` false): one result per metric,
+   * `{ index, name, status, id, units, derivation, changes, before, after, reasons }`, status new,
+   * changed, unchanged or refused, each reason `{ path, message }`. A changed metric has the same
+   * definition and another description: `changes` is `['description']`, `before` and `after` hold
+   * the two. All or nothing: with a refusal, or a dry run, nothing is written. It never deletes, and a
+   * name that exists with another definition is refused.
+   */
+  applyDerivedMetrics: async (document, dryRun) => {
+    const { data, error } = await supabase.rpc('apply_derived_metrics', { p_doc: document, p_dry_run: dryRun });
+    if (error) throw new Error(error.message || 'Could not apply the derived metrics');
+    return data ?? [];
+  },
+
+  /**
+   * The derived metrics as a document, all of them or those of the metric ids: a list that
+   * renderDerivedMetricsYaml() writes as YAML. A deprecated one is not in it.
+   */
+  derivedMetricsDocument: async (ids = null) => {
+    const { data, error } = await supabase.rpc('derived_metrics_document', { p_ids: ids });
+    if (error) throw new Error(error.message || 'Could not read the derived metrics');
+    return data ?? [];
+  },
+
   /** Enable or disable the automation with this key. Returns its row. */
   setAutomationEnabled: async (key, enabled) => {
     const { data, error } = await supabase.rpc('set_automation_enabled', { p_key: key, p_enabled: enabled });

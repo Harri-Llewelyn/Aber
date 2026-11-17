@@ -1,0 +1,12 @@
+{
+  "about": "A derived metric is no input.",
+  "path": "$[0].input",
+  "database": true,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@DERIVED@"
+    }
+  ]
+}

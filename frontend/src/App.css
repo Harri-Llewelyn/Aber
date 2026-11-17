@@ -7785,7 +7785,7 @@ ol.gateway-steps {
 .metric-col-semantic-id { width: 252px; }
 .metric-col-superseded { width: 220px; }
 /* Derived: Definition takes what is left, which is why it is the one column with no width. */
-.metric-table-derived { min-width: 940px; }
+.metric-table-derived { min-width: 976px; }
 .metric-col-kind { width: 140px; }
 .metric-col-description { width: 240px; }
 /* Uncatalogued: Declared By takes what is left, and its chips wrap within it. */
@@ -7974,6 +7974,13 @@ ol.gateway-steps {
 .apply-changes { font-size: 12px; color: var(--text-muted); }
 .apply-reasons li { display: flex; gap: 10px; font-size: 12px; line-height: 1.5; }
 .apply-line { flex-shrink: 0; color: var(--text-muted); }
+.apply-diffs { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.apply-diff { display: flex; flex-direction: column; gap: 2px; font-size: 12px; line-height: 1.5; }
+.apply-diff-key { font-weight: 600; color: var(--text-primary); }
+.apply-diff-pair { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; }
+.apply-diff-pair dt { color: var(--text-muted); }
+.apply-diff-pair dd { margin: 0; color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.apply-none { color: var(--text-muted); font-style: italic; }
 
 /* VOCABULARY. `.vocab-sections` is the card's scroller (`.card-fill-scroll`). A section header reuses
    `.table-group-button` and `.table-group-label`; the strip behind it is the header colour, and pins

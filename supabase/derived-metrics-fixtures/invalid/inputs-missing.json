@@ -1,0 +1,11 @@
+{
+  "about": "A sum with no inputs.",
+  "path": "$[0].inputs",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Sum",
+      "kind": "sum"
+    }
+  ]
+}

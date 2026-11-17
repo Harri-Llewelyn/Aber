@@ -1,0 +1,12 @@
+{
+  "about": "A name a deprecated derived metric holds.",
+  "path": "$[0].name",
+  "database": true,
+  "document": [
+    {
+      "name": "@DERIVED_DEPRECATED@",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

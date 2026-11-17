@@ -1,0 +1,17 @@
+{
+  "about": "An input that is another derived metric of the same file.",
+  "path": "$[1].input",
+  "database": true,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    },
+    {
+      "name": "Test_0297_Guard/Rate_Of_A_Rate",
+      "kind": "counter_rate",
+      "input": "Test_0297_Guard/New_Rate"
+    }
+  ]
+}

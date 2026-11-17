@@ -1,0 +1,13 @@
+{
+  "about": "A description of 4,001 characters.",
+  "path": "$[0].description",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "@COUNTER@",
+      "description": "@X4001@"
+    }
+  ]
+}

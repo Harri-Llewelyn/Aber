@@ -1,0 +1,12 @@
+{
+  "about": "An input that is not a metric name.",
+  "path": "$[0].input",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Rate",
+      "kind": "counter_rate",
+      "input": "Controller PART_COUNT"
+    }
+  ]
+}

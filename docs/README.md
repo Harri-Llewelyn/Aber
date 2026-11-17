@@ -14,3 +14,6 @@ raise an alert: its keys, what the database does with it, and what happens when 
 
 The [device schemas reference](device-schemas.md) is the format of the file a person exports from the
 Schemas page or uploads to it: its keys, and how an upload becomes a new draft version.
+
+The [derived metrics reference](derived-metrics.md) is the format of the file a person exports from the
+Metrics page's Derived tab or uploads to it: its keys, and why a description is all an upload can change.

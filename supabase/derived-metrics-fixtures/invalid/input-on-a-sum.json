@@ -1,0 +1,22 @@
+{
+  "about": "A sum has inputs, not an input.",
+  "path": "$[0].input",
+  "database": false,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Sum",
+      "kind": "sum",
+      "inputs": [
+        {
+          "metric": "@PHASE_A@",
+          "sign": 1
+        },
+        {
+          "metric": "@PHASE_B@",
+          "sign": -1
+        }
+      ],
+      "input": "@PHASE_A@"
+    }
+  ]
+}

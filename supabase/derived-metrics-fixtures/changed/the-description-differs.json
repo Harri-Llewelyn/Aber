@@ -1,0 +1,13 @@
+{
+  "about": "A name that exists with this definition and another description: a change, shown before and after.",
+  "before": { "description": "Parts per hour." },
+  "after": { "description": "Something else." },
+  "document": [
+    {
+      "name": "@DERIVED@",
+      "description": "Something else.",
+      "kind": "counter_rate",
+      "input": "@COUNTER@"
+    }
+  ]
+}

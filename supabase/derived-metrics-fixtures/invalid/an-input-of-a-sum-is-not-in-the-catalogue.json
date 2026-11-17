@@ -1,0 +1,21 @@
+{
+  "about": "An input of a sum the site lacks.",
+  "path": "$[0].inputs[1].metric",
+  "database": true,
+  "document": [
+    {
+      "name": "Test_0297_Guard/New_Sum",
+      "kind": "sum",
+      "inputs": [
+        {
+          "metric": "@PHASE_A@",
+          "sign": 1
+        },
+        {
+          "metric": "@UNKNOWN@",
+          "sign": 1
+        }
+      ]
+    }
+  ]
+}
