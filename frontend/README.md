@@ -2402,7 +2402,8 @@ changes anything. Its help is `help/pages/built-in-alerts.md`, one section for e
 - **A row says** its name and uid, group, severity, subject (the `entity_type` label), hold (`for`), what
   fires it and what evaluates it (`evaluator`, Grafana for every rule today; when the rules move, only this
   value changes). The default order is the file's, group by group. Search matches the name, uid, group, subject
-  and description.
+  and description. With the drawer open, the columns it repeats are dropped (as the Gateways table drops
+  its own) and the table keeps the name, the severity and the state.
 - **Its state is honest.** `api.readBuiltInAlerts()` reads every row of `platform_alerts_active` that has a
   `rule_uid`, acknowledged and suppressed ones too, and `builtInStates()` counts them by rule. **Firing** has a
   count. **Could not be evaluated** is an instance whose `labels.alertname` is `DatasourceError` or

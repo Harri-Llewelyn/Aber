@@ -8271,6 +8271,7 @@ ol.gateway-steps {
 .built-in-state,
 .built-in-subtitle { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .built-in-queries { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.built-in-query { min-width: 0; }
 .built-in-query-label { margin-bottom: 2px; font-size: 11px; color: var(--text-muted); }
 /* A query is read, not edited: wrapped, so the drawer never scrolls sideways, and its own scroll
    when long. It takes focus, so a keyboard can reach what scrolls. */

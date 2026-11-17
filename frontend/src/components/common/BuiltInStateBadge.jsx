@@ -8,9 +8,11 @@ import { plural } from '../../utils/format'
  * A built-in alert's state, in words: how many instances are firing, and whether a rule could not be
  * evaluated, which says nothing of its condition. With neither it is "Not firing", never "OK": Aber
  * cannot see that Grafana evaluated the rule. `state` is one entry of builtInStates(), or null when
- * the open alerts could not be read, which says "Not known" rather than call a rule quiet.
+ * the open alerts could not be read, which says "Not known" rather than call a rule quiet, or undefined
+ * while the first read is out.
  */
 export function BuiltInStateBadge({ rule, state, size = 'sm' }) {
+  if (state === undefined) return <span className="cell-meta">Reading…</span>
   if (!state) return <span className="cell-meta">Not known</span>
   if (!state.firing && !state.notEvaluated) return <span className="cell-meta">Not firing</span>
   return (

@@ -45,7 +45,7 @@ const COLUMNS = {
 export function BuiltInAlerts({ head, showToast }) {
   const [search, setSearch] = useUrlState('search', '')
   const [ruleUid, setRuleUid] = useUrlState('rule', '')
-  // The alerts firing now: null until the first read, and while a read has failed.
+  // The alerts firing now: null until the first read, and again whenever a read has failed.
   const [active, setActive] = useState(null)
   const [error, setError] = useState(null)
 
@@ -54,6 +54,8 @@ export function BuiltInAlerts({ head, showToast }) {
       setActive(await api.readBuiltInAlerts({ signal }))
       setError(null)
     } catch (e) {
+      // An old answer is not kept: a rule is not said to be quiet on what was true before the failure.
+      setActive(null)
       setError(e.message || 'The alerts that are firing could not be read.')
       throw e
     }
@@ -65,9 +67,10 @@ export function BuiltInAlerts({ head, showToast }) {
   const states = useMemo(() => (active ? builtInStates(active) : null), [active])
   const entries = useMemo(() => BUILT_IN_RULES.map(rule => ({
     ...rule,
-    state: states ? states.get(rule.uid) ?? { firing: 0, notEvaluated: 0 } : null,
+    // undefined while the first read is out, null once a read has failed.
+    state: states ? states.get(rule.uid) ?? { firing: 0, notEvaluated: 0 } : error ? null : undefined,
     searchText: builtInSearchText(rule),
-  })), [states])
+  })), [states, error])
   const needle = search.trim().toLowerCase()
   const shown = useMemo(() => entries.filter(e => !needle || e.searchText.includes(needle)), [entries, needle])
   const [rows, sort] = useSortableRows(shown, COLUMNS)
@@ -76,6 +79,8 @@ export function BuiltInAlerts({ head, showToast }) {
   // A uid no built-in rule has: a rule a site wrote for itself, or one a release retired.
   const unlisted = ruleUid !== '' && !builtInRule(ruleUid)
   const firingIds = useMemo(() => (active ? new Set(active.map(a => a.id)) : null), [active])
+  // With the drawer open, the columns it repeats are dropped so the table fits beside it.
+  const compact = Boolean(selected)
 
   const selectRow = (e) => setRuleUid(current => (current === e.uid ? '' : e.uid))
   const rowProps = (e) => ({
@@ -138,12 +143,12 @@ export function BuiltInAlerts({ head, showToast }) {
                 <thead>
                   <tr>
                     <SortHeader sort={sort} column="title" title="The alert's name, with its rule's uid under it">Alert</SortHeader>
-                    <SortHeader sort={sort} column="group" title="The group of rules it belongs to">Group</SortHeader>
+                    {!compact && <SortHeader sort={sort} column="group" title="The group of rules it belongs to">Group</SortHeader>}
                     <SortHeader sort={sort} column="severity" title="How urgent it is, as the rule sets it">Severity</SortHeader>
-                    <SortHeader sort={sort} column="subject" title="What the alert is about: a gateway, a machine identity's token, or the platform as a whole">Subject</SortHeader>
-                    <SortHeader sort={sort} column="hold" title="How long the condition must hold before the alert fires. None fires at the first check.">Hold</SortHeader>
-                    <ColumnHeader title="What fires it, in words. Open the alert to read its query and threshold.">Fires when</ColumnHeader>
-                    <ColumnHeader title="What checks the rule">Evaluated by</ColumnHeader>
+                    {!compact && <SortHeader sort={sort} column="subject" title="What the alert is about: a gateway, a machine identity's token, or the platform as a whole">Subject</SortHeader>}
+                    {!compact && <SortHeader sort={sort} column="hold" title="How long the condition must hold before the alert fires. None fires at the first check.">Hold</SortHeader>}
+                    {!compact && <ColumnHeader title="What fires it, in words. Open the alert to read its query and threshold.">Fires when</ColumnHeader>}
+                    {!compact && <ColumnHeader title="What checks the rule">Evaluated by</ColumnHeader>}
                     <SortHeader sort={sort} column="state" title="How many instances are firing now. Not firing is not a promise: Aber cannot see that the rule was checked.">State</SortHeader>
                   </tr>
                 </thead>
@@ -154,16 +159,18 @@ export function BuiltInAlerts({ head, showToast }) {
                         <strong>{e.title}</strong>
                         <div className="cell-meta mono">{e.uid}</div>
                       </td>
-                      <td className="cell-meta">{e.group}</td>
+                      {!compact && <td className="cell-meta">{e.group}</td>}
                       <td><Badge size="sm" tone={severityOf(e.severity).tone}>{severityOf(e.severity).label}</Badge></td>
-                      <td className="cell-meta">{SUBJECT_WORDS[e.subject] ?? e.subject}</td>
-                      <td className="cell-meta">{holdWords(e.hold)}</td>
-                      <td className="automation-summary">
-                        <Tooltip text={e.fires}>
-                          <span tabIndex={0} className="automation-summary-text"><OverflowText>{e.fires}</OverflowText></span>
-                        </Tooltip>
-                      </td>
-                      <td className="cell-meta">{EVALUATOR_WORDS[e.evaluator] ?? e.evaluator}</td>
+                      {!compact && <td className="cell-meta">{SUBJECT_WORDS[e.subject] ?? e.subject}</td>}
+                      {!compact && <td className="cell-meta">{holdWords(e.hold)}</td>}
+                      {!compact && (
+                        <td className="automation-summary">
+                          <Tooltip text={e.fires}>
+                            <span tabIndex={0} className="automation-summary-text"><OverflowText>{e.fires}</OverflowText></span>
+                          </Tooltip>
+                        </td>
+                      )}
+                      {!compact && <td className="cell-meta">{EVALUATOR_WORDS[e.evaluator] ?? e.evaluator}</td>}
                       <td><BuiltInStateBadge rule={e} state={e.state} /></td>
                     </tr>
                   ))}
@@ -176,7 +183,7 @@ export function BuiltInAlerts({ head, showToast }) {
 
       <BuiltInAlertDrawer
         rule={selected}
-        state={selected?.state ?? null}
+        state={selected?.state}
         firingIds={firingIds}
         onClose={() => setRuleUid('')}
         onCopy={showToast}

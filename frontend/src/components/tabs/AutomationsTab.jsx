@@ -391,7 +391,7 @@ export function AutomationsTab({ showToast, userRole, hasPermission }) {
       <CardHeading
         icon={<IconZap size={15} />}
         title="Automations"
-        description="Rules that watch a device's readings and raise an alert. Write one as YAML here, or upload a file of them. Built-in lists the alerts Aber raises about itself."
+        description="Rules that watch a device's readings and raise an alert. Write one as YAML, or upload a file. Built-in lists the alerts Aber raises about itself."
       />
       {!editing && !redirecting && (
         <TabStrip

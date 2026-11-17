@@ -129,6 +129,28 @@ describe('the Built-in tab', () => {
     expect(document.querySelector('tbody').textContent).not.toMatch(/Not firing/)
   })
 
+  it('says it is reading until the first answer, and not Not firing', async () => {
+    api.readBuiltInAlerts.mockReturnValue(new Promise(() => {}))
+    await show()
+    expect(cells(STALE).at(-1)).toBe('Reading…')
+    expect(document.querySelector('tbody').textContent).not.toMatch(/Not firing|Not known/)
+  })
+
+  it('does not keep an old answer when a later read fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      api.readBuiltInAlerts.mockResolvedValueOnce([firing(STALE, 1)]).mockRejectedValue(new Error('connection lost'))
+      await show()
+      expect(row(STALE)).toHaveTextContent('1 firing')
+      // The page's polling asks again after its interval, and the answer is a failure.
+      await act(async () => { await vi.advanceTimersByTimeAsync(3500) })
+      expect(cells(STALE).at(-1)).toBe('Not known')
+      expect(screen.getByText(/Which alerts are firing could not be read/)).toHaveTextContent('connection lost')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each(['Administrator', 'Shopfloor_Manager', 'Operator', 'Auditor'])('is read by a %s, who is offered nothing that changes it', async (role) => {
     await show({ role })
     expect(document.querySelectorAll('tbody tr')).toHaveLength(BUILT_IN_RULES.length)
@@ -180,6 +202,17 @@ describe('the Built-in tab', () => {
     expect(row(STALE)).toHaveClass('row-selected')
     fireEvent.click(screen.getByRole('button', { name: 'Close rule' }))
     expect(window.location.search).toBe('')
+  })
+
+  it('drops the columns the drawer repeats while it is open, so the table fits beside it, and brings them back', async () => {
+    await show({ url: `/automations/built-in?rule=${STALE}` })
+    await screen.findByRole('complementary', { name: 'Gateway Stale alert rule' })
+    const heads = () => [...document.querySelectorAll('thead th')].map(th => th.textContent)
+    expect(heads()).toEqual(['Alert', 'Severity', 'State'])
+    // The state stays, which is what a person flicking between rules reads.
+    expect(row('aber-backup-stale').querySelectorAll('td')).toHaveLength(3)
+    fireEvent.click(screen.getByRole('button', { name: 'Close rule' }))
+    expect(heads()).toEqual(['Alert', 'Group', 'Severity', 'Subject', 'Hold', 'Fires when', 'Evaluated by', 'State'])
   })
 
   it('opens the drawer a link names, and says when the uid is a rule this release does not ship', async () => {

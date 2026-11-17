@@ -25,7 +25,7 @@ The state is one of three:
 - **Could not be evaluated** means Grafana could not run the rule's query. Aber cannot say whether the condition holds. Check what the rule reads, such as the database or the metrics store.
 - **Not firing** means no open alert from this rule. It does not mean all is well. Aber cannot see whether Grafana checked the rule.
 
-Select a row to open its drawer. The drawer shows the rule as its file writes it: the query, the threshold, the hold, the labels and the summary. It lists the rule's recent alerts. **View Help** opens the entry below. **View in Grafana** opens the rule in Grafana, in a new tab.
+Select a row to open its drawer. The table then keeps only **Alert**, **Severity** and **State**, to fit beside it. The drawer shows the rule as its file writes it: the query, the threshold, the hold, the labels and the summary. It lists the rule's recent alerts. **View Help** opens the entry below. **View in Grafana** opens the rule in Grafana, in a new tab.
 
 An alert about the platform opens its rule here, from the counter in the top bar or from a message. An alert about a gateway or a device opens that gateway or device. Its drawer has **View rule**, which opens the rule here.
 
