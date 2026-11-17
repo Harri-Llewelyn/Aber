@@ -1844,7 +1844,9 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
     the room its own axis took (`TIMED_SAVED_PX`, 25px, with `TIMED_PAD_PX` above and below the
     plot), and has `cursor.y: false`, so its pointer is a vertical line. A chart outside a
     `ChartTimeline` draws its own axis, Now badge and words as before: the Metric, Cell and Area
-    tabs.
+    tabs. Its labels are `timelineTicks()` too (`ownTicks()`, asked at uPlot's width as it draws):
+    uPlot centres every label on its tick, so the call is `centred` and a label that would run
+    past the gutters beside the plot (`roomPx`, `PLOT_LEFT_PX` and `PLOT_RIGHT_PX`) is left out.
   - **One pointer** is `{ at, by }` in the provider, `by` being `plot`, `strip` or `axis`. A number
     chart publishes its uPlot cursor (`syncKey` still syncs one number chart to the next). A strip
     and the axis publish from `pointermove`; the number charts put their cursor there with
@@ -1893,8 +1895,12 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   the card (`.card-fill-scroll.trail-timeline`, then `.trail-scroll`), so the axis and the headings
   pin and the row above the lanes stays. Overview's axis follows the Audit Trail's, not the Device
   tab's charts: the tracks run from the label column to the card's edge, and no longer span the
-  charts' plot gutters (`PLOT_LEFT_PX`, `PLOT_RIGHT_PX`). Overview's own rules (`.overview-*`) are
-  only what it adds; the Audit Trail is unchanged.
+  charts' plot gutters (`PLOT_LEFT_PX`, `PLOT_RIGHT_PX`). Its ticks are `axisTicks()`:
+  `timelineTicks()` at the axis track's width, measured as the axis mounts and by a
+  `ResizeObserver`, so no two labels touch at any span or width. A label at an end is held inside the
+  track (`TICK_SHIFT`). A calendar window takes them too, since `calendarTicks()` at a phone's 186px
+  track crowd. Overview's own rules (`.overview-*`) are only what it adds; the Audit Trail is
+  unchanged.
 - **The read** is `api.readCoverage()`, the RPC `telemetry_coverage()` (`0245`): one row per device,
   its readings in each block as an array, and the stretch the historian's device rollups have
   counted. It reads every device in parts of `COVERAGE_MAX_DEVICES` (1,000), again on Refresh and

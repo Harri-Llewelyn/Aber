@@ -118,7 +118,7 @@ One time axis sits above the charts, as on the Audit Trail. It stays in view whi
 - **Point at a chart, a band or the axis** to draw one line through every chart and band. The axis says the time under the pointer. Each chart's title line reads its own value at that time.
 - **Press on the axis and drag** to zoom, as on a chart. See [Zooming in on a stretch](#zooming-in-on-a-stretch).
 
-The Metric, Cell and Area tabs keep a time axis under each chart.
+The Metric, Cell and Area tabs keep a time axis under each chart. Their labels are chosen the same way, and so are Overview's, so none of them run together on a narrow screen.
 
 ## Zooming in on a stretch
 

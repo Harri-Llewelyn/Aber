@@ -17,8 +17,9 @@ import { areaWideInService, inServiceDevices } from './inService'
 import { REPLAY_LANES_PARAM, isReplayLane } from './replayLanes'
 import { DERIVED_MAX_MINUTES, SHARE_UNIT, derivedInputCount, derivedReportedBy, percentWords, unitOf } from './derivedMetric'
 import { unitSticks, unitSymbol, withUnit } from './units'
+import { timelineTicks } from './timelineAxis'
 import {
-  SPAN_IDS, TIME_PRESETS, bandWords, calendarTicks, clockWords, localDay, rollingWindow, windowToQuery,
+  SPAN_IDS, TIME_PRESETS, bandWords, clockWords, localDay, rollingWindow, windowToQuery,
 } from './timeWindow'
 
 const MINUTE = 60 * 1000
@@ -1273,23 +1274,13 @@ export const boxWords = (count, start, end, now = Date.now()) =>
   `${count} ${count === 1 ? 'device' : 'devices'} · ${bandWords(start, end, now)}`
 
 /**
- * The Overview's time axis: a calendar window's own ticks (calendarTicks()), else five evenly
- * spaced, labelled with the clock (to the second under an hour) inside a day, the date and clock up
- * to three days, and the date beyond, as the Audit Trail's axis is. Each `{ f, label }`, `f` a
- * fraction of [start, end].
+ * The Overview's time axis over a track `widthPx` wide: timelineTicks(), the shared axis's round
+ * times, so no two labels touch at any span or width, a label at an end held inside the track (its
+ * `align`). A calendar window takes them too: its own ticks (calendarTicks()) crowd a phone's
+ * narrow track. Each `{ f, label, align }`, `f` a fraction of [start, end].
  */
-export function axisTicks(win, startMs, endMs) {
-  const span = endMs - startMs
-  if (!(span > 0)) return []
-  if (win?.kind === 'calendar') {
-    return calendarTicks(win.span, new Date(startMs), new Date(endMs))
-      .map(({ at, label }) => ({ f: (at.getTime() - startMs) / span, label }))
-      .filter(t => t.f >= 0 && t.f <= 1)
-  }
-  const label = (d) => (span < HOUR
-    ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    : span <= DAY ? clockWords(d) : momentWords(d.getTime(), span <= 3 * DAY ? 1 : 1440))
-  return [0, 0.25, 0.5, 0.75, 1].map(f => ({ f, label: label(new Date(startMs + span * f)) }))
+export function axisTicks(startMs, endMs, widthPx) {
+  return timelineTicks(startMs, endMs, widthPx).map(({ f, label, align }) => ({ f, label, align }))
 }
 
 // ------------------------------------------------------------------------------------------------

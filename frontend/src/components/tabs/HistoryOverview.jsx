@@ -48,6 +48,9 @@ const WIDTH_SETTLE_MS = 300
 /** How long typing in the search settles before a long window reads the devices it matches. */
 const SEARCH_SETTLE_MS = 300
 
+/** Where an axis label stands on its tick (axisTicks()): held inside the track at its ends, centred between. */
+const TICK_SHIFT = { start: 'none', middle: 'translateX(-50%)', end: 'translateX(-100%)' }
+
 /** The band drag (hooks/useBandDrag.js): a press on any of Overview's tracks, each the window's width. */
 const OVERVIEW_BAND = { track: '.overview-swimlanes .trail-track' }
 
@@ -547,6 +550,19 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settledPx])
 
+  // The axis track's width, which its ticks are chosen for: measured as the axis mounts, and as it changes.
+  const [axisPx, setAxisPx] = useState(0)
+  const axisShown = Boolean(reading?.counts) && shown.length > 0
+  useEffect(() => {
+    const track = axisShown ? bodyRef.current?.querySelector('.trail-axis-track') : null
+    if (!track) return undefined
+    setAxisPx(track.clientWidth)
+    if (typeof ResizeObserver !== 'function') return undefined
+    const watcher = new ResizeObserver(() => setAxisPx(track.clientWidth))
+    watcher.observe(track)
+    return () => watcher.disconnect()
+  }, [axisShown])
+
   // The timer runs only while the window reaches now: an ended window cannot gain a reading.
   const live = holdsNow(win, now)
   usePolling(read, every * 1000, live && every > 0)
@@ -666,7 +682,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
   // What the device rollups have not counted yet: hatched apart from the future, and named.
   const uncounted = reading?.counts ? uncountedStretches(reading.counted, { start: reading.start, end: reading.end, now }) : []
   const uncountedNote = reading?.counts ? uncountedWords(reading.counted, reading.start) : null
-  const ticks = reading?.counts ? axisTicks(win, reading.start, reading.end) : []
+  const ticks = reading?.counts ? axisTicks(reading.start, reading.end, axisPx) : []
   const busy = Boolean(reading?.loading) || reading === null
   const allKeys = groupKeys(shown)
   const trackPx = typeof document === 'undefined' ? 0 : (bodyRef.current?.querySelector('.trail-axis-track')?.clientWidth || 0)
@@ -822,7 +838,7 @@ export function HistoryOverview({ devices, cells, areas, schemas, catalog, win, 
                     <div className="trail-lane-label trail-axis-corner" aria-hidden="true" />
                     <div className="trail-track trail-axis-track" aria-hidden="true">
                       {ticks.map(t => (
-                        <span key={t.f} className="trail-tick" style={{ left: at(t.f) }}>{t.label}</span>
+                        <span key={t.f} className="trail-tick" style={{ left: at(t.f), transform: TICK_SHIFT[t.align] }}>{t.label}</span>
                       ))}
                       {fraction !== null && (
                         <div className={edgeClass('trail-now', fraction)} style={{ left: at(fraction) }}>

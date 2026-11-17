@@ -123,11 +123,11 @@ export const labelPx = (label) => String(label).length * TICK_CHAR_PX
 
 /**
  * Where a tick's label sits on its tick: centred, held inside the axis where a centred label would
- * run past one of its ends.
+ * run past one of its ends, unless the axis draws every label centred (`centred`).
  */
-function alignOf(f, px, widthPx) {
+function alignOf(f, px, widthPx, centred) {
   const half = px / 2
-  return f * widthPx < half ? 'start' : (1 - f) * widthPx < half ? 'end' : 'middle'
+  return centred ? 'middle' : f * widthPx < half ? 'start' : (1 - f) * widthPx < half ? 'end' : 'middle'
 }
 
 /** The label's left and right edge in pixels along the axis, for its alignment. */
@@ -155,8 +155,12 @@ function clearOf(ticks, widthPx) {
  * time in milliseconds, its fraction of the window, its words and where the label sits on it
  * (`start`, `middle` or `end`: held inside the axis near its ends). Where no step has the room,
  * the coarsest is thinned from the left until nothing touches.
+ *
+ * An axis that can only draw every label centred on its tick, a chart's own (`centred`), gets
+ * `align: 'middle'` throughout, and a tick whose label would run more than `roomPx`, `[left, right]`,
+ * past either end of the axis is left out: the gutters beside the plot are what is there to run into.
  */
-export function timelineTicks(startMs, endMs, widthPx = DEFAULT_AXIS_PX) {
+export function timelineTicks(startMs, endMs, widthPx = DEFAULT_AXIS_PX, { centred = false, roomPx = [0, 0] } = {}) {
   const span = endMs - startMs
   if (!(span > 0)) return []
   const width = widthPx > 0 ? widthPx : DEFAULT_AXIS_PX
@@ -170,8 +174,15 @@ export function timelineTicks(startMs, endMs, widthPx = DEFAULT_AXIS_PX) {
     const labels = at.map(t => labelOf(t, step, span))
     ticks = at.map((t, i) => {
       const f = (t - startMs) / span
-      return { at: t, f, label: labels[i], align: alignOf(f, labelPx(labels[i]), width) }
+      return { at: t, f, label: labels[i], align: alignOf(f, labelPx(labels[i]), width, centred) }
     })
+    if (centred) {
+      ticks = ticks.filter((t) => {
+        const [left, right] = boxOf(t, width)
+        return left >= -roomPx[0] && right <= width + roomPx[1]
+      })
+      if (ticks.length === 0) continue
+    }
     const room = Math.max(Math.max(...labels.map(labelPx)) + COMFORT_GAP_PX, least)
     if ((step.ms / span) * width >= room && clearOf(ticks, width)) return ticks
   }

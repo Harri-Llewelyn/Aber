@@ -33,13 +33,11 @@ import { NumberKey } from './NumberKey'
 import { StateBand, StateBandKey } from './StateBand'
 import { useChartTimeline } from './ChartTimeline'
 import { clockWords } from '../../utils/timeWindow'
-import { PLOT_LEFT_PX, PLOT_RIGHT_PX } from '../../utils/timelineAxis'
+import { PLOT_LEFT_PX, PLOT_RIGHT_PX, timelineTicks } from '../../utils/timelineAxis'
 import {
   DEFAULT_CHART_PX, changeCount, chartPalette, chartTitle, latestWords, lowWords, markWords, markedStretches, momentWords, nowFraction, numberFigures,
   numberKey, readingWords, runNear, runWords, splitCarried, stateKey, stateRuns, stateShares, validRangeWords,
 } from '../../utils/history'
-
-const DAY_S = 24 * 60 * 60
 
 /** No plugins: hoisted, so a chart without any is not drawn again on each render. */
 const NO_PLUGINS = Object.freeze([])
@@ -75,17 +73,21 @@ export function useChartPalette() {
   return palette
 }
 
-/** The time axis's labels: clock times inside a day, with the weekday on a longer window, then dates. */
-const timeLabels = (spanS) => (u, splits, axisIdx, space, incr) => splits.map((s) => {
-  const d = new Date(s * 1000)
-  if (incr < DAY_S) {
-    const clock = clockWords(d)
-    return spanS > DAY_S ? `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${clock}` : clock
+/**
+ * A chart's own time axis, for one outside a shared one: its ticks and labels are timelineTicks()
+ * at the plot's width, so no two labels touch at any span or width, as the shared axis's do. uPlot
+ * draws every label centred on its tick, so one that would run past the gutters beside the plot is
+ * left out. It asks for them again whenever uPlot draws the axis, at the width it has then, and
+ * keeps the last answer for its labels.
+ */
+const ownTicks = (start, end) => {
+  let made = { width: -1, ticks: [] }
+  return (u) => {
+    const width = u.width - PLOT_LEFT_PX - PLOT_RIGHT_PX
+    if (made.width !== width) made = { width, ticks: timelineTicks(start, end, width, { centred: true, roomPx: [PLOT_LEFT_PX, PLOT_RIGHT_PX] }) }
+    return made.ticks
   }
-  return incr < 28 * DAY_S
-    ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-    : d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
-})
+}
 
 /** Dotted lines at the schema's bounds, each labelled, where they fall inside the plot. */
 const drawValidRange = (validRange, palette) => (u) => {
@@ -123,6 +125,7 @@ export { PLOT_LEFT_PX, PLOT_RIGHT_PX }
 function plotOptions({ width, height, start, end, validRange, yRange, palette, syncKey, onHover, plugins, unit, ticks }) {
   const axis = { stroke: palette.text, font: palette.font, grid: { stroke: palette.grid, width: 1 }, ticks: { stroke: palette.grid, width: 1 } }
   const line = { stroke: palette.line, width: 1.5, spanGaps: false }
+  const own = ticks ? null : ownTicks(start, end)
   return {
     width,
     height,
@@ -143,7 +146,7 @@ function plotOptions({ width, height, start, end, validRange, yRange, palette, s
     axes: [
       ticks
         ? { ...axis, size: 0, ticks: { show: false }, splits: () => ticks(), values: (u, splits) => splits.map(() => '') }
-        : { ...axis, values: timeLabels((end - start) / 1000) },
+        : { ...axis, splits: (u) => own(u).map(t => t.at / 1000), values: (u) => own(u).map(t => t.label) },
       {
         ...axis,
         size: PLOT_LEFT_PX,

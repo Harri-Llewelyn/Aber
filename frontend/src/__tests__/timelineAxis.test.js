@@ -96,6 +96,26 @@ describe('the shared axis ticks', () => {
     expect(new Set(ticks.map(t => t.at)).size).toBe(ticks.length)
   })
 
+  it("draws every label centred for an axis that cannot hold one at its end, and leaves out one that would run past the gutters", () => {
+    const [start, end] = SPANS.Week
+    const room = [56, 28]
+    for (const width of WIDTHS) {
+      const ticks = timelineTicks(start, end, width, { centred: true, roomPx: room })
+      expect(ticks.length).toBeGreaterThan(0)
+      expect(ticks.every(t => t.align === 'middle')).toBe(true)
+      ticks.forEach((t, i) => {
+        const [left, right] = edges(t, width)
+        expect(left).toBeGreaterThanOrEqual(-room[0] - 0.5)
+        expect(right).toBeLessThanOrEqual(width + room[1] + 0.5)
+        if (i > 0) expect(left - edges(ticks[i - 1], width)[1]).toBeGreaterThanOrEqual(TICK_GAP_PX - 0.5)
+      })
+    }
+    // A label of 5 glyphs is 35px: centred on the last tick it runs 17px past the end, within 28.
+    expect(timelineTicks(start, end, 1000, { centred: true, roomPx: room }).at(-1).label).toBe('Mon 9')
+    // With no room at the ends, the ticks at the ends go.
+    expect(timelineTicks(start, end, 1000, { centred: true }).some(t => t.f === 0 || t.f === 1)).toBe(false)
+  })
+
   it('draws no tick for a window with no length', () => {
     expect(timelineTicks(at(2026, 11, 2), at(2026, 11, 2), 600)).toEqual([])
   })
