@@ -2895,7 +2895,11 @@ main:focus { outline: none; }
   color: var(--text-muted);
 }
 
+.further-ids-group { min-width: 0; }
+.further-id-type { color: var(--text-primary); }
+.further-id-source { color: var(--text-muted); overflow-wrap: anywhere; }
 .further-id-remove { margin-left: auto; padding: 2px 8px; font-size: 12px; }
+.further-ids-add { margin-top: 2px; }
 .further-ids-none { margin-bottom: 8px; font-size: 12px; color: var(--text-dim); }
 
 .further-ids-form {
