@@ -685,13 +685,13 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
 
     // Factory+ concepts. No semanticId, because IDTA defines none for them and inventing one
     // under admin-shell.io would be a forgery -- see supabase/migrations/archive/20260101000029_semantic_identifiers.sql's header.
+    // Neither a connection method (it is always Sparkplug B) nor a status (a live state a document
+    // cannot keep) is here. i3X and the REST API serve a device's live state.
     property("AssetSparkplugId", "xs:string", device.sparkplug_id, {
       description: "Immutable wire identity; the same value keys telemetry in the historian.",
     }),
-    property("ConnectionMethod", "xs:string", device.connection_method),
     property("EdgeGatewayName", "xs:string", gateway?.name ?? null),
     property("EdgeGatewaySparkplugId", "xs:string", gateway?.sparkplug_id ?? null),
-    property("Status", "xs:string", device.status),
   ].filter((element) => element !== null);
 
   const submodels: Record<string, unknown>[] = [

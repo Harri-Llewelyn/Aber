@@ -251,6 +251,30 @@ describe('writing an asset location', () => {
   });
 });
 
+/**
+ * `devices.connection_method` is deprecated: the dashboard sends none, and the API still writes one
+ * a caller names.
+ */
+describe('a device’s connection method', () => {
+  it('is not written when a device is created without one', async () => {
+    await api.post('/api/v1/devices', { asset_name: 'CNC_02', active_gateway_id: 'gw-9' });
+    expect(callFor('devices').payload).not.toHaveProperty('connection_method');
+  });
+
+  it('is written when the caller names one, and an empty one stores NULL', async () => {
+    await api.post('/api/v1/devices', { asset_name: 'CNC_02', connection_method: 'Sparkplug B' });
+    expect(callFor('devices').payload).toMatchObject({ connection_method: 'Sparkplug B' });
+    state.calls.length = 0;
+    await api.post('/api/v1/devices', { asset_name: 'CNC_03', connection_method: '' });
+    expect(callFor('devices').payload.connection_method).toBeNull();
+  });
+
+  it('is left alone by an ordinary edit', async () => {
+    await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', active_gateway_id: 'gw-9' });
+    expect(callFor('devices').payload).not.toHaveProperty('connection_method');
+  });
+});
+
 describe('device gateway assignment', () => {
   it('writes gateway_id from active_gateway_id on update', async () => {
     await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', active_gateway_id: 'gw-9' });

@@ -124,7 +124,6 @@ def ensure(base, token, anon):
         # OFFLINE, not ONLINE: status is what ingestion has observed, and devices_online_implies_born
         # (0119) refuses ONLINE for a device with no first_dbirth_at, which a provisioned one has.
         "status": "OFFLINE", "is_quarantined": False, "cell_id": cell_id, "location_scope": "cell",
-        "connection_method": "MQTT / Sparkplug B",
     }, on_conflict="id")
     if not devices:
         raise FixtureError("device upsert returned no row")

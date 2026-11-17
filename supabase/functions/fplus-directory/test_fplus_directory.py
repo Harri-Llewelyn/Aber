@@ -169,7 +169,6 @@ def provision(token):
         # OFFLINE: devices_online_implies_born (0119) refuses ONLINE without a first_dbirth_at.
         "status": "OFFLINE",
         "is_quarantined": False,
-        "connection_method": "MQTT / Sparkplug B",
     }, {"Prefer": "resolution=merge-duplicates,return=representation"})
     if status not in (200, 201):
         # The body, not just the code: PostgREST answers 409 for a unique violation and for a
@@ -196,7 +195,6 @@ def provision_published(token) -> bool:
         "gateway_id": aas_fixture.GATEWAY_UUID,
         "status": "OFFLINE",
         "is_quarantined": False,
-        "connection_method": "MQTT / Sparkplug B",
         # What ingestion records when the device arrives in Quarantine, and approval keeps.
         "reported_identity": PUBLISHED_ID,
         "identity_source": "reported_identity",

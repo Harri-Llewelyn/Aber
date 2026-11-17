@@ -59,6 +59,17 @@ describe('what a form would change', () => {
     expect(patch).toEqual({})
   })
 
+  it('never proposes a device’s connection method', () => {
+    // The column is deprecated: the form has no box for it, so a stale form key is dropped, and an
+    // open proposal that names it is still read back by column.
+    expect(Object.values(PROPOSAL_FORMS.device.fields)).not.toContain('connection_method')
+    const patch = patchFromForm('device',
+      { ...current, connection_method: 'Sparkplug B' },
+      { ...current, connection_method: 'Modbus TCP', asset_name: 'CNC_01_renamed' })
+    expect(patch).toEqual({ name: 'CNC_01_renamed' })
+    expect(formFromPatch('device', { connection_method: 'Modbus TCP' })).toEqual({})
+  })
+
   it('translates the area form’s area_name onto name', () => {
     // Same shape as the cell pair above: `area_name` is the box, `name` is the column, and it is
     // what reaches MQTT as the <area> segment of every uns/ topic beneath it.
