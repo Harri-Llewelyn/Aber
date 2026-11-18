@@ -8,6 +8,7 @@ import { RestoreMetricModal } from '../modals/RestoreMetricModal'
 import { EditMetricSemanticIdModal } from '../modals/EditMetricSemanticIdModal'
 import { AddDerivedMetricModal } from '../modals/AddDerivedMetricModal'
 import { useDerivedMetricsYaml } from '../../hooks/useDerivedMetricsYaml'
+import { useQuantityKinds } from '../../hooks/useQuantityKinds'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
 import {
   groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup, isValidMetricName,
@@ -361,11 +362,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     return () => { current = false }
   }, [])
 
+  // The QUDT quantity kinds, read when the first dialog with a picker opens.
+  const quantityKinds = useQuantityKinds(showAddMetric || !!editTarget)
+
   // Everything the semantic id picker offers, built once per read rather than on each keystroke.
   const semanticIdChoices = useMemo(() => semanticIdCandidates({
     mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, vda5050: vdaVocabulary,
-    templates: templateElements
-  }), [vocabulary, isoVocabulary, opcuaVocabulary, vdaVocabulary, templateElements])
+    quantityKinds, templates: templateElements
+  }), [vocabulary, isoVocabulary, opcuaVocabulary, vdaVocabulary, quantityKinds, templateElements])
 
   /**
    * Turn a suggested group name into the two fields the picker needs. A vocabulary can suggest a
@@ -441,6 +445,16 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     setShowAddMetric(true)
   }
 
+  // Opens the Add Metric dialog as a Custom metric whose own semantic id is the one chosen, a QUDT
+  // quantity kind on the Vocabulary page. The name, datatype and unit are the operator's.
+  const handleUseSemanticId = ({ semanticId, semanticIdType }) => {
+    setNewMetric(m => ({
+      ...m, standard: STANDARDS.CUSTOM, type: '', companionSpec: '', vocabSemanticId: '',
+      semanticIdOwn: { semanticId, semanticIdType: semanticIdType || '' }
+    }))
+    setShowAddMetric(true)
+  }
+
   /**
    * Catalogue, on the Uncatalogued tab: Add Metric as a Custom metric under the declared name, its
    * first segment the group, its last the name and any between the instance. A group the Custom
@@ -477,7 +491,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     if (!pendingVocabularyEntry || !loaded || !referenceLoaded) return
     const entry = pendingVocabularyEntry
 
-    if (entry.standard === STANDARDS.MTCONNECT && entry.type) {
+    if (entry.standard === STANDARDS.CUSTOM && entry.semanticId) {
+      handleUseSemanticId(entry)
+    } else if (entry.standard === STANDARDS.MTCONNECT && entry.type) {
       handleUseVocabularyType(entry.type)
     } else if (entry.standard === STANDARDS.ISO22400) {
       const kpi = kpiByName(isoVocabulary, entry.name)

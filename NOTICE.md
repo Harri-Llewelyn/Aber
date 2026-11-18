@@ -585,6 +585,32 @@ Federation AISBL and carry an SPDX identifier for the same licence.
 Adopting the vocabulary is not a claim of OPC UA compliance, which is a certification of a server's
 behaviour.
 
+### QUDT: the quantity-kind and unit vocabularies and the rows read from them
+
+[`scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl`](scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl)
+and [`qudt-3.5.2-units.ttl`](scripts/vocabularies/qudt-3.5.2-units.ttl) are
+`VOCAB_QUDT-QUANTITY-KINDS-ALL.ttl` and `VOCAB_QUDT-UNITS-ALL.ttl` at tag `v3.5.2` of
+[`github.com/qudt/qudt-public-repo`](https://github.com/qudt/qudt-public-repo), by QUDT.org. They are
+unmodified, byte for byte. QUDT licenses them under
+[Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/),
+as both files declare, and asks that attribution is made to QUDT.org. The repository's licence notice
+is beside them, in [`LICENSE-qudt-CC-BY-4.0.txt`](scripts/vocabularies/LICENSE-qudt-CC-BY-4.0.txt). The
+MIT licence above, which covers the rest of this repository, does not cover them.
+
+> The QUDT Ontologies are issued under a Creative Commons Attribution 4.0 International License
+> (CC BY 4.0), available at https://creativecommons.org/licenses/by/4.0/. Attribution should be made to
+> QUDT.org
+
+`scripts/generate-qudt-vocabulary.mjs` builds the `qudt_quantity_kinds` and `qudt_units` rows from them,
+in migration `0304`: each quantity kind's IRI, English label and description, and the IRI, label, symbol
+and UN/ECE Recommendation 20 code of the 83 units that MTConnect's unit names map to. The descriptions
+are changed from QUDT's text in one way: LaTeX is written out as plain text, HTML tags are removed,
+whitespace is collapsed, and where QUDT's plain-text description is German its English description is
+taken. QUDT's text is in those rows, in the definition an AAS export gives each concept, and on the
+Vocabulary page, which credits QUDT.org under CC BY 4.0. QUDT provides the material as it is, with no
+warranty, as the licence's disclaimer says. The units file's metadata also carries a notice from the
+Regenstrief Institute and the UCUM Organization, which covers the UCUM codes. None is taken.
+
 ### VDA 5050: the state schema and the fields read from it
 
 [`scripts/vocabularies/vda5050-3.0.0-state.schema`](scripts/vocabularies/vda5050-3.0.0-state.schema) is

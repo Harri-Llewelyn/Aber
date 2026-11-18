@@ -7,10 +7,14 @@ import { lastDefinition, ok, problems, ROOT, SCHEMA } from './lib.mjs';
 // database gives them. A metric's `standard` is what a ConceptDescription's source is read from,
 // and concept_definitions names the standard of each definition it serves, so a vocabulary that the
 // form offers and the view spells another way would define a concept under a standard no metric
-// carries. Every standard but Custom has a vocabulary arm in the view (IDTA has an arm and no entry,
-// being a template and not a standard a metric is named from), and a metric group registered under
-// it, since the Standard filter and the group picker read the same spelling.
+// carries. Every standard but Custom has a vocabulary arm in the view (IDTA and QUDT have an arm and no
+// entry: IDTA is a template, and a QUDT quantity kind names what a reading measures, so neither is a
+// standard a metric is named from), and a metric group registered under it, since the Standard filter
+// and the group picker read the same spelling.
 // -------------------------------------------------------------------------------------------------
+// Arms of the view whose label is not a standard a metric is filed under.
+const NOT_OFFERED = ['IDTA', 'QUDT'];
+
 export default async function check() {
   const { STANDARDS } = await import(pathToFileURL(join(ROOT, 'frontend/src/utils/standards.js')).href);
   const offered = Object.values(STANDARDS).filter((value) => value !== STANDARDS.CUSTOM);
@@ -20,7 +24,7 @@ export default async function check() {
   // The migration that declares it last: the nearest file marker above it, which is not a generated block's.
   const files = [...SCHEMA.slice(0, SCHEMA.lastIndexOf('CREATE OR REPLACE VIEW public.concept_definitions')).matchAll(/^-- >>> (\d{4}_\S+\.sql)$/gm)];
   const file = files.at(-1)?.[1] ?? view.file;
-  const labels = [...view.body.matchAll(/'([^']+)'::text(?: AS standard)?(?=\s*\n\s*FROM)/g)].map((m) => m[1]).filter((label) => label !== 'IDTA');
+  const labels = [...view.body.matchAll(/'([^']+)'::text(?: AS standard)?(?=\s*\n\s*FROM)/g)].map((m) => m[1]).filter((label) => !NOT_OFFERED.includes(label));
   const missingFromView = offered.filter((standard) => !labels.includes(standard));
   const missingFromForm = labels.filter((label) => !offered.includes(label));
   if (labels.length === 0) {

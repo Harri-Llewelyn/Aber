@@ -7,6 +7,7 @@
  * true for one, the API's answer changes shape without erroring. AASX packaging stays in aas-export.
  */
 import { sparkplugToXsd } from "./sparkplugToXsd.ts";
+import { QUDT_UNIT_IDS } from "./qudtUnits.ts";
 import { modelContentType, modelFileName } from "./model3dContentType.ts";
 import { assignSubmodelKeys } from "./submodelKeys.ts";
 
@@ -350,9 +351,11 @@ function conceptName(id: string): string | null {
 }
 
 /**
- * Authorities that issue ids no vocabulary here holds, by IRI prefix. Such an id is defined by its
- * authority, whatever standard the metrics carrying it are filed under, so its definition defers
- * there and never to a metric's description. A row in `concept_definitions` still takes precedence.
+ * Authorities that issue ids no vocabulary here holds in full, by IRI prefix. Such an id is defined
+ * by its authority, whatever standard the metrics carrying it are filed under, so its definition
+ * defers there and never to a metric's description. A row in `concept_definitions` still takes
+ * precedence: QUDT's seeded quantity kinds are defined by their own text, and this is for one the
+ * seed leaves out, a deprecated kind or one a later release added.
  */
 export const ID_AUTHORITIES: readonly { prefix: string; authority: string }[] = [
   { prefix: "http://qudt.org/vocab/quantitykind/", authority: "QUDT" },
@@ -366,6 +369,27 @@ function authorityOf(id: string): string | undefined {
 function onlyValue(values: unknown[]): string | undefined {
   const distinct = [...new Set(values.map((v) => String(v ?? "").trim()).filter(Boolean))];
   return distinct.length === 1 ? distinct[0] : undefined;
+}
+
+/**
+ * The IEC 61360 `unitId` for a metric's unit: the QUDT unit that is exactly that MTConnect unit name,
+ * as an ExternalReference with one GlobalReference key, or undefined where the crosswalk maps the name
+ * to none. `unit` keeps the MTConnect name as free text beside it.
+ */
+function unitReference(unit: string | undefined) {
+  if (unit === undefined || !Object.hasOwn(QUDT_UNIT_IDS, unit)) return undefined;
+  return {
+    type: "ExternalReference",
+    keys: [{ type: "GlobalReference", value: QUDT_UNIT_IDS[unit] }],
+  };
+}
+
+/** Where an id's definition comes from, as `concept_sources` records it, or undefined where it records none. */
+function sourceOfDefinition(
+  sources: readonly ConceptSource[] | undefined,
+  id: string,
+): string | undefined {
+  return sources?.find((s) => s.semantic_id === id)?.source || undefined;
 }
 
 /**
@@ -434,7 +458,12 @@ function conceptDescription(
   id: string,
   name: string,
   definition: string,
-  opts: { unit?: string; dataType?: string } = {},
+  opts: {
+    unit?: string;
+    unitId?: ReturnType<typeof unitReference>;
+    dataType?: string;
+    sourceOfDefinition?: string;
+  } = {},
 ) {
   return {
     modelType: "ConceptDescription",
@@ -449,6 +478,8 @@ function conceptDescription(
         modelType: "DataSpecificationIec61360",
         preferredName: [{ language: "en", text: name.slice(0, 255) }],
         unit: opts.unit,
+        unitId: opts.unitId,
+        sourceOfDefinition: opts.sourceOfDefinition,
         dataType: opts.dataType,
         // Mandatory in English (AASc-3a-008), so every source below supplies one.
         definition: [{ language: "en", text: definition.slice(0, 1023) }],
@@ -464,16 +495,17 @@ function conceptDescription(
  * metric's description never defines a standard concept. An id under one of ID_AUTHORITIES defers
  * to that authority. For any other id, a catalog description is the definition only when every
  * live row carrying the id agrees on it, since several metrics can share one concept (#457). The
- * unit and datatype come from the catalog rows on the same terms. An id an imported site vocabulary holds
- * takes the file's preferred name, and its definition only where the file's definitions are shared
- * (`siteDefinitionFor()`), whatever the catalog describes.
- * `unitId` is not set: the units are MTConnect UnitEnum names, which IEC 61360 `unit` takes as free
- * text.
+ * unit and datatype come from the catalog rows on the same terms. The units are MTConnect UnitEnum
+ * names, which IEC 61360 `unit` takes as free text; `unitId` is the QUDT unit the crosswalk maps the
+ * name to (qudtUnits.ts), and is left out for a name that maps to none. An id an imported site
+ * vocabulary holds takes the file's preferred name, and its definition only where the file's
+ * definitions are shared (`siteDefinitionFor()`), whatever the catalog describes.
  */
 export function buildConceptDescriptions(
   ids: string[],
-  rows: Pick<DeviceRecord, "catalog" | "templates" | "schemas" | "definitions"> &
-    Partial<Pick<DeviceRecord, "siteConcepts">>,
+  rows:
+    & Pick<DeviceRecord, "catalog" | "templates" | "schemas" | "definitions">
+    & Partial<Pick<DeviceRecord, "sources" | "siteConcepts">>,
 ): Record<string, unknown>[] {
   const definedBy = new Map(rows.definitions.map((d) => [d.semantic_id, d]));
   return ids.map((id) => {
@@ -514,6 +546,8 @@ export function buildConceptDescriptions(
         site?.definition ?? defined?.definition ?? described ?? deferred,
         {
           unit,
+          unitId: unitReference(unit),
+          sourceOfDefinition: defined || authority ? sourceOfDefinition(rows.sources, id) : undefined,
           // Units that disagree leave the type unsaid: MEASURE needs one unit, COUNT claims none.
           dataType: units.size > 1 || datatype === undefined
             ? undefined
@@ -527,7 +561,9 @@ export function buildConceptDescriptions(
     const definition = site?.definition || defined?.definition ||
       (authority ? `${name}, as ${authority} defines it.` : schema?.description as string | null) ||
       `The concept ${name}, which this shell references.`;
-    return conceptDescription(id, name, definition);
+    return conceptDescription(id, name, definition, {
+      sourceOfDefinition: defined || authority ? sourceOfDefinition(rows.sources, id) : undefined,
+    });
   });
 }
 
@@ -593,6 +629,8 @@ export interface DeviceRecord {
   supplemental?: SupplementalSemanticId[];
   /** `concept_definitions` rows for the ids conceptIdsFor() names. */
   definitions: ConceptDefinition[];
+  /** `concept_sources` rows for the same ids: where a vocabulary's definition comes from. */
+  sources?: ConceptSource[];
   /** The imported site vocabularies' concepts for the same ids, each with the file it comes from. */
   siteConcepts?: SiteConcept[];
   /** The files the catalog's metrics link to (`metric_catalog.site_vocabulary_id`), for the KPI split. */
@@ -631,6 +669,12 @@ export interface ConceptDefinition {
   definition: string;
   /** NULL for a site vocabulary's concept: it is no standard Aber ships. */
   standard: string | null;
+}
+
+/** A row of `concept_sources`: the citation of the vocabulary a semantic id's definition is read from. */
+export interface ConceptSource {
+  semantic_id: string;
+  source: string;
 }
 
 /** Any Supabase client. Deliberately structural: the authority is the caller's to choose. */
@@ -693,10 +737,16 @@ export async function loadDeviceRecord(
     schemas: schemaRows ?? [],
     supplemental: supplementalRows ?? [],
   });
+  // Started first, so it runs beside the definitions. Without rows (an error, or a database that lacks
+  // the view) no definition names its source.
+  const sourcesRequest = conceptIds.length > 0
+    ? client.from("concept_sources").select("semantic_id, source").in("semantic_id", conceptIds)
+    : Promise.resolve({ data: [] });
   const { data: definitionRows } = conceptIds.length > 0
     ? await client.from("concept_definitions").select("semantic_id, name, definition, standard")
       .in("semantic_id", conceptIds)
     : { data: [] };
+  const { data: sourceRows } = await sourcesRequest;
 
   // The imported site vocabularies, for the same ids and for the files the catalog links to. Without
   // rows (an error, or a database that lacks the tables) an id keeps its other definitions.
@@ -721,6 +771,7 @@ export async function loadDeviceRecord(
     schemas: schemaRows ?? [],
     supplemental: supplementalRows ?? [],
     definitions: definitionRows ?? [],
+    sources: sourceRows ?? [],
     siteConcepts: siteConceptRows ?? [],
     siteVocabularies: siteVocabularyRows ?? [],
   };
@@ -1137,6 +1188,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     templates,
     schemas,
     definitions,
+    sources: record.sources,
   });
 
   const environment = {

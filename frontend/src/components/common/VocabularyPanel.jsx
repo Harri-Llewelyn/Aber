@@ -14,8 +14,11 @@ import { VocabularySections } from './VocabularySections'
  * standard's sections, which scroll inside the card (`.card-fill`; the page supplies `.page-fill`). What a
  * standard is, and what to watch for in it, is on the page's help page. What differs per standard
  * arrives as a tab descriptor (how sections are derived, what an entry's tooltip says, the id it
- * shows on a line of its own (`idFor`, `{ label, value }`), what counts as in use); see
- * common/MTConnectVocabularyPanel.jsx and its siblings. The search matches the name, the tooltip and the id. Sections start collapsed,
+ * shows on a line of its own (`idFor`, `{ label, value }`), a sentence on a line of its own after the
+ * tooltip (`noteFor`, a standard's source for the entry), what counts as in use); see
+ * common/MTConnectVocabularyPanel.jsx and its siblings. A descriptor's `notice` is a line the
+ * standard asks to be shown with it, such as QUDT's credit, at the right-hand end of the row Expand
+ * all starts. The search matches the name, the tooltip and the id. Sections start collapsed,
  * and searching opens only the sections that match. An entry is clickable when its tab has an
  * `onUse` and the viewer can add a metric.
  *
@@ -121,6 +124,7 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
           onCollapseAll={() => setAll(false)}
           disabled={filtered.length === 0}
         />
+        {active.notice && <span className="vocab-notice">{active.notice}</span>}
       </div>
 
       {query && filtered.length === 0 && (

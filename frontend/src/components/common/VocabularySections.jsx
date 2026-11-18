@@ -6,8 +6,8 @@ import { Tooltip } from './Tooltip'
 /**
  * A vocabulary's sections as the Vocabulary page draws them: a heading that opens and closes (with its
  * "N in use" count) and, when open, one chip for each entry. `tab` is the tab descriptor
- * VocabularyPanel documents, whose `isUsed`, `isActionable`, `onUse`, `metaFor`, `tooltipFor` and
- * `idFor` decide what a chip says and does; `isOpen(key)` and `toggle(key)` are the caller's state.
+ * VocabularyPanel documents, whose `isUsed`, `isActionable`, `onUse`, `metaFor`, `tooltipFor`,
+ * `idFor` and `noteFor` decide what a chip says and does; `isOpen(key)` and `toggle(key)` are the caller's state.
  * VocabularyPanel draws the standards' tabs with it, and a tab with a panel of its own (Imported) draws
  * its concepts with it, so a chip looks and acts the same on every tab.
  */
@@ -53,6 +53,7 @@ export function VocabularySections({ sections, tab: active, canAddMetric, isOpen
                     const tooltip = active.tooltipFor?.(item) || item.name
                     // The id on a line of its own, in mono as CopyableId shows one; the hint last.
                     const id = active.idFor?.(item)
+                    const note = active.noteFor?.(item)
                     const hint = inUse ? 'Already used by a catalog metric.'
                       : actionable ? 'Press it to start a new catalog metric from this.' : null
                     return (
@@ -61,6 +62,7 @@ export function VocabularySections({ sections, tab: active, canAddMetric, isOpen
                         text={<>
                           {tooltip}
                           {id && <span className="tooltip-line">{id.label} <span className="copyable-id-full">{id.value}</span></span>}
+                          {note && <span className="tooltip-line">{note}</span>}
                           {hint && <span className="tooltip-line">{hint}</span>}
                         </>}
                       >

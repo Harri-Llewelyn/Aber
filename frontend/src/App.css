@@ -8327,6 +8327,14 @@ ol.gateway-steps {
 .vocab-chip-action:hover .vocab-chip-plus,
 .vocab-chip-action:focus-visible .vocab-chip-plus { visibility: visible; }
 
+/* What a standard asks to be shown with its tab, such as QUDT's credit: at the right-hand end of the
+   row Expand all starts, wrapping under it on a narrow card. Its link is accent text with no resting
+   underline, as every link is. */
+.vocab-notice { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.vocab-notice a { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
+.vocab-notice a:hover,
+.vocab-notice a:focus-visible { text-decoration: underline; }
+
 /* VOCABULARY, Imported: the files a site imported, in a table above the concepts, and the Import
    dialog's preview. The table scrolls with the concepts, in the card's one scroller. */
 .site-vocabulary-body .num,

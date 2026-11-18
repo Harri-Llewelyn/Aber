@@ -1,4 +1,6 @@
-import { fail, pass, read } from './lib.mjs';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { fail, pass, read, REPO } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
 // 47. No ASHRAE 223P class is a metric's semantic id, in the example set or from the Add Metric
@@ -6,9 +8,9 @@ import { fail, pass, read } from './lib.mjs';
 //
 // 223P is a reference here. A class names equipment or a substance, so `TemperatureSensor` as the
 // id of a Property whose value is 21.4 tells an AAS consumer the Property is a sensor. The example
-// set's five readings carry QUDT quantity kinds instead, TYPED because QUDT is not seeded, so the
-// file's inner join no longer checks them; 0172 repoints an older install to the same five pairs,
-// and the two must not drift apart. The prefill is the dashboard's one door that fills an id
+// set's five readings carry QUDT quantity kinds instead. They are typed in the file, which takes no id
+// from a vocabulary table, so this check is the join: each kind must be a row of qudt_quantity_kinds
+// (0304). 0172 repoints an older install to the same five pairs, and the two must not drift apart. The prefill is the dashboard's one door that fills an id
 // without being asked; the suggestion and the search are held by semanticIdSources.test.js.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
@@ -39,6 +41,20 @@ export default function check() {
   }
   for (const [name, id] of seeded) {
     if (!id.startsWith(QUANTITY_KIND)) offences.push(`${name} carries ${id}, not a QUDT quantity kind`);
+  }
+
+  // The join: the kinds the table seeds, from the migration that creates it.
+  const tableFile = readdirSync(join(REPO, 'supabase/migrations')).find(
+    (f) => /^\d{4}_.*\.sql$/.test(f) && read(`supabase/migrations/${f}`).includes('CREATE TABLE IF NOT EXISTS public.qudt_quantity_kinds')
+  );
+  const kindRows = new Set(
+    tableFile ? [...read(`supabase/migrations/${tableFile}`).matchAll(/^\('(http:\/\/qudt\.org\/vocab\/quantitykind\/[^']+)', /gm)].map((m) => m[1]) : []
+  );
+  if (kindRows.size === 0) {
+    offences.push("found no seeded QUDT quantity kind: the table's migration changed shape, so the join reads nothing");
+  }
+  for (const [name, id] of seeded) {
+    if (kindRows.size > 0 && !kindRows.has(id)) offences.push(`${name} carries ${id}, which qudt_quantity_kinds does not hold`);
   }
 
   // 0172's tuples: (name, the 223P class the seed gave it, the quantity kind it moves to).
@@ -72,8 +88,8 @@ export default function check() {
     );
   } else {
     pass(
-      `the ${seeded.size} example 223P reading(s) carry QUDT quantity kinds, the pairs 0172 repoints to, ` +
-        'and the 223P prefill fills no semantic id'
+      `the ${seeded.size} example 223P reading(s) carry QUDT quantity kinds that qudt_quantity_kinds holds, ` +
+        'the pairs 0172 repoints to, and the 223P prefill fills no semantic id'
     );
   }
 }

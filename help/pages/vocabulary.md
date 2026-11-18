@@ -4,20 +4,21 @@ This page holds reference vocabularies: the published sets of terms that industr
 
 ## What the controls do
 
-- **The five standard tabs**, MTConnect, ISO 22400, OPC UA, ASHRAE 223P and VDA 5050, each show one standard's entries in the same card. Switching tab keeps the search text, so the same search can be tried on each standard in turn.
-- **Point at a tab**, or move to it with the keyboard, to read what that standard covers. What each standard is, and what to watch for in it, is under **The five standards** below.
+- **The six standard tabs**, MTConnect, ISO 22400, OPC UA, ASHRAE 223P, QUDT and VDA 5050, each show one standard's entries in the same card. Switching tab keeps the search text, so the same search can be tried on each standard in turn.
+- **Point at a tab**, or move to it with the keyboard, to read what that standard covers. What each standard is, and what to watch for in it, is under **The six standards** below.
 - **Search** filters the selected standard by name and by the text shown on hover. For example, an ISO 22400 KPI is found by its formula. A search opens the sections that match.
-- **The sections** group each standard's entries. MTConnect has data item types, components, sub types and units. ISO 22400 has KPI families, OPC UA has companion specifications, ASHRAE 223P has superclasses, and VDA 5050 has the parts of the vehicle state. Sections start collapsed.
+- **The sections** group each standard's entries. MTConnect has data item types, components, sub types and units. ISO 22400 has KPI families, OPC UA has companion specifications, ASHRAE 223P has superclasses, QUDT has one for each first letter, and VDA 5050 has the parts of the vehicle state. Sections start collapsed.
 - A section header shows **N in use** when catalog metrics already use N of its entries. Where a section needs explaining, a **?** sits beside its title. A header stays at the top of the card while its entries scroll under it.
 - **Expand all** is at the start of the line above the sections, at the far left. It opens every section of the selected standard, and reads **Collapse all** while any is open. Collapse all also closes the sections a search opened, and keeps the search.
 - **Click an entry** to start a catalog metric from it. An entry you can click shows a **+** when you point at it or tab to it. It opens the Add Metric dialog on the Metrics page, with the type, the semantic identifier and the reference type already filled in.
 - This saves typing the identifiers by hand. They are long and exact, and a typing mistake in one goes unnoticed.
-- Only some entries can be clicked. In MTConnect, these are data item types, not components, sub types or units. Every ISO 22400 KPI, every OPC UA data point and every VDA 5050 field can be clicked. In ASHRAE 223P, classes can be clicked, but relations cannot.
+- Only some entries can be clicked. In MTConnect, these are data item types, not components, sub types or units. Every ISO 22400 KPI, every OPC UA data point and every VDA 5050 field can be clicked. In ASHRAE 223P, classes can be clicked, but relations cannot. Every QUDT quantity kind can be clicked.
 - Entries already in use are ticked, and you can still click them. Clicking needs the Administrator role; without it the entries are read-only.
 - **ASHRAE 223P is a reference here.** Clicking a 223P class opens Add Metric in the BMS group, with the class as the type. It fills in no semantic identifier, datatype or units. Choose those yourself. A class names a piece of equipment, such as a temperature sensor, not the reading it takes. A 223P class is ticked when a 223P metric is named after it.
+- **A QUDT quantity kind** opens Add Metric as a Custom metric, with the kind as its semantic identifier. Give the name, the datatype and the unit yourself. A kind is ticked when a catalog metric carries it as its own id or as a further id.
 - **A unit** in the MTConnect vocabulary is listed by its code, such as CELSIUS. The Metrics page shows it with its symbol, **°C (CELSIUS)**, and History shows the symbol alone.
 
-## The five standards
+## The six standards
 
 ### MTConnect
 
@@ -34,6 +35,10 @@ The manufacturing KPIs that ISO 22400-2 defines. These are computed measures. MT
 
 - **A KPI is picked whole.** It is not composed like an MTConnect name. `AVAILABILITY` becomes `OEE/AVAILABILITY` in the catalog, with the KPI's unit and semantic id. Point at a KPI to see its formula, in the standard's symbols.
 - **Beware the name clash.** MTConnect's own `AVAILABILITY` is a different thing. It is an event meaning the device is connected, not this ratio.
+- **Four KPIs cite a source.** `AVAILABILITY`, `EFFECTIVENESS`, `QUALITY` and `OEE` were read from OPC 40501-1 v1.02.0, Annex C.2.4. That annex is free to read, and says it takes its KPI definitions from ISO 22400-2. Point at one of them to see the source on its last line. The same line is the `sourceOfDefinition` of the KPI's concept in an AAS export.
+- **Four KPIs are deprecated.** `UTILIZATION`, `SCRAP_RATIO`, `MTBF` and `MTTR` are marked **deprecated** on the tab, and the line under a KPI's tooltip says why. `UTILIZATION` is not an ISO 22400 KPI. No free source publishes the formulas of the other three.
+- **They stay for now.** A metric that already carries one of their ids keeps it. The four are removed no sooner than 1.10.0.
+- **A site that owns ISO 22400-2 can import it on the Vocabulary page.** That brings in its KPIs with your licence recorded, so Aber does not ship copies nobody has checked.
 
 ### OPC UA
 
@@ -48,8 +53,18 @@ Data points from the OPC UA companion specifications: `OPC 40001` (Machinery), `
 
 The semantic concepts that ASHRAE 223P defines for building systems: HVAC, electrical, and the sensing around them. The sections follow the standard's own class hierarchy.
 
-- **It is a reference, not a source of ids.** `Fan` names a piece of equipment, not a reading. You choose the datatype, units and id yourself, such as a QUDT quantity kind.
+- **It is a reference, not a source of ids.** `Fan` names a piece of equipment, not a reading. You choose the datatype, units and id yourself, such as a quantity kind from the QUDT tab.
 - **It is still in public review.** These concepts come from the open223 pre-publication ontology. They may change before ASHRAE 223 is published.
+
+### QUDT
+
+The quantity kinds that QUDT defines. A quantity kind says what a reading measures, such as `Temperature` or `VolumeFlowRate`. Each section holds the kinds that start with one letter.
+
+- **Quantity kinds from QUDT 3.5.2, by QUDT.org, under CC BY 4.0.** The credit is on the tab, and the licence is linked from it. Kinds QUDT has deprecated are left out.
+- **A kind is not a standard.** It names what a reading measures, not the reading itself. So it is never the id of an MTConnect, ISO 22400, OPC UA or VDA 5050 metric. Those keep their own standard's id.
+- **Where it is the id.** A Custom metric and an ASHRAE 223P metric can have a kind as their own semantic id. Any metric can have one as a further id, which says what the metric measures without replacing its own.
+- **QUDT's own ids.** QUDT publishes each kind's id, so it is not made here. Point at a kind to see it.
+- **A kind shows QUDT's description.** Some kinds have none in English, and then the tab shows the name alone.
 
 ### VDA 5050
 
