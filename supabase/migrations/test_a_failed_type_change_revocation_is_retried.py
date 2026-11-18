@@ -24,7 +24,7 @@ What is held here:
     many sweeps run and however the request was answered. A credential issued before the stamp,
     and one issued to another gateway, stop nothing.
   * An archived gateway is judged as it was: a failed request clears the stamp and is asked again
-    with a new one, a restore ends the request, and a 2xx keeps the stamp.
+    with a new one, a restore leaves the stamp and the request, and a 2xx keeps the stamp.
   * A stamp with no request row, which a change of type before 0288 could leave, is not asked for.
   * gateway_credential_was_replaced(): its truth table, and that no API role may run it.
 
@@ -440,16 +440,13 @@ class TheArchivePathIsAsItWas(RetryBase):
         self.assertEqual(self.state(gid), (stamped, request_id))
         self.assertEqual(self.queue_depth(gid), before)
 
-    def test_restoring_the_gateway_ends_the_request(self):
-        gid, request_id, _ = self.archived_and_asked()
-        self.reply(request_id, 503)
+    def test_restoring_the_gateway_leaves_its_stamp_and_its_request(self):
+        gid, request_id, stamped = self.archived_and_asked(minutes_ago=1)
         self.cur.execute("UPDATE public.gateways SET is_archived = false WHERE id = %s;", (gid,))
-        before = self.queue_depth(gid)
 
         self.sweep()
 
-        self.assertEqual(self.queue_depth(gid), before, "a restored gateway's revocation was asked again")
-        self.assertEqual(self.state(gid), (None, None))
+        self.assertEqual(self.state(gid), (stamped, request_id))
 
 
 class WhatItDoesNotReach(RetryBase):

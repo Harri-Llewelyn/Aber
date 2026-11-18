@@ -8,7 +8,7 @@ To use the page, read [its help](../help/pages/gateways.md). The design reasons 
 [Remote gateways](remote-gateways.md).
 
 Every row says what the step **should** leave. Where today's code does something else, the row carries a
-key such as **[D1]**, and [*Where the code differs*](#where-the-code-differs) says what. Where only a live
+key such as **[Dn]**, with a number for n, and [*Where the code differs*](#where-the-code-differs) says what. Where only a live
 gateway can show a cell, the cell says so.
 
 ## The types
@@ -138,8 +138,8 @@ says why.
 | **Archive**, Third-party, Host or Simulated, with no credential | Unchanged | None | None | None: nothing is asked | None | Restore Gateway | One `UPDATE` |
 | **Archive**, Playback | Refused while it is the only Playback gateway | n/a | n/a | n/a | n/a | The drawer has no Archive Gateway | A refusal |
 | **Restore**, Remote, never enrolled | Unchanged: `PENDING_ENROLLMENT` stays so | None: a cancelled token does not come back | None | None | None | Set Up Gateway (primary) | One `UPDATE` clearing `archived_at` and the timer. The toast says it was restored. |
-| **Restore**, Remote, enrolled | Unchanged | None | The stamp stays, so the record keeps reading Revoked until a credential is issued or enrolled after the restore. Today it is cleared: **[D1]** | The account stays disabled until the appliance enrols again | The repository comes back out of the forge's archive. The deploy key does not come back, and the appliance enrols again to be given one. **[D3]** | Set Up Gateway (primary). Today it is not offered: **[D2]** | One `UPDATE`. The toast says it was restored. |
-| **Restore**, Third-party, Host or Simulated, with a credential | Unchanged | None | The stamp stays. Today it is cleared: **[D1]** | The account stays disabled until a credential is issued | None | Generate Broker Credential. No kept copy comes back. | One `UPDATE`. The toast says it was restored. |
+| **Restore**, Remote, enrolled | Unchanged | None | The stamp stays, so the record keeps reading Revoked until a credential is issued or enrolled after the restore. | The account stays disabled until the appliance enrols again | The repository comes back out of the forge's archive. The deploy key does not come back, and the appliance enrols again to be given one. **[D3]** | Set Up Gateway (primary) | One `UPDATE`. The toast says it was restored. |
+| **Restore**, Third-party, Host or Simulated, with a credential | Unchanged | None | The stamp stays. | The account stays disabled until a credential is issued | None | Generate Broker Credential. No kept copy comes back. The Restore dialog names Host and Simulated and leaves out Third-party: **[D2]** | One `UPDATE`. The toast says it was restored. |
 | **Restore**, any type, with no credential | Unchanged | None | None | None | None | As an active gateway | One `UPDATE` |
 | **Auto-delete**, any type but Playback | The row goes | Go with the row | Gone | Nothing is asked: the account was disabled when the gateway was archived. | The sweep removes any key left and archives the repository. A repository is never deleted. | n/a | One `DELETE`, by the retention job, and a tombstone on the Archived Entities page. It runs nightly at 03:30. A gateway with no timer, or one a playback names, is skipped. |
 | **Delete**, any type but Playback | The row goes | Go with the row | Gone | An archived gateway: as for auto-delete. One that is not archived and holds a credential: its account is disabled. | As for auto-delete | n/a | One `DELETE`, and a tombstone for an archived gateway. The toast says it was permanently deleted. |
@@ -162,8 +162,7 @@ whoever fixes it has to remove the mark and this text with it.
 
 | Key | What the code does today | How it is confirmed |
 | :--- | :--- | :--- |
-| **[D1]** | *Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled.* The record then reads Issued and the database counts the old credential again. | `test_gateway_lifecycle.py` and `test_gateway_lifecycle_broker.py`, expected to fail |
-| **[D2]** | *The Restore dialog sends a person to a setup action the drawer does not offer.* The drawer offers Set Up Gateway to an enrolled Remote gateway only while a revocation stands, and [D1] removes it. The dialog also names Host and Simulated gateways, and leaves out Third-party. | `test_gateway_lifecycle.py` for the row [D1] leaves, and `gatewayTypeChange.test.jsx` for the drawer's rule |
+| **[D2]** | *The Restore dialog names Host and Simulated gateways where a credential is issued again, and leaves out Third-party.* The drawer offers Generate Broker Credential to a Third-party gateway as it does to the other two. | `ArchivesTab.test.jsx` and `gatewayRowActions.test.jsx`, which hold the dialog's text |
 | **[D3]** | *The Gateways help says restoring a gateway brings back its deploy key, which it does not.* The forge sweep removes the key on archive and has nothing to register on restore. The Restore dialog says so correctly. [An appliance that is lost, stolen or scrapped](remote-gateways.md#an-appliance-that-is-lost-stolen-or-scrapped) says the same as the help. | `test_forge_sweep.py`, and the sweep's own source |
 | **[D4]** | *Issuing a setup token for an archived gateway succeeds and moves it to Awaiting setup.* Credential issue refuses an archived gateway. Redeeming the token is refused, so nothing can enrol. | `test_gateway_lifecycle.py`, expected to fail |
 | **[D6]** | *Changing the type of an archived gateway leaves the old type's status behind.* The clean-up skips an archived gateway. The Edit dialog is not offered for one, so only a direct write reaches it. | `test_gateway_lifecycle.py`, expected to fail |

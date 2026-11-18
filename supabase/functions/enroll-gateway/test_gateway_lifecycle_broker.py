@@ -341,7 +341,6 @@ class DashboardIssued(BrokerLifecycle):
         self.assertTrue(self.account(sparkplug_id)["disabled"], "restoring re-enabled the broker account")
         self.assert_refused(sparkplug_id, password)
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
     def test_after_a_restore_the_record_agrees_with_the_account(self):
         gid, sparkplug_id = self.new_gateway("host")
         self.issue_credential(gid)
@@ -478,7 +477,6 @@ class RemoteEnrolled(BrokerLifecycle):
         self.assertTrue(self.account(sparkplug_id)["disabled"], "restoring re-enabled the broker account")
         self.assert_refused(sparkplug_id, password)
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
     def test_after_a_restore_an_enrolled_gateway_s_record_agrees_with_the_account(self):
         gid, sparkplug_id = self.new_gateway("remote")
         self.setup_and_enrol(gid)

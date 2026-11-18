@@ -892,7 +892,6 @@ class Restoring(Lifecycle):
         self.assertTrue(self.issue_credential(gid))
         self.assertTrue(self.holds_credential(gid))
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
     def test_restoring_an_enrolled_remote_gateway_keeps_its_credential_revoked(self):
         gid, _ = self.gateway("remote", status="ONLINE", enrolled=True)
         self.archive(gid)
@@ -901,7 +900,6 @@ class Restoring(Lifecycle):
         self.assertIsNotNone(self.row(gid)["credential_revoked_at"],
                              "the account is still disabled, and the record now says it is not")
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
     def test_restoring_a_dashboard_issued_gateway_does_not_count_its_old_credential_again(self):
         gid, _ = self.gateway("host", **ISSUED_STATES["issued"])
         self.archive(gid)

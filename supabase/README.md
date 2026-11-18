@@ -5630,7 +5630,7 @@ credential revoked, and the broker account still worked for whoever held the old
 | Any other reply, or none in five minutes | the stamp is cleared, and the same run asks again | the stamp stays, and the run asks again |
 | Asked again | for an archived gateway that holds a credential and has no stamp, 200 a run | for each row that failed, oldest first, 200 a run |
 | A credential issued or enrolled after the stamp | the archive's rule, unchanged | the row is dropped and nothing is asked |
-| The stamp is cleared (a restore) | the row goes | the row goes |
+| The gateway is restored | n/a: it is no longer archived | the stamp and the row stay (0308) |
 
 **A retry must never disable a newer credential.** After a type change the gateway can be issued a
 credential for its new type under the same broker account name, the Sparkplug ID. A retry after that
@@ -5671,8 +5671,8 @@ not a 2xx and after five minutes with none, with the stamp kept; a young request
 asked again; asking until one succeeds; the run that cannot ask leaving the row; the retry never
 running after a credential issued or an enrolment after the stamp, over several runs and when the
 credential comes after a retry; a credential before the stamp, another gateway's and another
-action's stopping nothing; the archive path as it was, and a restore ending the request; the stamp
-with no row asked for nothing; and the helper's truth table.
+action's stopping nothing; the archive path as it was, and a restore leaving the stamp and the
+request; the stamp with no row asked for nothing; and the helper's truth table.
 
 ### An acknowledger is shown by name (0290)
 
