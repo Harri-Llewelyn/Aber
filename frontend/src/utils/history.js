@@ -7,7 +7,7 @@ import {
   COVERAGE_LARGE_MAX_HOURS, COVERAGE_MAX_DEVICES, COVERAGE_ROLLUP_MINUTES, COVERAGE_SMALL_SELECTION, HISTORY_CHANGE_READINGS,
   HISTORY_GROUP_READ_ROWS, HISTORY_MAX_CHANGES, HISTORY_MAX_ROWS, HISTORY_RESOLUTIONS, HOUR_OF_DAY_MAX_ROWS,
 } from '../api'
-import { encodeList } from '../hooks/useUrlState'
+import { decodeList, encodeList } from '../hooks/useUrlState'
 import { modelledMetricsAcross, schemasForDevice } from './deviceTags'
 import { datatypeLabel } from './sparkplugDatatype'
 import { modelledConstraints } from './payloadConformance'
@@ -17,8 +17,9 @@ import { areaWideInService, inServiceDevices } from './inService'
 import { REPLAY_LANES_PARAM, isReplayLane } from './replayLanes'
 import { DERIVED_MAX_MINUTES, SHARE_UNIT, derivedInputCount, derivedReportedBy, percentWords, unitOf } from './derivedMetric'
 import { unitSticks, unitSymbol, withUnit } from './units'
+import { timelineTicks } from './timelineAxis'
 import {
-  SPAN_IDS, TIME_PRESETS, bandWords, calendarTicks, clockWords, localDay, rollingWindow, windowToQuery,
+  SPAN_IDS, TIME_PRESETS, bandWords, clockWords, localDay, rollingWindow, windowToQuery,
 } from './timeWindow'
 
 const MINUTE = 60 * 1000
@@ -95,16 +96,51 @@ export function resolutionFor(startMs, endMs, series, bucket = 'auto', options =
 }
 
 /**
- * The Buckets control's options for Auto's pick `auto`: Auto, then each resolution, on when it is
- * as coarse as Auto's pick or coarser. With no pick, only Auto is on.
+ * The segments' short names for HISTORY_RESOLUTIONS, by id: a group's heading offers Auto, then
+ * these in order ("Auto · 1 min · 5 min · 1 hour · 1 day"). The long words, "5-minute buckets",
+ * are each segment's tooltip and the words the page says a read in.
  */
-export function bucketOptions(auto) {
-  const autoAt = auto ? HISTORY_RESOLUTIONS.findIndex(r => r.id === auto.id) : HISTORY_RESOLUTIONS.length
+export const BUCKET_SEGMENT_LABELS = Object.freeze({ '1m': '1 min', '5m': '5 min', '1h': '1 hour', '1d': '1 day' })
+
+/**
+ * A group's bucket choices as SegmentedControl options, for the finest size its row cap allows
+ * (`cap`, pickResolution() of the group's metrics, or null when none fits): Auto, then each size.
+ * A size finer than `cap` is offered but off (`unavailable`, its tooltip the reason), as it would
+ * pass the row cap. `autoWords` is Auto's tooltip.
+ */
+export function bucketOptions(cap, { autoWords = null } = {}) {
+  const capAt = cap ? HISTORY_RESOLUTIONS.findIndex(r => r.id === cap.id) : HISTORY_RESOLUTIONS.length
   return [
-    { value: 'auto', label: 'Auto buckets', on: true },
-    ...HISTORY_RESOLUTIONS.map((r, i) => ({ value: r.id, label: r.words, on: i >= autoAt })),
+    { id: 'auto', label: 'Auto', description: autoWords },
+    ...HISTORY_RESOLUTIONS.map((r, i) => ({
+      id: r.id, label: BUCKET_SEGMENT_LABELS[r.id], description: r.words, ...(i < capAt ? { unavailable: TOO_MANY_BUCKETS } : {}),
+    })),
   ]
 }
+
+/**
+ * The `?bucket=` of a Device page: one entry for each datatype group that is not Auto, the group
+ * named as its heading names it ("Double:5m,String:1h"). Returns `{ legacy, byType }`: `byType` maps
+ * a group's name to a size's id, and `legacy` is the size of an older link, a bare "5m", which
+ * meant every chart. An entry naming no size, or no group name, is left out.
+ */
+export function parseBuckets(raw) {
+  const text = String(raw ?? '').trim()
+  const ids = HISTORY_RESOLUTIONS.map(r => r.id)
+  const byType = new Map()
+  if (ids.includes(text)) return { legacy: text, byType }
+  for (const entry of decodeList(text)) {
+    const at = entry.lastIndexOf(':')
+    if (at > 0 && ids.includes(entry.slice(at + 1))) byType.set(entry.slice(0, at), entry.slice(at + 1))
+  }
+  return { legacy: null, byType }
+}
+
+/** `byType` (parseBuckets()) written as the address's value, "Double:5m,String:1h"; empty when every group is Auto. */
+export const bucketsText = (byType) => encodeList([...byType].map(([group, id]) => `${group}:${id}`))
+
+/** A query string with the bucket choices' colons written as colons, so the address reads `bucket=Double:5m`. */
+export const withBucketColons = (url) => url.replace(/([?&]bucket=)([^&]*)/, (m, key, value) => key + value.replace(/%3A/gi, ':'))
 
 /**
  * A metric's kind before it is read, from its catalog datatype: text (String, Text, UUID), flag
@@ -166,29 +202,36 @@ export function readableResolution(startMs, endMs, series, widthPx, {
 }
 
 /**
- * The reads a window takes: groups of metrics, each at one resolution. A Buckets choice reads every
- * metric at it. Under Auto, or when the choice is too fine (`refused`), text metrics (`textNames`)
- * read apart at readableResolution() for charts `widthPx` wide, flagged `text`, and the rest at
- * pickResolution() for their own number. `problem` when one series does not fit even at 1 day.
+ * The reads a window takes: one for each group of metrics (metricGroups()), each at its own size and
+ * counting its own row cap. A group is `{ key, names, text, bucket }`: `bucket` is Auto or one of
+ * HISTORY_RESOLUTIONS' ids. Under Auto, a text group (`text`) reads at readableResolution() for
+ * charts `widthPx` wide and any other at pickResolution(). A size chosen is read with every metric
+ * of the group in one read when it is as coarse as the finest the row cap allows, pickResolution(),
+ * or coarser. A finer one would pass the cap, so the group reads at Auto and `refused` names the
+ * size chosen. `problem` when one series does not fit even at 1 day.
  *
  * Each group's `changes` are its text and flag metrics (`stateNames`), whatever the buckets: they
  * also take the change read (telemetry_changes(), 0254), which draws every change while raw
  * telemetry holds the window and the cap allows, and marks the group's buckets otherwise.
  */
-export function readPlan(startMs, endMs, {
-  names, textNames = new Set(), stateNames = new Set(), bucket = 'auto', widthPx = DEFAULT_CHART_PX,
-}) {
-  const withChanges = (g) => ({ ...g, changes: g.names.filter(n => stateNames.has(n)) })
-  const { resolution: chosen, refused } = resolutionFor(startMs, endMs, names.length, bucket)
-  if (!chosen) return { problem: true, groups: [], refused: null }
-  if (bucket !== 'auto' && !refused) return { groups: names.length ? [withChanges({ names, resolution: chosen })] : [], refused: null, chosen }
-  const text = names.filter(n => textNames.has(n))
-  const rest = names.filter(n => !textNames.has(n))
-  const groups = []
-  if (rest.length) groups.push({ names: rest, resolution: pickResolution(startMs, endMs, rest.length) })
-  if (text.length) groups.push({ names: text, resolution: readableResolution(startMs, endMs, text.length, widthPx), text: true })
-  if (groups.some(g => !g.resolution)) return { problem: true, groups: [], refused: null }
-  return { groups: groups.map(withChanges), refused, chosen }
+export function readPlan(startMs, endMs, { groups, stateNames = new Set(), widthPx = DEFAULT_CHART_PX }) {
+  const planned = []
+  for (const g of groups) {
+    if (!g.names.length) continue
+    const cap = pickResolution(startMs, endMs, g.names.length)
+    const auto = g.text ? readableResolution(startMs, endMs, g.names.length, widthPx) : cap
+    if (!cap || !auto) return { problem: true, groups: [] }
+    const bucket = g.bucket && HISTORY_BUCKETS.includes(g.bucket) ? g.bucket : 'auto'
+    const chosen = HISTORY_RESOLUTIONS.findIndex(r => r.id === bucket)
+    const capAt = HISTORY_RESOLUTIONS.findIndex(r => r.id === cap.id)
+    const refused = chosen >= 0 && chosen < capAt ? HISTORY_RESOLUTIONS[chosen] : null
+    const resolution = chosen < 0 || refused ? auto
+      : chosen === capAt ? cap : { ...HISTORY_RESOLUTIONS[chosen], perRead: Math.max(1, g.names.length) }
+    planned.push({
+      key: g.key, names: g.names, text: Boolean(g.text), bucket, resolution, refused, changes: g.names.filter(n => stateNames.has(n)),
+    })
+  }
+  return { groups: planned }
 }
 
 /** `list` in groups of at most `size`, in order. */
@@ -242,8 +285,9 @@ export function overviewAddress(win, { devices = [] } = {}) {
 
 /**
  * The address of a device's charts, or the picker's, keeping the window shown now, and the metrics
- * chosen (`metric`) and the bucket choice (`bucket`) when they are not the defaults. The next
- * device keeps the metrics it has. `replay` keeps the Show replay lanes check on.
+ * chosen (`metric`) and the bucket choices (`bucket`, "Double:5m,String:1h") when they are not the
+ * defaults. The next device keeps the metrics it has, and the groups' choices that it has a group
+ * for. `replay` keeps the Show replay lanes check on.
  */
 export function pickedAddress(deviceId, win, { metrics = [], bucket = 'auto', replay = false } = {}) {
   const query = new URLSearchParams()
@@ -253,7 +297,7 @@ export function pickedAddress(deviceId, win, { metrics = [], bucket = 'auto', re
   if (replay) query.set(REPLAY_LANES_PARAM, '1')
   // A list reads with its commas, as useUrlList writes it.
   const q = query.toString().replace(/%2C/gi, ',')
-  return `${deviceHistoryPath(deviceId)}${q ? `?${q}` : ''}`
+  return withBucketColons(`${deviceHistoryPath(deviceId)}${q ? `?${q}` : ''}`)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1230,23 +1274,13 @@ export const boxWords = (count, start, end, now = Date.now()) =>
   `${count} ${count === 1 ? 'device' : 'devices'} · ${bandWords(start, end, now)}`
 
 /**
- * The Overview's time axis: a calendar window's own ticks (calendarTicks()), else five evenly
- * spaced, labelled with the clock (to the second under an hour) inside a day, the date and clock up
- * to three days, and the date beyond, as the Audit Trail's axis is. Each `{ f, label }`, `f` a
- * fraction of [start, end].
+ * The Overview's time axis over a track `widthPx` wide: timelineTicks(), the shared axis's round
+ * times, so no two labels touch at any span or width, a label at an end held inside the track (its
+ * `align`). A calendar window takes them too: its own ticks (calendarTicks()) crowd a phone's
+ * narrow track. Each `{ f, label, align }`, `f` a fraction of [start, end].
  */
-export function axisTicks(win, startMs, endMs) {
-  const span = endMs - startMs
-  if (!(span > 0)) return []
-  if (win?.kind === 'calendar') {
-    return calendarTicks(win.span, new Date(startMs), new Date(endMs))
-      .map(({ at, label }) => ({ f: (at.getTime() - startMs) / span, label }))
-      .filter(t => t.f >= 0 && t.f <= 1)
-  }
-  const label = (d) => (span < HOUR
-    ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    : span <= DAY ? clockWords(d) : momentWords(d.getTime(), span <= 3 * DAY ? 1 : 1440))
-  return [0, 0.25, 0.5, 0.75, 1].map(f => ({ f, label: label(new Date(startMs + span * f)) }))
+export function axisTicks(startMs, endMs, widthPx) {
+  return timelineTicks(startMs, endMs, widthPx).map(({ f, label, align }) => ({ f, label, align }))
 }
 
 // ------------------------------------------------------------------------------------------------

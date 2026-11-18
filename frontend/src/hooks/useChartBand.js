@@ -2,10 +2,10 @@ import { useBandDrag } from './useBandDrag'
 import { bandWindow, bandWords, windowBounds } from '../utils/timeWindow'
 
 /**
- * The charts' band drag (hooks/useBandDrag.js): a press on a chart's plot area or a state's strip,
- * each the window's width.
+ * The charts' band drag (hooks/useBandDrag.js): a press on a chart's plot area, a state's strip or
+ * the shared time axis, each the window's width.
  */
-const CHART_BAND = { track: '.u-over, .chart-box-states' }
+const CHART_BAND = { track: '.u-over, .chart-box-states, .chart-axis-track' }
 
 /**
  * A drag across any of a page's time-series charts, which shades one band on every chart and sets it
