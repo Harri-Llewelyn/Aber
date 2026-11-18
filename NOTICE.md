@@ -50,7 +50,7 @@ one.
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.34.1` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
 | `aber/node-red` | `nodered/node-red:5.0.9` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
 | `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`) |
-| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit), [the charts'](#the-dashboards-charts--uplot-mit), [the editor's](#the-automations-pages-editor--codemirror-and-lezer-mit) and [the YAML parser's](#the-automations-pages-yaml-parser--yaml-isc) notices are in the bundle |
+| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit), [the charts'](#the-dashboards-charts--uplot-mit), [the editor's](#the-automations-pages-editor--codemirror-and-lezer-mit), [the YAML parser's](#the-automations-pages-yaml-parser--yaml-isc) and [the AASX unzipper's](#the-aas-readers-unzipper--fflate-mit) notices are in the bundle |
 | `aber/ingestion`, `aber/i3x-service`, `aber/test-runner` | `python:3.13-slim` (`test-runner` on `aber/ingestion`) | Python Software Foundation License | In the base: `/usr/local/lib/python3.13/LICENSE.txt` |
 
 **The packages a Dockerfile installs from a distribution** (pgBackRest, tini, gosu, Node.js, SQLite,
@@ -175,6 +175,22 @@ grep -l "Copyright Eemeli Aro" frontend/dist/assets/*.js
 ```
 
 `legalComments.test.js` fails if that comment stops matching the licence the installed package ships.
+
+## The AAS reader's unzipper — fflate (MIT)
+
+The Vocabulary page reads an AASX package in the browser with [`fflate`](https://github.com/101arrowz/fflate),
+copyright Arjun Barrett, under the MIT licence. It is an npm dependency of `frontend/` with no
+dependencies of its own, and the edge functions use the same library
+([`supabase/functions/deno.json`](supabase/functions/deno.json)). Its MIT licence asks for its notice in
+every copy, and its files carry none the build keeps. So
+[`frontend/src/utils/aasPackage.js`](frontend/src/utils/aasPackage.js) opens with that notice as a `/*!`
+legal comment. To check a build:
+
+```
+grep -l "Copyright (c) 2026 Arjun Barrett" frontend/dist/assets/*.js
+```
+
+`legalCommentsFflate.test.js` fails if that comment stops matching the licence the installed package ships.
 
 ## The ASHRAE 223P ontology — Apache License 2.0
 

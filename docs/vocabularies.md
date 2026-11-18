@@ -88,7 +88,13 @@ before proposing a change:
 
 - `VocabularyPanel` takes a `tabs` array of descriptors
   ([VocabularyPanel.jsx](../frontend/src/components/common/VocabularyPanel.jsx)) — a standard is one
-  descriptor, not a refactor.
+  descriptor, not a refactor. A tab whose rows the page does not hold carries a `panel` instead, an
+  element that loads its own data: the Imported tab is one.
+- **A site adds a vocabulary of its own as rows, not code.** The Administrator imports the AAS
+  ConceptDescriptions of a file (*Site vocabularies*, below) into `site_vocabularies` and
+  `site_vocabulary_concepts` (`0306`). The seeded tables stay generated and unwritable, and
+  `concept_definitions` has an arm that shows an imported vocabulary only once an Administrator has
+  confirmed that its definitions may be shared.
 - `opcua_vocabulary` is keyed `(companion_spec, name)` (`0001_baseline_schema.sql`), so further OPC
   specs are **seed rows in the existing table**, not new tables.
 - The migrations are baked into the `db-init` image (`supabase/db-init/Dockerfile`), so a large
@@ -733,6 +739,72 @@ specification, so filing it in `opcua_vocabulary` would misstate where it came f
   as Sparkplug B metrics, and the edge adapter that would do it is the catalogue of edge connectors'
   business (#307).
 
+## Site vocabularies
+
+A site can bring its own vocabulary: a group's naming standard, a customer's specification, or the
+concepts of a standard it holds a copy of, such as ISO 22400-2 or an ECLASS release. Built as
+migration `0306`, on the Vocabulary page's **Imported** tab. Nothing here is seeded, so nothing here
+is verified against a source Aber ships: the file is the site's.
+
+- **What can be imported.** AAS ConceptDescriptions with the IEC 61360 data specification: an
+  identifier, a preferred name, a definition, a unit and a data type. The file is an `.aasx`
+  package, an AAS JSON environment or an AAS XML environment, read by one reader in the browser
+  (`frontend/src/utils/aasReader.js`, shared with #483's supplier AASX import and #489's template
+  upload). Only the V3 metamodel is read. A NodeSet2 file is #809's. **No CSV and no format of
+  Aber's own**, because a custom file has no standard, and the easiest route would be the one
+  everybody took.
+- **The file is hostile.** It is refused over 25 MB. Inside a package it is refused for more than
+  5,000 entries, any entry over 50 MB expanded, more than 100 MB in all, an entry that inflates to
+  more than 100 times its packed size, and an entry named with an absolute path, a `..` segment, a
+  backslash or a drive letter. Every count is made while the bytes are inflated, never from the
+  sizes the zip declares. An XML document with a `<!DOCTYPE` is refused before it is parsed, so no
+  entity is ever declared. Each refusal names its reason in the dialog.
+- **A package is read through its relationships** (IDTA 01005): the origin's `aas-spec` relationship
+  names the environment. A package with none is refused, and the reason says which link is missing.
+- **Two tables.** `site_vocabularies` has one row for each file: its name, format, SHA-256, the
+  version it states, a licence note, whether its definitions are shared, and who imported it and
+  when. `site_vocabulary_concepts` has one row for each concept, and a semantic id is held by one
+  file only. Every signed-in role reads them. Only `import_site_vocabulary()`,
+  `remove_site_vocabulary()` and `set_site_vocabulary_sharing()` write them, each for an
+  Administrator behind the second factor, each filing one Audit Trail row.
+- **The import says what the file is.** A **published standard** is named by its name, edition and
+  publisher (`ISO 22400-2`, `2014`, `ISO`). The **site's own vocabulary** names no standard. The
+  preview shows the format, the version the file states, how many concepts will be imported, how
+  many were skipped for no IEC 61360 content, and which ids a vocabulary already defines and which
+  one. The database checks every row again, and skips an id that a seeded vocabulary, another file
+  or the file itself already defines. A file whose SHA-256 is held is refused, naming the file.
+- **Provenance stays honest.** A metric started from an imported concept keeps `standard` NULL and
+  links to the file (`metric_catalog.site_vocabulary_id`). The Metrics page labels it from the
+  file: *ISO 22400-2:2014 (site licence)* for a published standard, the file's name for a site's
+  own vocabulary, so nobody takes it for a standard Aber ships. The Standard filter offers each
+  published standard a site imported. **`STANDARDS` stays closed**: the dashboard and i3X mirror it,
+  and a site's own name in it would claim a standard that does not exist. A typed "this is ISO
+  22400" would carry no evidence and still flow into every export; a file arrives with its SHA-256,
+  version and importer. The AAS export files a metric started from a published standard whose name
+  begins `ISO 22400` under KeyPerformanceIndicators, as it files a metric with `standard = 'ISO
+  22400'`.
+- **Buying a standard gives definitions, not identifiers.** ISO issues no ids for the 22400 KPIs,
+  so a site's ConceptDescriptions for them carry ids the site mints. Aber's seeded ISO 22400 rows
+  and a site's licensed import sit side by side under different ids, and the label tells them
+  apart.
+- **Licensed definitions stay home until an Administrator says otherwise.** An export carries an
+  imported concept's id and preferred name. Its definition is the file's text only once the
+  Administrator confirms that the licence allows sharing it (**Share definitions**, with a line
+  saying the licence is the site's responsibility). Until then the IEC 61360 definition, which is
+  mandatory in English, is "*name*, as *ISO 22400-2:2014* defines it.", and it never falls back to
+  the catalog's description, which may be a copy of the licensed text. For the same reason a metric
+  carrying such an id, as its own id or a further one, exports no description on its own element
+  (`withholdsDescription()`). The rule is in
+  `buildConceptDescriptions()`, so a ConceptDescription route reads the same text. Add Metric leaves
+  the description empty when the definitions are not shared, for the same reason.
+  `concept_definitions` has an arm for imported concepts, last in precedence, with no standard, and
+  it holds only vocabularies whose definitions are shared.
+- **Removing a vocabulary** says first how many metrics use it. They keep their ids, because an id
+  is only a value, and lose the link. Only the definitions go: an export falls back to the catalog
+  description.
+- **The seeded standards are never deleted.** db-init would put them back, and no migration deletes
+  rows an install already holds. A setting that hides a seeded standard's tab is not built.
+
 ---
 
 ## Definition of done — applies to every vocabulary
@@ -758,6 +830,14 @@ specification, so filing it in `opcua_vocabulary` would misstate where it came f
    authority are local there until it gains a case. `TestNamespaces` in `i3x/test_i3x_service.py`
    fails if an advertised URI is unused, or a standard's own is advertised without the suffix.
 
+**A vocabulary a site imports is outside this list.** Its rows are the site's, so nothing is
+generated, nothing is verified against a source Aber ships, and no migration seeds it. What it must
+satisfy instead (*Site vocabularies*, above): the seeded tables stay unwritable; the two site tables
+are written only by Administrator functions behind the second factor, each filing an Audit Trail
+row; the file is read by the one reader with the hostile-file rules; the database checks every row
+again; a published standard is never added to `STANDARDS`; and a licensed definition leaves the site
+only after an Administrator confirms the licence allows it.
+
 ## Settled decisions worth not relitigating
 
 | Question | Settled answer |
@@ -773,6 +853,7 @@ specification, so filing it in `opcua_vocabulary` would misstate where it came f
 | Is OPC 34100 (ECM) seeded too? | **No** — only Machinery/Energy; ECM is recorded as a dependency |
 | Which `category` does a non-MTConnect metric get? | MTConnect's: `SAMPLE`, `EVENT` or `CONDITION`, translated per standard; 223P leaves it null |
 | Which datatypes can the form create? | Double, Boolean and String; OPC UA integers become Double |
+| What may a site import as a vocabulary, and why not a CSV? | **AAS ConceptDescriptions** with IEC 61360 content, from an `.aasx`, an AAS JSON environment or an AAS XML environment, and an OPC UA NodeSet2 file (#809). No CSV and no format of Aber's own: a custom file has no standard, and the simple route would be the one everybody took, so the standards would go unused. The import says what the file is. **A published standard** the site holds a copy of (name, edition, publisher) labels its metrics "ISO 22400-2:2014 (site licence)", files them under KeyPerformanceIndicators when it is ISO 22400, and never enters `STANDARDS`. **The site's own vocabulary** makes its metrics local extensions carrying the file's name. A metric links to the file and `standard` stays NULL, because a typed tag carries no evidence and a file's SHA-256, version and importer do. A licensed definition stays home until an Administrator confirms the licence allows sharing it (#808) |
 | Which group do 223P metrics file under? | **`BMS`**, the one group registered under ASHRAE 223P (#456) |
 | Where does VDA 5050 go: rows in `opcua_vocabulary`, or a table of its own? | **Its own, `vda5050_vocabulary`**, as 223P has one: it is not an OPC UA companion specification (#941) |
 | Which VDA 5050 fields are rows? | The 24 scalar fields of the `state` message that are readings. No array (Sparkplug B has no composite type), no header, no order flow (#941) |

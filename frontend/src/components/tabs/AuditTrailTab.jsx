@@ -11,7 +11,7 @@ import { shortcutAllowed } from '../../shortcuts'
 import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag, IconChevronRight,
-  IconRecord, IconFileText, IconRefreshCw, IconGlobe, IconX, IconServer
+  IconRecord, IconFileText, IconRefreshCw, IconGlobe, IconX, IconServer, IconFileCode
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
@@ -478,6 +478,7 @@ const SECTION_ICONS = {
   SCHEMA:             IconClipboardList,
   METRIC:             IconTag,
   'METRIC SEMANTIC ID': IconTag,
+  'IMPORTED VOCABULARY': IconFileCode,
   SETTING:            IconSettings,
   RECORDING:          IconRecord,
   CAPTURE:            IconFileText,
@@ -918,6 +919,8 @@ const APP_ACT_LABELS = {
  */
 const EXPORT_ACT_LABELS = {
   TELEMETRY_EXPORTED: ['Readings exported', 'Exported'],
+  // A vocabulary imported from an AAS file (0306): new_data alone, the file and what was taken from it.
+  SITE_VOCABULARY_IMPORTED: ['Vocabulary imported', 'Imported'],
 }
 
 /**

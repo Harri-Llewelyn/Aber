@@ -1,6 +1,6 @@
 ## What this page is for
 
-This page holds reference vocabularies: the published sets of terms that industrial standards define. Use them to label a metric in this deployment with the same term somebody else's system already uses. This page is for reading; nothing here is edited.
+This page holds reference vocabularies: the published sets of terms that industrial standards define. Use them to label a metric in this deployment with the same term somebody else's system already uses. The standards are for reading, and nothing in them is edited. The **Imported** tab holds vocabularies your own site brought in. [The Imported tab](#the-imported-tab) says how.
 
 ## What the controls do
 
@@ -78,9 +78,45 @@ The readings an automated guided vehicle (AGV) reports in the `state` message of
 - **A position is a reading on the device.** It is never the cell the device is in.
 - **This lists the readings and nothing more.** A vehicle must still publish them as Sparkplug B metrics. Connecting a fleet that speaks VDA 5050 is separate work.
 
+## The Imported tab
+
+The Imported tab holds vocabularies your site brought in itself. It can be your group's naming standard, a customer's specification, or the terms of a standard you hold a copy of. Every role can read them. Only an Administrator can import, remove or share one, and the buttons are greyed for anyone else.
+
+## Import a vocabulary
+
+1. Open the **Imported** tab and press **Import vocabulary**.
+2. Choose a file. It can be an `.aasx` package, or an AAS JSON or XML file. Aber reads it in your browser. Nothing is written yet.
+3. Read what the file holds. The preview shows the format, the version the file states, and how many concepts will be imported.
+4. Say what the file is. Choose **A published standard**, or **The site's own vocabulary**. For a standard, give its name, edition and publisher, such as `ISO 22400-2`, `2014` and `ISO`.
+5. Check the name, add a licence note if you want one, and press **Import vocabulary**.
+
+- **Only concepts with IEC 61360 content are taken.** The other ConceptDescriptions in the file are counted and skipped.
+- **The preview lists what is already defined.** A term that one of the standards on this page defines, or another imported file, is skipped. The preview says which one.
+- **A file is imported once.** The same file again is refused, and the message names the vocabulary that holds it.
+- **The licence is your site's responsibility.** Aber keeps the text in this database, and every role can read it here. Do not import a file whose licence forbids that.
+- **A file that could do harm is refused, with the reason.** That means a file over 25 MB, or a package with more than 5,000 entries, an entry over 50 MB, more than 100 MB in all, or an entry that expands to more than 100 times its size. It also means an entry named with an absolute path, `..`, a backslash or a drive letter, and an XML file with a document type.
+- **The definitions start unshared.** See [Share the definitions](#share-the-definitions).
+
+## Use an imported concept
+
+Click a concept to start a catalog metric from it, as you do on any other tab. The metric is a local extension that is linked to its vocabulary. Its name is made from the preferred name, and you can change it before you add it.
+
+- **The Metrics page names the vocabulary.** A published standard shows as **ISO 22400-2:2014 (site licence)**, so nobody takes it for a standard Aber ships. The site's own vocabulary shows its name.
+- **The Standard filter lists each published standard you imported.** A site's own vocabulary is a local extension, so it is under **Local extension**.
+- **The description is filled in only when the definitions are shared.** Until then, write your own.
+- **A metric from an ISO 22400 file is a KPI.** The AAS export files it under KeyPerformanceIndicators.
+
+## Share the definitions
+
+Press **Share definitions** and confirm that your licence allows it. Until you do, an AAS export carries each concept's id and preferred name, and says its definition is the vocabulary's. It also leaves out the description of each metric that carries one of those ids, in case it is a copy. Once you do, it carries the definition text and the metrics' descriptions. **Stop sharing** takes it back.
+
+## Remove a vocabulary
+
+Press **Remove**. The dialog says how many metrics use the vocabulary. Those metrics keep their ids and lose the link. An export of them uses the catalog's description again. You can import the file again later.
+
 ## Why this is a separate page from Metrics and Schemas
 
-The metric catalog and the schemas are things you add to, correct, publish and version. Vocabularies are reference: they are what standards bodies say. They are loaded with Aber rather than edited, and there are more of them each time Aber adopts another standard. Keeping them apart keeps the pages you edit small, while the page you consult can grow.
+The metric catalog and the schemas are things you add to, correct, publish and version. Vocabularies are reference: they are what standards bodies say. They are loaded with Aber rather than edited, and there are more of them each time Aber adopts another standard. Keeping them apart keeps the pages you edit small, while the page you consult can grow. The Imported tab is the one place a vocabulary is added here, and only by an Administrator.
 
 ## What the states mean
 
