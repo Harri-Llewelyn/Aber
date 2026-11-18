@@ -9,6 +9,8 @@ import { mtconnectVocabularyTab } from '../common/MTConnectVocabularyPanel'
 import { iso22400VocabularyTab } from '../common/ISO22400VocabularyPanel'
 import { opcuaVocabularyTab } from '../common/OPCUAVocabularyPanel'
 import { ashrae223VocabularyTab } from '../common/ASHRAE223VocabularyPanel'
+import { qudtVocabularyTab } from '../common/QUDTVocabularyPanel'
+import { qudtHandover } from '../../utils/qudt'
 import { vda5050VocabularyTab } from '../common/VDA5050VocabularyPanel'
 
 /**
@@ -23,6 +25,7 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
   const [isoVocabulary, setIsoVocabulary] = useState([])
   const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
   const [s223Vocabulary, setS223Vocabulary] = useState([])
+  const [qudtKinds, setQudtKinds] = useState([])
   const [vdaVocabulary, setVdaVocabulary] = useState([])
   const [catalog, setCatalog] = useState([])
   const [loading, setLoading] = useState(true)
@@ -34,17 +37,19 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
       api.get('/api/v1/iso22400-vocabulary'),
       api.get('/api/v1/opcua-vocabulary'),
       api.get('/api/v1/ashrae223-vocabulary'),
+      api.get('/api/v1/qudt-quantity-kinds'),
       api.get('/api/v1/vda5050-vocabulary'),
       // The catalog is read only to mark which entries are in use, so a failure there is defaulted
       // rather than blanking the reference.
       api.get('/api/v1/metric-catalog').catch(() => [])
     ])
-      .then(([mt, iso, opcua, s223, vda, cat]) => {
+      .then(([mt, iso, opcua, s223, qudt, vda, cat]) => {
         if (cancelled) return
         setVocabulary(mt || [])
         setIsoVocabulary(iso || [])
         setOpcuaVocabulary(opcua || [])
         setS223Vocabulary(s223 || [])
+        setQudtKinds(qudt || [])
         setVdaVocabulary(vda || [])
         setCatalog(cat || [])
         setLoading(false)
@@ -104,6 +109,13 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
               catalog,
               onUseConcept: canUse
                 ? (concept => onUseEntry?.({ standard: STANDARDS.ASHRAE223, name: concept?.name }))
+                : undefined
+            }),
+            qudtVocabularyTab({
+              vocabulary: qudtKinds,
+              catalog,
+              onUseKind: canUse
+                ? (kind => onUseEntry?.(qudtHandover(kind)))
                 : undefined
             }),
             vda5050VocabularyTab({

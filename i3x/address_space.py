@@ -428,13 +428,16 @@ _OPCUA_NAMESPACE_ROOT = "http://opcfoundation.org/UA/"
 _EXPANDED_NODE_ID = re.compile(r"nsu=([^;]+);[isgb]=.+", re.S)
 _ASHRAE_223P_NAMESPACE = "http://data.ashrae.org/standard223#"
 _ASHRAE_223P_PROJECTION = "http://data.ashrae.org/standard223" + PROJECTION_SUFFIX
+_QUDT_KIND_NAMESPACE = "http://qudt.org/vocab/quantitykind/"
+_QUDT_KIND_PROJECTION = "http://qudt.org/vocab/quantitykind" + PROJECTION_SUFFIX
 
 
 def metric_type_namespace(semantic_id) -> str:
     """
     The namespace a catalog metric's semantic id is defined in, and so its type's. An OPC UA id is
-    an ExpandedNodeId, which names its namespace: the URI after `nsu=`. An id under any other
-    authority, or none, is local: never a namespace in someone else's name.
+    an ExpandedNodeId, which names its namespace: the URI after `nsu=`. An ASHRAE 223P or QUDT
+    quantity-kind id is in the ontology's own. An id under any other authority, or none, is local:
+    never a namespace in someone else's name.
     """
     if not isinstance(semantic_id, str) or not semantic_id:
         return NS_LOCAL
@@ -448,6 +451,8 @@ def metric_type_namespace(semantic_id) -> str:
             return namespace + PROJECTION_SUFFIX
     if semantic_id.startswith(_ASHRAE_223P_NAMESPACE):
         return _ASHRAE_223P_PROJECTION
+    if semantic_id.startswith(_QUDT_KIND_NAMESPACE):
+        return _QUDT_KIND_PROJECTION
     return NS_LOCAL
 
 
@@ -543,6 +548,8 @@ def _namespace_display_name(uri: str) -> str:
         return _LOCAL_STANDARD_NAMESPACES[uri]
     if uri == _ASHRAE_223P_PROJECTION:
         return "ASHRAE 223P (i3X projection)"
+    if uri == _QUDT_KIND_PROJECTION:
+        return "QUDT quantity kinds (i3X projection)"
     if uri.startswith(_OPCUA_NAMESPACE_ROOT) and uri.endswith(PROJECTION_SUFFIX):
         spec = uri[len(_OPCUA_NAMESPACE_ROOT): -len(PROJECTION_SUFFIX)].strip("/")
         return f"OPC UA {spec or 'base'} (i3X projection)"

@@ -211,11 +211,13 @@ The mappings that are decisions rather than mechanics:
     `https://aber.local/semantics/mtconnect/v2.0`, `https://aber.local/semantics/iso22400` and
     `https://aber.local/semantics/vda5050/v3.0`.
   - An OPC UA id is the ExpandedNodeId its NodeSet publishes, `nsu=<namespace URI>;i=<id>`,
-    whose namespace is the URI after `nsu=`, and an ASHRAE 223P id is the ontology's own. A
-    scalar type adapted from one is an in-exact implementation of that namespace, which the guide
+    whose namespace is the URI after `nsu=`. An ASHRAE 223P id and a QUDT quantity kind
+    (`http://qudt.org/vocab/quantitykind/<Name>`) are each the ontology's own. A scalar type
+    adapted from one is an in-exact implementation of that namespace, which the guide
     marks with a `projection` suffix:
     `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
-    `http://data.ashrae.org/standard223?projection=i3X`. The bare URI would claim the standard
+    `http://data.ashrae.org/standard223?projection=i3X`,
+    `http://qudt.org/vocab/quantitykind?projection=i3X`. The bare URI would claim the standard
     defined the type.
   - An id under any other authority, or none, is local, and so are the per-datatype metric types
     and `UnknownType`. So is an `http://opcfoundation.org/UA/...` IRI: the OPC Foundation issues

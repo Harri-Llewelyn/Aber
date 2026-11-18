@@ -3681,6 +3681,23 @@ const apiMethods = {
       return data || [];
     }
 
+    if (path.startsWith('/api/v1/qudt-quantity-kinds')) {
+      // Reference data (migration 0304), generated from QUDT 3.5.2's quantity-kind vocabulary (CC BY 4.0) and
+      // read-only to the app. Keyed by QUDT's own IRI, which two kinds never share; their labels can. Read
+      // in pages of 1000, the most a server may be set to return, since there are more kinds than that.
+      const rows = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('qudt_quantity_kinds')
+          .select('semantic_id, name, description')
+          .order('semantic_id', { ascending: true })
+          .range(from, from + 999);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if ((data || []).length < 1000) return rows;
+      }
+    }
+
     if (path.startsWith('/api/v1/vda5050-vocabulary')) {
       // Reference data (migration 0302), generated from the VDA's state schema at tag 3.0.0 and
       // read-only to the app. Keyed by the field's path, so that is the order.

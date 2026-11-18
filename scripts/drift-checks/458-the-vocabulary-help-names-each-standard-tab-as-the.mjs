@@ -5,14 +5,16 @@ import { fail, pass, read, REPO } from './lib.mjs';
 // -------------------------------------------------------------------------------------------------
 // 458. The Vocabulary help names the standard tabs as the page draws them: how many (the controls
 // bullet and the heading under it say it in words), which, in the order of VOCABULARY_TABS, and a
-// section of its own for each, since the tab's tooltip sends a reader there.
+// section of its own for each, since the tab's tooltip sends a reader there. A tab is a STANDARDS
+// entry, or QUDT's label, which is not a standard a metric is filed under.
 // -------------------------------------------------------------------------------------------------
 export default async function check() {
   const problems458 = [];
   const { STANDARDS } = await import(pathToFileURL(join(REPO, 'frontend/src/utils/standards.js')).href);
+  const { QUDT_LABEL } = await import(pathToFileURL(join(REPO, 'frontend/src/utils/qudt.js')).href);
   const tabs = read('frontend/src/navigation.jsx').match(/export const VOCABULARY_TABS = \[([^\]]+)\]/)?.[1]
-    .split(',').map((t) => t.trim().replace(/^STANDARDS\./, '')) ?? [];
-  const labels = tabs.map((key) => STANDARDS[key]);
+    .split(',').map((t) => t.trim().replace(/^STANDARDS\./, '')).filter(Boolean) ?? [];
+  const labels = tabs.map((key) => (key === 'QUDT_LABEL' ? QUDT_LABEL : STANDARDS[key]));
   if (labels.length === 0 || labels.some((label) => !label)) {
     fail('458: found no VOCABULARY_TABS in navigation.jsx -- the file\'s shape changed, so this check is no longer checking anything');
     return;

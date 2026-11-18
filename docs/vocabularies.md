@@ -108,20 +108,23 @@ before proposing a change:
   **Each id also gets a `ConceptDescription`** in the
   Environment (`buildConceptDescriptions()`, #460), because most resolve nowhere (`aber.local`, an
   operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,
-  `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text; `unitId` is unset) and a
+  `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text) and, where the name maps
+  to a QUDT unit, `unitId`, a reference to it ([QUDT](#qudt-quantity-kinds-and-units)), and a
   `dataType` derived from the Sparkplug datatype. **The definition is the vocabulary's own text**
-  wherever one defines the id. `concept_definitions` (`0169`, redeclared by `0301` and `0302`) unions
-  the IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect and VDA 5050 descriptions, in that order of
-  precedence. So a 223P class such as `TemperatureSensor` is defined by 223P, not by the description
-  of a metric carrying it. An MTConnect data item type is defined by the text MTConnect publishes
-  for it: POSITION is "point along an axis in a cartesian coordinate system.", not the description of
-  whichever axis a metric names. A VDA 5050 field is defined by the schema's description of it. An
-  id no vocabulary holds but a known authority issues defers to that authority, whatever the
-  metrics carrying it say: the QUDT quantity kinds the example 223P readings carry are defined as,
-  for example, "Temperature, as QUDT defines it." (`ID_AUTHORITIES` in `shell.ts`, one entry per
-  authority). Any other id, such as one an Administrator typed, takes the catalog description only
-  when every live metric carrying the id agrees on it. A new standard's ids are covered with no
-  code change; its definitions need an arm in the view.
+  wherever one defines the id. `concept_definitions` (`0169`, redeclared by `0301`, `0302` and
+  `0304`) unions the IDTA, ASHRAE 223P, QUDT, OPC UA, ISO 22400, MTConnect and VDA 5050
+  descriptions, in that order of precedence. So a 223P class such as `TemperatureSensor` is defined
+  by 223P, not by the description of a metric carrying it. A QUDT quantity kind is defined by
+  QUDT's own description of it. An MTConnect data item type is defined by the text MTConnect
+  publishes for it: POSITION is "point along an axis in a cartesian coordinate system.", not the
+  description of whichever axis a metric names. A VDA 5050 field is defined by the schema's
+  description of it. An id no vocabulary holds but a known authority issues defers to that
+  authority, whatever the metrics carrying it say: a QUDT quantity kind the seed leaves out, such as
+  a deprecated one, is defined as, for example, "Temperature, as QUDT defines it."
+  (`ID_AUTHORITIES` in `shell.ts`, one entry per authority). Any other id, such as one an
+  Administrator typed, takes the catalog description only when every live metric carrying the id
+  agrees on it. A new standard's ids are covered with no code change; its definitions need an arm
+  in the view.
 
 ## How a vocabulary entry becomes a metric
 
@@ -175,7 +178,7 @@ against the IDTA content hub, the ISA/ANSI webstore and the open223 project.
 | PackML | **OPC 30050** *OPC UA for PackML* v1.01, 2020-10-08 — **the ISA document is not needed** | `http://opcfoundation.org/UA/PackML/` |
 | ASHRAE 223P | ontology `v1.0.0-2026`, **Apache-2.0**; the *standard* is still in public review | `http://data.ashrae.org/standard223#` |
 | VDA 5050 | **VDA 5050 3.0.0**, the `state` message's JSON Schema (tag `3.0.0`, 2026-03-18), **MIT** | `https://aber.local/semantics/vda5050/v3.0/State/` (minted here: the VDA issues none) |
-| QUDT quantity kinds | *QUDT Quantity Kind Vocabulary* **3.5.2**; five IRIs cited, nothing seeded | `http://qudt.org/vocab/quantitykind/` |
+| QUDT | *QUDT Quantity Kind Vocabulary* and *Units Vocabulary* **3.5.2** (tag `v3.5.2`, 2026-09-22), **CC BY 4.0**; 1,126 kinds and 83 units seeded | `http://qudt.org/vocab/quantitykind/` and `http://qudt.org/vocab/unit/` |
 
 The generator pins the NodeSet paths. Upstream capitalises `NodeSet2` and `Nodeset2`
 inconsistently, and the Additive path 404s if you guess it:
@@ -259,6 +262,13 @@ with the VDA's MIT licence beside it, pinned by SHA-256. It is `json_schemas/sta
 `VDA5050/VDA5050`, byte for byte. The VDA's README says its published PDF prevails where the two
 differ, so the vocabulary reads the machine-readable half and claims nothing about conformance.
 
+**QUDT's two vocabulary files are kept the same way,** at
+[`scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl`](../scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl) and
+[`qudt-3.5.2-units.ttl`](../scripts/vocabularies/qudt-3.5.2-units.ttl), with QUDT's licence file beside
+them, pinned by SHA-256. They are `VOCAB_QUDT-QUANTITY-KINDS-ALL.ttl` and `VOCAB_QUDT-UNITS-ALL.ttl`
+at tag `v3.5.2` of `qudt/qudt-public-repo`, byte for byte. Both declare CC BY 4.0 in their graph
+metadata (`dcterms:rights`: "Attribution should be made to QUDT.org").
+
 **MTConnect's definitions are read from a kept copy of the 2.7 XSD** (#779), at
 [`scripts/vocabularies/MTConnectDevices_2.7.xsd`](../scripts/vocabularies/MTConnectDevices_2.7.xsd),
 pinned by SHA-256. `DataItemEnumEnum` documents 248 of the 249 data item types. The model's markup
@@ -280,7 +290,7 @@ in a derived work, and every licence was read rather than assumed:
 | ASHRAE 223P ontology | Apache-2.0 | `dcterms:license` in the ontology |
 | VDA 5050 `state.schema` | MIT, copyright 2024 Verband der Automobilindustrie | the repository's `LICENSE.txt` at the tag |
 | MTConnect `MTConnectDevices_2.7.xsd` (the definitions) | BSD-style licence from AMT, in the file; the repository is Apache-2.0 | header of the file, and the repository's licence |
-| QUDT quantity kinds (five IRIs cited, not seeded) | CC BY 4.0, attribution to QUDT.org | `dcterms:rights` in the vocabulary's graph metadata |
+| QUDT 3.5.2 quantity kinds and units | CC BY 4.0, attribution to QUDT.org. The units file's metadata also carries a UCUM notice, which covers the UCUM codes, and none is taken | `dcterms:rights` in each file's graph metadata, and the repository's `LICENSE.md` |
 
 As with MTConnect's Apache-2.0, a licence covers the *vocabulary*, not a conformance claim.
 
@@ -490,11 +500,10 @@ filing it in `opcua_vocabulary` would misstate its provenance.
 - **Whitespace is collapsed in descriptions**, because several comments are hard-wrapped in the
   ontology and a newline inside a SQL string breaks the one-statement-per-line shape the digest, the
   seed-sync check and every `git diff` of that file rely on.
-- **Only the `s223:` namespace is seeded.** The ontology `owl:imports` QUDT
+- **Only the `s223:` namespace is seeded here.** The ontology `owl:imports` QUDT
   (`http://qudt.org/3.2.1/shacl/qudt-all`) for quantity kinds and units. Following it would pull in
-  a second vocabulary several times the size, under its own licence (CC BY 4.0). Units come from
-  MTConnect's `units` vocabulary; the example readings cite QUDT quantity kinds without seeding
-  them.
+  a second vocabulary several times the size, under its own licence (CC BY 4.0), so QUDT is a
+  vocabulary of its own, read from its own release ([below](#qudt-quantity-kinds-and-units)).
 - **Browsable without a BMS adapter.** Per-point tagging over BACnet is the long pole, and the
   vocabulary does not wait for it.
 
@@ -532,18 +541,88 @@ Constituent-CO2`. `MoleFraction` is a narrower kind of `DimensionlessRatio` (`sk
 consumer following QUDT reaches the shape's kind; `DimensionlessRatio` alone would give CO2 the id
 of every percentage, since the constituent has nowhere to go here.
 
-**QUDT is cited, not seeded.** It is CC BY 4.0 (attribution to QUDT.org), and no QUDT vocabulary is
-imported: the five ids are typed in `example-metrics.sql`, the one place that file does not take
-an id from a vocabulary table, so its inner join does not check them. Check 47 holds them to the
-pairs migration `0172` repoints an install to. That install holds the old 223P class ids, seeded by
-`0002` up to 1.0.1 and by the example set since, and `0172` moves a row only while its id is still
-the seed's. An AAS export defines each of these ids as QUDT's, "Temperature, as QUDT defines it.",
-never by a reading's description or as 223P's. i3X files their types in the local namespace, since
-`metric_type_namespace()` has no case for QUDT.
+**The five kinds are rows of `qudt_quantity_kinds`.** They are typed in `example-metrics.sql`, the one
+place that file does not take an id from a vocabulary table, so its inner join does not check them.
+Check 47 is the join: each kind must be a seeded row, and the five must be the pairs migration `0172`
+repoints an install to. That install holds the old 223P class ids, seeded by `0002` up to 1.0.1 and by
+the example set since, and `0172` moves a row only while its id is still the seed's. An AAS export
+defines each of these ids by QUDT's own description of the kind, never by a reading's description or
+as 223P's, and i3X files their types in QUDT's namespace
+([below](#qudt-quantity-kinds-and-units)). The CO2 reading's unit, `PARTS/MILLION`, is not an
+MTConnect name, so its export carries no `unitId`.
 
-**The full model waits for a BMS adapter:** a QUDT quantity-kind vocabulary of its own, with its
-provenance, and a second field saying what a point is attached to (its 223P class). Until then the
-class lives only in a metric's name.
+**The rest of the model waits for a BMS adapter:** a second field saying what a point is attached to
+(its 223P class). Until then the class lives only in a metric's name.
+
+## QUDT (quantity kinds and units)
+
+Built as migration `0304`: `qudt_quantity_kinds` with **1,126 quantity kinds** and `qudt_units` with
+**83 units**, generated by `scripts/generate-qudt-vocabulary.mjs` into two marked blocks in `0304` and
+guarded by `scripts/check-qudt-seed-sync.mjs` and `scripts/check-qudt-crosswalk.mjs`, plus a
+Vocabulary-page tab, a place in the semantic id picker, an API route, an i3X namespace and `unitId` in
+the AAS export. A quantity kind names what a reading measures (`Temperature`, `VolumeFlowRate`), not
+the reading.
+
+- **Source, licence and credit.** QUDT release 3.5.2 (tag `v3.5.2`, 2026-09-22), kept whole in
+  `scripts/vocabularies/` and pinned by SHA-256, as 223P's ontology is. QUDT declares CC BY 4.0 in
+  both files and asks that attribution is made to QUDT.org. The Vocabulary tab says "Quantity kinds
+  from QUDT 3.5.2, by QUDT.org, under CC BY 4.0", with the licence linked. `NOTICE.md` and the
+  Licences table say it too. The units file also carries a UCUM notice in its metadata. It covers
+  the UCUM codes, and none is taken.
+- **The ids are QUDT's own,** `http://qudt.org/vocab/quantitykind/<Name>` and
+  `http://qudt.org/vocab/unit/<Name>`, so nothing is minted and a CHECK on each table admits no other
+  prefix. The IRI is the key, because two kinds can share an English label.
+- **Every kind that is not deprecated is a row, and only the units the crosswalk reaches.** The kinds
+  file holds 1,225 `quantitykind:` subjects. One has a wikidata match and no type or label, so 1,224
+  are kinds, and 98 of them are deprecated. Its units file holds 2,932 units, 85 deprecated, and 1,577
+  carry a UN/ECE Recommendation 20 code (one of them two). Some 4,000 rows would bury the picker,
+  which is why the OPC UA seed is curated too. The picker searches, so every kind can go in; the units
+  table needs only what `unitId` uses.
+- **A kind's description is QUDT's, as plain text.** It is `qudt:plainTextDescription`, else
+  `dcterms:description`, in English, with the HTML tags removed, the LaTeX written out
+  (`$\textit{Absolute Humidity}$` is `Absolute Humidity`) and the whitespace collapsed. 122 of QUDT's
+  plain-text descriptions are German, and those kinds take their English description. 171 kinds have
+  none, and their description is NULL. QUDT writes some of its LaTeX with a backslash that Turtle
+  reads as an escape, so a `\textit` can arrive as a backslash and a tab: the reader puts it back. A
+  command it does not know stops the generator, so a release that adds one is read before it is
+  seeded.
+- **A kind is a semantic id where no other standard names the reading.** A Custom metric or an
+  ASHRAE 223P metric can have one as its own id. Any metric can have one as a further id (`0299`).
+  Add Metric's picker offers a kind as the primary id only under those two, and Edit's further-id
+  editor offers it for every metric. A metric another standard names, such as an MTConnect
+  `TEMPERATURE`, keeps its own id, or an operator would replace a standard's id with a broader one
+  and the provenance the Standard column records would stand for nothing. A kind typed in by hand
+  under another standard gets the note that it replaces that standard's id.
+- **QUDT is not a `STANDARDS` entry,** and no metric group is registered for it. A metric is never
+  filed under it. Mirror check 119 exempts it as it exempts IDTA, and check 124 holds its label to
+  the view.
+- **`concept_definitions` has a QUDT arm** between ASHRAE 223P's and OPC UA's, because QUDT issues
+  its own IRIs, as 223P does. Its columns are the view's four, so nothing a released file states
+  changes.
+- **i3X files a kind's type in QUDT's namespace,** `http://qudt.org/vocab/quantitykind?projection=i3X`,
+  as a projection, as 223P's is. A unit is not a kind and stays local.
+- **The crosswalk to MTConnect's units** is
+  [`scripts/vocabularies/mtconnect-units-to-qudt.json`](../scripts/vocabularies/mtconnect-units-to-qudt.json):
+  each of the 54 UnitEnum names and 46 further NativeUnitEnum names, read from the seed, maps to one
+  QUDT unit IRI or to nothing with a one-line reason. **83 map and 17 map to nothing.** A name maps
+  only where QUDT has exactly that unit, in quantity and scale. Where QUDT lists two units as the same
+  unit (`qudt:exactMatch`), the one that carries a UCUM or UN/ECE code is used (`NUM` for `COUNT`, `IN`
+  for `INCH`), and where both carry one the name maps to nothing (`POUND`: `LB` and `LB_M`;
+  `POUND/INCH^2`: `PSI` and `LB_F-PER-IN2`). The other 15 are a vector or direction with no unit
+  (`DEGREE_3D`, `MILLIMETER_3D`, `FOOT_3D`, `INCH_3D`, `UNIT_VECTOR_3D`), the catch-all `OTHER`, four
+  units QUDT does not have (`CUBIC_MILLIMETER/SECOND`, `CUBIC_MILLIMETER/SECOND^2`,
+  `MILLIGRAM/CUBIC_MILLIMETER`, `MILLIMETER/REVOLUTION`), `GALLON/MINUTE`, which does not say which
+  gallon, `GRAVITATIONAL_ACCELERATION`, whose g is 9.90665 m/s2 in MTConnect and 9.80665 in QUDT,
+  `GRAVITATIONAL_FORCE`, and the two counts per million and per trillion, which QUDT's parts per
+  million and per trillion do not match in quantity. The check fails when a name is missing from the
+  crosswalk, when it names one MTConnect does not, and when an IRI is not in the units file or is
+  deprecated there.
+- **`unitId` in the export.** A metric's `units` is an MTConnect name, written as free text into the
+  IEC 61360 `unit` as before. Where the crosswalk maps the name, the ConceptDescription also carries
+  `unitId`, an ExternalReference with one GlobalReference key, the QUDT unit's IRI. The exporter reads
+  a map generated from the crosswalk, `supabase/functions/_shared/aas/qudtUnits.ts`, and the seed-sync
+  check holds the map to the crosswalk, so the export makes no extra read. Metrics sharing a concept
+  and disagreeing on the unit export neither `unit` nor `unitId`.
 
 ## VDA 5050 (AGVs)
 
@@ -635,7 +714,7 @@ specification, so filing it in `opcua_vocabulary` would misstate where it came f
 | PackML as its own standard, or under OPC UA? | **Under OPC UA** (`companion_spec = OPC 30050 PackML`) — it is what the NodeSet was read from, and it avoids a table, a panel and a mirror module |
 | Digital Nameplate version | IDTA 02006 **3.0** |
 | Seed 223P before the standard is published? | **Yes**, from `223p.ttl` `v1.0.0-2026`, with the migration header stating it is pre-publication |
-| Does 223P follow the QUDT import? | **No** — no QUDT vocabulary is imported: separate vocabulary, separate licence (CC BY 4.0), and units are already covered. The five example 223P readings cite QUDT quantity-kind IRIs as their semantic ids instead, typed (#461) |
+| Does 223P follow the QUDT import? | **Not through 223P.** QUDT is a vocabulary of its own under its own licence (CC BY 4.0, credited to QUDT.org), read from its own release, 3.5.2, and not from the 3.2.1 the 223P ontology imports. It is seeded as `qudt_quantity_kinds` (every kind that is not deprecated, 1,126) and `qudt_units` (the 83 units MTConnect's names map to), in `0304`. A kind is the semantic id of a Custom or 223P metric and a further id of any metric. The five example 223P readings carry kinds that are rows (#942) |
 | Is OPC 34100 (ECM) seeded too? | **No** — only Machinery/Energy; ECM is recorded as a dependency |
 | Which `category` does a non-MTConnect metric get? | MTConnect's: `SAMPLE`, `EVENT` or `CONDITION`, translated per standard; 223P leaves it null |
 | Which datatypes can the form create? | Double, Boolean and String; OPC UA integers become Double |

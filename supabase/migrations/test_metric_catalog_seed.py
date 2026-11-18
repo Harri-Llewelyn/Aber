@@ -598,7 +598,8 @@ class TestConceptDefinitions(unittest.TestCase):
     SENSOR = "http://data.ashrae.org/standard223#TemperatureSensor"
     # Every vocabulary with a description column, and the spelling the view gives its standard.
     DESCRIBED = (("idta_submodel_templates", "IDTA"), ("ashrae223_vocabulary", "ASHRAE 223P"),
-                 ("opcua_vocabulary", "OPC UA"), ("iso22400_vocabulary", "ISO 22400"),
+                 ("qudt_quantity_kinds", "QUDT"), ("opcua_vocabulary", "OPC UA"),
+                 ("iso22400_vocabulary", "ISO 22400"),
                  ("mtconnect_vocabulary", "MTConnect"), ("vda5050_vocabulary", "VDA 5050"))
 
     @classmethod
@@ -663,7 +664,7 @@ class TestConceptDefinitions(unittest.TestCase):
         self.assertEqual(twice, [])
 
     def test_an_id_two_vocabularies_hold_takes_the_first_in_precedence(self):
-        """IDTA, then ASHRAE 223P, then OPC UA, then ISO 22400."""
+        """IDTA, then ASHRAE 223P, then QUDT, then OPC UA, then ISO 22400."""
         local = "urn:example:fixture-0169"
 
         def probe(cur):

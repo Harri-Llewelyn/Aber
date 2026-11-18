@@ -11,6 +11,7 @@ import {
 import { kpiByName } from './iso22400'
 import { suggestedGroup } from './opcua'
 import { fieldType } from './vda5050'
+import { QUDT_LABEL, QUDT_PRIMARY_FOR, kindTooltip } from './qudt'
 
 /**
  * An MTConnect data item type's suggestion: its concept id, shared by every metric of that type.
@@ -85,13 +86,15 @@ export const templateSource = (row) =>
 
 /**
  * Every concept the picker offers, as `{ standard, label, semanticId, semanticIdType, detail }`:
- * MTConnect data item types, ISO 22400 KPIs, OPC UA data points, VDA 5050 fields and the IDTA
- * template elements.
+ * MTConnect data item types, ISO 22400 KPIs, OPC UA data points, VDA 5050 fields, QUDT quantity
+ * kinds and the IDTA template elements.
  * No ASHRAE 223P class: 223P is a reference here, and a class names equipment, not a reading. A
  * template records its element's reference type; a vocabulary id is typed by its shape. MTConnect
  * ids are derived, so choosing a metric's own type here gives exactly its suggestion.
+ * A quantity kind carries `primaryFor`, the standards a metric may have it as its own id under
+ * (candidatesFor() applies it); it is offered as a further id for any metric.
  */
-export function semanticIdCandidates({ mtconnect, iso22400, opcua, vda5050, templates } = {}) {
+export function semanticIdCandidates({ mtconnect, iso22400, opcua, vda5050, quantityKinds, templates } = {}) {
   const candidates = []
   const add = (standard, label, semanticId, semanticIdType, detail) => {
     const id = (semanticId || '').trim()
@@ -108,8 +111,29 @@ export function semanticIdCandidates({ mtconnect, iso22400, opcua, vda5050, temp
   for (const k of iso22400 || []) add(STANDARDS.ISO22400, k.name, k.semantic_id, '', k.description)
   for (const p of opcua || []) add(STANDARDS.OPCUA, p.name, p.semantic_id, '', p.companion_spec)
   for (const f of vda5050 || []) add(STANDARDS.VDA5050, f.name, f.semantic_id, '', f.description)
+  for (const k of quantityKinds || []) {
+    const id = (k.semantic_id || '').trim()
+    if (id) {
+      candidates.push({
+        standard: QUDT_LABEL, label: k.name, semanticId: id, semanticIdType: 'IRI', detail: kindTooltip(k),
+        primaryFor: QUDT_PRIMARY_FOR
+      })
+    }
+  }
   for (const t of templates || []) add(templateSource(t), t.id_short, t.semantic_id, t.semantic_id_type, t.description)
   return candidates
+}
+
+/**
+ * The candidates a subject may take. A further id takes any. A metric's own id takes one whose
+ * `primaryFor` is absent, or names the metric's `standard` ('' for a Custom metric): a quantity
+ * kind names what a reading measures, so it never replaces the id a standard gives the reading.
+ * Any other subject, a schema, takes only those with no `primaryFor`.
+ */
+export function candidatesFor(candidates, { subject = 'metric', standard = '' } = {}) {
+  if (subject === 'further') return candidates || []
+  return (candidates || []).filter(c =>
+    !c.primaryFor || (subject === 'metric' && c.primaryFor.includes(standard || '')))
 }
 
 /**
@@ -144,7 +168,8 @@ export function searchSemanticIdCandidates(candidates, query, { standard = '', l
 export function foreignConcept(candidates, semanticId, standard) {
   const id = (semanticId || '').trim()
   if (!id || !standard) return null
+  // A concept the subject's own standard may have as its id, such as a kind under 223P, is not foreign.
   const named = (candidates || []).filter(c => c.semanticId === id)
-  if (named.length === 0 || named.some(c => c.standard === standard)) return null
+  if (named.length === 0 || named.some(c => c.standard === standard || c.primaryFor?.includes(standard))) return null
   return named[0]
 }
