@@ -658,7 +658,9 @@ is verified against a source Aber ships: the file is the site's.
   Administrator confirms that the licence allows sharing it (**Share definitions**, with a line
   saying the licence is the site's responsibility). Until then the IEC 61360 definition, which is
   mandatory in English, is "*name*, as *ISO 22400-2:2014* defines it.", and it never falls back to
-  the catalog's description, which may be a copy of the licensed text. The rule is in
+  the catalog's description, which may be a copy of the licensed text. For the same reason a metric
+  carrying such an id, as its own id or a further one, exports no description on its own element
+  (`withholdsDescription()`). The rule is in
   `buildConceptDescriptions()`, so a ConceptDescription route reads the same text. Add Metric leaves
   the description empty when the definitions are not shared, for the same reason.
   `concept_definitions` has an arm for imported concepts, last in precedence, with no standard, and

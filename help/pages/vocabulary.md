@@ -93,7 +93,7 @@ Click a concept to start a catalog metric from it, as you do on any other tab. T
 
 ## Share the definitions
 
-Press **Share definitions** and confirm that your licence allows it. Until you do, an AAS export carries each concept's id and preferred name, and says its definition is the vocabulary's. Once you do, it carries the definition text. **Stop sharing** takes it back.
+Press **Share definitions** and confirm that your licence allows it. Until you do, an AAS export carries each concept's id and preferred name, and says its definition is the vocabulary's. It also leaves out the description of each metric that carries one of those ids, in case it is a copy. Once you do, it carries the definition text and the metrics' descriptions. **Stop sharing** takes it back.
 
 ## Remove a vocabulary
 

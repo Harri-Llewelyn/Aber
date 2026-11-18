@@ -401,6 +401,21 @@ export function siteDefinitionFor(
 }
 
 /**
+ * Whether a metric's own description stays out of an export: one of its ids is held by an imported
+ * vocabulary whose definitions are not shared. The description may be a copy of the licensed text,
+ * which is why `siteDefinitionFor()` never lets it define such an id either.
+ */
+export function withholdsDescription(
+  ids: readonly (string | null | undefined)[],
+  siteConcepts: readonly SiteConcept[] | undefined,
+): boolean {
+  return ids.some((id) => {
+    const concept = id ? siteConcepts?.find((c) => c.semantic_id === id) : undefined;
+    return concept !== undefined && concept.site_vocabularies?.definitions_shareable !== true;
+  });
+}
+
+/**
  * Whether a metric is a key performance indicator: ISO 22400 names it, or it was started from an
  * imported file that is a published standard named ISO 22400 (by prefix, as `ISO 22400-2` is).
  */
@@ -823,6 +838,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     const metric = catalogByName.get(name);
     const semanticId = (metric?.semantic_id as string | null) ?? null;
     if (!semanticId) unmappedCount += 1;
+    const further = supplementalByMetric.get(String(metric?.id));
     return {
       metric,
       element: property(
@@ -831,8 +847,10 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
         valueFor(name),
         {
           semanticId,
-          supplementalSemanticIds: supplementalByMetric.get(String(metric?.id)),
-          description: (metric?.description as string | null) ?? null,
+          supplementalSemanticIds: further,
+          description: withholdsDescription([semanticId, ...(further ?? [])], record.siteConcepts)
+            ? null
+            : (metric?.description as string | null) ?? null,
         },
       ),
     };

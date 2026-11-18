@@ -9,6 +9,7 @@ import {
   siteDefinitionFor,
   siteFileLabel,
   type SiteVocabularyRef,
+  withholdsDescription,
 } from "./shell.ts";
 
 // Local rather than an assertion library: a test import would enter deno.lock and the image's graph.
@@ -221,6 +222,41 @@ Deno.test("the ConceptDescription of an exported KPI carries the licence rule th
   assert.equal(content.preferredName[0].text, "Overall equipment effectiveness");
   assert.equal(content.definition[0].text, "Overall equipment effectiveness, as ISO 22400-2:2014 defines it.");
   assert.equal(JSON.stringify(exported).includes(LICENSED), false);
+});
+
+/** The description of the one telemetry property an export built from these rows carries. */
+const elementDescription = (rows: DeviceRecord) => {
+  const exported = JSON.parse(JSON.stringify(buildEnvironment(rows).environment));
+  const telemetry = exported.submodels.find((s: Anything) => s.idShort.endsWith("OperationalTelemetry"));
+  return telemetry.submodelElements[0].value[0].description;
+};
+
+Deno.test("a metric whose id an unshared vocabulary holds exports no description of its own, which may be the licensed text", () => {
+  const rows = record([metric("m1", "Line/Group", OTHER, { description: LICENSED })], [OWN_FILE]);
+  rows.siteConcepts = [concept(OTHER, "Group KPI", LICENSED, OWN_FILE)];
+  assert.equal(elementDescription(rows), undefined);
+  assert.equal(JSON.stringify(buildEnvironment(rows).environment).includes(LICENSED), false);
+});
+
+Deno.test("once the definitions are shared, the metric's description is exported again", () => {
+  const shared = { ...OWN_FILE, definitions_shareable: true };
+  const rows = record([metric("m1", "Line/Group", OTHER, { description: LICENSED })], [shared]);
+  rows.siteConcepts = [concept(OTHER, "Group KPI", LICENSED, shared)];
+  assert.equal(elementDescription(rows), [{ language: "en", text: LICENSED }]);
+});
+
+Deno.test("an unshared vocabulary holding one of the metric's further ids withholds its description too", () => {
+  const rows = record([metric("m1", "Line/Temperature", KPI, { description: LICENSED })], [OWN_FILE]);
+  rows.supplemental = [{ metric_id: "m1", semantic_id: OTHER }] as Anything;
+  rows.siteConcepts = [concept(OTHER, "Group KPI", LICENSED, OWN_FILE)];
+  assert.equal(elementDescription(rows), undefined);
+});
+
+Deno.test("withholdsDescription answers only for an id a site vocabulary holds unshared", () => {
+  const unshared = [concept(OTHER, "Group KPI", LICENSED, OWN_FILE)];
+  assert.equal(withholdsDescription([OTHER], unshared), true);
+  assert.equal(withholdsDescription([KPI, null, undefined], unshared), false);
+  assert.equal(withholdsDescription([OTHER], undefined), false);
 });
 
 // ---- The loader --------------------------------------------------------------------------------

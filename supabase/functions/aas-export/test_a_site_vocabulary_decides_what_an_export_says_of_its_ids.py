@@ -227,10 +227,13 @@ class TestAnExportReadsTheSiteVocabulary(unittest.TestCase):
         self.assertNotEqual(described["definition"], CATALOG_TEXT)
 
     def test_2_the_catalogs_description_never_stands_in_for_the_licensed_text(self):
-        # Both metrics carry a description that is a copy of the licensed text.
+        # The metric's description is a copy of the licensed text: neither its ConceptDescription nor
+        # its own element may carry it. Put back whatever happens, so the later tests read CATALOG_TEXT.
         call("PATCH", f"/rest/v1/metric_catalog?name=eq.{urllib.parse.quote(GROUP_METRIC)}", TOKEN, {"description": LICENSED_TEXT})
-        self.assertNotIn(LICENSED_TEXT, json.dumps(export_environment()))
-        call("PATCH", f"/rest/v1/metric_catalog?name=eq.{urllib.parse.quote(GROUP_METRIC)}", TOKEN, {"description": CATALOG_TEXT})
+        try:
+            self.assertNotIn(LICENSED_TEXT, json.dumps(export_environment()))
+        finally:
+            call("PATCH", f"/rest/v1/metric_catalog?name=eq.{urllib.parse.quote(GROUP_METRIC)}", TOKEN, {"description": CATALOG_TEXT})
 
     def test_3_once_the_licence_is_confirmed_the_export_carries_the_files_text(self):
         rpc("set_site_vocabulary_sharing", {"p_id": self.group["id"], "p_shareable": True})
