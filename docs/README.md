@@ -9,6 +9,9 @@ guide, the tutorial, the glossary and the dashboard's help.
 The [architecture overview](architecture.md#repository-map) lists every folder in the repository
 and what each covers. Each component's own README sits beside its code.
 
+The [gateway lifecycle](gateway-lifecycle.md) says what each step of a gateway's life leaves behind, for each
+type: its status, setup tokens, credential record, broker account, forge repository and Audit Trail rows.
+
 The [automations reference](automations.md) is the format of the file a person writes or uploads to
 raise an alert: its keys, what the database does with it, and what happens when a device goes.
 
