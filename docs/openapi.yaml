@@ -49,8 +49,8 @@ info:
 
     The reference vocabularies (`mtconnect_vocabulary`, `iso22400_vocabulary`,
     `opcua_vocabulary`, `ashrae223_vocabulary`, `qudt_quantity_kinds`, `qudt_units`, `vda5050_vocabulary`,
-    `idta_submodel_templates`) and the
-    `concept_definitions` view over them are `SELECT`-only for `authenticated`; `anon` is revoked.
+    `idta_submodel_templates`) and the `concept_definitions` and `concept_sources` views over them are
+    `SELECT`-only for `authenticated`; `anon` is revoked.
 
     ### PostgREST conventions
 
@@ -3674,7 +3674,12 @@ paths:
       tags: [Registry]
       summary: Read the ISO 22400 KPI definitions
       description: |
-        Eight KPI definitions. Reference data on the same terms as the MTConnect vocabulary.
+        Eight KPI rows. Reference data on the same terms as the MTConnect vocabulary.
+
+        **The four OEE KPIs cite a source anyone can read.** `source` is the citation, OPC 40501-1
+        v1.02.0 Annex C.2.4 (informative), whose KPI definitions are taken from ISO 22400-2; it is null for
+        a KPI no free source publishes. An AAS export carries it as the ConceptDescription's
+        `sourceOfDefinition`.
 
         **ISO 22400-2 calls the second OEE factor *Effectiveness*, not Performance.**
         A metric for it is named after the KPI, as the example `OEE/EFFECTIVENESS` is. The index
@@ -3883,6 +3888,31 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/ConceptDefinition' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/concept_sources:
+    get:
+      tags: [Registry]
+      summary: Read where each vocabulary concept's definition comes from
+      description: |
+        A view: one row per semantic id whose vocabulary says where its definition comes from, with that
+        citation. It unions the QUDT quantity kinds ("QUDT 3.5.2, QUDT.org, CC BY 4.0") and the ISO 22400
+        KPIs that cite a source (the four OEE KPIs, OPC 40501-1 Annex C.2.4). An id both hold takes the
+        first in that order. Its two columns are fixed, so a vocabulary added later is a new arm, not a
+        new column.
+
+        The AAS exporter reads it for each ConceptDescription's `sourceOfDefinition`. Filter by
+        `?semantic_id=in.(…)`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - { name: semantic_id, in: query, schema: { type: string }, description: 'e.g. `eq.http://qudt.org/vocab/quantitykind/Temperature`' }
+      responses:
+        '200':
+          description: Concept sources.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ConceptSource' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/platform_alerts:
@@ -8574,6 +8604,7 @@ components:
         unit: { type: string, nullable: true, example: PERCENT }
         formula: { type: string, nullable: true }
         semantic_id: { type: string, nullable: true }
+        source: { type: string, nullable: true, example: 'OPC 40501-1 v1.02.0, Annex C.2.4 (informative): "Availability = APT / PBT". The annex takes its KPI definitions from ISO 22400-2.', description: 'Where the definition was read from. Null for a KPI no free source publishes (0305).' }
 
     OPCUAVocabularyEntry:
       type: object
@@ -8647,7 +8678,14 @@ components:
         semantic_id: { type: string, example: 'http://data.ashrae.org/standard223#TemperatureSensor', description: 'Unique in the view.' }
         name: { type: string, example: TemperatureSensor, description: 'The concept''s key in its vocabulary: the IDTA idShort, or the vocabulary row''s name.' }
         definition: { type: string, example: 'A `Sensor` that `observes` a `QuantifiableObservableProperty` that represents a measure of temperature.' }
-        standard: { type: string, enum: [IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect, VDA 5050] }
+        standard: { type: string, enum: [IDTA, ASHRAE 223P, QUDT, OPC UA, ISO 22400, MTConnect, VDA 5050] }
+
+    ConceptSource:
+      type: object
+      readOnly: true
+      properties:
+        semantic_id: { type: string, example: 'http://qudt.org/vocab/quantitykind/Temperature', description: 'Unique in the view.' }
+        source: { type: string, example: 'QUDT 3.5.2, QUDT.org, CC BY 4.0', description: 'Where the definition of the id comes from.' }
 
     UserSettings:
       type: object

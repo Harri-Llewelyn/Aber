@@ -384,11 +384,24 @@ function unitReference(unit: string | undefined) {
   };
 }
 
+/** Where an id's definition comes from, as `concept_sources` records it, or undefined where it records none. */
+function sourceOfDefinition(
+  sources: readonly ConceptSource[] | undefined,
+  id: string,
+): string | undefined {
+  return sources?.find((s) => s.semantic_id === id)?.source || undefined;
+}
+
 function conceptDescription(
   id: string,
   name: string,
   definition: string,
-  opts: { unit?: string; unitId?: ReturnType<typeof unitReference>; dataType?: string } = {},
+  opts: {
+    unit?: string;
+    unitId?: ReturnType<typeof unitReference>;
+    dataType?: string;
+    sourceOfDefinition?: string;
+  } = {},
 ) {
   return {
     modelType: "ConceptDescription",
@@ -404,6 +417,7 @@ function conceptDescription(
         preferredName: [{ language: "en", text: name.slice(0, 255) }],
         unit: opts.unit,
         unitId: opts.unitId,
+        sourceOfDefinition: opts.sourceOfDefinition,
         dataType: opts.dataType,
         // Mandatory in English (AASc-3a-008), so every source below supplies one.
         definition: [{ language: "en", text: definition.slice(0, 1023) }],
@@ -425,7 +439,9 @@ function conceptDescription(
  */
 export function buildConceptDescriptions(
   ids: string[],
-  rows: Pick<DeviceRecord, "catalog" | "templates" | "schemas" | "definitions">,
+  rows:
+    & Pick<DeviceRecord, "catalog" | "templates" | "schemas" | "definitions">
+    & Partial<Pick<DeviceRecord, "sources">>,
 ): Record<string, unknown>[] {
   const definedBy = new Map(rows.definitions.map((d) => [d.semantic_id, d]));
   return ids.map((id) => {
@@ -466,6 +482,7 @@ export function buildConceptDescriptions(
         {
           unit,
           unitId: unitReference(unit),
+          sourceOfDefinition: defined || authority ? sourceOfDefinition(rows.sources, id) : undefined,
           // Units that disagree leave the type unsaid: MEASURE needs one unit, COUNT claims none.
           dataType: units.size > 1 || datatype === undefined
             ? undefined
@@ -479,7 +496,9 @@ export function buildConceptDescriptions(
     const definition = defined?.definition ||
       (authority ? `${name}, as ${authority} defines it.` : schema?.description as string | null) ||
       `The concept ${name}, which this shell references.`;
-    return conceptDescription(id, name, definition);
+    return conceptDescription(id, name, definition, {
+      sourceOfDefinition: defined || authority ? sourceOfDefinition(rows.sources, id) : undefined,
+    });
   });
 }
 
@@ -545,6 +564,8 @@ export interface DeviceRecord {
   supplemental?: SupplementalSemanticId[];
   /** `concept_definitions` rows for the ids conceptIdsFor() names. */
   definitions: ConceptDefinition[];
+  /** `concept_sources` rows for the same ids: where a vocabulary's definition comes from. */
+  sources?: ConceptSource[];
 }
 
 /** A row of `metric_semantic_ids`: another published id of the concept a catalog metric measures. */
@@ -560,6 +581,12 @@ export interface ConceptDefinition {
   name: string;
   definition: string;
   standard: string;
+}
+
+/** A row of `concept_sources`: the citation of the vocabulary a semantic id's definition is read from. */
+export interface ConceptSource {
+  semantic_id: string;
+  source: string;
 }
 
 /** Any Supabase client. Deliberately structural: the authority is the caller's to choose. */
@@ -622,10 +649,16 @@ export async function loadDeviceRecord(
     schemas: schemaRows ?? [],
     supplemental: supplementalRows ?? [],
   });
+  // Started first, so it runs beside the definitions. Without rows (an error, or a database that lacks
+  // the view) no definition names its source.
+  const sourcesRequest = conceptIds.length > 0
+    ? client.from("concept_sources").select("semantic_id, source").in("semantic_id", conceptIds)
+    : Promise.resolve({ data: [] });
   const { data: definitionRows } = conceptIds.length > 0
     ? await client.from("concept_definitions").select("semantic_id, name, definition, standard")
       .in("semantic_id", conceptIds)
     : { data: [] };
+  const { data: sourceRows } = await sourcesRequest;
 
   return {
     device,
@@ -638,6 +671,7 @@ export async function loadDeviceRecord(
     schemas: schemaRows ?? [],
     supplemental: supplementalRows ?? [],
     definitions: definitionRows ?? [],
+    sources: sourceRows ?? [],
   };
 }
 
@@ -1048,6 +1082,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     templates,
     schemas,
     definitions,
+    sources: record.sources,
   });
 
   const environment = {

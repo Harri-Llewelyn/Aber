@@ -1,11 +1,12 @@
-import { iso22400Sections, kpiTooltip } from '../../utils/iso22400'
+import { iso22400Sections, kpiTooltip, kpiSource } from '../../utils/iso22400'
 import { STANDARDS } from '../../utils/standards'
 
 /**
  * The ISO 22400 tab of the Vocabulary page. A distinct tab because ISO 22400
  * gives whole computed KPIs with formulas, not words to build an observation name from; MTConnect's
  * `AVAILABILITY` is an EVENT meaning connected, not the ISO ratio. In use is decided by semantic id
- * where the catalog has one, falling back to the name token.
+ * where the catalog has one, falling back to the name token. A KPI whose definition was read from a
+ * source anyone can check, OPC 40501-1 Annex C for the four OEE KPIs, says so after its tooltip.
  */
 export function iso22400VocabularyTab({ vocabulary, catalog, onUseKpi }) {
   const sections = iso22400Sections(vocabulary).map(s => ({
@@ -33,6 +34,7 @@ export function iso22400VocabularyTab({ vocabulary, catalog, onUseKpi }) {
     isUsed: item =>
       (item.kpi.semantic_id && semanticIds.has(item.kpi.semantic_id)) || nameTokens.has(item.name),
     tooltipFor: item => kpiTooltip(item.kpi),
+    noteFor: item => kpiSource(item.kpi),
     metaFor: item => item.kpi.unit || '',
     onUse: onUseKpi ? (item => onUseKpi(item.kpi)) : undefined
   }

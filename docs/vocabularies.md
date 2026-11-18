@@ -43,12 +43,19 @@ does. They are [`supabase/example-metrics.sql`](../supabase/example-metrics.sql)
   semantic ids in the historian would mean two ways to produce one identity with no way to tell
   them apart.
 
-  **Checked against the registered formulas rather than argued from principle.** Of the eight KPIs
-  in `iso22400_vocabulary`, NOT ONE is computable from the 44 example metrics: `A = APT/PBT`
-  has no PBT, `E = (PRI × PQ)/APT` has no PRI, `Q = GQ/PQ` has only a total `Controller/PART_COUNT`
-  with no quality disposition, and MTBF/MTTR need maintenance records. Moving the arithmetic to
-  Grafana or Node-RED does not help — the inputs are missing there too. The constraint is the data,
-  not the place.
+  **Checked against the formulas OPC 40501-1 publishes rather than argued from principle.** The
+  four OEE KPIs are the ones with a published source ([below](#iso-22400-and-its-source)): Annex C.2.4
+  gives `Availability = APT / PBT`, `Effectiveness = PRI x PQ / APT` and `Quality rate = GQ / PQ`,
+  and OEE as their product. None is computable from the 44 example metrics. **Availability and
+  effectiveness are missing inputs the machine does not have:** `A` needs planned busy time (PBT)
+  and `E` needs planned run time per item (PRI). The annex says these "usually come from an MES or
+  ERP and not from the machine". **Quality is missing only a disposition the example set lacks,
+  not one no machine can give.** `Controller/PART_COUNT` in the examples is a total. But MTConnect's
+  `PART_COUNT` with sub type `GOOD` (items that conform to specification or expectation) and OPC
+  40501-1's `PartsGood` are both seeded, so a machine that publishes `GOOD` and `ALL` supplies both
+  of `Q = GQ / PQ`'s inputs. OEE needs all three factors, so it needs PBT and PRI as well. Moving
+  the arithmetic to Grafana or Node-RED does not help — the planned inputs are missing there too.
+  The constraint is the data, not the place. MTBF and MTTR need maintenance records.
 
   **Derived series over what we DO have are fine, and must not borrow these ids.**
   `Controller/EXECUTION` and `Controller/PART_COUNT` support an uptime ratio and a parts-per-hour
@@ -178,6 +185,7 @@ against the IDTA content hub, the ISA/ANSI webstore and the open223 project.
 | PackML | **OPC 30050** *OPC UA for PackML* v1.01, 2020-10-08 — **the ISA document is not needed** | `http://opcfoundation.org/UA/PackML/` |
 | ASHRAE 223P | ontology `v1.0.0-2026`, **Apache-2.0**; the *standard* is still in public review | `http://data.ashrae.org/standard223#` |
 | VDA 5050 | **VDA 5050 3.0.0**, the `state` message's JSON Schema (tag `3.0.0`, 2026-03-18), **MIT** | `https://aber.local/semantics/vda5050/v3.0/State/` (minted here: the VDA issues none) |
+| ISO 22400 | **OPC 40501-1** v1.02.0 Annex C (informative), read at `reference.opcfoundation.org/specs/OPC-40501-1/annex-c`, for the four OEE KPIs; ISO 22400-2 itself was not read | `https://aber.local/semantics/iso22400/` |
 | QUDT | *QUDT Quantity Kind Vocabulary* and *Units Vocabulary* **3.5.2** (tag `v3.5.2`, 2026-09-22), **CC BY 4.0**; 1,126 kinds and 83 units seeded | `http://qudt.org/vocab/quantitykind/` and `http://qudt.org/vocab/unit/` |
 
 The generator pins the NodeSet paths. Upstream capitalises `NodeSet2` and `Nodeset2`
@@ -278,6 +286,42 @@ which the generator still reads for the names, carries no type documentation. Th
 is 2.7. The model's own repository, `mtconnect/mtconnect_sysml_model`, is not a source: it has no
 licence file, and its terms allow copying only in the form received.
 
+### ISO 22400 and its source
+
+ISO 22400-2 is a purchased standard. A purchased ISO standard is licensed to its reader, and Aber is
+distributed publicly, so rows taken from its text would raise a redistribution question this project
+should not have to answer. Each ISO 22400 row needs a source anyone can read. For four of them there
+is one: **OPC 40501-1 v1.02.0, Annex C**, *KPI Calculation (Informative)*, which is free to read at
+`reference.opcfoundation.org` and says "The KPI definitions used are taken from the ISO 22400-2
+specification". Migration `0305` cites it for `AVAILABILITY`, `EFFECTIVENESS`, `QUALITY` and `OEE`.
+
+- **What the annex gives.** C.1 defines the abbreviations: APT (Actual Production Time), PBT (Planned
+  Busy Time), PQ (Produced Quantity), GQ (Good Quantity), PRI (Planned Run Time Per Item) and OEE.
+  C.2.4, *Calculation of the OEE*, says "The OEE (Overall Equipment Effectiveness) is the product of
+  Availability, Effectiveness and Quality Rate" and gives `Availability = APT / PBT`,
+  `Effectiveness = PRI x PQ / APT` and `Quality rate = GQ / PQ`. C.2.1 to C.2.3 map PQ, GQ, APT, AUST
+  and ADET to OPC UA variables. The annex gives formulas and no prose definition of a KPI.
+- **`iso22400_vocabulary.source`** holds the citation, for those four rows only: the annex, its clause
+  and the formula in the annex's words. The ISO 22400 tab shows it on its own line of the KPI's
+  tooltip, and an AAS export carries it as the ConceptDescription's `sourceOfDefinition`.
+- **The descriptions follow the annex.** The released seed quoted ISO 22400-2 names the annex does
+  not use ("Quality ratio", "OEE index"), which nobody could check. The annex says "Quality rate" and
+  "OEE", and each description now says what the annex's abbreviations say and no name it does not give.
+  The `formula` column is unchanged: it is the annex's formula with the KPI's symbol in front.
+- **`concept_sources` is a view of its own.** `(semantic_id, source)`, one row per id, with two arms:
+  ISO 22400 (a row with a source) and QUDT (every seeded kind: "QUDT 3.5.2, QUDT.org, CC BY 4.0"). It
+  is not a column of `concept_definitions`, because that view's four columns are stated inline by
+  `0169`, `0301`, `0302` and `0304`, and db-init replays each on every boot: a view that gained a
+  column would be redeclared narrower by the next boot of the earlier file and fail with "cannot drop
+  columns from view". A vocabulary added later adds an arm.
+- **The other four rows cite nothing.** No free source publishes the formulas of `SCRAP_RATIO`, `MTBF`
+  or `MTTR`, and `UTILIZATION` is not an ISO 22400 KPI. OPC 40001-1 v1.04.2 Annex C, read at
+  `reference.opcfoundation.org`, maps `MachineryItemState` and `MachineryOperationMode` to ISO 22400-2
+  time elements, TTR among them, and says "This annex does not define any KPI values." The ~26 other KPIs of ISO 22400-2 are not added, because no free source
+  publishes them.
+- **The annex is cited, not vendored.** It is free to read, and three formulas and a sentence are
+  quoted with the citation; nothing is redistributed whole.
+
 ### Licences
 
 Every vocabulary comes from an open, machine-readable source whose licence permits redistribution
@@ -290,6 +334,7 @@ in a derived work, and every licence was read rather than assumed:
 | ASHRAE 223P ontology | Apache-2.0 | `dcterms:license` in the ontology |
 | VDA 5050 `state.schema` | MIT, copyright 2024 Verband der Automobilindustrie | the repository's `LICENSE.txt` at the tag |
 | MTConnect `MTConnectDevices_2.7.xsd` (the definitions) | BSD-style licence from AMT, in the file; the repository is Apache-2.0 | header of the file, and the repository's licence |
+| OPC 40501-1 v1.02.0 Annex C (cited, not vendored) | free to read on the OPC Foundation's reference site; three formulas and a sentence are quoted, each with the citation | the reference site, which carries the specification |
 | QUDT 3.5.2 quantity kinds and units | CC BY 4.0, attribution to QUDT.org. The units file's metadata also carries a UCUM notice, which covers the UCUM codes, and none is taken | `dcterms:rights` in each file's graph metadata, and the repository's `LICENSE.md` |
 
 As with MTConnect's Apache-2.0, a licence covers the *vocabulary*, not a conformance claim.
@@ -724,5 +769,5 @@ specification, so filing it in `opcua_vocabulary` would misstate where it came f
 | Which group do VDA 5050 metrics file under, and why that spelling? | **`AGV`**, the word the pilot shopfloor uses; it cannot be confused with OPC 40010's robots, and the first spelling is permanent. The group says that 3.0 calls the vehicle a mobile robot (#941) |
 | Does a VDA 5050 field fill in its unit? | **No.** The schema's keyword is the VDA's spelling, not an MTConnect UnitEnum name; units for these readings are #942's (#941) |
 | Is a 223P class a metric's semantic id? | **No.** 223P is a reference: a class names equipment, not a reading. Use starts a metric under `BMS` with no id, and the example readings carry QUDT quantity kinds (#461) |
-| Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. Not one of the eight registered formulas is computable from the catalogued metrics, and moving the arithmetic to Grafana or Node-RED does not change that. Was a roadmap item; retired |
+| Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. None of the four OEE KPIs is computable from the catalogued metrics. Availability needs planned busy time and effectiveness needs planned run time per item, which OPC 40501-1 says come from an MES or ERP and not from the machine. Quality needs a good count beside the produced count, which a machine can publish (`PART_COUNT` `GOOD`, `PartsGood`), but OEE needs all three. Moving the arithmetic to Grafana or Node-RED does not change that. Was a roadmap item; retired |
 | What is an OPC UA semantic id? | **The ExpandedNodeId the NodeSet publishes**, `nsu=<namespace URI>;i=<id>`, as `node_id` and `semantic_id` both, typed `ExpandedNodeId`. Not `<namespace URI><name>`, an IRI the OPC Foundation never issued (#458) |

@@ -45,7 +45,7 @@ test('HTML tags and entities are removed without a pattern, and whitespace is co
 
 test('a command it does not know is an error, never published with its backslash', () => {
   assert.throws(() => plainText(String.raw`$\unknowncommand{x}$`), /LaTeX command the reader does not know/);
-  assert.throws(() => plainText(String.raw`a \\ b`), /does not know/);
+  assert.throws(() => plainText('a \\\\ b'), /does not know/);
 });
 
 test('an unclosed brace after a wrapper leaves the text and drops the command', () => {

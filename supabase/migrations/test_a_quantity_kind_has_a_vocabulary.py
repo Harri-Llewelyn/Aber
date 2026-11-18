@@ -149,9 +149,22 @@ class TestTheUnits(QudtTestCase):
 
 
 class TestTheTablesAreReferenceData(QudtTestCase):
+    # Each table's policy, its id namespace and the statements the probes run, written out whole.
     TABLES = {
         "qudt_quantity_kinds": ("qudt_quantity_kinds_select_authenticated", KIND),
         "qudt_units": ("qudt_units_select_authenticated", UNIT),
+    }
+    COUNT = {
+        "qudt_quantity_kinds": "SELECT count(*) FROM public.qudt_quantity_kinds",
+        "qudt_units": "SELECT count(*) FROM public.qudt_units",
+    }
+    INSERT = {
+        "qudt_quantity_kinds": "INSERT INTO public.qudt_quantity_kinds (semantic_id, name) VALUES (%s, 'x')",
+        "qudt_units": "INSERT INTO public.qudt_units (semantic_id, name) VALUES (%s, 'x')",
+    }
+    PEEK = {
+        "qudt_quantity_kinds": "SELECT 1 FROM public.qudt_quantity_kinds",
+        "qudt_units": "SELECT 1 FROM public.qudt_units",
     }
 
     def test_each_has_row_security_and_one_select_policy_for_authenticated(self):
@@ -183,7 +196,7 @@ class TestTheTablesAreReferenceData(QudtTestCase):
             with self.subTest(table=table):
                 def probe(cur, table=table):
                     cur.execute("SET LOCAL ROLE authenticated")
-                    cur.execute(f"SELECT count(*) FROM public.{table}")
+                    cur.execute(self.COUNT[table])
                     return cur.fetchone()[0]
                 self.assertEqual(self.in_transaction(probe), stamped_rows(table))
 
@@ -193,13 +206,13 @@ class TestTheTablesAreReferenceData(QudtTestCase):
                 def write(cur, table=table, base=base):
                     cur.execute("SET LOCAL ROLE authenticated")
                     with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
-                        cur.execute(f"INSERT INTO public.{table} (semantic_id, name) VALUES (%s, 'x')", (base + "x",))
+                        cur.execute(self.INSERT[table], (base + "x",))
                 self.in_transaction(write)
 
                 def read(cur, table=table):
                     cur.execute("SET LOCAL ROLE anon")
                     with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
-                        cur.execute(f"SELECT 1 FROM public.{table}")
+                        cur.execute(self.PEEK[table])
                 self.in_transaction(read)
 
     def test_the_checks_refuse_an_id_qudt_did_not_issue_and_a_key_twice(self):
@@ -220,7 +233,7 @@ class TestTheTablesAreReferenceData(QudtTestCase):
                 with self.subTest(table=table, what=what):
                     def probe(cur, table=table, iri=iri):
                         with self.assertRaises((psycopg2.errors.CheckViolation, psycopg2.errors.UniqueViolation)):
-                            cur.execute(f"INSERT INTO public.{table} (semantic_id, name) VALUES (%s, 'x')", (iri,))
+                            cur.execute(TestTheTablesAreReferenceData.INSERT[table], (iri,))
                     self.in_transaction(probe)
 
 

@@ -1,14 +1,15 @@
 # suite:
 #   lanes: unit
 #   why: An export's ConceptDescription names a metric's unit twice, as the MTConnect name in free text
-#     and, where QUDT has exactly that unit, as a reference to it (`unitId`, 0304). Both the JSON and the
-#     XML the exporter writes are validated against the official IDTA schemas, which accept the new
-#     shape: a reference with the wrong type, or an element out of order, is refused by the validator and
-#     passes the exporter's own assertions. Where CI is set, a missing validator or Node fails the suite
-#     rather than skipping it, which would turn a missing dependency into a green step.
+#     and, where QUDT has exactly that unit, as a reference to it (`unitId`, 0304), and says where its
+#     definition comes from (`sourceOfDefinition`, 0305). Both the JSON and the XML the exporter writes
+#     are validated against the official IDTA schemas, which accept the new shape: a reference with the
+#     wrong type, or an element out of order, is refused by the validator and passes the exporter's own
+#     assertions. Where CI is set, a missing validator or Node fails the suite rather than skipping it,
+#     which would turn a missing dependency into a green step.
 
 """
-The IEC 61360 `unit` and `unitId` of an exported ConceptDescription, validated.
+The IEC 61360 `unit`, `unitId` and `sourceOfDefinition` of an exported ConceptDescription, validated.
 
 Needs jsonschema and xmlschema (test-harness/requirements.txt) and Node 22.6 or later, which runs the
 TypeScript of _shared/aas by stripping its types, as test_aas_export.py runs shell.ts.
@@ -183,6 +184,73 @@ class TestUnitId(ConceptDescriptionTestCase):
                     self.assertEqual(described["unitId"]["keys"][0]["value"], entry["unit"])
                 else:
                     self.assertNotIn("unitId", described)
+
+
+ISO = "https://aber.local/semantics/iso22400/"
+CITATION = 'OPC 40501-1 v1.02.0, Annex C.2.4 (informative): "Availability = APT / PBT" & more <so> it is escaped.'
+QUDT_SOURCE = "QUDT 3.5.2, QUDT.org, CC BY 4.0"
+
+
+def with_sources():
+    """The device of `record()` with a KPI whose definition a vocabulary gives and a source row for it."""
+    catalog = record()["catalog"] + [
+        metric("OEE/AVAILABILITY", ISO + "AVAILABILITY", standard="ISO 22400", units=None),
+        metric("Custom/ACTION", "http://qudt.org/vocab/quantitykind/ActionTime", standard=None, units=None),
+        metric("Custom/OWN_TEXT", "https://example.org/concepts/own", standard=None, units=None),
+    ]
+    properties = {m["name"]: {} for m in catalog}
+    return record(
+        catalog=catalog,
+        schemas=[{"id": "s1", "schema_name": "Mill", "semantic_id": None, "schema_definition": {"properties": properties}}],
+        definitions=[{"semantic_id": ISO + "AVAILABILITY", "name": "AVAILABILITY", "standard": "ISO 22400",
+                      "definition": "Availability: actual production time (APT) as a share of planned busy time (PBT)."}],
+        sources=[{"semantic_id": ISO + "AVAILABILITY", "source": CITATION},
+                 {"semantic_id": "http://qudt.org/vocab/quantitykind/ActionTime", "source": QUDT_SOURCE},
+                 {"semantic_id": "https://example.org/concepts/own", "source": "Not this metric's"}],
+    )
+
+
+class TestSourceOfDefinition(ConceptDescriptionTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.environment = environment_json(with_sources())
+        cls.xml = environment_xml(with_sources())
+
+    def test_a_definition_a_vocabulary_gives_names_its_source(self):
+        kpi = content(self.environment, ISO + "AVAILABILITY")
+        self.assertEqual(kpi["sourceOfDefinition"], CITATION)
+        self.assertTrue(kpi["definition"][0]["text"].startswith("Availability: actual production time"))
+
+    def test_a_kind_no_text_describes_is_defined_as_qudt_defines_it_and_sourced_to_qudt(self):
+        kind = content(self.environment, "http://qudt.org/vocab/quantitykind/ActionTime")
+        self.assertEqual(kind["definition"][0]["text"], "ActionTime, as QUDT defines it.")
+        self.assertEqual(kind["sourceOfDefinition"], QUDT_SOURCE)
+
+    def test_a_metrics_own_description_is_never_credited_to_a_source(self):
+        own = content(self.environment, "https://example.org/concepts/own")
+        self.assertEqual(own["definition"][0]["text"], "The Custom/OWN_TEXT reading")
+        self.assertNotIn("sourceOfDefinition", own)
+
+    def test_an_id_with_no_source_row_has_none(self):
+        self.assertNotIn("sourceOfDefinition", content(self.environment, MTC + "TEMPERATURE"))
+
+    def test_the_json_validates_against_the_idta_schema(self):
+        self.assertEqual([e.message for e in self.json_schema.iter_errors(self.environment)], [])
+
+    def test_the_xml_validates_against_the_idta_xsd_with_the_source_escaped_and_in_its_place(self):
+        self.assertEqual([str(e) for e in self.xsd.iter_errors(self.xml)], [])
+        compact = "".join(part.strip() for part in self.xml.splitlines())
+        escaped = CITATION.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        self.assertIn(f"<sourceOfDefinition>{escaped}</sourceOfDefinition>", compact)
+        # After the unit's reference, before the data type, as the schema's sequence has it.
+        self.assertRegex(compact, r"</unitId><sourceOfDefinition>[^<]*</sourceOfDefinition>|"
+                                  r"</preferredName><sourceOfDefinition>")
+
+    def test_the_validators_refuse_a_source_that_is_not_text(self):
+        broken = json.loads(json.dumps(self.environment))
+        content(broken, ISO + "AVAILABILITY")["sourceOfDefinition"] = ""
+        self.assertTrue(list(self.json_schema.iter_errors(broken)))
 
 
 if __name__ == "__main__":

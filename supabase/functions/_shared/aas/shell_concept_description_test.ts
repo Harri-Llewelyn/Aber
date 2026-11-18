@@ -1,4 +1,10 @@
-import { buildConceptDescriptions, buildEnvironment, type DeviceRecord } from "./shell.ts";
+import {
+  buildConceptDescriptions,
+  buildEnvironment,
+  type ConceptSource,
+  type DeviceRecord,
+  loadDeviceRecord,
+} from "./shell.ts";
 import { QUDT_UNIT_IDS } from "./qudtUnits.ts";
 import { environmentToXml } from "./environmentXml.ts";
 
@@ -34,16 +40,24 @@ const metric = (name: string, semanticId: string | null, extra = {}) => ({
 type Rows = Parameters<typeof buildConceptDescriptions>[1];
 
 /** The rows buildConceptDescriptions() reads, with the catalog a test names. */
-const rows = (catalog: Record<string, unknown>[]): Rows => ({
+const rows = (
+  catalog: Record<string, unknown>[],
+  extra: { definitions?: Rows["definitions"]; sources?: ConceptSource[]; schemas?: Rows["schemas"] } = {},
+): Rows => ({
   catalog,
   templates: [],
-  schemas: [],
-  definitions: [],
+  schemas: extra.schemas ?? [],
+  definitions: extra.definitions ?? [],
+  sources: extra.sources,
 });
 
 /** The IEC 61360 content of the one ConceptDescription made for `id` from `catalog`. */
-function contentFor(id: string, catalog: Record<string, unknown>[]) {
-  const [concept] = buildConceptDescriptions([id], rows(catalog));
+function contentFor(
+  id: string,
+  catalog: Record<string, unknown>[],
+  extra: Parameters<typeof rows>[1] = {},
+) {
+  const [concept] = buildConceptDescriptions([id], rows(catalog, extra));
   // deno-lint-ignore no-explicit-any
   return (concept as any).embeddedDataSpecifications[0].dataSpecificationContent;
 }
@@ -235,4 +249,156 @@ Deno.test("the XML writer puts unitId after unit, with the reference's one key",
   // The unmapped unit is written as text with no reference after it, so only the one unit maps.
   assert.ok(xml.includes("<unit>DEGREE_3D</unit>"), "no <unit>DEGREE_3D</unit>");
   assert.equal(xml.split("<unitId>").length - 1, 1, "one unitId, for the one unit that maps");
+});
+
+// ---- sourceOfDefinition ----------------------------------------------------------------------------
+
+const ISO = "https://aber.local/semantics/iso22400/";
+const QUDT_KIND = "http://qudt.org/vocab/quantitykind/";
+const CITATION = 'OPC 40501-1 v1.02.0, Annex C.2.4 (informative): "Availability = APT / PBT".';
+const QUDT_SOURCE = "QUDT 3.5.2, QUDT.org, CC BY 4.0";
+const availability = metric("OEE/AVAILABILITY", ISO + "AVAILABILITY", { standard: "ISO 22400", units: null });
+const availabilityDefined = [{
+  semantic_id: ISO + "AVAILABILITY",
+  name: "AVAILABILITY",
+  definition: "Availability: actual production time (APT) as a share of planned busy time (PBT).",
+  standard: "ISO 22400",
+}];
+
+Deno.test("a definition read from a vocabulary names the source the vocabulary gives it", () => {
+  const content = contentFor(ISO + "AVAILABILITY", [availability], {
+    definitions: availabilityDefined,
+    sources: [{ semantic_id: ISO + "AVAILABILITY", source: CITATION }],
+  });
+  assert.equal(content.sourceOfDefinition, CITATION);
+  assert.equal(content.definition[0].text, availabilityDefined[0].definition);
+});
+
+Deno.test("an id the sources hold no row for has no sourceOfDefinition", () => {
+  const unsourced = contentFor(ISO + "AVAILABILITY", [availability], {
+    definitions: availabilityDefined,
+    sources: [{ semantic_id: ISO + "OEE", source: "another id's" }],
+  });
+  assert.equal(unsourced.sourceOfDefinition, undefined);
+  assert.equal(
+    contentFor(ISO + "AVAILABILITY", [availability], { definitions: availabilityDefined }).sourceOfDefinition,
+    undefined,
+  );
+});
+
+Deno.test("a catalog metric's own description is never credited to a vocabulary's source", () => {
+  // No vocabulary defines the id, so the text is the metric's: a source row beside it would be a lie.
+  const content = contentFor(ISO + "AVAILABILITY", [availability], {
+    sources: [{ semantic_id: ISO + "AVAILABILITY", source: CITATION }],
+  });
+  assert.equal(content.definition[0].text, "The OEE/AVAILABILITY reading");
+  assert.equal(content.sourceOfDefinition, undefined);
+});
+
+Deno.test("a QUDT kind with no description is defined as QUDT defines it, and sourced to QUDT", () => {
+  const id = QUDT_KIND + "ActionTime";
+  const content = contentFor(id, [metric("Custom/ACTION", id, { standard: null, units: null })], {
+    sources: [{ semantic_id: id, source: QUDT_SOURCE }],
+  });
+  assert.equal(content.definition[0].text, "ActionTime, as QUDT defines it.");
+  assert.equal(content.sourceOfDefinition, QUDT_SOURCE);
+});
+
+Deno.test("a concept only a schema references takes a source the same way", () => {
+  const id = QUDT_KIND + "Temperature";
+  const [concept] = buildConceptDescriptions([id], {
+    ...rows([], { sources: [{ semantic_id: id, source: QUDT_SOURCE }] }),
+    definitions: [{ semantic_id: id, name: "Temperature", definition: "Hot and cold.", standard: "QUDT" }],
+  });
+  // deno-lint-ignore no-explicit-any
+  const content = (concept as any).embeddedDataSpecifications[0].dataSpecificationContent;
+  assert.equal([content.definition[0].text, content.sourceOfDefinition], ["Hot and cold.", QUDT_SOURCE]);
+});
+
+Deno.test("an export with sources is valid against the IDTA schema, and the XML puts sourceOfDefinition after unitId", () => {
+  const record = deviceRecord({
+    catalog: [
+      metric("Systems/TEMPERATURE", MTC + "TEMPERATURE"),
+      availability,
+    ],
+    schemas: [{
+      id: "s1",
+      schema_name: "Mill",
+      semantic_id: null,
+      schema_definition: { properties: { "Systems/TEMPERATURE": {}, "OEE/AVAILABILITY": {} } },
+    }],
+    definitions: [
+      { semantic_id: MTC + "TEMPERATURE", name: "TEMPERATURE", definition: "The temperature.", standard: "MTConnect" },
+      ...availabilityDefined,
+    ],
+    sources: [
+      { semantic_id: MTC + "TEMPERATURE", source: "MTConnect 2.7 XSD" },
+      { semantic_id: ISO + "AVAILABILITY", source: CITATION },
+    ],
+  });
+  const { environment } = buildEnvironment(record);
+  const descriptions: Record<string, unknown>[] = JSON.parse(JSON.stringify(environment)).conceptDescriptions;
+  for (const concept of descriptions) {
+    assert.equal(violations(concept, resolve("#/definitions/ConceptDescription"), "conceptDescription"), []);
+    // deno-lint-ignore no-explicit-any
+    const content = (concept as any).embeddedDataSpecifications[0].dataSpecificationContent;
+    assert.equal(violations(content, resolve("#/definitions/DataSpecificationIec61360"), "content"), []);
+  }
+  const xml = environmentToXml(environment).replace(/>\s+</g, "><");
+  const after = "</unitId><sourceOfDefinition>MTConnect 2.7 XSD</sourceOfDefinition>";
+  assert.ok(xml.includes(after), `no ${after}`);
+  // A concept with no unit has no unitId, and its source follows the preferred name.
+  assert.ok(xml.includes("</preferredName><sourceOfDefinition>"), "the KPI's source does not follow its name");
+});
+
+// ---- loading ---------------------------------------------------------------------------------------
+
+type Builder = Promise<{ data: Record<string, unknown>[] | null; error: unknown }> & {
+  select: () => Builder;
+  eq: () => Builder;
+  in: () => Builder;
+};
+
+/** A client over fixed tables, in which one table's read can fail. */
+function client(tables: Record<string, object[]>, failing?: string) {
+  const reads: string[] = [];
+  const from = (table: string) => {
+    reads.push(table);
+    const result = table === failing
+      ? { data: null, error: { message: `relation "${table}" does not exist` } }
+      : { data: (tables[table] ?? []) as Record<string, unknown>[], error: null };
+    const builder: Builder = Object.assign(Promise.resolve(result), {
+      select: () => builder,
+      eq: () => builder,
+      in: () => builder,
+    });
+    return builder;
+  };
+  return { client: { from }, reads };
+}
+
+const loadedTables = (): Record<string, object[]> => {
+  const rows = deviceRecord();
+  return {
+    devices: [rows.device],
+    device_schemas: [{ device_id: "d1", schema_id: "s1", submodel_key: null }],
+    metric_catalog: rows.catalog,
+    schemas: rows.schemas,
+    concept_sources: [{ semantic_id: MTC + "TEMPERATURE", source: "MTConnect 2.7 XSD" }],
+  };
+};
+
+Deno.test("loadDeviceRecord reads the sources once and carries them", async () => {
+  const { client: fake, reads } = client(loadedTables());
+  const loaded = await loadDeviceRecord(fake, "d1");
+  assert.equal(reads.filter((t) => t === "concept_sources").length, 1);
+  assert.equal(loaded?.sources, [{ semantic_id: MTC + "TEMPERATURE", source: "MTConnect 2.7 XSD" }]);
+});
+
+Deno.test("loadDeviceRecord still loads where the sources cannot be read, and no definition names one", async () => {
+  const { client: fake } = client(loadedTables(), "concept_sources");
+  const loaded = await loadDeviceRecord(fake, "d1");
+  assert.equal(loaded?.sources, []);
+  const { environment } = buildEnvironment(loaded as DeviceRecord);
+  assert.equal(JSON.stringify(environment).includes("sourceOfDefinition"), false);
 });

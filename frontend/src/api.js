@@ -3664,7 +3664,9 @@ const apiMethods = {
         category: k.category,
         unit: k.unit,
         formula: k.formula,
-        semantic_id: k.semantic_id
+        semantic_id: k.semantic_id,
+        // Where the definition was read from (0305); null for a KPI no free source publishes.
+        source: k.source ?? null
       }));
     }
 

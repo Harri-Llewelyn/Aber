@@ -1,19 +1,21 @@
 # suite:
 #   lanes: stack
 #   why: Against a live stack, an export's ConceptDescription names a metric's unit as a reference to a
-#     QUDT unit beside the MTConnect name (`unitId`, 0304), and the document still validates against the
-#     official IDTA schema. With the unit tables or the unit map missing, the export succeeds and the
-#     reference is simply absent, which no other suite would notice.
+#     QUDT unit beside the MTConnect name (`unitId`, 0304), and a KPI's definition names where it comes
+#     from (`sourceOfDefinition`, 0305), and the document still validates against the official IDTA
+#     schema. With the unit tables, the unit map or the sources view missing, the export succeeds and
+#     the reference or the source is simply absent, which no other suite would notice.
 
 """
-A ConceptDescription's `unit` and `unitId`, as the deployed exporter writes them.
+A ConceptDescription's `unit`, `unitId` and `sourceOfDefinition`, as the deployed exporter writes them.
 
     python supabase/functions/aas-export/test_aas_export_units_and_sources.py
 
 Needs a stack with the example metrics loaded: the subject is the AAS conformance device
 (test-harness/aas_fixture.py), provisioned at pinned ids as the other AAS suites do, and the metric it
-exports is `Systems/TEMPERATURE`, whose unit is CELSIUS. Without a reachable stack, or without that
-metric, every check skips and says why. It reads and writes nothing in the catalogue.
+exports are `Systems/TEMPERATURE`, whose unit is CELSIUS, and `OEE/AVAILABILITY`, an ISO 22400 KPI.
+Without a reachable stack, or without a metric a check needs, that check skips and says why. It reads and
+writes nothing in the catalogue.
 """
 import http.client
 import json
@@ -33,6 +35,7 @@ ADMIN_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@aber.local")
 ADMIN_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "aber123")
 
 TEMPERATURE = "Systems/TEMPERATURE"
+AVAILABILITY = "OEE/AVAILABILITY"
 
 try:
     from jsonschema import Draft201909Validator
@@ -90,6 +93,17 @@ if TOKEN:
             METRIC_ROW = None
 LIVE = bool(METRIC_ROW)
 
+# The source the database holds for the KPI, which the export must carry; None where there is none.
+KPI_ROW = None
+KPI_SOURCE = None
+if LIVE:
+    status, rows = call(TOKEN, "GET", f"/rest/v1/metric_catalog?name=eq.{urllib.parse.quote(AVAILABILITY)}&select=semantic_id")
+    KPI_ROW = rows[0] if status == 200 and rows and rows[0].get("semantic_id") else None
+    if KPI_ROW:
+        status, rows = call(TOKEN, "GET", "/rest/v1/concept_sources?semantic_id=eq."
+                            + urllib.parse.quote(KPI_ROW["semantic_id"], safe="") + "&select=source")
+        KPI_SOURCE = rows[0]["source"] if status == 200 and rows else None
+
 
 def walk(node):
     if isinstance(node, dict):
@@ -136,6 +150,20 @@ class TestTheUnitIsExportedAsAQudtUnit(unittest.TestCase):
                 checked += 1
         if not checked:
             self.skipTest("no exported concept carries a unit the crosswalk maps to none")
+
+    def test_a_kpis_definition_names_the_source_the_database_gives_it(self):
+        if not KPI_ROW:
+            self.skipTest(f"the catalogue has no {AVAILABILITY} with a semantic id: load the example metrics")
+        if not KPI_SOURCE:
+            self.skipTest(f"concept_sources holds no source for {KPI_ROW['semantic_id']}: 0305 has not run")
+        content = self.description_of(KPI_ROW["semantic_id"])
+        self.assertEqual(content["sourceOfDefinition"], KPI_SOURCE)
+        self.assertIn("OPC 40501-1", KPI_SOURCE)
+
+    def test_a_concept_whose_vocabulary_names_no_source_carries_none(self):
+        # An MTConnect data item type: the XSD defines it and no source is recorded for it.
+        content = self.description_of(METRIC_ROW["semantic_id"])
+        self.assertNotIn("sourceOfDefinition", content)
 
     @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema not installed")
     def test_the_export_validates_against_the_official_schema(self):

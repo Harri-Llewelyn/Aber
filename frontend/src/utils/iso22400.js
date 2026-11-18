@@ -78,6 +78,12 @@ export function iso22400Prefill(kpi) {
   }
 }
 
+/** The line a KPI's tooltip ends with: where its definition was read from, or null where it cites no source. */
+export function kpiSource(kpi) {
+  const source = (kpi?.source || '').trim()
+  return source ? `Source: ${source}` : null
+}
+
 /** One-line summary for a KPI chip's tooltip: what it is, then how it is computed. */
 export function kpiTooltip(kpi) {
   if (!kpi) return ''
