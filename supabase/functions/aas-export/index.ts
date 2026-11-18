@@ -17,6 +17,7 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { strToU8 } from "fflate";
 import { zip } from "../_shared/zip.ts";
 import { modelContentType } from "../_shared/aas/model3dContentType.ts";
+import { environmentToXml } from "../_shared/aas/environmentXml.ts";
 import {
   BUNDLE_PARTS,
   DEFAULT_MAX_TELEMETRY_ROWS,
@@ -87,6 +88,18 @@ const AASX_MEDIA_TYPE = "application/asset-administration-shell-package+xml";
 const AASX_SPEC_PART = "aasx/aasenv-root.json";
 
 /**
+ * How a package holds its Environment. JSON is the default and is byte-identical to the JSON
+ * export. XML is the part AAS Part 5 names for it: `aasx/data.xml`, reached by the same aas-spec
+ * relationship, with the media type AAS tools write for an XML part. Which one is a request's
+ * `serialization`.
+ */
+const SERIALIZATIONS = {
+  json: { part: AASX_SPEC_PART, extension: "json", contentType: "application/json" },
+  xml: { part: "aasx/data.xml", extension: "xml", contentType: "text/xml" },
+} as const;
+type Serialization = keyof typeof SERIALIZATIONS;
+
+/**
  * Package an AAS Environment as an `.aasx` (OPC / ISO 29500 container). OPC is a ZIP with a
  * mandated discovery chain, every part of which a reader requires: `[Content_Types].xml` declares a
  * media type for every extension; `_rels/.rels` points at the aasx-origin part; `aasx/aasx-origin`
@@ -98,7 +111,12 @@ const AASX_SPEC_PART = "aasx/aasenv-root.json";
  */
 type SupplementaryFile = { part: string; bytes: Uint8Array; contentType: string };
 
-function buildAasxPackage(environment: unknown, supplements: SupplementaryFile[] = []) {
+function buildAasxPackage(
+  environment: Record<string, unknown>,
+  supplements: SupplementaryFile[] = [],
+  serialization: Serialization = "json",
+) {
+  const spec = SERIALIZATIONS[serialization];
   // One Override per supplementary part rather than a Default per extension: two models could
   // share an extension, and an Override names the part exactly. Deduplicated by part name.
   const overrides = supplements
@@ -108,7 +126,7 @@ function buildAasxPackage(environment: unknown, supplements: SupplementaryFile[]
   const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="json" ContentType="application/json"/>
+  <Default Extension="${spec.extension}" ContentType="${spec.contentType}"/>
   <Override PartName="/aasx/aasx-origin" ContentType="text/plain"/>${overrides ? "\n" + overrides : ""}
 </Types>
 `;
@@ -121,7 +139,7 @@ function buildAasxPackage(environment: unknown, supplements: SupplementaryFile[]
 
   const originRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId2" Type="http://admin-shell.io/aasx/relationships/aas-spec" Target="/${AASX_SPEC_PART}"/>
+  <Relationship Id="rId2" Type="http://admin-shell.io/aasx/relationships/aas-spec" Target="/${spec.part}"/>
 </Relationships>
 `;
 
@@ -143,13 +161,15 @@ ${
     // Empty by design -- see the chain described above.
     "aasx/aasx-origin": strToU8(""),
     "aasx/_rels/aasx-origin.rels": strToU8(originRels),
-    [AASX_SPEC_PART]: strToU8(JSON.stringify(environment, null, 2)),
+    [spec.part]: strToU8(
+      serialization === "xml" ? environmentToXml(environment) : JSON.stringify(environment, null, 2),
+    ),
   };
 
   if (supplements.length > 0) {
     // Only written when there is something to relate. An empty <Relationships/> part is legal but
     // pointless, and its presence would suggest to a reader that supplements were expected.
-    entries["aasx/_rels/aasenv-root.json.rels"] = strToU8(specRels);
+    entries[`${spec.part.replace(/[^/]+$/, "_rels/$&")}.rels`] = strToU8(specRels);
     for (const s of supplements) entries[s.part] = s.bytes;
   }
 
@@ -214,6 +234,20 @@ export default async function handler(req: Request): Promise<Response> {
       return json({ error: "format must be 'json', 'aasx' or 'bundle'" }, 400);
     }
     const format = requestedFormat;
+
+    // Which serialisation an AASX package holds its Environment in. Accepted where format is.
+    const requestedSerialization = String(
+      new URL(req.url).searchParams.get("serialization") ?? body.serialization ?? "json",
+    ).toLowerCase();
+    if (!Object.hasOwn(SERIALIZATIONS, requestedSerialization)) {
+      return json({ error: "serialization must be 'json' or 'xml'" }, 400);
+    }
+    const serialization = requestedSerialization as Serialization;
+    if (serialization === "xml" && format === "json") {
+      return json({
+        error: "serialization 'xml' applies to an AASX package: use format 'aasx' or 'bundle'",
+      }, 400);
+    }
 
     if (format === "bundle" && !(await callerHolds(supabaseUser, BUNDLE_PERMISSION))) {
       return json({
@@ -298,7 +332,7 @@ export default async function handler(req: Request): Promise<Response> {
       }
 
       if (format === "aasx") {
-        return new Response(buildAasxPackage(environment, supplements), {
+        return new Response(buildAasxPackage(environment, supplements, serialization), {
           status: 200,
           headers: {
             ...corsHeaders,
@@ -357,7 +391,7 @@ export default async function handler(req: Request): Promise<Response> {
         { part: BUNDLE_PARTS.hourly, bytes: strToU8(csvOf([...hourly.rows].reverse(), HOURLY_COLUMNS)), contentType: "text/csv" },
         { part: BUNDLE_PARTS.manifest, bytes: strToU8(JSON.stringify(manifest, null, 2)), contentType: "application/json" },
       );
-      const bytes = buildAasxPackage(environment, supplements);
+      const bytes = buildAasxPackage(environment, supplements, serialization);
 
       // The stored copy is what a tombstone can point at once the row is gone; the download is
       // what the caller asked for. A failure to store is reported in the header and the download

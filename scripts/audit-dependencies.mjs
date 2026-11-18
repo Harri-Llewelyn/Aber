@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PYTHON_IMAGE = 'python:3.13-slim'
 const PIP_AUDIT = 'pip-audit==2.9.0'
-const REQUIREMENTS = ['ingestion/requirements.txt', 'i3x/requirements.txt']
+const REQUIREMENTS = ['ingestion/requirements.txt', 'i3x/requirements.txt', 'test-harness/requirements.txt']
 const GATE = new Set(['high', 'critical'])
 
 const allow = JSON.parse(readFileSync(resolve(REPO, 'scripts/lint/dependency-allowlist.json'), 'utf8'))

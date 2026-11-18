@@ -8819,7 +8819,8 @@ Two routes to the same destination, and it is worth having both before you need 
 
 **The package.** `?format=aasx` downloads a self-contained OPC container with the 3D model bundled
 in as a supplementary part. This is the handover artefact — it needs nothing from this stack once
-it has been produced.
+it has been produced. Its Environment is JSON by default. `?format=aasx&serialization=xml` writes it
+as XML instead, at `aasx/data.xml`, for a tool that expects XML.
 
 **The REST push.** `npm run aas:push-basyx -- --device=<device name>` exports the JSON
 environment and POSTs it into a running server's `/submodels` and `/shells`. Before you run it:
@@ -8834,10 +8835,11 @@ environment and POSTs it into a running server's `/submodels` and `/shells`. Bef
 To view the result, set the BaSyx Web UI's repository addresses to the AAS Environment, and allow
 the Web UI's origin in BaSyx's own CORS setting.
 
-The second exists because the AASX carries its Environment as JSON at `aasx/aasenv-root.json` —
-valid AAS Part 5, but some BaSyx builds' upload path expects an XML environment part and will
-reject or half-load a JSON one. That is a property of the consumer, not of the package, and not
-something to discover on the morning of a demonstration.
+The second exists because the AASX carries its Environment as JSON by default, at
+`aasx/aasenv-root.json` — valid AAS Part 5, but some BaSyx builds' upload path expects an XML
+environment part and will reject or half-load a JSON one. `serialization=xml` writes the XML part
+for such a build. That is a property of the consumer, not of the package, and not something to
+discover on the morning of a demonstration. The push is unchanged.
 
 Three things the script gets right that a hand-rolled client usually does not, verified against
 `eclipsebasyx/aas-environment:2.0.0-milestone-15`:

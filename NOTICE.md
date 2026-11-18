@@ -185,6 +185,26 @@ Upstream: [`github.com/open223/defs.open223.info`](https://github.com/open223/de
 `ontologies/223p.ttl`. Upstream no longer serves this release; the folder's
 [README](scripts/vocabularies/README.md) says why it is kept here.
 
+## The AAS metamodel schemas — Creative Commons Attribution 4.0
+
+[`test-harness/schemas/AAS_V3_0_JSON_Schema.json`](test-harness/schemas/AAS_V3_0_JSON_Schema.json)
+and [`AAS_V3_0_XML_Schema.xsd`](test-harness/schemas/AAS_V3_0_XML_Schema.xsd) are the Industrial
+Digital Twin Association's JSON and XML schemas for the Asset Administration Shell metamodel,
+IDTA-01001-3-2, copyright the IDTA. They are licensed under
+[Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/), as
+the upstream repository's `LICENSE.txt` says, and are unmodified. The MIT licence above does not
+cover them.
+
+Upstream: [`github.com/admin-shell-io/aas-specs`](https://github.com/admin-shell-io/aas-specs),
+`schemas/json/aas.json` and `schemas/xml/AAS.xsd`, both at commit
+`fdac9f497d388ed4f486c20f3b3ab0df82671445`. The folder's
+[README](test-harness/schemas/README.md) says how they are refreshed.
+
+Only the tests read them: the AAS export suite validates the JSON export against the JSON schema, and
+the XML writer's test reads the XSD. They are in no runtime image. `test-harness/Dockerfile` copies
+the folder into the `aber/test-runner` image, which runs the conformance suites and is not part of
+the deployed stack. The folder's README is copied with them, and gives the licence's address.
+
 ## TimescaleDB — Timescale License
 
 `timescale/timescaledb:2.31.0-pg17` is dual-licensed in a single upstream repository: the core under

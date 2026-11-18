@@ -48,7 +48,7 @@ Nothing is cached between runs: the pinned ESLint installs into `.cache/lint/esl
 | `scan:secrets` | gitleaks 8.30.1 | Every commit on every ref (`--history=head`: the checked-out commit's history), and what is not committed yet | Keys, tokens and passwords, printed redacted | `.gitleaksignore`, by fingerprint, for committed findings only; with `--ignore-union`, every branch's list too, never a pull request head's |
 | `scan:config` | trivy config 0.74.0 | The chart rendered three times from `values-prod.yaml.example`: as it stands, with every optional workload on, and with the workloads a switch replaces (see below); and every Dockerfile | HIGH and CRITICAL misconfiguration: security contexts, root users, host mounts | `scripts/lint/config-allowlist.json`, by check and resource |
 | `scan:source` | Semgrep 1.140.0, `p/default` and `p/security-audit` | Every tracked file except those `.semgrepignore` lists: generated files and the chart's Go templates | Injection, unsafe APIs, workflow supply chain, Dockerfile users | `scripts/lint/semgrep-allowlist.json`, by rule, file and the text of the line |
-| `audit:deps` | npm audit, pip-audit 2.9.0 | `frontend/package-lock.json`, `ingestion/` and `i3x/requirements.txt` | Known advisories, HIGH and above for npm and all of them for Python | `scripts/lint/dependency-allowlist.json`, by advisory id |
+| `audit:deps` | npm audit, pip-audit 2.9.0 | `frontend/package-lock.json`, and `ingestion/`, `i3x/` and `test-harness/requirements.txt` | Known advisories, HIGH and above for npm and all of them for Python | `scripts/lint/dependency-allowlist.json`, by advisory id |
 
 ## The chart scan's three renders
 
