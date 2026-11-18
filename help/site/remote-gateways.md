@@ -50,8 +50,9 @@ token.
    countdown: the token is good for 30 minutes.
 
 Coming back later works differently, on purpose:
-**Gateways → the gateway → Set Up Gateway** (or **Re-issue Setup**, for one that enrolled and never
-published). Somebody may already be carrying that
+**Gateways → the gateway → Set Up Gateway** (or **Re-issue Setup**, for one that enrolled and is not
+online, such as a rebuilt machine). Re-issuing disables the old appliance's broker credential at once.
+Somebody may already be carrying that
 gateway's command or bundle to a machine. So the modal
 **asks first and makes you type the gateway's name** before it mints anything. See
 [`docs/remote-gateways.md`, *Re-issuing, and what it invalidates*](../../docs/remote-gateways.md#6-re-issuing-and-what-it-invalidates).

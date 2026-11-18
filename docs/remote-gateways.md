@@ -183,11 +183,11 @@ appliance's account is disabled as the new setup is issued, and the platform kee
 until it confirms. The new appliance is given a new password when it enrols. The modal says so before
 it mints.
 
-The drawer's **Set Up Gateway** and **Re-issue Setup** actions are deliberately absent once a gateway
-is `ONLINE`. Re-issuing then
-would invalidate the credential a working appliance is using: a destructive action dressed up as a
-convenience. To rotate a live gateway's credential, run
-`node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>`, or re-enrol on purpose.
+The drawer offers **Re-issue Setup** for an enrolled gateway that is `AWAITING_BIRTH`, `OFFLINE` or
+STALE. It is deliberately absent once a gateway is `ONLINE`. Re-issuing then would cut off the
+credential a working appliance is using: a destructive action dressed up as a convenience. To rotate a
+live gateway's credential, run `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>`, or
+re-enrol on purpose.
 
 The old appliance's deploy key stays on the gateway's repository until the new appliance enrols and its
 key replaces it. For an appliance that is lost or stolen, **archive** the gateway instead: that removes

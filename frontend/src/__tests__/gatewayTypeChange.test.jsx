@@ -248,9 +248,11 @@ describe('a gateway that has just become Remote', () => {
     expect(openDrawer().getByRole('button', { name: /Set Up Gateway/ })).toBeInTheDocument()
   })
 
-  it('does not offer it to an enrolled gateway that has gone quiet, nor to one online', async () => {
+  it('offers an enrolled gateway that has gone quiet Re-issue Setup instead, not as the primary', async () => {
     await show(gateway({ enrolled_at: '2026-11-01T09:00:00Z' }))
-    expect(openDrawer().queryByRole('button', { name: /Set Up Gateway|Re-issue Setup/ })).toBeNull()
+    const panel = openDrawer()
+    expect(panel.queryByRole('button', { name: /Set Up Gateway/ })).toBeNull()
+    expect(panel.getByRole('button', { name: /Re-issue Setup/ }).className).not.toMatch(/btn-primary/)
   })
 
   it('does not offer it to one that is online without an enrolment', async () => {
