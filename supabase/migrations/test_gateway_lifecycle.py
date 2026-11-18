@@ -428,12 +428,14 @@ class RegistrationAndSetup(Lifecycle):
         self.issue_setup(gid, user=self.admin)
         self.assertEqual(self.tokens(gid), (1, 0))
 
-    @known_bug("Issuing a setup token for an archived gateway succeeds and moves it to Awaiting setup")
     def test_setup_is_refused_to_an_archived_gateway(self):
         gid, _ = self.gateway("remote")
         self.archive(gid)
-        self.refused(self.manager, "SELECT * FROM public.issue_gateway_enrollment_token(%s, 30);", (gid,),
-                     psycopg2.errors.InvalidParameterValue)
+        refusal = self.refused(self.manager, "SELECT * FROM public.issue_gateway_enrollment_token(%s, 30);", (gid,),
+                               psycopg2.errors.InvalidParameterValue)
+        self.assertIn("is archived; restore it before issuing a setup token", str(refusal))
+        self.assertEqual(self.tokens(gid), (0, 0))
+        self.assertEqual(self.row(gid)["status"], "OFFLINE", "the archived row was moved to Awaiting setup")
 
     def test_an_unused_token_expires_and_the_gateway_goes_on_waiting(self):
         gid, _ = self.gateway("remote", status="PENDING_ENROLLMENT")

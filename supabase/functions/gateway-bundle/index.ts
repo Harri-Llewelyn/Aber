@@ -324,7 +324,7 @@ export default async function handler(req: Request): Promise<Response> {
     // Read the gateway BEFORE minting anything, so a bad id or a host-run gateway costs no token.
     const { data: gateway, error: gatewayError } = await supabaseUser
       .from("gateways")
-      .select("id, name, sparkplug_id, sparkplug_group, deployment")
+      .select("id, name, sparkplug_id, sparkplug_group, deployment, is_archived")
       .eq("id", gatewayId)
       .maybeSingle();
 
@@ -355,6 +355,15 @@ export default async function handler(req: Request): Promise<Response> {
         details:
           "Enrolment bundles are for Aber's gateway appliance. A Third-party gateway is issued " +
           "its broker credential from its drawer instead.",
+      });
+    }
+    if (gateway.is_archived) {
+      // Refused by the RPC too. An archived gateway cannot enrol, so a token for it would only move
+      // the row to Awaiting setup.
+      return json(400, {
+        error: "That gateway is archived",
+        details:
+          "Restore it from Archived Entities or its drawer, then set it up. No enrolment token was minted.",
       });
     }
 
