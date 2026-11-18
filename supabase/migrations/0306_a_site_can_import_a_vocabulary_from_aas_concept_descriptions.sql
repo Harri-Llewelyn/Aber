@@ -21,7 +21,7 @@
 --   * An import skips every id that is already defined, by a seeded vocabulary, by another site
 --     vocabulary or earlier in the same file, and answers with the new row and each skipped id and why.
 --     site_vocabulary_holders() says which vocabulary holds an id, so the preview and the import agree.
---   * concept_definitions gains a seventh arm, last in precedence, for the concepts of a vocabulary whose
+--   * concept_definitions gains an arm, last in precedence, for the concepts of a vocabulary whose
 --     definitions the Administrator confirmed shareable. Its standard is NULL. A vocabulary that is not
 --     shareable defines nothing there: an export carries its preferred names and defers to the file.
 --   * metric_catalog.site_vocabulary_id links a metric started from an imported concept to the file's
@@ -234,6 +234,8 @@ CREATE OR REPLACE FUNCTION public.site_vocabulary_holders(p_ids text[]) RETURNS 
         FROM public.idta_submodel_templates t WHERE t.semantic_id = ANY (p_ids)
       UNION ALL
       SELECT 1, v.semantic_id, 'ASHRAE 223P'::text FROM public.ashrae223_vocabulary v WHERE v.semantic_id = ANY (p_ids)
+      UNION ALL
+      SELECT 1, v.semantic_id, 'QUDT'::text FROM public.qudt_quantity_kinds v WHERE v.semantic_id = ANY (p_ids)
       UNION ALL
       SELECT 1, v.semantic_id, 'OPC UA'::text FROM public.opcua_vocabulary v WHERE v.semantic_id = ANY (p_ids)
       UNION ALL
@@ -600,12 +602,12 @@ COMMENT ON FUNCTION public.set_site_vocabulary_sharing(uuid, boolean) IS
 -- -------------------------------------------------------------------------------------------------
 -- 6. Definitions follow the import
 -- -------------------------------------------------------------------------------------------------
--- 0302's view with the seventh arm, the concepts of an imported vocabulary whose definitions are shared
+-- 0304's view with one more arm, the concepts of an imported vocabulary whose definitions are shared
 -- (site_vocabularies.definitions_shareable), after every published standard. Their standard is NULL, not
 -- a label: a site's own file is no standard Aber ships, and the dashboard's list of standards stays
 -- closed. A vocabulary that is not shared defines nothing here, so the exporter carries the file's
 -- preferred names and defers the definitions to it. The columns do not change, so the grants and
--- security_invoker stay. 0302 declared the view with six arms, and this file is the one that must stay
+-- security_invoker stay. 0304 declared the view with seven arms, and this file is the one that must stay
 -- complete when a later file adds another.
 CREATE OR REPLACE VIEW public.concept_definitions WITH (security_invoker='true') AS
  SELECT DISTINCT ON (c.semantic_id)
@@ -620,20 +622,23 @@ CREATE OR REPLACE VIEW public.concept_definitions WITH (security_invoker='true')
          SELECT 2, v.name, v.semantic_id, v.name, v.description, 'ASHRAE 223P'::text
            FROM public.ashrae223_vocabulary v
         UNION ALL
-         SELECT 3, v.companion_spec || ' ' || v.name, v.semantic_id, v.name, v.description,
+         SELECT 3, v.semantic_id, v.semantic_id, v.name, v.description, 'QUDT'::text
+           FROM public.qudt_quantity_kinds v
+        UNION ALL
+         SELECT 4, v.companion_spec || ' ' || v.name, v.semantic_id, v.name, v.description,
             'OPC UA'::text
            FROM public.opcua_vocabulary v
         UNION ALL
-         SELECT 4, v.name, v.semantic_id, v.name, v.description, 'ISO 22400'::text
+         SELECT 5, v.name, v.semantic_id, v.name, v.description, 'ISO 22400'::text
            FROM public.iso22400_vocabulary v
         UNION ALL
-         SELECT 5, v.kind || ' ' || v.name, v.semantic_id, v.name, v.description, 'MTConnect'::text
+         SELECT 6, v.kind || ' ' || v.name, v.semantic_id, v.name, v.description, 'MTConnect'::text
            FROM public.mtconnect_vocabulary v
         UNION ALL
-         SELECT 6, v.name, v.semantic_id, v.name, v.description, 'VDA 5050'::text
+         SELECT 7, v.name, v.semantic_id, v.name, v.description, 'VDA 5050'::text
            FROM public.vda5050_vocabulary v
         UNION ALL
-         SELECT 7, c.semantic_id, c.semantic_id, c.preferred_name, c.definition, NULL::text
+         SELECT 8, c.semantic_id, c.semantic_id, c.preferred_name, c.definition, NULL::text
            FROM public.site_vocabulary_concepts c
            JOIN public.site_vocabularies f ON f.id = c.vocabulary_id
           WHERE f.definitions_shareable) c
@@ -643,7 +648,7 @@ CREATE OR REPLACE VIEW public.concept_definitions WITH (security_invoker='true')
 
 ALTER VIEW public.concept_definitions OWNER TO postgres;
 
-COMMENT ON VIEW public.concept_definitions IS 'One row per semantic id a vocabulary defines: the concept''s name and its vocabulary''s own definition text. IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect and VDA 5050, then the concepts of an imported site vocabulary whose definitions the Administrator confirmed shareable, which carry no standard. An id held by two vocabularies takes the first in that order. The AAS exporter reads it for ConceptDescription definitions.';
+COMMENT ON VIEW public.concept_definitions IS 'One row per semantic id a vocabulary defines: the concept''s name and its vocabulary''s own definition text. IDTA, ASHRAE 223P, QUDT, OPC UA, ISO 22400, MTConnect and VDA 5050, then the concepts of an imported site vocabulary whose definitions the Administrator confirmed shareable, which carry no standard. An id held by two vocabularies takes the first in that order. The AAS exporter reads it for ConceptDescription definitions.';
 
 -- Reference data, read as the vocabularies are: security_invoker applies their SELECT policies to
 -- the caller, so aas-api's caller-bound client reads it as itself.
