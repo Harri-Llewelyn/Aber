@@ -176,14 +176,22 @@ Re-issue when:
 
 * the token expired before the appliance was started (the modal counts down and says so);
 * the appliance was replaced, or its volume was destroyed;
-* a gateway stays in `AWAITING_BIRTH` and never publishes. The modal names this case, because
-  re-issuing there also revokes the broker credential its appliance already holds.
+* a gateway stays in `AWAITING_BIRTH` and never publishes.
+
+**Re-issuing for a gateway whose appliance enrolled revokes its broker credential at once.** The old
+appliance's account is disabled as the new setup is issued, and the platform keeps asking the broker
+until it confirms. The new appliance is given a new password when it enrols. The modal says so before
+it mints.
 
 The drawer's **Set Up Gateway** and **Re-issue Setup** actions are deliberately absent once a gateway
 is `ONLINE`. Re-issuing then
 would invalidate the credential a working appliance is using: a destructive action dressed up as a
 convenience. To rotate a live gateway's credential, run
 `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>`, or re-enrol on purpose.
+
+The old appliance's deploy key stays on the gateway's repository until the new appliance enrols and its
+key replaces it. For an appliance that is lost or stolen, **archive** the gateway instead: that removes
+the key at once ([*An appliance that is lost, stolen or scrapped*](#an-appliance-that-is-lost-stolen-or-scrapped)).
 
 ### A rebuilt appliance is a re-issue, and keeps its repository
 

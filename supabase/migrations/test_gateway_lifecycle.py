@@ -398,14 +398,34 @@ class RegistrationAndSetup(Lifecycle):
         self.assertEqual(len(self.consume(second)), 1)
 
     def test_setup_for_an_appliance_that_never_published_returns_it_to_awaiting_setup(self):
-        gid, _ = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
+        gid, sparkplug_id = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
         enrolled_at = self.row(gid)["enrolled_at"]
         self.issue_setup(gid)
         row = self.row(gid)
         self.assertEqual(row["status"], "PENDING_ENROLLMENT")
-        self.assertEqual(row["enrolled_at"], enrolled_at, "the enrolment is the record of the credential it holds")
+        self.assertEqual(row["enrolled_at"], enrolled_at, "the enrolment is kept, older than the stamp")
         self.assertEqual(self.tokens(gid), (1, 0))
-        self.assertEqual(self.actions(gid), ["INSERT", "UPDATE"])
+        self.assertEqual(self.actions(gid), ["INSERT", "UPDATE"], "the status and the stamp are one row")
+        self.assertIsNotNone(row["credential_revoked_at"], "the enrolled appliance's credential is ended at once")
+        self.assertEqual(self.revocations_asked(sparkplug_id), 1)
+        self.assertTrue(self.request_recorded(gid))
+        self.assertFalse(self.holds_credential(gid))
+
+    def test_setup_for_a_rebuilt_appliance_revokes_the_old_one_s_credential_at_once(self):
+        gid, sparkplug_id = self.gateway("remote", status="OFFLINE", enrolled=True)
+        self.issue_setup(gid)
+        row = self.row(gid)
+        self.assertEqual(row["status"], "PENDING_ENROLLMENT")
+        self.assertIsNotNone(row["enrolled_at"])
+        self.assertIsNotNone(row["credential_revoked_at"])
+        self.assertEqual(self.revocations_asked(sparkplug_id), 1)
+        self.assertEqual(self.tokens(gid), (1, 0))
+        # The new appliance's enrolment is newer than the stamp, so it holds the credential.
+        raw = self.issue_setup(gid)
+        self.assertEqual(self.revocations_asked(sparkplug_id), 1, "a second setup in a row revokes nothing more")
+        self.old_stamp(gid)
+        self.enrol(gid, raw)
+        self.assertTrue(self.holds_credential(gid))
 
     def test_setup_is_refused_to_every_type_that_is_not_remote(self):
         for kind in DASHBOARD_ISSUED:

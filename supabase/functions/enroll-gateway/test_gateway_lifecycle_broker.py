@@ -4,7 +4,7 @@
 #     broker has Dynamic Security, so only a stack can say whether an account is enabled, disabled or
 #     absent after a step, and whether the platform's record agrees. A Host and a Third-party gateway
 #     are issued, re-issued, archived, restored and deleted; a Remote gateway is enrolled through
-#     enroll-gateway, type-changed, archived, restored and deleted. A revocation the
+#     enroll-gateway, set up again, type-changed, archived, restored and deleted. A revocation the
 #     broker never received is asked again after the gateway is archived and deleted. A record that
 #     says a credential is held while the broker refuses it, or the reverse, is silent: nothing errors
 #     and the gateway just stays out. Needs no gateway online: it connects as the account it has just
@@ -464,11 +464,38 @@ class RemoteEnrolled(BrokerLifecycle):
         gid, sparkplug_id = self.new_gateway("remote")
         first = self.setup_and_enrol(gid)
         before = len(broker_clients())
-        second = self.setup_and_enrol(gid)
+        token = self.issue_setup(gid)
+        # The setup ends the first appliance's credential at once. Enrolling before that lands would
+        # race it, which no person standing at an appliance does.
+        self.wait_for_account(sparkplug_id, disabled=True)
+        status, payload = enroll(token, agent_version="1.4.2")
+        self.assertEqual(status, 200, payload)
+        second = payload["mqtt_password"]
         self.assertNotEqual(first, second)
         self.assertEqual(len(broker_clients()), before, "a second enrolment made a second account")
         self.assert_accepted(sparkplug_id, second)
         self.assert_refused(sparkplug_id, first)
+        self.assert_agree(gid, sparkplug_id)
+
+    def test_setting_up_an_enrolled_gateway_again_disables_its_account_at_once(self):
+        gid, sparkplug_id = self.new_gateway("remote")
+        old = self.setup_and_enrol(gid)
+        self.assert_accepted(sparkplug_id, old)
+
+        token = self.issue_setup(gid)
+        self.wait_for_account(sparkplug_id, disabled=True)
+        self.assert_refused(sparkplug_id, old)
+        record = self.record(gid)
+        self.assertEqual(record["status"], "PENDING_ENROLLMENT")
+        self.assertIsNotNone(record["credential_revoked_at"])
+        self.assert_agree(gid, sparkplug_id)
+
+        # The new appliance is given a credential of its own, and the old one stays out.
+        status, payload = enroll(token, agent_version="1.4.2")
+        self.assertEqual(status, 200, payload)
+        self.wait_for_account(sparkplug_id, disabled=False)
+        self.assert_accepted(sparkplug_id, payload["mqtt_password"])
+        self.assert_refused(sparkplug_id, old)
         self.assert_agree(gid, sparkplug_id)
 
     def test_leaving_remote_disables_the_account_and_the_record_says_so(self):
