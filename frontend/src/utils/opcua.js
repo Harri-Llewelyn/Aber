@@ -65,11 +65,12 @@ export function opcuaSections(vocabulary) {
   }
 
   const hints = {
-    'OPC 40001 Machinery': 'Identification and lifecycle state common to any machine.',
-    'OPC 40010 Robotics': 'Motion device model — axes, safety states and task control.',
-    'OPC 40001-4 Machinery Energy': 'Utility flow measurements — compressed air, water and gas.',
-    'OPC 40501 Machine Tools': 'Channel overrides and state, spindles, production counters and tool management.',
-    'OPC 40540 Additive Manufacturing': 'Feedstock condition and in-process sensor readings.',
+    'OPC 40001 Machinery': 'Identification, lifecycle state and operation counters common to any machine.',
+    'OPC 40001-2 Machinery Process Values': 'The shape of any process value: the reading, setpoint, limits and status. The vendor names each one.',
+    'OPC 40010 Robotics': 'Motion device model — axes, motors, controller, safety states and task control.',
+    'OPC 40001-4 Machinery Energy': 'Utility flow measurements (compressed air, water and gas) and non-electrical energy totals.',
+    'OPC 40501 Machine Tools': 'Channel overrides and state, spindles, production counters, tool management, lasers, EDM generators and the stacklight.',
+    'OPC 40540 Additive Manufacturing': 'Feedstock and the printing technology. A printer is a machine tool: Machine Tools and Machinery apply to it too, and its in-process readings are Machinery Process Values the vendor names.',
     'OPC 30050 PackML': 'Unit status, mode, and the state and mode time accumulators.'
   }
 

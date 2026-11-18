@@ -47,7 +47,10 @@ node scripts/run-python-suites.mjs --list
 # `.semgrepignore` that its report does not list as read. And the signing set
 # (`scripts/lib/signing-set.mjs`) completing values set up before 1.8.0, HS256 or ES256 with the
 # `oct` key, as `npm run setup` and `keys:rotate -- --signing-keys` apply it: what each gains, what
-# it keeps, and that a second run changes nothing. And the order the drift and mirror runners run
+# it keeps, and that a second run changes nothing. And the blocks the OPC UA vocabulary is seeded in
+# (`scripts/lib/opcua-seed-blocks.mjs`): which block seeds an entry, how a group is registered and
+# reworded, and what the generator writes into a block and what it only verifies once its migration
+# is released. And the order the drift and mirror runners run
 # their checks in, and the names they refuse (`scripts/lib/numbered-modules.mjs`). And the release's
 # fold of `unreleased/` into the upgrade guide and the migrations' README (`scripts/fold-unreleased.mjs`):
 # the order, the links rewritten, and that a second run changes nothing.

@@ -3610,9 +3610,9 @@ paths:
       tags: [Registry]
       summary: Read the OPC UA companion-specification data points
       description: |
-        75 data points from six companion specifications: OPC 40001 (Machinery), OPC 40001-4
-        (Machinery Energy), OPC 40010 (Robotics), OPC 30050 (PackML), OPC 40501 (Machine Tools)
-        and OPC 40540 (Additive Manufacturing).
+        124 data points from seven companion specifications: OPC 40001 (Machinery), OPC 40001-2
+        (Machinery Process Values), OPC 40001-4 (Machinery Energy), OPC 40010 (Robotics), OPC 30050
+        (PackML), OPC 40501 (Machine Tools) and OPC 40540 (Additive Manufacturing).
 
         **`node_id` and `semantic_id` are the ExpandedNodeId the specification publishes** —
         `nsu=<namespace URI>;i=<id>`, the NodeId its NodeSet2 XML declares for the data point.

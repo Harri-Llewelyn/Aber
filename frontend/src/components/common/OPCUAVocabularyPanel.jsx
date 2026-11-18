@@ -30,7 +30,7 @@ export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
   return {
     id: STANDARDS.OPCUA,
     label: 'OPC UA',
-    hint: 'Companion specification data points — machinery, robotics, machine tools, additive, PackML and energy.',
+    hint: 'Companion specification data points — machinery, process values, robotics, machine tools, additive, PackML and energy.',
     searchPlaceholder: 'Search data points…',
     sections,
     isUsed: item =>
