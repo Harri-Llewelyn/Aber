@@ -705,7 +705,6 @@ class ChangingTheType(Lifecycle):
         self.restore(gid)
         self.assertEqual(self.row(gid)["status"], "OFFLINE")
 
-    @known_bug("gateway_has_broker_credential() counts a Remote gateway's enrolment after the credential was revoked")
     def test_a_remote_gateway_changed_away_and_back_holds_no_credential(self):
         gid, sparkplug_id = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
         self.change_type(gid, "host")
@@ -713,7 +712,6 @@ class ChangingTheType(Lifecycle):
         self.old_stamp(gid)
         self.assertFalse(self.holds_credential(gid), "the credential was revoked and the appliance has not enrolled again")
 
-    @known_bug("gateway_has_broker_credential() counts a Remote gateway's enrolment after the credential was revoked")
     def test_leaving_remote_again_asks_for_no_second_revocation(self):
         gid, sparkplug_id = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
         self.change_type(gid, "host")
@@ -941,14 +939,14 @@ class DeletingAndAutoDeleting(Lifecycle):
         self.cur.execute("SELECT * FROM public.gateways WHERE id = %s;", (gid,))
         return self.cur.fetchone()
 
-    def test_the_retention_job_asks_for_an_enrolled_remote_gateway_s_account_once_more(self):
+    def test_the_retention_job_asks_for_nothing_where_archiving_disabled_the_account(self):
         gid, sparkplug_id = self.gateway("remote", status="ONLINE", enrolled=True)
         self.archive(gid)
         self.expire(gid)
         before = self.revocations_asked(sparkplug_id)
         self.purge()
         self.assertIsNone(self.row_or_none(gid))
-        self.assertEqual(self.revocations_asked(sparkplug_id), before + 1)
+        self.assertEqual(self.revocations_asked(sparkplug_id), before, "the account was disabled when the gateway was archived")
         self.assertEqual(self.actions(gid)[-1], "DELETE")
 
     def test_a_deleted_gateway_takes_its_tokens_and_its_copy_and_leaves_a_tombstone_if_it_was_archived(self):

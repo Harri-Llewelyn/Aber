@@ -347,9 +347,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const remoteWithheld = !proposeMode && enrolmentBlocked && formType === GATEWAY_TYPES.REMOTE
     && (!editing || editing.deployment !== 'remote')
 
-  // A Remote gateway holds the credential it enrolled for, the remote arm of
-  // gateway_has_broker_credential(). The other types' answer reads the Audit Trail, so it is asked
-  // for the one gateway whose dialog opens.
+  // A Remote gateway holds the credential it enrolled for while no revocation came after it, as the
+  // remote arm of gateway_has_broker_credential() reads it. The other types' answer reads the Audit
+  // Trail, so it is asked for the one gateway whose dialog opens.
   const editingId = showForm && editing && !proposeMode ? editing.gateway_id : null
   const editingRemote = editing?.deployment === 'remote'
   useEffect(() => {
@@ -362,7 +362,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       .catch(() => {})
     return () => { cancelled = true }
   }, [editingId, editingRemote])
-  const holdsCredential = editingRemote ? !!editing.enrolled_at : editingHoldsCredential
+  const holdsCredential = editingRemote ? enrolmentStands(editing) : editingHoldsCredential
   // What saving the chosen type ends, said in the Type hint and asked before Save where a
   // credential ends. Null when registering, proposing, or keeping the type.
   const typeChange = editingId ? gatewayTypeChange(editing, formType, holdsCredential) : null
