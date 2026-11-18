@@ -724,7 +724,7 @@ height is not known, and above the actions it could push Edit Details off the dr
   - **A row joins the block by `health: true`**, and `foldHealthRows()` (`utils/gatewayHealth.js`)
     folds the rows the kind shows (`gatewayShowsRow()`) into one group. A kind that shows none has
     no block, and nor has a gateway that has not reported its health. A new row of the same kind
-    (how much the gateway sends, which devices still report) is marked the same way.
+    is marked the same way. What arrives from the gateway is not one: it is a group of its own, below.
   - **The summary is the worst state in words, never a colour alone.** "Disk 3.0 GiB free" or "CA
     expires in 12d", with "and 2 more" when others need attention, or "Nothing needs attention".
     The tone adds a circle (danger) or a triangle (warning) and the tone's text colour.
@@ -734,6 +734,23 @@ height is not known, and above the actions it could push Edit Details off the dr
   - **The block alone does not bring both actions into view at 1920×917.** On the fixture gateway
     Launch UI starts at 1,018px and Archive Gateway ends at 1,163px, against 760px of drawer. What
     is left is the Repository paragraph, the three forge rows and the identifiers.
+- **What arrives from a gateway is a group of its own, read on its own.** **Arriving** holds
+  Messages Per Second (5m), Sequence Gaps (1h) and Messages Missed (1h), and is closed when the
+  drawer opens, as Health is. Its summary says the rate and whether a gap was counted ("12.5
+  messages/s · no gaps"), and a gap adds the warning triangle and the amber text. Each device in
+  the list has the time of its last reading beside it, or *No reading yet*.
+  - **The two come from two reads.** The figures are `gateway_arrivals` (Prometheus, once a
+    minute) and the times are `gateway_devices_last_reading()` (the historian, as the drawer
+    opens), which `useGatewayArrivals()` starts separately and settles separately. A historian that
+    cannot be read makes every time *Last reading not observed* and leaves the figures standing.
+    Neither read reports the page as having stopped updating.
+  - **A figure with no fresh answer reads *Not observed*,** in the muted words of an empty field,
+    never as a zero and never as the last value. The view blanks a figure Prometheus did not
+    evaluate in the last 3 minutes (`ARRIVAL_FRESH_MINUTES`). A gateway ingestion has counted
+    nothing from reads 0, because ingestion was observed. The label tip says which it is.
+  - **Not for an archived gateway or the Playback gateway,** which are not read either. The group
+    shows once the first read of the gateway has settled, so another gateway's figures never sit
+    under this one's name.
 - **A missing repository is one line.** `GatewayRepositoryPanel` draws the drawer's field shape:
   the label *Repository* with a help tip, then one muted line such as *None: edit it in Node-RED*.
   The reason is in the tip, in about 35 words. Every case without a repository does the same:

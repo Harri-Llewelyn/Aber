@@ -537,7 +537,7 @@ Zero devices disables the rule; the first device someone registers re-arms it. T
 through `platform_health` rather than `public.devices` because `grafana_reader` holds `SELECT` on
 the view only.
 
-The message rate is summed across `msg_type`, because a daemon receiving only NDATA is still
+The message rate is summed across `msg_type` and `edge_node`, because a daemon receiving only NDATA is still
 consuming, and carries `or vector(0)` because the counter does not exist until the first message:
 without it Prometheus returns an empty result, Grafana reads NoData, and `Alerting` would fire
 before the gate ran. A daemon that has gone away also yields `vector(0)`, and with devices
@@ -581,7 +581,7 @@ owns.
 
 Critical, `for: 2m`. Both halves of the condition matter: `$B < 1` is the daemon holding no
 connection, `$E > 0` is somebody publishing, with `or vector(0)` for the same reason the silent
-rule needs it and summed across `msg_type` for the same reason. On an idle stack the gauge alone is
+rule needs it and summed across `msg_type` and `edge_node` for the same reason. On an idle stack the gauge alone is
 not data loss; that case is the next rule. Two minutes because the daemon holds what arrives in its
 queue and keeps trying, so two minutes means the historian is not coming back by itself, and a busy
 site's queue may already be full (`ingestion/README.md`, *Connection handling*). `db_connected` cannot see a connection dropped by

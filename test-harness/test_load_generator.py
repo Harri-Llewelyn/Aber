@@ -125,8 +125,11 @@ class ExpositionTest(unittest.TestCase):
         # run of this generator read zero received messages for exactly this reason, while the
         # write path was busy -- the fixture had been written to the topic's spelling, not the
         # daemon's, so the suite agreed with the bug.
-        'aber_ingestion_messages_total{msg_type="ddata"} 900.0',
-        'aber_ingestion_messages_total{msg_type="dbirth"} 12.0',
+        # And labelled with the edge node, in name order, as prometheus_client writes them: the
+        # type is read out of the labels, never matched as a whole label string.
+        'aber_ingestion_messages_total{edge_node="gwy1",msg_type="ddata"} 600.0',
+        'aber_ingestion_messages_total{edge_node="gwy2",msg_type="ddata"} 300.0',
+        'aber_ingestion_messages_total{edge_node="gwy1",msg_type="dbirth"} 12.0',
         'aber_ingestion_messages_dropped_total{reason="write_queue_full"} 7.0',
         'aber_ingestion_messages_dropped_total{reason="gateway_binding"} 3.0',
         'aber_ingestion_write_seconds_bucket{le="0.005"} 10.0',
@@ -162,6 +165,25 @@ class ExpositionTest(unittest.TestCase):
 
     def test_births_are_counted_across_both_birth_types(self):
         self.assertEqual(self.sample.received_of("DBIRTH", "NBIRTH"), 12.0)
+
+    def test_every_edge_node_s_series_is_summed(self):
+        self.assertEqual(self.sample.received_ddata(), 900.0)
+        self.assertEqual(self.sample.received_of("ddata", "dbirth"), 912.0)
+
+    def test_a_message_counted_under_no_edge_node_is_summed_too(self):
+        sample = load_generator.parse_exposition("\n".join([
+            'aber_ingestion_messages_total{edge_node="",msg_type="ddata"} 5.0',
+            'aber_ingestion_messages_total{edge_node="gwy1",msg_type="ddata"} 7.0',
+        ]))
+        self.assertEqual(sample.received_ddata(), 12.0)
+
+    def test_a_label_string_reads_as_its_pairs(self):
+        self.assertEqual(load_generator.label_values('edge_node="gwy1",msg_type="ddata"'),
+                         {"edge_node": "gwy1", "msg_type": "ddata"})
+        self.assertEqual(load_generator.label_values('edge_node="",msg_type="ndata"'),
+                         {"edge_node": "", "msg_type": "ndata"})
+        self.assertEqual(load_generator.label_values('reason="a \\"b\\" c"'), {"reason": 'a "b" c'})
+        self.assertEqual(load_generator.label_values(""), {})
 
     def test_drops_are_summed_across_reasons_and_readable_one_by_one(self):
         self.assertEqual(self.sample.dropped_total(), 10.0)
@@ -800,7 +822,8 @@ class RestartTest(unittest.TestCase):
     """
 
     def sample(self, ddata):
-        return load_generator.parse_exposition(f'aber_ingestion_messages_total{{msg_type="ddata"}} {ddata}')
+        return load_generator.parse_exposition(
+            f'aber_ingestion_messages_total{{edge_node="gwy1",msg_type="ddata"}} {ddata}')
 
     def test_a_counter_that_went_backwards_is_a_restart(self):
         self.assertTrue(load_generator.counters_reset(self.sample(9000), self.sample(40)))

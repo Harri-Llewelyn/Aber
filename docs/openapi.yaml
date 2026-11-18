@@ -464,6 +464,92 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/GatewayStatus' } }
 
+  /rest/v1/gateway_arrivals:
+    get:
+      tags: [Assets]
+      summary: What arrives from each gateway, as the drawer shows it
+      description: |
+        One row per gateway the caller may read (`0303`), from `gateway_arrival_figures`, which
+        `refresh_gateway_arrivals()` writes every minute from Prometheus over pg_net: the gateway's
+        Sparkplug messages per second over 5 minutes, and the sequence gaps and messages missed in
+        the last hour (the second is a lower bound).
+
+        **Every figure is `null` unless Prometheus evaluated it within the last 3 minutes**, so a
+        stopped job, no Prometheus, or an answer that did not observe ingestion reads as not
+        observed and never as the last value. A gateway ingestion has counted nothing from reads `0`
+        while ingestion is observed. Whoever can read a gateway reads its row; no role writes it.
+        **Read this view, not `gateway_arrival_figures`**, which holds the same rows without the
+        3-minute rule.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - name: gateway_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+      responses:
+        '200':
+          description: One row for each gateway.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/GatewayArrival' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this view.' }
+
+  /rest/v1/gateway_arrival_figures:
+    get:
+      tags: [Assets]
+      summary: The rows behind `gateway_arrivals`, without its freshness rule
+      description: |
+        The table `refresh_gateway_arrivals()` writes (`0303`): one row per gateway, rewritten every
+        minute, `null` when the last answer did not observe ingestion. It does not blank a row whose
+        answer is old, so a job that has stopped leaves the last answer here. Read `gateway_arrivals`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - name: gateway_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+      responses:
+        '200':
+          description: One row for each gateway the caller may read.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/GatewayArrival' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
+  /rest/v1/rpc/gateway_devices_last_reading:
+    post:
+      tags: [Assets]
+      summary: When each device of a gateway last sent a reading
+      description: |
+        Each device of the gateway that is not archived, with the time of the newest reading of any
+        of its series, read as the caller from the historian's `telemetry_latest` over the FDW
+        (`0303`). A device with no reading has `last_reading_at: null`. A gateway with no device does
+        not touch the historian. When the historian cannot be reached the call fails (`503`), which
+        is not the same as no reading.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_gateway_id]
+              properties:
+                p_gateway_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: One row for each device.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    device_id: { type: string, format: uuid }
+                    last_reading_at: { type: string, format: date-time, nullable: true }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   /rest/v1/devices:
     get:
       tags: [Assets]
@@ -7589,6 +7675,35 @@ components:
               description: 'STALE when the last heartbeat is older than 90 seconds. Never stored.'
             is_stale: { type: boolean, readOnly: true }
             heartbeat_age_seconds: { type: integer, nullable: true, readOnly: true }
+
+    GatewayArrival:
+      type: object
+      description: What Prometheus holds for one gateway's edge node, read once a minute (`0303`).
+      properties:
+        gateway_id: { type: string, format: uuid }
+        messages_per_second:
+          type: number
+          nullable: true
+          description: >-
+            Sparkplug messages the ingestion service acted on from the gateway, per second over
+            the last 5 minutes. `null` when not observed.
+        sequence_gaps_last_hour:
+          type: integer
+          nullable: true
+          description: >-
+            Times in the last hour that a message's sequence number was not the next one: at least
+            one message never arrived. `null` when not observed.
+        messages_missed_last_hour:
+          type: integer
+          nullable: true
+          description: >-
+            Messages those gaps skipped over, as a lower bound: a gap larger than 255 wraps and is
+            undercounted. `null` when not observed.
+        observed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When Prometheus evaluated the figures; `null` with them.
 
     Device:
       type: object
