@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { compare, need, ok, problems, read, ROOT, SCHEMA } from './lib.mjs';
+import { compare, need, ok, read, ROOT, SCHEMA } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
 // 128. The words an imported vocabulary's file is judged by, in the exporter and the dashboard (0306).
