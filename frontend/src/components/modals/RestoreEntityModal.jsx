@@ -25,8 +25,8 @@ export function RestoreEntityModal({ type, name, credentialRevoked = false, forg
         'one it had.' +
         (type === 'gateway' && credentialRevoked
           ? ' Its broker credential was revoked when it was archived and is not restored with it:' +
-            ' issue it again from its drawer on the Gateways page (Generate Broker Credential) for a Host or' +
-            ' Simulated gateway, or set a Remote gateway up again from its drawer (Set Up Gateway)' +
+            ' issue it again from its drawer on the Gateways page (Generate Broker Credential) for a Host,' +
+            ' Simulated or Third-party gateway, or set a Remote gateway up again from its drawer (Set Up Gateway)' +
             ' with a fresh command or bundle, before it can publish again.'
           : '') +
         (type === 'gateway' && forgeArchived
