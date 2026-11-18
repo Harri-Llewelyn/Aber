@@ -569,6 +569,45 @@ export interface BuiltShell {
 }
 
 /**
+ * The names a device's other identifiers go under in `specificAssetIds`. Consumers match on them,
+ * so a rename is a break. `partInstanceId` is Catena-X's name; its `manufacturerPartId` is not
+ * written, because `device_nameplate` has no article-number column.
+ */
+export const SPECIFIC_ASSET_ID_NAMES = {
+  serialNumber: "partInstanceId",
+  productUri: "uriOfTheProduct",
+  sparkplugId: "sparkplugId",
+} as const;
+
+/** The AAS schema's `SpecificAssetId.value` limit. */
+const MAX_SPECIFIC_ASSET_ID_LENGTH = 2048;
+
+/** One entry of `assetInformation.specificAssetIds`. */
+export interface SpecificAssetId {
+  name: string;
+  value: string;
+  semanticId?: ReturnType<typeof semanticReference>;
+}
+
+/**
+ * The `specificAssetIds` of the candidates that have a value, in order, or undefined when none
+ * does: the schema's `minItems` is 1, so the key is left out. It takes identifiers, not a device
+ * row, so a shell that is not a device can name its own. A value over 2048 characters is left out,
+ * not cut.
+ */
+export function buildSpecificAssetIds(
+  candidates: { name: string; value: unknown; semanticId?: SpecificAssetId["semanticId"] }[],
+): SpecificAssetId[] | undefined {
+  const ids: SpecificAssetId[] = [];
+  for (const { name, value, semanticId } of candidates) {
+    const text = value === null || value === undefined ? "" : String(value);
+    if (text.trim() === "" || text.length > MAX_SPECIFIC_ASSET_ID_LENGTH) continue;
+    ids.push({ name, value: text, semanticId });
+  }
+  return ids.length > 0 ? ids : undefined;
+}
+
+/**
  * Compose one device's AAS Environment from the rows `loadDeviceRecord()` returned. Pure: no I/O
  * and no environment beyond the module constants, so the same graph is reproducible from a fixture.
  */
@@ -824,6 +863,27 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     });
   }
 
+  // The serial number and the product URI are what the Nameplate exports, with its semantic ids,
+  // so the shell names them once. A replay lane is a recording of an asset, not a second asset,
+  // and its DBIRTH repeats the original's serial number: it names none.
+  const nameplateElement = (idShort: string) =>
+    nameplateProps.find((element) => element?.idShort === idShort);
+  const serialNumber = nameplateElement("SerialNumber");
+  const productUri = nameplateElement("URIOfTheProduct");
+  const specificAssetIds = device.shadow_of ? undefined : buildSpecificAssetIds([
+    {
+      name: SPECIFIC_ASSET_ID_NAMES.serialNumber,
+      value: serialNumber?.value,
+      semanticId: serialNumber?.semanticId,
+    },
+    {
+      name: SPECIFIC_ASSET_ID_NAMES.productUri,
+      value: productUri?.value,
+      semanticId: productUri?.semanticId,
+    },
+    { name: SPECIFIC_ASSET_ID_NAMES.sparkplugId, value: device.sparkplug_id },
+  ]);
+
   const shell = {
     modelType: "AssetAdministrationShell",
     id: `${globalAssetId}/shell`,
@@ -831,6 +891,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     assetInformation: {
       assetKind: "Instance",
       globalAssetId,
+      specificAssetIds,
     },
     submodels: submodels.map((s) => ({
       type: "ModelReference",
