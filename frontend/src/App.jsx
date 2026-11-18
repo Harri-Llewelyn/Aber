@@ -791,7 +791,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {/* Ungated: every role reads. `userRole` decides which write controls the page offers, so it
                 waits for the role, as Settings does; the database refuses a write from anyone else. */}
             {tab === 'automations'    && !loadingPerms && <AutomationsTab showToast={showToast} userRole={userRole} hasPermission={hasPermission} />}
-            {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
+            {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} showToast={showToast} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
             {tab === 'system'         && <SystemTab showToast={showToast} userRole={userRole} rolePending={loadingPerms} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
                 proposer's own rows. The transition guard and RLS re-derive the proposer from

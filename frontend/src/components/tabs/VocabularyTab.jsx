@@ -10,6 +10,7 @@ import { iso22400VocabularyTab } from '../common/ISO22400VocabularyPanel'
 import { opcuaVocabularyTab } from '../common/OPCUAVocabularyPanel'
 import { ashrae223VocabularyTab } from '../common/ASHRAE223VocabularyPanel'
 import { vda5050VocabularyTab } from '../common/VDA5050VocabularyPanel'
+import { siteVocabularyTab } from '../common/SiteVocabularyPanel'
 
 /**
  * The standard vocabularies as a page of their own: reference material that is only read, separate
@@ -18,7 +19,7 @@ import { vda5050VocabularyTab } from '../common/VDA5050VocabularyPanel'
  * vocabularies for its type picker, resolves the entry itself, so one place knows how a vocabulary
  * row becomes a metric.
  */
-export function VocabularyTab({ onUseEntry, hasPermission }) {
+export function VocabularyTab({ onUseEntry, hasPermission, showToast }) {
   const [vocabulary, setVocabulary] = useState([])
   const [isoVocabulary, setIsoVocabulary] = useState([])
   const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
@@ -112,7 +113,8 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
               onUseField: canUse
                 ? (field => onUseEntry?.({ standard: STANDARDS.VDA5050, name: field?.name }))
                 : undefined
-            })
+            }),
+            siteVocabularyTab({ canManage: canUse, onUseEntry, showToast })
           ]}
         />
       )}

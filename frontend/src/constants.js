@@ -142,6 +142,11 @@ export const AUDIT_TRAIL_ACTIONS = {
   // An Administrator issuing or rotating the webhook's signing key on Settings › Notifications
   // (0248), in the webhook's lane. The key itself is never in the row.
   SIGNING_KEY_ISSUED:              'Signing key issued',
+  // A site's imported vocabulary (0306): imported from an AAS file, removed, or its definitions
+  // shared or not, by an Administrator, in the vocabulary's own lane.
+  SITE_VOCABULARY_IMPORTED:        'Vocabulary imported',
+  SITE_VOCABULARY_REMOVED:         'Vocabulary removed',
+  SITE_VOCABULARY_SHARING_CHANGED: 'Vocabulary sharing changed',
 };
 
 /**
@@ -193,6 +198,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   // An automation's acts (0256), one lane per automation, in the asset lane: an Administrator or a
   // Shopfloor Manager writes it and every role reads it.
   { kind: 'AUTOMATION',       table: 'automations',        label: 'Automations',        domain: 'asset', group: 'model' },
+  // A vocabulary a site imported from an AAS file (0306), one lane per file, in the asset lane: an
+  // Administrator imports it and every role reads it.
+  { kind: 'IMPORTED VOCABULARY', table: 'site_vocabularies', label: 'Imported vocabularies', domain: 'asset', group: 'model' },
   { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security', group: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset', group: 'model' },
@@ -242,6 +250,10 @@ export const AUDIT_TRAIL_ACTION_GROUPS = [
     label: 'Automations',
     actions: ['AUTOMATION_CREATED', 'AUTOMATION_CHANGED', 'AUTOMATION_ENABLED', 'AUTOMATION_DISABLED',
       'AUTOMATION_DELETED'],
+  },
+  {
+    label: 'Imported vocabularies',
+    actions: ['SITE_VOCABULARY_IMPORTED', 'SITE_VOCABULARY_REMOVED', 'SITE_VOCABULARY_SHARING_CHANGED'],
   },
   {
     label: 'Capture and playback',
@@ -361,6 +373,10 @@ export const AUDIT_TRAIL_ACTION_KINDS = [
   ['AUTOMATION_DELETED', ['automations'], ['lifecycle']],
   // The webhook's signing key, issued or rotated, in the webhook's lane.
   ['SIGNING_KEY_ISSUED', ['notification_channels'], ['configuration']],
+  // A site's imported vocabulary, in its own lane.
+  ['SITE_VOCABULARY_IMPORTED', ['site_vocabularies'], ['created']],
+  ['SITE_VOCABULARY_REMOVED', ['site_vocabularies'], ['lifecycle']],
+  ['SITE_VOCABULARY_SHARING_CHANGED', ['site_vocabularies'], ['configuration']],
 ];
 
 /**

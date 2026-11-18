@@ -8,7 +8,7 @@
  * standard: a metric started from an imported concept keeps `standard` empty and links to the file.
  */
 
-import { STANDARDS, DEFAULT_SEMANTIC_ID_TYPE, inferSemanticIdType } from './standards'
+import { STANDARDS, DEFAULT_SEMANTIC_ID_TYPE, LOCAL_EXTENSION_LABEL, inferSemanticIdType } from './standards'
 import { sparkplugDatatypeFor } from './opcua'
 
 /**
@@ -80,6 +80,12 @@ export function metricStandardLabel(vocabulary) {
   return vocabulary.name || null
 }
 
+/** The label the Metrics page gives the file with this id, or a plain phrase while the files are not read. */
+export function siteVocabularyLabel(vocabularies, id) {
+  const file = (vocabularies || []).find((v) => v.id === id)
+  return (file && metricStandardLabel(file)) || 'an imported vocabulary'
+}
+
 /**
  * The Standard filter's value for a published standard a site imported: one option for each, by its
  * label, so two files of one standard share an option. Never a STANDARDS value.
@@ -99,6 +105,26 @@ export function importedStandardOptions(vocabularies) {
   return [...seen.entries()]
     .map(([value, label]) => ({ value, label }))
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }))
+}
+
+/**
+ * The catalog's rows with what the Metrics page shows of each one's provenance: `standard_label`, the
+ * standard it was named from, else the file it was started from, else Local extension; and
+ * `site_standard_filter`, the Standard filter's value for a metric started from a published standard
+ * a site imported, which no STANDARDS value names. Other fields are as they were.
+ */
+export function withSiteStandards(catalog, vocabularies) {
+  const byId = new Map((vocabularies || []).map((v) => [v.id, v]))
+  return (catalog || []).map((m) => {
+    const file = m.site_vocabulary_id ? byId.get(m.site_vocabulary_id) : null
+    return {
+      ...m,
+      standard_label: m.standard || (file && metricStandardLabel(file)) || LOCAL_EXTENSION_LABEL,
+      site_standard_filter: !m.standard && file?.kind === VOCABULARY_KINDS.PUBLISHED && standardCitation(file)
+        ? importedStandardFilterValue(file)
+        : null
+    }
+  })
 }
 
 /**

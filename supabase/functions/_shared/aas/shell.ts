@@ -368,6 +368,53 @@ function onlyValue(values: unknown[]): string | undefined {
   return distinct.length === 1 ? distinct[0] : undefined;
 }
 
+/**
+ * How a site names the file a concept came from: a published standard by its citation
+ * (`ISO 22400-2:2014`), the site's own vocabulary by the file's name.
+ */
+export function siteFileLabel(file: SiteVocabularyRef | null | undefined): string {
+  if (file?.kind === "published_standard" && file.standard_name) {
+    return file.standard_edition ? `${file.standard_name}:${file.standard_edition}` : file.standard_name;
+  }
+  return file?.name ?? "the site's vocabulary";
+}
+
+/**
+ * What an imported site vocabulary says of an id: its preferred name always, and its definition only
+ * where the Administrator confirmed that the licence lets it be shared. Otherwise the IEC 61360
+ * definition, which is mandatory in English, defers to the file ("<name>, as <file> defines it.").
+ * It never falls back to a catalog description, which may be a copy of the licensed text. A seeded
+ * standard that defines the id comes first, as in `concept_definitions`: the site's is last.
+ */
+export function siteDefinitionFor(
+  id: string,
+  defined: ConceptDefinition | undefined,
+  siteConcepts: readonly SiteConcept[] | undefined,
+): { name: string; definition: string } | undefined {
+  if (defined?.standard) return undefined;
+  const concept = siteConcepts?.find((c) => c.semantic_id === id);
+  if (!concept) return undefined;
+  const name = concept.preferred_name;
+  const text = String(concept.definition ?? "").trim();
+  const shared = concept.site_vocabularies?.definitions_shareable === true && text !== "";
+  return { name, definition: shared ? text : `${name}, as ${siteFileLabel(concept.site_vocabularies)} defines it.` };
+}
+
+/**
+ * Whether a metric is a key performance indicator: ISO 22400 names it, or it was started from an
+ * imported file that is a published standard named ISO 22400 (by prefix, as `ISO 22400-2` is).
+ */
+export function isKpiMetric(
+  metric: Record<string, unknown> | undefined,
+  siteVocabularies: readonly SiteVocabularyRef[] | undefined,
+): boolean {
+  if (metric?.standard === "ISO 22400") return true;
+  const linked = metric?.site_vocabulary_id;
+  if (!linked) return false;
+  const file = siteVocabularies?.find((v) => v.id === linked);
+  return file?.kind === "published_standard" && String(file.standard_name ?? "").startsWith("ISO 22400");
+}
+
 function conceptDescription(
   id: string,
   name: string,
@@ -402,13 +449,16 @@ function conceptDescription(
  * metric's description never defines a standard concept. An id under one of ID_AUTHORITIES defers
  * to that authority. For any other id, a catalog description is the definition only when every
  * live row carrying the id agrees on it, since several metrics can share one concept (#457). The
- * unit and datatype come from the catalog rows on the same terms.
+ * unit and datatype come from the catalog rows on the same terms. An id an imported site vocabulary holds
+ * takes the file's preferred name, and its definition only where the file's definitions are shared
+ * (`siteDefinitionFor()`), whatever the catalog describes.
  * `unitId` is not set: the units are MTConnect UnitEnum names, which IEC 61360 `unit` takes as free
  * text.
  */
 export function buildConceptDescriptions(
   ids: string[],
-  rows: Pick<DeviceRecord, "catalog" | "templates" | "schemas" | "definitions">,
+  rows: Pick<DeviceRecord, "catalog" | "templates" | "schemas" | "definitions"> &
+    Partial<Pick<DeviceRecord, "siteConcepts">>,
 ): Record<string, unknown>[] {
   const definedBy = new Map(rows.definitions.map((d) => [d.semantic_id, d]));
   return ids.map((id) => {
@@ -423,13 +473,14 @@ export function buildConceptDescriptions(
     }
 
     const defined = definedBy.get(id);
+    const site = siteDefinitionFor(id, defined, rows.siteConcepts);
     const authority = authorityOf(id);
     const carrying = rows.catalog.filter((m) => m.semantic_id === id);
     const live = carrying.filter((m) => !m.deprecated);
     const metrics = live.length > 0 ? live : carrying;
     if (metrics.length > 0) {
       const named = conceptName(id);
-      const name = named ?? defined?.name ?? String(metrics.map((m) => m.name).sort()[0]);
+      const name = site?.name ?? named ?? defined?.name ?? String(metrics.map((m) => m.name).sort()[0]);
       const source = authority ?? onlyValue(metrics.map((m) => m.standard));
       const units = new Set(metrics.map((m) => String(m.units ?? "").trim()).filter(Boolean));
       const unit = units.size === 1 ? [...units][0] : undefined;
@@ -445,7 +496,7 @@ export function buildConceptDescriptions(
       return conceptDescription(
         id,
         name,
-        defined?.definition ?? described ?? deferred,
+        site?.definition ?? defined?.definition ?? described ?? deferred,
         {
           unit,
           // Units that disagree leave the type unsaid: MEASURE needs one unit, COUNT claims none.
@@ -457,8 +508,8 @@ export function buildConceptDescriptions(
     }
 
     const schema = rows.schemas.find((s) => s.semantic_id === id);
-    const name = conceptName(id) ?? defined?.name ?? String(schema?.schema_name ?? "Concept");
-    const definition = defined?.definition ||
+    const name = site?.name ?? conceptName(id) ?? defined?.name ?? String(schema?.schema_name ?? "Concept");
+    const definition = site?.definition || defined?.definition ||
       (authority ? `${name}, as ${authority} defines it.` : schema?.description as string | null) ||
       `The concept ${name}, which this shell references.`;
     return conceptDescription(id, name, definition);
@@ -527,6 +578,28 @@ export interface DeviceRecord {
   supplemental?: SupplementalSemanticId[];
   /** `concept_definitions` rows for the ids conceptIdsFor() names. */
   definitions: ConceptDefinition[];
+  /** The imported site vocabularies' concepts for the same ids, each with the file it comes from. */
+  siteConcepts?: SiteConcept[];
+  /** The files the catalog's metrics link to (`metric_catalog.site_vocabulary_id`), for the KPI split. */
+  siteVocabularies?: SiteVocabularyRef[];
+}
+
+/** A file in `site_vocabularies`: what the exporter needs to say where a concept came from. */
+export interface SiteVocabularyRef {
+  id?: string;
+  name?: string;
+  kind: string;
+  standard_name?: string | null;
+  standard_edition?: string | null;
+  definitions_shareable?: boolean;
+}
+
+/** A row of `site_vocabulary_concepts`, with its file embedded as PostgREST returns it. */
+export interface SiteConcept {
+  semantic_id: string;
+  preferred_name: string;
+  definition?: string | null;
+  site_vocabularies?: SiteVocabularyRef | null;
 }
 
 /** A row of `metric_semantic_ids`: another published id of the concept a catalog metric measures. */
@@ -541,7 +614,8 @@ export interface ConceptDefinition {
   semantic_id: string;
   name: string;
   definition: string;
-  standard: string;
+  /** NULL for a site vocabulary's concept: it is no standard Aber ships. */
+  standard: string | null;
 }
 
 /** Any Supabase client. Deliberately structural: the authority is the caller's to choose. */
@@ -609,6 +683,18 @@ export async function loadDeviceRecord(
       .in("semantic_id", conceptIds)
     : { data: [] };
 
+  // The imported site vocabularies, for the same ids and for the files the catalog links to. Without
+  // rows (an error, or a database that lacks the tables) an id keeps its other definitions.
+  const { data: siteConceptRows } = conceptIds.length > 0
+    ? await client.from("site_vocabulary_concepts")
+      .select("semantic_id, preferred_name, definition, site_vocabularies(name, kind, standard_name, standard_edition, definitions_shareable)")
+      .in("semantic_id", conceptIds)
+    : { data: [] };
+  const linked = [...new Set((catalogRows ?? []).map((m: Record<string, unknown>) => m.site_vocabulary_id).filter(Boolean))];
+  const { data: siteVocabularyRows } = linked.length > 0
+    ? await client.from("site_vocabularies").select("id, name, kind, standard_name, standard_edition").in("id", linked)
+    : { data: [] };
+
   return {
     device,
     config: configRows ?? [],
@@ -620,6 +706,8 @@ export async function loadDeviceRecord(
     schemas: schemaRows ?? [],
     supplemental: supplementalRows ?? [],
     definitions: definitionRows ?? [],
+    siteConcepts: siteConceptRows ?? [],
+    siteVocabularies: siteVocabularyRows ?? [],
   };
 }
 
@@ -885,7 +973,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
 
     for (const name of modelled) {
       const { metric, element } = propertyFor(name);
-      if (metric?.standard === "ISO 22400") kpiProps.push(element);
+      if (isKpiMetric(metric, record.siteVocabularies)) kpiProps.push(element);
       else telemetryProps.push(element);
     }
 
@@ -1026,6 +1114,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
   };
 
   const conceptDescriptions = buildConceptDescriptions(referencedSemanticIds(submodels), {
+    siteConcepts: record.siteConcepts,
     catalog,
     templates,
     schemas,

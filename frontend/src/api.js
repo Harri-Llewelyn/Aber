@@ -2379,6 +2379,54 @@ const apiMethods = {
     return data ?? [];
   },
 
+  /**
+   * Which vocabulary already defines each of the semantic ids (`site_vocabulary_holders()`, 0306): a
+   * seeded standard by its name, or an imported file by its name. An id nothing holds has no entry.
+   * The Import dialog's preview and `import_site_vocabulary()` ask the same question. Returns a Map.
+   */
+  siteVocabularyHolders: async (ids) => {
+    const unique = [...new Set((ids || []).filter(Boolean))];
+    if (unique.length === 0) return new Map();
+    const { data, error } = await supabase.rpc('site_vocabulary_holders', { p_ids: unique });
+    if (error) throw new Error(error.message || 'Could not check which ids are already defined');
+    return new Map((data || []).map(r => [r.semantic_id, r.held_by]));
+  },
+
+  /**
+   * Import a vocabulary read from an AAS file (`import_site_vocabulary()`, 0306). `file` describes it
+   * (name, source_format, kind, the standard's name, edition and publisher when published, sha256,
+   * version, licence_note) and `concepts` lists the rows the reader took. The database checks every row
+   * again and refuses in a sentence, shown as it came: one row it would not store, a file already
+   * imported (named), a caller who is not an Administrator behind the second factor. Returns
+   * `{ id, concepts, skipped: [{ semantic_id, reason, held_by }] }`, reason `already_defined` or
+   * `repeated_in_file`.
+   */
+  importSiteVocabulary: async (file, concepts) => {
+    const { data, error } = await supabase.rpc('import_site_vocabulary', { p_file: file, p_concepts: concepts });
+    if (error) throw new Error(error.message || 'Could not import the vocabulary');
+    return data;
+  },
+
+  /**
+   * Remove an imported vocabulary and its concepts (`remove_site_vocabulary()`). A metric started from it
+   * keeps its id and loses the link. Returns `{ id, name, concepts, metrics_linked }`.
+   */
+  removeSiteVocabulary: async (id) => {
+    const { data, error } = await supabase.rpc('remove_site_vocabulary', { p_id: id });
+    if (error) throw new Error(error.message || 'Could not remove the vocabulary');
+    return data;
+  },
+
+  /**
+   * The Administrator's confirmation that the licence lets an imported vocabulary's definitions be
+   * shared, or its withdrawal (`set_site_vocabulary_sharing()`). Returns `{ id, name, definitions_shareable }`.
+   */
+  setSiteVocabularySharing: async (id, shareable) => {
+    const { data, error } = await supabase.rpc('set_site_vocabulary_sharing', { p_id: id, p_shareable: shareable });
+    if (error) throw new Error(error.message || 'Could not change whether the definitions are shared');
+    return data;
+  },
+
   /** Enable or disable the automation with this key. Returns its row. */
   setAutomationEnabled: async (key, enabled) => {
     const { data, error } = await supabase.rpc('set_automation_enabled', { p_key: key, p_enabled: enabled });
@@ -3712,6 +3760,38 @@ const apiMethods = {
       }));
     }
 
+    if (path.startsWith('/api/v1/site-vocabularies')) {
+      // The files a site imported (0306), newest first, with how many concepts each holds. Every
+      // signed-in role reads them; only the three functions write them.
+      const { data, error } = await supabase
+        .from('site_vocabularies')
+        .select('*, site_vocabulary_concepts(count)')
+        .order('imported_at', { ascending: false });
+      if (error) throw error;
+      return (data || []).map(({ site_vocabulary_concepts: counted, ...file }) => ({
+        ...file,
+        concept_count: counted?.[0]?.count ?? 0
+      }));
+    }
+
+    if (path.startsWith('/api/v1/site-vocabulary-concepts')) {
+      // The concepts of every imported file (0306), in id order. PostgREST answers 1,000 rows at most
+      // (`max_rows`), and a file may hold ten thousand, so the read pages until a page is short.
+      const PAGE = 1000;
+      const rows = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('site_vocabulary_concepts')
+          .select('*')
+          .order('semantic_id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if (!data || data.length < PAGE) break;
+      }
+      return rows;
+    }
+
     if (path.startsWith('/api/v1/idta-submodel-templates')) {
       // Reference data (seeded by 0002_seed_data.sql), read-only to the app: each IDTA template
       // element with the id and reference type the template issues for it, for the semantic id picker.
@@ -3778,6 +3858,9 @@ const apiMethods = {
         // The other published ids of the same concept, by id: `{ semantic_id, semantic_id_type,
         // source }`. The AAS export carries them as the Property's supplementalSemanticIds.
         further_semantic_ids: furtherByMetric.get(m.id) || [],
+        // The imported vocabulary the metric was started from (0306), or null: the Metrics page
+        // labels it from that file's row, and the AAS export files it by that file's standard.
+        site_vocabulary_id: m.site_vocabulary_id ?? null,
         // The values a discrete metric may report, as text; NULL is no closed set. The schema
         // builders copy them into `enum`, and the Devices page's Out of vocabulary tag reads them.
         permitted_values: m.permitted_values ?? null,
@@ -4213,6 +4296,8 @@ const apiMethods = {
         sub_type: emptyToNull(body.sub_type),
         standard: emptyToNull(body.standard),
         ...semanticIdPair(body),
+        // Only a metric started from an imported vocabulary sends one; the database refuses it beside a standard.
+        ...(body.site_vocabulary_id && { site_vocabulary_id: body.site_vocabulary_id }),
         permitted_values: permittedValuesColumn(body.permitted_values),
         // Only a derived metric sends one; the database sets its unit from the inputs.
         ...(body.derivation && { derivation: body.derivation }),

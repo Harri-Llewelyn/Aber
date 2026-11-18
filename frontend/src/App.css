@@ -8327,6 +8327,40 @@ ol.gateway-steps {
 .vocab-chip-action:hover .vocab-chip-plus,
 .vocab-chip-action:focus-visible .vocab-chip-plus { visibility: visible; }
 
+/* VOCABULARY, Imported: the files a site imported, in a table above the concepts, and the Import
+   dialog's preview. The table scrolls with the concepts, in the card's one scroller. */
+.site-vocabulary-body .num,
+.site-vocabulary-body th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.site-vocabulary-note { margin: 12px 16px 0; }
+
+.site-import-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.site-import-facts dt { color: var(--text-muted); }
+.site-import-facts dd { margin: 0; overflow-wrap: anywhere; }
+
+.site-import-list {
+  margin: 4px 0 4px 16px;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.site-import-standard {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 12px;
+  margin: 0 0 4px 21px;
+}
+
+.site-import-citation { grid-column: 1 / -1; margin-top: 0; }
+
 /* COLD STORAGE: the catalogue rows and the destination dialog. */
 /* Alone above the empty state, the backlog card is centred at about the width it has in the row. */
 .cold-backlog-lead { display: flex; justify-content: center; margin-bottom: var(--stack); }

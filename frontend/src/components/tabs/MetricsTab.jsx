@@ -38,6 +38,7 @@ import {
   conceptByName, ashrae223Prefill, ashrae223Sections, metricConcepts
 } from '../../utils/ashrae223'
 import { fieldByName, fieldByType, fieldType, vda5050Prefill, vda5050Sections } from '../../utils/vda5050'
+import { importedStandardOptions, sitePrefill, withSiteStandards, siteVocabularyLabel } from '../../utils/siteVocabulary'
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { Modal } from '../common/Modal'
@@ -95,15 +96,22 @@ const LOCAL_STANDARD_FILTER = '__local__'
 // The standards the Standard filter offers, in the Add Metric form's order. Local extension follows.
 const FILTER_STANDARDS = STANDARD_OPTIONS.filter(o => o.value !== STANDARDS.CUSTOM)
 
-/** The Standard filter option a metric falls under. */
-const standardFilterValue = (m) => m.standard || LOCAL_STANDARD_FILTER
+/**
+ * The Standard filter option a metric falls under: a standard it was named from, else the published
+ * standard a site imported that it was started from (withSiteStandards), else Local extension.
+ */
+const standardFilterValue = (m) => m.standard || m.site_standard_filter || LOCAL_STANDARD_FILTER
 
 /** No standard chosen. */
 const NO_STANDARDS = Object.freeze([])
 
-/** The Standard filter's values: the standards in the Add Metric form's order, then Local extension. */
-const STANDARD_FILTER_OPTIONS = [
+/**
+ * The Standard filter's values: the standards in the Add Metric form's order, one for each published
+ * standard a site imported, then Local extension.
+ */
+const standardFilterOptions = (siteVocabularies) => [
   ...FILTER_STANDARDS.map(o => ({ value: o.value, label: o.label })),
+  ...importedStandardOptions(siteVocabularies),
   { value: LOCAL_STANDARD_FILTER, label: LOCAL_EXTENSION_LABEL },
 ]
 
@@ -135,7 +143,10 @@ const BLANK_METRIC = {
   vocabSemanticId: '', semanticIdOwn: null,
   // Only set for standards whose vocabulary states it. MTConnect derives it from the data item
   // type instead, so this stays blank there and effectiveCategory falls back to the derivation.
-  vocabCategory: ''
+  vocabCategory: '',
+  // The imported vocabulary a Custom metric is started from, and whether its definition was left out of
+  // the description because the file's definitions are not shared.
+  siteVocabularyId: '', definitionWithheld: false
 }
 
 /**
@@ -158,7 +169,7 @@ const UNCATALOGUED_DEVICES_SHOWN = 3
 /** The catalog's sortable columns, each on what its cell shows. A "—" cell goes last. */
 const CATALOG_SORT = {
   name: { type: 'text', value: m => m.name },
-  standard: { type: 'text', value: m => m.standard || LOCAL_EXTENSION_LABEL },
+  standard: { type: 'text', value: m => m.standard_label || m.standard || LOCAL_EXTENSION_LABEL },
   category: { type: 'text', value: m => m.category },
   // Units sorts on the code, so one unit's rows stay together whatever its symbol.
   units: { type: 'text', value: m => unitOf(m) },
@@ -235,6 +246,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [vdaVocabulary, setVdaVocabulary] = useState([])
   // IDTA template elements, which the semantic id picker offers beside the vocabularies.
   const [templateElements, setTemplateElements] = useState([])
+  // The files a site imported (site_vocabularies): the Standard column labels a metric started from one,
+  // and the Standard filter offers each published standard among them.
+  const [siteVocabularies, setSiteVocabularies] = useState([])
   const [referenceLoaded, setReferenceLoaded] = useState(false)
   // True after the first read, so a reload keeps the rows on screen.
   const [loaded, setLoaded]           = useState(false)
@@ -267,7 +281,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // The catalog's other filters: standards (LOCAL_STANDARD_FILTER among them), any of which a metric
   // may be under, and metrics with no id.
   const [standardFilter, setStandardFilter] = useUrlList('standard', NO_STANDARDS, {
-    allowed: [...FILTER_STANDARDS.map(o => o.value), LOCAL_STANDARD_FILTER]
+    // An imported standard's value is offered once the files are read; until then a link naming one stands.
+    allowed: v => FILTER_STANDARDS.some(o => o.value === v) || v === LOCAL_STANDARD_FILTER ||
+      (v.startsWith('site:') && (!loaded || importedStandardOptions(siteVocabularies).some(o => o.value === v)))
   })
   const [unmappedOnly, setUnmappedOnly] = useUrlState('unmapped', false)
   // The Derived tab's own search, by name or definition; the catalog's belongs to the catalog tab.
@@ -310,13 +326,16 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const load = useCallback(async () => {
     loadUncatalogued()
     try {
-      const [cat, grp, sch, dev] = await Promise.all([
+      const [cat, grp, sch, dev, files] = await Promise.all([
         api.get('/api/v1/metric-catalog'),
         api.get('/api/v1/metric-groups'),
         api.get('/api/v1/schemas'),
         api.get('/api/v1/devices').catch(() => null),
+        // A read of its own that may fail: the labels fall back to Local extension, the page stands.
+        api.get('/api/v1/site-vocabularies').catch(() => []),
       ])
-      setCatalog(cat); setGroups(grp); setSchemas(sch); setDevices(dev)
+      setSiteVocabularies(files || [])
+      setCatalog(withSiteStandards(cat, files)); setGroups(grp); setSchemas(sch); setDevices(dev)
     } finally { setLoaded(true) }
   }, [loadUncatalogued])
 
@@ -392,6 +411,26 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     setShowAddMetric(true)
   }
 
+  /**
+   * Apply an imported concept (utils/siteVocabulary) to the form and open the dialog: a Custom metric,
+   * named from the preferred name, carrying the concept's id and linked to its file, with its
+   * definition as the description only where the file's definitions are shared.
+   */
+  const applySitePrefill = (prefill) => {
+    if (!prefill) return
+    setNewMetric({
+      ...BLANK_METRIC,
+      standard: STANDARDS.CUSTOM,
+      customType: prefill.customType,
+      datatype: prefill.datatype,
+      description: prefill.description,
+      semanticIdOwn: { semanticId: prefill.semanticId, semanticIdType: prefill.semanticIdType },
+      siteVocabularyId: prefill.siteVocabularyId,
+      definitionWithheld: prefill.definitionWithheld
+    })
+    setShowAddMetric(true)
+  }
+
   // Opens the Add Metric dialog with the type chosen, leaving the component and instance to the
   // operator.
   const handleUseVocabularyType = (typeName) => {
@@ -452,6 +491,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     } else if (entry.standard === STANDARDS.VDA5050) {
       const field = fieldByName(vdaVocabulary, entry.name)
       if (field) applyPrefill(vda5050Prefill(field))
+    } else if (entry.siteConcept) {
+      applySitePrefill(sitePrefill(entry.siteConcept, entry.siteVocabulary))
     }
 
     onConsumeVocabularyEntry?.()
@@ -543,6 +584,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       newGroup: keepGroup ? m.newGroup : '',
       type: '', companionSpec: '', customType: '', customCategory: BLANK_METRIC.customCategory,
       subType: '', units: '', vocabCategory: '', vocabSemanticId: '', semanticIdOwn: null,
+      siteVocabularyId: '', definitionWithheld: false,
       // The values a VDA 5050 enum filled in were that field's; any other standard's are the operator's own.
       permittedValues: m.standard === STANDARDS.VDA5050 ? '' : m.permittedValues
     }))
@@ -572,6 +614,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         // nothing is minted for one.
         semantic_id: semanticIdValue,
         semantic_id_type: semanticIdTypeValue,
+        // The imported file a Custom metric was started from: a standard is never typed beside it.
+        site_vocabulary_id: effectiveStandard ? '' : newMetric.siteVocabularyId,
         permitted_values: permitted.values,
         description: newMetric.description
       })
@@ -923,7 +967,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         {isDerived(m) && <> <DerivedTag /></>}
       </td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
-      <td className="cell-meta">{m.standard || LOCAL_EXTENSION_LABEL}</td>
+      <td className="cell-meta">{m.standard_label || m.standard || LOCAL_EXTENSION_LABEL}</td>
       <td className="cell-meta">{m.category || '—'}</td>
       <td className="cell-meta">{unitAndCode(unitOf(m)) || '—'}</td>
       <td className="cell-meta">{datatypeLabel(m.datatype)}</td>
@@ -1031,7 +1075,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   label="Standard"
                   noun="standard"
                   plural="standards"
-                  options={STANDARD_FILTER_OPTIONS}
+                  options={standardFilterOptions(siteVocabularies)}
                   value={standardFilter}
                   onChange={setStandardFilter}
                   counts={facetCounts.standard}
@@ -1423,7 +1467,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             full: true,
             help: 'Every device in service that reports all its inputs. Nothing is stored: the value is computed when it is drawn.'
           },
-          !isDerived(selected) && { label: 'Standard', value: selected.standard || LOCAL_EXTENSION_LABEL },
+          !isDerived(selected) && { label: 'Standard', value: selected.standard_label || selected.standard || LOCAL_EXTENSION_LABEL },
           !isDerived(selected) && { label: 'Category', value: selected.category || null },
           // A time in state has no unit of its own: it is a fraction, shown as a percentage of the time.
           isShare(selected.derivation)
@@ -1791,7 +1835,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
             <div className="form-group" style={{ flex: '2 1 200px' }}>
               <label className="form-label" htmlFor="metric-description">Description</label>
-              <input id="metric-description" className="form-control" value={newMetric.description} onChange={e => setNewMetric(m => ({ ...m, description: e.target.value }))} placeholder="What this metric represents" />
+              <input id="metric-description" className="form-control" value={newMetric.description} onChange={e => setNewMetric(m => ({ ...m, description: e.target.value }))} placeholder="What this metric represents" aria-describedby={newMetric.definitionWithheld ? 'metric-description-withheld' : undefined} />
+              {newMetric.definitionWithheld && (
+                <div className="form-hint" id="metric-description-withheld">
+                  The imported definition is not copied here: its vocabulary's definitions are not shared, and a description
+                  is read by every export. Write your own.
+                </div>
+              )}
             </div>
 
             {takesPermittedValues && (
@@ -1834,7 +1884,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             )}
             {effectiveStandard
               ? <> Provenance <strong>{effectiveStandard}</strong>.</>
-              : <> Recorded as a <strong>local extension</strong>, with no standard provenance.</>}
+              : newMetric.siteVocabularyId
+                ? <> Recorded as a <strong>local extension</strong>, linked to {siteVocabularyLabel(siteVocabularies, newMetric.siteVocabularyId)}.</>
+                : <> Recorded as a <strong>local extension</strong>, with no standard provenance.</>}
             {semanticIdValue && (
               <> Semantic id <span className="mono">{semanticIdValue}</span>
                 {semanticIdTypeValue ? ` (${semanticIdTypeValue})` : ''}; unlike the name, an Administrator can correct it later with Edit.</>
