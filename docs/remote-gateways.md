@@ -564,6 +564,8 @@ that already exists, and sets it up the same way as an empty one.
 
 ## Related
 
+* [`docs/gateway-lifecycle.md`](gateway-lifecycle.md) — what each step of a gateway's life leaves behind,
+  for each type, and the suites that hold the code to it
 * [`forge/gateway-platform/appliance/README.md`](../forge/gateway-platform/appliance/README.md) — the copy that
   ships in the bundle
 * [`docs/openapi.yaml`](openapi.yaml) — `enroll-gateway` and `gateway-bundle` contracts
