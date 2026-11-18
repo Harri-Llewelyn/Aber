@@ -464,6 +464,92 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/GatewayStatus' } }
 
+  /rest/v1/gateway_arrivals:
+    get:
+      tags: [Assets]
+      summary: What arrives from each gateway, as the drawer shows it
+      description: |
+        One row per gateway the caller may read (`0303`), from `gateway_arrival_figures`, which
+        `refresh_gateway_arrivals()` writes every minute from Prometheus over pg_net: the gateway's
+        Sparkplug messages per second over 5 minutes, and the sequence gaps and messages missed in
+        the last hour (the second is a lower bound).
+
+        **Every figure is `null` unless Prometheus evaluated it within the last 3 minutes**, so a
+        stopped job, no Prometheus, or an answer that did not observe ingestion reads as not
+        observed and never as the last value. A gateway ingestion has counted nothing from reads `0`
+        while ingestion is observed. Whoever can read a gateway reads its row; no role writes it.
+        **Read this view, not `gateway_arrival_figures`**, which holds the same rows without the
+        3-minute rule.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - name: gateway_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+      responses:
+        '200':
+          description: One row for each gateway.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/GatewayArrival' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this view.' }
+
+  /rest/v1/gateway_arrival_figures:
+    get:
+      tags: [Assets]
+      summary: The rows behind `gateway_arrivals`, without its freshness rule
+      description: |
+        The table `refresh_gateway_arrivals()` writes (`0303`): one row per gateway, rewritten every
+        minute, `null` when the last answer did not observe ingestion. It does not blank a row whose
+        answer is old, so a job that has stopped leaves the last answer here. Read `gateway_arrivals`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - name: gateway_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+      responses:
+        '200':
+          description: One row for each gateway the caller may read.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/GatewayArrival' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
+  /rest/v1/rpc/gateway_devices_last_reading:
+    post:
+      tags: [Assets]
+      summary: When each device of a gateway last sent a reading
+      description: |
+        Each device of the gateway that is not archived, with the time of the newest reading of any
+        of its series, read as the caller from the historian's `telemetry_latest` over the FDW
+        (`0303`). A device with no reading has `last_reading_at: null`. A gateway with no device does
+        not touch the historian. When the historian cannot be reached the call fails (`503`), which
+        is not the same as no reading.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_gateway_id]
+              properties:
+                p_gateway_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: One row for each device.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    device_id: { type: string, format: uuid }
+                    last_reading_at: { type: string, format: date-time, nullable: true }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
   /rest/v1/devices:
     get:
       tags: [Assets]
@@ -3088,8 +3174,10 @@ paths:
       description: |
         A schema is **versioned, not edited**. `status` is `draft` | `active` | `archived`;
         an `active` or `archived` row is frozen by a trigger that binds every application
-        role. `schema_name` stays UNIQUE, so each version carries a derived name
-        (`Foo` → `Foo_v2`).
+        role. `schema_name` stays UNIQUE, so each version carries a name of its own
+        (`Foo` → `Foo_v2`). `lineage_name` and `lineage_root_id` are the same on every version
+        of one schema: the first version's name and id. An AAS Submodel's id is made from the
+        lineage's name, so it does not change when a version is published.
 
         Filter to the working set with `?status=in.(draft,active)`.
       parameters:
@@ -3097,6 +3185,7 @@ paths:
         - $ref: '#/components/parameters/Order'
         - { name: status, in: query, schema: { type: string }, description: '`eq.active` | `eq.draft` | `eq.archived`' }
         - { name: parent_schema_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` to walk a lineage.' }
+        - { name: lineage_root_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` for every version of one schema.' }
       responses:
         '200':
           description: Schema registry entries.
@@ -3239,7 +3328,7 @@ paths:
               properties:
                 device_id: { type: string, format: uuid }
                 schema_id: { type: string, format: uuid }
-                submodel_key: { type: string, nullable: true }
+                submodel_key: { type: string, nullable: true, pattern: '^[A-Za-z][A-Za-z0-9_]*$', description: 'Overrides the key in the Submodel id. Leave it out: the schema''s lineage name is used, and an id then survives every publish.' }
       responses:
         '201': { description: Attached. }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -3368,7 +3457,9 @@ paths:
           sent by `PUT /api/v1/metric-catalog/{id}`. Only the pair, with the type NULL whenever the
           id is. A semantic id is an assertion about the metric, not part of what a device
           publishes, so it is corrected in place; every shell exported from a schema that models the
-          metric carries the new id.
+          metric carries the new id. A metric that carries further ids
+          (`/rest/v1/metric_semantic_ids`) keeps an id of its own beside them: clearing it, or making
+          one of them its own, is refused with **400** and says which to remove first.
 
         Administrator only (`metric_catalog_update_privileged`). A caller the policy does not admit
         matches no row, so nothing changes and no error is raised; send
@@ -3392,6 +3483,122 @@ paths:
         '200': { description: 'Updated, with `Prefer: return=representation`. An empty array means no row was admitted.' }
         '204': { description: Updated. }
         '400': { description: '`name` or `datatype` in the body; both are immutable.' }
+
+  /rest/v1/metric_semantic_ids:
+    get:
+      tags: [Registry]
+      summary: List the further semantic ids of the metrics
+      description: |
+        The other published ids of the concept a metric measures, beside the one
+        `metric_catalog.semantic_id` holds (`0299`): an ECLASS IRDI beside an OPC UA ExpandedNodeId beside the
+        element id a submodel template gives it. One row for each (metric, id), with its type, an optional
+        `source` saying where the equivalence comes from, and who added it and when. The AAS export carries
+        them as the Property's `supplementalSemanticIds`. `metric_catalog.semantic_id` keeps its meaning: the
+        REST API and i3X read the metric's own id, and these are beside it.
+
+        A metric carries at most **10**, none equal to its own id, and only a metric that has an id of its
+        own carries any. To ask which metric carries an id, own or further, read
+        `/rest/v1/metric_semantic_id_crosswalk`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - { name: metric_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - { name: semantic_id, in: query, schema: { type: string }, description: 'e.g. `eq.0112/2///61987#ABA951#009`' }
+      responses:
+        '200':
+          description: Further semantic ids.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/MetricSemanticId' } }
+    post:
+      tags: [Registry]
+      summary: Add a further semantic id to a metric
+      description: |
+        Administrator behind the second factor (`metric_semantic_ids_insert_privileged`, as the catalogue's
+        own). `created_at` and `created_by` are set by the database whatever the body sends. Each add is a
+        row in `/rest/v1/audit_trail` under the metric's id, in the asset lane.
+
+        A refusal says what to do. **400** for a metric with no semantic id of its own, an id equal to the
+        metric's own, an eleventh id for a metric, a type outside IRI, IRDI and ExpandedNodeId, and an id or
+        a source with a space at either end, empty, or longer than 2,000 and 500 characters. **409** for an
+        id the metric already carries.
+      parameters: [{ $ref: '#/components/parameters/Prefer' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MetricSemanticIdWrite' }
+      responses:
+        '201': { description: Added. }
+        '400': { description: 'The metric has no id of its own, the id is its own, it carries ten already, or a value is outside its CHECK: the message says which.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: The metric already carries this id. }
+    patch:
+      tags: [Registry]
+      summary: Change the type or the source of a further semantic id
+      description: |
+        Only `semantic_id_type` and `source` may change. Which metric and which id a row is are fixed: send
+        `metric_id` or `semantic_id` and the answer is **400**. Remove the row and add the one you mean.
+        Administrator only. A caller the policy does not admit matches no row, so nothing changes and no
+        error is raised; send `Prefer: return=representation` and treat an empty array as refused. Always
+        send both filters, `?metric_id=eq.<uuid>&semantic_id=eq.<id>`.
+      parameters:
+        - { name: metric_id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - { name: semantic_id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.0112/2///61987#ABA951#009`' }
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                semantic_id_type: { type: string, enum: [IRI, IRDI, ExpandedNodeId] }
+                source: { type: string, nullable: true, maxLength: 500 }
+      responses:
+        '200': { description: 'Updated, with `Prefer: return=representation`. An empty array means no row was admitted.' }
+        '204': { description: Updated. }
+        '400': { description: '`metric_id` or `semantic_id` in the body, or a value outside its CHECK.' }
+    delete:
+      tags: [Registry]
+      summary: Remove a further semantic id
+      description: |
+        Administrator behind the second factor. The row is removed and the Audit Trail records it. A metric
+        deleted by the service role takes its rows with it, each recorded. A caller the policy does not admit
+        matches no row. Always send both filters.
+      parameters:
+        - { name: metric_id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - { name: semantic_id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.0112/2///61987#ABA951#009`' }
+      responses:
+        '204': { description: Removed. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/metric_semantic_id_crosswalk:
+    get:
+      tags: [Registry]
+      summary: Which metric carries a semantic id
+      description: |
+        Read-only view (`0299`): one row for each id a metric carries, `held_as` `primary` for the id
+        `metric_catalog.semantic_id` holds and `supplemental` for a further one in `metric_semantic_ids`,
+        with that row's `source`. It answers "which metric did we map to this concept?" across both, so a
+        concept a template names by its own IRDI finds the metric an OPC UA ExpandedNodeId names. A metric
+        with no id has no row. No order is promised: send `?order=` and read `held_as`.
+
+        The Digital Nameplate reads it for the six OPC 40001 Machinery concepts, with
+        `?semantic_id=in.(…)`. `security_invoker`, so the caller's own policies on the tables beneath apply.
+        `authenticated` only; `anon` is refused.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - { name: semantic_id, in: query, schema: { type: string }, description: 'e.g. `eq.nsu=http://opcfoundation.org/UA/Machinery/;i=6003`, or `in.(…)`' }
+        - { name: held_as, in: query, schema: { type: string }, description: '`eq.primary` or `eq.supplemental`' }
+        - { name: metric_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+      responses:
+        '200':
+          description: The metrics carrying the id.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/MetricSemanticIdCrosswalk' } }
 
   /rest/v1/uncatalogued_metrics:
     get:
@@ -3492,9 +3699,9 @@ paths:
       tags: [Registry]
       summary: Read the OPC UA companion-specification data points
       description: |
-        75 data points from six companion specifications: OPC 40001 (Machinery), OPC 40001-4
-        (Machinery Energy), OPC 40010 (Robotics), OPC 30050 (PackML), OPC 40501 (Machine Tools)
-        and OPC 40540 (Additive Manufacturing).
+        124 data points from seven companion specifications: OPC 40001 (Machinery), OPC 40001-2
+        (Machinery Process Values), OPC 40001-4 (Machinery Energy), OPC 40010 (Robotics), OPC 30050
+        (PackML), OPC 40501 (Machine Tools) and OPC 40540 (Additive Manufacturing).
 
         **`node_id` and `semantic_id` are the ExpandedNodeId the specification publishes** —
         `nsu=<namespace URI>;i=<id>`, the NodeId its NodeSet2 XML declares for the data point.
@@ -5967,10 +6174,27 @@ paths:
 
         A missing `semanticId` is **omitted, never emitted empty** — an empty `Reference` is
         invalid AAS. The unmapped count comes back in `stats`.
+        A metric's further semantic ids (`/rest/v1/metric_semantic_ids`) are its Property's
+        `supplementalSemanticIds`, each once and sorted, beside its own `semanticId`. The key is omitted
+        when a metric has none, and for a metric with no `semanticId` of its own (AASd-118).
+
+        **The shell names its asset by more than its `globalAssetId`.**
+        `assetInformation.specificAssetIds` lists the serial number (`partInstanceId`), the
+        manufacturer's product URI (`uriOfTheProduct`) and the Sparkplug id (`sparkplugId`), in that
+        order. The first two are the Nameplate's values, with the Nameplate's semantic ids. One with
+        no value is left out, and so is the key when none has one. A replay lane lists none.
 
         `?format=aasx` returns an OPC/ISO 29500 ZIP whose packaged Environment is
         byte-identical to the JSON export, except that a bundled 3D model's `File.value` is
         rewritten to the part name.
+
+        **`serialization=xml` packages the Environment as XML.** The package's one `aas-spec`
+        relationship then names `aasx/data.xml`, as AAS Part 5 names a data file, with the media
+        type `text/xml`, in place of `aasx/aasenv-root.json`. The XML follows the IDTA XML schema
+        (`test-harness/schemas/AAS_V3_0_XML_Schema.xsd`, namespace `https://admin-shell.io/aas/3/2`)
+        and says what the JSON export says: it is made from the same Environment. Some AAS tools
+        and some BaSyx builds expect an XML part. JSON stays the default. A `bundle` is an AASX, so
+        it takes the option too. `format=json` takes only JSON and refuses the option.
 
         `?format=bundle` returns the same AASX with the device's history inside, for taking an
         asset away before it is taken out of service: supplementary parts under
@@ -5991,6 +6215,10 @@ paths:
           in: query
           schema: { type: string, enum: [json, aasx, bundle], default: json }
           description: 'May also be sent in the body. `aasx` returns a ZIP; `bundle` returns that ZIP with the history parts and stores a copy.'
+        - name: serialization
+          in: query
+          schema: { type: string, enum: [json, xml], default: json }
+          description: 'May also be sent in the body. How an `aasx` or `bundle` package holds its Environment: as JSON at `aasx/aasenv-root.json`, or as XML at `aasx/data.xml`. `xml` with `format=json` is a 400.'
       requestBody:
         required: true
         content:
@@ -6001,6 +6229,7 @@ paths:
               properties:
                 device_id: { type: string, format: uuid }
                 format: { type: string, enum: [json, aasx, bundle] }
+                serialization: { type: string, enum: [json, xml], default: json }
       responses:
         '200':
           description: The AAS Environment, an AASX package, or the bundle.
@@ -6030,10 +6259,10 @@ paths:
                     properties:
                       assetAdministrationShells: { type: array, items: { type: object } }
                       submodels: { type: array, items: { type: object } }
-                      conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. The definition is the vocabulary''s own text (`concept_definitions`) where one defines the id, and catalog text only otherwise. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
+                      conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, a metric''s further ids included, with IEC 61360 content: name, definition, unit and data type. The definition is the vocabulary''s own text (`concept_definitions`) where one defines the id, and catalog text only otherwise. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
             application/asset-administration-shell-package+xml:
               schema: { type: string, format: binary }
-        '400': { description: 'Missing `device_id`, a non-UUID `device_id`, or an unknown `format`.' }
+        '400': { description: 'Missing `device_id`, a non-UUID `device_id`, an unknown `format`, a `serialization` that is neither `json` nor `xml`, or `serialization=xml` with `format=json`.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: No such device. }
@@ -6244,8 +6473,11 @@ paths:
         - bearerAuth: []
       summary: Get a shell's AssetInformation
       description: |
-        `assetKind` and the `globalAssetId` — the identifier the whole shell hangs off, derived
-        as `<AAS_BASE_IRI><sparkplug_id>`.
+        `assetKind`, the `globalAssetId` — the identifier the whole shell hangs off, derived
+        as `<AAS_BASE_IRI><sparkplug_id>` — and `specificAssetIds`: the serial number
+        (`partInstanceId`), the manufacturer's product URI (`uriOfTheProduct`) and the Sparkplug id
+        (`sparkplugId`), in that order. The first two carry the Nameplate's semantic ids. One with no
+        value is left out, and a replay lane has no `specificAssetIds` at all.
       parameters:
         - name: aasIdentifier
           in: path
@@ -6273,7 +6505,8 @@ paths:
 
         The element routes hang off this path too, so
         `/shells/{aasIdentifier}/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}`
-        works exactly as the direct form does. Append `/$value` for ValueOnly.
+        works exactly as the direct form does. Append `/$value` for ValueOnly. An id made from an
+        earlier version's name is answered here too, as on the direct route, until 1.10.0.
       parameters:
         - name: aasIdentifier
           in: path
@@ -6367,6 +6600,14 @@ paths:
         over HTTP.
 
         Append **`/$value`** for the ValueOnly form; collections nest as objects.
+
+        **A schema's Submodels keep their id when a version is published.** The id is made from the
+        name the schema's first version was built with, and `administration.version` says which
+        version made the Submodel. Until 1.9.0 the id carried the name of the version, so it changed
+        at every publish. For one minor release this route also answers an id made from any version's
+        name (`.../submodel/Robot_Arm_Schema_v2/OperationalTelemetry`) for a schema the device carries,
+        and returns the current Submodel, with its current `id`. The old ids are removed no sooner
+        than 1.10.0. A file holds only the current id.
       parameters:
         - name: submodelIdentifier
           in: path
@@ -7467,6 +7708,35 @@ components:
             is_stale: { type: boolean, readOnly: true }
             heartbeat_age_seconds: { type: integer, nullable: true, readOnly: true }
 
+    GatewayArrival:
+      type: object
+      description: What Prometheus holds for one gateway's edge node, read once a minute (`0303`).
+      properties:
+        gateway_id: { type: string, format: uuid }
+        messages_per_second:
+          type: number
+          nullable: true
+          description: >-
+            Sparkplug messages the ingestion service acted on from the gateway, per second over
+            the last 5 minutes. `null` when not observed.
+        sequence_gaps_last_hour:
+          type: integer
+          nullable: true
+          description: >-
+            Times in the last hour that a message's sequence number was not the next one: at least
+            one message never arrived. `null` when not observed.
+        messages_missed_last_hour:
+          type: integer
+          nullable: true
+          description: >-
+            Messages those gaps skipped over, as a lower bound: a gap larger than 255 wraps and is
+            undercounted. `null` when not observed.
+        observed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When Prometheus evaluated the figures; `null` with them.
+
     Device:
       type: object
       description: A shopfloor device served by an edge gateway.
@@ -7636,7 +7906,17 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         device_id: { type: string, format: uuid }
         schema_id: { type: string, format: uuid }
-        submodel_key: { type: string, nullable: true, description: 'Qualifies the exported idShort when a device carries more than one schema.' }
+        submodel_key:
+          type: string
+          nullable: true
+          pattern: '^[A-Za-z][A-Za-z0-9_]*$'
+          description: >-
+            The key in this Submodel's id (`<globalAssetId>/submodel/<key>/OperationalTelemetry`), and
+            in its idShort when the device carries more than one schema. NULL, which is every row the
+            Devices page writes, means the schema's `lineage_name`, so the id does not change when a
+            version is published. A value is the operator's own choice and is used as it stands. It
+            survives a publish, because publishing moves the row to the new version, and it is how a key
+            clash between two schemas is settled by hand. It starts with a letter, as an idShort does.
         created_at: { type: string, format: date-time, readOnly: true }
 
     DeviceSchema:
@@ -8053,7 +8333,9 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        schema_name: { type: string, example: Simulated_CNC_01_Schema_v2, description: 'UNIQUE. Each version gets a derived name — `Foo` → `Foo_v2` — and suffixes never stack.' }
+        schema_name: { type: string, example: Simulated_CNC_01_Schema_v2, description: 'UNIQUE. Each version gets a name of its own — `Foo` → `Foo_v2`, or `Foo_v2_2` when `Foo_v2` is taken — so a name `fork_schema()` had to suffix is not stripped back when it is versioned again (`Foo_v2_2_v3`). The lineage is `lineage_name`.' }
+        lineage_name: { type: string, readOnly: true, example: Simulated_CNC_01_Schema, description: 'The `schema_name` of the lineage''s first version, the same on every version. An AAS Submodel''s id is made from it, so a publish leaves the id where it was. Set by the database.' }
+        lineage_root_id: { type: string, format: uuid, readOnly: true, description: 'The first version of the lineage: this row for a first version. Set by the database.' }
         description: { type: string, nullable: true }
         schema_definition:
           type: object
@@ -8139,6 +8421,37 @@ components:
         permitted_values: { type: array, nullable: true, items: { type: string, minLength: 1 }, minItems: 1 }
         derivation: { type: object, nullable: true, description: 'A derived metric''s definition; see MetricCatalogEntry. Send no `units`: they follow the inputs.' }
 
+    MetricSemanticId:
+      type: object
+      description: >-
+        A further semantic id of a metric: another published identifier of the concept it measures,
+        exported as the Property's `supplementalSemanticIds`. The key is (`metric_id`, `semantic_id`).
+      properties:
+        metric_id: { type: string, format: uuid, description: 'The metric, deleted with it. Fixed once the row exists.' }
+        semantic_id: { type: string, minLength: 1, maxLength: 2000, example: '0112/2///61987#ABA951#009', description: 'No space at either end. Fixed once the row exists.' }
+        semantic_id_type: { type: string, enum: [IRI, IRDI, ExpandedNodeId], description: 'The three types `metric_catalog.semantic_id_type` admits. All export as an ExternalReference with one GlobalReference key.' }
+        source: { type: string, nullable: true, maxLength: 500, example: ECLASS 14.0, description: 'Where the equivalence comes from, in the writer''s words.' }
+        created_at: { type: string, format: date-time, readOnly: true }
+        created_by: { type: string, format: uuid, nullable: true, readOnly: true, description: 'The person whose session added it; NULL for a write with no session.' }
+    MetricSemanticIdWrite:
+      type: object
+      required: [metric_id, semantic_id, semantic_id_type]
+      properties:
+        metric_id: { type: string, format: uuid }
+        semantic_id: { type: string, minLength: 1, maxLength: 2000 }
+        semantic_id_type: { type: string, enum: [IRI, IRDI, ExpandedNodeId] }
+        source: { type: string, nullable: true, maxLength: 500 }
+    MetricSemanticIdCrosswalk:
+      type: object
+      description: One id a metric carries, and how.
+      properties:
+        semantic_id: { type: string }
+        semantic_id_type: { type: string, nullable: true, enum: [IRI, IRDI, ExpandedNodeId] }
+        metric_id: { type: string, format: uuid }
+        metric_name: { type: string }
+        deprecated: { type: boolean }
+        held_as: { type: string, enum: [primary, supplemental], description: '`primary` is `metric_catalog.semantic_id`; `supplemental` is a row of `metric_semantic_ids`.' }
+        source: { type: string, nullable: true, description: 'The supplemental row''s source; NULL for a primary one.' }
     UncataloguedMetric:
       type: object
       readOnly: true

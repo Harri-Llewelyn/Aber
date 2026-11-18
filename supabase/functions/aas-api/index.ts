@@ -7,7 +7,9 @@
  * The mapping is shared with the exporter (`../_shared/aas/shell.ts`). Identifiers are derived
  * (`${BASE_IRI}${sparkplug_id}/submodel/...`), so an identifier is parsed back to a `sparkplug_id`
  * rather than looked up; changing AAS_BASE_IRI changes every identifier this deployment has
- * published. Not served: writes (the dashboard is the authoring interface, with its own audit
+ * published. A schema's submodel ids carry the lineage's name, not the version's, and an id made
+ * from an earlier version's name is still answered, with the current submodel, until 1.10.0.
+ * Not served: writes (the dashboard is the authoring interface, with its own audit
  * trail), inlined telemetry values (`LinkedSegment` points at the historian), `.aasx`
  * (aas-export), concept descriptions, and the Registry and Discovery interfaces.
  */
@@ -19,6 +21,7 @@ import {
   type BuiltShell,
   loadDeviceRecord,
 } from "../_shared/aas/shell.ts";
+import { submodelOfAPreviousVersion } from "../_shared/aas/previousSubmodelIds.ts";
 import { checkCaller } from "../_shared/callerCheck.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
@@ -184,6 +187,15 @@ async function shellFor(client: Client, sparkplugId: string): Promise<BuiltShell
 }
 
 /**
+ * The Submodel an identifier names in a built shell: the one with that id, else, for one minor
+ * release, the current Submodel of a lineage the identifier names under an earlier version's key.
+ */
+async function submodelIn(client: Client, built: BuiltShell, identifier: string) {
+  return built.submodels.find((s) => s.id === identifier) ??
+    await submodelOfAPreviousVersion(client, built, identifier);
+}
+
+/**
  * One page of devices, keyset-paginated by `id` rather than `created_at`, so the cursor is stable
  * under insertion.
  */
@@ -332,7 +344,7 @@ export default async function handler(req: Request): Promise<Response> {
         if (!subIdentifier) {
           return problem(400, "submodelIdentifier must be base64url-encoded", "400");
         }
-        const submodel = built.submodels.find((s) => s.id === subIdentifier);
+        const submodel = await submodelIn(supabase, built, subIdentifier);
         if (!submodel) {
           return problem(404, `Shell '${identifier}' has no submodel '${subIdentifier}'`, "404");
         }
@@ -356,7 +368,7 @@ export default async function handler(req: Request): Promise<Response> {
       if (!sparkplugId) return problem(404, `No submodel with identifier '${identifier}'`, "404");
 
       const built = await shellFor(supabase, sparkplugId);
-      const submodel = built?.submodels.find((s) => s.id === identifier);
+      const submodel = built ? await submodelIn(supabase, built, identifier) : null;
       if (!submodel) return problem(404, `No submodel with identifier '${identifier}'`, "404");
 
       return submodelResponse(submodel, tail, wantsValue);

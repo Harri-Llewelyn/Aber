@@ -54,7 +54,9 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { SemanticIdField } from '../common/SemanticIdField'
+import { FurtherSemanticIdList } from '../common/FurtherSemanticIds'
 import { PermittedValuesField } from '../common/PermittedValuesField'
+import { furtherIdsOf } from '../../utils/furtherSemanticIds'
 import {
   parsePermittedValues, permittedValuesApply, permittedValuesText
 } from '../../utils/schemaProperty'
@@ -624,24 +626,36 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     )
   }
 
-  /** Edit's save: `change` holds only what changed, the semantic id pair, the permitted values or both. */
+  /**
+   * Edit's save: `change` holds only what changed, the semantic id pair, the permitted values, the
+   * further ids or any of them. A refusal that comes after the first write has changed the metric, so
+   * the catalog is read again before the dialog shows it.
+   */
   const handleEditMetric = async (change) => {
     const name = editTarget.name
     const pairChanged = Object.hasOwn(change, 'semantic_id')
     const valuesChanged = Object.hasOwn(change, 'permitted_values')
-    await api.put(`/api/v1/metric-catalog/${editTarget.metric_uuid}`, change)
+    const furtherChanged = Object.hasOwn(change, 'further_semantic_ids')
+    try {
+      await api.put(`/api/v1/metric-catalog/${editTarget.metric_uuid}`, change)
+    } catch (err) {
+      if (furtherChanged) load()
+      throw err
+    }
     setEditTarget(null)
     load()
     showToast(
-      pairChanged && valuesChanged
-        ? `Metric '${name}' saved`
-        : valuesChanged
-          ? (change.permitted_values
-            ? `Permitted values of '${name}' saved`
-            : `Permitted values of '${name}' cleared; it may report any value`)
-          : change.semantic_id
-            ? `Semantic id of '${name}' saved`
-            : `Semantic id of '${name}' cleared; the metric is now unmapped`,
+      furtherChanged && !pairChanged && !valuesChanged
+        ? `Further semantic ids of '${name}' saved`
+        : furtherChanged || (pairChanged && valuesChanged)
+          ? `Metric '${name}' saved`
+          : valuesChanged
+            ? (change.permitted_values
+              ? `Permitted values of '${name}' saved`
+              : `Permitted values of '${name}' cleared; it may report any value`)
+            : change.semantic_id
+              ? `Semantic id of '${name}' saved`
+              : `Semantic id of '${name}' cleared; the metric is now unmapped`,
       'success',
       { to: metricUrl(editTarget.metric_uuid, !!editTarget.deprecated) }
     )
@@ -865,7 +879,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       disabled: !canEditMetric,
       title: !canEditMetric
         ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
-        : "Correct this metric's semantic id, or the values it may report"
+        : "Correct this metric's semantic ids, or the values it may report"
     },
     m.deprecated
       ? {
@@ -923,6 +937,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               truncate="start"
             />
           : <span className="cell-meta">—</span>}
+        {/* The ids beside it are in the drawer; the row says only that there are some. */}
+        {m.semantic_id && (m.further_semantic_ids || []).length > 0 && (
+          <div className="cell-meta">+{m.further_semantic_ids.length} further</div>
+        )}
       </td>
       <td className="cell-meta">{m.description || '—'}</td>
     </>
@@ -969,7 +987,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       <SortHeader sort={sort} column="category" title="MTConnect observation category">Category</SortHeader>
       <SortHeader sort={sort} column="units">Units</SortHeader>
       <SortHeader sort={sort} column="datatype" title="How the value is encoded on the wire">Datatype</SortHeader>
-      <SortHeader sort={sort} column="semantic_id" title="The AAS id of the concept the metric measures. A dash is a metric mapped to none, which Edit can map.">Semantic ID</SortHeader>
+      <SortHeader sort={sort} column="semantic_id" title="The AAS id of the concept the metric measures. A dash is a metric mapped to none, which Edit can map. A line under an id counts the further ids it carries.">Semantic ID</SortHeader>
       <SortHeader sort={sort} column="description">Description</SortHeader>
     </>
   )
@@ -1414,6 +1432,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           { label: 'Datatype', value: datatypeLabel(selected.datatype) },
           !isDerived(selected) && { label: 'Semantic ID', value: selected.semantic_id || null, mono: true, copyable: true, full: true },
           !isDerived(selected) && { label: 'Reference Type', value: selected.semantic_id ? selected.semantic_id_type || null : null },
+          // Static text for every role: a person who may write changes them in Edit.
+          !isDerived(selected) && selected.semantic_id && (selected.further_semantic_ids || []).length > 0 && {
+            label: 'Further Semantic IDs',
+            value: <FurtherSemanticIdList ids={furtherIdsOf(selected)} />,
+            full: true,
+            help: "Other published ids of the same concept. The AAS export carries them beside the metric's own id."
+          },
           { label: 'Description', value: selected.description || null, full: true },
           !isDerived(selected) && {
             label: 'Permitted Values',

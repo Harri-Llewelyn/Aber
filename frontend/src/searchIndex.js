@@ -88,6 +88,8 @@ export const CARDS = [
   /* No "Metric Catalog" card: the catalogue is the Metrics page now, and its page entry answers
      every query this card did. */
   { id: 'automation-yaml',       label: 'Automation YAML',      tab: 'automations',   keywords: ['yaml editor', 'new automation', 'write a rule', 'upload automations', 'export automations', 'automations.yaml', 'json schema', 'vs code', 'threshold alert'] },
+  // The alerts Aber raises about itself: what somebody types who wants to know what is watched.
+  { id: 'built-in-alerts',       ...tabCard('automations', 'built-in'), keywords: ['alert rules', 'platform alerts', 'what does aber watch', 'what alerts exist', 'alert thresholds', 'is it firing', 'gateway stale', 'backup stale', 'grafana rules'] },
   { id: 'vocab-mtconnect',      ...tabCard('vocabulary', 'mtconnect'), keywords: ['machine tool', 'data items', 'components'] },
   { id: 'vocab-iso22400',       ...tabCard('vocabulary', 'iso-22400'), keywords: ['kpi', 'oee', 'availability', 'mtbf'] },
   { id: 'vocab-opcua',          ...tabCard('vocabulary', 'opc-ua'), keywords: ['companion', 'machinery', 'robotics'] },

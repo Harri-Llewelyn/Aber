@@ -7,6 +7,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
+import { useGatewayArrivals } from '../../hooks/useGatewayArrivals'
 import {
   gatewayDisplayStatus, isGatewayOnline, isGatewayPending, formatHeartbeat, formatUptime,
   formatCertExpiry, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS,
@@ -26,6 +27,10 @@ import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from
 import { isShadowGateway } from '../../utils/fleetCounts'
 import { flowDriftState, flowDriftLabel, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
 import { gatewayHealthProblems, rowTone, foldHealthRows, TONE_DANGER, TONE_WARNING } from '../../utils/gatewayHealth'
+import {
+  ARRIVAL_HELP, NOT_OBSERVED, arrivalFigures, arrivalSummary, deviceLastReading, hasCount, lastReadings
+} from '../../utils/gatewayArrivals'
+import { formatCount, formatRate } from '../../utils/systemFigures'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
@@ -37,6 +42,7 @@ import { Tooltip } from '../common/Tooltip'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { HelpLink } from '../common/HelpLink'
+import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
@@ -95,6 +101,34 @@ const STATUS_VALUES = STATUS_OPTIONS.map(o => o.value)
  * because they are what the Playback gateway serves.
  */
 const countedDevices = (devices) => inServiceDevices(devices, { replayLanes: true })
+
+const Unobserved = () => <span className="context-field-empty">{NOT_OBSERVED}</span>
+
+/**
+ * The drawer's group of what arrives from the gateway, from arrivalFigures()'s answer: three rows
+ * under one heading, closed when the drawer opens, whose summary names the rate and whether a gap
+ * was counted. A figure with no value reads Not observed, never a zero.
+ */
+const arrivalGroup = (gatewayId, figures) => {
+  const { text, tone } = arrivalSummary(figures)
+  const row = (label, help, value, count) => ({
+    label,
+    value: value === null ? <Unobserved /> : count ? formatCount(value) : formatRate(value),
+    warning: count && hasCount(value),
+    help: value === null ? `${help} ${ARRIVAL_HELP.unobserved}` : help,
+  })
+  return {
+    group: 'Arriving',
+    id: `gateway-arrivals-${gatewayId}`,
+    summary: text,
+    tone,
+    fields: [
+      row('Messages Per Second (5m)', ARRIVAL_HELP.messages_per_second, figures.perSecond, false),
+      row('Sequence Gaps (1h)', ARRIVAL_HELP.sequence_gaps_last_hour, figures.gaps, true),
+      row('Messages Missed (1h)', ARRIVAL_HELP.messages_missed_last_hour, figures.missed, true),
+    ],
+  }
+}
 
 export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
@@ -438,6 +472,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const selectedGroupMismatch = gatewayGroupMismatch(selected)
   // What the health rows say is wrong: each row's colour and the closed Health block's summary.
   const healthProblems = selected ? gatewayHealthProblems(selected, { rootNotAfter: enrolment?.ca?.not_after }) : []
+  // What arrives from it, read while the drawer is open: not for an archived gateway, and not for the
+  // Playback gateway, whose messages arrive under the gateways it replays as. The three figures and the
+  // devices' last readings are two reads, so the historian failing leaves the figures standing.
+  const arrivalsApply = !!selected && !selected.is_archived && !selected.is_shadow
+  const arrivalsRead = useGatewayArrivals(selected?.gateway_id, arrivalsApply)
+  const arrivals = arrivalsRead ? arrivalFigures(arrivalsRead.arrivals) : null
+  const deviceReadings = arrivalsRead ? lastReadings(arrivalsRead.readings) : undefined
 
   // "None yet" only when the stack holds no gateway of its own; anything else is a filter's doing.
   // The seeded Playback gateway does not count, so a new install still prompts under its row.
@@ -996,6 +1037,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                   : 'Devices served by this gateway resolve to this cell if they follow it, unless they have a place of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), help: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
+          // What the platform sees arriving from it, as against what it says about itself: absent
+          // until the first read settles, then closed like the Health block.
+          ...(arrivalsApply && arrivals ? [arrivalGroup(selected.gateway_id, arrivals)] : []),
           // What a Third-party gateway does not get, said rather than left as missing rows. No claim
           // about the root it holds: Aber cannot tell.
           ...(gatewayType(selected) === GATEWAY_TYPES.THIRD_PARTY ? [{
@@ -1335,17 +1379,23 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               </div>
             )}
             {/* The count leaves archived devices out, as the row's summary does; they are listed, flagged. */}
-            <div className="context-panel-section-label">Devices ({selectedCounted.length})</div>
+            <div className="context-panel-section-label">
+              Devices ({selectedCounted.length})
+              {arrivalsApply && arrivalsRead && selectedCounted.length > 0 && (
+                <HelpTip text={ARRIVAL_HELP.last_reading} label="What the last reading beside each device means" size={11} />
+              )}
+            </div>
             {selectedDevices.length === 0
               ? <div className="context-field-empty" style={{ fontSize: '11px' }}>No devices assigned</div>
               : (
                 /* Chips that navigate. The lifecycle state is a dot, since a status colour would
-                   collide with `chip-link`'s hover. */
-                <div className="context-device-list">
+                   collide with `chip-link`'s hover. Once the readings are read, each chip has a row of
+                   its own with the time of the device's last reading beside it. */
+                <div className={`context-device-list${arrivalsRead ? ' context-device-list-readings' : ''}`}>
                   {selectedDevices.map(d => {
                     const status = deviceLifecycleStatus(d)
                     const alert = alertForDevice(alerts, d)
-                    return (
+                    const chip = (
                       <RouteLink
                         key={d.asset_id}
                         className="chip chip-link"
@@ -1358,6 +1408,20 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                         <span className="chip-name">{d.asset_name}</span>
                         {d.is_archived && <span className="chip-flag">ARCHIVED</span>}
                       </RouteLink>
+                    )
+                    if (!arrivalsApply || !arrivalsRead) return chip
+                    const last = d.is_archived ? null : deviceLastReading(deviceReadings, d.asset_id)
+                    return (
+                      <div key={d.asset_id} className="context-device-row">
+                        {chip}
+                        {last && (
+                          <Tooltip text={last.title}>
+                            <span className={`context-device-last${last.kind === 'read' ? '' : ' context-field-empty'}`} tabIndex={0}>
+                              {last.text}
+                            </span>
+                          </Tooltip>
+                        )}
+                      </div>
                     )
                   })}
                 </div>

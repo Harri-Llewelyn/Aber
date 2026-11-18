@@ -207,12 +207,12 @@ describe('withdrawing', () => {
 })
 
 describe('where a message about an alert leads', () => {
-  it('goes to the device, the gateway, the page alertPage() names, or the rule', () => {
+  it("goes to the device, the gateway, the page alertPage() names, or the rule's Built-in entry", () => {
     expect(alertSubjectUrl(alert())).toBe(deviceUrl('dev231000000000400080000'))
     expect(alertSubjectUrl(alert({ entity_type: 'gateway', sparkplug_id: 'gw1' }))).toBe(gatewayUrl('gw1'))
     expect(alertSubjectUrl(alert({ entity_type: 'service_identity', sparkplug_id: null, entity_id: OPERATOR })))
       .toBe(identityUrl(OPERATOR))
     expect(alertSubjectUrl(alert({ entity_type: 'platform', sparkplug_id: null, rule_uid: 'aber-backup-stale' })))
-      .toMatch(/\/alerting\/grafana\/aber-backup-stale\/view$/)
+      .toBe('/automations/built-in?rule=aber-backup-stale')
   })
 })

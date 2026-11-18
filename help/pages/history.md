@@ -4,7 +4,7 @@ History shows a site's readings over a period you choose. Open it to see how a d
 
 The page opens on **Overview**, its first tab. It shows where readings arrived from every device over the window, before anything is charted. The other tabs:
 
-- **Device** draws one chart for each metric of one device, stacked down the page on the same time axis. Point at a chart to read the value at that moment; every chart shows the same moment. Otherwise each chart's title line shows its latest reading.
+- **Device** draws one chart for each metric of one device, stacked down the page under one time axis. Point at a chart, a band or the axis to read the value at that moment; every chart shows the same moment. Otherwise each chart's title line shows its latest reading. See [The time axis](#the-time-axis).
 - **Metric** compares one metric across every device that reports it, wherever the devices sit. See [The Metric tab](#the-metric-tab-one-metric-across-devices).
 - **Cell** compares one metric across every machine in a cell. A chart for each machine sits on the same scale, so the odd one stands out. Below them, a grid shows the metric's mean at each hour of the day. See [The Cell tab](#the-cell-tab-comparing-the-machines-in-a-cell).
 - **Area** compares one metric across the cells in an area. Each cell's chart is its mean or its total. See [The Area tab](#the-area-tab-comparing-the-cells-in-an-area).
@@ -87,14 +87,14 @@ The time window works as it does on the Audit Trail: see [Moving through time](a
 ## Choosing metrics and buckets
 
 1. Select **Metrics** in the toolbar and tick the metrics you want to chart. It starts at **All metrics**. A long list has a search box.
-2. Select **Buckets** to choose the bucket size. It starts at **Auto**, the smallest size that fits.
-3. Select **Clear filters** to go back to **Last 24 hours**, every metric and **Auto**. The device stays.
+2. To choose a bucket size, use the switch at the right-hand end of a group's heading, such as **Double**: **Auto**, **1 min**, **5 min**, **1 hour** or **1 day**. Each group has its own. It starts at **Auto**, the smallest size that fits.
+3. Select **Clear filters** to go back to **Last 24 hours**, every metric and **Auto** in every group. The device stays.
 
-The line above the charts says what you see, for example **3 of 10 metrics, in 1-minute buckets**.
+The line above the charts says how many metrics you see, for example **3 of 10 metrics**. Each group's heading says the size it is read in, for example **Double · 3 · 1-minute buckets**.
 
-Choosing fewer metrics gives smaller buckets, and so finer detail. Under **Auto**, the page picks the bucket size for the metrics you chose, not for all of them. See [Which bucket size you see](#which-bucket-size-you-see).
+Choosing fewer metrics gives smaller buckets, and so finer detail. Under **Auto**, each group picks its own bucket size for the metrics in it, not for all of them. See [Which bucket size you see](#which-bucket-size-you-see).
 
-The address keeps the device, the window, the metrics and the bucket size, so a link you share opens the same charts. When you chart another device, it keeps the metrics it also has.
+The address keeps the device, the window, the metrics and the bucket sizes, so a link you share opens the same charts. The sizes are one entry for each group that is not on **Auto**, for example `?bucket=Double:5m,String:1h`. A link with one size for every chart, such as `?bucket=5m`, gives that size to every group, and the address is rewritten. When you chart another device, it keeps the metrics it also has, and the sizes of the groups it also has.
 
 ## Charts grouped by type
 
@@ -104,14 +104,26 @@ The address keeps the device, the window, the metrics and the bucket size, so a 
 
 The charts are grouped by the type of value each metric holds, as the Metrics page names it, in this order: **Double**, **Float**, the whole numbers (**Int8** to **UInt64**), **Boolean**, **String** and **Text**, then any other type. A metric the Metrics page does not list is under **Other**, last. Each group's name says how many charts it holds.
 
-With many charts, they scroll inside the card. The line above them stays in view, and so does the name of the group you are scrolling through.
+With many charts, they scroll inside the card. The line above them stays in view, and so do the time axis and the name of the group you are scrolling through.
 
-Closing a group only hides its charts. The **Metrics** filter, the bucket size and what the page reads stay the same. This browser remembers which groups you closed, on every device's page, but a link you share opens them all. The **Metrics** list in the toolbar is grouped the same way.
+Closing a group only hides its charts. The **Metrics** filter, the bucket sizes and what the page reads stay the same. A closed group keeps its bucket size, and its switch stays on its heading. This browser remembers which groups you closed, on every device's page, but a link you share opens them all. The **Metrics** list in the toolbar is grouped the same way.
+
+## The time axis
+
+One time axis sits above the charts, as on the Audit Trail. It stays in view while the charts scroll under it. It lines up with every chart, so one time is at one place all the way down the page.
+
+- **The labels** are round times: the hours on a day, the days on a week, the dates on a month, the months on a year. A narrow screen gets fewer labels. No two labels are closer than 14 pixels, so they never run together.
+- **Now** is a badge under the labels, on a window that runs on past it, such as today's. The part after it is hatched. The axis says **No readings yet** there, once, when the part is wide enough for the words.
+- **Each chart** keeps its gridlines at the labels, a thin line at now, and its own hatched part. It draws no labels of its own.
+- **Point at a chart, a band or the axis** to draw one line through every chart and band. The axis says the time under the pointer. Each chart's title line reads its own value at that time.
+- **Press on the axis and drag** to zoom, as on a chart. See [Zooming in on a stretch](#zooming-in-on-a-stretch).
+
+The Metric, Cell and Area tabs keep a time axis under each chart. Their labels are chosen the same way, and so are Overview's, so none of them run together on a narrow screen.
 
 ## Zooming in on a stretch
 
-1. Press on a chart, or on a state's or a flag's band, and drag across the stretch you want. A shaded band follows the pointer, on every chart.
-2. Read the band's words, such as **10:05 – 10:40, 35 min**. They say what the charts will show.
+1. Press on a chart, on a state's or a flag's band, or on the time axis, and drag across the stretch you want. A shaded band follows the pointer, on every chart.
+2. Read the band's words on the axis, such as **10:05 – 10:40, 35 min**. They say what the charts will show.
 3. Let go. The charts show that stretch, in smaller buckets where the shorter window allows.
 4. To go back to the window before, select **Back** in your browser.
 
@@ -130,7 +142,7 @@ A few things to know:
 - **A band shorter than one minute opens as one minute**, around its middle.
 - **A zoomed window is a custom range,** so the arrows are called **Earlier** and **Later**.
 - **Each zoom is a new step in your browser's history,** so **Back** undoes it. Stepping with **‹** or **›** adds no step.
-- **A zoom keeps the metrics and the bucket size you chose.**
+- **A zoom keeps the metrics and the bucket sizes you chose.**
 
 ## Refreshing
 
@@ -163,7 +175,7 @@ Each chart is titled with the metric's name, with its unit in brackets when the 
 - **The key** under a state's band lists each state with its colour and its share of the charted time, the most first. Time after now does not count. The key names the six states with the most time; the rest are counted together as **others**.
 - **A flag's key** gives each value's share and its time, then how many times the flag changed in the window. For example, it says **true 96%** and **23 h 2 min** for true, **false 4%** and **58 min** for false, and **41 changes**. A flag read in buckets says **at least 41 changes**: see [When a chart shows its buckets instead](#when-a-chart-shows-its-buckets-instead).
 - **Pointing at a state's or a flag's band** shows the stretch under the pointer, for example **4 Nov 10:05 – 10:40 · RUNNING, 35 min**, and how much of it was carried forward. A stretch of a few seconds is found from a few pixels away.
-- **Now** marks the present moment on a window that runs on past it, such as today's. The part after it is hatched and says **No readings yet**.
+- **Now** marks the present moment on a window that runs on past it, such as today's. The part after it is hatched. On the Device tab the time axis shows the badge and the words: see [The time axis](#the-time-axis). On the other tabs each chart says **No readings yet** in its own hatched part.
 - **A shaded red stretch** means an alert on the device was firing then. A solid line marks where it started and where it ended, when that is inside the window. Its name is written inside the stretch when there is room. Point at it to read which alert it was, its severity and when it fired. Several alerts at once shade the same stretch more deeply.
 - **A state's or a flag's band** is shaded the same way, over its runs. A row under the band holds each alert's name, so the name never covers a run's. Point at the band to read the alert after the run, for example **Alert: Spindle Overload, warning · 4 Nov 10:05 – 10:40, 35 min**. A band no alert fired over has no row, and is no taller.
 - **The line above the charts** then also says how many alerts fired in the window, for example **Shaded while an alert was firing: 2 alerts in this window**. Select it to list them on the [Alerts](#alerts) tab.
@@ -185,24 +197,26 @@ A derived metric is one Aber computes from others, such as parts per hour. Its c
 
 ## Which bucket size you see
 
-Under **Auto**, the page picks the bucket size for you, and says which it chose above the charts, for example **15 metrics, in 5-minute buckets**. There are four sizes:
+Under **Auto**, each group picks its bucket size for you, and says which it chose on its heading, for example **Double · 15 · 5-minute buckets**. There are four sizes:
 
 - **1-minute buckets**
 - **5-minute buckets**
 - **1-hour buckets**
 - **1-day buckets**
 
-The page picks the smallest size that keeps one read to at most 5,000 points. A point is one bucket of one metric. So a longer window, or more metrics, gets larger buckets. For example, one metric over 24 hours fits in 1-minute buckets, but 15 metrics over the same day get 5-minute buckets. To see finer detail, choose fewer metrics or a shorter window.
+On the switch, after **Auto**, they are **1 min**, **5 min**, **1 hour** and **1 day**.
 
-**Buckets** also offers each size. A larger size than **Auto** picks is always on. A smaller one would need more than 5,000 points, so it is listed but off; point at it to see why. A link that asks for one is charted at the size **Auto** picks, and the line above the charts says so.
+Each group is read on its own. The page picks the smallest size that keeps one read of the group to at most 5,000 points. A point is one bucket of one metric. So a longer window, or more metrics in the group, gets larger buckets. For example, one metric over 24 hours fits in 1-minute buckets, but 15 metrics of one type over the same day get 5-minute buckets. A group with few metrics can have finer buckets than one with many. To see finer detail, choose fewer metrics or a shorter window.
 
-**Text charts get wider buckets under Auto.** In small buckets, the names in a state's strip run together and cannot be read. So under **Auto**, a text chart, such as a state, takes the smallest size whose buckets are each at least 3 pixels wide on the chart. A narrow screen or a long window gets larger buckets. Text and flag charts usually show every change instead, whatever the bucket size: see [Text and flags: every change](#text-and-flags-every-change). The buckets are what they fall back to.
+The switch also offers each size. A larger size than **Auto** picks is always on. A smaller one would need more than 5,000 points for that group, so it is listed but off; point at it to see why. A link that asks for one is charted at the size **Auto** picks, and the group's heading says so.
 
-When even 1-day buckets would be too many for all the metrics at once, the page reads them in parts and says so. A window too long for one metric in 1-day buckets is not charted, and the page asks for a shorter one.
+**Text charts get wider buckets under Auto.** In small buckets, the names in a state's strip run together and cannot be read. So under **Auto**, a text chart, such as a state, takes the smallest size whose buckets are each at least 3 pixels wide on the chart. A narrow screen or a long window gets larger buckets. You can still choose a finer size for a text group, as long as it fits the 5,000 points. Text and flag charts usually show every change instead, whatever the bucket size: see [Text and flags: every change](#text-and-flags-every-change). The buckets are what they fall back to.
+
+When even 1-day buckets would be too many for all the metrics of a group at once, the page reads them in parts and says so. A window too long for one metric in 1-day buckets is not charted, and the page asks for a shorter one.
 
 ## Text and flags: every change
 
-A text chart, such as a state, and a flag chart show **every change**, each at the moment it happened. A state the device held for ten seconds is drawn at its own time, even on **Last 24 hours**. The line above the charts says so, for example **3 metrics, in 5-minute buckets; text and flags show every change**.
+A text chart, such as a state, and a flag chart show **every change**, each at the moment it happened. A state the device held for ten seconds is drawn at its own time, even on **Last 24 hours**. The line above the charts says so, for example **3 metrics; text and flags show every change**.
 
 - **A state's box** runs from the moment the device reported that state to the moment it reported the next one.
 - **A flag's stretch** runs from the moment the flag changed to the moment it changed back.
@@ -252,7 +266,7 @@ A derived metric has no readings, so its rows are its computed values. Each row 
 
 Each resolution says how far back it has data, because raw readings are kept for much less time than the summaries. If the window starts before the resolution you chose begins, the dialog says so, names the finest resolution that covers the whole window, and offers to switch. It never swaps in a summary by itself. A raw file that starts later than the window says so in its first lines.
 
-**Buckets** changes only the charts. The export has its own **Resolution**.
+The bucket sizes change only the charts. The export has its own **Resolution**.
 
 ### How much one export can hold
 

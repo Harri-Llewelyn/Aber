@@ -8,6 +8,7 @@
  */
 import { sparkplugToXsd } from "./sparkplugToXsd.ts";
 import { modelContentType, modelFileName } from "./model3dContentType.ts";
+import { assignSubmodelKeys } from "./submodelKeys.ts";
 
 // Configuration, read at module load and so per worker: main/index.ts spawns one worker per
 // function with only the variables its registry entry names, so both aas-export and aas-api must
@@ -115,6 +116,16 @@ export function semanticReference(semanticId?: string | null) {
 }
 
 /**
+ * The `supplementalSemanticIds` of an element: a Reference for each further id of the same concept,
+ * each once and never the element's own, or undefined when there are none, so `JSON.stringify` drops
+ * the key (the list is `minItems: 1`). All three id types export as `semanticReference()` does.
+ */
+export function supplementalReferences(ids?: readonly string[] | null, ownId?: string | null) {
+  const distinct = [...new Set((ids ?? []).filter((id) => id && id !== ownId))];
+  return distinct.length > 0 ? distinct.map((id) => semanticReference(id)) : undefined;
+}
+
+/**
  * AAS idShort: the metamodel's pattern is ^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$. It must start with
  * a letter (prefixing a digit-leading name with `_` is still invalid; "3-Axis Mill" is an ordinary
  * device name) and be at least two characters.
@@ -131,7 +142,11 @@ export function property(
   idShort: string,
   valueType: string,
   value: unknown,
-  opts: { semanticId?: string | null; description?: string | null } = {},
+  opts: {
+    semanticId?: string | null;
+    supplementalSemanticIds?: readonly string[] | null;
+    description?: string | null;
+  } = {},
 ) {
   return {
     modelType: "Property",
@@ -141,6 +156,10 @@ export function property(
     // value, so an unpublished metric omits `value` entirely rather than carrying null.
     value: value === null || value === undefined ? undefined : String(value),
     semanticId: semanticReference(opts.semanticId),
+    // Only beside a semanticId (AASd-118): a further id without one has no concept to be further to.
+    supplementalSemanticIds: opts.semanticId
+      ? supplementalReferences(opts.supplementalSemanticIds, opts.semanticId)
+      : undefined,
     description: opts.description
       ? [{ language: "en", text: String(opts.description).slice(0, 1023) }]
       : undefined,
@@ -295,16 +314,27 @@ export function sparkplugToIec61360(
   return IEC61360_BY_SPARKPLUG[code];
 }
 
-/** Every GlobalReference a semanticId in `node` names, sorted, each once. */
+/**
+ * Every GlobalReference a semanticId or a supplementalSemanticIds list in `node` names, sorted, each
+ * once.
+ */
 export function referencedSemanticIds(node: unknown): string[] {
   const ids = new Set<string>();
+  type Reference = { keys?: { type?: string; value?: string }[] };
   const walk = (value: unknown) => {
     if (Array.isArray(value)) {
       value.forEach(walk);
     } else if (value && typeof value === "object") {
-      const keys = (value as { semanticId?: { keys?: { type?: string; value?: string }[] } })
-        .semanticId?.keys ?? [];
-      for (const key of keys) if (key.type === "GlobalReference" && key.value) ids.add(key.value);
+      const { semanticId, supplementalSemanticIds } = value as {
+        semanticId?: Reference;
+        supplementalSemanticIds?: Reference[];
+      };
+      const further = Array.isArray(supplementalSemanticIds) ? supplementalSemanticIds : [];
+      for (const reference of [semanticId, ...further]) {
+        for (const key of reference?.keys ?? []) {
+          if (key.type === "GlobalReference" && key.value) ids.add(key.value);
+        }
+      }
       Object.values(value).forEach(walk);
     }
   };
@@ -436,14 +466,34 @@ export function buildConceptDescriptions(
 }
 
 /**
+ * The further semantic ids of each metric (`metric_semantic_ids`), by the metric's id: each list
+ * sorted and without repeats, so two exports of one device agree.
+ */
+export function supplementalIdsByMetric(
+  rows: readonly SupplementalSemanticId[] | undefined,
+): Map<string, string[]> {
+  const byMetric = new Map<string, string[]>();
+  for (const row of rows ?? []) {
+    if (!row.metric_id || !row.semantic_id) continue;
+    const ids = byMetric.get(String(row.metric_id)) ?? [];
+    if (!ids.includes(row.semantic_id)) ids.push(row.semantic_id);
+    byMetric.set(String(row.metric_id), ids);
+  }
+  for (const ids of byMetric.values()) ids.sort();
+  return byMetric;
+}
+
+/**
  * The semantic ids a shell built from these rows can reference, besides the nameplate template's:
- * those of the catalog metrics the attached schemas model, and the schemas' own. The loader reads
- * `concept_definitions` for exactly these, so it must cover what buildEnvironment() references.
+ * those of the catalog metrics the attached schemas model, their further ids, and the schemas' own.
+ * The loader reads `concept_definitions` for exactly these, so it must cover what buildEnvironment()
+ * references.
  */
 export function conceptIdsFor(
-  rows: Pick<DeviceRecord, "catalog" | "schemas">,
+  rows: Pick<DeviceRecord, "catalog" | "schemas"> & Partial<Pick<DeviceRecord, "supplemental">>,
 ): string[] {
   const catalogByName = new Map(rows.catalog.map((m) => [String(m.name), m]));
+  const supplemental = supplementalIdsByMetric(rows.supplemental);
   const ids = new Set<string>();
   for (const schema of rows.schemas) {
     if (schema.semantic_id) ids.add(String(schema.semantic_id));
@@ -451,8 +501,11 @@ export function conceptIdsFor(
       (schema.schema_definition as Record<string, unknown> | null) ?? null,
     );
     for (const name of modelled) {
-      const id = catalogByName.get(name)?.semantic_id;
-      if (id) ids.add(String(id));
+      const metric = catalogByName.get(name);
+      const id = metric?.semantic_id;
+      if (!id) continue;
+      ids.add(String(id));
+      for (const further of supplemental.get(String(metric?.id)) ?? []) ids.add(further);
     }
   }
   return [...ids].sort();
@@ -470,8 +523,17 @@ export interface DeviceRecord {
   nameplate: Record<string, unknown> | null;
   templates: { id_short: string; semantic_id: string; description?: string | null }[];
   schemas: Record<string, unknown>[];
+  /** The further semantic ids of the catalog's metrics, as `metric_semantic_ids` holds them. */
+  supplemental?: SupplementalSemanticId[];
   /** `concept_definitions` rows for the ids conceptIdsFor() names. */
   definitions: ConceptDefinition[];
+}
+
+/** A row of `metric_semantic_ids`: another published id of the concept a catalog metric measures. */
+export interface SupplementalSemanticId {
+  metric_id: string;
+  semantic_id: string;
+  semantic_id_type?: string | null;
 }
 
 /** A row of `concept_definitions`: a vocabulary's own name and text for a semantic id. */
@@ -514,6 +576,7 @@ export async function loadDeviceRecord(
     { data: gatewayRows },
     { data: nameplateRows },
     { data: templateRows },
+    { data: supplementalRows },
   ] = await Promise.all([
     client.from("asset_config").select("*").eq("asset_id", device.sparkplug_id),
     client.from("device_schemas").select("schema_id, submodel_key").eq("device_id", device.id),
@@ -524,6 +587,8 @@ export async function loadDeviceRecord(
     client.from("device_nameplate").select("*").eq("device_id", device.id),
     client.from("idta_submodel_templates").select("id_short, semantic_id, description")
       .eq("template_id", NAMEPLATE_TEMPLATE_ID),
+    // Without rows (an error, or a database that lacks the table) each metric exports its own id alone.
+    client.from("metric_semantic_ids").select("metric_id, semantic_id, semantic_id_type"),
   ]);
 
   const links = linkRows ?? [];
@@ -534,7 +599,11 @@ export async function loadDeviceRecord(
 
   // One query for every vocabulary definition the shell can use. Without rows (an error, or a
   // database that lacks the view) each definition falls back to the catalog text.
-  const conceptIds = conceptIdsFor({ catalog: catalogRows ?? [], schemas: schemaRows ?? [] });
+  const conceptIds = conceptIdsFor({
+    catalog: catalogRows ?? [],
+    schemas: schemaRows ?? [],
+    supplemental: supplementalRows ?? [],
+  });
   const { data: definitionRows } = conceptIds.length > 0
     ? await client.from("concept_definitions").select("semantic_id, name, definition, standard")
       .in("semantic_id", conceptIds)
@@ -549,11 +618,21 @@ export async function loadDeviceRecord(
     nameplate: nameplateRows?.[0] ?? null,
     templates: templateRows ?? [],
     schemas: schemaRows ?? [],
+    supplemental: supplementalRows ?? [],
     definitions: definitionRows ?? [],
   };
 }
 
 // Construction
+
+export interface SchemaSubmodels {
+  schemaId: string;
+  rootId: string;
+  /** False for a draft attached beside the version in force, whose key carries its version. */
+  kept: boolean;
+  /** `OperationalTelemetry` and `KeyPerformanceIndicators`, whichever the schema made. */
+  ids: Record<string, string>;
+}
 
 export interface BuiltShell {
   /** The AAS Part 5 Environment: what an AASX package holds and what AAS tools accept as JSON. */
@@ -563,9 +642,53 @@ export interface BuiltShell {
   /** The single shell, already inside `environment`, for the same reason. */
   shell: Record<string, unknown>;
   stats: Record<string, unknown>;
+  /**
+   * Each attached schema, the lineage it belongs to and the Submodel ids it made by role. aas-api
+   * answers a previous version's id from the entry with `kept` of the same lineage.
+   */
+  schemaSubmodels: SchemaSubmodels[];
   /** `devices.model_3d_path`, or null. aas-export needs it to decide whether to bundle. */
   modelPath: string | null;
   modelUrl: string | null;
+}
+
+/**
+ * The names a device's other identifiers go under in `specificAssetIds`. Consumers match on them,
+ * so a rename is a break. `partInstanceId` is Catena-X's name; its `manufacturerPartId` is not
+ * written, because `device_nameplate` has no article-number column.
+ */
+export const SPECIFIC_ASSET_ID_NAMES = {
+  serialNumber: "partInstanceId",
+  productUri: "uriOfTheProduct",
+  sparkplugId: "sparkplugId",
+} as const;
+
+/** The AAS schema's `SpecificAssetId.value` limit. */
+const MAX_SPECIFIC_ASSET_ID_LENGTH = 2048;
+
+/** One entry of `assetInformation.specificAssetIds`. */
+export interface SpecificAssetId {
+  name: string;
+  value: string;
+  semanticId?: ReturnType<typeof semanticReference>;
+}
+
+/**
+ * The `specificAssetIds` of the candidates that have a value, in order, or undefined when none
+ * does: the schema's `minItems` is 1, so the key is left out. It takes identifiers, not a device
+ * row, so a shell that is not a device can name its own. A value over 2048 characters is left out,
+ * not cut.
+ */
+export function buildSpecificAssetIds(
+  candidates: { name: string; value: unknown; semanticId?: SpecificAssetId["semanticId"] }[],
+): SpecificAssetId[] | undefined {
+  const ids: SpecificAssetId[] = [];
+  for (const { name, value, semanticId } of candidates) {
+    const text = value === null || value === undefined ? "" : String(value);
+    if (text.trim() === "" || text.length > MAX_SPECIFIC_ASSET_ID_LENGTH) continue;
+    ids.push({ name, value: text, semanticId });
+  }
+  return ids.length > 0 ? ids : undefined;
 }
 
 /**
@@ -575,6 +698,7 @@ export interface BuiltShell {
 export function buildEnvironment(record: DeviceRecord): BuiltShell {
   const { device, config, links, catalog, gateway, nameplate, templates, schemas, definitions } =
     record;
+  const supplementalByMetric = supplementalIdsByMetric(record.supplemental);
 
   const keyBySchema = new Map<string, string | null>(
     links.map((l) => [String(l.schema_id), l.submodel_key ?? null]),
@@ -602,7 +726,11 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
 
   let unmappedCount = 0;
 
-  /** One AAS Property per catalogued metric name. */
+  /**
+   * One AAS Property per catalogued metric name: the metric's own id is its semanticId and its
+   * further ids are its supplementalSemanticIds. Not here: a template's element id as the primary
+   * one inside a schema built from that template, which Build Schema from Template adds.
+   */
   const propertyFor = (name: string) => {
     const metric = catalogByName.get(name);
     const semanticId = (metric?.semantic_id as string | null) ?? null;
@@ -613,7 +741,11 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
         toIdShort(name, "Metric"),
         sparkplugToXsd(metric?.datatype as number | undefined),
         valueFor(name),
-        { semanticId, description: (metric?.description as string | null) ?? null },
+        {
+          semanticId,
+          supplementalSemanticIds: supplementalByMetric.get(String(metric?.id)),
+          description: (metric?.description as string | null) ?? null,
+        },
       ),
     };
   };
@@ -627,10 +759,18 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     templates.map((row) => [String(row.id_short), String(row.semantic_id)]),
   );
 
+  // A metric carrying the id as its own answers before one carrying it as a further id, so adding a
+  // further id never moves a field from the metric that was answering it.
   const catalogBySemanticId = new Map<string, Record<string, unknown>>();
   for (const metric of catalog) {
     const id = metric.semantic_id as string | null;
     if (id && !catalogBySemanticId.has(id)) catalogBySemanticId.set(id, metric);
+  }
+  for (const metric of catalog) {
+    if (!metric.semantic_id) continue;
+    for (const id of supplementalByMetric.get(String(metric.id)) ?? []) {
+      if (!catalogBySemanticId.has(id)) catalogBySemanticId.set(id, metric);
+    }
   }
   /** The device's own answer for a concept, or null when it publishes nothing for it. */
   const publishedValue = (semanticId: string): unknown => {
@@ -721,6 +861,21 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
   let telemetryTotal = 0;
   let kpiTotal = 0;
 
+  // The key in each Submodel's id comes from the schema's lineage, so a publish leaves it where it
+  // was. `lineage_name` and `lineage_root_id` are on every row since 0298; a row without them (a
+  // fixture) is its own lineage.
+  const { keys: submodelKeys, clashes: keyClashes, current } = assignSubmodelKeys(
+    schemas.map((schema) => ({
+      id: String(schema.id),
+      rootId: String(schema.lineage_root_id ?? schema.id),
+      rootKey: toIdShort(String(schema.lineage_name || schema.schema_name || ""), "Submodel"),
+      version: Number(schema.version) || 1,
+      status: String(schema.status ?? "active"),
+      declaredKey: keyBySchema.get(String(schema.id)) ?? null,
+    })),
+  );
+  const schemaSubmodels: SchemaSubmodels[] = [];
+
   for (const schema of schemas) {
     const modelled = modelledMetrics(
       (schema.schema_definition as Record<string, unknown> | null) ?? null,
@@ -737,33 +892,43 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     telemetryTotal += telemetryProps.length;
     kpiTotal += kpiProps.length;
 
-    // The operator's chosen idShort where device_submodels carries one, otherwise derived from
-    // the schema name. Derived rather than stored by default, so it cannot drift from the name.
-    const declaredKey = keyBySchema.get(String(schema.id));
-    const baseKey = declaredKey || toIdShort(String(schema.schema_name || ""), "Submodel");
+    const baseKey = submodelKeys.get(String(schema.id)) as string;
     const single = schemas.length === 1;
+    // The schema version that produced the Submodel: a consumer that cached one sees it move.
+    const administration = { version: String(Number(schema.version) || 1) };
+    const made: SchemaSubmodels = {
+      schemaId: String(schema.id),
+      rootId: String(schema.lineage_root_id ?? schema.id),
+      kept: current.has(String(schema.id)),
+      ids: {},
+    };
+    schemaSubmodels.push(made);
 
     if (telemetryProps.length > 0) {
       const elements = [collection("Metrics", telemetryProps)];
       if (linkedSegment) elements.push(collection("Segments", [linkedSegment]));
+      made.ids.OperationalTelemetry = submodelId(`${baseKey}/OperationalTelemetry`);
       submodels.push({
         modelType: "Submodel",
-        id: submodelId(`${baseKey}/OperationalTelemetry`),
+        id: made.ids.OperationalTelemetry,
         // Keeps the well-known idShort while only one schema is attached, so a consumer looking
         // for OperationalTelemetry still finds it; qualifies it once there is more than one.
         idShort: single ? "OperationalTelemetry" : `${baseKey}_OperationalTelemetry`,
         kind: "Instance",
+        administration,
         semanticId: semanticReference((schema.semantic_id as string | null) ?? null),
         submodelElements: elements.filter(Boolean),
       });
     }
 
     if (kpiProps.length > 0) {
+      made.ids.KeyPerformanceIndicators = submodelId(`${baseKey}/KeyPerformanceIndicators`);
       submodels.push({
         modelType: "Submodel",
-        id: submodelId(`${baseKey}/KeyPerformanceIndicators`),
+        id: made.ids.KeyPerformanceIndicators,
         idShort: single ? "KeyPerformanceIndicators" : `${baseKey}_KeyPerformanceIndicators`,
         kind: "Instance",
+        administration,
         submodelElements: kpiProps,
       });
     }
@@ -824,6 +989,27 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     });
   }
 
+  // The serial number and the product URI are what the Nameplate exports, with its semantic ids,
+  // so the shell names them once. A replay lane is a recording of an asset, not a second asset,
+  // and its DBIRTH repeats the original's serial number: it names none.
+  const nameplateElement = (idShort: string) =>
+    nameplateProps.find((element) => element?.idShort === idShort);
+  const serialNumber = nameplateElement("SerialNumber");
+  const productUri = nameplateElement("URIOfTheProduct");
+  const specificAssetIds = device.shadow_of ? undefined : buildSpecificAssetIds([
+    {
+      name: SPECIFIC_ASSET_ID_NAMES.serialNumber,
+      value: serialNumber?.value,
+      semanticId: serialNumber?.semanticId,
+    },
+    {
+      name: SPECIFIC_ASSET_ID_NAMES.productUri,
+      value: productUri?.value,
+      semanticId: productUri?.semanticId,
+    },
+    { name: SPECIFIC_ASSET_ID_NAMES.sparkplugId, value: device.sparkplug_id },
+  ]);
+
   const shell = {
     modelType: "AssetAdministrationShell",
     id: `${globalAssetId}/shell`,
@@ -831,6 +1017,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     assetInformation: {
       assetKind: "Instance",
       globalAssetId,
+      specificAssetIds,
     },
     submodels: submodels.map((s) => ({
       type: "ModelReference",
@@ -862,6 +1049,9 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     kpi_metrics: kpiTotal,
     derived_metrics: derivedRows.length,
     unmapped_semantic_ids: unmappedCount,
+    // Keys that were taken, by another lineage with the same name or by a declared key, and were
+    // qualified with a short form of their lineage's id to stay apart.
+    submodel_key_clashes: keyClashes,
     concept_descriptions: conceptDescriptions.length,
     has_3d_model: Boolean(modelPath),
     // A warning here and not a refusal: in the JSON export the URL is visible to the caller, and a
@@ -872,5 +1062,5 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
       : {}),
   };
 
-  return { environment, submodels, shell, stats, modelPath, modelUrl };
+  return { environment, submodels, shell, stats, schemaSubmodels, modelPath, modelUrl };
 }

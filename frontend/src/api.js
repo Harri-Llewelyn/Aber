@@ -11,6 +11,7 @@ import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
 import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_CLASSES, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
+import { lineageVersionLabel } from './utils/schemaVersion';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
 import { ALLOWED_HOSTS_KEY, DELIVERY_LOG_LIMIT, EMAIL_MIN_SEVERITY_KEY, EMAIL_ROLES_KEY } from './utils/notifications';
@@ -40,7 +41,8 @@ const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Namepla
 /**
  * Which nameplate fields a device can answer for itself, and the OPC 40001 Machinery concept that
  * answers them, by its ExpandedNodeId. Mirrors OPC_MACHINERY and the exporter's resolution order in
- * supabase/functions/_shared/aas/shell.ts (a published value wins over a stored one). Keyed by
+ * supabase/functions/_shared/aas/shell.ts (a published value wins over a stored one, and a metric
+ * carrying the id as its own answers before one carrying it as a further id). Keyed by
  * `device_nameplate` column.
  */
 const NAMEPLATE_PUBLISHED_BY = new Map([
@@ -263,6 +265,9 @@ export const ALERT_HISTORY_LIMIT = 1000;
  * newest AUTOMATION_ALERT_LIMIT shows none: the alerts firing now are read apart, so they are never missed.
  */
 export const AUTOMATION_ALERT_LIMIT = 2000;
+
+/** How many of a built-in rule's newest occurrences its drawer lists. */
+export const BUILT_IN_OCCURRENCE_LIMIT = 5;
 
 /**
  * History's Overview read, telemetry_coverage() (0245), as its bounds are: one row a device, so no
@@ -1381,6 +1386,33 @@ const apiMethods = {
   },
 
   /**
+   * What Prometheus holds for one gateway's edge node (0303): messages per second over 5 minutes,
+   * and the sequence gaps and messages missed in the last hour, from `gateway_arrivals`. Null for a
+   * gateway with no row. A NULL figure was not observed within the last 3 minutes, and is never the
+   * last value.
+   */
+  gatewayArrivals: async (gatewayId) => {
+    const { data, error } = await supabase
+      .from('gateway_arrivals')
+      .select('messages_per_second,sequence_gaps_last_hour,messages_missed_last_hour,observed_at')
+      .eq('gateway_id', gatewayId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read what arrives from the gateway');
+    return data || null;
+  },
+
+  /**
+   * Each device of a gateway that is not archived, with the time of its newest reading (0303), read
+   * from the historian over the FDW: `[{ device_id, last_reading_at }]`, the time null for a device
+   * with no reading. Throws when the historian cannot be reached, which is not the same as none.
+   */
+  gatewayDevicesLastReading: async (gatewayId) => {
+    const { data, error } = await supabase.rpc('gateway_devices_last_reading', { p_gateway_id: gatewayId });
+    if (error) throw new Error(error.message || 'Could not read when the devices last reported');
+    return data || [];
+  },
+
+  /**
    * History's read (0233): every series of `assetIds` times `metricNames` over [from, to), one row
    * per bucket of `bucketMinutes`, a quiet bucket carried forward and marked `is_carried`.
    * `assetIds` are device UUIDs or Sparkplug ids, as the telemetry routes take them. Throws on a
@@ -2196,6 +2228,36 @@ const apiMethods = {
         .limit(AUTOMATION_ALERT_LIMIT)),
     ]);
     return { active: active.error ? [] : active.data ?? [], history: history.error ? [] : history.data ?? [] };
+  },
+
+  /**
+   * The alerts firing now that a rule raised, which the Built-in tab counts by `rule_uid`: every row of
+   * platform_alerts_active that has one, an acknowledged or suppressed alert included, as it still
+   * fires. An automation's alert has none. Throws when the read fails, so the tab says it does not
+   * know which are firing rather than calling every rule quiet.
+   */
+  readBuiltInAlerts: async ({ signal } = {}) => {
+    const query = supabase.from('platform_alerts_active')
+      .select('id, fingerprint, entity_type, sparkplug_id, alert_name, severity, summary, starts_at, rule_uid, labels')
+      .not('rule_uid', 'is', null);
+    const { data, error } = await (signal ? query.abortSignal(signal) : query);
+    if (error) throw new Error(error.message || 'Could not read the alerts that are firing');
+    return data ?? [];
+  },
+
+  /**
+   * The newest occurrences of one rule's alert, newest first: BUILT_IN_OCCURRENCE_LIMIT rows of
+   * platform_alerts with its `rule_uid`, those that could not be evaluated included.
+   */
+  readBuiltInOccurrences: async (uid, { signal } = {}) => {
+    const query = supabase.from('platform_alerts')
+      .select('id, fingerprint, entity_type, sparkplug_id, alert_name, severity, status, starts_at, ends_at, rule_uid, labels')
+      .eq('rule_uid', uid)
+      .order('starts_at', { ascending: false })
+      .limit(BUILT_IN_OCCURRENCE_LIMIT);
+    const { data, error } = await (signal ? query.abortSignal(signal) : query);
+    if (error) throw new Error(error.message || 'Could not read this rule\'s alerts');
+    return data ?? [];
   },
 
   /**
@@ -3310,7 +3372,9 @@ const apiMethods = {
      * Everything the nameplate editor needs, in one round trip: the template's element list, the
      * stored row, and what the device publishes for itself. The AAS exporter prefers a
      * device-published value over a stored one, so the form shows which fields the device already
-     * answers. The join is on `semantic_id`, as the exporter does it.
+     * answers. The join is on `semantic_id`, as the exporter does it: a metric carries the concept as
+     * its own id or as a further one (`metric_semantic_id_crosswalk` answers across both, and its
+     * rows come primary first).
      */
     if (path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)) {
       const deviceId = path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)[1];
@@ -3321,13 +3385,18 @@ const apiMethods = {
             .select('id_short, semantic_id, semantic_id_type, description, is_mandatory, ordinal')
             .eq('template_id', NAMEPLATE_TEMPLATE_ID)
             .order('ordinal', { ascending: true }),
-          supabase.from('metric_catalog').select('name, semantic_id').not('semantic_id', 'is', null)
+          supabase.from('metric_semantic_id_crosswalk')
+            .select('metric_name, semantic_id, held_as')
+            .in('semantic_id', [...NAMEPLATE_PUBLISHED_BY.values()])
         ]);
       if (templateError) throw templateError;
 
       const bySemanticId = new Map();
-      for (const metric of catalog || []) {
-        if (!bySemanticId.has(metric.semantic_id)) bySemanticId.set(metric.semantic_id, metric.name);
+      const byOwnIdFirst = [...(catalog || [])]
+        .sort((a, b) => (a.held_as === 'primary' ? 0 : 1) - (b.held_as === 'primary' ? 0 : 1)
+          || String(a.metric_name).localeCompare(String(b.metric_name)));
+      for (const metric of byOwnIdFirst) {
+        if (!bySemanticId.has(metric.semantic_id)) bySemanticId.set(metric.semantic_id, metric.metric_name);
       }
       const wanted = [...NAMEPLATE_PUBLISHED_BY.values()]
         .map(id => bySemanticId.get(id)).filter(Boolean);
@@ -3672,8 +3741,23 @@ const apiMethods = {
     }
 
     if (path.startsWith('/api/v1/metric-catalog')) {
-      const { data, error } = await supabase.from('metric_catalog').select('*').order('name', { ascending: true });
+      // The further semantic ids (0299) arrive beside the rows. Tolerated: a refused read, or a
+      // database without the table, leaves every metric with none rather than the page with nothing.
+      const [{ data, error }, furtherRows] = await Promise.all([
+        supabase.from('metric_catalog').select('*').order('name', { ascending: true }),
+        supabase.from('metric_semantic_ids')
+          .select('metric_id, semantic_id, semantic_id_type, source')
+          .order('semantic_id', { ascending: true })
+          .then(result => (result.error ? [] : result.data || []), () => [])
+      ]);
       if (error) throw error;
+      const furtherByMetric = new Map();
+      for (const row of furtherRows) {
+        furtherByMetric.set(row.metric_id, [
+          ...(furtherByMetric.get(row.metric_id) || []),
+          { semantic_id: row.semantic_id, semantic_id_type: row.semantic_id_type, source: row.source ?? null }
+        ]);
+      }
       return (data || []).map(m => ({
         metric_uuid: m.id,
         name: m.name,
@@ -3691,6 +3775,9 @@ const apiMethods = {
         // legitimate state for a local extension: no vocabulary names it.
         semantic_id: m.semantic_id ?? null,
         semantic_id_type: m.semantic_id_type ?? null,
+        // The other published ids of the same concept, by id: `{ semantic_id, semantic_id_type,
+        // source }`. The AAS export carries them as the Property's supplementalSemanticIds.
+        further_semantic_ids: furtherByMetric.get(m.id) || [],
         // The values a discrete metric may report, as text; NULL is no closed set. The schema
         // builders copy them into `enum`, and the Devices page's Out of vocabulary tag reads them.
         permitted_values: m.permitted_values ?? null,
@@ -3721,6 +3808,10 @@ const apiMethods = {
       return (data || []).map(s => ({
         schema_uuid: s.id,
         schema_name: s.schema_name,
+        // The first version's name, which every version of the lineage carries (0298): the Submodel
+        // id and every label that names a schema by its lineage read it.
+        lineage_name: s.lineage_name ?? s.schema_name,
+        lineage_root_id: s.lineage_root_id ?? s.id,
         description: s.description,
         schema_definition: s.schema_definition,
         semantic_id: s.semantic_id ?? null,
@@ -3862,7 +3953,7 @@ const apiMethods = {
           'id,name,description,connection_method,cell_id,area_id,location_scope,model_3d_path,is_archived',
           'id', deviceIds),
         readByIds('device_nameplate', '*', 'device_id', deviceIds),
-        readByIds('schemas', 'id,schema_name,version,status,parent_schema_id', 'id', idsOf('schemas')),
+        readByIds('schemas', 'id,schema_name,lineage_name,version,status,parent_schema_id', 'id', idsOf('schemas')),
         readByIds('areas', 'id,name,description,icon', 'id', idsOf('areas')),
         readByIds('cells', 'id,name,icon,area_id,plan_x,plan_y,description', 'id',
           idsOf('cells')),
@@ -3881,7 +3972,7 @@ const apiMethods = {
         devices:          { found: devices,  label: d => d.name },
         device_nameplate: { found: devices,  label: d => d.name,
                             current: id => (nameplates ? nameplates.get(id) || {} : null) },
-        schemas:          { found: schemas,  label: s => `${s.schema_name} v${s.version}` },
+        schemas:          { found: schemas,  label: lineageVersionLabel },
         areas:            { found: areas,    label: a => a.name },
         cells:            { found: cells,    label: c => c.name },
         gateways:         { found: gateways, label: g => g.name || g.sparkplug_id }
@@ -4327,10 +4418,16 @@ const apiMethods = {
     const id = parts[parts.length - 1];
 
     /**
-     * Correct a catalog metric's semantic id pair, its permitted values, or both: each only when the
-     * body names it, so an edit of one never blanks the other. `name` and `datatype` are never sent:
-     * devices publish them, and enforce_metric_catalog_immutability() refuses both regardless. No row
-     * back means RLS refused the UPDATE (Administrator only), so it is not a success.
+     * Correct a catalog metric's semantic id pair, its permitted values, its further semantic ids
+     * (`{ remove: [id], add: [{ semantic_id, semantic_id_type, source }] }`), or any of them: each
+     * only when the body names it, so an edit of one never blanks the others. `name` and `datatype`
+     * are never sent: devices publish them, and enforce_metric_catalog_immutability() refuses both
+     * regardless. No row back means RLS refused the write (Administrator only), so it is not a success.
+     *
+     * The writes go in the order the database's rules ask for: further ids removed, then the row
+     * changed, then further ids added. An id that takes over as the metric's own is no longer one of
+     * its further ids when the row changes, and an added id meets the metric's new own id. There is no
+     * transaction across them, so a refusal after the first says what was already saved.
      */
     if (/^\/api\/v1\/metric-catalog\/[^/]+$/.test(path)) {
       const change = {
@@ -4339,16 +4436,50 @@ const apiMethods = {
           permitted_values: permittedValuesColumn(body.permitted_values)
         })
       };
-      const { data, error } = await supabase
-        .from('metric_catalog').update(change).eq('id', id).select();
-      if (error) throw error;
-      if (!data?.length) {
+      const removed = body?.further_semantic_ids?.remove || [];
+      const added = body?.further_semantic_ids?.add || [];
+      const notChanged = () => new Error(
+        'Metric not changed — it may no longer exist, or you may not have permission to change ' +
+        'the catalog.'
+      );
+      const saved = [];
+      try {
+        if (removed.length > 0) {
+          const { data: gone, error } = await supabase
+            .from('metric_semantic_ids').delete().eq('metric_id', id).in('semantic_id', removed).select();
+          if (error) throw error;
+          if ((gone?.length || 0) < removed.length) throw notChanged();
+          saved.push('the further ids you removed were removed');
+        }
+        let row = { id };
+        if (Object.keys(change).length > 0) {
+          const { data, error } = await supabase
+            .from('metric_catalog').update(change).eq('id', id).select();
+          if (error) throw error;
+          if (!data?.length) throw notChanged();
+          row = data[0];
+          saved.push('the metric’s own change was saved');
+        }
+        if (added.length > 0) {
+          const { data: made, error } = await supabase.from('metric_semantic_ids').insert(
+            added.map(a => ({
+              metric_id: id,
+              semantic_id: String(a.semantic_id ?? '').trim(),
+              semantic_id_type: a.semantic_id_type,
+              source: emptyToNull(String(a.source ?? '').trim())
+            }))
+          ).select();
+          if (error) throw error;
+          if (!made?.length) throw notChanged();
+        }
+        return row;
+      } catch (err) {
+        if (saved.length === 0) throw err;
         throw new Error(
-          'Metric not changed — it may no longer exist, or you may not have permission to change ' +
-          'the catalog.'
+          `${err.message} Part of the save was made: ${saved.join(', and ')}. ` +
+          'Close this and open Edit again to see the metric as it is.'
         );
       }
-      return data[0];
     }
 
     // Editing a draft version: its metric set, description and semantic id. No status guard here

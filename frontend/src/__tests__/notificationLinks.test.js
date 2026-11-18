@@ -3,7 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   entityUrl, proposalUrl, metricUrl, captureSubjectUrl, captureJobUrl, backupUrl, personUrl, identityUrl, changesByUrl, replayLanesUrl,
-  automationUrl, automationsUrl, automationsForEntityUrl, automationForTriggerUrl, alertPage
+  automationUrl, automationsUrl, automationsForEntityUrl, automationForTriggerUrl, alertPage,
+  builtInAlertsUrl, builtInRuleUrl, builtInAlertUrl
 } from '../routes'
 
 /**
@@ -206,6 +207,15 @@ describe('where a notification links to', () => {
     expect(alertPage(undefined)).toBeNull()
   })
 
+  it("opens a platform alert on its rule's entry on Automations › Built-in, by its uid, or by its name for an older row", () => {
+    expect(builtInAlertsUrl()).toBe('/automations/built-in')
+    expect(builtInRuleUrl('aber-backup-stale')).toBe('/automations/built-in?rule=aber-backup-stale')
+    expect(builtInAlertUrl({ rule_uid: 'aber-backup-stale', alert_name: 'Backup Stale' })).toBe(builtInRuleUrl('aber-backup-stale'))
+    expect(builtInAlertUrl({ rule_uid: null, alert_name: 'Backup Stale' })).toBe('/automations/built-in?search=Backup+Stale')
+    // An alert an automation raised is no built-in rule's: alertPage() names its page.
+    expect(builtInAlertUrl({ fingerprint: 'condition:5d1f0c1e:dev22:Spindle/LOAD' })).toBeNull()
+  })
+
   it('finds a backup run, a person and a machine identity', () => {
     expect(backupUrl()).toBe('/backups')
     expect(backupUrl('b-1')).toBe('/backups?run=b-1')
@@ -235,6 +245,8 @@ describe('where a notification links to', () => {
     ['components/tabs/AccessControlTab.jsx', ["useUrlState('withdrawn'"], 'identities'],
     // The list reads the filter its device's link writes, and the alert's link names a trigger.
     ['components/tabs/AutomationsTab.jsx', ["useUrlState('entity'", "params.get('trigger')"], null],
+    // The Built-in tab reads the rule an alert's link names, and the search its older rows' links write.
+    ['components/tabs/BuiltInAlerts.jsx', ["useUrlState('rule'", "useUrlState('search'"], null],
   ])('%s reads what its link writes', (file, needles, tab) => {
     const text = source(file)
     for (const needle of needles) expect(text).toContain(needle)

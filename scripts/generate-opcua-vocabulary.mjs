@@ -41,6 +41,37 @@
  * also writes each entry's metric group to frontend/src/utils/opcuaGroups.generated.js, which the
  * Add Metric form suggests.
  *
+ * WHERE THE ROWS ARE SEEDED: IN BLOCKS, ONE PER MIGRATION THAT GROWS THE VOCABULARY.
+ *
+ * 0002_seed_data.sql is released and is never rewritten, so an expansion seeds its rows in a block
+ * of its own migration, and each entry says which block seeds it. `since: '0300'` on an entry means
+ * migration 0300's block; an entry with no `since` belongs to 0002's. The since() helper stamps a
+ * list. scripts/lib/opcua-seed-blocks.mjs lists the blocks (BLOCKS), states the rules and builds
+ * what each holds; its header is the design. In short:
+ *
+ *   * each block is written from its own entries and no others;
+ *   * a block is WRITTEN only while its migration is unreleased (its note is in unreleased/migrations/),
+ *     and otherwise only VERIFIED: a released block that would now read differently stops the run, so a
+ *     moved NodeSet or an edited entry can never rewrite a migration that has shipped. (Revising a
+ *     row a released block seeded is not built yet: scripts/lib/opcua-seed-blocks.mjs says what it
+ *     needs.);
+ *   * a group reworded after it was registered says so in its definition (`{ description, was, since }`),
+ *     and the block named by `since` carries an UPDATE guarded on the old text.
+ *
+ * To add the next expansion: add its block to BLOCKS, put `since('<number>', [...])` entries in SPECS,
+ * create the migration with the three marked regions (0300 is the model) and its note in
+ * unreleased/migrations/, and run this script.
+ *
+ * A DataType or a reference type the target NodeSet takes from another specification is resolved in
+ * that specification's own NodeSet, which DEPENDENCIES pins like a target: a Machine Tools
+ * stacklight's mode is an enumeration of IA, and Machinery Energy's statistics hang from IA's
+ * HasStatisticComponent, a subtype of HasComponent.
+ *
+ * An entry that carries `values` names the members of the enumeration its variable is typed as. The
+ * script checks them against the NodeSet's definition of that enumeration and requires the description
+ * to name each one: a device publishes an enumeration as the member's name, a String, and the names
+ * are what a person enters as the metric's permitted values.
+ *
  *   node scripts/generate-opcua-vocabulary.mjs --print-map   also prints each row's former id
  */
 
@@ -48,7 +79,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { COMMENT_BEGIN, COMMENT_END, tableCommentStatement } from './lib/opcua-vocabulary-comment.mjs';
+import { BLOCKS, applyPlan, isUnreleased, planBlocks, sqlString } from './lib/opcua-seed-blocks.mjs';
 
 /**
  * Pinned to a branch rather than a commit, matching the MTConnect generator's use of `master`.
@@ -59,9 +90,42 @@ const REF = 'latest';
 const BASE = `https://raw.githubusercontent.com/OPCFoundation/UA-Nodeset/${REF}`;
 
 /**
+ * NodeSets that a target NodeSet's DataTypes and reference types are defined in, pinned as a target
+ * is. No row comes from them. IA is "OPC Foundation MIT License 1.00", as every NodeSet here is.
+ */
+const DEPENDENCIES = [
+  {
+    namespaceUri: 'http://opcfoundation.org/UA/IA/',
+    path: 'IA/Opc.Ua.IA.NodeSet2.xml',
+    version: '1.01.4',
+    publicationDate: '2025-05-23T00:00:00Z'
+  }
+];
+
+/** The entries of a block the generator writes after 0002's: they name the migration that seeds them. */
+const since = (block, entries) => entries.map((entry) => ({ ...entry, since: block }));
+
+/**
+ * ProcessValue is one group for two specifications. OPC 40540 registered it in 0002 with the first
+ * description; OPC 40001-2's rows joined it in 0300, and the text now covers both. Both specs list it
+ * with this one definition, and the generator refuses two that differ. The first description is
+ * `was`: it is what 0002's block registers, and what 0300's UPDATE replaces on an installed database.
+ */
+const PROCESS_VALUE_GROUP = {
+  description: 'OPC UA process values -- OPC 40001-2 Machinery Process Values (the reading, setpoint, limits and status) and OPC 40540 Additive Manufacturing\'s classification of them',
+  was: 'OPC UA Additive Manufacturing (OPC 40540) in-process sensor readings',
+  since: '0300'
+};
+
+/**
  * Written to the seed as-is, except what the NodeSet supplies: `datatype` and the identifiers. A
  * group whose description is null is registered by the hand-written metric_groups rows above the
  * generated block, whose ids are fixed; the script checks that row exists.
+ *
+ * Descriptions: where an entry's text is the NodeSet's own, lightly edited, it follows the NodeSet's
+ * Description element; where the NodeSet has none, the specification's reference page (the NodeSet's
+ * Documentation link) or the entry's own enumeration is what it is written from. A description that
+ * is wholly ours says so in a comment on the entry.
  */
 const SPECS = [
   {
@@ -94,7 +158,31 @@ const SPECS = [
         browsePath: ['Status', 'MachineryOperationMode', 'CurrentState'],
         description: 'Operating mode of the machine: Processing, Setup, Maintenance or None.' },
       { group: 'Machine', type: 'MachineryOperationCounterType', name: 'PowerOnDuration', unit: 'MILLISECOND',
-        description: 'Accumulated time the machine has been powered on. The specification types it as Duration, which OPC UA counts in milliseconds.' }
+        description: 'Accumulated time the machine has been powered on. The specification types it as Duration, which OPC UA counts in milliseconds.' },
+
+      // Each description below follows the NodeSet's own, edited.
+      ...since('0300', [
+        { group: 'Machine', type: 'MachineryOperationCounterType', name: 'OperationCycleCounter', unit: 'COUNT',
+          description: 'How many times the component switches from not performing an activity to performing one: each time a valve starts moving is one. It only increases over the component\'s life and is not reset when it restarts, so it is a counter to difference rather than a value to read.' },
+        { group: 'Machine', type: 'MachineryOperationCounterType', name: 'OperationDuration', unit: 'MILLISECOND',
+          description: 'Time the machine has been powered and performing an activity, in milliseconds (the specification types it as Duration). Unlike PowerOnDuration it leaves out time spent switched on and idle: a drive can be powered without operating. It only increases and is not reset on a restart. A server may update it as seldom as once an hour.' },
+        { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'HardwareRevision',
+          description: 'Revision level of the machine\'s hardware, as text. Many machines do not provide one, because they are modular and configurable.' },
+        { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'ProductCode',
+          description: 'Machine-readable code for the machine\'s model, which may include options such as the hardware configuration. It may come from the vendor\'s ERP system, so it can serve as order information.' },
+        { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'DeviceClass',
+          description: 'The domain, or the purpose, the machine is used for.' },
+        { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'ManufacturerUri',
+          description: 'Globally unique identifier of the machine\'s manufacturer. Manufacturer is the name a person reads.' },
+        { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'AssetId',
+          description: 'Identification the end user stores to make the machine unique in their own application. The site assigns it, where SerialNumber is the manufacturer\'s. A server must accept at least 40 characters.' },
+        { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'InitialOperationDate',
+          description: 'Date the machine was first switched on after it left the manufacturer\'s plant.' },
+        { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'MonthOfConstruction',
+          description: 'Month in which the machine\'s manufacture was completed: a number from 1 (January) to 12 (December). With YearOfConstruction it dates the build.' },
+        { group: 'Machine', type: 'MachineIdentificationType', name: 'Location',
+          description: 'Where the end user keeps the machine, in whatever scheme the end user uses. Free text, separate from the area this platform places the machine in. A server must accept at least 60 characters.' }
+      ])
     ]
   },
   {
@@ -134,7 +222,34 @@ const SPECS = [
       { group: 'MotionDevice', type: 'TaskControlType', name: 'ExecutionMode', browsePath: ['ParameterSet', 'ExecutionMode'],
         description: 'Execution mode of the loaded task program -- continuous, step or cycle.' },
       { group: 'MotionDevice', type: 'ControllerType', name: 'TotalPowerOnTime', browsePath: ['ParameterSet', 'TotalPowerOnTime'],
-        description: 'Accumulated controller power-on time. The specification types it as DurationString, an ISO 8601 duration such as P12DT3H, so it is text rather than a number of seconds.' }
+        description: 'Accumulated controller power-on time. The specification types it as DurationString, an ISO 8601 duration such as P12DT3H, so it is text rather than a number of seconds.' },
+
+      // Each description below follows the NodeSet's own, edited. The specification fixes no unit
+      // for a fan speed or an energy total: the device's EngineeringUnits property carries it.
+      ...since('0300', [
+        { group: 'MotionDevice', type: 'ControllerType', name: 'Temperature', browsePath: ['ParameterSet', 'Temperature'], unit: 'CELSIUS',
+          description: 'Temperature given by a sensor inside the controller. A motor has its own, MotorTemperature.' },
+        { group: 'MotionDevice', type: 'ControllerType', name: 'CabinetFanSpeed', browsePath: ['ParameterSet', 'CabinetFanSpeed'],
+          description: 'Speed of the controller cabinet\'s fan. The specification fixes no unit, so choose one when the metric is created.' },
+        { group: 'MotionDevice', type: 'ControllerType', name: 'CPUFanSpeed', browsePath: ['ParameterSet', 'CPUFanSpeed'],
+          description: 'Speed of the controller\'s CPU fan. The specification fixes no unit, so choose one when the metric is created.' },
+        { group: 'MotionDevice', type: 'ControllerType', name: 'InputVoltage', browsePath: ['ParameterSet', 'InputVoltage'], unit: 'VOLT',
+          description: 'Input voltage of the controller, which can be a configured value rather than a measured one. Whether the supply is AC or DC is not in the value: the specification names the optional Definition property of the data item for that.' },
+        { group: 'MotionDevice', type: 'ControllerType', name: 'TotalEnergyConsumption', browsePath: ['ParameterSet', 'TotalEnergyConsumption'],
+          description: 'Total energy consumed by the motion devices that belong to this controller, accumulated. Monotonic, so it is a counter to difference rather than a value to read. The specification fixes no unit, so choose one when the metric is created, such as KILOWATT_HOUR or JOULE.' },
+        { group: 'MotionDevice', type: 'ControllerType', name: 'StartUpTime', browsePath: ['ParameterSet', 'StartUpTime'],
+          description: 'Date and time of the controller\'s last start-up. A moment, not a length of time: TotalPowerOnTime is how long the controller has been on.' },
+        { group: 'MotionDevice', type: 'ControllerType', name: 'UpsState', browsePath: ['ParameterSet', 'UpsState'],
+          description: 'Status of an integrated UPS or accumulator system in the controller. The status is the vendor\'s own, so its values come from the controller\'s manual.' },
+        { group: 'MotionDevice', type: 'MotorType', name: 'MotorTemperature', browsePath: ['ParameterSet', 'MotorTemperature'], unit: 'CELSIUS',
+          description: 'Temperature of the motor. A motor with no temperature sensor reports null. The controller has its own, Temperature.' },
+        { group: 'MotionDevice', type: 'MotorType', name: 'EffectiveLoadRate', browsePath: ['ParameterSet', 'EffectiveLoadRate'], unit: 'PERCENT',
+          description: 'Load on the motor as a percentage of its maximum continuous load. The specification suggests the Joule integral as the way to calculate it, over a duration the vendor defines and documents, so two vendors\' figures are not strictly comparable.' },
+        { group: 'MotionDevice', type: 'MotorType', name: 'BrakeReleased', browsePath: ['ParameterSet', 'BrakeReleased'],
+          description: 'Whether the motor\'s brake is released. Only a motor with a brake publishes it. TRUE means the motor is free to run and FALSE means the brake locks the shaft. Note the sense: this asserts the brake is off.' },
+        { group: 'MotionDevice', type: 'TaskControlType', name: 'TaskProgramLoaded', browsePath: ['ParameterSet', 'TaskProgramLoaded'],
+          description: 'Whether a task program is loaded in the task control. TaskProgramName says which.' }
+      ])
     ]
   },
   {
@@ -150,7 +265,10 @@ const SPECS = [
       Spindle: 'OPC UA Machine Tools (OPC 40501) spindle monitoring',
       MachineOperation: 'OPC UA Machine Tools (OPC 40501) machine-level operation mode and power-on time',
       Production: 'OPC UA Machine Tools (OPC 40501) production counters, part quality and process irregularities',
-      Tool: 'OPC UA Machine Tools (OPC 40501) tool management state'
+      Tool: 'OPC UA Machine Tools (OPC 40501) tool management state',
+      Laser: 'OPC UA Machine Tools (OPC 40501) laser monitoring -- the laser device\'s state and its controller',
+      EDMGenerator: 'OPC UA Machine Tools (OPC 40501) EDM spark generator monitoring -- its state and whether it is on',
+      Stacklight: 'OPC UA Machine Tools (OPC 40501) stacklight -- how the signal tower is used'
     },
     entries: [
       { group: 'Channel', type: 'ChannelMonitoringType', name: 'FeedOverride', unit: 'PERCENT',
@@ -202,7 +320,33 @@ const SPECS = [
       { group: 'Tool', type: 'ToolType', name: 'Locked',
         description: 'Whether the tool is locked out of use. A locked tool in a magazine is capacity the machine cannot use, which is a common and otherwise invisible cause of a stoppage.' },
       { group: 'Tool', type: 'ToolType', name: 'PlannedForOperating',
-        description: 'Whether the tool is planned for use by the current setup.' }
+        description: 'Whether the tool is planned for use by the current setup.' },
+
+      // The NodeSet describes only StacklightMode. The others are written from the specification's
+      // reference page for each type (the Documentation link in the NodeSet) and from the
+      // enumeration's own definitions.
+      ...since('0300', [
+        { group: 'Spindle', type: 'SpindleMonitoringType', name: 'IsUsedAsAxis',
+          description: 'Whether the monitored element is used as an axis (TRUE) or as a spindle (FALSE). When it is TRUE the specification says a client shall not use IsRotating or Override on the same element.' },
+        { group: 'Laser', type: 'LaserMonitoringType', name: 'LaserState',
+          description: 'State of the laser device: Undefined (it cannot be indicated), Ready (no error, and emission is prohibited), Active (safety clearances have to be set and emission can be activated, or a program is running on the laser device) or Error. The MachineTool enumeration LaserState, carried as the member name.' },
+        { group: 'Laser', type: 'LaserMonitoringType', name: 'ControllerIsOn',
+          description: 'Whether the laser device\'s controller is running. It says nothing about whether laser light is being emitted: LaserState is the state of the laser.' },
+        { group: 'EDMGenerator', type: 'EDMGeneratorMonitoringType', name: 'EDMGeneratorState',
+          description: 'State of the EDM spark generator: Undefined, Ready (initialised, and can receive a set of technology parameters), Active_Low_Voltage (supplying pulses within the ISO 28881 low-voltage limits, 25 V AC or 60 V DC), Active_High_Voltage (supplying pulses above them) or Error. The MachineTool enumeration EDMGeneratorState, carried as the member name.' },
+        { group: 'EDMGenerator', type: 'EDMGeneratorMonitoringType', name: 'IsOn',
+          description: 'Whether the EDM spark generator has a valid set of technology parameters, meets every safety condition required and is switched on.' },
+        { group: 'Production', type: 'ProductionPartSetType', name: 'PartsCompletedPerRun', unit: 'COUNT',
+          description: 'Parts of this group completed in the current run of the job. It says nothing about their quality: PartQuality does.' },
+        { group: 'Production', type: 'ProductionPartSetType', name: 'PartsPlannedPerRun', unit: 'COUNT',
+          description: 'Parts of this group meant to be produced in one run of the job. Compare PartsCompletedPerRun.' },
+        { group: 'Production', type: 'ProductionPartSetType', name: 'ContainsMixedParts',
+          description: 'Whether the parts in this group may differ from each other (TRUE) or are all of one type (FALSE).' },
+        { group: 'Tool', type: 'ToolType', name: 'LastUsage',
+          description: 'When the tool was last the active tool on a tool carrier while the machine was in an automatic mode.' },
+        { group: 'Stacklight', type: 'MonitoringType', name: 'StacklightMode', browsePath: ['Stacklight', 'StacklightMode'],
+          description: 'How the stacklight (signal tower) is used: Segmented (a stack of individual lights), Levelmeter (a level meter), Running_Light (the whole stack acts as a running light) or Other. The IA enumeration StacklightOperationMode, carried as the member name.' }
+      ])
     ]
   },
   {
@@ -213,7 +357,8 @@ const SPECS = [
     publicationDate: '2025-02-01T00:00:00Z',
     groups: {
       Feedstock: 'OPC UA Additive Manufacturing (OPC 40540) feedstock -- the powder, filament or resin a printer consumes',
-      ProcessValue: 'OPC UA Additive Manufacturing (OPC 40540) in-process sensor readings'
+      Machine: null,
+      ProcessValue: PROCESS_VALUE_GROUP
     },
     entries: [
       { group: 'Feedstock', type: 'FeedstockType', name: 'RemainingQuantity',
@@ -228,7 +373,23 @@ const SPECS = [
       { group: 'ProcessValue', type: 'ProcessValueAMType', name: 'Category',
         description: 'Category of an in-process sensor reading, from the SensorCategory enumeration -- what kind of thing is being measured.' },
       { group: 'ProcessValue', type: 'ProcessValueAMType', name: 'Severity',
-        description: 'Severity attached to an in-process sensor reading, from the SensorSeverity enumeration. The machine grading its own measurement, which is not the same as an alarm.' }
+        description: 'Severity attached to an in-process sensor reading, from the SensorSeverity enumeration. The machine grading its own measurement, which is not the same as an alarm.' },
+
+      // The NodeSet describes none of these. Each is written from the specification's reference page
+      // for its type (the Documentation link in the NodeSet), and Function's from its enumeration.
+      ...since('0300', [
+        { group: 'Feedstock', type: 'FeedstockType', name: 'Function',
+          values: ['Undefined', 'Main', 'Ancillary', 'Consumable'],
+          description: 'What the feedstock is used for: Main (used for production and part of the finished part), Ancillary (used for production but removed before the part is finished), Consumable (consumed during production, such as process gas) or Undefined. A device publishes the member name as a String, so those four names are the permitted values to give the metric.' },
+        { group: 'Feedstock', type: 'FeedstockType', name: 'Identifier',
+          description: 'Identifier of the feedstock. The specification uses it to determine the type of feedstock and requires it to be unique. A particular load of it is told apart by ExternalIdentifier.' },
+        { group: 'Feedstock', type: 'FeedstockType', name: 'ExternalIdentifier',
+          description: 'Identifies the feedstock instance in use, such as its lot or batch ID, and is unique per Identifier. It is what traces a part back to the material it was made from.' },
+        { group: 'Feedstock', type: 'FeedstockType', name: 'Name',
+          description: 'Human-readable name of the feedstock in use, for example PLA_Black.' },
+        { group: 'Machine', type: 'MachineIdentificationAMType', name: 'AMTechnologyIdentifier',
+          description: 'The machine\'s main additive manufacturing technology category, as ISO/ASTM 52900 names them: BJT (binder jetting), DED (directed energy deposition), MEX (material extrusion), MJT (material jetting), PBF (powder bed fusion), SHL (sheet lamination) or VPP (vat photopolymerization). The specification says these values should be used but may be extended, so they are a guide and not a closed list.' }
+      ])
     ]
   },
   {
@@ -284,7 +445,20 @@ const SPECS = [
       { group: 'PackML', type: 'PackMLAdminObjectType', name: 'AccTimeSinceReset', unit: 'SECOND',
         description: 'Time since the accumulators were last reset. Without it the cumulative counters have no denominator and cannot be turned into a ratio.' },
       { group: 'PackML', type: 'PackMLBaseObjectType', name: 'PackMLVersion',
-        description: 'Which PackML version the unit implements. Worth catalogue space because the state model changed between editions.' }
+        description: 'Which PackML version the unit implements. Worth catalogue space because the state model changed between editions.' },
+
+      // The NodeSet describes none of these. Each is written from the specification's reference page
+      // for its type (the Documentation link in the NodeSet). The three count arrays
+      // (ProdProcessedCount, ProdDefectiveCount, ProdConsumedCount) are not here: they are arrays of
+      // the PackMLCountDataType structure, which Sparkplug B cannot carry.
+      ...since('0300', [
+        { group: 'PackML', type: 'PackMLStatusObjectType', name: 'UnitModeRequested',
+          description: 'Whether a unit mode change has been requested; it reflects the status of the command of the same name. It is a Boolean, so it says a change was asked for and not which mode. UnitModeCurrent is the mode the unit is in.' },
+        { group: 'PackML', type: 'PackMLAdminObjectType', name: 'StopReasonExtent',
+          description: 'Maximum number of stop reason elements the unit holds. A size, not a reading.' },
+        { group: 'PackML', type: 'PackMLBaseObjectType', name: 'TagID',
+          description: 'An additional name for the PackML system, in which a third-party cross reference or any other string can be stored.' }
+      ])
     ]
   },
   {
@@ -308,19 +482,52 @@ const SPECS = [
       { group: 'Energy', type: 'IVolumeFlowType', name: 'Volume', unit: 'LITER',
         description: 'Accumulated volume of a utility that has flowed. Monotonic, so it is a counter to difference rather than a value to read.' },
       { group: 'Energy', type: 'IVolumeFlowType', name: 'VolumeFlowRate', unit: 'LITER/SECOND',
-        description: 'Instantaneous volume flow rate of a utility -- compressed air consumption being the usual reason to model this on a shopfloor.' }
+        description: 'Instantaneous volume flow rate of a utility -- compressed air consumption being the usual reason to model this on a shopfloor.' },
+
+      // The NodeSet describes neither. They hang from the interface by IA's HasStatisticComponent
+      // and carry no unit of their own here: the carrier decides it.
+      ...since('0300', [
+        { group: 'Energy', type: 'INonElectricalEnergyType', name: 'NeEnergyImportHp',
+          description: 'Accumulated non-electrical energy the machine takes in, for example as heat or gas, as a Double. Monotonic, so it is a counter to difference rather than a value to read. No unit is offered because it follows the carrier: choose one when the metric is created.' },
+        { group: 'Energy', type: 'INonElectricalEnergyType', name: 'NeEnergyExportHp',
+          description: 'Accumulated non-electrical energy the machine gives out, the other direction of NeEnergyImportHp, as a Double. A counter to difference, and its unit is chosen when the metric is created.' }
+      ])
     ]
+  },
+  {
+    // OPC 40001-2 is the shape of a process value, which OPC 40540's ProcessValueAMType subtypes: a
+    // printer's chamber temperature is an instance of it that the vendor names. The generic
+    // reading, setpoint, limits and status are therefore worth a row each, and the rows share
+    // OPC 40540's ProcessValue group (PROCESS_VALUE_GROUP above). The NodeSet describes every one;
+    // each description follows its text, edited.
+    companionSpec: 'OPC 40001-2 Machinery Process Values',
+    namespaceUri: 'http://opcfoundation.org/UA/Machinery/ProcessValues/',
+    path: 'Machinery/ProcessValues/Opc.Ua.Machinery.ProcessValues.NodeSet2.xml',
+    version: '1.00.0',
+    publicationDate: '2023-05-01T00:00:00Z',
+    groups: { ProcessValue: PROCESS_VALUE_GROUP },
+    entries: since('0300', [
+      { group: 'ProcessValue', type: 'ProcessValueType', name: 'AnalogSignal',
+        description: 'The process value itself: the reading. The specification puts its unit and range in the signal\'s EngineeringUnits and EURange properties, so here the unit is chosen when the metric is created. Its limits and its percentage are rows of their own.' },
+      { group: 'ProcessValue', type: 'ProcessValueType', name: 'ProcessValueSetpoint',
+        description: 'The desired value, which the server may or may not control. AnalogSignal is the reading it is compared with.' },
+      { group: 'ProcessValue', type: 'ProcessValueType', name: 'Status',
+        description: 'Whether a limit has been reached, as a number from the specification: 0 not monitoring, 1 status not known, 2 below LowLowLimit, 3 below LowLimit, 4 below LowLowDeviation, 5 below LowDeviation, 6 within tolerance, 7 above HighDeviation, 8 above HighHighDeviation, 9 above HighLimit, 10 above HighHighLimit.' },
+      { group: 'ProcessValue', type: 'ProcessValueType', name: 'PercentageValue', browsePath: ['AnalogSignal', 'PercentageValue'], unit: 'PERCENT',
+        description: 'The process value as a percentage, for a signal that provides one.' },
+      { group: 'ProcessValue', type: 'ProcessValueType', name: 'HighHighLimit', browsePath: ['AnalogSignal', 'HighHighLimit'],
+        description: 'Absolute high-high limit of the process value, in its unit. Status reports above HighHighLimit when the reading passes it.' },
+      { group: 'ProcessValue', type: 'ProcessValueType', name: 'HighLimit', browsePath: ['AnalogSignal', 'HighLimit'],
+        description: 'Absolute high limit of the process value, in its unit. Status reports above HighLimit when the reading passes it.' },
+      { group: 'ProcessValue', type: 'ProcessValueType', name: 'LowLimit', browsePath: ['AnalogSignal', 'LowLimit'],
+        description: 'Absolute low limit of the process value, in its unit. Status reports below LowLimit when the reading falls under it.' },
+      { group: 'ProcessValue', type: 'ProcessValueType', name: 'LowLowLimit', browsePath: ['AnalogSignal', 'LowLowLimit'],
+        description: 'Absolute low-low limit of the process value, in its unit. Status reports below LowLowLimit when the reading falls under it.' }
+    ])
   }
 ];
 
-const SEED = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..', 'supabase', 'migrations', '0002_seed_data.sql'
-);
-const VOCAB_BEGIN = '-- >>> BEGIN GENERATED opcua_vocabulary_rows';
-const VOCAB_END = '-- <<< END GENERATED opcua_vocabulary_rows';
-const GROUP_BEGIN = '-- >>> BEGIN GENERATED opcua_metric_groups';
-const GROUP_END = '-- <<< END GENERATED opcua_metric_groups';
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The dashboard's group suggestion per data point, which no opcua_vocabulary column carries. */
 const GROUPS_MODULE = join(
@@ -330,8 +537,6 @@ const GROUPS_MODULE = join(
 
 /** Namespace index 0 of every NodeSet: the base OPC UA namespace, never listed in NamespaceUris. */
 const OPC_UA_NAMESPACE = 'http://opcfoundation.org/UA/';
-
-const sqlString = (value) => `'${String(value).replace(/'/g, "''")}'`;
 
 /**
  * A deliberately narrow reader for UANodeSet documents, rather than an XML dependency.
@@ -370,7 +575,7 @@ function parseNodeSet(xml) {
     ? [...table[1].matchAll(/<Uri>([^<]*)<\/Uri>/g)].map((m) => m[1].trim())
     : [];
 
-  const element = /<(UAObjectType|UAVariable|UADataType|UAObject|UAVariableType)\b([^>]*?)(\/)?>/g;
+  const element = /<(UAObjectType|UAVariable|UADataType|UAObject|UAVariableType|UAReferenceType)\b([^>]*?)(\/)?>/g;
   let match;
   while ((match = element.exec(xml)) !== null) {
     const [full, tag, attrText, selfClosing] = match;
@@ -390,10 +595,14 @@ function parseNodeSet(xml) {
         const refAttrs = readAttrs(r[1]);
         return {
           type: referenceTypeName(refAttrs.ReferenceType, aliases),
+          // The NodeId the document names the type by, which a type from another namespace is found by.
+          typeId: aliases.get(refAttrs.ReferenceType) ?? refAttrs.ReferenceType,
           forward: refAttrs.IsForward !== 'false',
           target: r[2].trim()
         };
-      })
+      }),
+      // The members of an enumeration, in the order the DataType defines them.
+      fields: tag === 'UADataType' ? [...body.matchAll(/<Field\b([^>]*)>/g)].map((f) => readAttrs(f[1]).Name) : []
     };
     if (node.nodeId) nodes.set(node.nodeId, node);
     if (node.browseName) {
@@ -402,7 +611,10 @@ function parseNodeSet(xml) {
     }
     void full;
   }
-  return { nodes, byBrowseName, model, aliases, namespaceUris };
+  const doc = { nodes, byBrowseName, model, aliases, namespaceUris };
+  // A node is read in the document that defines it: its NodeIds count namespaces from that table.
+  for (const node of nodes.values()) node.doc = doc;
+  return doc;
 }
 
 /**
@@ -446,7 +658,7 @@ const BUILT_IN = {
   'i=1': 'Boolean', 'i=2': 'SByte', 'i=3': 'Byte', 'i=4': 'Int16', 'i=5': 'UInt16',
   'i=6': 'Int32', 'i=7': 'UInt32', 'i=8': 'Int64', 'i=9': 'UInt64', 'i=10': 'Float',
   'i=11': 'Double', 'i=12': 'String', 'i=13': 'DateTime', 'i=17': 'NodeId',
-  'i=21': 'LocalizedText', 'i=26': 'Number', 'i=294': 'UtcTime',
+  'i=21': 'LocalizedText', 'i=26': 'Number', 'i=28': 'UInteger', 'i=294': 'UtcTime',
   // Double in milliseconds, and an ISO 8601 duration string.
   'i=290': 'Duration', 'i=12879': 'DurationString',
   // The abstract Enumeration base, used where a variable accepts any enumeration member.
@@ -468,6 +680,7 @@ const STRUCTURE_BASE = 'i=22';
  * ABSTRACT `Number` BECOMES `Double`. `Number` is not instantiable; a device publishes a concrete
  * type, and Double is the only one that cannot lose range against the alternatives. `Duration` is a
  * Double and `DurationString` a String, so each becomes its base; the description says what it holds.
+ * The abstract `UInteger` becomes `UInt64` for the same reason, and `UtcTime`, a DateTime, its base.
  *
  * STRUCTURES ARE REFUSED, AND A STRUCTURE STOPS THE BUILD. Treating any specification-defined
  * DataType as an enumeration holds for MachineTool and Additive and fails for OPC 30050, which
@@ -483,10 +696,12 @@ function resolveDataType(node, doc, where) {
   if (BUILT_IN[raw]) {
     const builtIn = BUILT_IN[raw];
     if (builtIn === 'Number' || builtIn === 'Duration') return 'Double';
+    if (builtIn === 'UInteger') return 'UInt64';
+    if (builtIn === 'UtcTime') return 'DateTime';
     if (builtIn === 'Enumeration' || builtIn === 'DurationString') return 'String';
     return builtIn;
   }
-  const target = doc.nodes.get(raw);
+  const target = doc.nodes.get(raw) ?? externalNode(raw, doc);
   if (!target) throw new Error(`${where}: DataType ${raw} is neither built-in nor defined in this NodeSet`);
   if (target.tag !== 'UADataType') throw new Error(`${where}: DataType ${raw} resolves to a ${target.tag}`);
 
@@ -506,6 +721,50 @@ function resolveDataType(node, doc, where) {
   );
 }
 
+/** The members of an enumeration the variable is typed as, in the order its DataType defines them. */
+function enumerationMembers(node, doc, where) {
+  const raw = doc.aliases.get(node.dataType) ?? node.dataType;
+  const target = doc.nodes.get(raw) ?? externalNode(raw, doc);
+  const base = target?.references.find((r) => r.type === 'HasSubtype' && !r.forward)?.target;
+  if (target?.tag !== 'UADataType' || base !== ENUMERATION_BASE) {
+    throw new Error(`${where}: the entry names values, but ${node.dataType} is not an enumeration this NodeSet or a pinned dependency defines`);
+  }
+  return target.fields;
+}
+
+/**
+ * A node this document names but another NodeSet defines. `ns=6;i=3002` in Machine Tools is `i=3002`
+ * of IA, and IA writes it `ns=1;i=3002`, counting from its own table. Null when the namespace is none
+ * of DEPENDENCIES, so the caller's own message says what could not be resolved.
+ */
+function externalNode(nodeId, doc) {
+  const m = /^ns=(\d+);(.+)$/.exec(nodeId || '');
+  const uri = m && doc.namespaceUris[Number(m[1]) - 1];
+  const dependency = uri && dependencyDocs.get(uri);
+  return dependency?.nodes.get(`ns=${dependency.namespaceUris.indexOf(uri) + 1};${m[2]}`) ?? null;
+}
+
+/**
+ * Whether a reference links a member to its type: HasComponent, HasProperty, or a reference type that
+ * subtypes one. Machinery Energy hangs `NeEnergyImportHp` from its interface by IA's
+ * HasStatisticComponent, which IA declares as a subtype of HasComponent; the chain is followed in the
+ * NodeSet that declares each type.
+ */
+function linksAMember(ref, doc) {
+  let typeId = ref.typeId;
+  let owner = doc;
+  for (let hops = 0; hops < 8; hops += 1) {
+    const known = REFERENCE_TYPES[typeId];
+    if (known === 'HasComponent' || known === 'HasProperty') return true;
+    const type = owner.nodes.get(typeId) ?? externalNode(typeId, owner);
+    if (!type) return false;
+    owner = type.doc;
+    typeId = type.references.find((r) => r.type === 'HasSubtype' && !r.forward)?.target;
+    if (!typeId) return false;
+  }
+  return false;
+}
+
 /**
  * The variable at `path` below the ObjectType, one BrowseName per step. Each step is a component or
  * property the NodeSet declares on the node before it, and must name exactly one node: the NodeId
@@ -515,7 +774,7 @@ function memberAt(objectType, path, doc, where) {
   let node = objectType;
   path.forEach((name, step) => {
     const found = node.references
-      .filter((ref) => ref.forward && (ref.type === 'HasComponent' || ref.type === 'HasProperty'))
+      .filter((ref) => ref.forward && linksAMember(ref, doc))
       .map((ref) => doc.nodes.get(ref.target))
       .filter((target) => target && target.browseName === name &&
         (step === path.length - 1 ? target.tag === 'UAVariable' : ['UAObject', 'UAVariable'].includes(target.tag)));
@@ -528,15 +787,13 @@ function memberAt(objectType, path, doc, where) {
   return node;
 }
 
-const vocabRows = [];
-const groupRows = new Map();
-const groupsByPoint = new Map();
-const formerIds = [];
-const seenIds = new Map();
-const summary = [];
 
-for (const spec of SPECS) {
-  const url = `${BASE}/${spec.path}`;
+/** The pinned NodeSets of DEPENDENCIES, parsed, by namespace URI. */
+const dependencyDocs = new Map();
+
+/** A NodeSet read from the pinned branch, with its ModelUri, version and publication date held to the pin. */
+async function readNodeSet(source, label) {
+  const url = `${BASE}/${source.path}`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`fetch failed: ${response.status} ${url}`);
   const doc = parseNodeSet(await response.text());
@@ -545,16 +802,33 @@ for (const spec of SPECS) {
   // NodeSet that is not the one this vocabulary was curated against must stop the build rather than
   // quietly re-stamp the seed against a specification nobody reviewed.
   const { uri, version, publicationDate } = doc.model;
-  if (uri !== spec.namespaceUri) {
-    throw new Error(`${spec.companionSpec}: ModelUri is ${uri}, expected ${spec.namespaceUri}`);
+  if (uri !== source.namespaceUri) {
+    throw new Error(`${label}: ModelUri is ${uri}, expected ${source.namespaceUri}`);
   }
-  if (version !== spec.version || publicationDate !== spec.publicationDate) {
+  if (version !== source.version || publicationDate !== source.publicationDate) {
     throw new Error(
-      `${spec.companionSpec}: upstream moved to ${version} (${publicationDate}), pinned to ` +
-      `${spec.version} (${spec.publicationDate}). Review the diff, update the pin and the entries, ` +
+      `${label}: upstream moved to ${version} (${publicationDate}), pinned to ` +
+      `${source.version} (${source.publicationDate}). Review the diff, update the pin and the entries, ` +
       `then re-run -- do not just bump the pin.`
     );
   }
+  return doc;
+}
+
+const rows = [];
+const groups = new Map();
+const groupOwner = new Map();
+const groupsByPoint = new Map();
+const formerIds = [];
+const seenIds = new Map();
+const summary = [];
+
+for (const dependency of DEPENDENCIES) {
+  dependencyDocs.set(dependency.namespaceUri, await readNodeSet(dependency, dependency.namespaceUri));
+}
+
+for (const spec of SPECS) {
+  const doc = await readNodeSet(spec, spec.companionSpec);
 
   for (const entry of spec.entries) {
     const where = `${spec.companionSpec}/${entry.name}`;
@@ -564,6 +838,15 @@ for (const spec of SPECS) {
     }
     const member = memberAt(candidates[0], entry.browsePath ?? [entry.name], doc, where);
     const datatype = resolveDataType(member, doc, where);
+    if (entry.values) {
+      // The names a person enters as the metric's permitted values, held to the NodeSet's own.
+      const members = enumerationMembers(member, doc, where);
+      if (members.join() !== entry.values.join()) {
+        throw new Error(`${where}: the entry names the values ${entry.values.join(', ')}, the NodeSet defines ${members.join(', ')}`);
+      }
+      const unnamed = entry.values.filter((value) => !entry.description.includes(value));
+      if (unnamed.length) throw new Error(`${where}: the description does not name ${unnamed.join(', ')}`);
+    }
     // The id the specification publishes for this variable, as both the node and the concept.
     const nodeId = expandedNodeId(member.nodeId, doc, where);
     if (!nodeId.startsWith(`nsu=${spec.namespaceUri};`)) {
@@ -575,105 +858,72 @@ for (const spec of SPECS) {
     // What 0171 repoints: the namespace plus the name, the id this vocabulary carried before 1.2.0.
     formerIds.push([`${spec.namespaceUri}${entry.name}`, semanticId]);
 
-    vocabRows.push(
-      `INSERT INTO public.opcua_vocabulary VALUES (${sqlString(entry.name)}, ` +
-      `${sqlString(spec.companionSpec)}, ${sqlString(nodeId)}, ${sqlString(entry.description)}, ` +
-      `${sqlString(datatype)}, ${entry.unit ? sqlString(entry.unit) : 'NULL'}, ${sqlString(semanticId)})\n` +
-      `ON CONFLICT (companion_spec, name) DO UPDATE SET\n` +
-      `  node_id     = EXCLUDED.node_id,\n` +
-      `  description = EXCLUDED.description,\n` +
-      `  datatype    = EXCLUDED.datatype,\n` +
-      `  unit        = EXCLUDED.unit,\n` +
-      `  semantic_id = EXCLUDED.semantic_id;`
-    );
+    rows.push({
+      since: entry.since,
+      spec: spec.companionSpec,
+      group: entry.group,
+      statement:
+        `INSERT INTO public.opcua_vocabulary VALUES (${sqlString(entry.name)}, ` +
+        `${sqlString(spec.companionSpec)}, ${sqlString(nodeId)}, ${sqlString(entry.description)}, ` +
+        `${sqlString(datatype)}, ${entry.unit ? sqlString(entry.unit) : 'NULL'}, ${sqlString(semanticId)})\n` +
+        `ON CONFLICT (companion_spec, name) DO UPDATE SET\n` +
+        `  node_id     = EXCLUDED.node_id,\n` +
+        `  description = EXCLUDED.description,\n` +
+        `  datatype    = EXCLUDED.datatype,\n` +
+        `  unit        = EXCLUDED.unit,\n` +
+        `  semantic_id = EXCLUDED.semantic_id;`
+    });
     if (!(entry.group in spec.groups)) throw new Error(`${where}: no description registered for group ${entry.group}`);
-    groupRows.set(entry.group, spec.groups[entry.group]);
+    // Two specifications may list one group, with one definition: a second text for it would be
+    // silently replacing the first.
+    if (groups.has(entry.group) && JSON.stringify(groups.get(entry.group)) !== JSON.stringify(spec.groups[entry.group])) {
+      throw new Error(`group ${entry.group} is described one way by ${groupOwner.get(entry.group)} and another by ${spec.companionSpec}; give both the same definition`);
+    }
+    groups.set(entry.group, spec.groups[entry.group]);
+    groupOwner.set(entry.group, spec.companionSpec);
     if (!groupsByPoint.has(spec.companionSpec)) groupsByPoint.set(spec.companionSpec, new Map());
     groupsByPoint.get(spec.companionSpec).set(entry.name, entry.group);
   }
   summary.push(`${spec.companionSpec}: ${spec.entries.length} rows from ${spec.path}`);
 }
 
-/**
- * `metric_groups` rows, registered here rather than created on first use.
- *
- * `enforce_metric_group_spelling()` makes the first spelling of a group permanent, so a group that
- * arrives implicitly -- because someone created a metric called `Channel/FeedOverride` -- fixes
- * whatever casing they typed, forever. Registering the intended spelling in the seed is what makes
- * that trigger a guard rather than a trap.
- *
- * Ids are derived from the name so re-running is stable and the diff stays empty; a random uuid
- * would rewrite every line on every run. `ON CONFLICT DO NOTHING` covers both the primary key and
- * uq_metric_groups_name_ci, so a group that already exists is left exactly as it is rather than
- * being restated with this file's description. `Machine` and `MotionDevice` are registered by the
- * hand-written rows above the block, with the ids every database already holds.
- */
-const groupUuid = (name) => {
-  // The salt these PRIMARY KEYS are derived from. Changing it changes every id this block seeds,
-  // and an installed database keeps the ids it was seeded with, so it is fixed from 1.0 on.
-  const hex = createHash('sha256').update(`aber.metric_group.${name}`).digest('hex');
-  return [
-    hex.slice(0, 8), hex.slice(8, 12),
-    `4${hex.slice(13, 16)}`,
-    ((parseInt(hex.slice(16, 17), 16) & 0x3 | 0x8).toString(16)) + hex.slice(17, 20),
-    hex.slice(20, 32)
-  ].join('-');
-};
-
-function splice(seed, begin, end, header, body) {
-  const beginAt = seed.indexOf(begin);
-  const endAt = seed.indexOf(end);
-  if (beginAt < 0 || endAt < 0 || endAt < beginAt) {
-    throw new Error(`markers not found in ${SEED}. Expected a block delimited by:\n  ${begin}\n  ${end}`);
-  }
-  return seed.slice(0, beginAt) + header + '\n' + body + '\n' + seed.slice(endAt);
-}
+const plans = planBlocks({ rows, groups, generatedSpecs: SPECS.map((spec) => spec.companionSpec) });
 
 // Normalised for the same reason the MTConnect generator normalises: git checks the seed out as
 // CRLF on Windows, and splicing an LF block in would digest over neither ending consistently.
-let seed = readFileSync(SEED, 'utf8').replace(/\r\n/g, '\n');
+const read = (file) => readFileSync(join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
+const current = new Map(BLOCKS.map((block) => [block.file, read(block.file)]));
 
-for (const [name, description] of groupRows) {
-  if (description !== null) continue;
+// A group with no description here is registered by a hand-written metric_groups row in a block's
+// file, with the id every database already holds.
+for (const [name, definition] of groups) {
+  if (definition !== null) continue;
   const quoted = name.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
   const registered = new RegExp(`^INSERT INTO public\\.metric_groups VALUES \\('[^']+', '${quoted}', .*'OPC UA'\\)$`, 'm');
-  if (!registered.test(seed)) {
-    throw new Error(`group ${name} has no description here and no hand-written OPC UA metric_groups row in ${SEED}`);
+  if (![...current.values()].some((text) => registered.test(text))) {
+    throw new Error(`group ${name} has no description here and no hand-written OPC UA metric_groups row in ${BLOCKS.map((b) => b.file).join(' or ')}`);
   }
 }
 
-const groupStatements = [...groupRows.entries()]
-  .filter(([, description]) => description !== null)
-  .sort(([a], [b]) => a.localeCompare(b))
-  .map(([name, description]) =>
-    `INSERT INTO public.metric_groups (id, name, description, standard) VALUES ` +
-    `(${sqlString(groupUuid(name))}, ${sqlString(name)}, ${sqlString(description)}, 'OPC UA')\n` +
-    `ON CONFLICT DO NOTHING;`);
-
-const vocabBody = vocabRows.join('\n');
-const vocabDigest = createHash('sha256').update(vocabBody).digest('hex').slice(0, 16);
-seed = splice(seed, VOCAB_BEGIN, VOCAB_END,
-  `${VOCAB_BEGIN} -- ${vocabRows.length} rows, sha256:${vocabDigest}\n` +
-  `-- GENERATED from the OPC Foundation NodeSet2 XML by scripts/generate-opcua-vocabulary.mjs.\n` +
-  `-- Do not edit these rows by hand: change ENTRIES in that script and re-run it. Browse names,\n` +
-  `-- datatypes and NodeIds are read from the NodeSet; the selection, prose and units are curated.\n` +
-  `-- CI verifies the digest above.`,
-  vocabBody);
-
-const groupBody = groupStatements.join('\n');
-const groupDigest = createHash('sha256').update(groupBody).digest('hex').slice(0, 16);
-seed = splice(seed, GROUP_BEGIN, GROUP_END,
-  `${GROUP_BEGIN} -- ${groupStatements.length} rows, sha256:${groupDigest}\n` +
-  `-- GENERATED by scripts/generate-opcua-vocabulary.mjs. CI verifies the digest above.`,
-  groupBody);
-
-// The table's COMMENT names every specification the seed holds.
-seed = splice(seed, COMMENT_BEGIN, COMMENT_END,
-  `${COMMENT_BEGIN}\n` +
-  `-- GENERATED by scripts/generate-opcua-vocabulary.mjs from every opcua_vocabulary row in this file.`,
-  tableCommentStatement(seed, SPECS.map((spec) => spec.companionSpec)));
-
-writeFileSync(SEED, seed, 'utf8');
+// Every block is worked out before any file is written, so a released block that has moved stops the
+// run with nothing changed.
+const results = plans.map((plan) => ({ plan, ...applyPlan(current.get(plan.block.file), plan) }));
+for (const { plan, changed } of results) {
+  if (changed.length && !isUnreleased(plan.block, ROOT)) {
+    throw new Error(
+      `${plan.block.file} is released (no unreleased/migrations/${plan.block.since}.md) and its ${changed.join(', ')} ` +
+      `would now read differently. A released block is verified, never rewritten. Find what moved, a ` +
+      `NodeSet under its pin or an entry or a group description edited since the block shipped, and ` +
+      `undo it. A new data point goes in a new block: add the block to scripts/lib/opcua-seed-blocks.mjs ` +
+      `and give the entry since: '<its migration>'.`
+    );
+  }
+}
+for (const { plan, text, changed } of results) {
+  if (changed.length) writeFileSync(join(ROOT, plan.block.file), text, 'utf8');
+  console.log(`  ${plan.block.since}: ${plan.vocabulary.rows} opcua_vocabulary rows, ${plan.groups.rows} metric_groups statements` +
+    (changed.length ? ` (wrote ${changed.join(', ')})` : ' (unchanged)'));
+}
 
 // The dashboard's group suggestion for each data point, keyed as the table is.
 const groupsBody = [...groupsByPoint.keys()].sort().map((spec) => {
@@ -691,11 +941,12 @@ writeFileSync(GROUPS_MODULE,
   '// and name. node_id is a NodeId, so no column of the row says it.\n' +
   `export const OPCUA_GROUPS = {\n${groupsBody}\n}\n`, 'utf8');
 
-console.log(`wrote ${vocabRows.length} opcua_vocabulary rows and ${groupStatements.length} metric_groups rows`);
-console.log(`  opcua_vocabulary  sha256:${vocabDigest}`);
-console.log(`  metric_groups     sha256:${groupDigest}`);
+console.log(`${rows.length} opcua_vocabulary rows in ${BLOCKS.length} blocks`);
+for (const { plan } of results) {
+  console.log(`  ${plan.block.since}  vocabulary ${plan.vocabulary.header.match(/sha256:([0-9a-f]+)/)[1]}  groups ${plan.groups.header.match(/sha256:([0-9a-f]+)/)[1]}`);
+}
 console.log(`  dashboard groups  sha256:${groupsDigest}`);
 for (const line of summary) console.log(`  ${line}`);
 if (process.argv.includes('--print-map')) {
-  for (const [former, current] of formerIds) console.log(`${former}\t${current}`);
+  for (const [former, id] of formerIds) console.log(`${former}\t${id}`);
 }

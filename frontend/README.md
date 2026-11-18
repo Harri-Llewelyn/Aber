@@ -726,7 +726,7 @@ height is not known, and above the actions it could push Edit Details off the dr
   - **A row joins the block by `health: true`**, and `foldHealthRows()` (`utils/gatewayHealth.js`)
     folds the rows the kind shows (`gatewayShowsRow()`) into one group. A kind that shows none has
     no block, and nor has a gateway that has not reported its health. A new row of the same kind
-    (how much the gateway sends, which devices still report) is marked the same way.
+    is marked the same way. What arrives from the gateway is not one: it is a group of its own, below.
   - **The summary is the worst state in words, never a colour alone.** "Disk 3.0 GiB free" or "CA
     expires in 12d", with "and 2 more" when others need attention, or "Nothing needs attention".
     The tone adds a circle (danger) or a triangle (warning) and the tone's text colour.
@@ -736,6 +736,23 @@ height is not known, and above the actions it could push Edit Details off the dr
   - **The block alone does not bring both actions into view at 1920×917.** On the fixture gateway
     Launch UI starts at 1,018px and Archive Gateway ends at 1,163px, against 760px of drawer. What
     is left is the Repository paragraph, the three forge rows and the identifiers.
+- **What arrives from a gateway is a group of its own, read on its own.** **Arriving** holds
+  Messages Per Second (5m), Sequence Gaps (1h) and Messages Missed (1h), and is closed when the
+  drawer opens, as Health is. Its summary says the rate and whether a gap was counted ("12.5
+  messages/s · no gaps"), and a gap adds the warning triangle and the amber text. Each device in
+  the list has the time of its last reading beside it, or *No reading yet*.
+  - **The two come from two reads.** The figures are `gateway_arrivals` (Prometheus, once a
+    minute) and the times are `gateway_devices_last_reading()` (the historian, as the drawer
+    opens), which `useGatewayArrivals()` starts separately and settles separately. A historian that
+    cannot be read makes every time *Last reading not observed* and leaves the figures standing.
+    Neither read reports the page as having stopped updating.
+  - **A figure with no fresh answer reads *Not observed*,** in the muted words of an empty field,
+    never as a zero and never as the last value. The view blanks a figure Prometheus did not
+    evaluate in the last 3 minutes (`ARRIVAL_FRESH_MINUTES`). A gateway ingestion has counted
+    nothing from reads 0, because ingestion was observed. The label tip says which it is.
+  - **Not for an archived gateway or the Playback gateway,** which are not read either. The group
+    shows once the first read of the gateway has settled, so another gateway's figures never sit
+    under this one's name.
 - **A missing repository is one line.** `GatewayRepositoryPanel` draws the drawer's field shape:
   the label *Repository* with a help tip, then one muted line such as *None: edit it in Node-RED*.
   The reason is in the tip, in about 35 words. Every case without a repository does the same:
@@ -1399,7 +1416,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
-| Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new`, for an automation whose id is `new` |
+| Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter; `built-in` for the Built-in tab | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new` and `/automations/built-in`, for an automation whose id is `new` or `built-in`. Built-in: `search`, `sort`, `rule` (a built-in alert's uid, which opens its drawer) |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
@@ -1475,13 +1492,13 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
-| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked on one time axis, each head showing its latest reading. Export CSV, on the Device, Overview, Metric, Cell and Area tabs, is the readings export ([History's Export](#historys-export)). Cell compares one metric across a cell's machines on one scale, with an hour-of-day heatmap (`HistoryCell`, [History's Cell tab](#historys-cell-tab)) |
+| `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked under one time axis (`ChartTimeline`), each head showing its latest reading. Export CSV, on the Device, Overview, Metric, Cell and Area tabs, is the readings export ([History's Export](#historys-export)). Cell compares one metric across a cell's machines on one scale, with an hour-of-day heatmap (`HistoryCell`, [History's Cell tab](#historys-cell-tab)) |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the form for a schema, and Upload the file** ([Schemas read and write YAML](#schemas-read-and-write-yaml)); changing one is versioning, not editing |
-| `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example |
+| `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example. The page's second tab, **Built-in**, is `BuiltInAlerts` and its drawer `BuiltInAlertDrawer`: the alerts Aber raises about itself, read-only ([The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)) |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
@@ -1748,24 +1765,44 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   flags take the change read beside it (below).
 - **The row cap picks the resolution.** `pickResolution()` takes the finest of `HISTORY_RESOLUTIONS`
   (`api.js`: the rollups' 1 minute, 5 minutes and 1 hour, then 1 day) whose rows, buckets times
-  the metrics chosen, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from
+  the metrics of one group, fit `HISTORY_MAX_ROWS` (5,000, `TELEMETRY_MAX_ROWS`). A bucket is counted from
   the one holding the window's start, on the epoch grid the rollups use. When no resolution fits
-  every metric, the coarsest reads them in parts. The page says which it shows ("3 of 10 metrics,
-  in 1-minute buckets").
-- **Buckets** (`HISTORY_BUCKETS`, `?bucket=`) is Auto, `pickResolution()`'s pick, or one size, in
-  a `ToolbarPopover` as the time window is. `resolutionFor()` reads a coarser size with every
-  metric in one read. A finer one would pass the cap: `bucketOptions()` lists it `aria-disabled`
-  with `TOO_MANY_BUCKETS` as its tooltip, and an address naming one is read at Auto's pick, the
-  status line saying so. A toolbar keeps no `<select>` (check 193), so this is not one.
-- **Text reads apart under Auto** (`readPlan()`). A metric's kind is known before it is read, from
-  its catalog datatype (`datatypeKind()`: String, Text and UUID are text, Boolean a flag, the rest
-  numbers). Text metrics read at `readableResolution()`: the finest whose buckets are each at least
+  every metric of a group, the coarsest reads them in parts. The status line says how many metrics
+  are charted ("3 of 10 metrics", then ", read in 4 parts" when a group took more than one read),
+  and each group's heading says the size that group is read in.
+- **Each group has its bucket choice** (`HistoryGroupHead`, `common/HistoryGroupHead.jsx`: the
+  `GroupHeading` and, at the row's right-hand end, a `SegmentedControl` named "Double buckets", the
+  shared heading row of History's chart pages). Its options are `bucketOptions()`: Auto, then each
+  of `HISTORY_RESOLUTIONS` by `BUCKET_SEGMENT_LABELS` ("1 min", "5 min", "1 hour", "1 day"), each
+  with its words, "5-minute buckets", as its tooltip. A size finer than the finest the group's own
+  rows allow is `unavailable` (`aria-disabled`, still a tab stop) with `TOO_MANY_BUCKETS` as its
+  tooltip; Auto's tooltip says the size it takes now. `SegmentedControl` needed no change: it
+  already offers an unavailable segment with its reason, as the time window's does, and its other
+  users look and behave as they did. The heading's `detail` says the size read ("5-minute buckets"),
+  and where the choice was too fine for the window, "5-minute buckets, as 1-minute buckets are too
+  many here": the group reads at Auto and the switch keeps the choice. The toolbar has no Buckets
+  control (check 193 keeps a toolbar free of a `<select>`; this is not one).
+- **The choices are in the address** (`?bucket=Double:5m,String:1h`, `useBucketChoices()`): one
+  entry for each group that is not Auto, the group named as its heading names it, the colon
+  written as a colon (`withBucketColons()`). `parseBuckets()` and `bucketsText()` read and write
+  them. Each change replaces the history entry, as a filter does. A link naming a group the device
+  has none of keeps its entry, which another device's group of that name takes. An older link, one
+  size for every chart (`?bucket=5m`), reads as that size for every group of the device and the
+  address is rewritten to one entry for each, replacing the entry. Clear filters writes none. A
+  closed group keeps its entry and its switch.
+- **Each group is a read of its own** (`readPlan()`: `groups` of `{ key, names, text, bucket }`, one
+  for each `metricGroups()` group of the metrics charted). A group counts its own row cap. Under
+  Auto, a text group reads at `readableResolution()`: the finest whose buckets are each at least
   `TEXT_BUCKET_MIN_PX` (3px) across the chart and whose rows fit the cap, since one-minute buckets
-  over a day run a strip's words together. The width is a chart box's, measured at each read; a
-  change of width settles for 300 ms and reads the text again only when it changes their pick.
-  Numbers, flags and a metric the catalog does not know keep `pickResolution()` for their own
-  count. The status line says "3 metrics, in 1-minute buckets; text in 5-minute buckets", and each
-  chart's summary names its own bucket. A Buckets choice reads every chart at it, text included.
+  over a day run a strip's words together. A metric's kind is known before it is read, from its
+  catalog datatype (`datatypeKind()`: String, Text and UUID are text, Boolean a flag, the rest
+  numbers). The width is a chart box's, measured at each read; a change of width settles for
+  300 ms and reads a text group again only when it changes its pick under Auto. Every other group
+  reads at `pickResolution()` for its own metrics. A size chosen reads the group at it, every
+  metric in one read, when it is as coarse as the group's `pickResolution()` or coarser: a text
+  group may read finer than its readable Auto. A finer one would pass the cap, so the group reads
+  at its own Auto and the plan's `refused` names the size. Each chart's summary names its own
+  bucket.
 - **Text and flags take the change read too** (`readPlan()`'s `changes`, whatever the buckets):
   `api.readTelemetryChanges()`, the RPC `telemetry_changes()` (`0254`), beside the bucket read, in
   parts of `HISTORY_CHANGE_SERIES` (50), on each group's buckets. A row that is every change is
@@ -1785,11 +1822,12 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   over them (`?metric=`, `useUrlList`); nothing chosen charts every one. A name the device does not
   have is dropped from the address, so a device switched to keeps the names it shares.
 - **Clear filters** counts and resets the window (off `DEFAULT_HISTORY_WINDOW`), the metrics and
-  the buckets. The device is the page's subject, not a filter, and stays.
+  the buckets (one filter, whichever groups have a choice). The device is the page's subject, not a
+  filter, and stays.
 - **The charts are grouped by catalog datatype** (`metricGroups()`), each group named as the
   Metrics page names the type (`datatypeLabel()`) and in `GROUP_ORDER`: Double, Float, the
   integers, Boolean, String, Text, any other type by its code, then Other for a metric the catalog
-  does not know. Each group is a `GroupHeading` with its count, which opens and closes it, and
+  does not know. Each group is a `HistoryGroupHead` (a `GroupHeading` with its count, which opens and closes it, and its bucket choice), and
   `ExpandAllToggle` does every group from the start of the row above the charts (`groups-header`), as the Audit Trail has it over its sections. A closed
   group only unmounts its charts: the reads, the row cap and the Metrics filter are unchanged. Which
   are closed is kept in this browser (`CLOSED_GROUPS_KEY`, localStorage, by datatype code, read and
@@ -1797,8 +1835,43 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   `group`, so its checklist draws them under the same headings.
 - **The charts scroll inside the card**, as Overview's lanes do (`.card-fill-scroll.trail-timeline`,
   then `.trail-scroll`): the toolbar and the row above the charts stay, and a group's heading pins
-  while its charts are in view. A chart is its box's width, so a scrollbar narrows it
-  (`TimeSeriesChart` resizes uPlot on its box), and never sideways.
+  under the time axis while its charts are in view. A chart is its box's width, so a scrollbar
+  narrows it (`TimeSeriesChart` resizes uPlot on its box), and never sideways.
+- **One time axis is over the charts** (`common/ChartTimeline.jsx`: `ChartTimeline` is a
+  `TimelineProvider` and a `ChartAxis` over the groups, in the scroller as `.history-groups`). The axis
+  is `position: sticky; top: 0` on the base surface, as the Audit Trail's `.trail-axis` is, and the
+  headings pin under it by `--chart-axis-height` (24px, 44px while the window reaches past now).
+  Its track takes the plot area's two gutters, `PLOT_LEFT_PX` and `PLOT_RIGHT_PX`, through
+  `--plot-left` and `--plot-right`, which `ChartTimeline` sets from the constants: a tick is above
+  the same time in every plot area and strip. It is `aria-hidden`; each chart's summary names the
+  window. `TimelineProvider` is the page's state and draws nothing, so a page whose lanes have an
+  axis of their own can provide it alone.
+  - **The ticks** are `timelineTicks()` (`utils/timelineAxis.js`): round local times from a ladder of
+    steps (seconds, minutes and hours from local midnight, then days, Mondays, months, years). It
+    takes the finest step whose ticks are as far apart as the longest label needs (`labelPx()`, 7px
+    a glyph, plus `COMFORT_GAP_PX`) and `MIN_TICK_SPACE_PX`, and where no two labels, as drawn, are
+    closer than `TICK_GAP_PX` (14px). A label at an end is held inside the axis. The axis measures
+    its track with a `ResizeObserver`, so a narrower one takes fewer ticks: Day at 360px is 00:00,
+    12:00, 00:00. A span with no step that fits takes the coarsest, thinned from the left.
+  - **Now and the future** have a row of their own under the labels, only while the window reaches
+    past now: the Now badge (`.trail-now`) at the start of the hatch and, when it is
+    `FUTURE_WORDS_PX` wide beyond the badge, "No readings yet" once. The badge never covers a label.
+  - **A chart under it** (`useChartTimeline()` is not null) draws no time labels: `axes[0]` is
+    `size: 0`, with no tick marks and empty labels, and its `splits` read the page's ticks, so the
+    gridlines are under every label, moved by `redraw()` when the ticks change and never by building
+    the chart again. It keeps a thin Now line and the hatch (`.chart-future`, empty), is shorter by
+    the room its own axis took (`TIMED_SAVED_PX`, 25px, with `TIMED_PAD_PX` above and below the
+    plot), and has `cursor.y: false`, so its pointer is a vertical line. A chart outside a
+    `ChartTimeline` draws its own axis, Now badge and words as before: the Metric, Cell and Area
+    tabs. Its labels are `timelineTicks()` too (`ownTicks()`, asked at uPlot's width as it draws):
+    uPlot centres every label on its tick, so the call is `centred` and a label that would run
+    past the gutters beside the plot (`roomPx`, `PLOT_LEFT_PX` and `PLOT_RIGHT_PX`) is left out.
+  - **One pointer** is `{ at, by }` in the provider, `by` being `plot`, `strip` or `axis`. A number
+    chart publishes its uPlot cursor (`syncKey` still syncs one number chart to the next). A strip
+    and the axis publish from `pointermove`; the number charts put their cursor there with
+    `setCursor(…, true, false)`, which fires the head's hook and publishes nothing, so a cursor
+    is never echoed. A strip derives its run, mark and alerts from `at` and draws `.chart-cursor`;
+    the axis says `pointerWords()` in a `.trail-band-words` pill, except while a band is drawn.
 - **Refresh** is `RefreshButton` with `HISTORY_REFRESH_EVERY` (Off, 30 s, 1 min, 5 min; no 10 s,
   since each read reads every chart again). The interval is the page's state, as Logs keeps it, so
   it outlasts a change of device. `usePolling` runs it only while the window reaches now
@@ -1809,9 +1882,10 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   metrics chosen and the window, resolved to ISO bounds as it opens. It is for an Administrator or
   a Shopfloor Manager, and for a window within `history.export_max_days`; every rule is in
   [History's Export](#historys-export).
-- **Zoom** is the time control's `zoom` and a drag across any chart (`useChartBand`, shared with the Cell
-  tab, over `useBandDrag` on each `.u-over` and state strip, which are the window's width). The page holds the band and every chart
-  shades it (`band`, `.chart-band` with the trail's look) with `bandWords()`; a release calls
+- **Zoom** is the time control's `zoom` and a drag across any chart or the axis (`useChartBand`, shared with the Cell
+  tab, over `useBandDrag` on each `.u-over`, state strip and `.chart-axis-track`, which are the window's width). The page holds the
+  band and every chart shades it (`band`, `.chart-band` with the trail's look); the axis says its words once
+  (`.trail-band-words`, `bandWords()`), where a chart outside a `ChartTimeline` says them itself; a release calls
   `setWin(bandWindow(start, end, axisMs), { replace: false })`, so Back undoes it, keeping the
   metrics and the buckets. uPlot's own selection stays off: one band covers the number charts and
   the state strips alike, and Escape, the 4px click and touch behave as on the Audit Trail.
@@ -1824,7 +1898,7 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   check to the next device. A link to a lane's charts sets the check, once for each lane opened
   (`HistoryTab`'s `openedLane`), and the lane charts either way: unticking it later removes the
   other lanes from the lists and leaves this one.
-- **The address** is `/history/device/<id>` with the window's keys, `metric`, `bucket` and `replay`;
+- **The address** is `/history/device/<id>` with the window's keys, `metric`, `bucket` (the groups' choices, above) and `replay`;
   `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.
 
@@ -1840,8 +1914,12 @@ arrived over the window, a lane per device, before anything is charted. Its arit
   the card (`.card-fill-scroll.trail-timeline`, then `.trail-scroll`), so the axis and the headings
   pin and the row above the lanes stays. Overview's axis follows the Audit Trail's, not the Device
   tab's charts: the tracks run from the label column to the card's edge, and no longer span the
-  charts' plot gutters (`PLOT_LEFT_PX`, `PLOT_RIGHT_PX`). Overview's own rules (`.overview-*`) are
-  only what it adds; the Audit Trail is unchanged.
+  charts' plot gutters (`PLOT_LEFT_PX`, `PLOT_RIGHT_PX`). Its ticks are `axisTicks()`:
+  `timelineTicks()` at the axis track's width, measured as the axis mounts and by a
+  `ResizeObserver`, so no two labels touch at any span or width. A label at an end is held inside the
+  track (`TICK_SHIFT`). A calendar window takes them too, since `calendarTicks()` at a phone's 186px
+  track crowd. Overview's own rules (`.overview-*`) are only what it adds; the Audit Trail is
+  unchanged.
 - **The read** is `api.readCoverage()`, the RPC `telemetry_coverage()` (`0245`): one row per device,
   its readings in each block as an array, and the stretch the historian's device rollups have
   counted. It reads every device in parts of `COVERAGE_MAX_DEVICES` (1,000), again on Refresh and
@@ -2386,6 +2464,53 @@ page's help is `help/pages/automations.md`.
   and the database says `enabled` is true or false. A syntax error is shown with its line and the
   database is not asked; an alias bomb is refused; a file over 2 MiB is refused before it is read.
 
+### The Built-in tab lists the alerts Aber raises about itself
+
+**The Built-in tab is the second tab of the Automations page** (`tabs/BuiltInAlerts.jsx`,
+`tabs/BuiltInAlertDrawer.jsx`, `/automations/built-in`). Every role reads it, and nothing on it
+changes anything. Its help is `help/pages/built-in-alerts.md`, one section for each rule.
+
+- **The list is the rules file, read when the bundle is built.**
+  `scripts/generate-built-in-alerts.mjs` reads `grafana/provisioning/alerting/alert-rules.yaml` and writes
+  `utils/builtInAlerts.generated.json`, which the dashboard bundles. It never asks Grafana: that would need a
+  service-account token, and Grafana leaves the default install. The copy is committed, since the frontend
+  image builds from `./frontend` and cannot see `grafana/`. CI runs the script with `--check` (check 465), a
+  vitest reads the file again with the parser alone and compares rule by rule
+  (`builtInAlertsGenerated.test.js`), and check 462 compares the uids, titles and groups with no parser. A
+  rule's words come from the comment above it, which the file's header makes the convention: the first sentence
+  is the row's **Fires when**, the rest the drawer's description. A rule with no such comment is refused.
+- **A row says** its name and uid, group, severity, subject (the `entity_type` label), hold (`for`), what
+  fires it and what evaluates it (`evaluator`, Grafana for every rule today; when the rules move, only this
+  value changes). The default order is the file's, group by group. Search matches the name, uid, group, subject
+  and description. With the drawer open, the columns it repeats are dropped (as the Gateways table drops
+  its own) and the table keeps the name, the severity and the state.
+- **Its state is honest.** `api.readBuiltInAlerts()` reads every row of `platform_alerts_active` that has a
+  `rule_uid`, acknowledged and suppressed ones too, and `builtInStates()` counts them by rule. **Firing** has a
+  count. **Could not be evaluated** is an instance whose `labels.alertname` is `DatasourceError` or
+  `DatasourceNoData`, the instance Grafana sends for a rule it could not run, which the webhook records as
+  "<rule> could not be evaluated" under the rule's uid (mirror check 120 holds the two names to the
+  webhook's). Otherwise **Not firing**, never OK, since Aber cannot see that Grafana evaluated the rule. A
+  read that fails says **Not known** and a notice, rather than call every rule quiet.
+- **The drawer** is `?rule=<uid>`, beside the table like every drawer. Its fields are the uid, the
+  description, the query (read-only, monospace, each query under what runs it), the threshold (`last(A) above
+  0`: the condition read off the file), the hold, the labels and the summary, then the group and what
+  evaluates it. Under them are the rule's newest occurrences (`api.readBuiltInOccurrences()`, five), and the
+  actions **View Help**, which opens `pages/built-in-alerts` at the heading that is the rule's title, and
+  **View in Grafana**, offered while `evaluator` is `grafana`. A uid this release does not ship, such as a
+  rule a site wrote itself or one a release has retired, opens the tab with a notice and no drawer, and the
+  notice offers **View in Grafana** for that uid, where a site's own rules live.
+- **Every surface that shows a platform alert opens its drawer**, by `builtInAlertUrl()` in `routes.js`:
+  the toast (`alertToastUrl()`), the counter's platform-wide rows, the drawer banner's **View rule**, the
+  message about an alert (`alertSubjectUrl()`) and the desktop notification (`alertOpener()`). A row written
+  before `rule_uid` (0220) opens the tab searched by the alert's name. An automation's alert answers null, and
+  keeps its own page. **View in Grafana**, in the drawer and in the notice for an unlisted uid, is the only
+  place that builds a Grafana address for a platform alert (`grafanaAlertUrl()`, offered while
+  `grafanaEvaluatesBuiltIns`); `builtInAlertSurfaces.test.jsx` reads the source for any other, and check 464
+  holds the five surfaces.
+- **`built-in` is a path segment, as an automation's id is**, so an automation with that id opens with
+  `?open=1`, as one named `new` does (`automationUrl()`). The tab's `help` in `navigation.jsx` names its own
+  help page, which drift check 16 allows.
+
 ### The editor's help comes from the JSON Schema
 
 **Completion, hover and the marks are pure functions of the text, the cursor and what the site holds**
@@ -2500,7 +2625,7 @@ paragraph together.
 - **An alert's link** is `alertPage()`'s: a `condition:` alert opens `/automations?trigger=<id>`, from the
   counter (a row with a page of its own goes there, not to its device), the toast that announces it, and
   the messages about it (`alertSubjectUrl()`). History's Alerts tab and the device drawer's alert banner
-  are unchanged: the first is about a device, and the second still links the rule where Grafana holds it.
+  are unchanged: the first is about a device, and the second links the rule's Built-in entry, **View rule**.
 - **The Devices drawer's View in Automations** shows how many automations apply
   (`api.automationsForEntity()`, each counted once) and opens `/automations?entity=<id>`. A failed read
   leaves it without a number. The list names the entity in a chip that clears the filter, and says why
@@ -2966,8 +3091,8 @@ passes `{ record: false }`, as an alert's toast does.
   text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
   message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a
   `RouteLink`: a plain click navigates in place, and Ctrl-click or a middle click opens a new tab.
-  Grafana opens in a new tab with the external-link icon, as the alert pill's platform-wide rows do,
-  and needs the browser to reach `VITE_GRAFANA_URL` as those rows already do. Following a toast's
+  A Grafana address opens in a new tab with the external-link icon, and needs the browser to reach
+  `VITE_GRAFANA_URL`; no alert leads there now, since a platform alert opens its Built-in entry. Following a toast's
   link dismisses it; a plain click on a row's link (or any click on a Grafana one) closes the list.
   The tooltip names the page and tab (`destinationTitle`). `isSafeDestination` checks `to` as the
   message comes in and again as the history is read back: one leading `/` (never `//`), or the
@@ -2984,8 +3109,9 @@ passes `{ record: false }`, as an alert's toast does.
   which `proposalNotice` in `utils/proposeFromForm.js` builds with the message), a metric
   (`metricUrl`), a setting (`settingUrl`), a capture's subject (`captureSubjectUrl`), a backup run
   (`backupUrl`), a person or a machine identity on Access Control (`personUrl`, `identityUrl`). A
-  plan attached goes to the area on the Site Map (`siteMapAreaUrl`), where it is drawn. A Grafana
-  alert goes to its rule (`grafanaAlertUrl`), and an automation's, which has none, to its device. A
+  plan attached goes to the area on the Site Map (`siteMapAreaUrl`), where it is drawn. A platform
+  alert goes to its rule's entry on Automations › Built-in (`builtInAlertUrl`; [The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)),
+  and an automation's, which has none, to its device. A
   device new to the Quarantine queue goes to
   `tabUrl('devices', 'quarantine')`, and an AAS export's warning about metrics with no semantic id
   to `unmappedMetricsUrl()`, which `App` passes only to a reader who has the Metrics page. An
@@ -3047,8 +3173,8 @@ so a notification has the visibility the alert counter has and follows the same 
   The icon is `/favicon.svg`; a browser that draws no SVG icon shows its own.
 - **A click opens the alert as the counter's row does.** It focuses this window, then calls
   `showDevice` or `showGateway` with the Sparkplug id, at the asset's own address; the page
-  `alertPage()` names for a machine identity or a capture job; or the rule in Grafana, in a new tab
-  (`alertOpener` in `utils/desktopNotifications.js`).
+  `alertPage()` names for a machine identity or a capture job; or the rule's entry on Automations ›
+  Built-in, in this tab (`alertOpener` in `utils/desktopNotifications.js`).
 - **The browser asks once per session.** A person with it on, in a browser that has not been asked,
   is asked at the first click or key press, the gesture Firefox and Safari require; the tab keeps an
   Allow Notifications button for when they dismiss it. Nothing is asked where the browser cannot raise one.

@@ -42,7 +42,7 @@ worth adopting:
 | `elementId` (unique, persistent) | `sparkplug_id`; a metric's is `<sparkplug_id>/<metric name>`, the key of `telemetry` |
 | `displayName` (human-readable when practical) | `name` |
 | `isExtended` (publishes beyond its type) | Unmodelled, derived by `deviceTags.js` |
-| `sourceTypeId` | `schemas.semantic_id`, else the schema name; a metric type's catalog `semantic_id` |
+| `sourceTypeId` | `schemas.semantic_id`, else the schema's lineage name, so every version of a schema names one source type; a metric type's catalog `semantic_id` |
 | Namespace, `typeNamespaceUri` | the local namespace, the relationships', and each standard a metric type comes from ([Address space](#address-space)) |
 | `quality` | derived at read time, like `gateway_status` |
 
@@ -325,7 +325,7 @@ and is placed by its own columns in the view's order. The root's `displayName` i
 setting the UNS bridge publishes under, and `Site` while it is empty; the setting is not sensitive,
 so every authenticated caller reads it. An object's
 `metadata.sourceTypeId` is its type's: a device's is its schema's `semantic_id`, else the schema's
-name; the synthesized type's id when it has several schemas; and `Device` when it has none. A
+lineage name (the first version's `schema_name`); the synthesized type's id when it has several schemas; and `Device` when it has none. A
 metric's is its catalog row's `semantic_id`, else the metric's name, and one the catalog lacks
 carries its Sparkplug datatype's name or `UnknownType`. The site, areas, cells, lanes and
 Unassigned have values too, and each sends exactly the properties its synthetic type declares;

@@ -37,10 +37,12 @@ The manufacturing KPIs that ISO 22400-2 defines. These are computed measures. MT
 
 ### OPC UA
 
-Data points from the OPC UA companion specifications: `OPC 40001` (Machinery), `OPC 40010` (Robotics), `OPC 40501` (Machine Tools), `OPC 40540` (Additive Manufacturing), `OPC 30050` (PackML) and `OPC 40001-4` (Machinery Energy).
+Data points from the OPC UA companion specifications: `OPC 40001` (Machinery), `OPC 40001-2` (Machinery Process Values), `OPC 40010` (Robotics), `OPC 40501` (Machine Tools), `OPC 40540` (Additive Manufacturing), `OPC 30050` (PackML) and `OPC 40001-4` (Machinery Energy).
 
 - **Names are positional**, as in MTConnect. `ActualPosition` becomes `MotionDevice/J1/ActualPosition` once you say which axis. Choosing a point fills in its group too.
 - **Each point carries its NodeId**: a namespace and an id, written `nsu=…;i=…`. That is the ExpandedNodeId the specification's NodeSet publishes for the point. It is also the point's semantic id, and an OPC UA client finds the same node by it.
+- **A printer is a machine tool.** The OPC 40540 section lists feedstock and the printing technology. The Machine Tools and Machinery sections apply to a printer too. Its in-process readings are process values. OPC 40001-2 gives their shape, and the vendor names each one.
+- **Some points are enumerations.** A device publishes one as the member's name, so it is a String. The point's description lists the values, as it does for `Function`. Type them in **Permitted Values** when you add the metric.
 
 ### ASHRAE 223P
 

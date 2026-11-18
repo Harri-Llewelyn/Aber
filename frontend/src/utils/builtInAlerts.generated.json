@@ -1,0 +1,1173 @@
+{
+  "generated": "Written by scripts/generate-built-in-alerts.mjs from grafana/provisioning/alerting/alert-rules.yaml. Do not edit: change the file and run the script.",
+  "source": "grafana/provisioning/alerting/alert-rules.yaml",
+  "groups": [
+    {
+      "name": "Platform Conditions",
+      "interval": "1m"
+    },
+    {
+      "name": "Ingestion Pipeline",
+      "interval": "1m"
+    },
+    {
+      "name": "Log Pipeline",
+      "interval": "1m"
+    },
+    {
+      "name": "Host",
+      "interval": "1m"
+    },
+    {
+      "name": "Cluster",
+      "interval": "1m"
+    },
+    {
+      "name": "Databases",
+      "interval": "1m"
+    }
+  ],
+  "rules": [
+    {
+      "uid": "aber-gateway-stale",
+      "title": "Gateway Stale",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "gateway",
+      "hold": "5m",
+      "fires": "A gateway the view already calls stale (90s), tolerated for 5m.",
+      "description": "A gateway the view already calls stale (90s), tolerated for 5m.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at   AS \"time\",\n       subject        AS gateway,\n       sparkplug_id   AS sparkplug_id,\n       value          AS quiet_seconds\n  FROM public.platform_health\n WHERE condition = 'gateway_stale'"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "gateway"
+      },
+      "summary": "{{ $labels.gateway }} has not sent a heartbeat for {{ printf \"%.0f\" $values.B.Value }}s. Check the appliance and its broker credential."
+    },
+    {
+      "uid": "aber-enrolment-stuck",
+      "title": "Enrolment Stuck",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "gateway",
+      "hold": "0s",
+      "fires": "AWAITING_BIRTH for over an hour.",
+      "description": "AWAITING_BIRTH for over an hour. The view carries the delay, so `for: 0s`.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at   AS \"time\",\n       subject        AS gateway,\n       sparkplug_id   AS sparkplug_id,\n       value          AS stuck_seconds\n  FROM public.platform_health\n WHERE condition = 'enrolment_stuck'"
+        }
+      ],
+      "threshold": "last(A) above 3600",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "gateway"
+      },
+      "summary": "{{ $labels.gateway }} has been AWAITING_BIRTH for {{ printf \"%.0f\" $values.B.Value }}s without publishing an NBIRTH. Its flow may not have deployed."
+    },
+    {
+      "uid": "aber-quarantine-depth",
+      "title": "Quarantine Queue Depth",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "5m",
+      "fires": "More than 5 devices awaiting a decision for 5m.",
+      "description": "More than 5 devices awaiting a decision for 5m. Emitted at zero, so an empty frame is the datasource, not an empty queue.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at AS \"time\",\n       value        AS quarantined\n  FROM public.platform_health\n WHERE condition = 'quarantine_depth'"
+        }
+      ],
+      "threshold": "last(A) above 5",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "{{ printf \"%.0f\" $values.B.Value }} devices are quarantined and waiting for an approval decision on the Devices page."
+    },
+    {
+      "uid": "aber-gateway-ca-expiring",
+      "title": "Gateway CA Expiring",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "gateway",
+      "hold": "0s",
+      "fires": "The CA each appliance reports holding, under 30 days (negative: expired).",
+      "description": "The CA each appliance reports holding, under 30 days (negative: expired). The threshold is the delay. NoData is a fleet with no appliances.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at          AS \"time\",\n       gateway_name          AS gateway,\n       sparkplug_id          AS sparkplug_id,\n       cert_expires_in_days  AS days_remaining\n  FROM public.gateway_health\n WHERE cert_expires_in_days IS NOT NULL"
+        }
+      ],
+      "threshold": "last(A) below 30",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "gateway"
+      },
+      "summary": "The broker CA trusted by {{ $labels.gateway }} expires in {{ printf \"%.1f\" $values.B.Value }} days (negative means it already has). The CA is distributed by hand into each appliance's trust store, so re-issuing it is a fleet operation -- see docs/incidents.md."
+    },
+    {
+      "uid": "aber-service-token-expiring",
+      "title": "Service Token Expiring",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "service_identity",
+      "hold": "0s",
+      "fires": "A machine identity's token past its warn point, 7 days before expiry or a quarter of a shorter lifetime.",
+      "description": "A machine identity's token past its warn point, 7 days before expiry or a quarter of a shorter lifetime. The query emits only those, so any row is the alert. One instance per token; it clears when the token is revoked, its identity withdrawn, or it expires.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at        AS \"time\",\n       identity_name       AS identity,\n       principal_id::text  AS principal_id,\n       jti                 AS jti,\n       renewal             AS renewal,\n       to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI \"UTC\"') AS expires_at,\n       remaining_seconds   AS remaining_seconds\n  FROM public.service_token_health\n WHERE warn_at <= collected_at"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "service_identity"
+      },
+      "summary": "The token {{ $labels.jti }} for the machine identity {{ $labels.identity }} expires at {{ $labels.expires_at }}. After that the API refuses it, and the client using it stops working. {{ if eq $labels.renewal \"keys_rotate\" }}The deployment reads this key at start: run npm run keys:rotate to sign new keys and put them in place, then revoke the old token on Access Control, under Machine identities.{{ else }}Issue a new token for {{ $labels.identity }} on Access Control, under Machine identities, put it in the client, then revoke the old one.{{ end }}"
+    },
+    {
+      "uid": "aber-archive-backlog",
+      "title": "Archive Backlog",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "1h",
+      "fires": "Days past the tiering threshold with no verified export, over 14 for 1h.",
+      "description": "Days past the tiering threshold with no verified export, over 14 for 1h. The row exists only while archiving is on.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at AS \"time\",\n       value        AS overdue_days\n  FROM public.platform_health\n WHERE condition = 'archive_backlog'"
+        }
+      ],
+      "threshold": "last(A) above 14",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "Cold telemetry is {{ printf \"%.1f\" $values.B.Value }} days past the tiering threshold and not yet verified on the remote endpoint. Check the S3 endpoint and the cold-archive CronJob's last run; the Cold Storage page names the chunk and any error."
+    },
+    {
+      "uid": "aber-backup-stale",
+      "title": "Backup Stale",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "No successful platform backup for 36h, counted from the first job recorded until one succeeds.",
+      "description": "No successful platform backup for 36h, counted from the first job recorded until one succeeds. The window is the delay. No row while no job exists.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at AS \"time\",\n       age_seconds  AS since_success_seconds\n  FROM public.backup_health"
+        }
+      ],
+      "threshold": "last(A) above 129600",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "No platform backup has succeeded for {{ humanizeDuration $values.B.Value }}. The Backups page names the last good one and why later runs failed; a job queued and never claimed means the backup service is not running."
+    },
+    {
+      "uid": "aber-backup-offsite-stale",
+      "title": "Off-site Backup Stale",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "The newest backup has had no copy at the off-site destination for 12h, counted from when it was taken or the destination last changed.",
+      "description": "The newest backup has had no copy at the off-site destination for 12h, counted from when it was taken or the destination last changed. No row while no destination.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at AS \"time\",\n       age_seconds  AS without_copy_seconds\n  FROM public.backup_offsite_health"
+        }
+      ],
+      "threshold": "last(A) above 43200",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The newest platform backup has had no off-site copy for {{ humanizeDuration $values.B.Value }}. The Backups page shows why the copy failed; check the S3 endpoint, the credential and, under a NetworkPolicy, the egress rule."
+    },
+    {
+      "uid": "aber-job-failed",
+      "title": "Capture or Playback Failed",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "A job that failed in the last hour, one instance each.",
+      "description": "A job that failed in the last hour, one instance each. The row leaves the view an hour on, so the alert resolves by itself.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at AS \"time\",\n       subject      AS job,\n       value        AS since_failed_seconds\n  FROM public.platform_health\n WHERE condition = 'job_failed'"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The {{ $labels.job }} failed {{ humanizeDuration $values.B.Value }} ago. The Capture page lists it, with the reason, on its Captures or Playbacks tab. This alert clears an hour after the failure."
+    },
+    {
+      "uid": "aber-job-stuck",
+      "title": "Capture or Playback Stuck",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "A job still queued, recording or running five minutes past what its own limits allow.",
+      "description": "A job still queued, recording or running five minutes past what its own limits allow. The view carries the margin, so `for: 0s`.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at AS \"time\",\n       subject      AS job,\n       value        AS past_limits_seconds\n  FROM public.platform_health\n WHERE condition = 'job_stuck'"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The {{ $labels.job }} is still queued, recording or running {{ humanizeDuration $values.B.Value }} after its own limits ran out. A queued or running capture blocks every other. Press Stop on the Capture page to end it, and check the ingestion or playback service's log."
+    },
+    {
+      "uid": "aber-playback-worker-stale",
+      "title": "Playback Worker Not Reporting",
+      "group": "Platform Conditions",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "A playback is queued or running and the worker's heartbeat is over two minutes old.",
+      "description": "A playback is queued or running and the worker's heartbeat is over two minutes old. The view emits the row only then, so `for: 0s`.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at AS \"time\",\n       value        AS quiet_seconds\n  FROM public.platform_health\n WHERE condition = 'playback_worker_stale'"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "A playback is queued or running, and the playback worker has not reported for over two minutes, so nothing will run it. Check that the playback Deployment is running (playback.enabled) and read its log."
+    },
+    {
+      "uid": "aber-ingestion-silent",
+      "title": "Ingestion Consuming Nothing",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "10m",
+      "fires": "No messages for 10m while expected_publishers > 0.",
+      "description": "No messages for 10m while expected_publishers > 0. The one rule where NoData is Alerting: an empty frame is a failed scrape.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum(rate(aber_ingestion_messages_total[5m])) or vector(0)"
+        },
+        {
+          "ref": "D",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT collected_at AS \"time\",\n       value        AS expected_publishers\n  FROM public.platform_health\n WHERE condition = 'expected_publishers'"
+        }
+      ],
+      "threshold": "(last(A) < 0.001) && (last(D) > 0)",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "The ingestion daemon has recorded no Sparkplug messages for 10 minutes while devices are registered and expected to publish. Telemetry is not reaching the historian. Check the broker connection and aber_ingestion_messages_dropped_total."
+    },
+    {
+      "uid": "aber-ingestion-drops",
+      "title": "Telemetry Being Dropped",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "5m",
+      "fires": "Any refused message, by reason, for 5m.",
+      "description": "Any refused message, by reason, for 5m. The counter exists only once something is dropped, so NoData is OK.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum by (reason) (rate(aber_ingestion_messages_dropped_total[5m]))"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "Ingestion is dropping messages ({{ $labels.reason }}). This is telemetry that was NOT recorded and will not be restated. See ingestion/README.md for what each reason means."
+    },
+    {
+      "uid": "aber-ingestion-binding-rejections",
+      "title": "Gateway Binding Rejections Rising",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "15m",
+      "fires": "Telemetry for devices the sender does not own, for 15m.",
+      "description": "Telemetry for devices the sender does not own, for 15m. Critical: a misconfigured gateway and forged telemetry look the same here.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "rate(aber_ingestion_messages_dropped_total{reason=\"gateway_binding\"}[15m])"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "Telemetry is being published for devices the sending gateway does not own, and refused. Either a gateway is misconfigured or something is publishing as an asset it is not."
+    },
+    {
+      "uid": "aber-ingestion-birth-drops",
+      "title": "Ingestion Dropping Birth Certificates",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "5m",
+      "fires": "A DBIRTH or NBIRTH refused because the directory was unreachable, for 5m.",
+      "description": "A DBIRTH or NBIRTH refused because the directory was unreachable, for 5m. A dropped birth costs the alias table, not one sample.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum by (reason) (rate(aber_ingestion_messages_dropped_total{reason=~\"dbirth_directory_unavailable|node_message_directory_unavailable\"}[5m]))"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "Birth certificates are being dropped ({{ $labels.reason }}) because the device directory is unreachable. Affected devices cannot be decoded until they birth again -- check PostgREST and the gateway, then request a rebirth rather than waiting on the timer."
+    },
+    {
+      "uid": "aber-audit-trail-partitions",
+      "title": "Audit Trail Partitions Falling Behind",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "30m",
+      "fires": "Rows in the DEFAULT partition, for 30m.",
+      "description": "Rows in the DEFAULT partition, for 30m. The view always returns one row, so an empty frame is the datasource.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "supabase",
+          "language": "sql",
+          "text": "SELECT now()        AS \"time\",\n       default_rows AS default_partition_rows\n  FROM public.audit_trail_partition_health"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "{{ printf \"%.0f\" $values.B.Value }} audit row(s) have landed in the audit_trail DEFAULT partition, so the monthly partition job has stopped. Nothing is lost and nothing is refused, but retention by DETACH will skip these rows. Run SELECT public.ensure_audit_trail_partitions(3); and check cron.job_run_details."
+    },
+    {
+      "uid": "aber-ingestion-db-down",
+      "title": "Historian Unreachable From Ingestion",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "2m",
+      "fires": "No connection while messages arrive, for 2m.",
+      "description": "No connection while messages arrive, for 2m. NoData is OK: a missing scrape is the silent-daemon rule's job, and alerting on it was this rule's loudest false positive.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "aber_ingestion_db_connected"
+        },
+        {
+          "ref": "D",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum(rate(aber_ingestion_messages_total[5m])) or vector(0)"
+        }
+      ],
+      "threshold": "(last(A) < 1) && (last(D) > 0)",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "The ingestion daemon cannot reach TimescaleDB while telemetry is arriving. Readings wait in the daemon's queue until it is full, and are dropped after that; a dropped reading is not restated."
+    },
+    {
+      "uid": "aber-ingestion-db-unreachable-idle",
+      "title": "Historian Unreachable From Ingestion (No Traffic)",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "10m",
+      "fires": "The recovery loop failing for 10m (twenty 30s attempts) with nothing publishing.",
+      "description": "The recovery loop failing for 10m (twenty 30s attempts) with nothing publishing. Becomes the rule above the moment a gateway publishes.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "rate(aber_ingestion_db_heal_failures_total[10m])"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The ingestion daemon cannot reach TimescaleDB. Nothing is being dropped, because nothing is publishing -- but any telemetry arriving while this lasts will be."
+    },
+    {
+      "uid": "aber-ingestion-sequence-gaps",
+      "title": "Sparkplug Message Loss",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "gateway",
+      "hold": "15m",
+      "fires": "Seq gaps per edge node, for 15m, which rides out the gap a broker restart produces.",
+      "description": "Seq gaps per edge node, for 15m, which rides out the gap a broker restart produces.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "rate(aber_ingestion_sequence_gaps_total[15m])"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "gateway",
+        "sparkplug_id": "{{ .Labels.edge_node }}"
+      },
+      "summary": "Edge node {{ $labels.edge_node }} is losing messages between the broker and the historian. Any metric carried by them is stale here until the node re-births."
+    },
+    {
+      "uid": "aber-ingestion-timestamps-refused",
+      "title": "Readings Refused for Their Timestamp",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "gateway",
+      "hold": "1m",
+      "fires": "A refusal in the last 15m, per edge node and reason, read off when it last happened, since a counter born at its first value shows no increase.",
+      "description": "A refusal in the last 15m, per edge node and reason, read off when it last happened, since a counter born at its first value shows no increase.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "time() - aber_ingestion_timestamps_rejected_at_seconds"
+        }
+      ],
+      "threshold": "last(A) below 900",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "gateway",
+        "sparkplug_id": "{{ .Labels.edge_node }}"
+      },
+      "summary": "Edge node {{ $labels.edge_node }} sent readings the platform refused for their timestamp ({{ $labels.reason }}), so they were not recorded. too_new or too_old means the gateway's clock is wrong; historical_too_old means it replayed an outage older than the platform keeps (ingestion.historicalMaxAgeSeconds). See docs/remote-gateways.md, \"The clock is part of certificate verification\", and help/site/remote-gateways.md, \"Late data after an outage\"."
+    },
+    {
+      "uid": "aber-gateway-outage-loss",
+      "title": "Gateway Outage Lost Readings",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "gateway",
+      "hold": "1m",
+      "fires": "An outage report with any reading dropped, for an hour after it arrived.",
+      "description": "An outage report with any reading dropped, for an hour after it arrived. The appliance counts exactly, so there is no noise floor to filter.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "aber_ingestion_gateway_outage_last_readings_dropped and on(edge_node) (time() - aber_ingestion_gateway_outage_reported_timestamp_seconds < 3600)"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "gateway",
+        "sparkplug_id": "{{ .Labels.edge_node }}"
+      },
+      "summary": "Edge node {{ $labels.edge_node }} reported an outage in which it dropped readings: they were never recorded and cannot be recovered. Its buffer was full or switched off, or the outage outlasted what it keeps. The Gateway Outages row of the Stack & Ingestion Health dashboard has the window and the counts; see help/site/remote-gateways.md, \"Troubleshooting\"."
+    },
+    {
+      "uid": "aber-ingestion-rollup-windows-failed",
+      "title": "Late Replay Missing From the Rollups",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "Any hour of late telemetry ingestion could not record for the rollups' refresh, within 1h.",
+      "description": "Any hour of late telemetry ingestion could not record for the rollups' refresh, within 1h. The counter is exported at zero from startup.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum(increase(aber_ingestion_rollup_windows_failed_total[1h]))"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "Ingestion could not record {{ printf \"%.0f\" $values.B.Value }} hour(s) of replayed telemetry for the rollups in the last hour. The readings are stored but missing from telemetry_1m/5m/1h until refreshed by hand: see help/site/remote-gateways.md, \"Late data after an outage\"."
+    },
+    {
+      "uid": "aber-gateway-clock-skew",
+      "title": "Gateway Clock Skew",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "gateway",
+      "hold": "15m",
+      "fires": "|offset| over 60s for 15m, gated on a measurement under 300s old so a powered-down appliance does not alert on its last value.",
+      "description": "|offset| over 60s for 15m, gated on a measurement under 300s old so a powered-down appliance does not alert on its last value.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "abs(aber_ingestion_gateway_clock_offset_seconds) and on(edge_node) (time() - aber_ingestion_gateway_clock_measured_timestamp_seconds < 300)"
+        }
+      ],
+      "threshold": "last(A) above 60",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "gateway",
+        "sparkplug_id": "{{ .Labels.edge_node }}"
+      },
+      "summary": "Edge node {{ $labels.edge_node }} has a clock that disagrees with the platform by more than a minute, so every reading it sends is being filed at the wrong time. Nothing corrects this centrally -- devices are trusted for their own timestamps. Fix time synchronisation on the appliance; see docs/remote-gateways.md, \"The clock is part of certificate verification\"."
+    },
+    {
+      "uid": "aber-ingestion-writer-saturating",
+      "title": "Historian Writer Saturating",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "10m",
+      "fires": "Writer occupancy over 0.5 for 10m.",
+      "description": "Writer occupancy over 0.5 for 10m. Queue depth is deliberately not the trigger; it grows only once the writer is already behind.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum(rate(aber_ingestion_write_seconds_sum[5m]))"
+        }
+      ],
+      "threshold": "last(A) above 0.5",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The ingestion daemon's historian writer has been busy more than half the time for ten minutes. Telemetry is still being written; a burst or a slower historian would start it queueing. Read aber_ingestion_write_queue_depth and aber_ingestion_write_seconds beside it."
+    },
+    {
+      "uid": "aber-broker-shedding",
+      "title": "Broker Shedding Messages",
+      "group": "Ingestion Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "1m",
+      "fires": "Any QoS 0 discard in 5m, broker-wide.",
+      "description": "Any QoS 0 discard in 5m, broker-wide. No series while the exporter (mosquitto.metrics.enabled) is off.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum(increase(broker_publish_messages_dropped[5m]))"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The broker discarded about {{ printf \"%.0f\" $values.B.Value }} messages in five minutes for a subscriber that could not keep up. They were not delivered and will not be restated. If aber_ingestion_sequence_gaps_total is rising too, the subscriber is the ingestion daemon and this is telemetry missing from the historian."
+    },
+    {
+      "uid": "aber-log-collector-down",
+      "title": "Log Collector Down",
+      "group": "Log Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "5m",
+      "fires": "up{job=\"alloy\"} == 0 for 5m.",
+      "description": "up{job=\"alloy\"} == 0 for 5m. Warning: only the record is lost.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "up{job=\"alloy\"}"
+        }
+      ],
+      "threshold": "last(A) below 1",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The log collector is not answering its scrape. Container logs are still being written by Docker and are still readable with `docker logs`, but nothing is being kept -- so the evidence for anything that fails while this is down will not be in the store afterwards."
+    },
+    {
+      "uid": "aber-log-collection-stalled",
+      "title": "Log Collection Stalled",
+      "group": "Log Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "15m",
+      "fires": "The local writer's shipped-entry rate under 0.001/s for 15m.",
+      "description": "The local writer's shipped-entry rate under 0.001/s for 15m. This stack logs about itself every 60s, so a silent quarter-hour is a fault.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum(rate(loki_write_sent_entries_total{component_id=\"loki.write.local\"}[10m]))"
+        }
+      ],
+      "threshold": "last(A) below 0.001",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The log collector is running and has shipped nothing for fifteen minutes. On a stack with any traffic this means collection is broken rather than idle -- check that discovery is resolving targets, which is what fails when the socket proxy refuses an API path."
+    },
+    {
+      "uid": "aber-log-store-refusing",
+      "title": "Log Store Refusing Lines",
+      "group": "Log Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "10m",
+      "fires": "The local writer's rate_limited or stream_limited drops for 10m. ingester_error is excluded on purpose (loki/loki.yaml).",
+      "description": "The local writer's rate_limited or stream_limited drops for 10m. ingester_error is excluded on purpose (loki/loki.yaml).",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum by (reason) (rate(loki_write_dropped_entries_total{component_id=\"loki.write.local\", reason=~\"rate_limited|stream_limited\"}[10m]))"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The log store is refusing lines ({{ $labels.reason }}) and they are being lost. This is a ceiling in loki/loki.yaml doing its job: `rate_limited` is ingestion_rate_mb, and `stream_limited` is max_streams_per_user -- which usually means a label was promoted that should have stayed a field. Raise the bound or fix the cause; do not ignore it."
+    },
+    {
+      "uid": "aber-log-forward-failing",
+      "title": "Log Forward Failing",
+      "group": "Log Pipeline",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "15m",
+      "fires": "The forward's retries or losses, or lines handed to it and none sent, either protocol, for 15m.",
+      "description": "The forward's retries or losses, or lines handed to it and none sent, either protocol, for 15m. Zero while observability.alloy.logForward is off.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "(sum(rate(loki_write_batch_retries_total{component_id=\"loki.write.forward\"}[10m])) or vector(0)) + (sum(rate(loki_write_dropped_entries_total{component_id=\"loki.write.forward\"}[10m])) or vector(0)) + (sum(rate(otelcol_exporter_send_failed_log_records_total{component_id=\"otelcol.exporter.otlphttp.forward\"}[10m])) or vector(0)) + (sum(rate(otelcol_exporter_enqueue_failed_log_records_total{component_id=\"otelcol.exporter.otlphttp.forward\"}[10m])) or vector(0)) + ((sum(rate(loki_relabel_entries_written{component_id=\"loki.relabel.forward\"}[10m])) > bool 0)\n   * ((sum(rate(loki_write_sent_entries_total{component_id=\"loki.write.forward\"}[10m]))\n       or sum(rate(otelcol_exporter_sent_log_records_total{component_id=\"otelcol.exporter.otlphttp.forward\"}[10m]))\n       or vector(0)) == bool 0)\n   or vector(0))"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The log forward to the site's store has failed for fifteen minutes; lines it cannot deliver within about an hour are lost. The in-cluster store is unaffected. Check the destination, its Secret and observability.alloy.logForward.egress."
+    },
+    {
+      "uid": "aber-host-disk-filling",
+      "title": "Host Disk Filling",
+      "group": "Host",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "15m",
+      "fires": "Root filesystem under 15% free for 15m.",
+      "description": "Root filesystem under 15% free for 15m. Every store here writes to it.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "min by (instance) (\n  node_filesystem_avail_bytes{mountpoint=\"/\"}\n  / node_filesystem_size_bytes{mountpoint=\"/\"}\n)"
+        }
+      ],
+      "threshold": "last(A) below 0.15",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "The root filesystem on {{ $labels.instance }} has {{ humanizePercentage $values.B.Value }} free. Both databases, the metrics store and the log store write to it, and each of them stops when it is full. Prune backups, shorten retention, or grow the volume."
+    },
+    {
+      "uid": "aber-cluster-container-memory",
+      "title": "Container Near Memory Limit",
+      "group": "Cluster",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "10m",
+      "fires": "Working set over 90% of the limit for 10m.",
+      "description": "Working set over 90% of the limit for 10m.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "max by (namespace, pod, container) (\n  container_memory_working_set_bytes{container!=\"\"}\n  / on (namespace, pod, container)\n  (container_spec_memory_limit_bytes{container!=\"\"} > 0)\n)"
+        }
+      ],
+      "threshold": "last(A) above 0.9",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }} is at {{ humanizePercentage $values.B.Value }} of its memory limit. Past it the kernel kills the process and the kubelet restarts the container. Raise the limit in the chart's resources for that workload, or find the growth."
+    },
+    {
+      "uid": "aber-cluster-container-restarting",
+      "title": "Container Restarting",
+      "group": "Cluster",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "5m",
+      "fires": "More than 2 starts in an hour, as changes of container_start_time_seconds.",
+      "description": "More than 2 starts in an hour, as changes of container_start_time_seconds.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum by (namespace, pod, container) (\n  changes(container_start_time_seconds{container!=\"\"}[1h])\n)"
+        }
+      ],
+      "threshold": "last(A) above 2",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "Container {{ $labels.container }} in {{ $labels.namespace }}/{{ $labels.pod }} has started {{ $values.B }} times in the last hour. The previous instance's last lines: kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c {{ $labels.container }} --previous"
+    },
+    {
+      "uid": "aber-cluster-volume-filling",
+      "title": "Volume Filling",
+      "group": "Cluster",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "15m",
+      "fires": "A claim over 85% full for 15m, as the kubelet measures the mounted filesystem.",
+      "description": "A claim over 85% full for 15m, as the kubelet measures the mounted filesystem.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "max by (namespace, persistentvolumeclaim) (\n  kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes\n)"
+        }
+      ],
+      "threshold": "last(A) above 0.85",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "Claim {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is {{ humanizePercentage $values.B.Value }} full. The store on it stops when it is; grow the claim (the storage class must allow expansion), shorten that store's retention, or prune what it holds."
+    },
+    {
+      "uid": "aber-cluster-node-memory",
+      "title": "Node Memory Pressure",
+      "group": "Cluster",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "10m",
+      "fires": "MemAvailable under 10% of MemTotal for 10m.",
+      "description": "MemAvailable under 10% of MemTotal for 10m.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "min by (instance) (\n  node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes\n)"
+        }
+      ],
+      "threshold": "last(A) below 0.1",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "Node {{ $labels.instance }} has {{ humanizePercentage $values.B.Value }} of its memory available. The kubelet evicts pods below its threshold and the kernel kills below its own. Lower the memory requests and limits of the stores, or give the node memory."
+    },
+    {
+      "uid": "aber-cluster-node-cpu",
+      "title": "Node CPU Saturated",
+      "group": "Cluster",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "15m",
+      "fires": "Non-idle share over 90% for 15m.",
+      "description": "Non-idle share over 90% for 15m. Nothing fails; the ingestion writer slows first.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))"
+        }
+      ],
+      "threshold": "last(A) above 0.9",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "Node {{ $labels.instance }} has been {{ humanizePercentage $values.B.Value }} busy for fifteen minutes. The Cluster dashboard's CPU by Pod panel says which workload; the historian's continuous aggregates and Loki's compaction are the usual ones."
+    },
+    {
+      "uid": "aber-db-connections",
+      "title": "Database Connections Near Limit",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "5m",
+      "fires": "Over 80% of max_connections for 5m.",
+      "description": "Over 80% of max_connections for 5m. The denominator is aber_postgres_max_connections, a custom query; the exporter's settings collector is off.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum by (job) (pg_stat_activity_count) / on (job) max by (job) (aber_postgres_max_connections)"
+        }
+      ],
+      "threshold": "last(A) above 0.8",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "{{ $labels.job }} is at {{ humanizePercentage $values.B.Value }} of max_connections and has been for five minutes. At 100% it refuses every new connection at once -- PostgREST's pool, the ingestion writer and the edge functions together. Find what is holding them open (the Backends by State panel separates `idle in transaction` from `active`) before raising max_connections."
+    },
+    {
+      "uid": "aber-db-deadlocks",
+      "title": "Database Deadlocks",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "Any deadlock in 10m.",
+      "description": "Any deadlock in 10m. The window is the delay, so `for: 0s`.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum by (job) (increase(pg_stat_database_deadlocks[10m]))"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "{{ $labels.job }} has recorded {{ $values.B }} deadlock(s) in the last ten minutes. PostgreSQL resolved each by killing one transaction, so the database is healthy and an application saw an error it may not have logged. Two transactions are taking the same locks in different orders."
+    },
+    {
+      "uid": "aber-db-wraparound",
+      "title": "Transaction ID Wraparound Approaching",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "15m",
+      "fires": "age(datfrozenxid) over 1e9.",
+      "description": "age(datfrozenxid) over 1e9. A TRANSACTION count, whatever the metric's _seconds suffix says; do not turn the threshold into a duration.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "max by (job) (pg_database_wraparound_age_datfrozenxid_seconds)"
+        }
+      ],
+      "threshold": "last(A) above 1000000000",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "{{ $labels.job }} has a transaction ID age of {{ $values.B }} (TRANSACTIONS, not seconds). PostgreSQL refuses all writes at about 2.147e9 and recovers only in single-user mode. Autovacuum is being prevented from freezing -- look for a long-lived transaction or an inactive replication slot, then let autovacuum catch up."
+    },
+    {
+      "uid": "aber-db-historian-job-failing",
+      "title": "Historian Policy Job Failing",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "failures_total rising within 1h.",
+      "description": "failures_total rising within 1h. On the failure count, not last_run_succeeded, which is 0 for a job that has never run.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "sum by (job_id, proc_name) (increase(aber_historian_job_failures_total[1h])) and on (job_id) aber_historian_job_runs_total"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "TimescaleDB job {{ $labels.job_id }} ({{ $labels.proc_name }}) has failed {{ $values.B }} time(s) in the last hour. Retention, compression and rollup refresh are what keep the historian's storage and its aggregates true; a failing policy has no other symptom until the volume fills or a dashboard quietly goes stale. Check the job's last error: SELECT * FROM timescaledb_information.job_stats WHERE job_id = {{ $labels.job_id }};"
+    },
+    {
+      "uid": "aber-db-not-answering",
+      "title": "Database Not Answering",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "5m",
+      "fires": "pg_up == 0 for 5m.",
+      "description": "pg_up == 0 for 5m. A pod that is gone yields NoData and OK; the Cluster group covers that case.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "min by (job) (pg_up)"
+        }
+      ],
+      "threshold": "last(A) below 1",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "{{ $labels.job }} has not answered its own exporter for five minutes. The exporter runs beside the server in the same pod and connects over loopback, so this is the database itself: down, still recovering, or out of connections. Nothing reaches it either -- check the pod: kubectl -n aber logs {{ $labels.job }}-0 -c {{ $labels.job }}"
+    },
+    {
+      "uid": "aber-db-collector-failing",
+      "title": "Database Collector Failing",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "warning",
+      "subject": "platform",
+      "hold": "10m",
+      "fires": "A collector unsuccessful for 10m.",
+      "description": "A collector unsuccessful for 10m. The scrape still succeeds, so this gauge is the only signal that the panels and rules on its series are empty.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "min by (job, collector) (pg_scrape_collector_success)"
+        }
+      ],
+      "threshold": "last(A) below 1",
+      "labels": {
+        "severity": "warning",
+        "entity_type": "platform"
+      },
+      "summary": "The `{{ $labels.collector }}` collector on {{ $labels.job }} has failed for ten minutes. The exporter is still serving and the scrape still succeeds, so every panel and rule built on that collector's series is now silently empty rather than reporting a problem. Usually a missing extension or a privilege the exporter's role does not hold -- kubectl -n aber logs {{ $labels.job }}-0 -c metrics names the cause."
+    },
+    {
+      "uid": "aber-db-historian-backup-stale",
+      "title": "Historian Backup Stale",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "No successful physical backup for 36h, gated on archive_mode.",
+      "description": "No successful physical backup for 36h, gated on archive_mode. Before the first success the clock starts when backup was switched on.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "(time() - max(aber_historian_backup_clock_since_time)) and on () (max(aber_historian_wal_archive_enabled) == 1)"
+        }
+      ],
+      "threshold": "last(A) above 129600",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "The historian has had no successful physical backup for {{ humanizeDuration $values.B.Value }}. A restore can reach no later than the last one. The Backups page shows the last failure's reason, and Take a backup there asks for one. The sidecar's log has the rest: kubectl -n aber logs timescaledb-0 -c pgbackrest"
+    },
+    {
+      "uid": "aber-db-historian-wal-archiving",
+      "title": "Historian WAL Archiving Failing",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "10m",
+      "fires": "The last archive attempt failed and nothing has succeeded since, for 10m.",
+      "description": "The last archive attempt failed and nothing has succeeded since, for 10m. Unarchived WAL fills the data volume until archiveQueueMax drops it.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "(time() - max(aber_historian_wal_archive_last_archived_time)) and on () (max(aber_historian_wal_archive_last_failed_time) > max(aber_historian_wal_archive_last_archived_time)) and on () (max(aber_historian_wal_archive_enabled) == 1)"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "The historian has not archived WAL for {{ humanizeDuration $values.B.Value }} and its last attempt failed. Unarchived WAL accumulates on the data volume until archiveQueueMax, after which it is dropped. Usually the repository endpoint or its credentials: kubectl -n aber logs timescaledb-0 -c timescaledb | grep archive"
+    },
+    {
+      "uid": "aber-db-platform-backup-stale",
+      "title": "Platform Database Backup Stale",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "0s",
+      "fires": "Historian Backup Stale for supabase-db, gated on its archive_mode, with the same clock series.",
+      "description": "Historian Backup Stale for supabase-db, gated on its archive_mode, with the same clock series.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "(time() - max(aber_platform_db_backup_clock_since_time)) and on () (max(aber_platform_db_wal_archive_enabled) == 1)"
+        }
+      ],
+      "threshold": "last(A) above 129600",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "The platform database has had no successful physical backup for {{ humanizeDuration $values.B.Value }}. A point-in-time restore can reach no later than the last one plus the WAL archived after it. The Backups page shows the last failure's reason. The sidecar's log has the rest: kubectl -n aber logs supabase-db-0 -c pgbackrest"
+    },
+    {
+      "uid": "aber-db-platform-wal-archiving",
+      "title": "Platform Database WAL Archiving Failing",
+      "group": "Databases",
+      "evaluator": "grafana",
+      "severity": "critical",
+      "subject": "platform",
+      "hold": "10m",
+      "fires": "Historian WAL Archiving Failing for supabase-db.",
+      "description": "Historian WAL Archiving Failing for supabase-db. The last archive attempt failed and nothing has succeeded since, for 10m.",
+      "queries": [
+        {
+          "ref": "A",
+          "datasource": "prometheus",
+          "language": "promql",
+          "text": "(time() - max(aber_platform_db_wal_archive_last_archived_time)) and on () (max(aber_platform_db_wal_archive_last_failed_time) > max(aber_platform_db_wal_archive_last_archived_time)) and on () (max(aber_platform_db_wal_archive_enabled) == 1)"
+        }
+      ],
+      "threshold": "last(A) above 0",
+      "labels": {
+        "severity": "critical",
+        "entity_type": "platform"
+      },
+      "summary": "The platform database has not archived WAL for {{ humanizeDuration $values.B.Value }} and its last attempt failed. Unarchived WAL accumulates on its data volume until archiveQueueMax, after which it is dropped. Usually the repository endpoint or its credentials: kubectl -n aber logs supabase-db-0 -c supabase-db | grep archive"
+    }
+  ]
+}

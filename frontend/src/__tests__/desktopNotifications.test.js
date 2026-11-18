@@ -149,14 +149,24 @@ describe('where a click leads', () => {
     expect(h.open).not.toHaveBeenCalled()
   })
 
-  it('opens the rule in Grafana for any other alert, and for a device whose id matched no row', () => {
+  it("opens the rule's entry on Automations › Built-in for any other alert, and for a device whose id matched no row", () => {
     const h = helpers()
     const open = alertOpener(h)
     open({ entity_type: 'platform', rule_uid: 'aber-backup-stale', alert_name: 'Backup Stale' })
-    expect(h.open).toHaveBeenCalledTimes(1)
-    expect(h.open.mock.calls[0][0]).toContain('aber-backup-stale')
+    expect(h.navigate).toHaveBeenCalledTimes(1)
+    expect(h.navigate.mock.calls[0][0]).toBe('/automations/built-in?rule=aber-backup-stale')
     open({ entity_type: 'device', sparkplug_id: null, rule_uid: 'aber-device-offline' })
-    expect(h.open).toHaveBeenCalledTimes(2)
+    expect(h.navigate).toHaveBeenCalledTimes(2)
+    expect(h.navigate.mock.calls[1][0]).toBe('/automations/built-in?rule=aber-device-offline')
     expect(h.showDevice).not.toHaveBeenCalled()
+    // Never a new tab, and never Grafana.
+    expect(h.open).not.toHaveBeenCalled()
+  })
+
+  it('opens nothing for an alert an automation raised about the platform, which has no built-in rule', () => {
+    const h = helpers()
+    alertOpener(h)({ entity_type: 'platform', fingerprint: 'condition:not-evaluated', rule_uid: null })
+    expect(h.navigate).not.toHaveBeenCalled()
+    expect(h.open).not.toHaveBeenCalled()
   })
 })

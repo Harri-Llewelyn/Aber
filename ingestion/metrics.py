@@ -174,7 +174,7 @@ COUNTER_MAP = {
 EXPORTED_LABELLED_INSTEAD = {
     "messages_total": (
         "aber_ingestion_messages_total",
-        "the sum of aber_ingestion_messages_total{msg_type=...}; sum() those instead"),
+        "the sum of aber_ingestion_messages_total{msg_type=...,edge_node=...}; sum() those instead"),
     "metrics_rejected_timestamp": (
         "aber_ingestion_timestamps_rejected_total",
         "exported as aber_ingestion_timestamps_rejected_total{edge_node=...}, so a rejected "
@@ -183,7 +183,9 @@ EXPORTED_LABELLED_INSTEAD = {
 
 HELP = {
     "aber_ingestion_messages_total":
-        "Sparkplug messages the daemon acted on, after parsing and the command-topic filter.",
+        "Sparkplug messages the daemon acted on, after parsing and the command-topic filter, by "
+        "message type and edge node. sum() it for the stack, or sum by (edge_node) for one gateway: "
+        "a query that does not sum answers once for each edge node and type.",
     "aber_ingestion_messages_written_total":
         "DDATA messages whose telemetry the historian committed. Divide aber_ingestion_write_seconds_count "
         "into it for the messages per transaction: 1 while the writer keeps up, rising as it batches.",

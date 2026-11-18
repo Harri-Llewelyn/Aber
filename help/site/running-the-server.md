@@ -212,6 +212,14 @@ Asset Administration Shell, exported or read from the AAS API, is `supabaseFunct
 plus the asset's `sparkplug_id`. Once a shell has left the site, whoever imported it holds those
 identifiers.
 Changing the IRI would then give every asset a new identity.
+A Submodel built from a schema keeps its id when you publish a new version of the schema. Its
+`administration.version` says which version made it. The AAS API still answers the ids that carried
+a version's name until 1.10.0, and a file holds only the current one.
+
+A shell also names its asset by its serial number, its manufacturer's product URI and its Sparkplug
+id. They are the shell's `specificAssetIds`. They don't use the base IRI, so changing the IRI
+doesn't change them. A replay lane has none, because a lane is a recording of a device and not a
+second device.
 
 The twelve built images resolve automatically to the chart's `appVersion`, which the release sets
 equal to the chart version. Chart 1.8.0 can only pull images 1.8.0, so there is nothing to line up

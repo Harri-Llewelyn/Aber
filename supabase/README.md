@@ -2467,7 +2467,7 @@ stable name for what fired. `platform_alerts` now has three nullable columns, an
   `ruleUID`, which the webhook reads when the URL names none, and last an `__alert_rule_uid__` label.
   Grafana removes that label, and every `__x__` label, before a contact point sees the alert, so
   only a relay that kept it would send it. Anything that is not a Grafana uid (letters, digits,
-  `-` and `_`, at most 40) is stored as NULL. All 42 provisioned rules carry an explicit `uid:`.
+  `-` and `_`, at most 40) is stored as NULL. Every provisioned rule carries an explicit `uid:`.
 - **`labels jsonb`**: the alert's labels as sent, the rule's and its series' together, with
   `alertname` and `grafana_folder`.
 - **`values jsonb`**: what Grafana evaluated, by the refId of each query and expression node, as
@@ -2478,10 +2478,12 @@ for the rule, not a new `code` label: a label added to a rule changes every fing
 produces, and the fingerprint is half of the occurrence key.
 
 **A row from before keeps working.** All three are NULL on rows written before the upgrade.
-`grafanaAlertUrl()` (`frontend/src/constants.js`) opens `/alerting/grafana/<uid>/view` when the row
-has a uid, and otherwise Grafana's alert list searched by the rule's name, as before. An alert an
-automation raised has a `condition:` fingerprint and no rule: `grafanaAlertUrl()` answers null for
-it, and no surface links to Grafana (0271).
+The dashboard opens a platform alert's rule on Automations › Built-in by its uid
+(`builtInAlertUrl()`, `frontend/src/routes.js`), and a row with none opens the tab searched by the
+rule's name. Grafana is one click further: the rule's drawer has View in Grafana, which opens
+`/alerting/grafana/<uid>/view` (`grafanaAlertUrl()`, `frontend/src/constants.js`), and so does the tab's
+notice for a uid no built-in rule has. Those are the only places that build a Grafana address for an alert. An alert an automation raised has a `condition:` fingerprint
+and no rule: `builtInAlertUrl()` answers null for it, and no surface links to Grafana (0271).
 
 **The shape lives in `0001`.** `0001` states `platform_alerts_active` with a column list and replays
 first on every boot. Had `0220` widened the view, `0001`'s `CREATE OR REPLACE VIEW` would have tried
@@ -2666,8 +2668,10 @@ one-row `directory_figures_probe`, so the two collectors never read each other's
   answers and not others.
 - **The query is fixed in the function.** Nothing from a browser becomes PromQL.
 - **A series that appears only at its first event reads 0 while ingestion is scraped.**
-  `aber_ingestion_messages_total{msg_type}` and `aber_ingestion_sequence_messages_missed_total`
-  have no series until something happens. `or sum(aber_ingestion_up) * 0` makes them 0 while the
+  `aber_ingestion_messages_total{msg_type,edge_node}` and `aber_ingestion_sequence_messages_missed_total`
+  have no series until something happens. (`0303` adds the `edge_node` label, which the sums here
+  add up, and reads the same counters for each gateway with `sum by (edge_node)`: see *A gateway
+  shows what arrives from it (0303)*.) `or sum(aber_ingestion_up) * 0` makes them 0 while the
   daemon answers its scrape, and leaves them absent while it does not. The panel's `or vector(0)`
   would claim a zero nobody observed.
 - **`sum` and `min` across ingestion pods.** One pod runs, but a restart leaves two series in the
@@ -3997,6 +4001,9 @@ next request.
 | `metric_catalog` | `metric_catalog_update_privileged` | UPDATE | A | yes | Changes a catalogued metric |
 | `metric_groups` | `metric_groups_insert_privileged` | INSERT | A | yes | Adds a metric group |
 | `metric_groups` | `metric_groups_update_privileged` | UPDATE | A | yes | Changes a metric group |
+| `metric_semantic_ids` | `metric_semantic_ids_delete_privileged` | DELETE | A | yes | Removes a further semantic id of a metric |
+| `metric_semantic_ids` | `metric_semantic_ids_insert_privileged` | INSERT | A | yes | Adds a further semantic id to a metric |
+| `metric_semantic_ids` | `metric_semantic_ids_update_privileged` | UPDATE | A | yes | Changes the type or source of a further semantic id |
 | `platform_alerts` | `platform_alerts_select_authenticated` | SELECT | A | no | A read, which the switch never refuses |
 | `playback_jobs` | `playback_jobs_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
 | `playback_worker_status` | `playback_worker_status_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
@@ -8773,6 +8780,29 @@ also needs its origin in `global.corsExtraOrigins`, as any browser client of the
 `SELECT TO authenticated USING (true)`, so the token decides whether a caller is let in, not what
 it sees.
 
+**A shell names its asset by more than its `globalAssetId`.** `assetInformation.specificAssetIds`
+lists the serial number (`partInstanceId`), the manufacturer's product URI (`uriOfTheProduct`) and
+the Sparkplug id (`sparkplugId`), in that order. A client that holds the number printed on a
+machine can match it to the shell. The first two are the Digital Nameplate's own values, with the
+Nameplate's semantic ids (`0112/2///61987#ABA951#009` and `0112/2///61987#ABN590#002`). The
+Sparkplug id has none. An id with no value is left out, and so is the key when none has one.
+`aas-export` and `aas-api` build the list in one function, `buildSpecificAssetIds()` in
+`_shared/aas/shell.ts`. It takes identifiers, not a device row, so a shell that is not a device can
+name its own.
+
+- **`partInstanceId` is Catena-X's name for a serial number.** Its `manufacturerPartId` is not
+  written, because `device_nameplate` has no article-number column.
+- **The names are permanent once Discovery indexes them.** It matches on them, so a rename is a
+  break.
+- **A replay lane lists none.** A lane republishes its original's DBIRTH, so it would carry the
+  original's serial number. A lookup would then return the asset and every lane recorded from it.
+  A lane is a recording of an asset, not a second asset.
+- **The product URI is the one the Nameplate shows.** That is the device's own value when it
+  publishes one, and `device_nameplate.uri_of_the_product` otherwise.
+- **Nothing else about identity changes.** `globalAssetId`, the shell's id and the submodels' ids
+  are still `<AAS_BASE_IRI><sparkplug_id>` and what follows it. The specific ids do not use the base
+  IRI, so changing it leaves them alone.
+
 **What is not served:**
 
 - the Registry and Discovery interfaces;
@@ -8796,7 +8826,8 @@ Two routes to the same destination, and it is worth having both before you need 
 
 **The package.** `?format=aasx` downloads a self-contained OPC container with the 3D model bundled
 in as a supplementary part. This is the handover artefact — it needs nothing from this stack once
-it has been produced.
+it has been produced. Its Environment is JSON by default. `?format=aasx&serialization=xml` writes it
+as XML instead, at `aasx/data.xml`, for a tool that expects XML.
 
 **The REST push.** `npm run aas:push-basyx -- --device=<device name>` exports the JSON
 environment and POSTs it into a running server's `/submodels` and `/shells`. Before you run it:
@@ -8811,10 +8842,11 @@ environment and POSTs it into a running server's `/submodels` and `/shells`. Bef
 To view the result, set the BaSyx Web UI's repository addresses to the AAS Environment, and allow
 the Web UI's origin in BaSyx's own CORS setting.
 
-The second exists because the AASX carries its Environment as JSON at `aasx/aasenv-root.json` —
-valid AAS Part 5, but some BaSyx builds' upload path expects an XML environment part and will
-reject or half-load a JSON one. That is a property of the consumer, not of the package, and not
-something to discover on the morning of a demonstration.
+The second exists because the AASX carries its Environment as JSON by default, at
+`aasx/aasenv-root.json` — valid AAS Part 5, but some BaSyx builds' upload path expects an XML
+environment part and will reject or half-load a JSON one. `serialization=xml` writes the XML part
+for such a build. That is a property of the consumer, not of the package, and not something to
+discover on the morning of a demonstration. The push is unchanged.
 
 Three things the script gets right that a hand-rolled client usually does not, verified against
 `eclipsebasyx/aas-environment:2.0.0-milestone-15`:

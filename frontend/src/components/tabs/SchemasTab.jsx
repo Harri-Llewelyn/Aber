@@ -15,7 +15,7 @@ import { renderDeviceSchemasYaml } from '../../utils/deviceSchemaYaml'
 import { DEVICE_SCHEMAS_FILE_MAX_BYTES, DEVICE_SCHEMAS_FILE_NAME } from '../../utils/deviceSchemas'
 import {
   schemaVersionLabel, schemaStatus, statusBadgeClass, statusLabel, isSchemaEditable,
-  canForkSchema, nextVersion, schemaVersion, SCHEMA_STATUS
+  canForkSchema, nextVersion, schemaVersion, lineageName, lineageVersionLabel, SCHEMA_STATUS
 } from '../../utils/schemaVersion'
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -179,7 +179,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     load()
     const moved = result.devices_rebound || 0
     showToast(
-      `'${published.schema_name}' v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
+      `'${lineageName(published)}' v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
       (moved > 0 ? ` — ${plural(moved, 'device')} moved to v${result.version}` : ''),
       'success',
       { to: schemaUrl(published.schema_uuid) }
@@ -682,7 +682,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             onClick: () => setShowValidateModal(true),
             disabled: !selectedSchema.schema_definition,
             title: selectedSchema.schema_definition
-              ? `Judge one DDATA payload against ${schemaVersionLabel(selectedSchema)} of ${selectedSchema.schema_name}, by ingestion's Schema Conformance rules`
+              ? `Judge one DDATA payload against ${lineageVersionLabel(selectedSchema)} (${statusLabel(schemaStatus(selectedSchema))}), by ingestion's Schema Conformance rules`
               : 'This version has no definition to validate against'
           },
           {

@@ -395,8 +395,8 @@ def _read_address_space(pg: PostgrestClient) -> dict:
     schemas = _read_relation(
         pg,
         "schemas",
-        {"select": "id,schema_name,description,schema_definition,semantic_id,version,status,"
-                   "change_description"},
+        {"select": "id,schema_name,lineage_name,description,schema_definition,semantic_id,version,"
+                   "status,change_description"},
     )
     # Every schema attached to a device, as the dashboard, the AAS exporter and ingestion read it:
     # one device_submodels row per schema.

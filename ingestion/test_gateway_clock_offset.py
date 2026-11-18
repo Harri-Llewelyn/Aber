@@ -348,7 +348,7 @@ class TimestampRejectionLabelTests(unittest.TestCase):
         registry.count("messages_DDATA", 42)
         samples = self.samples(registry.render())
         self.assertNotIn("aber_ingestion_messages_total 42.0", samples)
-        self.assertIn('aber_ingestion_messages_total{msg_type="DDATA"} 42.0', samples)
+        self.assertIn('aber_ingestion_messages_total{edge_node="",msg_type="DDATA"} 42.0', samples)
         self.assertEqual(42, registry.counter_snapshot()["messages_total"])
 
 

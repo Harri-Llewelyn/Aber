@@ -3796,7 +3796,7 @@ def on_message(client, userdata, msg):
     # Counted AFTER the parse and the command-topic filter, so this is messages the daemon
     # actually acted on rather than everything the wildcard subscription delivered.
     count("messages_total")
-    count(f"messages_{msg_type.lower()}")
+    count(f"messages_{msg_type.lower()}", edge_node=edge_node_id)
 
     # Follow the edge node's sequence counter before dispatching. Advisory: a gap is reported
     # and a rebirth requested, but the message itself is still processed -- it is a real

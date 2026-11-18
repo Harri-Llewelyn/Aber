@@ -1,6 +1,5 @@
 import { severityOf } from './alertHistory'
-import { alertPage } from '../routes'
-import { grafanaAlertUrl } from '../constants'
+import { alertPage, builtInAlertUrl } from '../routes'
 
 /**
  * Desktop notifications for a firing alert: what one says, how long it waits to name its subject,
@@ -13,15 +12,16 @@ export const SUBJECT_WAIT_MS = 2000
 /**
  * What a click on a notification opens, as the alert counter's row does: a device or gateway through
  * `showDevice` and `showGateway`, at its own address; the page alertPage() names through
- * `navigate`; any other alert's rule in Grafana, in a new tab. Returns the function to call with the alert.
+ * `navigate`; any other alert's rule on Automations › Built-in, through `navigate` too. Returns the
+ * function to call with the alert.
  */
-export function alertOpener({ showDevice, showGateway, navigate, open = (url) => window.open(url, '_blank', 'noopener,noreferrer') }) {
+export function alertOpener({ showDevice, showGateway, navigate }) {
   return (alert) => {
     const kind = alert?.entity_type || 'device'
     if (kind === 'device' && alert?.sparkplug_id) return showDevice?.(alert.sparkplug_id)
     if (kind === 'gateway' && alert?.sparkplug_id) return showGateway?.(alert.sparkplug_id)
-    const page = alertPage(alert)
-    return page ? navigate?.(page.to) : open(grafanaAlertUrl(alert))
+    const to = alertPage(alert)?.to ?? builtInAlertUrl(alert)
+    return to ? navigate?.(to) : undefined
   }
 }
 

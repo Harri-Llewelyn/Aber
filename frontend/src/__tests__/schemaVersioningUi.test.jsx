@@ -22,6 +22,7 @@ const CATALOG = [
 const V1 = {
   schema_uuid: 'v1-uuid',
   schema_name: 'Robot_Arm_Schema',
+  lineage_name: 'Robot_Arm_Schema',
   description: 'Six axis arm',
   schema_definition: {
     type: 'object',
@@ -325,7 +326,7 @@ describe('Detail modal — read-only vs draft', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/schemas/v2-uuid/publish', {}))
     // The count's one name, Devices, in the toast as on the page.
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
-      "'Robot_Arm_Schema_v2' v2 published, v1 archived — 3 devices moved to v2", 'success', { to: '/schemas?search=v2-uuid' }
+      "'Robot_Arm_Schema' v2 published, v1 archived — 3 devices moved to v2", 'success', { to: '/schemas?search=v2-uuid' }
     ))
   })
 

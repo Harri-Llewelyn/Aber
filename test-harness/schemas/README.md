@@ -10,6 +10,7 @@ Industrial Digital Twin Association's specification repository:
 | `$id` | `https://admin-shell.io/aas/3/2` |
 | `$schema` | JSON Schema draft 2019-09 |
 | Definitions | 70 |
+| Licence | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), as the repository's `LICENSE.txt` says. It is the IDTA's text, copyright the IDTA, not Aber's. This README travels with the file, in the `aber/test-runner` image too |
 
 ## Do not hand-edit it
 
@@ -39,3 +40,33 @@ against the real schema immediately found three in the exporter that the bespoke
 
 It is validated by draft 2019-09, matching the schema's own `$schema`; using a different draft
 would silently relax rules the document depends on.
+
+# Vendored AAS V3 XML Schema
+
+`AAS_V3_0_XML_Schema.xsd` is the **official IDTA XML schema** for the same metamodel, vendored
+verbatim from the same repository, at the commit the JSON schema above is the file of:
+
+| | |
+| :--- | :--- |
+| Source | <https://raw.githubusercontent.com/admin-shell-io/aas-specs/fdac9f497d388ed4f486c20f3b3ab0df82671445/schemas/xml/AAS.xsd> |
+| Repository | [`admin-shell-io/aas-specs`](https://github.com/admin-shell-io/aas-specs), commit `fdac9f49`, the last to change `schemas/json/aas.json`. The XSD's last change is the commit before it, `7792b9df`, so the file is the same at both |
+| Target namespace | `https://admin-shell.io/aas/3/2`, the schema of the JSON file's `$id`. Both are IDTA-01001-3-2, whatever the file names say |
+| Root element | `environment` |
+| Licence | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), as above |
+
+Refresh both together, from one commit:
+
+```bash
+COMMIT=fdac9f497d388ed4f486c20f3b3ab0df82671445
+curl -o test-harness/schemas/AAS_V3_0_JSON_Schema.json \
+  https://raw.githubusercontent.com/admin-shell-io/aas-specs/$COMMIT/schemas/json/aas.json
+curl -o test-harness/schemas/AAS_V3_0_XML_Schema.xsd \
+  https://raw.githubusercontent.com/admin-shell-io/aas-specs/$COMMIT/schemas/xml/AAS.xsd
+```
+
+It is not hand-edited either. `aas-export` writes an AASX package's environment as XML when it is
+asked to (`?format=aasx&serialization=xml`), and `environmentXml.ts` follows this schema's element
+order. The XSD is how a reader of that file, or a change to the writer, is checked. The unit lane's
+`test_the_xml_environment_validates_against_the_idta_xsd.py` validates the writer's output against
+it with `xmlschema`, which `test-harness/requirements.txt` pins and CI installs. `xmllint` says the
+same, if you have it: `xmllint --noout --schema AAS_V3_0_XML_Schema.xsd <file>`.

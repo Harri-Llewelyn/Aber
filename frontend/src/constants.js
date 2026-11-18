@@ -187,6 +187,9 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset', group: 'model' },
   // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset', group: 'model' },
+  // A metric's further semantic ids, added or removed (0299); the entity id is the metric's, so they
+  // share its lane.
+  { kind: 'METRIC SEMANTIC ID', table: 'metric_semantic_ids', label: 'Metric semantic IDs', domain: 'asset', group: 'model' },
   // An automation's acts (0256), one lane per automation, in the asset lane: an Administrator or a
   // Shopfloor Manager writes it and every role reads it.
   { kind: 'AUTOMATION',       table: 'automations',        label: 'Automations',        domain: 'asset', group: 'model' },
@@ -283,12 +286,12 @@ export const AUDIT_TRAIL_CLASSES = ['created', 'operational', 'configuration', '
  */
 export const AUDIT_TRAIL_ACTION_KINDS = [
   // The audit trigger, on every table it is attached to.
-  ['INSERT', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'], ['created']],
+  ['INSERT', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'metric_semantic_ids', 'schemas', 'device_nameplate'], ['created']],
   ['INSERT', ['device_submodels', 'system_settings', 'service_principals', 'broker_accounts'], ['configuration']],
-  ['UPDATE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'],
+  ['UPDATE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'metric_semantic_ids', 'schemas', 'device_nameplate'],
     ['operational', 'configuration', 'lifecycle']],
   ['UPDATE', ['device_submodels', 'system_settings'], ['configuration']],
-  ['DELETE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'schemas', 'device_nameplate'], ['lifecycle']],
+  ['DELETE', ['areas', 'cells', 'devices', 'gateways', 'metric_catalog', 'metric_semantic_ids', 'schemas', 'device_nameplate'], ['lifecycle']],
   ['DELETE', ['device_submodels', 'system_settings', 'broker_accounts'], ['configuration']],
   // The plant and the model.
   ['SCHEMA_REJECTION', ['devices'], ['configuration']],
@@ -416,7 +419,7 @@ export const GITHUB_REPO_URL = readSetting(
 ).replace(/\/+$/, '');
 
 /**
- * Grafana, as the browser reaches it, for the "View in Grafana" link on an active alert. The
+ * Grafana, as the browser reaches it, for the "View in Grafana" action in a built-in alert's drawer. The
  * default is 3002 (`npm run dev:forward` puts it there; the frontend has 3000). Same value as
  * GRAFANA_PUBLIC_URL, which the seed registers as the OAuth redirect origin, so a deployment that
  * moves Grafana sets both. A fallback is kept for the reason GITHUB_REPO_URL keeps one.
@@ -467,6 +470,10 @@ export const isAutomationAlert = (alert) => String(alert?.fingerprint ?? '').sta
  * the alert list searched by the rule's name. That search reads rule definitions, so a
  * `label:sparkplug_id=` filter (a label on evaluated series) would match nothing. An alert an
  * automation raised has no rule there, and answers null.
+ *
+ * Only the Built-in tab calls this: its drawer's View in Grafana, and the notice for a uid no built-in
+ * rule has. Every other surface that shows a platform alert opens that drawer instead (builtInAlertUrl
+ * in routes.js), and a test holds it to that.
  */
 export const grafanaAlertUrl = (alert) => {
   if (isAutomationAlert(alert)) return null
