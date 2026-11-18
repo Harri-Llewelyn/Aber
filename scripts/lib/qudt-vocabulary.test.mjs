@@ -44,7 +44,8 @@ test('HTML tags and entities are removed without a pattern, and whitespace is co
 });
 
 test('a command it does not know is an error, never published with its backslash', () => {
-  assert.throws(() => plainText(String.raw`$\unknowncommand{x}$`), /LaTeX command the reader does not know/);
+  // Written as a plain string: `\u` followed by a letter is no valid escape in an untagged template.
+  assert.throws(() => plainText('$\\' + 'nosuchcommand{x}$'), /LaTeX command the reader does not know/);
   assert.throws(() => plainText('a \\\\ b'), /does not know/);
 });
 
