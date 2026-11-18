@@ -62,6 +62,9 @@ DASHBOARD_ISSUED = ("third_party", "host", "simulated")
 # The Service_Ingestor machine principal (0046): the identity the daemon's token names.
 INGESTION_PRINCIPAL = "b0000000-0000-4000-8000-000000000002"
 
+# What the kept copy holds when a test does not choose: a word, not a credential.
+A_COPY = "not-a-real-password"
+
 # The six columns a proposal may carry for a gateway.
 PROPOSABLE = ("name", "description", "cell_id", "area_id", "location_scope", "access_url")
 
@@ -299,12 +302,12 @@ class Lifecycle(unittest.TestCase):
         self.as_(INGESTION_PRINCIPAL,
                  "SELECT public.ingest_record_gateway_health(%s::uuid, 'ONLINE', now() - %s::interval, NULL);", (gid, age))
 
-    def issue_credential(self, gid, user=None, password="not-a-real-password"):
+    def issue_credential(self, gid, user=None, password=None):
         """What gateway-credential asks of the database once the broker holds the account."""
         user = user or self.manager
         self.as_(user, "SELECT * FROM public.authorize_host_gateway_credential(%s);", (gid,))
         self.as_(user, "SELECT public.record_gateway_credential_issued(%s);", (gid,))
-        return self.as_(user, "SELECT public.keep_gateway_credential(%s, %s) AS kept;", (gid, password))[0]["kept"]
+        return self.as_(user, "SELECT public.keep_gateway_credential(%s, %s) AS kept;", (gid, password or A_COPY))[0]["kept"]
 
     def old_stamp(self, gid, minutes=10):
         """Set the revocation stamp back, so a credential issued now is newer than it."""

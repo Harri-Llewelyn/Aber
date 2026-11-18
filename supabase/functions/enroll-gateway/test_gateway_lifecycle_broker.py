@@ -41,13 +41,13 @@ same rows against the database alone.
 The mqtt probe is `mosquitto_pub` run inside the broker's container as the account: a published
 message is a probe to a topic under the account's own edge node, and nothing reads it.
 """
+import http.client
 import json
 import os
 import sys
 import time
 import unittest
-import urllib.error
-import urllib.request
+import urllib.parse
 import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "test-harness"))
@@ -193,19 +193,23 @@ class BrokerLifecycle(unittest.TestCase):
         return gid, rows[0]["sparkplug_id"]
 
     def call(self, function, body):
-        req = urllib.request.Request(
-            f"{SUPABASE_URL}/functions/v1/{function}", method="POST", data=json.dumps(body).encode(),
-            headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {self.admin_token}",
-                     "Content-Type": "application/json"})
+        """POST to an edge function as the signed-in Administrator: (status, parsed JSON or {raw})."""
+        address = urllib.parse.urlsplit(SUPABASE_URL)
+        connect = http.client.HTTPSConnection if address.scheme == "https" else http.client.HTTPConnection
+        connection = connect(address.netloc, timeout=30)
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
-                return response.status, json.loads(response.read().decode())
-        except urllib.error.HTTPError as err:
-            raw = err.read().decode()
-            try:
-                return err.code, json.loads(raw) if raw.strip() else None
-            except json.JSONDecodeError:
-                return err.code, {"raw": raw}
+            connection.request(
+                "POST", f"{address.path.rstrip('/')}/functions/v1/{function}", body=json.dumps(body),
+                headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {self.admin_token}",
+                         "Content-Type": "application/json"})
+            response = connection.getresponse()
+            status, raw = response.status, response.read().decode()
+        finally:
+            connection.close()
+        try:
+            return status, json.loads(raw) if raw.strip() else None
+        except json.JSONDecodeError:
+            return status, {"raw": raw}
 
     def issue_credential(self, gid):
         """The Generate Broker Credential button, as the dashboard calls it. Returns the password."""
