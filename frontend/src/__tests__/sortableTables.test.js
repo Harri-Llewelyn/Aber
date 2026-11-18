@@ -23,6 +23,7 @@ const TABLES = {
     sortable: 0,
     fixed: ['A person\'s sessions, a handful: the one in use first, then the most recently active. The Sessions tab and a person\'s drawer on People both draw it.']
   },
+  'components/common/SiteVocabularyPanel.jsx': { sortable: 1 },
   'components/modals/AssetConfigModal.jsx': { sortable: 2 },
   'components/modals/ServiceTokenInventoryModal.jsx': { sortable: 1 },
   'components/modals/StartPlaybackModal.jsx': {

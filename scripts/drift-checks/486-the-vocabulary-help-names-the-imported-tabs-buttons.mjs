@@ -28,7 +28,7 @@ export default function check() {
     ['The site\'s own vocabulary', modal, 'the dialog'],
   ]) {
     if (!section.includes(`**${label}**`)) problems486.push(`the help does not name **${label}**`);
-    if (!source.includes(label) && !source.includes(label.replace("'", '\''))) problems486.push(`${where} does not draw "${label}", which the help names`);
+    if (!source.includes(label)) problems486.push(`${where} does not draw "${label}", which the help names`);
   }
   // The dialog's confirm is the act's name, and filled.
   if (!/confirmLabel="Remove vocabulary"/.test(panel)) problems486.push('the removal\'s confirm does not repeat the action as "Remove vocabulary"');

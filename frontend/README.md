@@ -1417,7 +1417,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
 | Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter; `built-in` for the Built-in tab | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new` and `/automations/built-in`, for an automation whose id is `new` or `built-in`. Built-in: `search`, `sort`, `rule` (a built-in alert's uid, which opens its drawer) |
-| Vocabulary | the standard, as a slug (`opc-ua`), or `imported` | `search`; `file`, on Imported, an imported vocabulary's id, which opens its concepts |
+| Vocabulary | the standard, as a slug (`opc-ua`), or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
 | Archives | `retired` | `sort` |

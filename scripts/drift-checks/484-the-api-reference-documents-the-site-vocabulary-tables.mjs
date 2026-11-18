@@ -22,8 +22,14 @@ export default function check() {
     const at = spec.indexOf(`\n  ${path}:\n`);
     return at < 0 ? '' : spec.slice(at + 1, spec.indexOf('\n  /', at + 2));
   };
-  const columns = (table) => [...(sql.match(new RegExp(`CREATE TABLE IF NOT EXISTS public\\.${table} \\(\\n([\\s\\S]*?)\\n    CONSTRAINT `))?.[1] ?? '')
-    .matchAll(/^ {4}([a-z_0-9]+) /gm)].map((m) => m[1]);
+  // The columns a table declares: the first word of each line before its first CONSTRAINT.
+  const columns = (table) => {
+    const head = `CREATE TABLE IF NOT EXISTS public.${table} (\n`;
+    const at = sql.indexOf(head);
+    if (at < 0) return [];
+    const body = sql.slice(at + head.length, sql.indexOf('\n    CONSTRAINT ', at));
+    return body.split('\n').filter((line) => line.startsWith('    ')).map((line) => line.trim().split(' ')[0]);
+  };
   const schema = (name) => {
     const at = spec.indexOf(`\n    ${name}:\n`);
     return at < 0 ? '' : spec.slice(at + 1, spec.indexOf('\n\n', at + 2));

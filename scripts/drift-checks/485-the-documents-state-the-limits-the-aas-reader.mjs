@@ -12,8 +12,9 @@ export default function check() {
   const source = read('frontend/src/utils/aasPackage.js');
   // The number a limit is written as: `25 * MiB` is 25 (megabytes), `5000` is 5000.
   const limit = (name) => {
-    const m = source.match(new RegExp(`${name}: (\\d+)`));
-    return m ? Number(m[1]) : null;
+    const at = source.indexOf(`${name}: `);
+    const m = at < 0 ? null : source.slice(at + name.length + 2).match(/^\d+/);
+    return m ? Number(m[0]) : null;
   };
   const limits = {
     file: limit('maxFileBytes'),

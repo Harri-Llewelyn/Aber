@@ -104,6 +104,20 @@ describe('the Imported tab', () => {
     expect(own.slice(5, 8)).toEqual(['1', '1', 'Shared'])
   })
 
+  it('sorts the files by a column, and again to reverse it', async () => {
+    renderTab()
+    const table = await filesTable()
+    const order = () => [...table.querySelectorAll('tbody tr')].map(tr => tr.querySelector('td').textContent)
+    expect(order()).toEqual(['ISO 22400 KPIs', 'Group naming standard'])
+
+    fireEvent.click(within(table).getByRole('button', { name: 'Vocabulary' }))
+    expect(order()).toEqual(['Group naming standard', 'ISO 22400 KPIs'])
+    fireEvent.click(within(table).getByRole('button', { name: 'Vocabulary' }))
+    expect(order()).toEqual(['ISO 22400 KPIs', 'Group naming standard'])
+    fireEvent.click(within(table).getByRole('button', { name: 'Concepts' }))
+    expect(order()).toEqual(['Group naming standard', 'ISO 22400 KPIs'])
+  })
+
   it('shows the concepts under it, with how many are in use, and hands one over as a Custom entry', async () => {
     const { onUseEntry } = renderTab()
     await filesTable()

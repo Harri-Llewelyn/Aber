@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { useDisplayNames } from '../../hooks/useDisplayNames'
+import { useSortableRows } from '../../hooks/useTableSort'
 import { useUrlState } from '../../hooks/useUrlState'
 import { siteVocabularyUrl } from '../../routes'
 import { formatDateTime, plural } from '../../utils/format'
@@ -17,11 +18,23 @@ import { IconBookOpen, IconUpload } from './Icons'
 import { LoadingState } from './LoadingState'
 import { PersonName } from './PersonName'
 import { SearchInput } from './SearchInput'
-import { ColumnHeader } from './SortHeader'
+import { SortHeader } from './SortHeader'
 import { Tooltip } from './Tooltip'
 import { VocabularySections } from './VocabularySections'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { ImportVocabularyModal } from '../modals/ImportVocabularyModal'
+
+/** The files table's sortable columns, each on what its cell shows. */
+const FILE_SORT = {
+  name: { type: 'text', value: f => f.name },
+  label: { type: 'text', value: f => f.label },
+  version: { type: 'text', value: f => f.version },
+  imported_by: { type: 'text', value: f => f.imported_by_name },
+  imported_at: { type: 'time', value: f => f.imported_at },
+  concept_count: { type: 'number', value: f => f.concept_count },
+  in_use: { type: 'number', value: f => f.in_use },
+  shared: { type: 'text', value: f => (f.definitions_shareable ? 'Shared' : 'Not shared') }
+}
 
 /**
  * The Imported tab of the Vocabulary page: the vocabularies a site brought in from AAS files, its
@@ -121,14 +134,19 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
 
   const usedBy = (file) => metricsUsing(file, concepts, catalog).length
 
-  const imported = ({ id, name, concepts: added, skipped }) => {
+  // The files as the table sorts and shows them: what each is, who imported it and how many metrics use it.
+  const rows = useMemo(() => files.map(file => ({
+    ...file,
+    label: vocabularyLabel(file),
+    imported_by_name: names.get(file.imported_by) || '',
+    in_use: metricsUsing(file, concepts, catalog).length
+  })), [files, concepts, catalog, names])
+  const [sortedFiles, sort] = useSortableRows(rows, FILE_SORT)
+
+  // The dialog has already toasted; the table reads the files again.
+  const imported = () => {
     setImporting(false)
     load()
-    const left = skipped.length
-    showToast?.(
-      `Vocabulary '${name}' imported: ${plural(added, 'concept')}${left ? `, ${left} skipped` : ''}`,
-      'success', { to: siteVocabularyUrl(id) }
-    )
   }
 
   const remove = async () => {
@@ -196,19 +214,19 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
               <table>
                 <thead>
                   <tr>
-                    <ColumnHeader title="The file's name.">Vocabulary</ColumnHeader>
-                    <ColumnHeader title="A published standard the site holds a copy of, or the site's own vocabulary.">What it is</ColumnHeader>
-                    <ColumnHeader title="The version the file states.">Version</ColumnHeader>
-                    <ColumnHeader title="Who imported it.">Imported by</ColumnHeader>
-                    <ColumnHeader title="When it was imported.">Imported</ColumnHeader>
-                    <ColumnHeader className="num" title="How many concepts it holds.">Concepts</ColumnHeader>
-                    <ColumnHeader className="num" title="How many catalog metrics use one of its concepts or were started from it.">In use</ColumnHeader>
-                    <ColumnHeader title="Whether an export carries the definitions. Until they are shared it carries the preferred names alone.">Definitions</ColumnHeader>
+                    <SortHeader sort={sort} column="name" title="The file's name.">Vocabulary</SortHeader>
+                    <SortHeader sort={sort} column="label" title="A published standard the site holds a copy of, or the site's own vocabulary.">What it is</SortHeader>
+                    <SortHeader sort={sort} column="version" title="The version the file states.">Version</SortHeader>
+                    <SortHeader sort={sort} column="imported_by" title="Who imported it.">Imported by</SortHeader>
+                    <SortHeader sort={sort} column="imported_at" title="When it was imported.">Imported</SortHeader>
+                    <SortHeader sort={sort} column="concept_count" className="num" title="How many concepts it holds.">Concepts</SortHeader>
+                    <SortHeader sort={sort} column="in_use" className="num" title="How many catalog metrics use one of its concepts or were started from it.">In use</SortHeader>
+                    <SortHeader sort={sort} column="shared" title="Whether an export carries the definitions. Until they are shared it carries the preferred names alone.">Definitions</SortHeader>
                     <th className="row-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {files.map(file => (
+                  {sortedFiles.map(file => (
                     <tr key={file.id} aria-current={file.id === focused ? 'true' : undefined}>
                       <td>
                         <Tooltip text={`${SOURCE_FORMAT_LABELS[file.source_format] || file.source_format}. SHA-256 ${file.sha256}.${file.licence_note ? ` Licence: ${file.licence_note}` : ''}`}>
@@ -226,7 +244,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
                       </td>
                       <td className="cell-meta">{formatDateTime(file.imported_at)}</td>
                       <td className="num">{file.concept_count}</td>
-                      <td className="num">{usedBy(file)}</td>
+                      <td className="num">{file.in_use}</td>
                       <td>{file.definitions_shareable ? 'Shared' : 'Not shared'}</td>
                       <td className="row-actions">
                         {file.definitions_shareable ? (
@@ -296,7 +314,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
       </div>
 
       {importing && (
-        <ImportVocabularyModal onImported={imported} onClose={() => setImporting(false)} />
+        <ImportVocabularyModal showToast={showToast} onImported={imported} onClose={() => setImporting(false)} />
       )}
 
       {removing && (

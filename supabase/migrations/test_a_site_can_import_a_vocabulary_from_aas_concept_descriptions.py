@@ -554,18 +554,13 @@ class SiteArm(SiteVocabularyBase):
 
 
 class MetricLink(SiteVocabularyBase):
-    def metric(self, name, **cols):
-        cols = {"name": f"{T}/{name}", "datatype": 10, **cols}
-        keys = ", ".join(cols)
-        self.cur.execute(f"INSERT INTO public.metric_catalog ({keys}) VALUES ({', '.join(['%s'] * len(cols))}) RETURNING id::text;",
-                         tuple(cols.values()))
-        return self.cur.fetchone()[0]
-
-    def as_admin_metric(self, name, **cols):
-        cols = {"name": f"{T}/{name}", "datatype": 10, **cols}
-        keys = ", ".join(cols)
-        return self.as_person(ADMIN_ID, f"INSERT INTO public.metric_catalog ({keys}) VALUES ({', '.join(['%s'] * len(cols))}) RETURNING id::text;",
-                              tuple(cols.values()))[0][0]
+    def as_admin_metric(self, name, semantic_id=None, semantic_id_type=None, site_vocabulary_id=None, standard=None):
+        """A catalogue row written as an Administrator would write it; the columns it does not name are NULL."""
+        return self.as_person(
+            ADMIN_ID,
+            "INSERT INTO public.metric_catalog (name, datatype, semantic_id, semantic_id_type, site_vocabulary_id, standard)"
+            " VALUES (%s, 10, %s, %s, %s, %s) RETURNING id::text;",
+            (f"{T}/{name}", semantic_id, semantic_id_type, site_vocabulary_id, standard))[0][0]
 
     def link_of(self, metric):
         self.cur.execute("SELECT site_vocabulary_id::text, semantic_id, standard FROM public.metric_catalog WHERE id = %s;", (metric,))

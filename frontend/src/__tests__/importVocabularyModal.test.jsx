@@ -196,6 +196,17 @@ describe('importing', () => {
     expect(rows.map(r => r.semantic_id)).toEqual([OEE, SCRAP, MTBF])
   })
 
+  it('toasts the success, naming the vocabulary and what was skipped, with a link to it', async () => {
+    api.importSiteVocabulary.mockResolvedValue({ id: 'v-9', concepts: 2, skipped: [{ semantic_id: OEE, reason: 'already_defined', held_by: 'ISO 22400' }] })
+    const showToast = vi.fn()
+    renderModal({ showToast })
+    await choose(jsonFile(THREE, 'iso.json'))
+    await waitFor(() => expect(confirmButton()).not.toBeDisabled())
+    fireEvent.click(confirmButton())
+
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("Vocabulary 'iso' imported: 2 concepts, 1 skipped", 'success', { to: '/vocabulary/imported?file=v-9' }))
+  })
+
   it('sends a site\'s own vocabulary with no standard fields and no empty ones', async () => {
     api.importSiteVocabulary.mockResolvedValue({ id: 'x', concepts: 1, skipped: [] })
     renderModal()

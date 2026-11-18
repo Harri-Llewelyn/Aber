@@ -2,6 +2,7 @@ import React, { useId, useRef, useState } from 'react'
 import { api } from '../../api'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { readConceptDescriptionsFile, AasFileRefusal } from '../../utils/aasReader'
+import { siteVocabularyUrl } from '../../routes'
 import { plural } from '../../utils/format'
 import {
   SITE_VOCABULARY_LIMITS as LIMITS, SOURCE_FORMAT_LABELS, VOCABULARY_KINDS, standardCitation
@@ -27,10 +28,10 @@ const nameOfFile = (fileName) => String(fileName || '').replace(/\.(aasx|json|xm
  * The licence is the site's responsibility, and the definitions start unshared: an export carries the
  * preferred names alone until an Administrator shares them from the Imported tab.
  *
- * `onImported({ id, name, concepts, skipped })` runs once the database has stored it. A refusal stays
- * in the dialog, as it was worded.
+ * Once the database has stored it the dialog toasts, with a link to the vocabulary, and calls
+ * `onImported({ id, name, concepts, skipped })`. A refusal stays in the dialog, as it was worded.
  */
-export function ImportVocabularyModal({ onImported, onClose }) {
+export function ImportVocabularyModal({ showToast, onImported, onClose }) {
   const uid = useId()
   const fileRef = useRef(null)
   const [reading, setReading] = useState(false)
@@ -98,6 +99,11 @@ export function ImportVocabularyModal({ onImported, onClose }) {
         ...(licenceNote.trim() ? { licence_note: licenceNote.trim() } : {})
       }
       const result = await api.importSiteVocabulary(described, preview.concepts)
+      const left = result.skipped.length
+      showToast?.(
+        `Vocabulary '${described.name}' imported: ${plural(result.concepts, 'concept')}${left ? `, ${left} skipped` : ''}`,
+        'success', { to: siteVocabularyUrl(result.id) }
+      )
       onImported({ ...result, name: described.name })
     } catch (err) {
       setError(err.message)
