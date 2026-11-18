@@ -59,8 +59,9 @@ export default function check() {
 
   const notice = read('NOTICE.md');
   const section = notice.slice(notice.indexOf('### QUDT:'));
-  if (!section.startsWith('### QUDT:') || !section.includes('QUDT.org') || !section.includes('CC BY 4.0') ||
-      !section.includes('https://creativecommons.org/licenses/by/4.0/')) {
+  // Phrases of the notice, not bare hosts: the check reads prose and trusts no URL.
+  if (!section.startsWith('### QUDT:') || !section.includes('attribution is made to QUDT.org') ||
+      !section.includes('(CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/)')) {
     problems474.push('NOTICE.md has no QUDT section under Standards and vocabularies that credits QUDT.org under CC BY 4.0 and links the licence');
   }
 
