@@ -8327,6 +8327,14 @@ ol.gateway-steps {
 .vocab-chip-action:hover .vocab-chip-plus,
 .vocab-chip-action:focus-visible .vocab-chip-plus { visibility: visible; }
 
+/* What a standard asks to be shown with its tab, such as QUDT's credit: at the right-hand end of the
+   row Expand all starts, wrapping under it on a narrow card. Its link is accent text with no resting
+   underline, as every link is. */
+.vocab-notice { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.vocab-notice a { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
+.vocab-notice a:hover,
+.vocab-notice a:focus-visible { text-decoration: underline; }
+
 /* COLD STORAGE: the catalogue rows and the destination dialog. */
 /* Alone above the empty state, the backlog card is centred at about the width it has in the row. */
 .cold-backlog-lead { display: flex; justify-content: center; margin-bottom: var(--stack); }

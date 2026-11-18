@@ -3664,7 +3664,11 @@ const apiMethods = {
         category: k.category,
         unit: k.unit,
         formula: k.formula,
-        semantic_id: k.semantic_id
+        semantic_id: k.semantic_id,
+        // Where the definition was read from (0305); null for a KPI no free source publishes.
+        source: k.source ?? null,
+        // Why the KPI is deprecated (0305); null for a live one.
+        deprecated_reason: k.deprecated_reason ?? null
       }));
     }
 
@@ -3679,6 +3683,23 @@ const apiMethods = {
         .order('label', { ascending: true });
       if (error) throw error;
       return data || [];
+    }
+
+    if (path.startsWith('/api/v1/qudt-quantity-kinds')) {
+      // Reference data (migration 0304), generated from QUDT 3.5.2's quantity-kind vocabulary (CC BY 4.0) and
+      // read-only to the app. Keyed by QUDT's own IRI, which two kinds never share; their labels can. Read
+      // in pages of 1000, the most a server may be set to return, since there are more kinds than that.
+      const rows = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('qudt_quantity_kinds')
+          .select('semantic_id, name, description')
+          .order('semantic_id', { ascending: true })
+          .range(from, from + 999);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if ((data || []).length < 1000) return rows;
+      }
     }
 
     if (path.startsWith('/api/v1/vda5050-vocabulary')) {

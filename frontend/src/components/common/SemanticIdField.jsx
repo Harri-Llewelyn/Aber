@@ -3,7 +3,7 @@ import { HelpTip } from './HelpTip'
 import {
   SEMANTIC_ID_TYPES, followSemanticIdType, storedSemanticIdPair, sameSemanticIdPair
 } from '../../utils/standards'
-import { searchSemanticIdCandidates, foreignConcept } from '../../utils/semanticIdSources'
+import { searchSemanticIdCandidates, foreignConcept, candidatesFor } from '../../utils/semanticIdSources'
 import { Tooltip } from './Tooltip'
 
 /** The most matches the picker lists at once; the rest are reached by narrowing the search. */
@@ -46,7 +46,9 @@ const LABEL = { marginBottom: 0 }
  *
  * `candidates` (utils/semanticIdSources.js) add a search beside the field; choosing one sends its id
  * and reference type through `onChange`, and typing stays open for ids no source holds. The search
- * is over the list given, not the server. `ownStandard` is the subject's provenance: a metric carries
+ * is over the list given, not the server, narrowed to what the subject may take (candidatesFor): a
+ * QUDT quantity kind is offered as a metric's own id only under 223P or Custom, and as a further id
+ * always. `ownStandard` is the subject's provenance: a metric carries
  * one id, so an id only another standard holds is named under the field as a replacement. The
  * `further` subject is the id of a metric's further ids: it is not optional, since it is added
  * with its own button, and no id replaces another.
@@ -63,16 +65,20 @@ export function SemanticIdField({
     suggested.semanticId !== '' && sameSemanticIdPair({ semanticId, semanticIdType }, suggested)
   const canRestore = !readOnly && suggested.semanticId !== '' && !showingSuggestion
 
-  const canPick = !readOnly && (candidates?.length || 0) > 0
+  const offered = useMemo(
+    () => candidatesFor(candidates, { subject, standard: ownStandard }),
+    [candidates, subject, ownStandard]
+  )
+  const canPick = !readOnly && offered.length > 0
   const [picking, setPicking] = useState(false)
   const [query, setQuery] = useState('')
   const searchRef = useRef(null)
   useEffect(() => { if (picking) searchRef.current?.focus() }, [picking])
   const { matches, total } = useMemo(
     () => (picking
-      ? searchSemanticIdCandidates(candidates, query, { standard: ownStandard, limit: PICKER_LIMIT })
+      ? searchSemanticIdCandidates(offered, query, { standard: ownStandard, limit: PICKER_LIMIT })
       : { matches: [], total: 0 }),
-    [picking, candidates, query, ownStandard]
+    [picking, offered, query, ownStandard]
   )
   const foreign = readOnly || subject === 'further' ? null : foreignConcept(candidates, semanticId, ownStandard)
 

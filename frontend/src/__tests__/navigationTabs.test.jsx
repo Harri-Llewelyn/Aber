@@ -28,6 +28,7 @@ import { mtconnectVocabularyTab } from '../components/common/MTConnectVocabulary
 import { iso22400VocabularyTab } from '../components/common/ISO22400VocabularyPanel'
 import { opcuaVocabularyTab } from '../components/common/OPCUAVocabularyPanel'
 import { ashrae223VocabularyTab } from '../components/common/ASHRAE223VocabularyPanel'
+import { qudtVocabularyTab } from '../components/common/QUDTVocabularyPanel'
 import { vda5050VocabularyTab } from '../components/common/VDA5050VocabularyPanel'
 import { api } from '../api'
 import { tabLink } from '../test/tabBar'
@@ -107,7 +108,7 @@ describe('one list per page', () => {
 
   it('lists the standards in the order the Vocabulary page draws them, by their slugs', () => {
     const none = { vocabulary: [], catalog: [] }
-    const drawn = [mtconnectVocabularyTab(none), iso22400VocabularyTab(none), opcuaVocabularyTab(none), ashrae223VocabularyTab(none), vda5050VocabularyTab(none)]
+    const drawn = [mtconnectVocabularyTab(none), iso22400VocabularyTab(none), opcuaVocabularyTab(none), ashrae223VocabularyTab(none), qudtVocabularyTab(none), vda5050VocabularyTab(none)]
     expect(VOCABULARY_TABS).toEqual(drawn.map(d => ({ id: pathSlug(d.id), label: d.label })))
   })
 

@@ -11528,13 +11528,13 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
 
 **A vocabulary's definitions reach the AAS export through `concept_definitions` (`0169`).** The
 view is one row per semantic id, `(semantic_id, name, definition, standard)`, from each
-vocabulary's own description column: the IDTA templates, ASHRAE 223P, OPC UA, ISO 22400, MTConnect
-(`0301`) and VDA 5050 (`0302`). An id held by two vocabularies takes the first in that order, the one
-whose ids are issued furthest from this deployment, and a row with no text is left out. The exporter
-reads the view in one query. An id no
-vocabulary holds but a known authority issues, such as a QUDT quantity kind, defers to that
-authority (`ID_AUTHORITIES` in `functions/_shared/aas/shell.ts`). Catalog text is used only for
-the rest, such as an id an Administrator typed. A new
+vocabulary's own description column: the IDTA templates, ASHRAE 223P, QUDT (`0304`), OPC UA, ISO 22400,
+MTConnect (`0301`) and VDA 5050 (`0302`). An id held by two vocabularies takes the first in that order,
+the one whose ids are issued furthest from this deployment, and a row with no text is left out. The
+exporter reads the view in one query. An id no vocabulary holds but a known authority issues, such as
+a QUDT quantity kind the seed leaves out, defers to that authority (`ID_AUTHORITIES` in
+`functions/_shared/aas/shell.ts`). Catalog text is used only for the rest, such as an id an
+Administrator typed. A new
 vocabulary with a description column adds an arm in a migration that redeclares the view; the
 columns stay the same, so `CREATE OR REPLACE VIEW` keeps its grants. It is `security_invoker`, so
 the vocabularies' own policies apply to the caller: `authenticated` and `service_role` read it,

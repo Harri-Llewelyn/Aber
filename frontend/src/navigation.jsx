@@ -2,6 +2,7 @@ import React from 'react'
 import { PERMISSION_UUIDS } from './constants'
 import { leadKey } from './utils/navSignal'
 import { STANDARDS } from './utils/standards'
+import { QUDT_LABEL } from './utils/qudt'
 import { pathSegments, pathSlug } from './hooks/useUrlState'
 import {
   IconMap,
@@ -66,7 +67,9 @@ export const AUTOMATIONS_TABS = [
 ]
 
 /** The standards in the page's order; each tab's tooltip is its standard's own hint (VocabularyPanel). */
-export const VOCABULARY_TABS = [STANDARDS.MTCONNECT, STANDARDS.ISO22400, STANDARDS.OPCUA, STANDARDS.ASHRAE223, STANDARDS.VDA5050]
+export const VOCABULARY_TABS = [
+  STANDARDS.MTCONNECT, STANDARDS.ISO22400, STANDARDS.OPCUA, STANDARDS.ASHRAE223, QUDT_LABEL, STANDARDS.VDA5050
+]
   .map(label => ({ id: pathSlug(label), label }))
 
 /** The two subjects a capture records, then the recordings and playbacks that have finished. */
