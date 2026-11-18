@@ -72,6 +72,8 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/standards.js` (`mtconnectSemanticId()`) | `mtconnect_vocabulary.semantic_id`, as `0002` seeds it |
 | `utils/units.js` (`UNIT_SYMBOLS`) | the units the Add Metric dialog's list offers, which `0002` seeds as the MTConnect `UNIT` and `NATIVE_UNIT` rows, the units the ISO 22400 and OPC UA rows prefill, and the example metrics' units (mirror checks 102 and 103) |
 | `utils/ashrae223.js` (`ASHRAE223_GROUP`) | the one metric group registered under ASHRAE 223P, and the group its seeded metrics file under |
+| `utils/standards.js` (`VDA5050_GROUP`, `vda5050FieldType()`, `VDA5050_SEMANTIC_NAMESPACE`) | the metric group registered under VDA 5050, the name `metric_catalog_name_format` admits for each seeded field, and the namespace the generator, the table's CHECK and i3X mint and read the ids under (mirror checks 117 and 118) |
+| `utils/standards.js` (`STANDARDS`) | the `standard` each arm of `concept_definitions` carries, and the one a metric group is registered under (mirror check 119) |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 | `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |

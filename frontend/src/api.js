@@ -3643,7 +3643,9 @@ const apiMethods = {
       // 20260101000032_effectiveness_and_mtconnect_semantics.sql -- distinct from the observation-level
       // id a catalog metric carries, which is built from the whole metric name.
       return (data || []).map(v => ({
-        kind: v.kind, name: v.name, category: v.category, semantic_id: v.semantic_id ?? null
+        kind: v.kind, name: v.name, category: v.category, semantic_id: v.semantic_id ?? null,
+        // The text MTConnect publishes for a data item type (0301); null for every other kind.
+        description: v.description ?? null
       }));
     }
 
@@ -3675,6 +3677,17 @@ const apiMethods = {
         .select('*')
         .order('subclass_of', { ascending: true, nullsFirst: true })
         .order('label', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    }
+
+    if (path.startsWith('/api/v1/vda5050-vocabulary')) {
+      // Reference data (migration 0302), generated from the VDA's state schema at tag 3.0.0 and
+      // read-only to the app. Keyed by the field's path, so that is the order.
+      const { data, error } = await supabase
+        .from('vda5050_vocabulary')
+        .select('*')
+        .order('name', { ascending: true });
       if (error) throw error;
       return data || [];
     }

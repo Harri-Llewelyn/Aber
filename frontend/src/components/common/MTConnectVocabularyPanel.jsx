@@ -22,6 +22,13 @@ export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
     if (entry?.semantic_id) semanticIds.set(entry.name, entry.semantic_id)
   }
 
+  // What MTConnect says a data item type is (migration 0301): NULL for every other kind of entry
+  // and for a type the XSD does not document, which then shows its name alone.
+  const definitions = new Map()
+  for (const entry of vocabulary || []) {
+    if (entry?.kind === 'DATA_ITEM_TYPE' && entry?.description) definitions.set(entry.name, entry.description)
+  }
+
   return {
     id: STANDARDS.MTCONNECT,
     label: 'MTConnect',
@@ -29,6 +36,10 @@ export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
     searchPlaceholder: 'Search the vocabulary…',
     sections,
     isUsed: item => adopted.has(item.name),
+    tooltipFor: item => {
+      const definition = item.sectionKey.startsWith('type:') ? definitions.get(item.name) : null
+      return definition ? `${item.name} — ${definition}` : ''
+    },
     idFor: item => {
       const semanticId = semanticIds.get(item.name)
       return semanticId ? { label: 'Semantic ID', value: semanticId } : null

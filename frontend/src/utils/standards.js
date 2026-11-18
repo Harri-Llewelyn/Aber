@@ -1,8 +1,8 @@
 /**
  * The standards a catalog metric can be built from. `metric_catalog.standard` is provenance; NULL
- * means a local extension, which every adopted standard permits. The four are complementary:
+ * means a local extension, which every adopted standard permits. The five are complementary:
  * MTConnect for machine tools, ISO 22400 for computed KPIs, OPC UA for robotics and machinery
- * companion specs, ASHRAE 223P for building systems.
+ * companion specs, ASHRAE 223P for building systems, VDA 5050 for AGVs.
  */
 
 export const STANDARDS = {
@@ -10,6 +10,7 @@ export const STANDARDS = {
   ISO22400: 'ISO 22400',
   OPCUA: 'OPC UA',
   ASHRAE223: 'ASHRAE 223P',
+  VDA5050: 'VDA 5050',
   /** A local extension. Stored as NULL, not as the string 'Custom'. */
   CUSTOM: ''
 }
@@ -32,12 +33,17 @@ export const STANDARD_OPTIONS = [
   {
     value: STANDARDS.OPCUA,
     label: 'OPC UA',
-    hint: 'Companion specification data points — OPC 40001 Machinery and OPC 40010 Robotics.'
+    hint: 'OPC UA companion specification data points, such as Machinery and Robotics.'
   },
   {
     value: STANDARDS.ASHRAE223,
     label: 'ASHRAE 223P',
     hint: 'Building systems — HVAC, electrical and the sensing around them. The standard is still in public review, so its concepts may change.'
+  },
+  {
+    value: STANDARDS.VDA5050,
+    label: 'VDA 5050',
+    hint: 'Automated guided vehicle readings — driving state, battery, velocity, position and safety. VDA 5050 3.0 calls the vehicle a mobile robot.'
   },
   {
     value: STANDARDS.CUSTOM,
@@ -69,6 +75,22 @@ export const LOCAL_SEMANTIC_NAMESPACE = 'https://aber.local/semantics'
  * 2.8, and an id that changed on every regeneration would not be an identifier.
  */
 export const MTCONNECT_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/mtconnect/v2.0`
+
+/**
+ * VDA 5050 field namespace, pinned to the major line as MTConnect's is. The VDA issues no concept
+ * identifiers, so `vda5050_vocabulary` mints them: `<this>/State/<path in the state message>`.
+ */
+export const VDA5050_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/vda5050/v3.0`
+
+/** The one metric group VDA 5050 fields file under, registered by migration 0302. */
+export const VDA5050_GROUP = 'AGV'
+
+/**
+ * The part of a metric name a VDA 5050 field stands for: its path in the state message with a slash
+ * between the levels, since a name cannot hold a dot. Held to `metric_catalog_name_format` for
+ * every seeded field by check-mirror-drift.mjs.
+ */
+export const vda5050FieldType = (path) => String(path || '').split('.').join('/')
 
 /** ISO 22400 KPI namespace. The ids seeded by archived migration 20260101000030_iso22400_vocabulary.sql are built on this. */
 export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400`

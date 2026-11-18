@@ -413,13 +413,14 @@ _SPARKPLUG_TYPES = {
 METRIC_FALLBACK_TYPES = [_SPARKPLUG_TYPES[code] for code in sorted(_SPARKPLUG_TYPES)]
 METRIC_FALLBACK_TYPES.append(UNKNOWN_TYPE)
 
-# The namespaces a metric's semantic id can be defined in. MTConnect and ISO 22400 ids are minted
-# here, so theirs are local. OPC UA and ASHRAE 223P ids are the standard's own, and a scalar type
-# adapted from one is an in-exact implementation, which the guide marks with `?projection=i3X`.
+# The namespaces a metric's semantic id can be defined in. MTConnect, ISO 22400 and VDA 5050 ids are
+# minted here, so theirs are local. OPC UA and ASHRAE 223P ids are the standard's own, and a scalar
+# type adapted from one is an in-exact implementation, which the guide marks with `?projection=i3X`.
 PROJECTION_SUFFIX = "?projection=i3X"
 _LOCAL_STANDARD_NAMESPACES = {
     "https://aber.local/semantics/mtconnect/v2.0": "MTConnect 2.0 (Aber ids)",
     "https://aber.local/semantics/iso22400": "ISO 22400 (Aber ids)",
+    "https://aber.local/semantics/vda5050/v3.0": "VDA 5050 3.0 (Aber ids)",
 }
 _OPCUA_NAMESPACE_ROOT = "http://opcfoundation.org/UA/"
 # An OPC UA id is an ExpandedNodeId, `nsu=<namespace URI>;<i|s|g|b>=<identifier>` (OPC 10000-6

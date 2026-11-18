@@ -13,16 +13,28 @@
  * these values in a derived work. Note this is distinct from the MTConnect *specification*
  * documents, which carry separate terms, and from the Implementer License required to claim
  * MTConnect compliance in a product. Adopting the vocabulary is not a compliance claim.
+ *
+ * Two sources are read. The names come from the 2.8 JSON Schema, fetched from `master`. The text
+ * that defines each data item type comes from `DataItemEnumEnum` in MTConnectDevices_2.7.xsd, a
+ * copy kept in scripts/vocabularies/ and pinned by SHA-256, because 2.7 is the newest XSD and the
+ * 2.8 JSON Schema carries no type documentation. The file's own header (a BSD-style licence from
+ * AMT) is why the copy is kept whole and why NOTICE.md reproduces the notice.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { dataItemTypeDefinitions } from './lib/mtconnect-definitions.mjs';
 
 const SCHEMA_VERSION = '2.8';
 const SCHEMA_URL =
   `https://raw.githubusercontent.com/mtconnect/schema/master/MTConnectDevices_${SCHEMA_VERSION}_draft-04.schema.json`;
+
+/** Pinned by content: a different file is refused rather than read. */
+const XSD_FILE = 'scripts/vocabularies/MTConnectDevices_2.7.xsd';
+const XSD_SHA256 = 'eebfafec4b8c12abdd30bba7c29071884248c5a52287ddd26bb11cc0ba543055';
+const XSD_VERSION = '2.7';
 
 /**
  * THE LIVE SEED (`0002`), AND IT HAS TO BE. The db-init Job globs `/migrations/*.sql`, which
@@ -193,7 +205,68 @@ if (beginAt < 0 || endAt < 0 || endAt < beginAt) {
 const updated = seed.slice(0, beginAt) + header + '\n' + body + '\n' + seed.slice(endAt);
 writeFileSync(SEED, updated, 'utf8');
 
+/**
+ * The text that defines each data item type, written into 0301's own block: 0002 is released, so
+ * its rows cannot gain a column in place. One UPDATE sets every description at once, and touches a
+ * row only when its text differs, so a replay on a settled database writes nothing. A type the XSD
+ * does not document (ELEVATION, which 2.8 added) is left out and keeps a NULL description.
+ *
+ * Like the rows above, the block carries a SHA-256 of its own body that
+ * scripts/check-mtconnect-seed-sync.mjs recomputes.
+ */
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const DESCRIPTIONS_FILE = 'supabase/migrations/0301_an_mtconnect_concept_carries_its_own_definition.sql';
+const DESCRIPTIONS = join(ROOT, DESCRIPTIONS_FILE);
+const DESCRIPTIONS_BEGIN = '-- >>> BEGIN GENERATED mtconnect_descriptions';
+const DESCRIPTIONS_END = '-- <<< END GENERATED mtconnect_descriptions';
+
+const xsd = readFileSync(join(ROOT, XSD_FILE));
+const xsdSha256 = createHash('sha256').update(xsd).digest('hex');
+if (xsdSha256 !== XSD_SHA256) {
+  throw new Error(
+    `${XSD_FILE} is sha256:${xsdSha256}, pinned to sha256:${XSD_SHA256}. A new XSD is reviewed (diff, ` +
+    `licence header, definitions) before the pin moves.`
+  );
+}
+const definitions = dataItemTypeDefinitions(xsd.toString('utf8'));
+const described = dataItemTypes
+  .map(([name]) => [name, definitions.get(name) ?? null])
+  .filter(([, text]) => text !== null);
+const undescribed = dataItemTypes.map(([name]) => name).filter(name => !definitions.get(name));
+
+const descriptionBody =
+  'UPDATE public.mtconnect_vocabulary AS v\n' +
+  '   SET description = d.description\n' +
+  '  FROM (VALUES\n' +
+  described.map(([name, text]) => `  (${sqlString(name)}, ${sqlString(text)})`).join(',\n') + '\n' +
+  '  ) AS d (name, description)\n' +
+  " WHERE v.kind = 'DATA_ITEM_TYPE'\n" +
+  '   AND v.name = d.name\n' +
+  '   AND v.description IS DISTINCT FROM d.description;';
+const descriptionDigest = createHash('sha256').update(descriptionBody).digest('hex').slice(0, 16);
+const descriptionHeader =
+  `${DESCRIPTIONS_BEGIN} -- MTConnect ${XSD_VERSION}, ${described.length} of ${dataItemTypes.length} data item types, sha256:${descriptionDigest}\n` +
+  `-- GENERATED from ${XSD_FILE} by scripts/generate-mtconnect-vocabulary.mjs.\n` +
+  '-- Do not edit these rows by hand: change the script and re-run it. CI verifies the digest above.';
+
+const migration = readFileSync(DESCRIPTIONS, 'utf8').replace(/\r\n/g, '\n');
+const descriptionsAt = migration.indexOf(DESCRIPTIONS_BEGIN);
+const descriptionsEndAt = migration.indexOf(DESCRIPTIONS_END);
+if (descriptionsAt < 0 || descriptionsEndAt < 0 || descriptionsEndAt < descriptionsAt) {
+  throw new Error(
+    `markers not found in ${DESCRIPTIONS}. Expected a block delimited by:\n  ${DESCRIPTIONS_BEGIN}\n  ${DESCRIPTIONS_END}`
+  );
+}
+writeFileSync(
+  DESCRIPTIONS,
+  migration.slice(0, descriptionsAt) + descriptionHeader + '\n' + descriptionBody + '\n' + migration.slice(descriptionsEndAt),
+  'utf8'
+);
+
 console.log(`MTConnect ${SCHEMA_VERSION}: wrote ${rows.length} rows into supabase/migrations/0002_seed_data.sql`);
 console.log(`  sha256:${digest}`);
 console.log(`  ${dataItemTypes.length} data item types, ${subTypes.length} subtypes, ${units.length} units, ` +
             `${nativeUnits.filter(n => !units.includes(n)).length} native units, ${components.length} components`);
+console.log(`MTConnect ${XSD_VERSION} definitions: wrote ${described.length} of ${dataItemTypes.length} data item types into ${DESCRIPTIONS_FILE}`);
+console.log(`  sha256:${descriptionDigest}`);
+if (undescribed.length) console.log(`  no definition in the XSD for: ${undescribed.join(', ')}`);

@@ -9,6 +9,7 @@ import { mtconnectVocabularyTab } from '../common/MTConnectVocabularyPanel'
 import { iso22400VocabularyTab } from '../common/ISO22400VocabularyPanel'
 import { opcuaVocabularyTab } from '../common/OPCUAVocabularyPanel'
 import { ashrae223VocabularyTab } from '../common/ASHRAE223VocabularyPanel'
+import { vda5050VocabularyTab } from '../common/VDA5050VocabularyPanel'
 
 /**
  * The standard vocabularies as a page of their own: reference material that is only read, separate
@@ -22,6 +23,7 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
   const [isoVocabulary, setIsoVocabulary] = useState([])
   const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
   const [s223Vocabulary, setS223Vocabulary] = useState([])
+  const [vdaVocabulary, setVdaVocabulary] = useState([])
   const [catalog, setCatalog] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -32,16 +34,18 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
       api.get('/api/v1/iso22400-vocabulary'),
       api.get('/api/v1/opcua-vocabulary'),
       api.get('/api/v1/ashrae223-vocabulary'),
+      api.get('/api/v1/vda5050-vocabulary'),
       // The catalog is read only to mark which entries are in use, so a failure there is defaulted
       // rather than blanking the reference.
       api.get('/api/v1/metric-catalog').catch(() => [])
     ])
-      .then(([mt, iso, opcua, s223, cat]) => {
+      .then(([mt, iso, opcua, s223, vda, cat]) => {
         if (cancelled) return
         setVocabulary(mt || [])
         setIsoVocabulary(iso || [])
         setOpcuaVocabulary(opcua || [])
         setS223Vocabulary(s223 || [])
+        setVdaVocabulary(vda || [])
         setCatalog(cat || [])
         setLoading(false)
       })
@@ -100,6 +104,13 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
               catalog,
               onUseConcept: canUse
                 ? (concept => onUseEntry?.({ standard: STANDARDS.ASHRAE223, name: concept?.name }))
+                : undefined
+            }),
+            vda5050VocabularyTab({
+              vocabulary: vdaVocabulary,
+              catalog,
+              onUseField: canUse
+                ? (field => onUseEntry?.({ standard: STANDARDS.VDA5050, name: field?.name }))
                 : undefined
             })
           ]}

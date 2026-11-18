@@ -809,7 +809,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     return table ? [...table.querySelectorAll('tbody tr:not(.table-group-row) td:first-child .mono')].map(el => el.textContent) : []
   }
   const ALL_OPTIONS = [
-    'MTConnect 3', 'ISO 22400 2', 'OPC UA 1', 'ASHRAE 223P 0', 'Local extension 2'
+    'MTConnect 3', 'ISO 22400 2', 'OPC UA 1', 'ASHRAE 223P 0', 'VDA 5050 0', 'Local extension 2'
   ]
 
   const mockFilterCatalog = () => api.get.mockImplementation((path) =>
@@ -902,7 +902,7 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     fireEvent.change(search(), { target: { value: 'OEE' } })
     fireEvent.click(unmappedButton())
     // Of the OEE metrics, only MTBF has no semantic id.
-    expect(optionTexts()).toEqual(['MTConnect 0', 'ISO 22400 1', 'OPC UA 0', 'ASHRAE 223P 0', 'Local extension 0'])
+    expect(optionTexts()).toEqual(['MTConnect 0', 'ISO 22400 1', 'OPC UA 0', 'ASHRAE 223P 0', 'VDA 5050 0', 'Local extension 0'])
 
     chooseStandard('OPC UA')
     expect(unmappedButton().textContent).toBe('Unmapped (4)')
