@@ -1,1 +1,3 @@
-{}
+{
+  "GHSA-fc5q-39xc-vjpf": "picomatch <= 4.0.7, a ReDoS on single-branch repeated extglobs, with no patched release when accepted (2026-11-18). In frontend/package-lock.json picomatch 4.0.7 is a development dependency only, of vite, vitest, tinyglobby and fdir. It runs while the bundle is built and tested, on glob patterns from the repository's own configuration, never on input from a request. The frontend image ships only the built files (frontend/Dockerfile copies dist into nginx), so no running Aber holds it. Bump picomatch and delete this entry once a patched release exists."
+}
