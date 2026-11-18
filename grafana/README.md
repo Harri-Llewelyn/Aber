@@ -30,6 +30,27 @@ say, which is why several groups below are `noDataState: OK` throughout: their e
 switched off, and a rule that alerts forever about a measurement the operator declined would be
 switched off with them.
 
+## The dashboard lists these rules
+
+**The Automations page's Built-in tab lists every rule in `alert-rules.yaml`**, read from the file
+when the dashboard is built, never from Grafana. Adding or changing a rule takes four steps:
+
+1. Put a comment above the rule that reads `# <Title>: what it fires on.` The first sentence is the
+   tab's **Fires when**, and the rest is the drawer's description. A rule with no such comment is
+   refused.
+2. Run `node scripts/generate-built-in-alerts.mjs` and commit
+   `frontend/src/utils/builtInAlerts.generated.json`. CI runs it with `--check`, and drift check 462
+   compares the uids.
+3. Add a section to [`help/pages/built-in-alerts.md`](../help/pages/built-in-alerts.md): a `###`
+   heading with the rule's title, a first line `Rule UID: ` and the uid in code, then what the
+   alert means and what to check first, for a newcomer. Drift check 461 refuses a rule with no
+   section, and a section for a rule that is gone.
+4. Add a section to this file, below. The engineering reasons stay here and not in the help.
+
+A rule a site writes in Grafana is not listed: the tab is what this release ships. When the rules
+move out of Grafana, the script reads the new source, and the tab changes only in what each row
+says evaluates it.
+
 ## Bundled plugins
 
 **Grafana runs only the datasource plugins Aber provisions.** The image bundles fourteen backend

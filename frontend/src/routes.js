@@ -1,5 +1,5 @@
 import { pageUrl } from './hooks/useUrlState'
-import { ENTITY_KIND_BY_TABLE } from './constants'
+import { ENTITY_KIND_BY_TABLE, isAutomationAlert } from './constants'
 
 /*
  * The addresses one page links to on another. A drill-down is a link to one of these, so it opens
@@ -130,12 +130,30 @@ export const tabUrl = (page, tab = '') => pageUrl(page, {}, tab)
 export const automationsUrl = () => pageUrl('automations')
 /** A new automation: the editor on the example. No `?open=1`, which names a saved automation whose id is `new`. */
 export const newAutomationUrl = () => '/automations/new'
-/** `new` opens the starter, so an automation whose id is `new` opens with `?open=1` to say it is that one. */
-export const automationUrl = (key) => (key === 'new' ? `/automations/new?open=1` : `/automations/${encodeURIComponent(key)}`)
+/** `new` opens the starter and `built-in` the Built-in tab, so an automation with either id opens with `?open=1` to say it is that one. */
+export const automationUrl = (key) => (key === 'new' || key === 'built-in' ? `/automations/${key}?open=1` : `/automations/${encodeURIComponent(key)}`)
 /** Every automation that applies to one device (or any entity), and why. */
 export const automationsForEntityUrl = (id) => pageUrl('automations', { entity: id })
 /** The automation that owns a trigger, by the trigger's id: the page opens that automation. */
 export const automationForTriggerUrl = (triggerId) => pageUrl('automations', { trigger: triggerId })
+
+/** The Automations page's Built-in tab: the alerts Aber raises about itself. Its id is navigation.jsx's. */
+export const builtInAlertsUrl = () => tabUrl('automations', 'built-in')
+/** One built-in alert, by its rule's uid, with its drawer open. */
+export const builtInRuleUrl = (uid) => pageUrl('automations', { rule: uid }, 'built-in')
+
+/**
+ * Where an alert a built-in rule raised opens in the dashboard: the rule's drawer on the Built-in
+ * tab, by the `rule_uid` the row keeps. A row written before the uid was kept opens the tab searched
+ * by the alert's name. An alert an automation raised is no built-in rule's, and answers null:
+ * alertPage() names its page.
+ */
+export const builtInAlertUrl = (alert) => {
+  if (isAutomationAlert(alert)) return null
+  const { rule_uid: uid, alert_name: name } = alert ?? {}
+  if (uid) return builtInRuleUrl(uid)
+  return name ? pageUrl('automations', { search: name }, 'built-in') : builtInAlertsUrl()
+}
 
 /**
  * The trigger id in the fingerprint of an alert an automation raised, `condition:<trigger

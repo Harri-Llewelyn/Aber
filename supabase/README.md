@@ -2467,7 +2467,7 @@ stable name for what fired. `platform_alerts` now has three nullable columns, an
   `ruleUID`, which the webhook reads when the URL names none, and last an `__alert_rule_uid__` label.
   Grafana removes that label, and every `__x__` label, before a contact point sees the alert, so
   only a relay that kept it would send it. Anything that is not a Grafana uid (letters, digits,
-  `-` and `_`, at most 40) is stored as NULL. All 42 provisioned rules carry an explicit `uid:`.
+  `-` and `_`, at most 40) is stored as NULL. Every provisioned rule carries an explicit `uid:`.
 - **`labels jsonb`**: the alert's labels as sent, the rule's and its series' together, with
   `alertname` and `grafana_folder`.
 - **`values jsonb`**: what Grafana evaluated, by the refId of each query and expression node, as
@@ -2478,10 +2478,12 @@ for the rule, not a new `code` label: a label added to a rule changes every fing
 produces, and the fingerprint is half of the occurrence key.
 
 **A row from before keeps working.** All three are NULL on rows written before the upgrade.
-`grafanaAlertUrl()` (`frontend/src/constants.js`) opens `/alerting/grafana/<uid>/view` when the row
-has a uid, and otherwise Grafana's alert list searched by the rule's name, as before. An alert an
-automation raised has a `condition:` fingerprint and no rule: `grafanaAlertUrl()` answers null for
-it, and no surface links to Grafana (0271).
+The dashboard opens a platform alert's rule on Automations › Built-in by its uid
+(`builtInAlertUrl()`, `frontend/src/routes.js`), and a row with none opens the tab searched by the
+rule's name. Grafana is one click further: the rule's drawer has View in Grafana, which opens
+`/alerting/grafana/<uid>/view` (`grafanaAlertUrl()`, `frontend/src/constants.js`), and so does the tab's
+notice for a uid no built-in rule has. Those are the only places that build a Grafana address for an alert. An alert an automation raised has a `condition:` fingerprint
+and no rule: `builtInAlertUrl()` answers null for it, and no surface links to Grafana (0271).
 
 **The shape lives in `0001`.** `0001` states `platform_alerts_active` with a column list and replays
 first on every boot. Had `0220` widened the view, `0001`'s `CREATE OR REPLACE VIEW` would have tried

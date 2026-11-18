@@ -27,7 +27,7 @@ export default function check() {
       if (!row.includes(`\`${key}\``)) problems321.push(`the routing table's Automations row does not name \`${key}\``);
       if (!tab.includes(needle)) problems321.push(`${TAB} does not read \`${key}\` (${needle})`);
     }
-    for (const form of ['<id>', 'new']) {
+    for (const form of ['<id>', 'new', 'built-in']) {
       if (!row.includes(`\`${form}\``)) problems321.push(`the routing table's Automations row does not name the path form \`${form}\``);
     }
   }
@@ -36,10 +36,13 @@ export default function check() {
       problems321.push(`routes.js's ${builder}() does not build /automations?${key}=<id> through pageUrl()`);
     }
   }
-  if (!/export const automationUrl = \(key\) => \(key === 'new' \? `\/automations\/new\?open=1` : `\/automations\/\$\{encodeURIComponent\(key\)\}`\)/.test(routes)) {
-    problems321.push("routes.js's automationUrl() no longer sends an automation whose id is `new` to ?open=1 or the others to /automations/<id>");
+  if (!/export const automationUrl = \(key\) => \(key === 'new' \|\| key === 'built-in' \? `\/automations\/\$\{key\}\?open=1` : `\/automations\/\$\{encodeURIComponent\(key\)\}`\)/.test(routes)) {
+    problems321.push("routes.js's automationUrl() no longer sends an automation whose id is `new` or `built-in` to ?open=1 or the others to /automations/<id>");
   }
-  if (!tab.includes("params.has('open')")) problems321.push(`${TAB} does not read ?open=1, which tells an automation called \`new\` from the starter`);
+  if (!tab.includes("params.has('open')")) problems321.push(`${TAB} does not read ?open=1, which tells an automation called \`new\` or \`built-in\` from the starter and the Built-in tab`);
+  // The Built-in tab reads its own key, which the same row names.
+  if (row && !row.includes('`rule`')) problems321.push("the routing table's Automations row does not name `rule`, which opens a built-in alert's drawer");
+  if (!read('frontend/src/components/tabs/BuiltInAlerts.jsx').includes("useUrlState('rule'")) problems321.push('BuiltInAlerts.jsx does not read `rule`');
   // New Automation opens the starter, never the address of a saved automation whose id is new.
   if (!/export const newAutomationUrl = \(\) => '\/automations\/new'\n/.test(routes)) {
     problems321.push("routes.js's newAutomationUrl() is no longer /automations/new with no query");
@@ -48,6 +51,6 @@ export default function check() {
   if (problems321.length) {
     fail(`the Automations page's address is not stated as the code reads it:\n${problems321.map((p) => `        ${p}`).join('\n')}`);
   } else {
-    pass(`frontend/README.md's routing table gives the Automations page's ${Object.keys(reads).length} query keys and 2 path forms, each read by ${TAB}, and routes.js builds the entity, trigger and \`new\` links with them`);
+    pass(`frontend/README.md's routing table gives the Automations page's ${Object.keys(reads).length} query keys and 3 path forms, each read by ${TAB}, the Built-in tab's \`rule\` key, and routes.js builds the entity, trigger and \`new\` links with them`);
   }
 }

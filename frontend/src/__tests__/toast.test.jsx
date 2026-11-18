@@ -9,8 +9,7 @@ import {
   useToast, readStoredHistory, clearStoredHistory,
   HISTORY_LIMIT, HISTORY_STORAGE_KEY, MAX_VISIBLE_TOASTS
 } from '../hooks/useToast'
-import { grafanaAlertUrl } from '../constants'
-import { identityUrl, deviceUrl } from '../routes'
+import { identityUrl, deviceUrl, builtInAlertUrl } from '../routes'
 import { alertToastUrl } from '../hooks/usePlatformAlerts'
 
 /**
@@ -429,14 +428,13 @@ describe('a firing platform alert', () => {
     expect(screen.getByText('Spindle Overtemperature').closest('.toast')).toHaveTextContent(/^Alert: /)
   })
 
-  it('links the toast to its rule in Grafana, in a new tab, and dismisses it when followed', async () => {
+  it("links the toast to its rule's Built-in entry, in this tab, and dismisses it when followed", async () => {
     await mountAlerts([row])
     const link = screen.getByRole('link', { name: /Historian Backup Stale/ })
-    expect(link).toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
-    expect(link).toHaveAttribute('target', '_blank')
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(link).toHaveAccessibleDescription('Open in Grafana, in a new tab')
-    expect(hook.toasts[0].to).toBe(grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
+    expect(link).toHaveAttribute('href', builtInAlertUrl({ alert_name: 'Historian Backup Stale' }))
+    expect(link).not.toHaveAttribute('target')
+    expect(link).toHaveAccessibleDescription('Go to Automations › Built in')
+    expect(hook.toasts[0].to).toBe('/automations/built-in?search=Historian+Backup+Stale')
     fireEvent.click(link)
     expect(document.querySelector('.toast')).toBeNull()
     expect(hook.history).toEqual([])
@@ -477,8 +475,8 @@ describe('a firing platform alert', () => {
     expect(hook.toasts.find(t => t.msg === 'Resolved — Capture or Playback Failed').to).toBe(`/capture/playbacks?job=${job}`)
     expect(alertToastUrl({ ...failed, labels: { job: 'capture job 7d2c' } })).toBe('/capture/captures?job=7d2c')
     expect(alertToastUrl({ ...failed, rule_uid: 'aber-playback-worker-stale', labels: {} })).toBe('/capture/playbacks')
-    // A row written before 0220 has no labels, and its link stays the rule's.
-    expect(alertToastUrl({ ...failed, labels: null })).toBe(grafanaAlertUrl(failed))
+    // A row written before 0220 has no labels, and its link stays the rule's Built-in entry.
+    expect(alertToastUrl({ ...failed, labels: null })).toBe('/automations/built-in?rule=aber-job-failed')
   })
 
   it("leads an automation's alert to its device, and to nowhere when it names none", () => {
@@ -487,23 +485,23 @@ describe('a firing platform alert', () => {
     expect(alertToastUrl({ ...automation, entity_type: 'platform', sparkplug_id: null })).toBeUndefined()
   })
 
-  it('links any other alert to its rule, whatever entity_id it carries', () => {
-    expect(alertToastUrl({ ...row, entity_type: 'gateway', entity_id: 'g-1' })).toBe(grafanaAlertUrl(row))
-    expect(alertToastUrl({ ...row, entity_type: 'service_identity', entity_id: null })).toBe(grafanaAlertUrl(row))
+  it("links any other alert to its rule's Built-in entry, whatever entity_id it carries", () => {
+    expect(alertToastUrl({ ...row, entity_type: 'gateway', entity_id: 'g-1' })).toBe(builtInAlertUrl(row))
+    expect(alertToastUrl({ ...row, entity_type: 'service_identity', entity_id: null })).toBe(builtInAlertUrl(row))
   })
 
-  it('links straight to the rule by its uid, firing and resolved', async () => {
+  it("links straight to the rule's drawer by its uid, firing and resolved", async () => {
     const firing = await mountAlerts([{ ...row, rule_uid: 'aber-backup-stale' }])
-    const ruleView = 'http://localhost:3002/alerting/grafana/aber-backup-stale/view'
+    const ruleView = '/automations/built-in?rule=aber-backup-stale'
     expect(screen.getByRole('link', { name: /Historian Backup Stale/ })).toHaveAttribute('href', ruleView)
     await firing([])
     expect(hook.toasts.find(t => t.msg === 'Resolved — Historian Backup Stale').to).toBe(ruleView)
   })
 
-  it('searches by the rule name for a row written before the uid was kept', async () => {
+  it('searches the Built-in tab by the rule name for a row written before the uid was kept', async () => {
     await mountAlerts([{ ...row, rule_uid: null }])
     expect(screen.getByRole('link', { name: /Historian Backup Stale/ }))
-      .toHaveAttribute('href', grafanaAlertUrl({ alert_name: 'Historian Backup Stale' }))
+      .toHaveAttribute('href', '/automations/built-in?search=Historian+Backup+Stale')
   })
 
   it('dismisses from the Dismiss button without following the link', async () => {

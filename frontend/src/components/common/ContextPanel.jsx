@@ -1,12 +1,12 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { IconX, IconAlertTriangle, IconAlertCircle, IconExternalLink, IconCheck, IconBellOff } from './Icons'
+import { IconX, IconAlertTriangle, IconAlertCircle, IconCheck, IconBellOff } from './Icons'
 import CopyableId from './CopyableId'
 import { GroupHeading } from './GroupHeading'
 import { HelpTip } from './HelpTip'
 import { RouteLink } from './RouteLink'
 import { Tooltip } from './Tooltip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
-import { grafanaAlertUrl } from '../../constants'
+import { builtInAlertUrl } from '../../routes'
 import { formatDateTime, formatRelative } from '../../utils/format'
 import { isAcknowledged, reasonLabel } from '../../utils/alertAcknowledgement'
 import { isSuppressed } from '../../utils/alertSuppression'
@@ -300,20 +300,17 @@ function AlertBanner({ alert, open }) {
           >
             Alert history
           </RouteLink>
-          {/* A real anchor with target=_blank, so middle-click and copy link address work. To the rule by its
-              uid, or by its name for an older row. See grafanaAlertUrl, which has none for an automation's. */}
-          {grafanaAlertUrl(alert) && (
-            <Tooltip text="Open this rule in Grafana Alerting, where its thresholds and state history live">
-              <a
-                className="context-alert-link"
-                href={grafanaAlertUrl(alert)}
-                target="_blank"
-                rel="noopener noreferrer"
-                tabIndex={open ? 0 : -1}
-              >
-                View in Grafana <IconExternalLink size={11} />
-              </a>
-            </Tooltip>
+          {/* The rule's entry on Automations › Built-in, by its uid, or searched by its name for an older
+              row. See builtInAlertUrl, which has none for an automation's alert. */}
+          {builtInAlertUrl(alert) && (
+            <RouteLink
+              to={builtInAlertUrl(alert)}
+              className="context-alert-link"
+              title="Show this alert's rule on Automations › Built-in: what fires it, its threshold and what to check first"
+              tabIndex={open ? 0 : -1}
+            >
+              View rule
+            </RouteLink>
           )}
         </span>
       </div>

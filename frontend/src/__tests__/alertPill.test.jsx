@@ -3,7 +3,6 @@ import { render, screen, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { AlertPill } from '../components/common/AlertPill'
 import { POLL_INTERVAL_MS, RECONCILE_MS } from '../hooks/usePlatformAlerts'
-import { GRAFANA_URL } from '../constants'
 import { getByTooltip, queryByTooltip, tooltipOf } from '../test/tooltips'
 
 /**
@@ -340,7 +339,7 @@ describe('AlertPill', () => {
       expect(onSelectDevice).not.toHaveBeenCalled()
     })
 
-    it('opens a platform alert in Grafana, because no page here is about the platform', () => {
+    it("opens a platform alert's rule on Automations › Built-in, because no page here is about the platform", () => {
       const onSelectDevice = vi.fn()
       const onSelectGateway = vi.fn()
       render(
@@ -353,18 +352,18 @@ describe('AlertPill', () => {
       fireEvent.click(pill())
 
       const link = document.querySelector('a.alert-pill-item-link')
-      // A real anchor with target=_blank, as in ContextPanel, so middle-click and copy link address
-      // work.
+      // A row with no uid (written before the column existed) opens the tab searched by its name. A
+      // real anchor in this app, so middle-click and copy link address work, and it opens no new tab.
       expect(link).toBeTruthy()
-      expect(link.getAttribute('href')).toContain('/alerting/list?search=')
-      expect(link.getAttribute('href')).toContain(encodeURIComponent('Ingestion Pipeline Silent'))
-      expect(link).toHaveAttribute('target', '_blank')
-      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+      expect(link).toHaveAttribute('href', '/automations/built-in?search=Ingestion+Pipeline+Silent')
+      expect(link).not.toHaveAttribute('target')
+      expect(link.querySelector('svg')).toBeNull()
+      expect(tooltipOf(link)).toMatch(/Automations › Built-in/)
       expect(onSelectDevice).not.toHaveBeenCalled()
       expect(onSelectGateway).not.toHaveBeenCalled()
     })
 
-    it('leaves an alert the evaluator raised about the platform inert, since Grafana has no rule for it', () => {
+    it('leaves an alert the evaluator raised about the platform inert, since no built-in rule raised it', () => {
       render(<AlertPill alerts={[platformAlert({
         fingerprint: 'condition:not-evaluated', alert_name: 'Automations Not Evaluated', rule_uid: null
       })]} />)
@@ -388,11 +387,11 @@ describe('AlertPill', () => {
       expect(onSelectDevice).toHaveBeenCalledWith('dev220000000000400080000')
     })
 
-    it('opens the rule itself when the row carries its uid', () => {
+    it("opens the rule's drawer on the Built-in tab when the row carries its uid", () => {
       render(<AlertPill alerts={[{ ...platformAlert(), rule_uid: 'aber-ingestion-silent' }]} />)
       fireEvent.click(pill())
       expect(document.querySelector('a.alert-pill-item-link'))
-        .toHaveAttribute('href', `${GRAFANA_URL}/alerting/grafana/aber-ingestion-silent/view`)
+        .toHaveAttribute('href', '/automations/built-in?rule=aber-ingestion-silent')
     })
 
     it('says what a fleet-wide alert is about instead of showing an empty id line', () => {
@@ -468,17 +467,17 @@ describe('AlertPill', () => {
         ['no labels, as a row written before 0220 has', undefined],
         ['a job label of another shape', 'backup job 7d2c0000'],
         ['an empty job label', ''],
-      ])('opens the rule in Grafana when the row has %s', (_, job) => {
+      ])("opens the rule's drawer on the Built-in tab when the row has %s", (_, job) => {
         render(<AlertPill alerts={[jobAlert('aber-job-failed', job)]} />)
         fireEvent.click(pill())
-        expect(rowLink()).toHaveAttribute('href', `${GRAFANA_URL}/alerting/grafana/aber-job-failed/view`)
-        expect(rowLink()).toHaveAttribute('target', '_blank')
+        expect(rowLink()).toHaveAttribute('href', '/automations/built-in?rule=aber-job-failed')
+        expect(rowLink()).not.toHaveAttribute('target')
       })
 
       it('reads the job label only for the job rules', () => {
         render(<AlertPill alerts={[jobAlert('aber-ingestion-silent', 'capture job 7d2c0000')]} />)
         fireEvent.click(pill())
-        expect(rowLink()).toHaveAttribute('href', `${GRAFANA_URL}/alerting/grafana/aber-ingestion-silent/view`)
+        expect(rowLink()).toHaveAttribute('href', '/automations/built-in?rule=aber-ingestion-silent')
       })
     })
   })

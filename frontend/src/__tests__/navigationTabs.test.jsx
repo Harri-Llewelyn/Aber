@@ -8,7 +8,7 @@ import { act, render, screen } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import {
-  TABS, DEVICES_TABS, APPROVALS_TABS, METRICS_TABS, VOCABULARY_TABS, CAPTURE_TABS, ARCHIVES_TABS,
+  TABS, AUTOMATIONS_TABS, DEVICES_TABS, APPROVALS_TABS, METRICS_TABS, VOCABULARY_TABS, CAPTURE_TABS, ARCHIVES_TABS,
   SYSTEM_TABS, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ACCESS_CONTROL_TABS, SETTINGS_TABS, PROFILE_TABS,
   currentTabOf, pageTabsOf, pageTitleOf, signalTabOf, tabHref,
 } from '../navigation'
@@ -54,11 +54,17 @@ describe('one list per page', () => {
     expect(Object.entries(CATEGORY_DESCRIPTIONS)).toEqual(SETTINGS_TABS.map(t => [t.label, t.description]))
   })
 
-  it('names the eleven tabbed pages, Profile among them though the rail does not draw it', () => {
+  it('names the twelve tabbed pages, Profile among them though the rail does not draw it', () => {
     expect(tabbed.map(t => t.id).sort()).toEqual([
-      'access-control', 'approvals', 'archives', 'capture', 'devices', 'history', 'metrics',
+      'access-control', 'approvals', 'archives', 'automations', 'capture', 'devices', 'history', 'metrics',
       'profile', 'settings', 'system', 'vocabulary',
     ])
+  })
+
+  it("gives Automations two tabs, the site's own and the built-in alerts, which every role reads", () => {
+    expect(AUTOMATIONS_TABS.map(t => [t.id, t.label])).toEqual([['automations', 'Automations'], ['built-in', 'Built-in']])
+    expect(TABS.find(t => t.id === 'automations').pageTabs).toBe(AUTOMATIONS_TABS)
+    expect(AUTOMATIONS_TABS.some(t => t.role || t.permission)).toBe(false)
   })
 
   it.each(tabbed.map(t => [t.id, t]))('gives %s unique ids and a name for every tab', (_, page) => {
@@ -121,6 +127,8 @@ describe('the addresses', () => {
     expect(tabHref('capture', 'gateway')).toBe('/capture')
     expect(tabHref('capture', 'captures')).toBe('/capture/captures')
     expect(tabHref('capture', 'playbacks')).toBe('/capture/playbacks')
+    expect(tabHref('automations', 'automations')).toBe('/automations')
+    expect(tabHref('automations', 'built-in')).toBe('/automations/built-in')
   })
 
   it('read the open tab from the second path segment, falling back to the first tab', () => {
@@ -136,6 +144,10 @@ describe('the addresses', () => {
     expect(pageTitleOf('vocabulary', '/vocabulary')).toBe('Vocabulary › MTConnect')
     expect(pageTitleOf('gateways', '/gateways')).toBe('Gateways')
     expect(pageTitleOf('capture', '/capture/playbacks')).toBe('Capture › Playbacks')
+    // The first tab is named as its page, which adds nothing to the title.
+    expect(pageTitleOf('automations', '/automations')).toBe('Automations')
+    expect(pageTitleOf('automations', '/automations/lathe-3-spindle-hot')).toBe('Automations')
+    expect(pageTitleOf('automations', '/automations/built-in?rule=aber-gateway-stale')).toBe('Automations › Built-in')
     expect(pageTitleOf('nowhere', '/nowhere')).toBeUndefined()
   })
 })

@@ -55,6 +55,16 @@ export const METRICS_TABS = [
   { id: 'uncatalogued', label: 'Uncatalogued', description: 'Metric names devices declare that no catalog row describes. Their readings are stored, but carry no unit or meaning.' },
 ]
 
+/**
+ * The Automations page. `built-in` is a path segment as an automation's id is, so an automation
+ * with that id opens by `automationUrl()`, which says it is the automation with `?open=1`. `help` names
+ * a tab's own page of help in help/pages/ (drift check 16 allows one), which the tab's drawers open.
+ */
+export const AUTOMATIONS_TABS = [
+  { id: 'automations', label: 'Automations', description: "The site's own rules: each watches a device's reading and raises an alert. Write one as YAML, or upload a file of them." },
+  { id: 'built-in', label: 'Built-in', description: 'The alerts Aber raises about itself, from the rules this release ships, and which are firing. Read-only: nothing here changes.', help: 'built-in-alerts' },
+]
+
 /** The standards in the page's order; each tab's tooltip is its standard's own hint (VocabularyPanel). */
 export const VOCABULARY_TABS = [STANDARDS.MTCONNECT, STANDARDS.ISO22400, STANDARDS.OPCUA, STANDARDS.ASHRAE223]
   .map(label => ({ id: pathSlug(label), label }))
@@ -219,8 +229,8 @@ export const TABS = [
 
   // Ungated, as Settings is: every role reads an automation (RLS), and writing one is for
   // Administrators and Shopfloor Managers, so anyone else sees no write controls. IconZap: when this
-  // happens, do that. No tabs yet; the Blueprints and Built-in tabs are later additions.
-  { id: 'automations',    label: 'Automations',    group: 'automation', icon: <IconZap size={16} /> },
+  // happens, do that. Built-in is read-only and every role reads it; Blueprints is a later addition.
+  { id: 'automations',    label: 'Automations',    group: 'automation', icon: <IconZap size={16} />, pageTabs: AUTOMATIONS_TABS },
 
   /* Gated on the permission, not on role names: the `audit_trail` SELECT policies resolve
      `audit_trail:read`, so one predicate decides visibility and access. Without it an Operator
@@ -342,5 +352,6 @@ export function pageTitleOf(pageId, url) {
   const page = TABS.find(t => t.id === pageId)
   if (!page) return undefined
   const tab = currentTabOf(pageId, url)
-  return tab ? `${page.label} › ${tab.label}` : page.label
+  // A first tab named as its page ("Automations") adds nothing to the title.
+  return tab && tab.label !== page.label ? `${page.label} › ${tab.label}` : page.label
 }

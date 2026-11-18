@@ -1397,7 +1397,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Audit Trail | | `search`, `type`, `action`, `changed_by`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)), `deleted`; `event` |
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
-| Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new`, for an automation whose id is `new` |
+| Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter; `built-in` for the Built-in tab | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new` and `/automations/built-in`, for an automation whose id is `new` or `built-in`. Built-in: `search`, `sort`, `rule` (a built-in alert's uid, which opens its drawer) |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
@@ -1479,7 +1479,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the form for a schema, and Upload the file** ([Schemas read and write YAML](#schemas-read-and-write-yaml)); changing one is versioning, not editing |
-| `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example |
+| `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example. The page's second tab, **Built-in**, is `BuiltInAlerts` and its drawer `BuiltInAlertDrawer`: the alerts Aber raises about itself, read-only ([The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)) |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
@@ -2384,6 +2384,53 @@ page's help is `help/pages/automations.md`.
   and the database says `enabled` is true or false. A syntax error is shown with its line and the
   database is not asked; an alias bomb is refused; a file over 2 MiB is refused before it is read.
 
+### The Built-in tab lists the alerts Aber raises about itself
+
+**The Built-in tab is the second tab of the Automations page** (`tabs/BuiltInAlerts.jsx`,
+`tabs/BuiltInAlertDrawer.jsx`, `/automations/built-in`). Every role reads it, and nothing on it
+changes anything. Its help is `help/pages/built-in-alerts.md`, one section for each rule.
+
+- **The list is the rules file, read when the bundle is built.**
+  `scripts/generate-built-in-alerts.mjs` reads `grafana/provisioning/alerting/alert-rules.yaml` and writes
+  `utils/builtInAlerts.generated.json`, which the dashboard bundles. It never asks Grafana: that would need a
+  service-account token, and Grafana leaves the default install. The copy is committed, since the frontend
+  image builds from `./frontend` and cannot see `grafana/`. CI runs the script with `--check` (check 465), a
+  vitest reads the file again with the parser alone and compares rule by rule
+  (`builtInAlertsGenerated.test.js`), and check 462 compares the uids, titles and groups with no parser. A
+  rule's words come from the comment above it, which the file's header makes the convention: the first sentence
+  is the row's **Fires when**, the rest the drawer's description. A rule with no such comment is refused.
+- **A row says** its name and uid, group, severity, subject (the `entity_type` label), hold (`for`), what
+  fires it and what evaluates it (`evaluator`, Grafana for every rule today; when the rules move, only this
+  value changes). The default order is the file's, group by group. Search matches the name, uid, group, subject
+  and description. With the drawer open, the columns it repeats are dropped (as the Gateways table drops
+  its own) and the table keeps the name, the severity and the state.
+- **Its state is honest.** `api.readBuiltInAlerts()` reads every row of `platform_alerts_active` that has a
+  `rule_uid`, acknowledged and suppressed ones too, and `builtInStates()` counts them by rule. **Firing** has a
+  count. **Could not be evaluated** is an instance whose `labels.alertname` is `DatasourceError` or
+  `DatasourceNoData`, the instance Grafana sends for a rule it could not run, which the webhook records as
+  "<rule> could not be evaluated" under the rule's uid (mirror check 120 holds the two names to the
+  webhook's). Otherwise **Not firing**, never OK, since Aber cannot see that Grafana evaluated the rule. A
+  read that fails says **Not known** and a notice, rather than call every rule quiet.
+- **The drawer** is `?rule=<uid>`, beside the table like every drawer. Its fields are the uid, the
+  description, the query (read-only, monospace, each query under what runs it), the threshold (`last(A) above
+  0`: the condition read off the file), the hold, the labels and the summary, then the group and what
+  evaluates it. Under them are the rule's newest occurrences (`api.readBuiltInOccurrences()`, five), and the
+  actions **View Help**, which opens `pages/built-in-alerts` at the heading that is the rule's title, and
+  **View in Grafana**, offered while `evaluator` is `grafana`. A uid this release does not ship, such as a
+  rule a site wrote itself or one a release has retired, opens the tab with a notice and no drawer, and the
+  notice offers **View in Grafana** for that uid, where a site's own rules live.
+- **Every surface that shows a platform alert opens its drawer**, by `builtInAlertUrl()` in `routes.js`:
+  the toast (`alertToastUrl()`), the counter's platform-wide rows, the drawer banner's **View rule**, the
+  message about an alert (`alertSubjectUrl()`) and the desktop notification (`alertOpener()`). A row written
+  before `rule_uid` (0220) opens the tab searched by the alert's name. An automation's alert answers null, and
+  keeps its own page. **View in Grafana**, in the drawer and in the notice for an unlisted uid, is the only
+  place that builds a Grafana address for a platform alert (`grafanaAlertUrl()`, offered while
+  `grafanaEvaluatesBuiltIns`); `builtInAlertSurfaces.test.jsx` reads the source for any other, and check 464
+  holds the five surfaces.
+- **`built-in` is a path segment, as an automation's id is**, so an automation with that id opens with
+  `?open=1`, as one named `new` does (`automationUrl()`). The tab's `help` in `navigation.jsx` names its own
+  help page, which drift check 16 allows.
+
 ### The editor's help comes from the JSON Schema
 
 **Completion, hover and the marks are pure functions of the text, the cursor and what the site holds**
@@ -2498,7 +2545,7 @@ paragraph together.
 - **An alert's link** is `alertPage()`'s: a `condition:` alert opens `/automations?trigger=<id>`, from the
   counter (a row with a page of its own goes there, not to its device), the toast that announces it, and
   the messages about it (`alertSubjectUrl()`). History's Alerts tab and the device drawer's alert banner
-  are unchanged: the first is about a device, and the second still links the rule where Grafana holds it.
+  are unchanged: the first is about a device, and the second links the rule's Built-in entry, **View rule**.
 - **The Devices drawer's View in Automations** shows how many automations apply
   (`api.automationsForEntity()`, each counted once) and opens `/automations?entity=<id>`. A failed read
   leaves it without a number. The list names the entity in a chip that clears the filter, and says why
@@ -2964,8 +3011,8 @@ passes `{ record: false }`, as an alert's toast does.
   text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
   message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a
   `RouteLink`: a plain click navigates in place, and Ctrl-click or a middle click opens a new tab.
-  Grafana opens in a new tab with the external-link icon, as the alert pill's platform-wide rows do,
-  and needs the browser to reach `VITE_GRAFANA_URL` as those rows already do. Following a toast's
+  A Grafana address opens in a new tab with the external-link icon, and needs the browser to reach
+  `VITE_GRAFANA_URL`; no alert leads there now, since a platform alert opens its Built-in entry. Following a toast's
   link dismisses it; a plain click on a row's link (or any click on a Grafana one) closes the list.
   The tooltip names the page and tab (`destinationTitle`). `isSafeDestination` checks `to` as the
   message comes in and again as the history is read back: one leading `/` (never `//`), or the
@@ -2982,8 +3029,9 @@ passes `{ record: false }`, as an alert's toast does.
   which `proposalNotice` in `utils/proposeFromForm.js` builds with the message), a metric
   (`metricUrl`), a setting (`settingUrl`), a capture's subject (`captureSubjectUrl`), a backup run
   (`backupUrl`), a person or a machine identity on Access Control (`personUrl`, `identityUrl`). A
-  plan attached goes to the area on the Site Map (`siteMapAreaUrl`), where it is drawn. A Grafana
-  alert goes to its rule (`grafanaAlertUrl`), and an automation's, which has none, to its device. A
+  plan attached goes to the area on the Site Map (`siteMapAreaUrl`), where it is drawn. A platform
+  alert goes to its rule's entry on Automations › Built-in (`builtInAlertUrl`; [The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)),
+  and an automation's, which has none, to its device. A
   device new to the Quarantine queue goes to
   `tabUrl('devices', 'quarantine')`, and an AAS export's warning about metrics with no semantic id
   to `unmappedMetricsUrl()`, which `App` passes only to a reader who has the Metrics page. An
@@ -3045,8 +3093,8 @@ so a notification has the visibility the alert counter has and follows the same 
   The icon is `/favicon.svg`; a browser that draws no SVG icon shows its own.
 - **A click opens the alert as the counter's row does.** It focuses this window, then calls
   `showDevice` or `showGateway` with the Sparkplug id, at the asset's own address; the page
-  `alertPage()` names for a machine identity or a capture job; or the rule in Grafana, in a new tab
-  (`alertOpener` in `utils/desktopNotifications.js`).
+  `alertPage()` names for a machine identity or a capture job; or the rule's entry on Automations ›
+  Built-in, in this tab (`alertOpener` in `utils/desktopNotifications.js`).
 - **The browser asks once per session.** A person with it on, in a browser that has not been asked,
   is asked at the first click or key press, the gesture Firefox and Safari require; the tab keeps an
   Allow Notifications button for when they dismiss it. Nothing is asked where the browser cannot raise one.

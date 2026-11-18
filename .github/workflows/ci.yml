@@ -256,6 +256,12 @@ jobs:
       - name: Verify SQL-to-JavaScript Mirrors Agree
         run: node scripts/check-mirror-drift.mjs
 
+      # The Built-in tab lists the alert rules from the file that provisions them, read when the
+      # bundle is built and committed as JSON (the frontend image cannot see grafana/). A stale copy
+      # lists rules the file no longer holds, or misses one it does.
+      - name: Verify The Built-in Alerts List Is Current
+        run: node scripts/generate-built-in-alerts.mjs --check
+
       # The MTConnect vocabulary is generated into 0002_seed_data.sql with a SHA-256 stamped in its
       # BEGIN marker; this recomputes it plus the semantic-id form, category rules and uniqueness.
       - name: Verify MTConnect Vocabulary Seed Is In Sync

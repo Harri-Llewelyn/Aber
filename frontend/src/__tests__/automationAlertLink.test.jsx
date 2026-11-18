@@ -68,7 +68,7 @@ describe('the alert counter', () => {
 })
 
 describe('where else the alert shows', () => {
-  it("links the toast that announces it to the automation, never to Grafana's alert list", () => {
+  it('links the toast that announces it to the automation, never to the Built-in alerts', () => {
     expect(alertToastUrl(raised)).toBe(`/automations?trigger=${TRIGGER}`)
   })
 
@@ -84,7 +84,8 @@ describe('where else the alert shows', () => {
   })
 
   it('leaves every other alert where it was', () => {
-    expect(alertToastUrl(grafana)).toContain('/alerting/list?search=')
+    // A rule's alert with no uid opens the Built-in tab searched by its name, never Grafana.
+    expect(alertToastUrl(grafana)).toBe('/automations/built-in?search=Thermal+Excursion')
     expect(alertSubject(grafana, { devices: new Map(), gateways: new Map() }).page).toBeNull()
   })
 })
