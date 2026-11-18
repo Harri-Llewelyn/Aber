@@ -13,10 +13,11 @@ import { serverError } from "../_shared/failure.ts";
  * removed; every login the forge knows that holds an admitted role is placed in its team; every
  * gateway repository has its push webhook, `main` closed to pushes, the `appliance` rule that
  * admits deploy keys alone and the `**` rule that admits none, and its deploy keys reconciled
- * with the gateway row (an active gateway's keys are read-write on its own repository, an archived
- * or deleted gateway's are removed, which is the third revocation handle beside `disableClient`
- * and the enrolment token); an archived gateway's repository is put into the forge's archive and a
- * restored one taken back out (#197), which is what stops a retired gateway reading, in the forge's
+ * with the gateway row (an active Remote gateway's keys are read-write on its own repository; the
+ * keys of one that is archived, deleted or no longer Remote are removed, which is the third
+ * revocation handle beside `disableClient` and the enrolment token); an archived gateway's
+ * repository is put into the forge's archive and a restored one taken back out (#197), which is
+ * what stops a retired gateway reading, in the forge's
  * own listing, exactly like one in service; and every other repository in the organisation -- a
  * playbook somebody made by hand -- has `main` protected the same way, without the incident
  * template, because a flow a gateway may later adopt should have been reviewed from the start.
@@ -66,6 +67,7 @@ import {
 } from "../_shared/forge.ts";
 import { GATEWAY_CUSTOM_EXAMPLE_DIGEST, GATEWAY_CUSTOM_EXAMPLE_FILES } from "../_shared/gatewayCustomExample.generated.ts";
 import { GATEWAY_PLATFORM_DIGEST, GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
+import { holdsDeployKey, type KeyedGateway } from "./keys.ts";
 
 /** The platform repository, as the key functions address it. */
 const PLATFORM_REF = { owner: PLATFORM_ORGANISATION, name: PLATFORM_REPOSITORY };
@@ -102,7 +104,7 @@ interface Summary {
   protected: string[];
   /** Keys re-registered read-write on an active gateway's repository. */
   rekeyed: string[];
-  /** Keys removed from an archived or deleted gateway's repository. */
+  /** Keys removed from the repository of a gateway that is archived, deleted or no longer Remote. */
   revoked: string[];
   /** A repository put into the forge's archive, because its gateway is archived or its row is gone. */
   archived: string[];
@@ -242,22 +244,22 @@ async function sweepMembership(
 }
 
 /**
- * The keys on a gateway's repository, against its row. An active gateway holds its key read-write
- * (an enrolment from before the appliance branch registered it read-only, and Gitea has no edit,
- * so it is re-registered from the material the forge lists). An archived gateway, or one whose row
- * is gone, holds none: the appliance is decommissioned and the key it still carries must open
- * nothing.
+ * The keys on a gateway's repository, against its row. An active Remote gateway holds its key
+ * read-write (an enrolment from before the appliance branch registered it read-only, and Gitea has
+ * no edit, so it is re-registered from the material the forge lists). One that is archived, is no
+ * longer Remote, or whose row is gone holds none (holdsDeployKey): the key its old appliance still
+ * carries must open nothing. Changed back to Remote, it is given a new key when it enrols.
  */
 async function sweepDeployKeys(
   cfg: ForgeConfig,
   name: string,
   sparkplugId: string,
-  gateway: { is_archived: boolean } | undefined,
+  gateway: KeyedGateway | undefined,
   platform: boolean,
   summary: Summary,
 ): Promise<void> {
   const keys = await listDeployKeys(cfg, { name });
-  if (!gateway || gateway.is_archived) {
+  if (!holdsDeployKey(gateway)) {
     for (const key of keys) {
       await deleteDeployKey(cfg, { name }, key);
       summary.revoked.push(`${name}: '${key.title}'`);
@@ -278,18 +280,17 @@ async function sweepDeployKeys(
 
 /**
  * The platform repository's keys against the gateway rows: a key titled for a gateway that is
- * archived or gone is removed. A key somebody titled by hand is left alone.
+ * archived, gone or no longer Remote is removed. A key somebody titled by hand is left alone.
  */
 async function sweepPlatformKeys(
   cfg: ForgeConfig,
-  gateways: Map<string, { is_archived: boolean }>,
+  gateways: Map<string, KeyedGateway>,
   summary: Summary,
 ): Promise<void> {
   for (const key of await listDeployKeys(cfg, PLATFORM_REF)) {
     const named = DEPLOY_KEY_TITLE.exec(key.title);
     if (!named) continue;
-    const gateway = gateways.get(named[1]);
-    if (gateway && !gateway.is_archived) continue;
+    if (holdsDeployKey(gateways.get(named[1]))) continue;
     await deleteDeployKey(cfg, PLATFORM_REF, key);
     summary.revoked.push(`${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}: '${key.title}'`);
   }
@@ -373,13 +374,14 @@ async function sweepRepositories(
 ): Promise<void> {
   const { data, error } = await admin
     .from("gateways")
-    .select("sparkplug_id, is_archived, forge_repository_at, forge_archived_at");
+    .select("sparkplug_id, is_archived, deployment, forge_repository_at, forge_archived_at");
   if (error) throw new Error(`could not read gateways: ${error.message}`);
   const gateways = new Map(
     (data ?? []).map((
       g: {
         sparkplug_id: string;
         is_archived: boolean;
+        deployment: string;
         forge_repository_at: string | null;
         forge_archived_at: string | null;
       },

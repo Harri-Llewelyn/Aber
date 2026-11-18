@@ -425,7 +425,8 @@ Broker **credentials** are different: they can be revoked immediately (see below
 **Archiving the gateway is the revocation.** It disables the broker account: the appliance's live
 session is dropped at once, and its next connection is refused. Do it the moment hardware goes
 missing, not as part of a later tidy-up. The Access Control page shows the account as *Disabled*
-once the change has landed.
+once the change has landed. If the credential service cannot be reached, Aber asks again every
+fifteen minutes until it confirms, even if the gateway is deleted meanwhile.
 
 The broker password is on the appliance in plaintext, in `/data/gateway.env`. That is unavoidable,
 since something has to connect. The damage is deliberately limited: the gateway's broker role

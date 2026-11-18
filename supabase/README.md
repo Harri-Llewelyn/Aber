@@ -4201,10 +4201,11 @@ issued under, and revoking on a guess could cut off a gateway that works.
 
 **What it does not reach.**
 
-- **The forge repository** of a Remote gateway that enrolled is kept, with the deploy key its
-  appliance registered. Archiving archives the repository and removes the key; a type change does
-  neither, so the old appliance can still read its repository until the key is removed in the
-  forge.
+- **The forge repository** of a Remote gateway that enrolled is kept. Archiving archives the
+  repository and removes the deploy key; a type change did neither. Since `0311` the forge sweep
+  removes the key of a gateway that is no longer Remote, the change asks the sweep at once, and the
+  repository is kept out of the archive (*A revocation is owed until the credential service confirms
+  it (0311)*).
 - **A failed revocation was not asked again.** The sweep judged archived gateways alone, and a type
   change's stamp was never judged. `0288` asks again, and stops when a credential issued or enrolled
   since replaces the one it ends (*A failed revocation after a change of type is asked again (0288)*).
@@ -5659,6 +5660,8 @@ in the Vault, the old row stays and the next run asks again.
   its call landed, so nothing is asked for it. The Broker column on Access Control shows an account
   still Active that should be Disabled, and issuing the gateway a credential replaces its password.
 - **A gateway archived while its type change's call is unanswered** is judged by the archive's rule.
+  Since `0311` that rule asks again too, whatever the gateway's type, and a delete keeps what is
+  still owed (*A revocation is owed until the credential service confirms it (0311)*).
 - **The drawer says Revoked as soon as the call is queued**, for an archive as for a type change.
   The Broker column on Access Control is the live answer. `utils/credentialState.js` is unchanged.
 

@@ -21,7 +21,8 @@ the Vault or the revocation call, and a test run as the owner would not notice o
 
 WHAT THE BROKER IS TO THIS SUITE. A revocation is asked of the credential service through pg_net, so
 it is the request in `net.http_request_queue` and the row in `gateway_revocation_requests` that are
-asserted, with the stamp `credential_revoked_at`. The account itself, in Dynamic Security, is read by
+asserted, with the stamp `credential_revoked_at`, and for a deleted gateway the row it leaves in
+`deleted_gateway_revocations`. The account itself, in Dynamic Security, is read by
 supabase/functions/enroll-gateway/test_gateway_lifecycle_broker.py in the stack lane.
 
 KNOWN BUGS. A row the code gets wrong today carries a `known_bug` mark with the bug's title, which is
@@ -721,6 +722,25 @@ class ChangingTheType(Lifecycle):
         self.change_type(gid, "host")
         self.assertEqual(self.revocations_asked(sparkplug_id), before)
 
+    def test_leaving_remote_asks_the_forge_to_remove_the_deploy_key(self):
+        gid, _ = self.gateway("remote", status="ONLINE", enrolled=True)
+        self.cur.execute("UPDATE public.gateways SET forge_repository_at = now() WHERE id = %s;", (gid,))
+        before = self.forge_sweeps_asked()
+        self.change_type(gid, "host")
+        self.assertEqual(self.forge_sweeps_asked(), before + 1, "the old appliance's key waits for the next quarter hour")
+        self.assertFalse(self.row(gid)["is_archived"], "the repository is kept, and so is the gateway")
+        self.change_type(gid, "remote")
+        self.assertEqual(self.forge_sweeps_asked(), before + 1, "entering Remote has no key to remove")
+
+    def test_a_change_made_while_the_credential_service_cannot_be_asked_is_owed(self):
+        gid, sparkplug_id = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
+        self.cur.execute("SELECT id FROM vault.secrets WHERE name = 'gateway_revoke_secret';")
+        self.cur.execute("SELECT vault.update_secret(%s, '');", (self.cur.fetchone()["id"],))
+        self.change_type(gid, "host")
+        self.assertEqual(self.revocations_asked(sparkplug_id), 0)
+        self.assertIsNotNone(self.row(gid)["credential_revoked_at"])
+        self.assertTrue(self.request_recorded(gid), "nothing is left for the sweep to ask once the service is configured")
+
 
 # -------------------------------------------------------------------------------------------------
 # Renaming and changing the group
@@ -970,6 +990,30 @@ class DeletingAndAutoDeleting(Lifecycle):
                 gid, sparkplug_id = self.gateway(kind, **spec)
                 self.as_(self.manager, "DELETE FROM public.gateways WHERE id = %s;", (gid,))
                 self.assertEqual(self.revocations_asked(sparkplug_id), 1)
+
+    def test_a_revocation_still_owed_outlives_the_row_and_one_confirmed_does_not(self):
+        for confirmed in (False, True):
+            with self.subTest(confirmed=confirmed):
+                self.cur.execute("SAVEPOINT owed;")
+                gid, sparkplug_id = self.gateway("remote", status="ONLINE", enrolled=True)
+                self.archive(gid)
+                self.expire(gid)
+                self.cur.execute("SELECT request_id FROM public.gateway_revocation_requests WHERE gateway_id = %s;", (gid,))
+                request_id = self.cur.fetchone()["request_id"]
+                if confirmed:
+                    self.cur.execute("INSERT INTO net._http_response (id, status_code, content) VALUES (%s, 200, '{}');",
+                                     (request_id,))
+                before = self.revocations_asked(sparkplug_id)
+                self.purge()
+                self.assertEqual(self.revocations_asked(sparkplug_id), before, "the delete asks nothing it owed already")
+                self.cur.execute("SELECT request_id FROM public.deleted_gateway_revocations WHERE sparkplug_id = %s;",
+                                 (sparkplug_id,))
+                kept = self.cur.fetchone()
+                if confirmed:
+                    self.assertIsNone(kept, "a confirmed revocation is owed no longer")
+                else:
+                    self.assertEqual(kept["request_id"], request_id, "the sweep has nothing left to ask for the deleted gateway")
+                self.cur.execute("ROLLBACK TO SAVEPOINT owed;")
 
     def test_deleting_a_gateway_that_holds_none_asks_for_nothing(self):
         for kind, spec in (("remote", REMOTE_STATES["pending"]), ("host", ISSUED_STATES["plain"])):

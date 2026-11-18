@@ -3,8 +3,8 @@
 #   why: 0288 -- a revocation a change of type asked for and that failed is asked again by the
 #     sweep, with the stamp kept, until a 2xx confirms it; and never once a credential was issued or
 #     enrolled after the stamp, since the account name is the same before and after and a retry
-#     would disable the new credential. The archive path is as it was, and the helper that decides
-#     is held by its truth table.
+#     would disable the new credential. An archived gateway is asked again the same way (0311), and
+#     the helper that decides is held by its truth table.
 
 """
 A failed revocation after a change of a gateway's type is asked again (0252, 0288).
@@ -23,8 +23,8 @@ What is held here:
     credential just issued. The row is dropped and the credential service is not called, however
     many sweeps run and however the request was answered. A credential issued before the stamp,
     and one issued to another gateway, stop nothing.
-  * An archived gateway is judged as it was: a failed request clears the stamp and is asked again
-    with a new one, a restore leaves the stamp and the request, and a 2xx keeps the stamp.
+  * An archived gateway is judged the same way since 0311: a failed request is asked again with the
+    stamp kept, a restore leaves the stamp and the request, and a 2xx keeps the stamp.
   * A stamp with no request row, which a change of type before 0288 could leave, is not asked for.
   * gateway_credential_was_replaced(): its truth table, and that no API role may run it.
 
@@ -396,7 +396,7 @@ class ANewerCredentialStopsTheRetry(RetryBase):
         self.assertEqual(self.queue_depth(gid), before + 1)
 
 
-class TheArchivePathIsAsItWas(RetryBase):
+class AnArchivedGatewayIsAskedAgainToo(RetryBase):
     def archived_and_asked(self, minutes_ago=10):
         gid, _ = self.gateway("host")
         self.cur.execute("UPDATE public.gateways SET is_archived = true WHERE id = %s;", (gid,))
@@ -409,7 +409,7 @@ class TheArchivePathIsAsItWas(RetryBase):
             " WHERE id = %s RETURNING credential_revoked_at;", (minutes_ago, gid))
         return gid, request_id, self.cur.fetchone()[0]
 
-    def test_a_failed_request_clears_the_stamp_and_is_asked_again_with_a_new_one(self):
+    def test_a_failed_request_is_asked_again_and_the_stamp_stays(self):
         gid, request_id, stamped = self.archived_and_asked()
         self.reply(request_id, 503)
         before = self.queue_depth(gid)
@@ -419,7 +419,7 @@ class TheArchivePathIsAsItWas(RetryBase):
         stamp, new_request = self.state(gid)
         self.assertEqual(self.queue_depth(gid), before + 1)
         self.assertNotEqual(new_request, request_id)
-        self.assertNotEqual(stamp, stamped, "an archived gateway's stamp is cleared and written again")
+        self.assertEqual(stamp, stamped, "an archived gateway's revocation is owed as a change of type's is (0311)")
 
     def test_a_2xx_keeps_the_stamp(self):
         gid, request_id, stamped = self.archived_and_asked()

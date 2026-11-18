@@ -142,8 +142,8 @@ class TestTheGatewaysItReaches(RevocationBase):
         self.cur.execute(
             "SELECT credential_revoked_at FROM public.gateways WHERE id = %s;", (gid,)
         )
-        # Stamped OPTIMISTICALLY -- the request is queued, not answered. The sweep clears this if
-        # pg_net never recorded a 2xx, which is what makes the optimism eventually correct.
+        # Stamped as the request is queued, not answered. The sweep asks again until pg_net records
+        # a 2xx, which is what makes the stamp eventually correct.
         self.assertIsNotNone(self.cur.fetchone()[0])
 
     def test_a_remote_enrolled_gateway_still_works(self):
@@ -216,8 +216,8 @@ class TestTheSweepAgrees(RevocationBase):
         # statement's own value is written. The sweep then found no work and the test failed
         # against correct code.
         #
-        # Archived with no stamp is the state the sweep exists to repair -- the trigger asked, pg_net
-        # never answered, and the sweep's first statement cleared the optimistic stamp.
+        # Archived with no stamp is what a release before 0311 left when its sweep cleared the stamp
+        # of a call pg_net never answered. The sweep owes it and stamps it again.
         self.cur.execute(
             "UPDATE public.gateways SET credential_revoked_at = NULL WHERE id = %s;", (gid,)
         )
@@ -306,7 +306,8 @@ class TestTheSweepJudgesItsOwnReply(RevocationBase):
         stamp, new_request = self.state(gid)
         self.assertGreater(self.queue_depth(), before, "the failed revocation was not asked again")
         self.assertNotEqual(new_request, request_id)
-        self.assertNotEqual(stamp, stamped, "the stamp of a revocation answered 503 survived")
+        # The revocation is owed until a 2xx confirms it, so the stamp of when it was asked stays (0311).
+        self.assertEqual(stamp, stamped, "the stamp of a revocation being asked again was rewritten")
 
     def test_no_reply_after_five_minutes_is_asked_again(self):
         gid, request_id, stamped = self.archived_and_asked(minutes_ago=10)
@@ -316,7 +317,7 @@ class TestTheSweepJudgesItsOwnReply(RevocationBase):
 
         stamp, new_request = self.state(gid)
         self.assertNotEqual(new_request, request_id)
-        self.assertNotEqual(stamp, stamped)
+        self.assertEqual(stamp, stamped)
 
     def test_a_non_2xx_reply_is_asked_again_at_once(self):
         gid, request_id, stamped = self.archived_and_asked(minutes_ago=1)
