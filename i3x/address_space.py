@@ -255,9 +255,11 @@ def namespaces(object_types: Optional[List[dict]] = None) -> List[dict]:
 def schema_source_type_id(row: dict) -> str:
     """
     A schema type's `sourceTypeId`, which its devices carry too: the semantic id when there is
-    one, the identifier of the concept the type instantiates, else the name.
+    one, the identifier of the concept the type instantiates, else the name of the lineage, so every
+    version of a schema names one source type. A row without a lineage name is its own lineage.
     """
-    return row.get("semantic_id") or row.get("schema_name") or row["id"]
+    return (row.get("semantic_id") or row.get("lineage_name") or row.get("schema_name")
+            or row["id"])
 
 
 def _schema_definition(row: dict) -> dict:

@@ -39,8 +39,21 @@ export const statusBadgeClass = (status) => STATUS_BADGES[status] || 'badge-neut
 export const schemaVersionLabel = (schema) =>
   `v${schemaVersion(schema)} · ${statusLabel(schemaStatus(schema))}`
 
-/** Mirrors public.schema_version_base_name(): strip a trailing `_v<n>` so suffixes never stack. */
+/**
+ * Strips one trailing `_v<n>`, as public.schema_version_base_name() does. A name fork_schema() had
+ * to suffix (`X_v2_2`) keeps its tail, so this is not the lineage's name: that is `lineage_name`,
+ * which every version carries.
+ */
 export const baseSchemaName = (name) => String(name || '').replace(/_v\d+$/, '')
+
+/**
+ * The name of the lineage a version belongs to: its first version's `schema_name`, carried on every
+ * version since 0298. A row without it is its own lineage.
+ */
+export const lineageName = (schema) => schema?.lineage_name || schema?.schema_name || ''
+
+/** `Robot_Arm_Schema v2`: the lineage's name and the version once, where the version's own name would print it twice. */
+export const lineageVersionLabel = (schema) => `${lineageName(schema)} v${schemaVersion(schema)}`
 
 export const nextVersion = (schema) => schemaVersion(schema) + 1
 

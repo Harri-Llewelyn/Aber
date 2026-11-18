@@ -3088,8 +3088,10 @@ paths:
       description: |
         A schema is **versioned, not edited**. `status` is `draft` | `active` | `archived`;
         an `active` or `archived` row is frozen by a trigger that binds every application
-        role. `schema_name` stays UNIQUE, so each version carries a derived name
-        (`Foo` → `Foo_v2`).
+        role. `schema_name` stays UNIQUE, so each version carries a name of its own
+        (`Foo` → `Foo_v2`). `lineage_name` and `lineage_root_id` are the same on every version
+        of one schema: the first version's name and id. An AAS Submodel's id is made from the
+        lineage's name, so it does not change when a version is published.
 
         Filter to the working set with `?status=in.(draft,active)`.
       parameters:
@@ -3097,6 +3099,7 @@ paths:
         - $ref: '#/components/parameters/Order'
         - { name: status, in: query, schema: { type: string }, description: '`eq.active` | `eq.draft` | `eq.archived`' }
         - { name: parent_schema_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` to walk a lineage.' }
+        - { name: lineage_root_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` for every version of one schema.' }
       responses:
         '200':
           description: Schema registry entries.
@@ -3239,7 +3242,7 @@ paths:
               properties:
                 device_id: { type: string, format: uuid }
                 schema_id: { type: string, format: uuid }
-                submodel_key: { type: string, nullable: true }
+                submodel_key: { type: string, nullable: true, pattern: '^[A-Za-z][A-Za-z0-9_]*$', description: 'Overrides the key in the Submodel id. Leave it out: the schema''s lineage name is used, and an id then survives every publish.' }
       responses:
         '201': { description: Attached. }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -6250,7 +6253,8 @@ paths:
 
         The element routes hang off this path too, so
         `/shells/{aasIdentifier}/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}`
-        works exactly as the direct form does. Append `/$value` for ValueOnly.
+        works exactly as the direct form does. Append `/$value` for ValueOnly. An id made from an
+        earlier version's name is answered here too, as on the direct route, until 1.10.0.
       parameters:
         - name: aasIdentifier
           in: path
@@ -6344,6 +6348,14 @@ paths:
         over HTTP.
 
         Append **`/$value`** for the ValueOnly form; collections nest as objects.
+
+        **A schema's Submodels keep their id when a version is published.** The id is made from the
+        name the schema's first version was built with, and `administration.version` says which
+        version made the Submodel. Until 1.9.0 the id carried the name of the version, so it changed
+        at every publish. For one minor release this route also answers an id made from any version's
+        name (`.../submodel/Robot_Arm_Schema_v2/OperationalTelemetry`) for a schema the device carries,
+        and returns the current Submodel, with its current `id`. The old ids are removed no sooner
+        than 1.10.0. A file holds only the current id.
       parameters:
         - name: submodelIdentifier
           in: path
@@ -7613,7 +7625,17 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         device_id: { type: string, format: uuid }
         schema_id: { type: string, format: uuid }
-        submodel_key: { type: string, nullable: true, description: 'Qualifies the exported idShort when a device carries more than one schema.' }
+        submodel_key:
+          type: string
+          nullable: true
+          pattern: '^[A-Za-z][A-Za-z0-9_]*$'
+          description: >-
+            The key in this Submodel's id (`<globalAssetId>/submodel/<key>/OperationalTelemetry`), and
+            in its idShort when the device carries more than one schema. NULL, which is every row the
+            Devices page writes, means the schema's `lineage_name`, so the id does not change when a
+            version is published. A value is the operator's own choice and is used as it stands. It
+            survives a publish, because publishing moves the row to the new version, and it is how a key
+            clash between two schemas is settled by hand. It starts with a letter, as an idShort does.
         created_at: { type: string, format: date-time, readOnly: true }
 
     DeviceSchema:
@@ -8030,7 +8052,9 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        schema_name: { type: string, example: Simulated_CNC_01_Schema_v2, description: 'UNIQUE. Each version gets a derived name — `Foo` → `Foo_v2` — and suffixes never stack.' }
+        schema_name: { type: string, example: Simulated_CNC_01_Schema_v2, description: 'UNIQUE. Each version gets a name of its own — `Foo` → `Foo_v2`, or `Foo_v2_2` when `Foo_v2` is taken — so a name `fork_schema()` had to suffix is not stripped back when it is versioned again (`Foo_v2_2_v3`). The lineage is `lineage_name`.' }
+        lineage_name: { type: string, readOnly: true, example: Simulated_CNC_01_Schema, description: 'The `schema_name` of the lineage''s first version, the same on every version. An AAS Submodel''s id is made from it, so a publish leaves the id where it was. Set by the database.' }
+        lineage_root_id: { type: string, format: uuid, readOnly: true, description: 'The first version of the lineage: this row for a first version. Set by the database.' }
         description: { type: string, nullable: true }
         schema_definition:
           type: object

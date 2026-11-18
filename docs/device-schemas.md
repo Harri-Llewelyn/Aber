@@ -77,7 +77,10 @@ Things to know:
 
 - **A schema is found by its name.** A schema's versions are called `Robot_Arm_Schema`,
   `Robot_Arm_Schema_v2`, `Robot_Arm_Schema_v3`. Aber adds the suffix when it versions the schema. The
-  file names the schema, and Aber finds it on any site by the name without the suffix.
+  file names the schema, and Aber finds it on any site by that name with one trailing `_v<n>` taken off.
+  When a version's name is already taken, Aber numbers it further, as `Robot_Arm_Schema_v2_2`. The file
+  then names the schema by that whole name, so another site finds it only where its versions are named
+  the same.
 - **A metric is named by its catalogue name.** Its type, its description and its permitted values come
   from the catalogue, as the schema builder writes them. The file does not repeat them.
 - **A metric the catalogue lacks is refused by name.** So is a derived metric: nothing publishes one,
