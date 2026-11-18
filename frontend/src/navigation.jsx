@@ -2,6 +2,7 @@ import React from 'react'
 import { PERMISSION_UUIDS } from './constants'
 import { leadKey } from './utils/navSignal'
 import { STANDARDS } from './utils/standards'
+import { QUDT_LABEL } from './utils/qudt'
 import { pathSegments, pathSlug } from './hooks/useUrlState'
 import {
   IconMap,
@@ -66,8 +67,16 @@ export const AUTOMATIONS_TABS = [
 ]
 
 /** The standards in the page's order; each tab's tooltip is its standard's own hint (VocabularyPanel). */
-export const VOCABULARY_TABS = [STANDARDS.MTCONNECT, STANDARDS.ISO22400, STANDARDS.OPCUA, STANDARDS.ASHRAE223, STANDARDS.VDA5050]
+export const VOCABULARY_TABS = [
+  STANDARDS.MTCONNECT, STANDARDS.ISO22400, STANDARDS.OPCUA, STANDARDS.ASHRAE223, QUDT_LABEL, STANDARDS.VDA5050
+]
   .map(label => ({ id: pathSlug(label), label }))
+
+/**
+ * The tab after the standards: what the site imported itself (VocabularyPanel's Imported tab, whose
+ * panel loads its own rows). Not a standard, so it is not in VOCABULARY_TABS.
+ */
+export const SITE_VOCABULARY_TAB = { id: 'imported', label: 'Imported' }
 
 /** The two subjects a capture records, then the recordings and playbacks that have finished. */
 export const CAPTURE_TABS = [
@@ -225,7 +234,7 @@ export const TABS = [
   // means live telemetry): this page is the definitions, never the readings.
   { id: 'metrics',        label: 'Metrics',        group: 'model',   icon: <IconTag size={16} />, pageTabs: METRICS_TABS },
   // Reference you read, where the two above are state you edit.
-  { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} />, pageTabs: VOCABULARY_TABS },
+  { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} />, pageTabs: [...VOCABULARY_TABS, SITE_VOCABULARY_TAB] },
 
   // Ungated, as Settings is: every role reads an automation (RLS), and writing one is for
   // Administrators and Shopfloor Managers, so anyone else sees no write controls. IconZap: when this

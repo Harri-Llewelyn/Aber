@@ -55,6 +55,44 @@ The VDA's README says its published PDF prevails where the schema and the PDF di
    them; a new major line is a new namespace and a new migration.
 4. Update `docs/vocabularies.md` and `NOTICE.md`.
 
+## `qudt-3.5.2-quantity-kinds.ttl` and `qudt-3.5.2-units.ttl`: QUDT's vocabularies
+
+`scripts/generate-qudt-vocabulary.mjs` builds the `qudt_quantity_kinds` and `qudt_units` seeds, in
+migration `0304`, from these two files, and `supabase/functions/_shared/aas/qudtUnits.ts`, the map the
+AAS export sets `unitId` from, from the crosswalk below. The generator refuses any other file: it checks
+the SHA-256 of each first. `scripts/check-qudt-crosswalk.mjs` and `scripts/check-qudt-seed-sync.mjs`
+check what it wrote.
+
+| | Quantity kinds | Units |
+| :--- | :--- | :--- |
+| What | QUDT's quantity-kind vocabulary, release 3.5.2 | QUDT's units vocabulary, release 3.5.2 |
+| Copyright | QUDT.org | QUDT.org |
+| Licence | CC BY 4.0, declared in the file (`dcterms:rights`): "Attribution should be made to QUDT.org". QUDT's notice is in [`LICENSE-qudt-CC-BY-4.0.txt`](LICENSE-qudt-CC-BY-4.0.txt) | The same. The file's metadata also carries a UCUM notice, which covers the UCUM codes. None is taken |
+| From | [`qudt/qudt-public-repo`](https://github.com/qudt/qudt-public-repo), `src/main/rdf/vocab/quantitykinds/VOCAB_QUDT-QUANTITY-KINDS-ALL.ttl` at tag `v3.5.2` (2026-09-22) | The same repository, `src/main/rdf/vocab/unit/VOCAB_QUDT-UNITS-ALL.ttl` at the same tag |
+| SHA-256 | `729dc6c4f429a808d4c5d6766f1be13a3dc1196fd95f5bdb417a19f251cbce8f` (1,204,247 bytes) | `372448d68405c3bf561ffc99900bb3bffc5fe9affd345eccbadacbc8043be4c7` (3,148,041 bytes) |
+| Changes | None. Each file is byte for byte what the tag holds | None |
+
+**`mtconnect-units-to-qudt.json` is Aber's own,** not QUDT's. It maps each MTConnect unit name the
+vocabulary holds (the 54 `UnitEnum` and 46 further `NativeUnitEnum` names, read from the seed) to the QUDT
+unit that is exactly that unit, or to `null` with the reason. The files above hold the units it names.
+
+**Why they are kept here.** CI then needs no network, which is the pattern the ASHRAE 223P ontology set.
+The files declare no version of their own (`$$QUDT_VERSION$$` is left unexpanded in them), so the
+SHA-256 is what says which release they are.
+
+**Moving to a newer release.** When QUDT publishes one:
+
+1. Diff both files against these, term by term, and read the licence notices.
+2. Replace the files, rename them, and update `KINDS_FILE`, `KINDS_SHA256`, `UNITS_FILE`, `UNITS_SHA256`
+   in the generator, and `QUDT_VERSION` in `scripts/lib/qudt-vocabulary.mjs` and
+   `frontend/src/utils/qudt.js`.
+3. Run `node scripts/check-qudt-crosswalk.mjs`. A unit QUDT has deprecated, or a name MTConnect has
+   added, stops it until `mtconnect-units-to-qudt.json` says what the name maps to.
+4. Regenerate and review the diff. A LaTeX command the reader does not know stops the generator until
+   `scripts/lib/qudt-vocabulary.mjs` writes it out. A release that follows 0304 is a new migration:
+   point the generator at it rather than rewriting a released one.
+5. Update `docs/vocabularies.md` and `NOTICE.md`.
+
 ## `MTConnectDevices_2.7.xsd`: the MTConnect Devices schema
 
 `scripts/generate-mtconnect-vocabulary.mjs` reads `DataItemEnumEnum` in this file for the text that

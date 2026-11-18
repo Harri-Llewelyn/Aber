@@ -43,12 +43,21 @@ does. They are [`supabase/example-metrics.sql`](../supabase/example-metrics.sql)
   semantic ids in the historian would mean two ways to produce one identity with no way to tell
   them apart.
 
-  **Checked against the registered formulas rather than argued from principle.** Of the eight KPIs
-  in `iso22400_vocabulary`, NOT ONE is computable from the 44 example metrics: `A = APT/PBT`
-  has no PBT, `E = (PRI × PQ)/APT` has no PRI, `Q = GQ/PQ` has only a total `Controller/PART_COUNT`
-  with no quality disposition, and MTBF/MTTR need maintenance records. Moving the arithmetic to
-  Grafana or Node-RED does not help — the inputs are missing there too. The constraint is the data,
-  not the place.
+  **Checked against the formulas OPC 40501-1 publishes rather than argued from principle.** The
+  four OEE KPIs are the ones with a published source ([below](#iso-22400-and-its-source)): Annex C.2.4
+  gives `Availability = APT / PBT`, `Effectiveness = PRI x PQ / APT` and `Quality rate = GQ / PQ`,
+  and OEE as their product. None is computable from the 44 example metrics. **Availability and
+  effectiveness are missing inputs the machine does not have:** `A` needs planned busy time (PBT)
+  and `E` needs planned run time per item (PRI). The annex says these "usually come from an MES or
+  ERP and not from the machine". **Quality is missing only a disposition the example set lacks,
+  not one no machine can give.** `Controller/PART_COUNT` in the examples is a total. But MTConnect's
+  `PART_COUNT` with sub type `GOOD` (items that conform to specification or expectation) and OPC
+  40501-1's `PartsGood` are both seeded, so a machine that publishes `GOOD` and `ALL` supplies both
+  of `Q = GQ / PQ`'s inputs. OEE needs all three factors, so it needs PBT and PRI as well. Moving
+  the arithmetic to Grafana or Node-RED does not help — the planned inputs are missing there too.
+  The constraint is the data, not the place. The other four rows, `UTILIZATION`, `SCRAP_RATIO`, `MTBF`
+  and `MTTR`, are deprecated ([below](#iso-22400-and-its-source)): `MTBF` and `MTTR` would need
+  maintenance records.
 
   **Derived series over what we DO have are fine, and must not borrow these ids.**
   `Controller/EXECUTION` and `Controller/PART_COUNT` support an uptime ratio and a parts-per-hour
@@ -79,7 +88,13 @@ before proposing a change:
 
 - `VocabularyPanel` takes a `tabs` array of descriptors
   ([VocabularyPanel.jsx](../frontend/src/components/common/VocabularyPanel.jsx)) — a standard is one
-  descriptor, not a refactor.
+  descriptor, not a refactor. A tab whose rows the page does not hold carries a `panel` instead, an
+  element that loads its own data: the Imported tab is one.
+- **A site adds a vocabulary of its own as rows, not code.** The Administrator imports the AAS
+  ConceptDescriptions of a file (*Site vocabularies*, below) into `site_vocabularies` and
+  `site_vocabulary_concepts` (`0306`). The seeded tables stay generated and unwritable, and
+  `concept_definitions` has an arm that shows an imported vocabulary only once an Administrator has
+  confirmed that its definitions may be shared.
 - `opcua_vocabulary` is keyed `(companion_spec, name)` (`0001_baseline_schema.sql`), so further OPC
   specs are **seed rows in the existing table**, not new tables.
 - The migrations are baked into the `db-init` image (`supabase/db-init/Dockerfile`), so a large
@@ -108,20 +123,23 @@ before proposing a change:
   **Each id also gets a `ConceptDescription`** in the
   Environment (`buildConceptDescriptions()`, #460), because most resolve nowhere (`aber.local`, an
   operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,
-  `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text; `unitId` is unset) and a
+  `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text) and, where the name maps
+  to a QUDT unit, `unitId`, a reference to it ([QUDT](#qudt-quantity-kinds-and-units)), and a
   `dataType` derived from the Sparkplug datatype. **The definition is the vocabulary's own text**
-  wherever one defines the id. `concept_definitions` (`0169`, redeclared by `0301` and `0302`) unions
-  the IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect and VDA 5050 descriptions, in that order of
-  precedence. So a 223P class such as `TemperatureSensor` is defined by 223P, not by the description
-  of a metric carrying it. An MTConnect data item type is defined by the text MTConnect publishes
-  for it: POSITION is "point along an axis in a cartesian coordinate system.", not the description of
-  whichever axis a metric names. A VDA 5050 field is defined by the schema's description of it. An
-  id no vocabulary holds but a known authority issues defers to that authority, whatever the
-  metrics carrying it say: the QUDT quantity kinds the example 223P readings carry are defined as,
-  for example, "Temperature, as QUDT defines it." (`ID_AUTHORITIES` in `shell.ts`, one entry per
-  authority). Any other id, such as one an Administrator typed, takes the catalog description only
-  when every live metric carrying the id agrees on it. A new standard's ids are covered with no
-  code change; its definitions need an arm in the view.
+  wherever one defines the id. `concept_definitions` (`0169`, redeclared by `0301`, `0302` and
+  `0304`) unions the IDTA, ASHRAE 223P, QUDT, OPC UA, ISO 22400, MTConnect and VDA 5050
+  descriptions, in that order of precedence. So a 223P class such as `TemperatureSensor` is defined
+  by 223P, not by the description of a metric carrying it. A QUDT quantity kind is defined by
+  QUDT's own description of it. An MTConnect data item type is defined by the text MTConnect
+  publishes for it: POSITION is "point along an axis in a cartesian coordinate system.", not the
+  description of whichever axis a metric names. A VDA 5050 field is defined by the schema's
+  description of it. An id no vocabulary holds but a known authority issues defers to that
+  authority, whatever the metrics carrying it say: a QUDT quantity kind the seed leaves out, such as
+  a deprecated one, is defined as, for example, "Temperature, as QUDT defines it."
+  (`ID_AUTHORITIES` in `shell.ts`, one entry per authority). Any other id, such as one an
+  Administrator typed, takes the catalog description only when every live metric carrying the id
+  agrees on it. A new standard's ids are covered with no code change; its definitions need an arm
+  in the view.
 
 ## How a vocabulary entry becomes a metric
 
@@ -175,7 +193,8 @@ against the IDTA content hub, the ISA/ANSI webstore and the open223 project.
 | PackML | **OPC 30050** *OPC UA for PackML* v1.01, 2020-10-08 — **the ISA document is not needed** | `http://opcfoundation.org/UA/PackML/` |
 | ASHRAE 223P | ontology `v1.0.0-2026`, **Apache-2.0**; the *standard* is still in public review | `http://data.ashrae.org/standard223#` |
 | VDA 5050 | **VDA 5050 3.0.0**, the `state` message's JSON Schema (tag `3.0.0`, 2026-03-18), **MIT** | `https://aber.local/semantics/vda5050/v3.0/State/` (minted here: the VDA issues none) |
-| QUDT quantity kinds | *QUDT Quantity Kind Vocabulary* **3.5.2**; five IRIs cited, nothing seeded | `http://qudt.org/vocab/quantitykind/` |
+| ISO 22400 | **OPC 40501-1** v1.02.0 Annex C (informative), read at `reference.opcfoundation.org/specs/OPC-40501-1/annex-c`, for the four OEE KPIs; ISO 22400-2 itself was not read | `https://aber.local/semantics/iso22400/` |
+| QUDT | *QUDT Quantity Kind Vocabulary* and *Units Vocabulary* **3.5.2** (tag `v3.5.2`, 2026-09-22), **CC BY 4.0**; 1,126 kinds and 83 units seeded | `http://qudt.org/vocab/quantitykind/` and `http://qudt.org/vocab/unit/` |
 
 The generator pins the NodeSet paths. Upstream capitalises `NodeSet2` and `Nodeset2`
 inconsistently, and the Additive path 404s if you guess it:
@@ -259,6 +278,13 @@ with the VDA's MIT licence beside it, pinned by SHA-256. It is `json_schemas/sta
 `VDA5050/VDA5050`, byte for byte. The VDA's README says its published PDF prevails where the two
 differ, so the vocabulary reads the machine-readable half and claims nothing about conformance.
 
+**QUDT's two vocabulary files are kept the same way,** at
+[`scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl`](../scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl) and
+[`qudt-3.5.2-units.ttl`](../scripts/vocabularies/qudt-3.5.2-units.ttl), with QUDT's licence file beside
+them, pinned by SHA-256. They are `VOCAB_QUDT-QUANTITY-KINDS-ALL.ttl` and `VOCAB_QUDT-UNITS-ALL.ttl`
+at tag `v3.5.2` of `qudt/qudt-public-repo`, byte for byte. Both declare CC BY 4.0 in their graph
+metadata (`dcterms:rights`: "Attribution should be made to QUDT.org").
+
 **MTConnect's definitions are read from a kept copy of the 2.7 XSD** (#779), at
 [`scripts/vocabularies/MTConnectDevices_2.7.xsd`](../scripts/vocabularies/MTConnectDevices_2.7.xsd),
 pinned by SHA-256. `DataItemEnumEnum` documents 248 of the 249 data item types. The model's markup
@@ -267,6 +293,50 @@ words, and a type with no documentation, ELEVATION, which 2.8 added, keeps none.
 which the generator still reads for the names, carries no type documentation. The newest published XSD
 is 2.7. The model's own repository, `mtconnect/mtconnect_sysml_model`, is not a source: it has no
 licence file, and its terms allow copying only in the form received.
+
+### ISO 22400 and its source
+
+ISO 22400-2 is a purchased standard. A purchased ISO standard is licensed to its reader, and Aber is
+distributed publicly, so rows taken from its text would raise a redistribution question this project
+should not have to answer. Each ISO 22400 row needs a source anyone can read. For four of them there
+is one: **OPC 40501-1 v1.02.0, Annex C**, *KPI Calculation (Informative)*, which is free to read at
+`reference.opcfoundation.org` and says "The KPI definitions used are taken from the ISO 22400-2
+specification". Migration `0305` cites it for `AVAILABILITY`, `EFFECTIVENESS`, `QUALITY` and `OEE`.
+
+- **What the annex gives.** C.1 defines the abbreviations: APT (Actual Production Time), PBT (Planned
+  Busy Time), PQ (Produced Quantity), GQ (Good Quantity), PRI (Planned Run Time Per Item) and OEE.
+  C.2.4, *Calculation of the OEE*, says "The OEE (Overall Equipment Effectiveness) is the product of
+  Availability, Effectiveness and Quality Rate" and gives `Availability = APT / PBT`,
+  `Effectiveness = PRI x PQ / APT` and `Quality rate = GQ / PQ`. C.2.1 to C.2.3 map PQ, GQ, APT, AUST
+  and ADET to OPC UA variables. The annex gives formulas and no prose definition of a KPI.
+- **`iso22400_vocabulary.source`** holds the citation, for those four rows only: the annex, its clause
+  and the formula in the annex's words. The ISO 22400 tab shows it on its own line of the KPI's
+  tooltip, and an AAS export carries it as the ConceptDescription's `sourceOfDefinition`.
+- **The descriptions follow the annex.** The released seed quoted ISO 22400-2 names the annex does
+  not use ("Quality ratio", "OEE index"), which nobody could check. The annex says "Quality rate" and
+  "OEE", and each description now says what the annex's abbreviations say and no name it does not give.
+  The `formula` column is unchanged: it is the annex's formula with the KPI's symbol in front.
+- **`concept_sources` is a view of its own.** `(semantic_id, source)`, one row per id, with two arms:
+  ISO 22400 (a row with a source) and QUDT (every seeded kind: "QUDT 3.5.2, QUDT.org, CC BY 4.0"). It
+  is not a column of `concept_definitions`, because that view's four columns are stated inline by
+  `0169`, `0301`, `0302` and `0304`, and db-init replays each on every boot: a view that gained a
+  column would be redeclared narrower by the next boot of the earlier file and fail with "cannot drop
+  columns from view". A vocabulary added later adds an arm.
+- **The other four rows cite nothing, and are deprecated.** No free source publishes the formulas of
+  `SCRAP_RATIO`, `MTBF` or `MTTR`, and `UTILIZATION` is not an ISO 22400 KPI: its own description said
+  so, and it still sat in a table whose name says it is. `iso22400_vocabulary.deprecated_reason` holds
+  why (NULL means live), and the ISO 22400 tab marks the four in words and says why. A site that owns
+  ISO 22400-2 can import it on the Vocabulary page, with its licence recorded, so Aber does not need to
+  ship unchecked copies. The deprecation is announced in 1.9.0 and the rows are removed no sooner than
+  1.10.0 (`docs/releases.md`, *Deprecation*). Through that window the four rows, their metric groups
+  (`Quality`, `Utilization` and `Maintenance`) and their example metrics stay. An install keeps any
+  metric that carries one of these ids, since an id is only a value, and such a metric's
+  ConceptDescription takes the catalog's description instead. OPC 40001-1 v1.04.2 Annex C, read at
+  `reference.opcfoundation.org`, maps `MachineryItemState` and `MachineryOperationMode` to ISO 22400-2
+  time elements, TTR among them, and says "This annex does not define any KPI values." The ~26 other KPIs of ISO 22400-2 are not added, because no free source
+  publishes them.
+- **The annex is cited, not vendored.** It is free to read, and three formulas and a sentence are
+  quoted with the citation; nothing is redistributed whole.
 
 ### Licences
 
@@ -280,7 +350,8 @@ in a derived work, and every licence was read rather than assumed:
 | ASHRAE 223P ontology | Apache-2.0 | `dcterms:license` in the ontology |
 | VDA 5050 `state.schema` | MIT, copyright 2024 Verband der Automobilindustrie | the repository's `LICENSE.txt` at the tag |
 | MTConnect `MTConnectDevices_2.7.xsd` (the definitions) | BSD-style licence from AMT, in the file; the repository is Apache-2.0 | header of the file, and the repository's licence |
-| QUDT quantity kinds (five IRIs cited, not seeded) | CC BY 4.0, attribution to QUDT.org | `dcterms:rights` in the vocabulary's graph metadata |
+| OPC 40501-1 v1.02.0 Annex C (cited, not vendored) | free to read on the OPC Foundation's reference site; three formulas and a sentence are quoted, each with the citation | the reference site, which carries the specification |
+| QUDT 3.5.2 quantity kinds and units | CC BY 4.0, attribution to QUDT.org. The units file's metadata also carries a UCUM notice, which covers the UCUM codes, and none is taken | `dcterms:rights` in each file's graph metadata, and the repository's `LICENSE.md` |
 
 As with MTConnect's Apache-2.0, a licence covers the *vocabulary*, not a conformance claim.
 
@@ -490,11 +561,10 @@ filing it in `opcua_vocabulary` would misstate its provenance.
 - **Whitespace is collapsed in descriptions**, because several comments are hard-wrapped in the
   ontology and a newline inside a SQL string breaks the one-statement-per-line shape the digest, the
   seed-sync check and every `git diff` of that file rely on.
-- **Only the `s223:` namespace is seeded.** The ontology `owl:imports` QUDT
+- **Only the `s223:` namespace is seeded here.** The ontology `owl:imports` QUDT
   (`http://qudt.org/3.2.1/shacl/qudt-all`) for quantity kinds and units. Following it would pull in
-  a second vocabulary several times the size, under its own licence (CC BY 4.0). Units come from
-  MTConnect's `units` vocabulary; the example readings cite QUDT quantity kinds without seeding
-  them.
+  a second vocabulary several times the size, under its own licence (CC BY 4.0), so QUDT is a
+  vocabulary of its own, read from its own release ([below](#qudt-quantity-kinds-and-units)).
 - **Browsable without a BMS adapter.** Per-point tagging over BACnet is the long pole, and the
   vocabulary does not wait for it.
 
@@ -532,18 +602,88 @@ Constituent-CO2`. `MoleFraction` is a narrower kind of `DimensionlessRatio` (`sk
 consumer following QUDT reaches the shape's kind; `DimensionlessRatio` alone would give CO2 the id
 of every percentage, since the constituent has nowhere to go here.
 
-**QUDT is cited, not seeded.** It is CC BY 4.0 (attribution to QUDT.org), and no QUDT vocabulary is
-imported: the five ids are typed in `example-metrics.sql`, the one place that file does not take
-an id from a vocabulary table, so its inner join does not check them. Check 47 holds them to the
-pairs migration `0172` repoints an install to. That install holds the old 223P class ids, seeded by
-`0002` up to 1.0.1 and by the example set since, and `0172` moves a row only while its id is still
-the seed's. An AAS export defines each of these ids as QUDT's, "Temperature, as QUDT defines it.",
-never by a reading's description or as 223P's. i3X files their types in the local namespace, since
-`metric_type_namespace()` has no case for QUDT.
+**The five kinds are rows of `qudt_quantity_kinds`.** They are typed in `example-metrics.sql`, the one
+place that file does not take an id from a vocabulary table, so its inner join does not check them.
+Check 47 is the join: each kind must be a seeded row, and the five must be the pairs migration `0172`
+repoints an install to. That install holds the old 223P class ids, seeded by `0002` up to 1.0.1 and by
+the example set since, and `0172` moves a row only while its id is still the seed's. An AAS export
+defines each of these ids by QUDT's own description of the kind, never by a reading's description or
+as 223P's, and i3X files their types in QUDT's namespace
+([below](#qudt-quantity-kinds-and-units)). The CO2 reading's unit, `PARTS/MILLION`, is not an
+MTConnect name, so its export carries no `unitId`.
 
-**The full model waits for a BMS adapter:** a QUDT quantity-kind vocabulary of its own, with its
-provenance, and a second field saying what a point is attached to (its 223P class). Until then the
-class lives only in a metric's name.
+**The rest of the model waits for a BMS adapter:** a second field saying what a point is attached to
+(its 223P class). Until then the class lives only in a metric's name.
+
+## QUDT (quantity kinds and units)
+
+Built as migration `0304`: `qudt_quantity_kinds` with **1,126 quantity kinds** and `qudt_units` with
+**83 units**, generated by `scripts/generate-qudt-vocabulary.mjs` into two marked blocks in `0304` and
+guarded by `scripts/check-qudt-seed-sync.mjs` and `scripts/check-qudt-crosswalk.mjs`, plus a
+Vocabulary-page tab, a place in the semantic id picker, an API route, an i3X namespace and `unitId` in
+the AAS export. A quantity kind names what a reading measures (`Temperature`, `VolumeFlowRate`), not
+the reading.
+
+- **Source, licence and credit.** QUDT release 3.5.2 (tag `v3.5.2`, 2026-09-22), kept whole in
+  `scripts/vocabularies/` and pinned by SHA-256, as 223P's ontology is. QUDT declares CC BY 4.0 in
+  both files and asks that attribution is made to QUDT.org. The Vocabulary tab says "Quantity kinds
+  from QUDT 3.5.2, by QUDT.org, under CC BY 4.0", with the licence linked. `NOTICE.md` and the
+  Licences table say it too. The units file also carries a UCUM notice in its metadata. It covers
+  the UCUM codes, and none is taken.
+- **The ids are QUDT's own,** `http://qudt.org/vocab/quantitykind/<Name>` and
+  `http://qudt.org/vocab/unit/<Name>`, so nothing is minted and a CHECK on each table admits no other
+  prefix. The IRI is the key, because two kinds can share an English label.
+- **Every kind that is not deprecated is a row, and only the units the crosswalk reaches.** The kinds
+  file holds 1,225 `quantitykind:` subjects. One has a wikidata match and no type or label, so 1,224
+  are kinds, and 98 of them are deprecated. Its units file holds 2,932 units, 85 deprecated, and 1,577
+  carry a UN/ECE Recommendation 20 code (one of them two). Some 4,000 rows would bury the picker,
+  which is why the OPC UA seed is curated too. The picker searches, so every kind can go in; the units
+  table needs only what `unitId` uses.
+- **A kind's description is QUDT's, as plain text.** It is `qudt:plainTextDescription`, else
+  `dcterms:description`, in English, with the HTML tags removed, the LaTeX written out
+  (`$\textit{Absolute Humidity}$` is `Absolute Humidity`) and the whitespace collapsed. 122 of QUDT's
+  plain-text descriptions are German, and those kinds take their English description. 171 kinds have
+  none, and their description is NULL. QUDT writes some of its LaTeX with a backslash that Turtle
+  reads as an escape, so a `\textit` can arrive as a backslash and a tab: the reader puts it back. A
+  command it does not know stops the generator, so a release that adds one is read before it is
+  seeded.
+- **A kind is a semantic id where no other standard names the reading.** A Custom metric or an
+  ASHRAE 223P metric can have one as its own id. Any metric can have one as a further id (`0299`).
+  Add Metric's picker offers a kind as the primary id only under those two, and Edit's further-id
+  editor offers it for every metric. A metric another standard names, such as an MTConnect
+  `TEMPERATURE`, keeps its own id, or an operator would replace a standard's id with a broader one
+  and the provenance the Standard column records would stand for nothing. A kind typed in by hand
+  under another standard gets the note that it replaces that standard's id.
+- **QUDT is not a `STANDARDS` entry,** and no metric group is registered for it. A metric is never
+  filed under it. Mirror check 119 exempts it as it exempts IDTA, and check 124 holds its label to
+  the view.
+- **`concept_definitions` has a QUDT arm** between ASHRAE 223P's and OPC UA's, because QUDT issues
+  its own IRIs, as 223P does. Its columns are the view's four, so nothing a released file states
+  changes.
+- **i3X files a kind's type in QUDT's namespace,** `http://qudt.org/vocab/quantitykind?projection=i3X`,
+  as a projection, as 223P's is. A unit is not a kind and stays local.
+- **The crosswalk to MTConnect's units** is
+  [`scripts/vocabularies/mtconnect-units-to-qudt.json`](../scripts/vocabularies/mtconnect-units-to-qudt.json):
+  each of the 54 UnitEnum names and 46 further NativeUnitEnum names, read from the seed, maps to one
+  QUDT unit IRI or to nothing with a one-line reason. **83 map and 17 map to nothing.** A name maps
+  only where QUDT has exactly that unit, in quantity and scale. Where QUDT lists two units as the same
+  unit (`qudt:exactMatch`), the one that carries a UCUM or UN/ECE code is used (`NUM` for `COUNT`, `IN`
+  for `INCH`), and where both carry one the name maps to nothing (`POUND`: `LB` and `LB_M`;
+  `POUND/INCH^2`: `PSI` and `LB_F-PER-IN2`). The other 15 are a vector or direction with no unit
+  (`DEGREE_3D`, `MILLIMETER_3D`, `FOOT_3D`, `INCH_3D`, `UNIT_VECTOR_3D`), the catch-all `OTHER`, four
+  units QUDT does not have (`CUBIC_MILLIMETER/SECOND`, `CUBIC_MILLIMETER/SECOND^2`,
+  `MILLIGRAM/CUBIC_MILLIMETER`, `MILLIMETER/REVOLUTION`), `GALLON/MINUTE`, which does not say which
+  gallon, `GRAVITATIONAL_ACCELERATION`, whose g is 9.90665 m/s2 in MTConnect and 9.80665 in QUDT,
+  `GRAVITATIONAL_FORCE`, and the two counts per million and per trillion, which QUDT's parts per
+  million and per trillion do not match in quantity. The check fails when a name is missing from the
+  crosswalk, when it names one MTConnect does not, and when an IRI is not in the units file or is
+  deprecated there.
+- **`unitId` in the export.** A metric's `units` is an MTConnect name, written as free text into the
+  IEC 61360 `unit` as before. Where the crosswalk maps the name, the ConceptDescription also carries
+  `unitId`, an ExternalReference with one GlobalReference key, the QUDT unit's IRI. The exporter reads
+  a map generated from the crosswalk, `supabase/functions/_shared/aas/qudtUnits.ts`, and the seed-sync
+  check holds the map to the crosswalk, so the export makes no extra read. Metrics sharing a concept
+  and disagreeing on the unit export neither `unit` nor `unitId`.
 
 ## VDA 5050 (AGVs)
 
@@ -599,6 +739,72 @@ specification, so filing it in `opcua_vocabulary` would misstate where it came f
   as Sparkplug B metrics, and the edge adapter that would do it is the catalogue of edge connectors'
   business (#307).
 
+## Site vocabularies
+
+A site can bring its own vocabulary: a group's naming standard, a customer's specification, or the
+concepts of a standard it holds a copy of, such as ISO 22400-2 or an ECLASS release. Built as
+migration `0306`, on the Vocabulary page's **Imported** tab. Nothing here is seeded, so nothing here
+is verified against a source Aber ships: the file is the site's.
+
+- **What can be imported.** AAS ConceptDescriptions with the IEC 61360 data specification: an
+  identifier, a preferred name, a definition, a unit and a data type. The file is an `.aasx`
+  package, an AAS JSON environment or an AAS XML environment, read by one reader in the browser
+  (`frontend/src/utils/aasReader.js`, shared with #483's supplier AASX import and #489's template
+  upload). Only the V3 metamodel is read. A NodeSet2 file is #809's. **No CSV and no format of
+  Aber's own**, because a custom file has no standard, and the easiest route would be the one
+  everybody took.
+- **The file is hostile.** It is refused over 25 MB. Inside a package it is refused for more than
+  5,000 entries, any entry over 50 MB expanded, more than 100 MB in all, an entry that inflates to
+  more than 100 times its packed size, and an entry named with an absolute path, a `..` segment, a
+  backslash or a drive letter. Every count is made while the bytes are inflated, never from the
+  sizes the zip declares. An XML document with a `<!DOCTYPE` is refused before it is parsed, so no
+  entity is ever declared. Each refusal names its reason in the dialog.
+- **A package is read through its relationships** (IDTA 01005): the origin's `aas-spec` relationship
+  names the environment. A package with none is refused, and the reason says which link is missing.
+- **Two tables.** `site_vocabularies` has one row for each file: its name, format, SHA-256, the
+  version it states, a licence note, whether its definitions are shared, and who imported it and
+  when. `site_vocabulary_concepts` has one row for each concept, and a semantic id is held by one
+  file only. Every signed-in role reads them. Only `import_site_vocabulary()`,
+  `remove_site_vocabulary()` and `set_site_vocabulary_sharing()` write them, each for an
+  Administrator behind the second factor, each filing one Audit Trail row.
+- **The import says what the file is.** A **published standard** is named by its name, edition and
+  publisher (`ISO 22400-2`, `2014`, `ISO`). The **site's own vocabulary** names no standard. The
+  preview shows the format, the version the file states, how many concepts will be imported, how
+  many were skipped for no IEC 61360 content, and which ids a vocabulary already defines and which
+  one. The database checks every row again, and skips an id that a seeded vocabulary, another file
+  or the file itself already defines. A file whose SHA-256 is held is refused, naming the file.
+- **Provenance stays honest.** A metric started from an imported concept keeps `standard` NULL and
+  links to the file (`metric_catalog.site_vocabulary_id`). The Metrics page labels it from the
+  file: *ISO 22400-2:2014 (site licence)* for a published standard, the file's name for a site's
+  own vocabulary, so nobody takes it for a standard Aber ships. The Standard filter offers each
+  published standard a site imported. **`STANDARDS` stays closed**: the dashboard and i3X mirror it,
+  and a site's own name in it would claim a standard that does not exist. A typed "this is ISO
+  22400" would carry no evidence and still flow into every export; a file arrives with its SHA-256,
+  version and importer. The AAS export files a metric started from a published standard whose name
+  begins `ISO 22400` under KeyPerformanceIndicators, as it files a metric with `standard = 'ISO
+  22400'`.
+- **Buying a standard gives definitions, not identifiers.** ISO issues no ids for the 22400 KPIs,
+  so a site's ConceptDescriptions for them carry ids the site mints. Aber's seeded ISO 22400 rows
+  and a site's licensed import sit side by side under different ids, and the label tells them
+  apart.
+- **Licensed definitions stay home until an Administrator says otherwise.** An export carries an
+  imported concept's id and preferred name. Its definition is the file's text only once the
+  Administrator confirms that the licence allows sharing it (**Share definitions**, with a line
+  saying the licence is the site's responsibility). Until then the IEC 61360 definition, which is
+  mandatory in English, is "*name*, as *ISO 22400-2:2014* defines it.", and it never falls back to
+  the catalog's description, which may be a copy of the licensed text. For the same reason a metric
+  carrying such an id, as its own id or a further one, exports no description on its own element
+  (`withholdsDescription()`). The rule is in
+  `buildConceptDescriptions()`, so a ConceptDescription route reads the same text. Add Metric leaves
+  the description empty when the definitions are not shared, for the same reason.
+  `concept_definitions` has an arm for imported concepts, last in precedence, with no standard, and
+  it holds only vocabularies whose definitions are shared.
+- **Removing a vocabulary** says first how many metrics use it. They keep their ids, because an id
+  is only a value, and lose the link. Only the definitions go: an export falls back to the catalog
+  description.
+- **The seeded standards are never deleted.** db-init would put them back, and no migration deletes
+  rows an install already holds. A setting that hides a seeded standard's tab is not built.
+
 ---
 
 ## Definition of done — applies to every vocabulary
@@ -624,6 +830,14 @@ specification, so filing it in `opcua_vocabulary` would misstate where it came f
    authority are local there until it gains a case. `TestNamespaces` in `i3x/test_i3x_service.py`
    fails if an advertised URI is unused, or a standard's own is advertised without the suffix.
 
+**A vocabulary a site imports is outside this list.** Its rows are the site's, so nothing is
+generated, nothing is verified against a source Aber ships, and no migration seeds it. What it must
+satisfy instead (*Site vocabularies*, above): the seeded tables stay unwritable; the two site tables
+are written only by Administrator functions behind the second factor, each filing an Audit Trail
+row; the file is read by the one reader with the hostile-file rules; the database checks every row
+again; a published standard is never added to `STANDARDS`; and a licensed definition leaves the site
+only after an Administrator confirms the licence allows it.
+
 ## Settled decisions worth not relitigating
 
 | Question | Settled answer |
@@ -635,15 +849,17 @@ specification, so filing it in `opcua_vocabulary` would misstate where it came f
 | PackML as its own standard, or under OPC UA? | **Under OPC UA** (`companion_spec = OPC 30050 PackML`) — it is what the NodeSet was read from, and it avoids a table, a panel and a mirror module |
 | Digital Nameplate version | IDTA 02006 **3.0** |
 | Seed 223P before the standard is published? | **Yes**, from `223p.ttl` `v1.0.0-2026`, with the migration header stating it is pre-publication |
-| Does 223P follow the QUDT import? | **No** — no QUDT vocabulary is imported: separate vocabulary, separate licence (CC BY 4.0), and units are already covered. The five example 223P readings cite QUDT quantity-kind IRIs as their semantic ids instead, typed (#461) |
+| Does 223P follow the QUDT import? | **Not through 223P.** QUDT is a vocabulary of its own under its own licence (CC BY 4.0, credited to QUDT.org), read from its own release, 3.5.2, and not from the 3.2.1 the 223P ontology imports. It is seeded as `qudt_quantity_kinds` (every kind that is not deprecated, 1,126) and `qudt_units` (the 83 units MTConnect's names map to), in `0304`. A kind is the semantic id of a Custom or 223P metric and a further id of any metric. The five example 223P readings carry kinds that are rows (#942) |
 | Is OPC 34100 (ECM) seeded too? | **No** — only Machinery/Energy; ECM is recorded as a dependency |
 | Which `category` does a non-MTConnect metric get? | MTConnect's: `SAMPLE`, `EVENT` or `CONDITION`, translated per standard; 223P leaves it null |
 | Which datatypes can the form create? | Double, Boolean and String; OPC UA integers become Double |
+| What may a site import as a vocabulary, and why not a CSV? | **AAS ConceptDescriptions** with IEC 61360 content, from an `.aasx`, an AAS JSON environment or an AAS XML environment, and an OPC UA NodeSet2 file (#809). No CSV and no format of Aber's own: a custom file has no standard, and the simple route would be the one everybody took, so the standards would go unused. The import says what the file is. **A published standard** the site holds a copy of (name, edition, publisher) labels its metrics "ISO 22400-2:2014 (site licence)", files them under KeyPerformanceIndicators when it is ISO 22400, and never enters `STANDARDS`. **The site's own vocabulary** makes its metrics local extensions carrying the file's name. A metric links to the file and `standard` stays NULL, because a typed tag carries no evidence and a file's SHA-256, version and importer do. A licensed definition stays home until an Administrator confirms the licence allows sharing it (#808) |
 | Which group do 223P metrics file under? | **`BMS`**, the one group registered under ASHRAE 223P (#456) |
 | Where does VDA 5050 go: rows in `opcua_vocabulary`, or a table of its own? | **Its own, `vda5050_vocabulary`**, as 223P has one: it is not an OPC UA companion specification (#941) |
 | Which VDA 5050 fields are rows? | The 24 scalar fields of the `state` message that are readings. No array (Sparkplug B has no composite type), no header, no order flow (#941) |
 | Which group do VDA 5050 metrics file under, and why that spelling? | **`AGV`**, the word the pilot shopfloor uses; it cannot be confused with OPC 40010's robots, and the first spelling is permanent. The group says that 3.0 calls the vehicle a mobile robot (#941) |
 | Does a VDA 5050 field fill in its unit? | **No.** The schema's keyword is the VDA's spelling, not an MTConnect UnitEnum name; units for these readings are #942's (#941) |
+| What happens to `UTILIZATION`, `SCRAP_RATIO`, `MTBF` and `MTTR`? | **Deprecated in 1.9.0, removed no sooner than 1.10.0** (#940). `UTILIZATION` is not an ISO 22400 KPI, and no free source publishes the formulas of the other three. The four OEE KPIs stay, cited to OPC 40501-1 Annex C.2.4. A site that owns ISO 22400-2 can import it on the Vocabulary page. If that import does not ship in 1.9, the deprecation does not either |
 | Is a 223P class a metric's semantic id? | **No.** 223P is a reference: a class names equipment, not a reading. Use starts a metric under `BMS` with no id, and the example readings carry QUDT quantity kinds (#461) |
-| Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. Not one of the eight registered formulas is computable from the catalogued metrics, and moving the arithmetic to Grafana or Node-RED does not change that. Was a roadmap item; retired |
+| Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. None of the four OEE KPIs is computable from the catalogued metrics. Availability needs planned busy time and effectiveness needs planned run time per item, which OPC 40501-1 says come from an MES or ERP and not from the machine. Quality needs a good count beside the produced count, which a machine can publish (`PART_COUNT` `GOOD`, `PartsGood`), but OEE needs all three. Moving the arithmetic to Grafana or Node-RED does not change that. Was a roadmap item; retired |
 | What is an OPC UA semantic id? | **The ExpandedNodeId the NodeSet publishes**, `nsu=<namespace URI>;i=<id>`, as `node_id` and `semantic_id` both, typed `ExpandedNodeId`. Not `<namespace URI><name>`, an IRI the OPC Foundation never issued (#458) |

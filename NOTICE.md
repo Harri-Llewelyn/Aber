@@ -50,7 +50,7 @@ one.
 | `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.34.1` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
 | `aber/node-red` | `nodered/node-red:5.0.9` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
 | `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`) |
-| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit), [the charts'](#the-dashboards-charts--uplot-mit), [the editor's](#the-automations-pages-editor--codemirror-and-lezer-mit) and [the YAML parser's](#the-automations-pages-yaml-parser--yaml-isc) notices are in the bundle |
+| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit), [the charts'](#the-dashboards-charts--uplot-mit), [the editor's](#the-automations-pages-editor--codemirror-and-lezer-mit), [the YAML parser's](#the-automations-pages-yaml-parser--yaml-isc) and [the AASX unzipper's](#the-aas-readers-unzipper--fflate-mit) notices are in the bundle |
 | `aber/ingestion`, `aber/i3x-service`, `aber/test-runner` | `python:3.13-slim` (`test-runner` on `aber/ingestion`) | Python Software Foundation License | In the base: `/usr/local/lib/python3.13/LICENSE.txt` |
 
 **The packages a Dockerfile installs from a distribution** (pgBackRest, tini, gosu, Node.js, SQLite,
@@ -175,6 +175,22 @@ grep -l "Copyright Eemeli Aro" frontend/dist/assets/*.js
 ```
 
 `legalComments.test.js` fails if that comment stops matching the licence the installed package ships.
+
+## The AAS reader's unzipper — fflate (MIT)
+
+The Vocabulary page reads an AASX package in the browser with [`fflate`](https://github.com/101arrowz/fflate),
+copyright Arjun Barrett, under the MIT licence. It is an npm dependency of `frontend/` with no
+dependencies of its own, and the edge functions use the same library
+([`supabase/functions/deno.json`](supabase/functions/deno.json)). Its MIT licence asks for its notice in
+every copy, and its files carry none the build keeps. So
+[`frontend/src/utils/aasPackage.js`](frontend/src/utils/aasPackage.js) opens with that notice as a `/*!`
+legal comment. To check a build:
+
+```
+grep -l "Copyright (c) 2026 Arjun Barrett" frontend/dist/assets/*.js
+```
+
+`legalCommentsFflate.test.js` fails if that comment stops matching the licence the installed package ships.
 
 ## The ASHRAE 223P ontology — Apache License 2.0
 
@@ -568,6 +584,32 @@ Federation AISBL and carry an SPDX identifier for the same licence.
 
 Adopting the vocabulary is not a claim of OPC UA compliance, which is a certification of a server's
 behaviour.
+
+### QUDT: the quantity-kind and unit vocabularies and the rows read from them
+
+[`scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl`](scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl)
+and [`qudt-3.5.2-units.ttl`](scripts/vocabularies/qudt-3.5.2-units.ttl) are
+`VOCAB_QUDT-QUANTITY-KINDS-ALL.ttl` and `VOCAB_QUDT-UNITS-ALL.ttl` at tag `v3.5.2` of
+[`github.com/qudt/qudt-public-repo`](https://github.com/qudt/qudt-public-repo), by QUDT.org. They are
+unmodified, byte for byte. QUDT licenses them under
+[Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/),
+as both files declare, and asks that attribution is made to QUDT.org. The repository's licence notice
+is beside them, in [`LICENSE-qudt-CC-BY-4.0.txt`](scripts/vocabularies/LICENSE-qudt-CC-BY-4.0.txt). The
+MIT licence above, which covers the rest of this repository, does not cover them.
+
+> The QUDT Ontologies are issued under a Creative Commons Attribution 4.0 International License
+> (CC BY 4.0), available at https://creativecommons.org/licenses/by/4.0/. Attribution should be made to
+> QUDT.org
+
+`scripts/generate-qudt-vocabulary.mjs` builds the `qudt_quantity_kinds` and `qudt_units` rows from them,
+in migration `0304`: each quantity kind's IRI, English label and description, and the IRI, label, symbol
+and UN/ECE Recommendation 20 code of the 83 units that MTConnect's unit names map to. The descriptions
+are changed from QUDT's text in one way: LaTeX is written out as plain text, HTML tags are removed,
+whitespace is collapsed, and where QUDT's plain-text description is German its English description is
+taken. QUDT's text is in those rows, in the definition an AAS export gives each concept, and on the
+Vocabulary page, which credits QUDT.org under CC BY 4.0. QUDT provides the material as it is, with no
+warranty, as the licence's disclaimer says. The units file's metadata also carries a notice from the
+Regenstrief Institute and the UCUM Organization, which covers the UCUM codes. None is taken.
 
 ### VDA 5050: the state schema and the fields read from it
 

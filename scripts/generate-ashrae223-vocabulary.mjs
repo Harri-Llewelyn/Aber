@@ -27,19 +27,17 @@
  * like a parsing failure.
  *
  * WHY A PARSER RATHER THAN A REGEX. The other generator reads NodeSet2 XML, where a narrow scan is
- * sound. Turtle is not that: this file is 536 KB, its literals are sometimes triple-quoted and
- * multi-line, and -- the trap that actually bites -- **`rdfs:comment` appears INSIDE the nested
- * `sh:property [ ... ]` blank nodes as a SHACL constraint message**, several per class. A scan that
- * simply found `rdfs:comment` after a subject would silently describe `s223:Fan` as "A `Fan` shall
- * have at least one outlet using the medium `Fluid-Air`". So this tracks bracket depth and reads
- * predicates only at the top level of a subject block, and it tokenises strings properly instead of
- * matching quotes.
+ * sound. Turtle is not that: **`rdfs:comment` appears INSIDE the nested `sh:property [ ... ]` blank
+ * nodes as a SHACL constraint message**, several per class, so a scan would silently describe
+ * `s223:Fan` as "A `Fan` shall have at least one outlet using the medium `Fluid-Air`". The reader
+ * is scripts/lib/turtle.mjs, which the QUDT generator shares.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { parseSubjects, valuesOf } from './lib/turtle.mjs';
 
 /** Pinned by content: a different file is refused rather than read. */
 const ONTOLOGY_FILE = 'scripts/vocabularies/223p-v1.0.0-2026.ttl';
@@ -54,9 +52,9 @@ const NAMESPACE = 'http://data.ashrae.org/standard223#';
  * Only the `s223:` namespace is seeded.
  *
  * The ontology `owl:imports <http://qudt.org/3.2.1/shacl/qudt-all>` for quantity kinds and units.
- * Following that import would pull in a second, much larger vocabulary under a different licence
- * needing its own check -- and units are already covered by the MTConnect unit vocabulary. So a
- * concept outside s223: is skipped rather than partially adopted.
+ * QUDT is a separate vocabulary under a separate licence, seeded by
+ * scripts/generate-qudt-vocabulary.mjs from its own release, so a concept outside s223: is skipped
+ * here rather than partially adopted.
  */
 const PREFIX = 's223:';
 
@@ -75,158 +73,6 @@ const END_MARKER = '-- <<< END GENERATED ashrae223_vocabulary';
  */
 const collapse = (value) => String(value).replace(/\s+/g, ' ').trim();
 const sqlString = (value) => `'${collapse(value).replace(/'/g, "''")}'`;
-
-/**
- * The subset of Turtle this file needs, read as a token stream rather than matched.
- *
- * It understands: prefixed names, absolute IRIs, single- and triple-quoted string literals with
- * escapes, datatype (`^^`) and language (`@en`) suffixes, the separators `; , .`, and the bracket
- * pairs `[ ] ( )`. It does NOT implement Turtle -- no collections beyond skipping them, no base
- * resolution, no numeric or boolean literal typing -- because nothing here needs those, and a
- * half-implementation that pretended otherwise would be worse than an honest subset.
- */
-function* tokenise(text) {
-  let i = 0;
-  const n = text.length;
-  while (i < n) {
-    const ch = text[i];
-
-    if (ch === '#' ) {                                   // comment to end of line
-      while (i < n && text[i] !== '\n') i += 1;
-      continue;
-    }
-    if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') { i += 1; continue; }
-
-    if (ch === '"' || ch === "'") {
-      const triple = text.startsWith(ch.repeat(3), i);
-      const quote = triple ? ch.repeat(3) : ch;
-      i += quote.length;
-      let value = '';
-      while (i < n) {
-        if (text[i] === '\\') {                          // keep escapes intact for unescaping below
-          value += text[i] + (text[i + 1] ?? '');
-          i += 2;
-          continue;
-        }
-        if (text.startsWith(quote, i)) { i += quote.length; break; }
-        value += text[i];
-        i += 1;
-      }
-      yield { type: 'literal', value: unescapeTurtle(value) };
-      continue;
-    }
-
-    if (ch === '<') {
-      const end = text.indexOf('>', i);
-      const value = end < 0 ? '' : text.slice(i + 1, end);
-      i = end < 0 ? n : end + 1;
-      yield { type: 'iri', value };
-      continue;
-    }
-
-    if (ch === ';' || ch === ',' || ch === '.' || ch === '[' || ch === ']' || ch === '(' || ch === ')') {
-      // A '.' inside a prefixed name (s223:Fluid-Air.Something) is handled by the name branch
-      // below, which consumes it; reaching here means a real statement terminator.
-      i += 1;
-      yield { type: 'punct', value: ch };
-      continue;
-    }
-
-    if (ch === '^' && text[i + 1] === '^') { i += 2; yield { type: 'punct', value: '^^' }; continue; }
-    if (ch === '@') {
-      i += 1;
-      let value = '';
-      while (i < n && /[A-Za-z0-9-]/.test(text[i])) { value += text[i]; i += 1; }
-      yield { type: 'lang', value };
-      continue;
-    }
-
-    let value = '';
-    while (i < n && !/[\s;,[\]()"'<>]/.test(text[i])) {
-      // Stop at a '.' that terminates a statement -- i.e. one followed by whitespace or EOF --
-      // but keep one that is part of a name.
-      if (text[i] === '.' && (i + 1 >= n || /[\s]/.test(text[i + 1]))) break;
-      value += text[i];
-      i += 1;
-    }
-    if (value === '') { i += 1; continue; }
-    yield { type: 'name', value };
-  }
-}
-
-function unescapeTurtle(value) {
-  return value
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t')
-    .replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-}
-
-/**
- * Top-level statements about `s223:` subjects.
- *
- * Depth tracking is the load-bearing part: a predicate is recorded only when no `[` is open, which
- * is what keeps a SHACL constraint's `rdfs:comment` from being read as the class's own.
- */
-function parseConcepts(text) {
-  const concepts = new Map();
-  let subject = null;
-  let predicate = null;
-  let depth = 0;
-  let objects = [];
-
-  const flush = () => {
-    if (subject && predicate && objects.length > 0) {
-      const entry = concepts.get(subject);
-      if (entry) {
-        if (!entry[predicate]) entry[predicate] = [];
-        entry[predicate].push(...objects);
-      }
-    }
-    objects = [];
-  };
-
-  for (const token of tokenise(text)) {
-    if (token.type === 'punct') {
-      if (token.value === '[' || token.value === '(') { depth += 1; continue; }
-      if (token.value === ']' || token.value === ')') { depth -= 1; continue; }
-      if (depth > 0) continue;
-      if (token.value === ',') continue;                  // more objects for the same predicate
-      if (token.value === ';') { flush(); predicate = null; continue; }
-      if (token.value === '.') { flush(); subject = null; predicate = null; continue; }
-      if (token.value === '^^') continue;                 // datatype of the literal just read
-      continue;
-    }
-    if (depth > 0) continue;
-    if (token.type === 'lang') continue;
-
-    if (!subject) {
-      if (token.type === 'name' && token.value.startsWith(PREFIX)) {
-        subject = token.value.slice(PREFIX.length);
-        if (!concepts.has(subject)) concepts.set(subject, {});
-      } else if (token.type === 'name' || token.type === 'iri') {
-        // A subject this generator does not seed (the ontology header, a QUDT term). Consume its
-        // statements by leaving `subject` null until the next '.'.
-        subject = null;
-      }
-      predicate = null;
-      objects = [];
-      continue;
-    }
-
-    if (!predicate) {
-      // `^^xsd:string` after a literal arrives as a name; it is skipped because a predicate is
-      // only accepted immediately after a ';' or a subject, and '^^' clears nothing.
-      predicate = token.value === 'a' ? 'rdf:type' : token.value;
-      objects = [];
-      continue;
-    }
-
-    if (token.type === 'literal') objects.push(token.value);
-    else if (token.type === 'name' || token.type === 'iri') objects.push(token.value);
-  }
-  flush();
-  return concepts;
-}
 
 const source = readFileSync(join(ROOT, ONTOLOGY_FILE));
 const sourceSha256 = createHash('sha256').update(source).digest('hex');
@@ -250,7 +96,7 @@ if (!turtle.includes('http://www.apache.org/licenses/LICENSE-2.0')) {
   throw new Error('the ontology no longer declares the Apache-2.0 licence this generator relies on');
 }
 
-const concepts = parseConcepts(turtle);
+const concepts = parseSubjects(turtle, PREFIX);
 
 /** `s223:Class` and friends are themselves s223 terms, so the kind is read from rdf:type. */
 const KINDS = {
@@ -265,14 +111,13 @@ const KINDS = {
 
 const rows = [];
 for (const [name, statements] of [...concepts].sort(([a], [b]) => a.localeCompare(b))) {
-  const types = statements['rdf:type'] || [];
+  const types = valuesOf(statements, 'rdf:type');
   const kind = types.map((t) => KINDS[t]).find(Boolean);
   if (!kind) continue;                                    // a shape or an individual, not a concept
 
-  const label = (statements['rdfs:label'] || [])[0] || name;
-  const comment = (statements['rdfs:comment'] || [])[0] || null;
-  const parent = (statements['rdfs:subClassOf'] || [])
-    .find((v) => typeof v === 'string' && v.startsWith(PREFIX));
+  const label = valuesOf(statements, 'rdfs:label')[0] || name;
+  const comment = valuesOf(statements, 'rdfs:comment')[0] || null;
+  const parent = valuesOf(statements, 'rdfs:subClassOf').find((v) => v.startsWith(PREFIX));
 
   rows.push(
     `INSERT INTO public.ashrae223_vocabulary VALUES (${sqlString(name)}, ${sqlString(kind)}, ` +

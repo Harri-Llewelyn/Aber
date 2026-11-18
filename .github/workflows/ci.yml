@@ -290,6 +290,17 @@ jobs:
           node scripts/generate-vda5050-vocabulary.mjs
           node scripts/check-vda5050-seed-sync.mjs
 
+      # QUDT's two vocabulary files are kept in scripts/vocabularies/, which the generator refuses to
+      # read changed. The crosswalk from MTConnect's units to QUDT's is checked first. The generator
+      # then writes the two blocks and the unit map the exporter reads, and git diff fails when what it
+      # wrote is not what is committed.
+      - name: Verify QUDT Vocabulary Seed Is In Sync
+        run: |
+          node scripts/check-qudt-crosswalk.mjs
+          node scripts/generate-qudt-vocabulary.mjs
+          node scripts/check-qudt-seed-sync.mjs
+          git diff --exit-code -- supabase/migrations/0304_a_quantity_kind_has_a_vocabulary.sql supabase/functions/_shared/aas/qudtUnits.ts
+
       # Checks counts, lists, links and pinned versions only; never reasoning. A stale count is worse
       # than no count because a reader cannot tell it is stale.
       - name: Verify Documentation Matches The Repository

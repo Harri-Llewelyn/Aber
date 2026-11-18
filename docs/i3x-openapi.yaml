@@ -180,10 +180,12 @@ paths:
         (`https://aber.local/semantics/mtconnect/v2.0`, `https://aber.local/semantics/iso22400`,
         `https://aber.local/semantics/vda5050/v3.0`).
         An OPC UA id is the ExpandedNodeId its NodeSet publishes (`nsu=<namespace URI>;i=<id>`),
-        in the namespace after `nsu=`; an ASHRAE 223P id is the ontology's own. A scalar type
-        adapted from either is an in-exact implementation of that namespace, marked as the i3X
-        guide asks with a `projection` suffix: `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
-        `http://data.ashrae.org/standard223?projection=i3X`. A namespace no served type
+        in the namespace after `nsu=`; an ASHRAE 223P id and a QUDT quantity kind are each the
+        ontology's own. A scalar type adapted from one is an in-exact implementation of that
+        namespace, marked as the i3X guide asks with a `projection` suffix:
+        `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
+        `http://data.ashrae.org/standard223?projection=i3X`,
+        `http://qudt.org/vocab/quantitykind?projection=i3X`. A namespace no served type
         belongs to is never listed.
       responses:
         '200':

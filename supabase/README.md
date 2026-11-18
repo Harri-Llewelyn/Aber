@@ -4071,6 +4071,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `fork_schema()` | `0165` | yes | Versions a schema (schema:manage) |
 | `gateway_is_playback_delivery_target()` | `0183` | no | A read the playback dialog makes. |
 | `historian_backup_state()` | `0001` | no | A read: the Backups page. |
+| `import_site_vocabulary()` | `0306` | yes | Imports a vocabulary read from an AAS file: Administrator only |
 | `is_active_capture_object()` | `0184` | no | A storage predicate; the write policies call require_mfa() in the arm beside it. |
 | `is_active_playback_capture()` | `0184` | no | A storage predicate the read policy calls. |
 | `is_own_avatar_object()` | `0213` | no | A person's own picture, in any role. |
@@ -4107,6 +4108,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `release_backup()` | `0001` | yes | Releases a kept backup |
 | `relocate_devices()` | `0165` | yes | Moves devices between cells |
 | `remove_app()` | `0217` | yes | Removes an app |
+| `remove_site_vocabulary()` | `0306` | yes | Removes an imported vocabulary and its concepts |
 | `request_backup()` | `0001` | yes | Takes a backup |
 | `revoke_service_principal()` | `0001` | yes | Revokes a machine identity |
 | `revoke_service_token()` | `0001` | yes | Revokes a service token |
@@ -4118,6 +4120,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `set_foreign_credential()` | `0178` | yes | Writes a credential to Vault: the archive, the backups, and each later one |
 | `set_notification_webhook_url()` | `0248` | yes | Sets where the platform's alerts are sent |
 | `set_own_picture()` | `0213` | no | A person's own picture, in any role. |
+| `set_site_vocabulary_sharing()` | `0306` | yes | Confirms, or withdraws, that an imported vocabulary's definitions may be shared |
 | `show_gateway_credential()` | `0164` | no | Shows a stored gateway credential again: a read, which the switch never refuses. |
 | `withdraw_alert_acknowledgement()` | `0231` | no | The other half of acknowledging an alert, which an Operator may do too. |
 
@@ -11528,17 +11531,28 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
 
 **A vocabulary's definitions reach the AAS export through `concept_definitions` (`0169`).** The
 view is one row per semantic id, `(semantic_id, name, definition, standard)`, from each
-vocabulary's own description column: the IDTA templates, ASHRAE 223P, OPC UA, ISO 22400, MTConnect
-(`0301`) and VDA 5050 (`0302`). An id held by two vocabularies takes the first in that order, the one
-whose ids are issued furthest from this deployment, and a row with no text is left out. The exporter
-reads the view in one query. An id no
-vocabulary holds but a known authority issues, such as a QUDT quantity kind, defers to that
-authority (`ID_AUTHORITIES` in `functions/_shared/aas/shell.ts`). Catalog text is used only for
-the rest, such as an id an Administrator typed. A new
+vocabulary's own description column: the IDTA templates, ASHRAE 223P, QUDT (`0304`), OPC UA, ISO 22400,
+MTConnect (`0301`) and VDA 5050 (`0302`). An id held by two vocabularies takes the first in that order,
+the one whose ids are issued furthest from this deployment, and a row with no text is left out. The
+exporter reads the view in one query. An id no vocabulary holds but a known authority issues, such as
+a QUDT quantity kind the seed leaves out, defers to that authority (`ID_AUTHORITIES` in
+`functions/_shared/aas/shell.ts`). Catalog text is used only for the rest, such as an id an
+Administrator typed. A new
 vocabulary with a description column adds an arm in a migration that redeclares the view; the
 columns stay the same, so `CREATE OR REPLACE VIEW` keeps its grants. It is `security_invoker`, so
 the vocabularies' own policies apply to the caller: `authenticated` and `service_role` read it,
 `anon` does not. `test_metric_catalog_seed.py` holds the precedence.
+
+**A site's own vocabulary is not added this way.** The list above is for a vocabulary Aber ships:
+generated from a source, replayed on every boot, and unwritable by the app. An Administrator
+imports a vocabulary of the site's from AAS ConceptDescriptions into `site_vocabularies` and
+`site_vocabulary_concepts` instead (`0306`), through `import_site_vocabulary()`. Nothing in that
+route seeds a row, so a migration never carries one and the seeded tables are never written. Its
+concepts reach the AAS export through the view's last arm, and only once the Administrator has
+confirmed that the licence lets their definitions be shared. An import skips every id a seeded
+vocabulary already defines, so adding a vocabulary here later does not clash with one a site
+imported: the seeded definition comes first in the view. See *Site vocabularies* in
+[`../docs/vocabularies.md`](../docs/vocabularies.md#site-vocabularies).
 
 ---
 

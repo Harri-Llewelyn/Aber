@@ -88,6 +88,9 @@ export const proposalUrl = (id, decided = false) => pageUrl('approvals', { propo
 export const metricUrl = (uuid, deprecated = false, derived = false) =>
   pageUrl('metrics', { metric: uuid }, deprecated ? 'deprecated' : derived ? 'derived' : '')
 
+/** One imported vocabulary on the Vocabulary page's Imported tab, its concepts open; the tab with no id. */
+export const siteVocabularyUrl = (id = '') => pageUrl('vocabulary', { file: id }, 'imported')
+
 /** A gateway or a device on the Capture page, with its captures open. */
 export const captureSubjectUrl = (kind, id) => pageUrl('capture', { subject: id }, kind === 'device' ? 'device' : '')
 
