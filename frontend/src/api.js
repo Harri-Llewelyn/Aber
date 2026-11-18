@@ -3666,7 +3666,9 @@ const apiMethods = {
         formula: k.formula,
         semantic_id: k.semantic_id,
         // Where the definition was read from (0305); null for a KPI no free source publishes.
-        source: k.source ?? null
+        source: k.source ?? null,
+        // Why the KPI is deprecated (0305); null for a live one.
+        deprecated_reason: k.deprecated_reason ?? null
       }));
     }
 

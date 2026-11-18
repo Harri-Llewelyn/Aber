@@ -55,7 +55,9 @@ does. They are [`supabase/example-metrics.sql`](../supabase/example-metrics.sql)
   40501-1's `PartsGood` are both seeded, so a machine that publishes `GOOD` and `ALL` supplies both
   of `Q = GQ / PQ`'s inputs. OEE needs all three factors, so it needs PBT and PRI as well. Moving
   the arithmetic to Grafana or Node-RED does not help — the planned inputs are missing there too.
-  The constraint is the data, not the place. MTBF and MTTR need maintenance records.
+  The constraint is the data, not the place. The other four rows, `UTILIZATION`, `SCRAP_RATIO`, `MTBF`
+  and `MTTR`, are deprecated ([below](#iso-22400-and-its-source)): `MTBF` and `MTTR` would need
+  maintenance records.
 
   **Derived series over what we DO have are fine, and must not borrow these ids.**
   `Controller/EXECUTION` and `Controller/PART_COUNT` support an uptime ratio and a parts-per-hour
@@ -314,8 +316,16 @@ specification". Migration `0305` cites it for `AVAILABILITY`, `EFFECTIVENESS`, `
   `0169`, `0301`, `0302` and `0304`, and db-init replays each on every boot: a view that gained a
   column would be redeclared narrower by the next boot of the earlier file and fail with "cannot drop
   columns from view". A vocabulary added later adds an arm.
-- **The other four rows cite nothing.** No free source publishes the formulas of `SCRAP_RATIO`, `MTBF`
-  or `MTTR`, and `UTILIZATION` is not an ISO 22400 KPI. OPC 40001-1 v1.04.2 Annex C, read at
+- **The other four rows cite nothing, and are deprecated.** No free source publishes the formulas of
+  `SCRAP_RATIO`, `MTBF` or `MTTR`, and `UTILIZATION` is not an ISO 22400 KPI: its own description said
+  so, and it still sat in a table whose name says it is. `iso22400_vocabulary.deprecated_reason` holds
+  why (NULL means live), and the ISO 22400 tab marks the four in words and says why. A site that owns
+  ISO 22400-2 can import it on the Vocabulary page, with its licence recorded, so Aber does not need to
+  ship unchecked copies. The deprecation is announced in 1.9.0 and the rows are removed no sooner than
+  1.10.0 (`docs/releases.md`, *Deprecation*). Through that window the four rows, their metric groups
+  (`Quality`, `Utilization` and `Maintenance`) and their example metrics stay. An install keeps any
+  metric that carries one of these ids, since an id is only a value, and such a metric's
+  ConceptDescription takes the catalog's description instead. OPC 40001-1 v1.04.2 Annex C, read at
   `reference.opcfoundation.org`, maps `MachineryItemState` and `MachineryOperationMode` to ISO 22400-2
   time elements, TTR among them, and says "This annex does not define any KPI values." The ~26 other KPIs of ISO 22400-2 are not added, because no free source
   publishes them.
@@ -768,6 +778,7 @@ specification, so filing it in `opcua_vocabulary` would misstate where it came f
 | Which VDA 5050 fields are rows? | The 24 scalar fields of the `state` message that are readings. No array (Sparkplug B has no composite type), no header, no order flow (#941) |
 | Which group do VDA 5050 metrics file under, and why that spelling? | **`AGV`**, the word the pilot shopfloor uses; it cannot be confused with OPC 40010's robots, and the first spelling is permanent. The group says that 3.0 calls the vehicle a mobile robot (#941) |
 | Does a VDA 5050 field fill in its unit? | **No.** The schema's keyword is the VDA's spelling, not an MTConnect UnitEnum name; units for these readings are #942's (#941) |
+| What happens to `UTILIZATION`, `SCRAP_RATIO`, `MTBF` and `MTTR`? | **Deprecated in 1.9.0, removed no sooner than 1.10.0** (#940). `UTILIZATION` is not an ISO 22400 KPI, and no free source publishes the formulas of the other three. The four OEE KPIs stay, cited to OPC 40501-1 Annex C.2.4. A site that owns ISO 22400-2 can import it on the Vocabulary page. If that import does not ship in 1.9, the deprecation does not either |
 | Is a 223P class a metric's semantic id? | **No.** 223P is a reference: a class names equipment, not a reading. Use starts a metric under `BMS` with no id, and the example readings carry QUDT quantity kinds (#461) |
 | Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. None of the four OEE KPIs is computable from the catalogued metrics. Availability needs planned busy time and effectiveness needs planned run time per item, which OPC 40501-1 says come from an MES or ERP and not from the machine. Quality needs a good count beside the produced count, which a machine can publish (`PART_COUNT` `GOOD`, `PartsGood`), but OEE needs all three. Moving the arithmetic to Grafana or Node-RED does not change that. Was a roadmap item; retired |
 | What is an OPC UA semantic id? | **The ExpandedNodeId the NodeSet publishes**, `nsu=<namespace URI>;i=<id>`, as `node_id` and `semantic_id` both, typed `ExpandedNodeId`. Not `<namespace URI><name>`, an IRI the OPC Foundation never issued (#458) |

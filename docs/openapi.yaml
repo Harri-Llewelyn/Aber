@@ -3681,6 +3681,10 @@ paths:
         a KPI no free source publishes. An AAS export carries it as the ConceptDescription's
         `sourceOfDefinition`.
 
+        **Four rows are deprecated.** `deprecated_reason` is why, and null for a live row:
+        `UTILIZATION` is not an ISO 22400 KPI, and no free source publishes the formulas of
+        `SCRAP_RATIO`, `MTBF` and `MTTR`. Announced in 1.9.0, removed no sooner than 1.10.0.
+
         **ISO 22400-2 calls the second OEE factor *Effectiveness*, not Performance.**
         A metric for it is named after the KPI, as the example `OEE/EFFECTIVENESS` is. The index
         on `metric_catalog.semantic_id` is deliberately not unique: a deprecated metric and its
@@ -8605,6 +8609,7 @@ components:
         formula: { type: string, nullable: true }
         semantic_id: { type: string, nullable: true }
         source: { type: string, nullable: true, example: 'OPC 40501-1 v1.02.0, Annex C.2.4 (informative): "Availability = APT / PBT". The annex takes its KPI definitions from ISO 22400-2.', description: 'Where the definition was read from. Null for a KPI no free source publishes (0305).' }
+        deprecated_reason: { type: string, nullable: true, example: 'Not an ISO 22400 KPI: it is the common loading ratio, so it cannot stay in a table whose name says it is. Deprecated in 1.9.0 and removed no sooner than 1.10.0.', description: 'Why the KPI is deprecated. Null for a live row (0305).' }
 
     OPCUAVocabularyEntry:
       type: object

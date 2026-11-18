@@ -36,7 +36,9 @@ The manufacturing KPIs that ISO 22400-2 defines. These are computed measures. MT
 - **A KPI is picked whole.** It is not composed like an MTConnect name. `AVAILABILITY` becomes `OEE/AVAILABILITY` in the catalog, with the KPI's unit and semantic id. Point at a KPI to see its formula, in the standard's symbols.
 - **Beware the name clash.** MTConnect's own `AVAILABILITY` is a different thing. It is an event meaning the device is connected, not this ratio.
 - **Four KPIs cite a source.** `AVAILABILITY`, `EFFECTIVENESS`, `QUALITY` and `OEE` were read from OPC 40501-1 v1.02.0, Annex C.2.4. That annex is free to read, and says it takes its KPI definitions from ISO 22400-2. Point at one of them to see the source on its last line. The same line is the `sourceOfDefinition` of the KPI's concept in an AAS export.
-- **The other KPIs cite nothing.** No free source publishes their formulas. A site that owns ISO 22400-2 can still name its own KPIs, as Custom metrics.
+- **Four KPIs are deprecated.** `UTILIZATION`, `SCRAP_RATIO`, `MTBF` and `MTTR` are marked **deprecated** on the tab, and the line under a KPI's tooltip says why. `UTILIZATION` is not an ISO 22400 KPI. No free source publishes the formulas of the other three.
+- **They stay for now.** A metric that already carries one of their ids keeps it. The four are removed no sooner than 1.10.0.
+- **A site that owns ISO 22400-2 can import it on the Vocabulary page.** That brings in its KPIs with your licence recorded, so Aber does not ship copies nobody has checked.
 
 ### OPC UA
 

@@ -37,12 +37,17 @@
 -- abbreviations do. Nothing here was read from ISO 22400-2 itself: where this file says "taken from
 -- ISO 22400-2" it is the annex's own statement, which this file did not check.
 --
--- UTILIZATION, SCRAP_RATIO, MTBF and MTTR are not cited. No free source publishes their formulas.
+-- UTILIZATION, SCRAP_RATIO, MTBF and MTTR are not cited. No free source publishes their formulas, and
+-- UTILIZATION is not an ISO 22400 KPI at all, so they are deprecated: `deprecated_reason` holds why (NULL
+-- means live) and the ISO 22400 tab says so. They stay in 1.9, with their groups and their example metrics,
+-- and are removed no sooner than 1.10 (docs/releases.md, Deprecation). An install keeps any metric that
+-- carries one of their ids, since an id is only a value. A site that owns ISO 22400-2 can import it on the
+-- Vocabulary page.
 --
 -- 0002 is released, and db-init replays it on every boot before this file: its upsert puts the four
 -- descriptions it holds back, and this file puts the corrected text over them. The four rows are written
--- twice a boot, and the table ends the boot as this file leaves it. `source` is not in 0002's column list,
--- so it is never put back.
+-- twice a boot, and the table ends the boot as this file leaves it. `source` and `deprecated_reason` are
+-- not in 0002's column list, so they are never put back.
 --
 -- Reasoning: supabase/README.md, "An OEE KPI cites the source it was read from (0305)". Idempotent.
 
@@ -82,6 +87,41 @@ UPDATE public.iso22400_vocabulary v
   ) AS c(name, description, source)
  WHERE v.name = c.name
    AND (v.description, v.source) IS DISTINCT FROM (c.description, c.source);
+
+-- -------------------------------------------------------------------------------------------------
+-- 2b. The four KPIs no free source publishes
+-- -------------------------------------------------------------------------------------------------
+-- No vocabulary table has a deprecation of its own, so this one is a column: the reason, NULL for a live
+-- row. A row is written only where its reason or its text differs. UTILIZATION's description loses the
+-- sentence that asked a reader to verify it against the standard: what was checked is the reason.
+ALTER TABLE public.iso22400_vocabulary ADD COLUMN IF NOT EXISTS deprecated_reason text;
+
+COMMENT ON COLUMN public.iso22400_vocabulary.deprecated_reason IS
+  'Why the KPI is deprecated, announced in 1.9.0 and removed no sooner than 1.10.0. NULL for a live row. '
+  'The ISO 22400 tab marks a deprecated KPI and says why (0305).';
+
+UPDATE public.iso22400_vocabulary v
+   SET deprecated_reason = c.reason,
+       description = COALESCE(c.description, v.description)
+  FROM (VALUES
+    ('UTILIZATION',
+     'Utilization (loading) ratio: planned busy time as a share of calendar time. The common industry ratio, not a KPI of ISO 22400-2 itself: it answers "how much of the day was this asset scheduled to work?", which availability deliberately does not.',
+     'Not an ISO 22400 KPI: it is the common loading ratio, so it cannot stay in a table whose name says it is. Deprecated in 1.9.0 and removed no sooner than 1.10.0.'),
+    ('SCRAP_RATIO', NULL,
+     'No free source publishes this KPI''s formula, and ISO 22400-2 is a purchased standard, so Aber ships no unchecked copy. A site that owns ISO 22400-2 can import it on the Vocabulary page. Deprecated in 1.9.0 and removed no sooner than 1.10.0.'),
+    ('MTBF', NULL,
+     'No free source publishes this KPI''s formula, and ISO 22400-2 is a purchased standard, so Aber ships no unchecked copy. A site that owns ISO 22400-2 can import it on the Vocabulary page. Deprecated in 1.9.0 and removed no sooner than 1.10.0.'),
+    ('MTTR', NULL,
+     'No free source publishes this KPI''s formula, and ISO 22400-2 is a purchased standard, so Aber ships no unchecked copy. A site that owns ISO 22400-2 can import it on the Vocabulary page. Deprecated in 1.9.0 and removed no sooner than 1.10.0.')
+  ) AS c(name, description, reason)
+ WHERE v.name = c.name
+   AND (v.description, v.deprecated_reason) IS DISTINCT FROM (COALESCE(c.description, v.description), c.reason);
+
+-- The four OEE rows are live, whatever a hand edit left on them.
+UPDATE public.iso22400_vocabulary
+   SET deprecated_reason = NULL
+ WHERE name IN ('AVAILABILITY', 'EFFECTIVENESS', 'QUALITY', 'OEE')
+   AND deprecated_reason IS NOT NULL;
 
 -- -------------------------------------------------------------------------------------------------
 -- 3. Where a definition comes from
@@ -131,6 +171,15 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.iso22400_vocabulary
               WHERE name IN ('AVAILABILITY', 'EFFECTIVENESS', 'QUALITY', 'OEE') AND NULLIF(btrim(source), '') IS NULL) THEN
     RAISE EXCEPTION '0305: an OEE KPI has no source';
+  END IF;
+  -- The four deprecated rows say why, and the four OEE rows are live.
+  IF EXISTS (SELECT 1 FROM public.iso22400_vocabulary
+              WHERE name IN ('UTILIZATION', 'SCRAP_RATIO', 'MTBF', 'MTTR') AND NULLIF(btrim(deprecated_reason), '') IS NULL) THEN
+    RAISE EXCEPTION '0305: a deprecated KPI gives no reason';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.iso22400_vocabulary
+              WHERE name IN ('AVAILABILITY', 'EFFECTIVENESS', 'QUALITY', 'OEE') AND deprecated_reason IS NOT NULL) THEN
+    RAISE EXCEPTION '0305: an OEE KPI is deprecated';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM public.concept_sources s
                    JOIN public.iso22400_vocabulary v ON v.semantic_id = s.semantic_id

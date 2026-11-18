@@ -1,13 +1,15 @@
 # suite:
 #   lanes: db
-#   why: The four OEE KPIs cite OPC 40501-1 Annex C (0305), and concept_sources names where a
-#     definition comes from. A source dropped, a description that quotes an ISO name the annex does not
-#     use, or a view that lost an arm breaks nothing at runtime: the panel shows no source, and an export
-#     defines the concept without saying where the definition came from.
+#   why: The four OEE KPIs cite OPC 40501-1 Annex C (0305), concept_sources names where a definition
+#     comes from, and the four KPIs no free source publishes are deprecated with their reason. A source
+#     dropped, a description that quotes an ISO name the annex does not use, a view that lost an arm or a
+#     deprecation that reached an OEE row breaks nothing at runtime: the panel shows no source, an
+#     export defines the concept without saying where the definition came from, and the tab calls a
+#     live KPI deprecated.
 
 """
-`iso22400_vocabulary.source`, the four corrected OEE descriptions and the `concept_sources` view, as 0305
-leaves them on a migrated database. Each probe runs in a transaction that is rolled back.
+`iso22400_vocabulary.source` and `.deprecated_reason`, the corrected descriptions and the `concept_sources`
+view, as 0305 leaves them on a migrated database. Each probe runs in a transaction that is rolled back.
 
     python supabase/migrations/test_an_oee_kpi_cites_the_source_it_was_read_from.py
 """
@@ -115,6 +117,50 @@ class TestTheOeeRows(SourceTestCase):
         self.assertIn("sourceOfDefinition", comment)
 
 
+class TestTheDeprecation(SourceTestCase):
+    def rows(self):
+        return {r[0]: r[1:] for r in self.fetch(
+            "SELECT name, description, deprecated_reason FROM public.iso22400_vocabulary")}
+
+    def test_the_four_kpis_no_free_source_publishes_are_deprecated_with_a_reason_and_the_oee_four_are_live(self):
+        rows = self.rows()
+        for name in OTHERS:
+            with self.subTest(name=name):
+                self.assertTrue(rows[name][1].strip())
+                self.assertIn("removed no sooner than 1.10.0", rows[name][1])
+        for name in OEE:
+            with self.subTest(name=name):
+                self.assertIsNone(rows[name][1])
+
+    def test_utilization_says_it_is_not_an_iso_22400_kpi_and_the_others_say_no_free_source_publishes_them(self):
+        rows = self.rows()
+        self.assertTrue(rows["UTILIZATION"][1].startswith("Not an ISO 22400 KPI"))
+        for name in ("SCRAP_RATIO", "MTBF", "MTTR"):
+            with self.subTest(name=name):
+                self.assertTrue(rows[name][1].startswith("No free source publishes this KPI's formula"))
+                self.assertIn("A site that owns ISO 22400-2 can import it on the Vocabulary page.", rows[name][1])
+
+    def test_utilization_no_longer_asks_a_reader_to_verify_it_against_the_standard(self):
+        text = self.rows()["UTILIZATION"][0]
+        self.assertNotIn("Verify against the standard", text)
+        self.assertIn("not a KPI of ISO 22400-2 itself", text)
+
+    def test_the_rows_their_groups_and_their_example_metrics_stay_in_1_9(self):
+        self.assertEqual(set(OTHERS) | set(OEE), set(self.rows()))
+        groups = {r[0] for r in self.fetch("SELECT name FROM public.metric_groups WHERE standard = 'ISO 22400'")}
+        self.assertTrue({"OEE", "Quality", "Utilization", "Maintenance"} <= groups)
+
+    def test_a_deprecated_kpi_still_defines_its_concept(self):
+        rows = self.fetch("SELECT c.standard FROM public.concept_definitions c WHERE c.semantic_id = %s", (ISO + "MTBF",))
+        self.assertEqual(rows, [("ISO 22400",)])
+
+    def test_the_column_is_documented(self):
+        comment = self.fetch("SELECT col_description('public.iso22400_vocabulary'::regclass,"
+                             " (SELECT attnum FROM pg_attribute WHERE attrelid = 'public.iso22400_vocabulary'::regclass"
+                             "   AND attname = 'deprecated_reason'))")[0][0]
+        self.assertIn("NULL for a live row", comment)
+
+
 class TestTheView(SourceTestCase):
     def test_its_columns_are_the_two_it_is_fixed_to(self):
         self.assertEqual([r[0] for r in self.fetch(
@@ -188,7 +234,7 @@ class TestReplay(SourceTestCase):
         sql = MIGRATION.read_text(encoding="utf-8")
 
         def probe(cur):
-            read = "SELECT name, xmin::text, description, source FROM public.iso22400_vocabulary ORDER BY name"
+            read = "SELECT name, xmin::text, description, source, deprecated_reason FROM public.iso22400_vocabulary ORDER BY name"
             cur.execute(read)
             before = cur.fetchall()
             cur.execute(sql)
@@ -201,11 +247,13 @@ class TestReplay(SourceTestCase):
         sql = MIGRATION.read_text(encoding="utf-8")
 
         def probe(cur):
-            read = "SELECT name, description, source FROM public.iso22400_vocabulary ORDER BY name"
+            read = "SELECT name, description, source, deprecated_reason FROM public.iso22400_vocabulary ORDER BY name"
             cur.execute(read)
             before = cur.fetchall()
             cur.execute("UPDATE public.iso22400_vocabulary SET source = 'edited', description = 'edited' WHERE name = 'QUALITY'")
             cur.execute("UPDATE public.iso22400_vocabulary SET source = NULL WHERE name = 'OEE'")
+            cur.execute("UPDATE public.iso22400_vocabulary SET deprecated_reason = NULL WHERE name = 'MTBF'")
+            cur.execute("UPDATE public.iso22400_vocabulary SET deprecated_reason = 'edited' WHERE name = 'AVAILABILITY'")
             cur.execute(sql)
             cur.execute(read)
             return before, cur.fetchall()
@@ -223,7 +271,7 @@ class TestReplay(SourceTestCase):
         block = seed[start:seed.index(closing, last) + len(closing)]
 
         def probe(cur):
-            read = "SELECT name, description, source FROM public.iso22400_vocabulary ORDER BY name"
+            read = "SELECT name, description, source, deprecated_reason FROM public.iso22400_vocabulary ORDER BY name"
             cur.execute(read)
             before = cur.fetchall()
             cur.execute(block)
