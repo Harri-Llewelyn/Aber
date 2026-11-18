@@ -142,6 +142,10 @@ class BrokerLifecycle(unittest.TestCase):
             broker_clients()
         except Exception as err:  # noqa: BLE001
             skip_or_fail(f"the broker's clients cannot be read from the credential container: {err}")
+        _, switch = rest("/system_settings?key=eq.security.require_mfa_for_managers&select=value")
+        if switch and switch[0]["value"] is True:
+            skip_or_fail("Settings requires a second factor of Administrators on this stack, which a script's session "
+                         "cannot give, so it cannot issue a credential or a setup token")
         try:
             cls.admin_token = sign_in()
         except stack_sign_in.RateLimited:
@@ -242,6 +246,10 @@ class BrokerLifecycle(unittest.TestCase):
             f"SELECT public.gateway_has_broker_credential(g) FROM public.gateways g WHERE g.id = '{gid}'") == "t"
         return {**rows[0], "held": held}
 
+    def revocation_asked(self, gid):
+        """Whether a revocation was asked for this gateway and not yet confirmed: its row for the sweep to judge."""
+        return sql_text(f"SELECT count(*) FROM public.gateway_revocation_requests WHERE gateway_id = '{gid}'") != "0"
+
     def account(self, sparkplug_id):
         """The broker's client for this gateway, or None: absent, enabled or disabled."""
         return broker_clients().get(sparkplug_id)
@@ -317,12 +325,10 @@ class DashboardIssued(BrokerLifecycle):
             with self.subTest(kind=kind):
                 gid, sparkplug_id = self.new_gateway(kind)
                 self.archive(gid)
-                # Asked for nothing, so there is nothing to wait for: give the call time to arrive.
-                time.sleep(5)
+                self.assertFalse(self.revocation_asked(gid), "a revocation was asked for an account never issued")
                 self.assertIsNone(self.account(sparkplug_id), "revocation created an account that was never issued")
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
-    def test_restoring_leaves_the_account_disabled_and_the_record_says_so(self):
+    def test_restoring_leaves_the_account_disabled(self):
         gid, sparkplug_id = self.new_gateway("host")
         password = self.issue_credential(gid)
         self.archive(gid)
@@ -330,6 +336,14 @@ class DashboardIssued(BrokerLifecycle):
         self.restore(gid)
         self.assertTrue(self.account(sparkplug_id)["disabled"], "restoring re-enabled the broker account")
         self.assert_refused(sparkplug_id, password)
+
+    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
+    def test_after_a_restore_the_record_agrees_with_the_account(self):
+        gid, sparkplug_id = self.new_gateway("host")
+        self.issue_credential(gid)
+        self.archive(gid)
+        self.wait_for_account(sparkplug_id, disabled=True)
+        self.restore(gid)
         self.assert_agree(gid, sparkplug_id)
 
     def test_a_restored_gateway_is_issued_a_credential_again_and_the_account_comes_back(self):
@@ -360,7 +374,7 @@ class DashboardIssued(BrokerLifecycle):
         password = self.issue_credential(gid)
         for kind in ("third_party", "simulated", "host"):
             self.change_type(gid, kind)
-            time.sleep(3)
+            self.assertFalse(self.revocation_asked(gid), f"changing to {kind} asked for a revocation")
             self.assertFalse(self.account(sparkplug_id)["disabled"], f"changing to {kind} disabled the account")
             self.assert_accepted(sparkplug_id, password)
             self.assert_agree(gid, sparkplug_id)
@@ -431,7 +445,7 @@ class RemoteEnrolled(BrokerLifecycle):
         rest("/rpc/issue_gateway_enrollment_token", method="POST", bearer=self.admin_token,
              body={"p_gateway_id": gid, "p_ttl_minutes": 30})
         self.change_type(gid, "host")
-        time.sleep(5)
+        self.assertFalse(self.revocation_asked(gid), "a revocation was asked for an account never issued")
         self.assertIsNone(self.account(sparkplug_id))
         self.assert_agree(gid, sparkplug_id)
 
@@ -448,11 +462,10 @@ class RemoteEnrolled(BrokerLifecycle):
         rest("/rpc/issue_gateway_enrollment_token", method="POST", bearer=self.admin_token,
              body={"p_gateway_id": gid, "p_ttl_minutes": 30})
         self.archive(gid)
-        time.sleep(5)
+        self.assertFalse(self.revocation_asked(gid), "a revocation was asked for an account never issued")
         self.assertIsNone(self.account(sparkplug_id))
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
-    def test_restoring_an_enrolled_gateway_leaves_the_account_disabled_and_the_record_says_so(self):
+    def test_restoring_an_enrolled_gateway_leaves_the_account_disabled(self):
         gid, sparkplug_id = self.new_gateway("remote")
         password = self.setup_and_enrol(gid)
         self.archive(gid)
@@ -460,6 +473,14 @@ class RemoteEnrolled(BrokerLifecycle):
         self.restore(gid)
         self.assertTrue(self.account(sparkplug_id)["disabled"], "restoring re-enabled the broker account")
         self.assert_refused(sparkplug_id, password)
+
+    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
+    def test_after_a_restore_an_enrolled_gateway_s_record_agrees_with_the_account(self):
+        gid, sparkplug_id = self.new_gateway("remote")
+        self.setup_and_enrol(gid)
+        self.archive(gid)
+        self.wait_for_account(sparkplug_id, disabled=True)
+        self.restore(gid)
         self.assert_agree(gid, sparkplug_id)
 
     def test_a_restored_gateway_enrols_again_and_the_account_comes_back(self):
