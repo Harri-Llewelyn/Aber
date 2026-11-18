@@ -108,7 +108,7 @@ ends anything: Remote to another type, or another type to Remote.
 | **Among Third-party, Host and Simulated** | Unchanged | None | Unchanged. The kept copy stays. | Unchanged | None | Unchanged | One `UPDATE`. Nothing is said to have ended. |
 | **The same type saved again** | Unchanged | Unchanged | Unchanged | Unchanged | Unchanged | Unchanged | One `UPDATE` for whatever else changed. |
 | **Any type, to or from Playback** | Refused by a constraint | n/a | n/a | n/a | n/a | The drawer has no Edit Details | A refusal. The Playback gateway stays as the seed made it. |
-| **An archived gateway**, to another type | The clean-up skips an archived gateway. A Remote gateway left in `PENDING_ENROLLMENT` stays so. **[D6]** | Already cancelled | Unchanged | Already disabled | n/a | Restore Gateway | One `UPDATE` |
+| **An archived gateway**, to another type | As for a gateway that is not archived: `OFFLINE` if it becomes Remote, or leaves Remote in `PENDING_ENROLLMENT` or `AWAITING_BIRTH`. Otherwise its own word. | Already cancelled | Unchanged | Already disabled | n/a | Restore Gateway | One `UPDATE` |
 | **Remote, to another type and back**, never enrolled again | `OFFLINE` | None | `enrolled_at` is older than the stamp, so no enrolment stands. The database still counts the old one as held. **[D5]** | Disabled | The repository is kept | Set Up Gateway (primary) | One `UPDATE` each way |
 
 ## Renaming and changing the Sparkplug group
@@ -167,7 +167,6 @@ whoever fixes it has to remove the mark and this text with it.
 | **[D3]** | *The Gateways help says restoring a gateway brings back its deploy key, which it does not.* The forge sweep removes the key on archive and has nothing to register on restore. The Restore dialog says so correctly. [An appliance that is lost, stolen or scrapped](remote-gateways.md#an-appliance-that-is-lost-stolen-or-scrapped) says the same as the help. | `test_forge_sweep.py`, and the sweep's own source |
 | **[D4]** | *Issuing a setup token for an archived gateway succeeds and moves it to Awaiting setup.* Credential issue refuses an archived gateway. Redeeming the token is refused, so nothing can enrol. | `test_gateway_lifecycle.py`, expected to fail |
 | **[D5]** | *`gateway_has_broker_credential()` counts a Remote gateway's enrolment after the credential was revoked.* A Remote gateway changed away and back reads as holding a credential. Leaving it again asks for a second revocation, and the Edit dialog says it ends a credential the gateway does not hold. | `test_gateway_lifecycle.py`, expected to fail |
-| **[D6]** | *Changing the type of an archived gateway leaves the old type's status behind.* The clean-up skips an archived gateway. The Edit dialog is not offered for one, so only a direct write reaches it. | `test_gateway_lifecycle.py`, expected to fail |
 | **[D7]** | *A Remote gateway whose appliance was rebuilt has no Re-issue Setup in the drawer.* [Re-issuing, and what it invalidates](remote-gateways.md#6-re-issuing-and-what-it-invalidates) says to re-issue for a replaced appliance. The drawer offers it only while the gateway waits for its first birth, or after its enrolment was revoked. | `gatewayTypeChange.test.jsx`, which holds the drawer's rule |
 
 ## How the code is held to this page

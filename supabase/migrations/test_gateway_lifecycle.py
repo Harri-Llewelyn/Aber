@@ -697,7 +697,6 @@ class ChangingTheType(Lifecycle):
         self.change_type(gid, "remote")
         self.assertEqual(self.revocations_asked(sparkplug_id), asked, "an archived gateway's credential was ended when it was archived")
 
-    @known_bug("Changing the type of an archived gateway leaves the old type's status behind")
     def test_an_archived_remote_gateway_changed_to_host_reads_offline_when_restored(self):
         gid, _ = self.gateway("remote", status="PENDING_ENROLLMENT", token=True)
         self.archive(gid)
