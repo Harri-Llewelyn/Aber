@@ -3997,6 +3997,9 @@ next request.
 | `metric_catalog` | `metric_catalog_update_privileged` | UPDATE | A | yes | Changes a catalogued metric |
 | `metric_groups` | `metric_groups_insert_privileged` | INSERT | A | yes | Adds a metric group |
 | `metric_groups` | `metric_groups_update_privileged` | UPDATE | A | yes | Changes a metric group |
+| `metric_semantic_ids` | `metric_semantic_ids_delete_privileged` | DELETE | A | yes | Removes a further semantic id of a metric |
+| `metric_semantic_ids` | `metric_semantic_ids_insert_privileged` | INSERT | A | yes | Adds a further semantic id to a metric |
+| `metric_semantic_ids` | `metric_semantic_ids_update_privileged` | UPDATE | A | yes | Changes the type or source of a further semantic id |
 | `platform_alerts` | `platform_alerts_select_authenticated` | SELECT | A | no | A read, which the switch never refuses |
 | `playback_jobs` | `playback_jobs_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |
 | `playback_worker_status` | `playback_worker_status_select_privileged` | SELECT | A, M, Au | no | A read, which the switch never refuses |

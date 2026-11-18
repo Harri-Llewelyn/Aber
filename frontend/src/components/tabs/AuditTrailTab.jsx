@@ -477,6 +477,7 @@ const SECTION_ICONS = {
   APP:                IconGlobe,
   SCHEMA:             IconClipboardList,
   METRIC:             IconTag,
+  'METRIC SEMANTIC ID': IconTag,
   SETTING:            IconSettings,
   RECORDING:          IconRecord,
   CAPTURE:            IconFileText,
@@ -1075,6 +1076,8 @@ export function AuditTrailTab({ userRole, showToast }) {
   const [cells, setCells]             = useState([])
   const [areas, setAreas]             = useState([])
   const [schemas, setSchemas] = useState([])
+  // The metrics, which name the lane a further semantic id is filed in: its entity is the metric.
+  const [metrics, setMetrics] = useState([])
   // Empty for a role that may not ask, which is also a role that cannot see the lane.
   const [userAccounts, setUserAccounts] = useState([])
   // Principal id -> `machine_principals` row, for the same roles as the accounts above.
@@ -1114,9 +1117,11 @@ export function AuditTrailTab({ userRole, showToast }) {
       // The names Administrators gave the machine identities they created on the Access Control
       // page. Same readers as the accounts above, same fallback.
       tolerated(() => api.listMachinePrincipalNames()),
+      tolerated(() => api.get('/api/v1/metric-catalog')),
     ])
-      .then(([d, g, c, sc, ar, us, mp]) => {
+      .then(([d, g, c, sc, ar, us, mp, mc]) => {
         setDevices(d); setGateways(g); setCells(c); setSchemas(sc || []); setAreas(ar || [])
+        setMetrics(Array.isArray(mc) ? mc : [])
         setUserAccounts(us || [])
         setMachinePrincipals(mp instanceof Map ? mp : new Map())
         // Subtracted from the constant, never listed again. The required three landed or this
@@ -1144,6 +1149,7 @@ export function AuditTrailTab({ userRole, showToast }) {
     for (const c of cells)    m.set(c.cell_id, { name: c.cell_name })
     for (const g of gateways) m.set(g.gateway_id, { name: g.gateway_name })
     for (const d of devices)  m.set(d.asset_id, { name: d.asset_name })
+    for (const mc of metrics) if (mc?.metric_uuid) m.set(mc.metric_uuid, { name: mc.name })
     for (const sc of schemas) {
       const id = sc.id || sc.schema_uuid
       if (id) m.set(id, {
@@ -1168,7 +1174,7 @@ export function AuditTrailTab({ userRole, showToast }) {
       if (row?.name && !m.has(id)) m.set(id, { name: row.name })
     }
     return m
-  }, [areas, cells, gateways, devices, schemas, userAccounts, machinePrincipals])
+  }, [areas, cells, gateways, devices, metrics, schemas, userAccounts, machinePrincipals])
 
   /**
    * The same thing as one string per id, which is what the search, the export, the drawer title and
