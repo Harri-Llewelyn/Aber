@@ -949,9 +949,11 @@ paths:
         reading whose value differs from the one before, with its time. A refresh of an unchanged
         value is not returned. The value in force at `from_ts` is `carried_string` or
         `carried_bool`. **`change_cap`** is more than `max_changes` changes, and **`reading_cap`**
-        more than 20,000 readings of one series in the window. For both, `marked_ts` and
-        `marked_values` name each bucket of `bucket` that held more than one value, and how many.
-        **`retention`**: the historian has dropped raw readings of the series inside the window.
+        more than 20,000 readings of one series in the window. **`retention`**: the historian has
+        dropped raw readings of the series inside the window. For all three, `marked_ts` and
+        `marked_values` name each bucket of `bucket` that held more than one value, and how many: a
+        bucket older than raw is marked from the state rollups (`0313`), which say only that it did,
+        so its count is null.
         Chart the last three from `/rest/v1/rpc/telemetry_carried` instead.
 
         Only text (`val_string`) and flag (`val_bool`) values are compared. `SECURITY INVOKER`, so
@@ -8322,8 +8324,8 @@ components:
         carried_string: { type: string, nullable: true, description: 'For `changes`: the text in force at `from_ts`, from before the window.' }
         carried_bool: { type: boolean, nullable: true, description: 'For `changes`: the flag in force at `from_ts`, from before the window.' }
         n_changes: { type: integer, nullable: true, description: 'How many changes the window holds; null for `reading_cap` and `retention`.' }
-        marked_ts: { type: array, nullable: true, items: { type: string, format: date-time }, description: 'Past a cap: the start of each bucket that held more than one value.' }
-        marked_values: { type: array, nullable: true, items: { type: integer }, description: 'How many values each of `marked_ts` held.' }
+        marked_ts: { type: array, nullable: true, items: { type: string, format: date-time }, description: 'Past a cap or raw retention: the start of each bucket that held more than one value.' }
+        marked_values: { type: array, nullable: true, items: { type: integer, nullable: true }, description: 'How many values each of `marked_ts` held; null for a bucket older than raw, which held more than one.' }
         raw_from: { type: string, format: date-time, nullable: true, description: 'The oldest raw reading the historian holds.' }
 
     TelemetryHourOfDayRow:
