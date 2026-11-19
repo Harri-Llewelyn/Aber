@@ -2,9 +2,9 @@
 --
 -- A read of public.telemetry or a rollup, newest first with a LIMIT, sent the historian its WHERE and
 -- nothing else. postgres_fdw sends ORDER BY and LIMIT only when its row estimate says the LIMIT cuts,
--- and the foreign tables have no statistics, so it estimates a page's read at one row: every row
--- inside the time bound crossed and was sorted here. Measured with one week at 1 Hz, a 500-row page
--- of one metric brought 604,800 rows across.
+-- and the foreign tables have no statistics, so it estimates a page naming a device at one to four
+-- rows: every row inside the time bound crossed and was sorted here. Measured with one week at 1 Hz, a
+-- 500-row page of one metric brought 604,800 rows across.
 --
 -- telemetry_page() and telemetry_rollup_page() read one page as the dashboard, i3X and the AAS bundle
 -- asked for it: newest first, at most p_limit rows after p_offset, of one device or every device, one
@@ -20,7 +20,8 @@
 -- The rows, their order and the page's boundaries are the read's own. Ties at one instant come in
 -- device and metric order. A window that holds fewer rows than the page is read whole.
 --
--- Both run as the caller, SECURITY INVOKER, as the telemetry views and telemetry_carried() do.
+-- telemetry_page_start() makes the first two, for both. All three run as the caller, SECURITY INVOKER,
+-- as the telemetry views and telemetry_carried() do.
 --
 -- Reasoning: supabase/README.md, "A page of readings brings across only the rows it returns (0315)".
 -- Idempotent.
