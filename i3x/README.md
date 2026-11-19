@@ -481,22 +481,23 @@ the series, so last month comes back as per-minute buckets rather than as nothin
   carried from a bucket into maps at raw instants is a sampled value, not an aggregate, and those
   maps are not called buckets. Maps at bucket instants are buckets, and the 206 says so.
 
-**Every read depends on a small LIMIT.** `public.telemetry` is a `postgres_fdw` foreign table with
-no statistics. The planner ships the `WHERE`, `ORDER BY` and `LIMIT` to the historian whole only
-while the LIMIT is small. Measured on PostgreSQL 17 with the columns these reads select, that holds
-up to 6338 rows. From 6339 up it ships only the `WHERE`, then fetches every matching row and sorts
-them locally. Turning on `use_remote_estimate` would fix the plan but costs 4 to 80 ms of planning
-on every telemetry read, so it stays off. The rollups are foreign tables of the same kind, and a
-rollup read selects columns of the same types (`bucket`, `metric_name` and the three `last_*`), so
-it is held to the same bounds; the threshold was measured on `telemetry`. Two consequences:
-- `I3X_HISTORY_MAX_ROWS` defaults to 1000. Raised past about 6300, each window read fetches its
-  whole window. A window's raw and rollup reads share that limit.
-- The read before the window has no lower time bound, so it asks for at most 1000 rows
-  (`HISTORY_SEED_MAX_ROWS`) whatever the limit, raw and bucketed together. Past the threshold it
-  would fetch the device's entire history.
+**Each read brings across only its rows.** The reads go through `telemetry_page()` and
+`telemetry_rollup_page()` (`supabase/migrations/0315_*.sql`), never the views. The historian sends
+the rows a read asks for, and any rows that share the last one's instant. A read of the views would
+bring every row inside its time bounds across instead. `public.telemetry` and the rollups are
+`postgres_fdw` foreign tables with no statistics. postgres_fdw sends a `LIMIT` and an `ORDER BY`
+only when its row estimate says the `LIMIT` cuts, and it estimates a read naming a device at one to
+four rows. Measured with a week of one metric at 1 Hz, a metric's window of 1,001 rows brought
+604,800 across through the view and 1,001 through `telemetry_page()`. The table is in
+`supabase/README.md`, "A page of readings brings across only the rows it returns (0315)". So:
+- `I3X_HISTORY_MAX_ROWS` defaults to 1000, and a window's raw and rollup reads share it. A higher
+  limit brings more rows across, and no more than it asks for.
+- The read before the window has no lower time bound. It asks for at most 1000 rows
+  (`HISTORY_SEED_MAX_ROWS`) whatever the limit, raw and bucketed together. It looks only for each
+  metric's last value.
 
-The AAS export's keyset pages (`supabase/functions/_shared/aas/bundle.ts`, 5000 rows) are under
-it too.
+The AAS export's keyset pages (`supabase/functions/_shared/aas/bundle.ts`, 5000 rows) read through
+them too.
 
 ### Subscriptions
 
