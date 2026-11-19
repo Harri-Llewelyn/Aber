@@ -2,13 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { api, telemetryLowerBound, TELEMETRY_DEFAULT_WINDOW_MINUTES } from '../api';
 
 /**
- * The property under test is "never unbounded", not "the default is 60". `public.telemetry` is a
- * postgres_fdw projection: the wrapper pushes WHERE down, and LIMIT only for small limits, so a
- * query with no lower time bound can drag an asset's whole history across the wrapper.
- * `gte('time', ...)` must be present on every path out of queryTelemetry, including the ones no UI code takes today.
+ * The property under test is "never unbounded", not "the default is 60". A page of `public.telemetry`
+ * is read through telemetry_page() (0315), which counts every row inside its bounds on the
+ * historian first, so a query with no lower time bound would count an asset's whole history.
+ * `p_from` must be present on every path out of queryTelemetry, including the ones no UI code takes
+ * today, and the latest route's `gte('time', ...)` on its own.
  */
 
-const calls = { gte: [], lte: [], eq: [], in: [], range: [] };
+const calls = { gte: [], lte: [], eq: [], in: [], range: [], rpc: [] };
 
 vi.mock('../lib/supabaseClient', () => {
   const builder = {
@@ -24,10 +25,16 @@ vi.mock('../lib/supabaseClient', () => {
     range: vi.fn((...a) => { calls.range.push(a); return Promise.resolve({ data: [], error: null }); }),
     then: vi.fn((resolve) => resolve({ data: [], error: null }))
   };
-  return { supabase: { from: vi.fn(() => builder), functions: { invoke: vi.fn() } } };
+  const rpc = vi.fn((fn, args) => { calls.rpc.push([fn, args]); return Promise.resolve({ data: [], error: null }); });
+  return { supabase: { from: vi.fn(() => builder), rpc, functions: { invoke: vi.fn() } } };
 });
 
-const timeBounds = () => calls.gte.filter(([col]) => col === 'time');
+// A page read's lower bound, or the latest route's.
+const timeBounds = () => [
+  ...calls.rpc.filter(([, args]) => args.p_from).map(([, args]) => ['time', args.p_from]),
+  ...calls.gte.filter(([col]) => col === 'time')
+];
+const upperBounds = () => calls.rpc.filter(([, args]) => args.p_to).map(([, args]) => args.p_to);
 
 beforeEach(() => {
   calls.gte.length = 0;
@@ -35,6 +42,7 @@ beforeEach(() => {
   calls.eq.length = 0;
   calls.in.length = 0;
   calls.range.length = 0;
+  calls.rpc.length = 0;
 });
 
 describe('telemetryLowerBound', () => {
@@ -104,7 +112,7 @@ describe('queryTelemetry always bounds time', () => {
 
   it('bounds a query carrying only an upper bound', async () => {
     await api.get(`/api/v1/telemetry?asset_id=${key}&to=2026-03-01T12:00:00.000Z`);
-    expect(calls.lte.some(([col]) => col === 'time')).toBe(true);
+    expect(upperBounds()).toEqual(['2026-03-01T12:00:00.000Z']);
     expect(timeBounds()).toHaveLength(1);
   });
 
