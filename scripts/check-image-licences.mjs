@@ -134,7 +134,7 @@ export const FLOATING_HELD = new Set(['python:3.13-slim']);
 
 /**
  * The bases in `dockerfiles` ({ path, text }) that float and are not held, and each held one no
- * Dockerfile names any more. Images built here and ARG-resolved references are not bases.
+ * Dockerfile names any more. Images built here, and references no ARG default resolves, are skipped.
  */
 export function floatingBases(dockerfiles, held = FLOATING_HELD) {
   const problems = [];
