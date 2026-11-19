@@ -244,7 +244,7 @@ A bucket shows only the last value in it. So the page also marks each bucket tha
 
 Buckets also make a flag's key less exact. A spell shorter than a bucket can be missed, so the shares and times are counted over buckets. The key then counts changes between buckets only, and says **at least**.
 
-To see every change again, zoom in, or choose a shorter window.
+To see every change again, zoom in, or choose a shorter window that the raw readings still hold.
 
 **Marks older than the raw readings reach back only so far.** The historian builds them from the raw readings. It started when it was upgraded to Aber 1.9, or installed, and reached back as far as the raw readings did then, 14 days by default. A bucket from before that has no mark, even if it held more than one value. If your site needs every change for longer, whoever installs Aber can keep the raw readings longer, with the install setting `timescaledb.retention.retainFor`. They then take more disk space.
 
