@@ -39,7 +39,6 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg2
 import psycopg2.errors
-from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
@@ -63,18 +62,32 @@ ROLLUP_COLUMNS = (
 A, B = "dev10000000000000000315a", "dev20000000000000000315b"
 # Well in the past, on the hour.
 T0 = datetime(2026, 1, 5, 10, 0, tzinfo=timezone.utc)
-RAW = ('"time", asset_id, metric_name, val_double, val_string, val_bool')
-BUCKET = ("bucket, asset_id, metric_name, avg_double, min_double, max_double, last_double,"
-          " last_string, last_bool, n_double, n_rows")
-ROLLUP_VIEWS = {"1m": "telemetry_1m", "5m": "telemetry_5m", "1h": "telemetry_1h"}
+PAGE_READ = ('SELECT "time", asset_id, metric_name, val_double, val_string, val_bool'
+             " FROM public.telemetry_page(%s, %s, %s, %s, %s, %s, %s);")
+ROLLUP_PAGE_READ = ("SELECT bucket, asset_id, metric_name, avg_double, min_double, max_double, last_double,"
+                    " last_string, last_bool, n_double, n_rows"
+                    " FROM public.telemetry_rollup_page(%s, %s, %s, %s, %s, %s, %s, %s);")
 # A read of the view as the readers made one, an omitted bound filtering nothing.
-VIEW_READ = sql.SQL(
-    "SELECT {columns} FROM {relation} t"
+VIEW_READ = (
+    'SELECT t."time", t.asset_id, t.metric_name, t.val_double, t.val_string, t.val_bool FROM public.telemetry t'
     " WHERE (%(asset)s::text IS NULL OR t.asset_id = %(asset)s)"
     "   AND (%(metric)s::text IS NULL OR t.metric_name = %(metric)s)"
-    "   AND (%(start)s::timestamptz IS NULL OR t.{at} >= %(start)s)"
-    "   AND (%(end)s::timestamptz IS NULL OR t.{at} < %(end)s OR (%(inclusive)s AND t.{at} = %(end)s))"
-    " ORDER BY t.{at} DESC, t.asset_id, t.metric_name LIMIT %(limit)s OFFSET %(offset)s;")
+    '   AND (%(start)s::timestamptz IS NULL OR t."time" >= %(start)s)'
+    '   AND (%(end)s::timestamptz IS NULL OR t."time" < %(end)s OR (%(inclusive)s AND t."time" = %(end)s))'
+    ' ORDER BY t."time" DESC, t.asset_id, t.metric_name LIMIT %(limit)s OFFSET %(offset)s;')
+# The same of the three rollup views, the one asked for chosen by its resolution.
+ROLLUP_VIEW_READ = (
+    "SELECT t.bucket, t.asset_id, t.metric_name, t.avg_double, t.min_double, t.max_double, t.last_double,"
+    "       t.last_string, t.last_bool, t.n_double, t.n_rows"
+    "  FROM (SELECT '1m' AS r, v.* FROM public.telemetry_1m v UNION ALL"
+    "        SELECT '5m', v.* FROM public.telemetry_5m v UNION ALL"
+    "        SELECT '1h', v.* FROM public.telemetry_1h v) t"
+    " WHERE t.r = %(resolution)s"
+    "   AND (%(asset)s::text IS NULL OR t.asset_id = %(asset)s)"
+    "   AND (%(metric)s::text IS NULL OR t.metric_name = %(metric)s)"
+    "   AND (%(start)s::timestamptz IS NULL OR t.bucket >= %(start)s)"
+    "   AND (%(end)s::timestamptz IS NULL OR t.bucket < %(end)s OR (%(inclusive)s AND t.bucket = %(end)s))"
+    " ORDER BY t.bucket DESC, t.asset_id, t.metric_name LIMIT %(limit)s OFFSET %(offset)s;")
 
 
 def get_connection():
@@ -142,31 +155,25 @@ class PageBase(unittest.TestCase):
 
     # ---- the two reads -----------------------------------------------------------------------
     def page(self, asset=None, metric=None, start=None, end=None, inclusive=True, limit=500, offset=0):
-        self.cur.execute(f"SELECT {RAW} FROM public.telemetry_page(%s, %s, %s, %s, %s, %s, %s);",
-                         (asset, metric, start, end, inclusive, limit, offset))
+        self.cur.execute(PAGE_READ, (asset, metric, start, end, inclusive, limit, offset))
         return self.cur.fetchall()
 
     def view(self, asset=None, metric=None, start=None, end=None, inclusive=True, limit=500, offset=0):
         """What a read of public.telemetry returned for the same bounds, its ties in device and metric order."""
-        self.cur.execute(VIEW_READ.format(columns=sql.SQL(RAW), relation=sql.Identifier("public", "telemetry"),
-                                          at=sql.Identifier("time")),
-                         {"asset": asset, "metric": metric, "start": start, "end": end,
-                          "inclusive": inclusive, "limit": limit, "offset": offset})
+        self.cur.execute(VIEW_READ, {"asset": asset, "metric": metric, "start": start, "end": end,
+                                     "inclusive": inclusive, "limit": limit, "offset": offset})
         return self.cur.fetchall()
 
     def rollup_page(self, resolution, asset=None, metric=None, start=None, end=None, inclusive=True,
                     limit=500, offset=0):
-        self.cur.execute(f"SELECT {BUCKET} FROM public.telemetry_rollup_page(%s, %s, %s, %s, %s, %s, %s, %s);",
-                         (resolution, asset, metric, start, end, inclusive, limit, offset))
+        self.cur.execute(ROLLUP_PAGE_READ, (resolution, asset, metric, start, end, inclusive, limit, offset))
         return self.cur.fetchall()
 
     def rollup_view(self, resolution, asset=None, metric=None, start=None, end=None, inclusive=True,
                     limit=500, offset=0):
-        self.cur.execute(VIEW_READ.format(columns=sql.SQL(BUCKET),
-                                          relation=sql.Identifier("public", ROLLUP_VIEWS[resolution]),
-                                          at=sql.Identifier("bucket")),
-                         {"asset": asset, "metric": metric, "start": start, "end": end,
-                          "inclusive": inclusive, "limit": limit, "offset": offset})
+        self.cur.execute(ROLLUP_VIEW_READ, {"resolution": resolution, "asset": asset, "metric": metric,
+                                            "start": start, "end": end, "inclusive": inclusive,
+                                            "limit": limit, "offset": offset})
         return self.cur.fetchall()
 
     def start(self, relation, asset=None, metric=None, start=None, end=None, inclusive=True, rows=1):
