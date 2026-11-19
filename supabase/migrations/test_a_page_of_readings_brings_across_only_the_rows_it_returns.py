@@ -295,15 +295,15 @@ class ABadPageIsRefusedBeforeAnyRead(PageBase):
         self.cur.execute("DROP TABLE timescale.telemetry CASCADE;"
                          "DROP TABLE timescale.telemetry_1m CASCADE;")
 
-    def refused(self, sql, args):
+    def refused(self, statement, args):
         self.cur.execute("SAVEPOINT bad;")
         with self.assertRaises(psycopg2.errors.InvalidParameterValue) as caught:
-            self.cur.execute(sql, args)
+            self.cur.execute(statement, args)
         self.cur.execute("ROLLBACK TO SAVEPOINT bad;")
         return str(caught.exception)
 
     def test_each_refusal_names_what_is_wrong(self):
-        for sql, args, phrase in (
+        for statement, args, phrase in (
             ("SELECT * FROM public.telemetry_page(%s, NULL, NULL, NULL, true, %s, 0);", (A, 0), "p_limit 0"),
             ("SELECT * FROM public.telemetry_page(%s, NULL, NULL, NULL, true, %s, 0);", (A, None), "p_limit"),
             ("SELECT * FROM public.telemetry_page(%s, NULL, NULL, NULL, true, 10, %s);", (A, -1), "p_offset -1"),
@@ -313,8 +313,8 @@ class ABadPageIsRefusedBeforeAnyRead(PageBase):
             ("SELECT public.telemetry_page_start(%s, %s, NULL, NULL, NULL, true, 1);", ("assets", A), "not telemetry"),
             ("SELECT public.telemetry_page_start('telemetry', %s, NULL, NULL, NULL, true, %s);", (A, 0), "first row"),
         ):
-            with self.subTest(sql=sql, args=args):
-                self.assertIn(phrase, self.refused(sql, args))
+            with self.subTest(statement=statement, args=args):
+                self.assertIn(phrase, self.refused(statement, args))
 
 
 class WhoMayCallThem(PageBase):
