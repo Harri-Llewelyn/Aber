@@ -2682,21 +2682,41 @@ def _relation_columns() -> dict:
     return columns
 
 
+def _rpc_columns() -> dict:
+    """
+    `rpc/<name>` for every `public` function declared RETURNS TABLE, replaying the live migrations
+    in filename order: its arguments, which a read passes as parameters, and the columns of its
+    result, which `select` names. The last declaration wins, as CREATE OR REPLACE does.
+    """
+    columns: dict = {}
+    head = re.compile(r"^CREATE OR REPLACE FUNCTION public\.(\w+)\(", re.M)
+    for path in sorted(MIGRATIONS_DIR.glob("[0-9]*.sql")):
+        sql = path.read_text(encoding="utf-8")
+        for m in head.finditer(sql):
+            args, end = _split_top_level(sql, m.end())
+            result = re.match(r"\)\s*RETURNS TABLE\s*\(", sql[end:])
+            if result:
+                items, _ = _split_top_level(sql, end + result.end())
+                columns[f"rpc/{m.group(1)}"] = {item.split()[0].strip('"') for item in args + items}
+    return columns
+
+
 _POSTGREST_RESERVED = {"select", "order", "limit", "offset", "and", "or", "on_conflict", "columns"}
 
 
 class ColumnCheckingPostgrest:
     """
-    Answers like PostgREST over the migrated schema: a read naming a column the relation lacks
-    fails as `PostgrestClient.get` fails on PostgREST's 400, and rows come back projected onto
-    `select`. Seeded rows are held to the same columns, so a fixture cannot invent one either.
+    Answers like PostgREST over the migrated schema: a read naming a column the relation lacks, or
+    one a function neither takes nor returns, fails as `PostgrestClient.get` fails on PostgREST's
+    400, and rows come back projected onto `select`. Seeded rows are held to the same columns, so a
+    fixture cannot invent one either.
     """
 
     COLUMNS = None
 
     def __init__(self, rows=None, bearer="Bearer test"):
         if ColumnCheckingPostgrest.COLUMNS is None:
-            ColumnCheckingPostgrest.COLUMNS = _relation_columns()
+            ColumnCheckingPostgrest.COLUMNS = {**_relation_columns(), **_rpc_columns()}
         self.bearer = bearer
         self.rows = rows or {}
         self.calls = []
@@ -2844,7 +2864,7 @@ class TestAddressSpaceReads(unittest.TestCase):
             i3x_service._read_rows(pg, relation, "dev1", "2026-01-02T00:00:00Z", 10,
                                    lower="2026-01-01T00:00:00Z", metric="Temp")
             i3x_service._read_rows(pg, relation, "dev1", "2026-01-02T00:00:00Z", 10, inclusive=False)
-        self.assertEqual([relation for relation, _ in pg.calls],
+        self.assertEqual([_read_relation(path, params) for path, params in pg.calls],
                          ["telemetry_horizons"] + [r for r in relations for _ in (1, 2)])
 
     def test_a_device_is_filed_under_its_resolved_cell(self):
@@ -4403,6 +4423,16 @@ class TestRequestValidation(unittest.TestCase):
 # History: a metric's samples, a device's map snapshots, and a 206 whenever a limit cuts either.
 # -------------------------------------------------------------------------------------------------
 ROLLUP_RELATIONS = ("telemetry_1m", "telemetry_5m", "telemetry_1h")
+PAGE_READS = ("rpc/telemetry_page", "rpc/telemetry_rollup_page")
+
+
+def _read_relation(path, params) -> str:
+    """The relation a read reads: a page read's (0315), by its p_resolution for a rollup's, or its own."""
+    if path == "rpc/telemetry_page":
+        return "telemetry"
+    if path == "rpc/telemetry_rollup_page":
+        return "telemetry_" + params["p_resolution"]
+    return path
 
 
 class TelemetryPostgrest(ColumnCheckingPostgrest):
@@ -4410,7 +4440,8 @@ class TelemetryPostgrest(ColumnCheckingPostgrest):
     ColumnCheckingPostgrest that also answers `telemetry`, `telemetry_latest` and the rollups as
     PostgREST would: filtered by asset, metric and time (a rollup's `bucket`), ordered, limited,
     then projected onto `select`. `telemetry_latest` is the newest telemetry row of each (asset,
-    metric), and `telemetry_horizons` each relation's oldest row, as the views are.
+    metric), and `telemetry_horizons` each relation's oldest row, as the views are. The page reads
+    answer as 0315 declares them: newest first, ties in device and metric order.
     """
 
     def __init__(self, telemetry=(), rows=None, rollups=None):
@@ -4438,6 +4469,8 @@ class TelemetryPostgrest(ColumnCheckingPostgrest):
         params = dict(params or {})
         if relation == "telemetry_horizons":
             return [{c: row[c] for c in params["select"].split(",")} for row in self.horizons()]
+        if relation in PAGE_READS:
+            return self.page(_read_relation(relation, params), params)
         if relation not in ("telemetry", "telemetry_latest") + ROLLUP_RELATIONS:
             return answer
         column = "bucket" if relation in ROLLUP_RELATIONS else "time"
@@ -4475,6 +4508,26 @@ class TelemetryPostgrest(ColumnCheckingPostgrest):
             )
         if "limit" in params:
             rows = rows[: int(params["limit"])]
+        return [{c: row.get(c) for c in params["select"].split(",")} for row in rows]
+
+    def page(self, relation, params):
+        """One page of `relation` newest first, from telemetry_page()'s or telemetry_rollup_page()'s arguments."""
+        column = "bucket" if relation in ROLLUP_RELATIONS else "time"
+        lower = self._instant(params["p_from"]) if "p_from" in params else None
+        upper = self._instant(params["p_to"]) if "p_to" in params else None
+        inclusive = params.get("p_to_inclusive", "true") == "true"
+
+        def keep(row):
+            at = self._instant(row[column])
+            return (params.get("p_asset_id") in (None, row["asset_id"])
+                    and params.get("p_metric_name") in (None, row["metric_name"])
+                    and (lower is None or at >= lower)
+                    and (upper is None or (at <= upper if inclusive else at < upper)))
+
+        rows = sorted((r for r in self.rows[relation] if keep(r)), key=lambda r: (r["asset_id"], r["metric_name"]))
+        rows.sort(key=lambda r: self._instant(r[column]), reverse=True)
+        first = int(params.get("p_offset", "0"))
+        rows = rows[first: first + int(params.get("p_limit", "500"))]
         return [{c: row.get(c) for c in params["select"].split(",")} for row in rows]
 
 
@@ -4546,11 +4599,14 @@ class _HistoryCase(unittest.TestCase):
         return req.result[0]["result"]
 
     def reads(self, pg) -> list:
-        """The reads after the request's one read of telemetry_horizons, which comes first."""
+        """
+        The reads after the request's one read of telemetry_horizons, which comes first, each named
+        by the relation it reads (_read_relation()).
+        """
         relations = [relation for relation, _ in pg.calls]
         self.assertEqual(relations[:1], ["telemetry_horizons"])
         self.assertEqual(relations.count("telemetry_horizons"), 1)
-        return pg.calls[1:]
+        return [(_read_relation(path, params), params) for path, params in pg.calls[1:]]
 
     def assertCut(self, req, element_id, *phrases):
         """A 206 on the response naming `element_id`, and one on its item saying each phrase."""
@@ -4640,8 +4696,8 @@ class TestHistoryWindow(_HistoryCase):
                                 "endTime": "2026-09-28T11:00:00.5Z"}, _telemetry((_at("09:00"), "Temp", 1.0)))
         self.assertEqual(req.status, 200)
         _, params = pg.calls[-1]
-        self.assertEqual(params["time"], "gte.2026-09-28T10:00:00.000000Z")
-        self.assertEqual(params["and"], "(time.lte.2026-09-28T11:00:00.500000Z)")
+        self.assertEqual(params["p_from"], "2026-09-28T10:00:00.000000Z")
+        self.assertEqual(params["p_to"], "2026-09-28T11:00:00.500000Z")
 
 
 class TestHistorySeries(_HistoryCase):
@@ -4684,15 +4740,15 @@ class TestHistorySeries(_HistoryCase):
         ]})
         self.assertEqual(len(self.reads(pg)), 1)
         relation, params = self.reads(pg)[0]
-        self.assertEqual((relation, params["asset_id"], params["metric_name"]),
-                         ("telemetry", f"eq.{SID}", "eq.Temp"))
+        self.assertEqual((relation, params["p_asset_id"], params["p_metric_name"]),
+                         ("telemetry", SID, "Temp"))
 
     def test_a_metric_id_splits_at_the_first_slash(self):
         rows = _telemetry((_at("10:10"), "Controller/EXECUTION", "ACTIVE"), (_at("10:10"), "Temp", 1.0))
         req, pg = self.history({"elementIds": [f"{SID}/Controller/EXECUTION"]}, rows,
                                ((SID, ("Controller/EXECUTION", "Temp")),))
         self.assertEqual([v["value"] for v in self.only(req)["values"]], ["ACTIVE"])
-        self.assertEqual(self.reads(pg)[0][1]["metric_name"], "eq.Controller/EXECUTION")
+        self.assertEqual(self.reads(pg)[0][1]["p_metric_name"], "Controller/EXECUTION")
 
     def test_a_device_is_a_map_per_instant_carried_forward_from_before_the_window(self):
         req, pg = self.history({"elementIds": [SID]}, self.ROWS, self.DEVICE)
@@ -4710,20 +4766,18 @@ class TestHistorySeries(_HistoryCase):
         # The window, the newest row per metric, and the rows just before the window.
         reads = self.reads(pg)
         self.assertEqual([relation for relation, _ in reads], ["telemetry", "telemetry_latest", "telemetry"])
-        self.assertEqual(reads[2][1]["time"], "lt.2026-09-28T10:00:00.000000Z")
-        # Unbounded below, so only a filter and an order postgres_fdw ships keep it cheap.
-        self.assertEqual(reads[2][1]["order"], "time.desc")
+        self.assertEqual((reads[2][1]["p_to"], reads[2][1]["p_to_inclusive"]),
+                         ("2026-09-28T10:00:00.000000Z", "false"))
+        # Unbounded below, so its row limit is what keeps it small.
+        self.assertNotIn("p_from", reads[2][1])
 
     def test_the_read_before_the_window_asks_for_few_rows_whatever_the_limit(self):
-        # postgres_fdw ships its LIMIT only up to 6338 rows (README.md -> History); past that, this
-        # read, unbounded below, would fetch the device's whole history.
+        # It only looks for each metric's last value, and has no lower bound.
         with mock.patch.object(i3x_service, "HISTORY_MAX_ROWS", 20000):
             _, pg = self.history({"elementIds": [SID]}, self.ROWS, self.DEVICE)
         reads = self.reads(pg)
-        self.assertEqual(reads[0][1]["limit"], "20001")
-        self.assertEqual(reads[2][1]["limit"], str(i3x_service.HISTORY_SEED_MAX_ROWS))
-        self.assertLessEqual(i3x_service.HISTORY_SEED_MAX_ROWS, 6338)
-        self.assertLessEqual(i3x_service.HISTORY_MAX_ROWS + 1, 6338)
+        self.assertEqual(reads[0][1]["p_limit"], "20001")
+        self.assertEqual(reads[2][1]["p_limit"], str(i3x_service.HISTORY_SEED_MAX_ROWS))
 
     def test_a_device_quiet_through_the_window_costs_one_read(self):
         rows = _telemetry((_at("09:50"), "Temp", 20.0), (_at("11:30"), "Temp", 23.0))
@@ -4796,7 +4850,7 @@ class TestHistoryIsNeverSilentlyCut(_HistoryCase):
         self.assertEqual([v["value"] for v in self.only(req)["values"]], [5.0, 4.0, 3.0])
         self.assertCut(req, f"{SID}/Temp", "this request's limit of 3 rows",
                        "nothing at or before 2026-09-28T10:20:00.000000Z")
-        self.assertEqual(self.reads(pg)[0][1]["limit"], "4", "one row past the limit shows there is more")
+        self.assertEqual(self.reads(pg)[0][1]["p_limit"], "4", "one row past the limit shows there is more")
 
     def test_resuming_between_millisecond_samples_returns_the_older_one(self):
         # validate.py check 12y's shape: two samples two seconds apart, stamped to the millisecond
@@ -4814,12 +4868,12 @@ class TestHistoryIsNeverSilentlyCut(_HistoryCase):
         self.assertIsNone(req.detail)
         self.assertEqual([(v["timestamp"], v["value"]) for v in self.only(req)["values"]],
                          [("2026-11-04T09:27:01.044Z", 21.0)])
-        self.assertEqual(self.reads(pg)[0][1]["and"], "(time.lte.2026-11-04T09:27:01.044000Z)")
+        self.assertEqual(self.reads(pg)[0][1]["p_to"], "2026-11-04T09:27:01.044000Z")
 
     def test_the_limit_field_lowers_the_server_limit_and_never_raises_it(self):
         with mock.patch.object(i3x_service, "HISTORY_MAX_ROWS", 2):
             req, pg = self.history({"elementIds": [f"{SID}/Temp"], "limit": 100}, self.TEMPS)
-            self.assertEqual(self.reads(pg)[0][1]["limit"], "3")
+            self.assertEqual(self.reads(pg)[0][1]["p_limit"], "3")
             self.assertCut(req, f"{SID}/Temp", "the server limit (I3X_HISTORY_MAX_ROWS) of 2 rows")
             req, pg = self.history({"elementIds": [f"{SID}/Temp"]}, self.TEMPS)
             self.assertEqual(len(self.only(req)["values"]), 2)
@@ -4859,7 +4913,8 @@ class TestHistoryIsNeverSilentlyCut(_HistoryCase):
         req, pg = self.history({"elementIds": [SID], "limit": 2}, rows, ((SID, ("A", "B")),))
         self.assertEqual([(v["timestamp"], v["value"]) for v in self.only(req)["values"]],
                          [("2026-09-28T10:30:00Z", {"A": 3.0, "B": "b"})])
-        self.assertEqual(self.reads(pg)[2][1]["time"], "lte.2026-09-28T10:10:00.000000Z")
+        self.assertEqual((self.reads(pg)[2][1]["p_to"], self.reads(pg)[2][1]["p_to_inclusive"]),
+                         ("2026-09-28T10:10:00.000000Z", "true"))
         self.assertCut(req, SID, "nothing at or before 2026-09-28T10:20:00.000000Z")
 
     def test_a_wide_device_is_cut_by_the_values_it_returns(self):
@@ -4969,9 +5024,9 @@ class TestHistoryContinuesIntoTheRollups(_HistoryCase):
         self.assertEqual([relation for relation, _ in reads], ["telemetry_1m"])
         self.assertEqual(reads[0][1], {
             "select": "bucket,metric_name,last_double,last_string,last_bool",
-            "asset_id": f"eq.{SID}", "bucket": "gte.2026-09-28T10:00:00.000000Z",
-            "and": "(bucket.lte.2026-09-28T10:20:00.000000Z)", "order": "bucket.desc",
-            "limit": "1001", "metric_name": "eq.Temp",
+            "p_asset_id": SID, "p_resolution": "1m", "p_from": "2026-09-28T10:00:00.000000Z",
+            "p_to": "2026-09-28T10:20:00.000000Z", "p_to_inclusive": "true",
+            "p_limit": "1001", "p_metric_name": "Temp",
         })
 
     def test_a_metric_straddling_the_raw_window_joins_raw_and_buckets_once(self):
@@ -4984,8 +5039,8 @@ class TestHistoryContinuesIntoTheRollups(_HistoryCase):
         reads = self.reads(pg)
         self.assertEqual([relation for relation, _ in reads], ["telemetry", "telemetry_1m"])
         # Only buckets that end by the time raw begins, so the 10:30 bucket is not served twice.
-        self.assertEqual(reads[1][1]["and"], "(bucket.lte.2026-09-28T10:29:00.000000Z)")
-        self.assertEqual(reads[1][1]["limit"], "999", "what the raw rows left of the limit")
+        self.assertEqual(reads[1][1]["p_to"], "2026-09-28T10:29:00.000000Z")
+        self.assertEqual(reads[1][1]["p_limit"], "999", "what the raw rows left of the limit")
 
     def test_a_metric_inside_the_raw_window_reads_no_rollup(self):
         req, pg = self.run_history({"elementIds": [f"{SID}/Temp"], "startTime": "2026-09-28T10:45:00Z"})
@@ -5012,9 +5067,10 @@ class TestHistoryContinuesIntoTheRollups(_HistoryCase):
         self.assertEqual([relation for relation, _ in reads],
                          ["telemetry_1m", "telemetry_latest", "telemetry_1m"])
         # Before the window, unbounded below and small, as the raw read before it is.
-        self.assertEqual(reads[2][1]["bucket"], "lt.2026-09-28T10:00:00.000000Z")
-        self.assertEqual(reads[2][1]["order"], "bucket.desc")
-        self.assertEqual(reads[2][1]["limit"], str(i3x_service.HISTORY_SEED_MAX_ROWS))
+        self.assertEqual((reads[2][1]["p_to"], reads[2][1]["p_to_inclusive"]),
+                         ("2026-09-28T10:00:00.000000Z", "false"))
+        self.assertNotIn("p_from", reads[2][1])
+        self.assertEqual(reads[2][1]["p_limit"], str(i3x_service.HISTORY_SEED_MAX_ROWS))
 
     def test_a_device_straddling_the_raw_window_is_one_series(self):
         req, pg = self.run_history({"elementIds": [SID], "maxDepth": 0})
@@ -5053,7 +5109,8 @@ class TestHistoryContinuesIntoTheRollups(_HistoryCase):
         reads = self.reads(pg)
         self.assertEqual([relation for relation, _ in reads],
                          ["telemetry", "telemetry_latest", "telemetry", "telemetry_1m"])
-        self.assertEqual(reads[3][1]["bucket"], "lte.2026-09-28T10:29:00.000000Z")
+        self.assertEqual((reads[3][1]["p_to"], reads[3][1]["p_to_inclusive"]),
+                         ("2026-09-28T10:29:00.000000Z", "true"))
 
     def test_a_device_whose_seeds_are_raw_reads_no_rollup(self):
         rollups = {**self.ROLLUPS, "telemetry_1m": [r for r in self.ROLLUPS["telemetry_1m"]
@@ -5073,7 +5130,7 @@ class TestHistoryContinuesIntoTheRollups(_HistoryCase):
                        "nothing at or before 2026-09-28T10:15:00.000000Z", self.JOIN)
         self.assertBucketed(req, f"{SID}/Temp")
         self.assertIn(f"A server limit cut 1 result(s) short: {SID}/Temp.", req.detail["detail"])
-        self.assertEqual(self.reads(pg)[1][1]["limit"], "2", "one past the limit, less the raw rows")
+        self.assertEqual(self.reads(pg)[1][1]["p_limit"], "2", "one past the limit, less the raw rows")
 
     def test_a_cut_inside_the_raw_rows_reads_no_rollup(self):
         req, pg = self.run_history({"elementIds": [f"{SID}/Temp"], "limit": 1})

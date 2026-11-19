@@ -4,7 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * Regression tests for the asset relationship and telemetry read/write paths: cells -> gateways
  * arrive as a nested embed and a cell's devices are bucketed by effective cell; `cell_id` on a
  * device row is the explicit override and `effective_cell_id` is resolved; a device's gateway is
- * written from `active_gateway_id`; telemetry is read from the `telemetry` view with real filters.
+ * written from `active_gateway_id`; a page of telemetry is read through telemetry_page() with real
+ * filters.
  */
 
 // Recording stub for the PostgREST query builder. Each `from()` starts a fresh chain and pushes the
@@ -41,6 +42,10 @@ vi.mock('../lib/supabaseClient', () => ({
     // assert the ARGUMENTS, which is where its filters live now.
     rpc: vi.fn((fn, args) => {
       state.rpcCalls.push({ fn, args });
+      // A page of telemetry (0315) answers what a test set for it, or no rows.
+      if (fn === 'telemetry_page' || fn === 'telemetry_rollup_page') {
+        return Promise.resolve(state.responses[fn] ?? { data: [], error: null });
+      }
       return Promise.resolve({
         data: {
           events: (state.responses.audit_trail || { data: [] }).data || [],
@@ -491,30 +496,34 @@ describe('a metric’s permitted values', () => {
 });
 
 describe('telemetry queries', () => {
-  it('reads the telemetry view with filters, ordering and a bounded page', async () => {
+  // A page is telemetry_page() or telemetry_rollup_page() (0315), newest first: the view's filters
+  // are its arguments.
+  const pageCall = (fn = 'telemetry_page') => state.rpcCalls.find(c => c.fn === fn);
+
+  it('reads a page of telemetry with filters and a bounded page', async () => {
     await api.get('/api/v1/telemetry?metric_name=temperature&minutes=15&limit=200&offset=200');
 
-    const call = callFor('telemetry');
-    expect(call.filters).toContainEqual(['eq', 'metric_name', 'temperature']);
-    expect(call.filters.some(([op, col]) => op === 'gte' && col === 'time')).toBe(true);
-    expect(call.order).toEqual(['time', { ascending: false }]);
-    expect(call.range).toEqual([200, 399]);
+    const { args } = pageCall();
+    expect(args.p_metric_name).toBe('temperature');
+    expect(typeof args.p_from).toBe('string');
+    expect([args.p_limit, args.p_offset]).toEqual([200, 200]);
+    expect(callFor('telemetry')).toBeUndefined();
   });
 
   it('defaults to a 500-row page when no limit is supplied', async () => {
     await api.get('/api/v1/telemetry');
-    expect(callFor('telemetry').range).toEqual([0, 499]);
+    expect([pageCall().args.p_limit, pageCall().args.p_offset]).toEqual([500, 0]);
   });
 
   it('resolves a device UUID filter to the sparkplug_id the hypertable stores', async () => {
     await api.get('/api/v1/telemetry?asset_id=ccd19944-8805-4c11-ae66-ea0d2c50f40c');
 
-    expect(callFor('telemetry').filters).toContainEqual(['eq', 'asset_id', 'devccd1994488054c11ae66e']);
+    expect(pageCall().args.p_asset_id).toBe('devccd1994488054c11ae66e');
   });
 
   it('passes a non-UUID asset filter straight through', async () => {
     await api.get('/api/v1/telemetry?asset_id=Simulated_CNC_01');
-    expect(callFor('telemetry').filters).toContainEqual(['eq', 'asset_id', 'Simulated_CNC_01']);
+    expect(pageCall().args.p_asset_id).toBe('Simulated_CNC_01');
   });
 
   // The collapse lives in the database: `public.telemetry_latest` is a view over a remote DISTINCT
@@ -540,12 +549,12 @@ describe('telemetry queries', () => {
   });
 
   it('reads a rollup when a resolution is asked for, and refuses an unknown one', async () => {
-    state.responses.telemetry_5m = { data: [], error: null };
     await api.get('/api/v1/telemetry?resolution=5m&asset_id=dev200000000000400080000');
-    const call = callFor('telemetry_5m');
-    expect(call).toBeTruthy();
-    // The rollup's time column is `bucket`, not `time`.
-    expect(call.filters.some(([op, col]) => op === 'gte' && col === 'bucket')).toBe(true);
+    const { args } = pageCall('telemetry_rollup_page');
+    expect([args.p_resolution, args.p_asset_id]).toEqual(['5m', 'dev200000000000400080000']);
+    // The rollup is held to the same floor: fewer rows per hour is not the same as few rows.
+    expect(typeof args.p_from).toBe('string');
+    expect(pageCall()).toBeUndefined();
 
     // An unknown resolution must NOT fall back to raw: answering a request for a year of hourly
     // buckets by scanning a year of raw rows is the failure this whole change exists to prevent.
@@ -553,7 +562,7 @@ describe('telemetry queries', () => {
   });
 
   it('propagates query errors instead of returning placeholder rows', async () => {
-    state.responses.telemetry = { data: null, error: { message: 'relation "telemetry" does not exist' } };
+    state.responses.telemetry_page = { data: null, error: { message: 'function telemetry_page does not exist' } };
     await expect(api.get('/api/v1/telemetry')).rejects.toMatchObject({ message: expect.stringContaining('telemetry') });
   });
 });

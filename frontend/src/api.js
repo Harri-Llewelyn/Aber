@@ -189,10 +189,8 @@ const planCoordFrom = (v) => {
 };
 
 export const TELEMETRY_PAGE_SIZE = 500;
-// postgres_fdw sends a LIMIT to TimescaleDB only when it is under its own row estimate. With no
-// statistics each condition shrinks that estimate, to about one row for a read naming a device and a
-// metric; then every row inside the time bound crosses before the limit trims it. So this caps what a
-// page returns, and the time bound caps what crosses.
+// The most rows one telemetry route asks for. A page is read through telemetry_page() (0315), so the
+// historian sends that page and the rows before it, not every row inside the time bound.
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
@@ -299,10 +297,10 @@ export const HISTORY_GROUP_READ_ROWS = 50000;
 /**
  * The lower time bound applied when a caller supplies none.
  *
- * `public.telemetry` is a postgres_fdw projection whose LIMIT is often applied here, not on the
- * historian (TELEMETRY_MAX_ROWS), so a query with no time predicate can drag an asset's entire
- * history across the wrapper before `.range()` applies. Every live caller already passes a window; this exists so the next caller
- * cannot reintroduce the unbounded scan by omitting an argument.
+ * A page read counts every row inside its bounds on the historian before it reads the page, so a
+ * query with no time predicate would count an asset's entire history. Every live caller already
+ * passes a window; this exists so the next caller cannot reintroduce the unbounded scan by omitting
+ * an argument.
  */
 export const TELEMETRY_DEFAULT_WINDOW_MINUTES = 60;
 
@@ -336,8 +334,9 @@ function toTelemetryKey(assetId) {
 }
 
 /**
- * Query the `telemetry` view, a postgres_fdw projection of the TimescaleDB hypertable exposed
- * through PostgREST.
+ * A page of the `telemetry` view, a postgres_fdw projection of the TimescaleDB hypertable, or of a
+ * rollup, newest first. Read through telemetry_page() or telemetry_rollup_page() (0315), which bring
+ * across the page's rows, not every row in the window as a read of the view did.
  *
  * @param minutes  Relative window, "the last N minutes"; the primary form.
  * @param from,to  Absolute ISO bounds, for the export dialog. An explicit bound wins over
@@ -361,24 +360,21 @@ async function queryTelemetry({ assetId, metricName, minutes, from: fromTime, to
       `unknown telemetry resolution '${resolution}'; expected one of ${Object.keys(TELEMETRY_RESOLUTIONS).join(', ')} (or omit it for raw)`
     );
   }
-  const relation = rollup ? rollup.relation : 'telemetry';
-  const timeColumn = rollup ? 'bucket' : 'time';
-
-  const telemetryKey = toTelemetryKey(assetId);
-
-  let query = supabase.from(relation).select('*');
-  if (telemetryKey) query = query.eq('asset_id', telemetryKey);
-  if (metricName) query = query.eq('metric_name', metricName);
 
   // Absolute bounds win over the relative window -- see the parameter note above. `to` is
   // applied on its own if that is all the caller gave; the lower bound is never left to them.
   // The floor applies to a rollup too: fewer rows per hour is not the same as few rows.
-  if (toTime) query = query.lte(timeColumn, toTime);
-  query = query.gte(timeColumn, telemetryLowerBound({ minutes, fromTime, toTime }));
-
-  const { data, error } = await query
-    .order(timeColumn, { ascending: false })
-    .range(from, from + pageSize - 1);
+  const page = {
+    p_asset_id: toTelemetryKey(assetId) || null,
+    p_metric_name: metricName || null,
+    p_from: telemetryLowerBound({ minutes, fromTime, toTime }),
+    p_to: toTime || null,
+    p_limit: pageSize,
+    p_offset: from
+  };
+  const { data, error } = rollup
+    ? await supabase.rpc('telemetry_rollup_page', { p_resolution: resolution, ...page })
+    : await supabase.rpc('telemetry_page', page);
 
   if (error) throw error;
   return data || [];
@@ -3988,7 +3984,7 @@ const apiMethods = {
     }
 
     // Latest value per (device, metric) inside a bounded recent window, for the Devices page, which
-    // needs current state rather than the history the export dialog pages through.
+    // needs current state rather than a page of history.
     if (path.startsWith('/api/v1/telemetry/latest')) {
       const url = new URL(path, window.location.origin);
       const minutes = Number.parseInt(url.searchParams.get('minutes') || '60', 10);
@@ -4001,8 +3997,7 @@ const apiMethods = {
         assetId: url.searchParams.get('asset_id'),
         metricName: url.searchParams.get('metric_name'),
         minutes: Number.parseInt(url.searchParams.get('minutes') || '', 10),
-        // Absolute bounds, used by the CSV export's custom range. Null when absent, so the
-        // relative `minutes` form still applies for every other caller.
+        // Absolute bounds. Null when absent, so the relative `minutes` form applies.
         from: url.searchParams.get('from'),
         to: url.searchParams.get('to'),
         limit: Number.parseInt(url.searchParams.get('limit') || '', 10),

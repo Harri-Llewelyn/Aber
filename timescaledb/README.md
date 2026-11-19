@@ -202,8 +202,12 @@ out.
 
 ## `aggregates.sql`
 
-**Why rollups.** `public.telemetry` in Supabase is a postgres_fdw projection, and the wrapper
-pushes WHERE down but not LIMIT. The rollups serve trend queries (Grafana reads this database
+**Why rollups.** `public.telemetry` in Supabase is a postgres_fdw projection. The wrapper sends this
+database a read's `WHERE`, and its `ORDER BY` and `LIMIT` only when its row estimate says the `LIMIT`
+cuts. The foreign tables have no statistics, so a read naming a device never gets them, and every row
+inside its time bounds crosses. A page of rows is read through `telemetry_page()` or
+`telemetry_rollup_page()` (0315), which send their own bound.
+The rollups serve trend queries (Grafana reads this database
 directly and never crosses the FDW); `telemetry_latest` serves latest-value lookups. The CSV export
 reads raw by default, because it is an export of observations, but may be asked for a rollup
 instead, which is the only way to export a period the raw retention window has already dropped
@@ -231,8 +235,9 @@ reader deciding "will this range come back empty?" needs the first, and only the
 answer it. It is created after the rollups because it reads them: on a fresh historian they do not
 exist until that section has run, and a view over a missing relation fails the whole Job
 (`docs/incidents.md`). It is evaluated here for the reason `telemetry_latest` is: four rows cross
-the FDW instead of the scan the Supabase side would need, and `ORDER BY time LIMIT 1` over the
-projection is not an alternative because LIMIT is not pushed down. Each `min()` is an index scan
+the FDW in one read. Over the projection the same answer is four reads: postgres_fdw sends each
+`min()` as a remote `ORDER BY time` with no `LIMIT`, and the platform stops reading after the first
+rows come back. Each `min()` is an index scan
 per chunk (MergeAppend over the per-chunk time indexes), so the cost is the chunk count, not the
 row count.
 

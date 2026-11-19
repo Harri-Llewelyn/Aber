@@ -9806,9 +9806,9 @@ weeks of raw however `retainFor` is set, and widening a policy does not restore 
 
 `timescale.telemetry_horizons` maps a view in `timescaledb/aggregates.sql` that reads `min()` from
 the raw hypertable and each rollup. It is evaluated on the other side for the reason
-`telemetry_latest` is: `postgres_fdw` pushes `WHERE` down but **not** `LIMIT`, so
-`ORDER BY time LIMIT 1` over the projection would stream the relation across the link to discard all
-but one row. Four rows cross instead. A null `oldest` means that relation is empty — not that it
+`telemetry_latest` is: four rows cross in one read, where the projection would take four, each a
+remote `ORDER BY time` that the platform stops reading after its first rows.
+A null `oldest` means that relation is empty — not that it
 fails to reach that far, which is a distinction the dialog acts on: an empty stack covers nothing at
 any resolution, so there is no better one to offer.
 
