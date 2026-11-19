@@ -1809,7 +1809,8 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   parts of `HISTORY_CHANGE_SERIES` (50), on each group's buckets. A row that is every change is
   drawn from it (`changeSeries()`); `change_cap` (past `HISTORY_MAX_CHANGES`, 2,000),
   `reading_cap` (past `HISTORY_CHANGE_READINGS`, 20,000) and `retention` draw the bucket read,
-  the first two with the buckets that held more than one value marked (`markBuckets()`). A bucket
+  each with the buckets that held more than one value marked (`markBuckets()`). A bucket older
+  than raw comes from the historian's state rollups (`0313`), with no count (`uncounted`). A bucket
   keeps only its last value, so without the change read a state held inside one would not be
   drawn ([#1370](https://github.com/Harri-Llewelyn/Aber/issues/1370)). The status line names the
   state charts' read (`stateReadLine()`): "…; text and flags show every change", else the first
@@ -2041,7 +2042,8 @@ text and a flag's true and false.
   (`runNear()`, which prefers a run thinner than 8px within 4px of it) to the second. A bucket
   series may carry `marked` (`markBuckets()`): a text's or a flag's bucket that held more than one
   value is dotted along the band's foot (`chart-state-mixed`), named in the key and read under the
-  pointer (`markWords()`).
+  pointer (`markWords()`): "3 values in this bucket", or "more than one value" for a mark with no
+  count.
 
 | Prop | What it is |
 | :--- | :--- |
