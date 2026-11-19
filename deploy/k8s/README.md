@@ -429,18 +429,21 @@ docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
 
 # Node-RED — a CUSTOM image is required, not a convenience: settings.js lives on the data volume
 # and Node resolves require() from the requiring file's location, so passport-oauth2 has to be
-# reachable by absolute path in the image
-docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
+# reachable by absolute path in the image. --build-context hands the build licenses/, for the
+# script that writes the OS packages' licences (NOTICE.md); the frontend's build needs it too.
+docker build -f node-red/Dockerfile --build-context licenses=./licenses \
+                                                -t $NS/node-red:$V node-red
 
 # Frontend — VITE_RUNTIME_CONFIG=true bakes NOTHING, which is what lets one image serve any
 # environment. A default build also runs, but its baked URL masks a missing ConfigMap.
 # VITE_APP_VERSION must be passed: the context is frontend/, so the build has no .git to read and
 # the account menu reads "unknown" without it. $V, the tag this image is about to carry.
-# --build-context hands the build help/, the pages the dashboard's help panel shows; without it the
-# build stops with `pull access denied` for `help`.
+# --build-context hands the build help/, the pages the dashboard's help panel shows, and licenses/;
+# without one the build stops with `pull access denied` for `help` or `licenses`.
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
                                     --build-arg VITE_APP_VERSION=$V \
                                     --build-context help=./help \
+                                    --build-context licenses=./licenses \
                                                 -t $NS/frontend:$V frontend
 
 # i3X 1.0 server -- repository root again, because it compiles sparkplug_b.proto. Built

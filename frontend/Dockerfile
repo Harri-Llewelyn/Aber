@@ -7,7 +7,7 @@
 # stop this line quietly covering a future ARG that IS sensitive.
 
 # Stage 1: Build Vite application
-FROM node:24-alpine AS builder
+FROM node:24.22.3-alpine3.24 AS builder
 # Opt this stage into the release's SBOM scan (release.yml builds with `sbom: true`). The shipped
 # image is nginx plus a minified bundle that carries no manifest of what was compiled into it, so
 # the final filesystem's SBOM would list Alpine and nginx and none of the npm tree the bundle IS.
@@ -57,7 +57,7 @@ COPY . .
 #
 # Verified, so the skip rests on facts rather than on the argument above:
 #   - `docker inspect` on the FINAL image shows no `VITE_*` variable in `Config.Env`, on either
-#     build path. Stage 2 is a fresh `FROM nginx:alpine` that copies only `/app/frontend/dist`, so
+#     build path. Stage 2 is a fresh `FROM` of nginx that copies only `/app/frontend/dist`, so
 #     nothing from this stage's environment survives the stage boundary -- which is precisely the
 #     leak the rule guards against, already closed by the structure.
 #   - The PUBLISHED image passes no key at all. release.yml builds with `VITE_RUNTIME_CONFIG=true`
@@ -104,11 +104,17 @@ ARG VITE_APP_VERSION
 RUN npm run build
 
 # Stage 2: Serve static production assets using NGINX
-FROM nginx:alpine
+FROM nginx:1.31.9-alpine3.24
 
 # Alpine packages from the base, taken to the current fixes the distribution ships: a fix Alpine ships
 # between two base cuts reaches the release rather than waiting for the next base (#347).
 RUN apk upgrade --no-cache
+# THE OS PACKAGES' LICENCES: every Alpine package with its licence, and the written offer of the
+# copyleft ones' source, written to /usr/share/licenses/ after the last apk step so the list is what
+# the image ships (NOTICE.md). The script comes through the named context `licenses`
+# (`--build-context licenses=./licenses`), since this context is frontend/.
+COPY --from=licenses os-packages.sh /tmp/os-packages.sh
+RUN sh /tmp/os-packages.sh && rm /tmp/os-packages.sh
 # nginx.conf is a template: the base image's entrypoint renders /etc/nginx/templates/*.template into
 # conf.d at start, substituting only the variables the filter names (nginx's own $uri stays). The
 # stock default.conf goes, so a skipped render serves nothing rather than nginx's welcome page.

@@ -82,12 +82,13 @@ const CERT_MANAGER_VERSION = 'v1.16.2'
 export const IMAGES = [
   { name: 'edge-runtime', file: 'supabase/functions/Dockerfile', context: '.' },
   { name: 'ingestion', file: 'ingestion/Dockerfile', context: '.' },
-  { name: 'node-red', file: 'node-red/Dockerfile', context: 'node-red' },
+  // It and the frontend copy the script that writes the OS packages' licences from licenses/.
+  { name: 'node-red', file: 'node-red/Dockerfile', context: 'node-red', contexts: ['licenses=./licenses'] },
   // VITE_APP_VERSION must be passed: the context is `frontend`, so vite.config.js has no .git to
   // read and the account menu reads "unknown". DESCRIBE, not VERSION -- the tag is Chart.appVersion,
   // which on a tree ahead of it would claim a release this bundle is not. `contexts` are named build
   // contexts: help/ holds the pages the bundle's help panel shows, and a help edit needs this rebuild.
-  { name: 'frontend', file: 'frontend/Dockerfile', context: 'frontend', contexts: ['help=./help'], args: ['VITE_RUNTIME_CONFIG=true', 'VITE_APP_VERSION=DESCRIBE'] },
+  { name: 'frontend', file: 'frontend/Dockerfile', context: 'frontend', contexts: ['help=./help', 'licenses=./licenses'], args: ['VITE_RUNTIME_CONFIG=true', 'VITE_APP_VERSION=DESCRIBE'] },
   { name: 'i3x-service', file: 'i3x/Dockerfile', context: '.' },
   // Both carry their scripts from scripts/, so a script edit needs this rebuild.
   { name: 'gateway-credential', file: 'gateway-credential/Dockerfile', context: '.' },

@@ -18,6 +18,11 @@ RUN apk upgrade --no-cache
 # (NOTICE.md). nginx's own is already in the base, at /usr/share/licenses/nginx/.
 COPY licenses/swagger-ui/ /usr/share/licenses/
 
+# And the OS packages': every Alpine package with its licence, and the written offer of the copyleft
+# ones' source, written after the last apk step so the list is what the image ships.
+COPY licenses/os-packages.sh /tmp/os-packages.sh
+RUN sh /tmp/os-packages.sh && rm /tmp/os-packages.sh
+
 # Strict-Transport-Security, from the value the chart sets when global.scheme is https: the base's
 # entrypoint renders this template into conf.d with its own. Empty sends no header.
 ENV ABER_STRICT_TRANSPORT_SECURITY=""

@@ -40,8 +40,12 @@ RUN apk upgrade --no-cache
 
 # THE LICENCES the base does not carry, as supabase/db/Dockerfile copies them: from
 # licenses/supabase-postgres/ through the named context `licenses`
-# (`--build-context licenses=./licenses`), since this context is supabase/.
+# (`--build-context licenses=./licenses`), since this context is supabase/. Then the OS packages':
+# every Alpine package with its licence, and the written offer of the copyleft ones' source, written
+# after the last apk step so the list is what the image ships.
 COPY --from=licenses supabase-postgres/ /usr/share/licenses/
+COPY --from=licenses os-packages.sh /tmp/os-packages.sh
+RUN sh /tmp/os-packages.sh && rm /tmp/os-packages.sh
 
 # TOP LEVEL ONLY. `supabase/migrations/archive/` holds the superseded migrations, kept as reasoning
 # and deliberately never executed -- a recursive copy would replay every one of them. The glob is

@@ -22,11 +22,16 @@ RUN apk upgrade --no-cache \
  && rm /usr/local/bin/gosu
 
 # THE LICENCES, which the base does not carry and a published image must: Supabase's, PostgreSQL's,
-# and the GPL the base's PostGIS and pgRouting binaries are under, with the written offer of their
-# source (SOURCE) and the licences of the copyleft libraries only PostGIS loads, to
-# /usr/share/licenses/. They come from licenses/supabase-postgres/ through the named context `licenses`
-# (`--build-context licenses=./licenses`), since this context is supabase/db/.
+# the permissive extensions', and the GPL the base's PostGIS and pgRouting binaries are under, with
+# the written offer of their source (SOURCE) and the licences of the copyleft libraries only PostGIS
+# loads, to /usr/share/licenses/. They come from licenses/supabase-postgres/ through the named context
+# `licenses` (`--build-context licenses=./licenses`), since this context is supabase/db/.
 COPY --from=licenses supabase-postgres/ /usr/share/licenses/
+
+# And the OS packages': every Alpine package with its licence, and the written offer of the copyleft
+# ones' source, written after the last apk step so the list is what the image ships.
+COPY --from=licenses os-packages.sh /tmp/os-packages.sh
+RUN sh /tmp/os-packages.sh && rm /tmp/os-packages.sh
 
 # TINI IS PID 1, NOT THE POSTMASTER. Asynchronous archive-push forks a process that outlives the
 # archive_command that started it; orphaned, it is adopted by PID 1. When the postmaster is PID 1 it

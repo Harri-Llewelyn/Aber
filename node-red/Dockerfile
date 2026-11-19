@@ -33,6 +33,12 @@ FROM nodered/node-red:5.0.9
 USER root
 RUN apk upgrade --no-cache \
  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+# THE OS PACKAGES' LICENCES: every Alpine package with its licence, and the written offer of the
+# copyleft ones' source, written to /usr/share/licenses/ as root after the last apk step, so the list
+# is what the image ships (NOTICE.md). The script comes through the named context `licenses`
+# (`--build-context licenses=./licenses`), since this context is node-red/.
+COPY --from=licenses os-packages.sh /tmp/os-packages.sh
+RUN sh /tmp/os-packages.sh && rm /tmp/os-packages.sh
 USER node-red
 
 # passport itself, passport-strategy, passport-http-bearer and oauth2orize already ship with

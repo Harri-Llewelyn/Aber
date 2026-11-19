@@ -169,7 +169,7 @@ test('the build is given the version in a value and never in a name, and the nam
   assert.deepEqual(dockerBuildArgs(byName.frontend, '1.7.0', 'v1.6.0-3-gabc'), [
     'build', '-f', 'frontend/Dockerfile', '-t', `${IMG_NS}/frontend:1.7.0`,
     '--build-arg', 'VITE_RUNTIME_CONFIG=true', '--build-arg', 'VITE_APP_VERSION=v1.6.0-3-gabc',
-    '--build-context', 'help=./help', 'frontend',
+    '--build-context', 'help=./help', '--build-context', 'licenses=./licenses', 'frontend',
   ]);
   assert.deepEqual(dockerBuildArgs(byName.timescaledb, '1.7.0', ''), [
     'build', '-f', 'timescaledb/Dockerfile', '-t', `${IMG_NS}/timescaledb:1.7.0`,

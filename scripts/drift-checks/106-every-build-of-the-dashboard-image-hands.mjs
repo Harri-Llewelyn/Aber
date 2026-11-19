@@ -26,13 +26,25 @@ export default function check() {
   }
 
   // The workflows: a build-push-action step names the context itself, or passes its matrix entry's.
+  // An entry's build_contexts is one value or a block of one per line, as build-push-action reads it.
+  const contextsOf = (entry) => {
+    const lines = entry.split('\n');
+    const at = lines.findIndex((l) => /^\s*build_contexts:/.test(l));
+    const indent = /^\s*/.exec(lines[at])[0].length;
+    const block = [lines[at].replace(/^\s*build_contexts:/, '')];
+    for (const l of lines.slice(at + 1)) {
+      if (l.trim() && /^\s*/.exec(l)[0].length <= indent) break;
+      block.push(l);
+    }
+    return block.join('\n');
+  };
   let steps = 0;
   for (const wf of allFiles.filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f))) {
     const text = read(wf);
     const chunks = text.split(/\n(?=\s*- name: )/);
     const entry = chunks.find((c) => /^\s*- name: [\w-]+\n\s+dockerfile: frontend\/Dockerfile\s*$/m.test(c));
     if (entry && !/^\s*build_contexts:.*$/m.test(entry)) wrong.push(`${wf}'s matrix entry for ${DOCKERFILE} has no build_contexts`);
-    else if (entry && !NAMED.test(/^\s*build_contexts:(.*)$/m.exec(entry)[1])) wrong.push(`${wf}'s matrix entry for ${DOCKERFILE} passes no help=./help in build_contexts`);
+    else if (entry && !NAMED.test(contextsOf(entry))) wrong.push(`${wf}'s matrix entry for ${DOCKERFILE} passes no help=./help in build_contexts`);
     for (const step of chunks.filter((c) => /uses: docker\/build-push-action@/.test(c))) {
       const file = /^\s*file:\s*(.+?)\s*$/m.exec(step)?.[1];
       const contexts = /^\s*build-contexts:\s*(.+?)\s*$/m.exec(step)?.[1] || '';
