@@ -8,10 +8,12 @@
  * (`${BASE_IRI}${sparkplug_id}/submodel/...`), so an identifier is parsed back to a `sparkplug_id`
  * rather than looked up; changing AAS_BASE_IRI changes every identifier this deployment has
  * published. A schema's submodel ids carry the lineage's name, not the version's, and an id made
- * from an earlier version's name is still answered, with the current submodel, until 1.10.0.
+ * from an earlier version's name is still answered, with the current submodel, until 1.10.0. The
+ * ConceptDescriptions the shells reference are served from each shell's Environment
+ * (conceptDescriptions.ts).
  * Not served: writes (the dashboard is the authoring interface, with its own audit
  * trail), inlined telemetry values (`LinkedSegment` points at the historian), `.aasx`
- * (aas-export), concept descriptions, and the Registry and Discovery interfaces.
+ * (aas-export), and the Registry and Discovery interfaces.
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -26,46 +28,12 @@ import { checkCaller } from "../_shared/callerCheck.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { logFailure, REQUEST_ID_HEADER, requestIdOf, SERVER_FAILURE } from "../_shared/failure.ts";
+import { conceptDescriptionRoute } from "./conceptDescriptions.ts";
+import { b64urlDecode, json, paged, pageSize, problem } from "./http.ts";
 
 const SERVICE_NAME = "aas-api";
-const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: jsonHeaders });
-
-/**
- * The specification's error shape: a conformant client parses `messages[]`, not a bare `{error:
- * "..."}`.
- */
-const problem = (status: number, text: string, code = String(status), correlationId?: string) =>
-  json({
-    messages: [{
-      messageType: "Error",
-      text,
-      code,
-      ...(correlationId ? { correlationId } : {}),
-      timestamp: new Date().toISOString(),
-    }],
-  }, status);
 
 // Identifiers
-
-/**
- * base64url, as IDTA-01002 requires for every Identifier in a path: `/` in plain base64 would split
- * one identifier across two segments. Padding is accepted whether or not the caller sent it.
- */
-function b64urlDecode(value: string): string | null {
-  try {
-    const padded = value.replace(/-/g, "+").replace(/_/g, "/") +
-      "=".repeat((4 - (value.length % 4)) % 4);
-    const binary = atob(padded);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return null;
-  }
-}
 
 /** A device's wire id, as `shell.ts` composes it into every identifier it mints. */
 const SPARKPLUG_RE = /^dev[0-9a-f]{21}$/;
@@ -79,32 +47,6 @@ function assetOf(identifier: string): string | null {
   const rest = identifier.slice(BASE_IRI.length);
   const first = rest.split("/")[0] ?? "";
   return SPARKPLUG_RE.test(first) ? first : null;
-}
-
-// Pagination. The specification's cursor is opaque to the client: a cursor here names the next
-// device, and a page is every item belonging to the devices it covers, which stays stable while the
-// data changes.
-
-const DEFAULT_LIMIT = 20;
-/** Each device on a page costs up to ten queries and one shell construction. That is the reason. */
-const MAX_LIMIT = 100;
-
-function pageSize(url: URL): number | Response {
-  const raw = url.searchParams.get("limit");
-  if (raw === null) return DEFAULT_LIMIT;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1) {
-    return problem(400, "limit must be a positive integer", "400");
-  }
-  return Math.min(n, MAX_LIMIT);
-}
-
-/** `{ paging_metadata, result }`, with the cursor omitted rather than nulled on the last page. */
-function paged(result: unknown[], cursor: string | null) {
-  return {
-    paging_metadata: cursor ? { cursor } : {},
-    result,
-  };
 }
 
 // ValueOnly serialisation ($value): IDTA-01002's form that strips the metamodel down to the values,
@@ -197,7 +139,9 @@ async function submodelIn(client: Client, built: BuiltShell, identifier: string)
 
 /**
  * One page of devices, keyset-paginated by `id` rather than `created_at`, so the cursor is stable
- * under insertion.
+ * under insertion. A cursor of /shells and /submodels names the next device, and a page is every item
+ * of the devices it covers, which stays stable while the data changes. It decides which shells are
+ * published, so the ConceptDescription routes list devices through it too.
  */
 async function devicePage(client: Client, limit: number, cursor: string | null) {
   let query = client
@@ -234,7 +178,9 @@ export default async function handler(req: Request): Promise<Response> {
     return json({
       profiles: [
         // SSP-002 is the READ-ONLY service specification profile in both cases. Advertising the
-        // full SSP-001 would promise the write routes this deliberately does not serve.
+        // full SSP-001 would promise the write routes this deliberately does not serve. The
+        // ConceptDescription Repository has no read-only profile (its one is SSP-001, with writes),
+        // so its two GET routes are served and no profile is declared for them.
         "https://admin-shell.io/aas/API/3/0/AssetAdministrationShellRepositoryServiceSpecification/SSP-002",
         "https://admin-shell.io/aas/API/3/0/SubmodelRepositoryServiceSpecification/SSP-002",
       ],
@@ -374,6 +320,10 @@ export default async function handler(req: Request): Promise<Response> {
       return submodelResponse(submodel, tail, wantsValue);
     }
 
+    // GET /concept-descriptions[/{cdIdentifier}]: the ConceptDescriptions the shells reference.
+    const described = await conceptDescriptionRoute(supabase, path, limit, cursor, devicePage);
+    if (described) return described;
+
     // GET /: the specification defines no route index, so this answers 404 and names the routes in
     // the body, so somebody who found this URL in a config file knows what to ask for next.
     if (bare === "/") {
@@ -395,6 +345,8 @@ export default async function handler(req: Request): Promise<Response> {
           "/submodels/{submodelIdentifier}",
           "/submodels/{submodelIdentifier}/submodel-elements",
           "/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}",
+          "/concept-descriptions",
+          "/concept-descriptions/{cdIdentifier}",
         ],
         note: "Identifiers are base64url-encoded. Append /$value for the ValueOnly serialisation.",
       }, 404);

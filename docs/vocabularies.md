@@ -795,8 +795,9 @@ is verified against a source Aber ships: the file is the site's.
   the catalog's description, which may be a copy of the licensed text. For the same reason a metric
   carrying such an id, as its own id or a further one, exports no description on its own element
   (`withholdsDescription()`). The rule is in
-  `buildConceptDescriptions()`, so a ConceptDescription route reads the same text. Add Metric leaves
-  the description empty when the definitions are not shared, for the same reason.
+  `buildConceptDescriptions()`, so the AAS API's `/concept-descriptions` routes serve the same
+  text. Add Metric leaves the description empty when the definitions are not shared, for the same
+  reason.
   `concept_definitions` has an arm for imported concepts, last in precedence, with no standard, and
   it holds only vocabularies whose definitions are shared.
 - **Removing a vocabulary** says first how many metrics use it. They keep their ids, because an id

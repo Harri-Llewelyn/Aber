@@ -6682,10 +6682,13 @@ paths:
         base URL is `https://api.<domain>/functions/v1/aas-api`; on the development stack,
         `http://api.localhost/functions/v1/aas-api`.
 
-        **Not served:** the Registry and Discovery interfaces, concept descriptions (the JSON
-        export carries them), writes, and the `$metadata`, `$reference` and `$path` modifiers,
-        which answer `404`; only `/$value` is handled. `GET /shells` reads `limit` and
-        `cursor` alone, so a search by `assetIds` or `idShort` gets every shell.
+        **Also served:** the ConceptDescriptions the shells reference, at `/concept-descriptions`,
+        each the one the JSON export of a shell carries.
+
+        **Not served:** the Registry and Discovery interfaces, writes, and the `$metadata`,
+        `$reference` and `$path` modifiers, which answer `404`; only `/$value` is handled. `GET
+        /shells` reads `limit` and `cursor` alone, so a search by `assetIds` or `idShort` gets
+        every shell.
 
         **This path itself answers `404`**, because there is no resource at a repository root and
         the specification defines no index. The body lists what *is* served, for the benefit of
@@ -6732,6 +6735,10 @@ paths:
         Both advertised profiles are **SSP-002, the read-only variants**. Every route below is a
         `GET`; asset data is authored through the dashboard, which has the role model and writes
         `audit_trail`, and a write here would bypass both.
+
+        **No profile is declared for `/concept-descriptions`.** IDTA-01002 defines no read-only
+        profile for the ConceptDescription Repository. Its one profile, SSP-001, includes the
+        writes, so declaring it would promise them.
       responses:
         '200':
           description: The advertised profiles.
@@ -7033,6 +7040,83 @@ paths:
             application/json: { schema: { type: object } }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No element at that path. }
+        '500': { $ref: '#/components/responses/AasFailure' }
+
+  /functions/v1/aas-api/concept-descriptions:
+    get:
+      tags: [Edge Functions]
+      security:
+        - bearerAuth: []
+      summary: List the ConceptDescriptions the shells reference
+      description: |
+        One ConceptDescription for each semantic id a shell's submodels use, from every shell
+        `/shells` lists, each id once and in id order. Each is the one that shell's JSON export
+        carries: both are built by `buildConceptDescriptions()` in
+        `supabase/functions/_shared/aas/shell.ts`, from the rows the caller reads. So a definition
+        an imported vocabulary does not share stays out of both. Two shells rarely describe one id
+        differently (two schemas with one semantic id and their own descriptions). Then the first
+        device's, in the order `/shells` lists them, is served.
+
+        **`limit` and `cursor` are the only parameters read.** `idShort`, `isCaseOf` and
+        `dataSpecificationRef` are ignored, as `/shells` ignores its search parameters, so a
+        filtered request gets every ConceptDescription, a page at a time.
+
+        **Pagination.** `limit` (default 20, capped at 100) counts ConceptDescriptions, not
+        devices. The opaque `cursor` names the last id of the page before. Every page reads every
+        shell, so a page costs what `/shells` costs for all of them. No `/$value` form is served.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: How many ConceptDescriptions a page holds.
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: Opaque. Echo back `paging_metadata.cursor` from the previous page.
+      responses:
+        '200':
+          description: A page of ConceptDescriptions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paging_metadata:
+                    type: object
+                    properties: { cursor: { type: string } }
+                    description: Empty object on the last page — the cursor is omitted, not nulled.
+                  result: { type: array, items: { type: object } }
+        '400': { description: Non-positive `limit`, or a `cursor` that is not base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/AasFailure' }
+
+  /functions/v1/aas-api/concept-descriptions/{cdIdentifier}:
+    get:
+      tags: [Edge Functions]
+      security:
+        - bearerAuth: []
+      summary: Get one ConceptDescription
+      description: |
+        **`cdIdentifier` is base64url-encoded**, as for shells and submodels. Padding is optional.
+
+        The ConceptDescription of a semantic id a shell references, the same object
+        `/concept-descriptions` lists. An id no shell `/shells` lists references answers `404`,
+        whether or not the database holds a definition for it, so a caller cannot tell which ids
+        exist. That includes an id only an archived device's shell carries.
+      parameters:
+        - name: cdIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+          description: base64url of the ConceptDescription's `id`, the semantic id.
+      responses:
+        '200':
+          description: The ConceptDescription.
+          content:
+            application/json: { schema: { type: object } }
+        '400': { description: Identifier is not valid base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No shell references that id. }
         '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/fplus-directory:
