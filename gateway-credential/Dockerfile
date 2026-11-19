@@ -19,6 +19,12 @@ FROM eclipse-mosquitto:2.1.2-alpine
 # The image is Alpine-based; only a runtime for the scripts is missing.
 RUN apk add --no-cache nodejs
 
+# THE OS PACKAGES' LICENCES: every Alpine package with its licence, and the written offer of the
+# copyleft ones' source, written to /usr/share/licenses/ after the last apk step so the list is what
+# the image ships (NOTICE.md). The base's own mosquitto/ texts stay beside them.
+COPY licenses/os-packages.sh /tmp/os-packages.sh
+RUN sh /tmp/os-packages.sh && rm /tmp/os-packages.sh
+
 # THE BROKER'S OWN USER (mosquitto, 1883). The boot reconcile writes the plugin's document, which
 # the broker reads and rewrites as that uid at 0600, so writing it as 1883 needs no chown. The
 # service patches the playback delivery file through the Kubernetes API and writes nothing on disk.

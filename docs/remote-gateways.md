@@ -447,7 +447,8 @@ the forge's archive: read-only, badged as archived, with every branch, issue and
 `forge-sweep` does both. Archiving calls it at once, and it retries every fifteen minutes, so an
 archive taken while the forge is down still lands. The repository itself is never deleted. Its
 wiki is where what you know about that gateway is written down, and deleting it is a decision you
-take in the forge. Restoring the gateway reverses both.
+take in the forge. Restoring the gateway takes the repository back out of the archive. The deploy key
+does not come back: the appliance enrols again, and is given a new one.
 
 Archiving does **not** retrieve the CA copy on that appliance. That certificate is public by nature,
 and worth nothing to whoever has the box.

@@ -189,10 +189,8 @@ const planCoordFrom = (v) => {
 };
 
 export const TELEMETRY_PAGE_SIZE = 500;
-// postgres_fdw sends a LIMIT to TimescaleDB only when it is under its own row estimate. With no
-// statistics each condition shrinks that estimate, to about one row for a read naming a device and a
-// metric; then every row inside the time bound crosses before the limit trims it. So this caps what a
-// page returns, and the time bound caps what crosses.
+// The most rows one telemetry route asks for. A page is read through telemetry_page() (0315), so the
+// historian sends that page and the rows before it, not every row inside the time bound.
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
@@ -299,10 +297,10 @@ export const HISTORY_GROUP_READ_ROWS = 50000;
 /**
  * The lower time bound applied when a caller supplies none.
  *
- * `public.telemetry` is a postgres_fdw projection whose LIMIT is often applied here, not on the
- * historian (TELEMETRY_MAX_ROWS), so a query with no time predicate can drag an asset's entire
- * history across the wrapper before `.range()` applies. Every live caller already passes a window; this exists so the next caller
- * cannot reintroduce the unbounded scan by omitting an argument.
+ * A page read counts every row inside its bounds on the historian before it reads the page, so a
+ * query with no time predicate would count an asset's entire history. Every live caller already
+ * passes a window; this exists so the next caller cannot reintroduce the unbounded scan by omitting
+ * an argument.
  */
 export const TELEMETRY_DEFAULT_WINDOW_MINUTES = 60;
 
@@ -336,8 +334,9 @@ function toTelemetryKey(assetId) {
 }
 
 /**
- * Query the `telemetry` view, a postgres_fdw projection of the TimescaleDB hypertable exposed
- * through PostgREST.
+ * A page of the `telemetry` view, a postgres_fdw projection of the TimescaleDB hypertable, or of a
+ * rollup, newest first. Read through telemetry_page() or telemetry_rollup_page() (0315), which bring
+ * across the page's rows, not every row in the window as a read of the view did.
  *
  * @param minutes  Relative window, "the last N minutes"; the primary form.
  * @param from,to  Absolute ISO bounds, for the export dialog. An explicit bound wins over
@@ -361,24 +360,21 @@ async function queryTelemetry({ assetId, metricName, minutes, from: fromTime, to
       `unknown telemetry resolution '${resolution}'; expected one of ${Object.keys(TELEMETRY_RESOLUTIONS).join(', ')} (or omit it for raw)`
     );
   }
-  const relation = rollup ? rollup.relation : 'telemetry';
-  const timeColumn = rollup ? 'bucket' : 'time';
-
-  const telemetryKey = toTelemetryKey(assetId);
-
-  let query = supabase.from(relation).select('*');
-  if (telemetryKey) query = query.eq('asset_id', telemetryKey);
-  if (metricName) query = query.eq('metric_name', metricName);
 
   // Absolute bounds win over the relative window -- see the parameter note above. `to` is
   // applied on its own if that is all the caller gave; the lower bound is never left to them.
   // The floor applies to a rollup too: fewer rows per hour is not the same as few rows.
-  if (toTime) query = query.lte(timeColumn, toTime);
-  query = query.gte(timeColumn, telemetryLowerBound({ minutes, fromTime, toTime }));
-
-  const { data, error } = await query
-    .order(timeColumn, { ascending: false })
-    .range(from, from + pageSize - 1);
+  const page = {
+    p_asset_id: toTelemetryKey(assetId) || null,
+    p_metric_name: metricName || null,
+    p_from: telemetryLowerBound({ minutes, fromTime, toTime }),
+    p_to: toTime || null,
+    p_limit: pageSize,
+    p_offset: from
+  };
+  const { data, error } = rollup
+    ? await supabase.rpc('telemetry_rollup_page', { p_resolution: resolution, ...page })
+    : await supabase.rpc('telemetry_page', page);
 
   if (error) throw error;
   return data || [];
@@ -1439,14 +1435,14 @@ const apiMethods = {
   /**
    * History's read of a text or a flag (0254): one row per series of `assetIds` times
    * `metricNames`. `read` is `changes` (every change in [from, to), each at its time, and the value
-   * carried in) or why not: `change_cap`, `reading_cap` or `retention`, the first two with the
-   * buckets of `bucketMinutes` that held more than one value. Throws on a refusal or a historian it
-   * cannot reach.
+   * carried in) or why not: `change_cap`, `reading_cap` or `retention`, each with the buckets of
+   * `bucketMinutes` that held more than one value and how many, null for a bucket older than raw
+   * (0313). Throws on a refusal or a historian it cannot reach.
    *
    * @returns {Promise<Array<{ asset_id: string, metric_name: string, read: string,
    *   change_ts: ?string[], val_string: ?Array<?string>, val_bool: ?Array<?boolean>,
    *   carried_string: ?string, carried_bool: ?boolean, n_changes: ?number, marked_ts: ?string[],
-   *   marked_values: ?number[], raw_from: ?string }>>}
+   *   marked_values: ?Array<?number>, raw_from: ?string }>>}
    */
   readTelemetryChanges: async ({ from, to, bucketMinutes, assetIds, metricNames, maxChanges = HISTORY_MAX_CHANGES }, { signal } = {}) => {
     let call = supabase.rpc('telemetry_changes', {
@@ -2377,6 +2373,54 @@ const apiMethods = {
     const { data, error } = await supabase.rpc('derived_metrics_document', { p_ids: ids });
     if (error) throw new Error(error.message || 'Could not read the derived metrics');
     return data ?? [];
+  },
+
+  /**
+   * Which vocabulary already defines each of the semantic ids (`site_vocabulary_holders()`, 0306): a
+   * seeded standard by its name, or an imported file by its name. An id nothing holds has no entry.
+   * The Import dialog's preview and `import_site_vocabulary()` ask the same question. Returns a Map.
+   */
+  siteVocabularyHolders: async (ids) => {
+    const unique = [...new Set((ids || []).filter(Boolean))];
+    if (unique.length === 0) return new Map();
+    const { data, error } = await supabase.rpc('site_vocabulary_holders', { p_ids: unique });
+    if (error) throw new Error(error.message || 'Could not check which ids are already defined');
+    return new Map((data || []).map(r => [r.semantic_id, r.held_by]));
+  },
+
+  /**
+   * Import a vocabulary read from an AAS file (`import_site_vocabulary()`, 0306). `file` describes it
+   * (name, source_format, kind, the standard's name, edition and publisher when published, sha256,
+   * version, licence_note) and `concepts` lists the rows the reader took. The database checks every row
+   * again and refuses in a sentence, shown as it came: one row it would not store, a file already
+   * imported (named), a caller who is not an Administrator behind the second factor. Returns
+   * `{ id, concepts, skipped: [{ semantic_id, reason, held_by }] }`, reason `already_defined` or
+   * `repeated_in_file`.
+   */
+  importSiteVocabulary: async (file, concepts) => {
+    const { data, error } = await supabase.rpc('import_site_vocabulary', { p_file: file, p_concepts: concepts });
+    if (error) throw new Error(error.message || 'Could not import the vocabulary');
+    return data;
+  },
+
+  /**
+   * Remove an imported vocabulary and its concepts (`remove_site_vocabulary()`). A metric started from it
+   * keeps its id and loses the link. Returns `{ id, name, concepts, metrics_linked }`.
+   */
+  removeSiteVocabulary: async (id) => {
+    const { data, error } = await supabase.rpc('remove_site_vocabulary', { p_id: id });
+    if (error) throw new Error(error.message || 'Could not remove the vocabulary');
+    return data;
+  },
+
+  /**
+   * The Administrator's confirmation that the licence lets an imported vocabulary's definitions be
+   * shared, or its withdrawal (`set_site_vocabulary_sharing()`). Returns `{ id, name, definitions_shareable }`.
+   */
+  setSiteVocabularySharing: async (id, shareable) => {
+    const { data, error } = await supabase.rpc('set_site_vocabulary_sharing', { p_id: id, p_shareable: shareable });
+    if (error) throw new Error(error.message || 'Could not change whether the definitions are shared');
+    return data;
   },
 
   /** Enable or disable the automation with this key. Returns its row. */
@@ -3664,7 +3708,11 @@ const apiMethods = {
         category: k.category,
         unit: k.unit,
         formula: k.formula,
-        semantic_id: k.semantic_id
+        semantic_id: k.semantic_id,
+        // Where the definition was read from (0305); null for a KPI no free source publishes.
+        source: k.source ?? null,
+        // Why the KPI is deprecated (0305); null for a live one.
+        deprecated_reason: k.deprecated_reason ?? null
       }));
     }
 
@@ -3679,6 +3727,23 @@ const apiMethods = {
         .order('label', { ascending: true });
       if (error) throw error;
       return data || [];
+    }
+
+    if (path.startsWith('/api/v1/qudt-quantity-kinds')) {
+      // Reference data (migration 0304), generated from QUDT 3.5.2's quantity-kind vocabulary (CC BY 4.0) and
+      // read-only to the app. Keyed by QUDT's own IRI, which two kinds never share; their labels can. Read
+      // in pages of 1000, the most a server may be set to return, since there are more kinds than that.
+      const rows = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('qudt_quantity_kinds')
+          .select('semantic_id, name, description')
+          .order('semantic_id', { ascending: true })
+          .range(from, from + 999);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if ((data || []).length < 1000) return rows;
+      }
     }
 
     if (path.startsWith('/api/v1/vda5050-vocabulary')) {
@@ -3710,6 +3775,38 @@ const apiMethods = {
         unit: p.unit,
         semantic_id: p.semantic_id
       }));
+    }
+
+    if (path.startsWith('/api/v1/site-vocabularies')) {
+      // The files a site imported (0306), newest first, with how many concepts each holds. Every
+      // signed-in role reads them; only the three functions write them.
+      const { data, error } = await supabase
+        .from('site_vocabularies')
+        .select('*, site_vocabulary_concepts(count)')
+        .order('imported_at', { ascending: false });
+      if (error) throw error;
+      return (data || []).map(({ site_vocabulary_concepts: counted, ...file }) => ({
+        ...file,
+        concept_count: counted?.[0]?.count ?? 0
+      }));
+    }
+
+    if (path.startsWith('/api/v1/site-vocabulary-concepts')) {
+      // The concepts of every imported file (0306), in id order. PostgREST answers 1,000 rows at most
+      // (`max_rows`), and a file may hold ten thousand, so the read pages until a page is short.
+      const PAGE = 1000;
+      const rows = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('site_vocabulary_concepts')
+          .select('*')
+          .order('semantic_id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if (!data || data.length < PAGE) break;
+      }
+      return rows;
     }
 
     if (path.startsWith('/api/v1/idta-submodel-templates')) {
@@ -3778,6 +3875,9 @@ const apiMethods = {
         // The other published ids of the same concept, by id: `{ semantic_id, semantic_id_type,
         // source }`. The AAS export carries them as the Property's supplementalSemanticIds.
         further_semantic_ids: furtherByMetric.get(m.id) || [],
+        // The imported vocabulary the metric was started from (0306), or null: the Metrics page
+        // labels it from that file's row, and the AAS export files it by that file's standard.
+        site_vocabulary_id: m.site_vocabulary_id ?? null,
         // The values a discrete metric may report, as text; NULL is no closed set. The schema
         // builders copy them into `enum`, and the Devices page's Out of vocabulary tag reads them.
         permitted_values: m.permitted_values ?? null,
@@ -3884,7 +3984,7 @@ const apiMethods = {
     }
 
     // Latest value per (device, metric) inside a bounded recent window, for the Devices page, which
-    // needs current state rather than the history the export dialog pages through.
+    // needs current state rather than a page of history.
     if (path.startsWith('/api/v1/telemetry/latest')) {
       const url = new URL(path, window.location.origin);
       const minutes = Number.parseInt(url.searchParams.get('minutes') || '60', 10);
@@ -3897,8 +3997,7 @@ const apiMethods = {
         assetId: url.searchParams.get('asset_id'),
         metricName: url.searchParams.get('metric_name'),
         minutes: Number.parseInt(url.searchParams.get('minutes') || '', 10),
-        // Absolute bounds, used by the CSV export's custom range. Null when absent, so the
-        // relative `minutes` form still applies for every other caller.
+        // Absolute bounds. Null when absent, so the relative `minutes` form applies.
         from: url.searchParams.get('from'),
         to: url.searchParams.get('to'),
         limit: Number.parseInt(url.searchParams.get('limit') || '', 10),
@@ -4213,6 +4312,8 @@ const apiMethods = {
         sub_type: emptyToNull(body.sub_type),
         standard: emptyToNull(body.standard),
         ...semanticIdPair(body),
+        // Only a metric started from an imported vocabulary sends one; the database refuses it beside a standard.
+        ...(body.site_vocabulary_id && { site_vocabulary_id: body.site_vocabulary_id }),
         permitted_values: permittedValuesColumn(body.permitted_values),
         // Only a derived metric sends one; the database sets its unit from the inputs.
         ...(body.derivation && { derivation: body.derivation }),

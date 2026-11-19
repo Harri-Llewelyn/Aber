@@ -135,11 +135,11 @@ MAX_QUEUED_MIB_PER_PRINCIPAL = int(os.getenv("I3X_MAX_QUEUED_MIB_PER_PRINCIPAL")
 MAX_QUEUED_MIB = int(os.getenv("I3X_MAX_QUEUED_MIB") or "128")
 # The most stored rows one history series reads, and the most values it returns, a device's map of
 # N metrics counting N. A request's `limit` may ask for fewer. A series cut short is answered 206,
-# naming the instant it stops at. Past about 6300, postgres_fdw no longer ships the LIMIT and each
-# read fetches its whole window (README.md -> History).
+# naming the instant it stops at. The historian sends a read's rows, and those sharing the last
+# one's instant (README.md -> History).
 HISTORY_MAX_ROWS = int(os.getenv("I3X_HISTORY_MAX_ROWS", "1000"))
-# The most rows the read just before a device's window asks for, whatever HISTORY_MAX_ROWS is. That
-# read has no lower time bound, so past the LIMIT postgres_fdw ships it would fetch every earlier row.
+# The most rows the read just before a device's window asks for, whatever HISTORY_MAX_ROWS is. It
+# looks for each metric's last value, and has no lower time bound.
 HISTORY_SEED_MAX_ROWS = 1000
 # The most HasComponent descendants one value or history request returns under `components`,
 # summed over its elementIds. Past it the rest are left out and the answer is a 206.
@@ -2314,23 +2314,19 @@ def _read_rows(pg: PostgrestClient, relation: str, element_id: str, upper: str, 
     """
     A device's stored rows, or one metric's, newest first: `telemetry`'s by `time`, or a rollup's
     by `bucket`. At or after `lower` when given, and before `upper`, or at it when `inclusive`.
-    The bounds are `_pg_time` strings; the upper one goes in `and` beside a lower one because a
-    params dict holds one key per column.
+    The bounds are `_pg_time` strings. Read through telemetry_page() or telemetry_rollup_page(),
+    so the historian sends the rows asked for and those sharing the last one's instant.
     """
-    column = "time" if relation == "telemetry" else "bucket"
-    bound = ("lte." if inclusive else "lt.") + upper
-    params = {"select": TELEMETRY_COLUMNS if column == "time" else ROLLUP_COLUMNS,
-              "asset_id": "eq." + element_id}
-    if lower is None:
-        params[column] = bound
-    else:
-        params[column] = "gte." + lower
-        params["and"] = f"({column}.{bound})"
-    params["order"] = column + ".desc"
-    params["limit"] = str(limit)
+    params = {"select": TELEMETRY_COLUMNS if relation == "telemetry" else ROLLUP_COLUMNS,
+              "p_asset_id": element_id, "p_to": upper,
+              "p_to_inclusive": "true" if inclusive else "false", "p_limit": str(limit)}
+    if relation != "telemetry":
+        params["p_resolution"] = relation.split("_", 1)[1]
+    if lower is not None:
+        params["p_from"] = lower
     if metric is not None:
-        params["metric_name"] = "eq." + metric
-    return pg.get(relation, params)
+        params["p_metric_name"] = metric
+    return pg.get("rpc/telemetry_page" if relation == "telemetry" else "rpc/telemetry_rollup_page", params)
 
 
 def _rollup_for(horizons: Dict[str, Optional[datetime]], start: datetime) -> Optional[tuple]:
@@ -2499,8 +2495,7 @@ class _History:
                  lower: Optional[datetime] = None, metric: Optional[str] = None) -> List[dict]:
         """
         The rollup's buckets in the range that end by the time the raw rows begin, newest first,
-        as stored rows. Nothing else is added to the read: postgres_fdw ships its WHERE, ORDER BY
-        and LIMIT whole only while the LIMIT stays small.
+        as stored rows.
         """
         raw_from, rollup = self.tiers()
         if rollup is None or limit <= 0:
@@ -2601,7 +2596,7 @@ class _History:
         active -= set(seeds)
         if not active:
             return set()
-        # No lower bound, so the LIMIT is what keeps each read small (README.md -> History).
+        # No lower bound, so the row limit is what keeps each read small (README.md -> History).
         before = self._raw(sid, boundary, inclusive, self._seed_rows())
         if active - {r["metric_name"] for r in before} - set(seeds):
             before += self._buckets(sid, boundary, inclusive, self._seed_rows() - len(before))

@@ -349,6 +349,11 @@ BEGIN
                    'public.telemetry_device_coverage TO %I', v_role);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.telemetry_device_coverage_rows() TO %I', v_role);
   END IF;
+  -- History's marks past raw retention: the state rollups, guarded as above.
+  IF to_regclass('public.telemetry_state_1h') IS NOT NULL THEN
+    EXECUTE format('GRANT SELECT ON public.telemetry_state_1m, public.telemetry_state_5m, '
+                   'public.telemetry_state_1h TO %I', v_role);
+  END IF;
   IF to_regclass('public.storage_footprint') IS NOT NULL THEN
     EXECUTE format('GRANT SELECT ON public.storage_footprint TO %I', v_role);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.storage_footprint_rows() TO %I', v_role);
@@ -454,6 +459,15 @@ BEGIN
       RAISE EXCEPTION
         'roles self-check: fdw_reader cannot read the device rollups or what they hold, so History''s '
         'Overview is refused through its mapping.';
+    END IF;
+
+    IF to_regclass('public.telemetry_state_1h') IS NOT NULL
+       AND NOT (has_table_privilege('fdw_reader', 'public.telemetry_state_1m', 'SELECT')
+            AND has_table_privilege('fdw_reader', 'public.telemetry_state_5m', 'SELECT')
+            AND has_table_privilege('fdw_reader', 'public.telemetry_state_1h', 'SELECT')) THEN
+      RAISE EXCEPTION
+        'roles self-check: fdw_reader cannot read the state rollups, so History''s read of a text or '
+        'a flag older than raw retention is refused through its mapping.';
     END IF;
 
     RAISE NOTICE 'roles self-check passed: fdw_reader reads the projection and writes nothing.';

@@ -380,6 +380,9 @@ gave:
 CALL refresh_continuous_aggregate('telemetry_1m', '<start>', '<end>');
 CALL refresh_continuous_aggregate('telemetry_5m', '<start>', '<end>');
 CALL refresh_continuous_aggregate('telemetry_1h', '<start>', '<end>');
+CALL refresh_continuous_aggregate('telemetry_state_1m', '<start>', '<end>');
+CALL refresh_continuous_aggregate('telemetry_state_5m', '<start>', '<end>');
+CALL refresh_continuous_aggregate('telemetry_state_1h', '<start>', '<end>');
 ```
 
 A window older than a rollup's retention is not refreshed.

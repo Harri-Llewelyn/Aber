@@ -74,6 +74,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/ashrae223.js` (`ASHRAE223_GROUP`) | the one metric group registered under ASHRAE 223P, and the group its seeded metrics file under |
 | `utils/standards.js` (`VDA5050_GROUP`, `vda5050FieldType()`, `VDA5050_SEMANTIC_NAMESPACE`) | the metric group registered under VDA 5050, the name `metric_catalog_name_format` admits for each seeded field, and the namespace the generator, the table's CHECK and i3X mint and read the ids under (mirror checks 117 and 118) |
 | `utils/standards.js` (`STANDARDS`) | the `standard` each arm of `concept_definitions` carries, and the one a metric group is registered under (mirror check 119) |
+| `utils/qudt.js` (`QUDT_VERSION`, `QUDT_KIND_NAMESPACE`, `QUDT_LABEL`) | the release the generator reads, the namespace the tables' CHECKs, i3X and the exporter name a quantity kind's id under, and the label the view gives QUDT's arm, which `STANDARDS` leaves out because no metric is filed under it (mirror checks 123 and 124) |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 | `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
@@ -1417,7 +1418,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
 | Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter; `built-in` for the Built-in tab | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new` and `/automations/built-in`, for an automation whose id is `new` or `built-in`. Built-in: `search`, `sort`, `rule` (a built-in alert's uid, which opens its drawer) |
-| Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
+| Vocabulary | the standard, as a slug (`opc-ua`), or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
 | Archives | `retired` | `sort` |
@@ -1808,7 +1809,8 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   parts of `HISTORY_CHANGE_SERIES` (50), on each group's buckets. A row that is every change is
   drawn from it (`changeSeries()`); `change_cap` (past `HISTORY_MAX_CHANGES`, 2,000),
   `reading_cap` (past `HISTORY_CHANGE_READINGS`, 20,000) and `retention` draw the bucket read,
-  the first two with the buckets that held more than one value marked (`markBuckets()`). A bucket
+  each with the buckets that held more than one value marked (`markBuckets()`). A bucket older
+  than raw comes from the historian's state rollups (`0313`), with no count (`uncounted`). A bucket
   keeps only its last value, so without the change read a state held inside one would not be
   drawn ([#1370](https://github.com/Harri-Llewelyn/Aber/issues/1370)). The status line names the
   state charts' read (`stateReadLine()`): "…; text and flags show every change", else the first
@@ -2040,7 +2042,8 @@ text and a flag's true and false.
   (`runNear()`, which prefers a run thinner than 8px within 4px of it) to the second. A bucket
   series may carry `marked` (`markBuckets()`): a text's or a flag's bucket that held more than one
   value is dotted along the band's foot (`chart-state-mixed`), named in the key and read under the
-  pointer (`markWords()`).
+  pointer (`markWords()`): "3 values in this bucket", or "more than one value" for a mark with no
+  count.
 
 | Prop | What it is |
 | :--- | :--- |
@@ -2758,7 +2761,9 @@ context stops at `COPY --from=help` with `pull access denied`: BuildKit reads `h
 name. In a checkout, `vite.config.js` adds `../help` to `server.fs.allow`, without which the dev
 server and vitest refuse to read a file outside this package. Drift check 105 holds the glob to
 every file in `help/` and to nothing outside it, and check 106 holds every build of the image to
-passing the context.
+passing the context. The nginx stage takes `licenses/` the same way, `--build-context
+licenses=./licenses`, for the script that writes the OS packages' licences into the image
+([`NOTICE.md`](../NOTICE.md)). `scripts/check-image-licences.mjs` holds every build to passing it.
 
 The pages are still free in CI: `ci.yml` classifies a diff with `*.md|docs/*`, and a `case` glob's
 `*` spans directory separators, so a `.md` file anywhere skips the end-to-end stack

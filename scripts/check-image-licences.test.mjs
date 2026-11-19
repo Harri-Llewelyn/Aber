@@ -11,8 +11,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  dockerfileBases, libraryProblems, licenceCopies, manifestProblems, mirrorProblems, namedContextProblems,
-  noticeExtension, offerProblems, templateImages, unlisted, valuesImages,
+  dockerfileBases, extensionTextProblems, finalStage, floatingBases, isAlpine, isPermissiveRow, isPinned,
+  libraryProblems, licenceCopies, manifestProblems, matrixContexts, mirrorProblems, namedContextProblems,
+  noticeExtension, noticeExtensionRows, offerProblems, osPackageProblems, publishedDockerfiles, templateImages,
+  unlisted, valuesImages,
 } from './check-image-licences.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -77,6 +79,26 @@ test('a Dockerfile names its FROM images, not the stages it built, with ARG defa
   assert.deepEqual(dockerfileBases('ARG NOPE\nFROM ${NOPE}'), ['${NOPE}']);
 });
 
+test('a base is pinned by a full version or a digest; a floating one fails unless held, and a stale hold fails', () => {
+  for (const ref of ['supabase/postgres:17.6.1.175', 'timescale/timescaledb:2.31.0-pg17', 'nginx:1.31.9-alpine3.24',
+    'swaggerapi/swagger-ui:v5.34.1', `python:3.12-slim@sha256:${'c'.repeat(64)}`, 'localhost:5000/x:1.2.3']) {
+    assert.equal(isPinned(ref), true, ref);
+  }
+  for (const ref of ['nginx:alpine', 'node:24-alpine', 'node:24.22-alpine3.24', 'python:3.13-slim', 'alpine:latest', 'alpine', 'localhost:5000/x']) {
+    assert.equal(isPinned(ref), false, ref);
+  }
+  const dockerfiles = [
+    { path: 'frontend/Dockerfile', text: 'FROM node:24-alpine AS builder\nFROM nginx:alpine\n' },
+    { path: 'i3x/Dockerfile', text: 'FROM python:3.13-slim\n' },
+    { path: 'test-harness/Dockerfile', text: 'ARG BASE=ghcr.io/harri-llewelyn/aber/ingestion:1.8.0\nFROM ${BASE}\n' },
+  ];
+  assert.deepEqual(floatingBases(dockerfiles, new Set(['python:3.13-slim', 'python:3.12-slim'])), [
+    'frontend/Dockerfile: FROM node:24-alpine floats; pin it to a version (x.y.z), as every other base is',
+    'frontend/Dockerfile: FROM nginx:alpine floats; pin it to a version (x.y.z), as every other base is',
+    'FLOATING_HELD holds python:3.12-slim, which no Dockerfile names any more',
+  ]);
+});
+
 test("an image NOTICE.md does not name fails, as main's NOTICE.md failed for Loki; a digest is not needed", () => {
   const pinned = [
     { image: 'grafana/grafana:13.2.3', at: 'values.yaml' },
@@ -125,6 +147,42 @@ test('a Dockerfile copies a licence set through the named context or from the re
   assert.deepEqual(licenceCopies(text), [{ named: true, set: 'timescaledb' }, { named: false, set: 'swagger-ui' }]);
 });
 
+const ALPINE = (lines) => ['FROM node:24.22.3-alpine3.24 AS builder', 'RUN npm ci', 'FROM nginx:1.31.9-alpine3.24', ...lines].join('\n');
+const WRITES = ['RUN apk upgrade --no-cache', 'COPY --from=licenses os-packages.sh /tmp/os-packages.sh', 'RUN sh /tmp/os-packages.sh && rm /tmp/os-packages.sh'];
+
+test('a final stage is followed through earlier stages, and is Alpine by its tag, its base or its apk', () => {
+  const stage = finalStage('ARG V=1.77.4\nFROM supabase/edge-runtime:v${V} AS runtime\nRUN true\nFROM runtime\nUSER 1000\n');
+  assert.deepEqual(stage, { base: 'supabase/edge-runtime:v1.77.4', lines: ['USER 1000'] });
+  assert.equal(isAlpine(stage), false);
+  assert.equal(isAlpine(finalStage('FROM eclipse-mosquitto:2.1.2-alpine\n')), true);
+  assert.equal(isAlpine(finalStage('FROM supabase/postgres:17.6.1.175\n')), true);
+  assert.equal(isAlpine(finalStage('FROM example/base:1.0.0\nRUN apk add --no-cache curl\n')), true);
+  assert.equal(isAlpine(finalStage('FROM python:3.13-slim\nRUN apt-get install -y curl\n')), false);
+  assert.deepEqual(publishedDockerfiles(WORKFLOW), ['timescaledb/Dockerfile']);
+});
+
+test('a published Alpine image copies os-packages.sh and runs it as root after its last apk step', () => {
+  assert.deepEqual(osPackageProblems([
+    { path: 'frontend/Dockerfile', text: ALPINE([...WRITES, 'USER 101:101']) },
+    { path: 'node-red/Dockerfile', text: ['FROM nodered/node-red:5.0.9', 'USER root', ...WRITES, 'USER node-red', 'RUN npm install x'].join('\n') },
+    { path: 'gateway-credential/Dockerfile', text: 'FROM eclipse-mosquitto:2.1.2-alpine\nRUN apk add nodejs\nCOPY licenses/os-packages.sh /tmp/\nRUN sh /tmp/os-packages.sh\n' },
+    { path: 'i3x/Dockerfile', text: 'FROM python:3.13-slim\nRUN pip install x\n' },
+  ]), []);
+
+  assert.deepEqual(osPackageProblems([
+    { path: 'a/Dockerfile', text: ALPINE(['RUN apk upgrade --no-cache']) },
+    { path: 'b/Dockerfile', text: ALPINE([...WRITES, 'RUN apk add --no-cache curl']) },
+    { path: 'c/Dockerfile', text: ALPINE(['USER 101', ...WRITES.slice(1)]) },
+    { path: 'd/Dockerfile', text: ALPINE([WRITES[1], 'RUN sh /tmp/os-packages.sh && apk add jq']) },
+  ]), [
+    "a/Dockerfile's final stage is Alpine and does not copy licenses/os-packages.sh, so its image carries no list of its OS packages' licences",
+    "a/Dockerfile's final stage is Alpine and never runs os-packages.sh, so its image carries no list of its OS packages' licences",
+    'b/Dockerfile changes its packages with apk after running os-packages.sh: "RUN apk add --no-cache curl"',
+    'c/Dockerfile runs os-packages.sh as 101; it writes /usr/share/licenses/ and must run as root',
+    'd/Dockerfile changes its packages with apk after os-packages.sh in one RUN, so the list is not what the image ships',
+  ]);
+});
+
 const WORKFLOW = `jobs:
   build-images:
     strategy:
@@ -169,6 +227,18 @@ test('every build of a Dockerfile that copies from the named context hands it th
   ]);
 });
 
+test('a matrix entry passes its contexts one per line; a comma does not separate two', () => {
+  const block = (value) => `          - name: frontend\n            dockerfile: frontend/Dockerfile\n            build_contexts: ${value}\n    steps:\n`;
+  assert.deepEqual(matrixContexts(block('|\n              help=./help\n              licenses=./licenses')), ['help=./help', 'licenses=./licenses']);
+  assert.deepEqual(matrixContexts(block('licenses=./licenses')), ['licenses=./licenses']);
+  assert.deepEqual(matrixContexts(block('help=./help,licenses=./licenses')), ['help=./help,licenses=./licenses']);
+  assert.deepEqual(matrixContexts('          - name: edge-runtime\n            dockerfile: x\n'), []);
+
+  const workflow = WORKFLOW.replace('build_contexts: licenses=./licenses', 'build_contexts: help=./help,licenses=./licenses');
+  assert.match(namedContextProblems('timescaledb/Dockerfile', { workflows: [{ path: 'release.yml', text: workflow }], devCluster: DEV, texts: [], bake: '' })[0],
+    /passes no licenses=\.\/licenses in build_contexts/);
+});
+
 const NOTICE_ROWS = [
   '| Extension | Version | Licence | Project |',
   '| `postgis`, `postgis_raster` | 3.3.7 | **GPL-2.0-or-later** | [`postgis/postgis`](https://github.com/postgis/postgis) `3.3.7` |',
@@ -191,6 +261,55 @@ test("NOTICE.md's extension row gives the version and the repository's tag", () 
   assert.deepEqual(noticeExtension(NOTICE_ROWS, 'pgrouting'), { version: '3.4.1', repo: 'https://github.com/pgRouting/pgrouting', tag: 'v3.4.1' });
   assert.deepEqual(noticeExtension(NOTICE_ROWS, 'postgis'), { version: '3.3.7', repo: 'https://github.com/postgis/postgis', tag: '3.3.7' });
   assert.equal(noticeExtension(NOTICE_ROWS, 'postgis_raster'), null);
+});
+
+const EXTENSION_TABLE = [
+  '| Extension or library | Version | Licence | Project |',
+  '| :--- | :--- | :--- | :--- |',
+  '| PostgreSQL\'s own: `amcheck`, `bloom` | 17.6 | PostgreSQL License | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_6` |',
+  NOTICE_ROWS.split('\n').slice(1).join('\n'),
+  '| `pg_cron` | 1.6.4 | PostgreSQL License | [`citusdata/pg_cron`](https://github.com/citusdata/pg_cron) `v1.6.4` |',
+  '| `pgjwt` | 0.2.0 | MIT | [`michelp/pgjwt`](https://github.com/michelp/pgjwt) commit `f3d82fd30151e754e19ce5d6a06c71c20689ce3d` |',
+  '| `plan_filter`, a server library | 0.1 | PostgreSQL License | [`pgexperts/pg_plan_filter`](https://github.com/pgexperts/pg_plan_filter) commit `5081a7b` |',
+  '',
+  '| Library | Version | Licence | Source |',
+  '| Boost (`serialization`) | 1.87.0 | BSL-1.0 | [`boostorg/boost`](https://github.com/boostorg/boost) `boost-1.87.0` |',
+].join('\n');
+
+test("NOTICE.md's extension table gives each row's names and the ref its licence was read at, and stops at the table", () => {
+  const rows = noticeExtensionRows(EXTENSION_TABLE);
+  assert.deepEqual(rows.map((r) => [r.names[0], r.ref, isPermissiveRow(r)]), [
+    ['amcheck', 'REL_17_6', false],
+    ['postgis', '3.3.7', false],
+    ['address_standardizer', '3.3.7', true],
+    ['pgrouting', 'v3.4.1', false],
+    ['pg_cron', 'v1.6.4', true],
+    ['pgjwt', 'f3d82fd30151e754e19ce5d6a06c71c20689ce3d', true],
+    ['plan_filter', '5081a7b', true],
+  ]);
+  assert.deepEqual(noticeExtensionRows('| Extension | Version | Licence | Project |\n'), []);
+});
+
+test('each permissive extension NOTICE.md lists has a pinned text, named in licenses/README.md at its ref', () => {
+  const pinned = new Map(['address_standardizer/COPYING', 'pg_cron/LICENSE', 'pgjwt/LICENSE', 'plan_filter/License']
+    .map((f) => [`supabase-postgres/${f}`, 'x']));
+  const readme = [
+    '| `supabase-postgres/address_standardizer/COPYING` | [`postgis/postgis`](https://github.com/postgis/postgis) `3.3.7` |',
+    '| `supabase-postgres/pg_cron/LICENSE` | [`citusdata/pg_cron`](https://github.com/citusdata/pg_cron) `v1.6.4` |',
+    '| `supabase-postgres/pgjwt/LICENSE` | commit `f3d82fd30151e754e19ce5d6a06c71c20689ce3d` |',
+    '| `supabase-postgres/plan_filter/License` | commit `5081a7b` |',
+  ].join('\n');
+  assert.deepEqual(extensionTextProblems(EXTENSION_TABLE, pinned, readme), []);
+
+  pinned.delete('supabase-postgres/pg_cron/LICENSE');
+  assert.deepEqual(extensionTextProblems(EXTENSION_TABLE, pinned, readme.replace('`v1.6.4`', '').replace('commit `5081a7b`', '`main`').split('\n').slice(0, 3).join('\n')), [
+    'NOTICE.md lists pg_cron (https://github.com/citusdata/pg_cron v1.6.4), and licenses/supabase-postgres/pg_cron/ holds no pinned licence text for it',
+    'licenses/README.md does not name licenses/supabase-postgres/plan_filter/',
+  ]);
+  assert.deepEqual(extensionTextProblems(EXTENSION_TABLE, new Map([...pinned, ['supabase-postgres/pg_cron/LICENSE', 'x']]), readme.replace('`v1.6.4`', '`v1.6.3`')), [
+    'licenses/README.md names licenses/supabase-postgres/pg_cron/ without v1.6.4, the ref NOTICE.md says its text was read at',
+  ]);
+  assert.match(extensionTextProblems('no table', pinned, readme)[0], /the parse has stopped matching it/);
 });
 
 test('every image built on supabase/postgres carries a pinned written offer naming its base and versions', () => {

@@ -141,7 +141,7 @@ says why.
 | **Archive**, Third-party, Host or Simulated, with no credential | Unchanged | None | None | None: nothing is asked | None | Restore Gateway | One `UPDATE` |
 | **Archive**, Playback | Refused while it is the only Playback gateway | n/a | n/a | n/a | n/a | The drawer has no Archive Gateway | A refusal |
 | **Restore**, Remote, never enrolled | Unchanged: `PENDING_ENROLLMENT` stays so | None: a cancelled token does not come back | None | None | None | Set Up Gateway (primary) | One `UPDATE` clearing `archived_at` and the timer. The toast says it was restored. |
-| **Restore**, Remote, enrolled | Unchanged | None | The stamp stays, so the record keeps reading Revoked until a credential is issued or enrolled after the restore. | The account stays disabled until the appliance enrols again | The repository comes back out of the forge's archive. The deploy key does not come back, and the appliance enrols again to be given one. **[D3]** | Set Up Gateway (primary) | Two `UPDATE`s: the restore under the person, then the forge clearing its archive stamp under the service (confirmed by the live walk, item 5). The toast says it was restored. |
+| **Restore**, Remote, enrolled | Unchanged | None | The stamp stays, so the record keeps reading Revoked until a credential is issued or enrolled after the restore. | The account stays disabled until the appliance enrols again | The repository comes back out of the forge's archive. The deploy key does not come back, and the appliance enrols again to be given one. | Set Up Gateway (primary) | Two `UPDATE`s: the restore under the person, then the forge clearing its archive stamp under the service (confirmed by the live walk, item 5). The toast says it was restored. |
 | **Restore**, Third-party, Host or Simulated, with a credential | Unchanged | None | The stamp stays. | The account stays disabled until a credential is issued | None | Generate Broker Credential. No kept copy comes back. | One `UPDATE`. The toast says it was restored. |
 | **Restore**, any type, with no credential | Unchanged | None | None | None | None | As an active gateway | One `UPDATE` |
 | **Auto-delete**, any type but Playback | The row goes | Go with the row | Gone. A revocation still owed is kept by the Sparkplug ID. | Nothing more is asked once the archive's revocation is confirmed. One still owed outlives the row, and the sweep asks until a reply confirms it. | The sweep removes any key left and archives the repository. A repository is never deleted. | n/a | One `DELETE`, by the retention job, and a tombstone on the Archived Entities page. It runs nightly at 03:30. A gateway with no timer, or one a playback names, is skipped. |
@@ -160,12 +160,9 @@ columns in the approver's transaction.
 
 ## Where the code differs
 
-Each key below is a row above. A difference is a bug, and the suite marks it as expected to fail so that
-whoever fixes it has to remove the mark and this text with it.
-
-| Key | What the code does today | How it is confirmed |
-| :--- | :--- | :--- |
-| **[D3]** | *The Gateways help says restoring a gateway brings back its deploy key, which it does not.* The forge sweep removes the key on archive and has nothing to register on restore. The Restore dialog says so correctly. [An appliance that is lost, stolen or scrapped](remote-gateways.md#an-appliance-that-is-lost-stolen-or-scrapped) says the same as the help. | `test_forge_sweep.py`, and the sweep's own source |
+Today the code does what every row above says. When a row and the code disagree, the row carries a key, such as
+**[Dn]**, and this section names the bug by its title. The suites then mark that row as expected to fail, so
+whoever fixes it has to remove the mark and the key with it.
 
 ## How the code is held to this page
 

@@ -44,26 +44,40 @@ one.
 
 | Published image | Built on | Licence of the base | The licence text in the published image |
 | :--- | :--- | :--- | :--- |
-| `aber/timescaledb` | `timescale/timescaledb:2.31.0-pg17` | [Timescale License, core Apache 2.0](#timescaledb--timescale-license); PostgreSQL License | **Added:** `/usr/share/licenses/timescaledb/` (`LICENSE`, `LICENSE-APACHE`, `NOTICE`, `LICENSE-TIMESCALE`) and `/usr/share/licenses/postgresql/COPYRIGHT` |
-| `aber/supabase-db`, `aber/db-init`, `aber/backup-service` | `supabase/postgres:17.6.1.175` | PostgreSQL License; [its extensions](#the-extensions-in-supabasepostgres) their own, two of them GPL | **Added:** `/usr/share/licenses/supabase-postgres/LICENSE`, `/usr/share/licenses/postgresql/COPYRIGHT`, the GPL under `/usr/share/licenses/postgis/` and `/usr/share/licenses/pgrouting/` with a written offer of their source (`SOURCE`), and the licences of the copyleft libraries only PostGIS loads under `/usr/share/licenses/geos/`, `sfcgal/`, `cgal/`, `gmp/`, `mpfr/`, `libidn2/` and `libunistring/` |
+| `aber/timescaledb` | `timescale/timescaledb:2.31.0-pg17` | [Timescale License, core Apache 2.0](#timescaledb--timescale-license); PostgreSQL License | **Added:** `/usr/share/licenses/timescaledb/` (`LICENSE`, `LICENSE-APACHE`, `NOTICE`, `LICENSE-TIMESCALE`) and `/usr/share/licenses/postgresql/COPYRIGHT`; the OS packages' list and written offer, `/usr/share/licenses/os-packages.txt` and `os-packages-source.txt` |
+| `aber/supabase-db`, `aber/db-init`, `aber/backup-service` | `supabase/postgres:17.6.1.175` | PostgreSQL License; [its extensions](#the-extensions-in-supabasepostgres) their own, two of them GPL | **Added:** `/usr/share/licenses/supabase-postgres/LICENSE`, `/usr/share/licenses/postgresql/COPYRIGHT`, the permissive extensions' licences, each under `/usr/share/licenses/<extension>/`, the GPL under `/usr/share/licenses/postgis/` and `/usr/share/licenses/pgrouting/` with a written offer of their source (`SOURCE`), the licences of the copyleft libraries only PostGIS loads under `/usr/share/licenses/geos/`, `sfcgal/`, `cgal/`, `gmp/`, `mpfr/`, `libidn2/` and `libunistring/`, and the OS packages' list and written offer, `/usr/share/licenses/os-packages.txt` and `os-packages-source.txt` |
 | `aber/edge-runtime` | `supabase/edge-runtime:v1.77.4`, with a module cache resolved by `denoland/deno:2.1.4` | MIT | **Added:** `/usr/share/licenses/edge-runtime/LICENSE` |
-| `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.34.1` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`). nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
-| `aber/node-red` | `nodered/node-red:5.0.9` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE` |
-| `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`) |
-| `aber/frontend` | `nginx:alpine`, with the bundle built by `node:24-alpine` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit), [the charts'](#the-dashboards-charts--uplot-mit), [the editor's](#the-automations-pages-editor--codemirror-and-lezer-mit) and [the YAML parser's](#the-automations-pages-yaml-parser--yaml-isc) notices are in the bundle |
+| `aber/swagger-ui` | `swaggerapi/swagger-ui:v5.34.1` | Apache 2.0; nginx BSD-2-Clause | **Added:** `/usr/share/licenses/swagger-ui/` (`LICENSE`, `NOTICE`) and the OS packages' list and written offer, `/usr/share/licenses/os-packages.txt` and `os-packages-source.txt`. nginx's is the base's `/usr/share/licenses/nginx/COPYRIGHT` |
+| `aber/node-red` | `nodered/node-red:5.0.9` | Apache 2.0; Node.js MIT | In the base: `/usr/src/node-red/node_modules/node-red/LICENSE` and Node.js's `/usr/local/LICENSE`. **Added:** the OS packages' list and written offer, `/usr/share/licenses/os-packages.txt` and `os-packages-source.txt` |
+| `aber/gateway-credential` | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 or EDL-1.0 | In the base: `/usr/share/licenses/mosquitto/` (`epl-v20`, `edl-v10`). **Added:** the OS packages' list and written offer, `/usr/share/licenses/os-packages.txt` and `os-packages-source.txt` |
+| `aber/frontend` | `nginx:1.31.9-alpine3.24`, with the bundle built by `node:24.22.3-alpine3.24` | BSD-2-Clause | In the base: `/usr/share/licenses/nginx/COPYRIGHT`. **Added:** the OS packages' list and written offer, `/usr/share/licenses/os-packages.txt` and `os-packages-source.txt`. [The fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) carry their own; [the icons'](#the-dashboards-icons--lucide-isc-and-feather-mit), [the charts'](#the-dashboards-charts--uplot-mit), [the editor's](#the-automations-pages-editor--codemirror-and-lezer-mit), [the YAML parser's](#the-automations-pages-yaml-parser--yaml-isc) and [the AASX unzipper's](#the-aas-readers-unzipper--fflate-mit) notices are in the bundle |
 | `aber/ingestion`, `aber/i3x-service`, `aber/test-runner` | `python:3.13-slim` (`test-runner` on `aber/ingestion`) | Python Software Foundation License | In the base: `/usr/local/lib/python3.13/LICENSE.txt` |
 
 **The packages a Dockerfile installs from a distribution** (pgBackRest, tini, gosu, Node.js, SQLite,
 GNU tar, age, the AWS CLI, protoc) come with that distribution's record of their licence. So does
 each base's operating system, which includes GPL-2.0 packages such as BusyBox in the Alpine bases.
 A Debian-based image (`edge-runtime` and the three Python images) carries each package's copyright
-file under `/usr/share/doc/<package>/`. An Alpine-based image carries no texts: Alpine records each
-package's licence in its package database (`apk list -I` prints it), and the sources are in Alpine's
-`aports`.
+file under `/usr/share/doc/<package>/`. An Alpine package carries no licence text, so each of the
+other eight images, all Alpine-based, carries two files its build writes from its own package
+database after its last `apk` step:
+
+- `/usr/share/licenses/os-packages.txt` lists every package, with its version, its licence and the
+  `aports` package that built it.
+- `/usr/share/licenses/os-packages-source.txt` lists the copyleft ones, BusyBox among them, with the
+  `aports` commit each was built from. It says where their source is: Alpine's
+  [`aports`](https://gitlab.alpinelinux.org/alpine/aports), on the branch of the image's Alpine
+  release. It carries Aber's written offer of that source, made as
+  [the extensions' offer](#the-extensions-in-supabasepostgres) is, through the same route.
+
+[`licenses/os-packages.sh`](licenses/os-packages.sh) writes both. The software in
+`supabase/postgres`'s Nix store is not in that package database; [its extensions](#the-extensions-in-supabasepostgres)
+are listed below.
 
 **A guard keeps this list whole.** `scripts/check-image-licences.mjs` fails CI when `values.yaml`
 pins an image, a chart template names one or a Dockerfile is built `FROM` one, that this file does
-not name. It also fails when a file in `licenses/` differs from its SHA-256.
+not name. It also fails when a file in `licenses/` differs from its SHA-256, when a Dockerfile builds
+on a floating tag rather than a version, and when a published Alpine-based image does not write
+those two files after its last `apk` step.
 
 ## `sparkplug_b.proto` — Eclipse Public License 2.0
 
@@ -175,6 +189,22 @@ grep -l "Copyright Eemeli Aro" frontend/dist/assets/*.js
 ```
 
 `legalComments.test.js` fails if that comment stops matching the licence the installed package ships.
+
+## The AAS reader's unzipper — fflate (MIT)
+
+The Vocabulary page reads an AASX package in the browser with [`fflate`](https://github.com/101arrowz/fflate),
+copyright Arjun Barrett, under the MIT licence. It is an npm dependency of `frontend/` with no
+dependencies of its own, and the edge functions use the same library
+([`supabase/functions/deno.json`](supabase/functions/deno.json)). Its MIT licence asks for its notice in
+every copy, and its files carry none the build keeps. So
+[`frontend/src/utils/aasPackage.js`](frontend/src/utils/aasPackage.js) opens with that notice as a `/*!`
+legal comment. To check a build:
+
+```
+grep -l "Copyright (c) 2026 Arjun Barrett" frontend/dist/assets/*.js
+```
+
+`legalCommentsFflate.test.js` fails if that comment stops matching the licence the installed package ships.
 
 ## The ASHRAE 223P ontology — Apache License 2.0
 
@@ -301,6 +331,14 @@ them: `aber/supabase-db`, `aber/db-init` and `aber/backup-service`. The list is 
 extension control files. Aber's migrations and seed create six of them: `postgres_fdw`, `pg_cron`,
 `pg_net`, `supabase_vault`, `pgjwt` and `pgcrypto`.
 
+**The permissive ones' licences travel with them.** Every extension and server library in the table
+below whose licence asks for its notice in each copy (MIT, BSD, ISC, Apache 2.0, the PostgreSQL
+License) has its project's licence file in all three images, under `/usr/share/licenses/<name>/`,
+`<name>` being the first the row names. [`licenses/README.md`](licenses/README.md) lists each file.
+PostgreSQL's own extensions are under `/usr/share/licenses/postgresql/COPYRIGHT`. pgTAP has no
+licence file, so its `README.md` travels, which states the licence. `pg_tle`'s `NOTICE` travels
+beside its Apache licence, as that licence's §4 asks.
+
 **Two are copyleft: PostGIS and pgRouting, both GPL-2.0-or-later.** Aber creates neither, but their
 binaries are in all three images, unmodified from `supabase/postgres:17.6.1.175`. Their GPL text
 travels with them (`/usr/share/licenses/postgis/`, `/usr/share/licenses/pgrouting/`). So does a
@@ -379,46 +417,48 @@ Each copyleft library's licence is under `/usr/share/licenses/<name>/`, and the 
 | PCRE2 | 10.46 | BSD-3-Clause with the PCRE2 exception | [`PCRE2Project/pcre2`](https://github.com/PCRE2Project/pcre2) `pcre2-10.46` |
 | libpq | 17.6 | PostgreSQL License | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_6` |
 
-Each licence is from the project's repository at the version the image ships. Three were read at
-a release of the version shipped: `rum` at 1.3.14, `plpgsql_check` at 2.8.0 and `pg_stat_monitor`
-at 2.1.0. `pgjwt`, `supautils` and `plan_filter` were read on their default branch, because the
-image names no tagged version of them.
+Each licence is read in the project's repository at the tag or commit the base's build fetched,
+which the last column gives. The build's own files name it: [`nix/ext/`](https://github.com/supabase/postgres/tree/17.6.1.175/nix/ext)
+in `supabase/postgres` at `17.6.1.175`. Three are commits, because the build fetches no tag of
+them: `pg_hashids`, `pgjwt` and `plan_filter`. A version is the extension's own, from its control
+file, so `http` 1.6 is the release `v1.6.1`.
 
-| Extension | Version | Licence | Project |
+| Extension or library | Version | Licence | Project |
 | :--- | :--- | :--- | :--- |
 | PostgreSQL's own: `amcheck`, `autoinc`, `bloom`, `btree_gin`, `btree_gist`, `citext`, `cube`, `dblink`, `dict_int`, `dict_xsyn`, `earthdistance`, `file_fdw`, `fuzzystrmatch`, `hstore`, `insert_username`, `intagg`, `intarray`, `isn`, `lo`, `ltree`, `moddatetime`, `pageinspect`, `pg_buffercache`, `pg_freespacemap`, `pg_prewarm`, `pg_stat_statements`, `pg_surgery`, `pg_trgm`, `pg_visibility`, `pg_walinspect`, `pgcrypto`, `pgrowlocks`, `pgstattuple`, `plpgsql`, `postgres_fdw`, `refint`, `seg`, `sslinfo`, `tablefunc`, `tcn`, `tsm_system_rows`, `tsm_system_time`, `unaccent`, `uuid-ossp`, `xml2` | 17.6 | PostgreSQL License | [`postgres/postgres`](https://github.com/postgres/postgres) `REL_17_6` |
 | `postgis`, `postgis_raster`, `postgis_sfcgal`, `postgis_tiger_geocoder`, `postgis_topology` | 3.3.7 | **GPL-2.0-or-later** | [`postgis/postgis`](https://github.com/postgis/postgis) `3.3.7` |
 | `address_standardizer`, `address_standardizer_data_us` | 3.3.7 | MIT | [`postgis/postgis`](https://github.com/postgis/postgis) `3.3.7`, `extensions/address_standardizer` |
 | `pgrouting` | 3.4.1 | **GPL-2.0-or-later**, some parts Boost or MIT | [`pgRouting/pgrouting`](https://github.com/pgRouting/pgrouting) `v3.4.1` |
-| `http` | 1.6 | MIT | [`pramsey/pgsql-http`](https://github.com/pramsey/pgsql-http) |
-| `hypopg` | 1.4.1 | PostgreSQL License | [`HypoPG/hypopg`](https://github.com/HypoPG/hypopg) |
-| `index_advisor` | 0.2.0 | PostgreSQL License | [`supabase/index_advisor`](https://github.com/supabase/index_advisor) |
-| `pg_cron` | 1.6.4 | PostgreSQL License | [`citusdata/pg_cron`](https://github.com/citusdata/pg_cron) |
-| `pg_graphql` | 1.6.2 | Apache 2.0 | [`supabase/pg_graphql`](https://github.com/supabase/pg_graphql) |
-| `pg_hashids` | 1.3.0 | MIT | [`iCyberon/pg_hashids`](https://github.com/iCyberon/pg_hashids) |
-| `pg_jsonschema` | 0.3.3 | Apache 2.0 | [`supabase/pg_jsonschema`](https://github.com/supabase/pg_jsonschema) |
-| `pg_net` | 0.20.4 | Apache 2.0 | [`supabase/pg_net`](https://github.com/supabase/pg_net) |
-| `pg_partman` | 5.3.1 | PostgreSQL License | [`pgpartman/pg_partman`](https://github.com/pgpartman/pg_partman) |
-| `pg_repack` | 1.5.2 | BSD-3-Clause | [`reorg/pg_repack`](https://github.com/reorg/pg_repack) |
-| `pg_stat_monitor` | 2.1 | PostgreSQL License | [`percona/pg_stat_monitor`](https://github.com/percona/pg_stat_monitor) |
-| `pg_tle` | 1.4.0 | Apache 2.0 | [`aws/pg_tle`](https://github.com/aws/pg_tle) |
-| `pgaudit` | 17.1 | PostgreSQL License | [`pgaudit/pgaudit`](https://github.com/pgaudit/pgaudit) |
-| `pgjwt` | 0.2.0 | MIT | [`michelp/pgjwt`](https://github.com/michelp/pgjwt) |
-| `pgmq` | 1.5.1 | PostgreSQL License | [`pgmq/pgmq`](https://github.com/pgmq/pgmq) |
-| `pgroonga`, `pgroonga_database` | 3.2.5 | PostgreSQL License | [`pgroonga/pgroonga`](https://github.com/pgroonga/pgroonga) |
-| `pgsodium` | 3.1.8 | PostgreSQL License | [`michelp/pgsodium`](https://github.com/michelp/pgsodium) |
-| `pgtap` | 1.3.3 | PostgreSQL License | [`theory/pgtap`](https://github.com/theory/pgtap) |
-| `plpgsql_check` | 2.8 | MIT | [`okbob/plpgsql_check`](https://github.com/okbob/plpgsql_check) |
-| `rum` | 1.3 | PostgreSQL License | [`postgrespro/rum`](https://github.com/postgrespro/rum) |
-| `supabase_vault` | 0.3.1 | Apache 2.0 | [`supabase/vault`](https://github.com/supabase/vault) |
-| `vector` | 0.8.2 | PostgreSQL License | [`pgvector/pgvector`](https://github.com/pgvector/pgvector) |
-| `wal2json` | 2.6 | BSD-3-Clause | [`eulerto/wal2json`](https://github.com/eulerto/wal2json) |
-| `wrappers` | 0.6.3 | Apache 2.0 | [`supabase/wrappers`](https://github.com/supabase/wrappers) |
+| `http` | 1.6 | MIT | [`pramsey/pgsql-http`](https://github.com/pramsey/pgsql-http) `v1.6.1` |
+| `hypopg` | 1.4.1 | PostgreSQL License | [`HypoPG/hypopg`](https://github.com/HypoPG/hypopg) `1.4.1` |
+| `index_advisor` | 0.2.0 | PostgreSQL License | [`supabase/index_advisor`](https://github.com/supabase/index_advisor) `v0.2.0` |
+| `pg_cron` | 1.6.4 | PostgreSQL License | [`citusdata/pg_cron`](https://github.com/citusdata/pg_cron) `v1.6.4` |
+| `pg_graphql` | 1.6.2 | Apache 2.0 | [`supabase/pg_graphql`](https://github.com/supabase/pg_graphql) `v1.6.2` |
+| `pg_hashids` | 1.3.0 | MIT | [`iCyberon/pg_hashids`](https://github.com/iCyberon/pg_hashids) commit `cd0e1b31d52b394a0df64079406a14a4f7387cd6` |
+| `pg_jsonschema` | 0.3.3 | Apache 2.0 | [`supabase/pg_jsonschema`](https://github.com/supabase/pg_jsonschema) `v0.3.3` |
+| `pg_net` | 0.20.4 | Apache 2.0 | [`supabase/pg_net`](https://github.com/supabase/pg_net) `v0.20.4` |
+| `pg_partman` | 5.3.1 | PostgreSQL License | [`pgpartman/pg_partman`](https://github.com/pgpartman/pg_partman) `v5.3.1` |
+| `pg_repack` | 1.5.2 | BSD-3-Clause | [`reorg/pg_repack`](https://github.com/reorg/pg_repack) `ver_1.5.2` |
+| `pg_stat_monitor` | 2.1 | PostgreSQL License | [`percona/pg_stat_monitor`](https://github.com/percona/pg_stat_monitor) `2.1.0` |
+| `pg_tle` | 1.4.0 | Apache 2.0 | [`aws/pg_tle`](https://github.com/aws/pg_tle) `v1.4.0` |
+| `pgaudit` | 17.1 | PostgreSQL License | [`pgaudit/pgaudit`](https://github.com/pgaudit/pgaudit) `17.1` |
+| `pgjwt` | 0.2.0 | MIT | [`michelp/pgjwt`](https://github.com/michelp/pgjwt) commit `f3d82fd30151e754e19ce5d6a06c71c20689ce3d` |
+| `pgmq` | 1.5.1 | PostgreSQL License | [`pgmq/pgmq`](https://github.com/pgmq/pgmq) `v1.5.1` |
+| `pgroonga`, `pgroonga_database` | 3.2.5 | PostgreSQL License | [`pgroonga/pgroonga`](https://github.com/pgroonga/pgroonga) `3.2.5` |
+| `pgsodium` | 3.1.8 | PostgreSQL License | [`michelp/pgsodium`](https://github.com/michelp/pgsodium) `v3.1.8` |
+| `pgtap` | 1.3.3 | PostgreSQL License | [`theory/pgtap`](https://github.com/theory/pgtap) `v1.3.3` |
+| `plpgsql_check` | 2.8 | MIT | [`okbob/plpgsql_check`](https://github.com/okbob/plpgsql_check) `v2.8.11` |
+| `rum` | 1.3 | PostgreSQL License | [`postgrespro/rum`](https://github.com/postgrespro/rum) `1.3.14` |
+| `supabase_vault` | 0.3.1 | Apache 2.0 | [`supabase/vault`](https://github.com/supabase/vault) `v0.3.1` |
+| `vector` | 0.8.2 | PostgreSQL License | [`pgvector/pgvector`](https://github.com/pgvector/pgvector) `v0.8.2` |
+| `wal2json` | 2.6 | BSD-3-Clause | [`eulerto/wal2json`](https://github.com/eulerto/wal2json) `wal2json_2_6` |
+| `wrappers` | 0.6.3 | Apache 2.0 | [`supabase/wrappers`](https://github.com/supabase/wrappers) `v0.6.3` |
+| `supautils`, a server library | 3.4.3 | Apache 2.0 | [`supabase/supautils`](https://github.com/supabase/supautils) `v3.4.3` |
+| `safeupdate`, a server library | 1.4 | ISC | [`eradman/pg-safeupdate`](https://github.com/eradman/pg-safeupdate) `1.4` |
+| `plan_filter`, a server library | 0.1 | PostgreSQL License | [`pgexperts/pg_plan_filter`](https://github.com/pgexperts/pg_plan_filter) commit `5081a7b5cb890876e67d8e7486b6a64c38c9a492` |
 
-The image also carries server libraries that are not extensions: PostgreSQL's own `auto_explain`,
-`auth_delay` and `passwordcheck`; `supautils` (Apache 2.0, [`supabase/supautils`](https://github.com/supabase/supautils));
-`safeupdate` 1.4 (ISC, [`eradman/pg-safeupdate`](https://github.com/eradman/pg-safeupdate)); and
-`plan_filter` 0.1 (PostgreSQL License, [`pgexperts/pg_plan_filter`](https://github.com/pgexperts/pg_plan_filter)).
+The image also carries server libraries that are not extensions: the three the table names, and
+PostgreSQL's own `auto_explain`, `auth_delay` and `passwordcheck`.
 The libraries the other extensions link, such as Groonga, libsodium and ICU, come from the image's
 Nix store under their own licences, Groonga's the LGPL. This list stops at the extensions and
 [the libraries only PostGIS loads](#the-extensions-in-supabasepostgres), above.
@@ -442,9 +482,9 @@ on any row.
 | `prom/prometheus:v3.15.1` | Apache 2.0 | `/LICENSE` |
 | `eclipse-mosquitto:2.1.2-alpine` | EPL-2.0 / EDL-1.0 | `/usr/share/licenses/mosquitto/` |
 | `nodered/node-red:5.0.9` | Apache 2.0 | `/usr/src/node-red/node_modules/node-red/LICENSE` |
-| `nginx:alpine` | BSD-2-Clause | `/usr/share/licenses/nginx/COPYRIGHT` (nginx 1.31.8 when read; the tag moves) |
+| `nginx:1.31.9-alpine3.24` | BSD-2-Clause | `/usr/share/licenses/nginx/COPYRIGHT` |
 | `python:3.13-slim` | Python Software Foundation License | `/usr/local/lib/python3.13/LICENSE.txt` (Python 3.13.16 when read; the tag moves) |
-| `node:24.22.2-alpine3.24`, `node:24-alpine` | MIT, with Node.js's bundled dependencies' licences in the same file | `/usr/local/LICENSE` |
+| `node:24.22.2-alpine3.24`, `node:24.22.3-alpine3.24` | MIT, with Node.js's bundled dependencies' licences in the same file | `/usr/local/LICENSE` |
 | `alpine:3.24` | Each package its own: BusyBox and apk-tools GPL-2.0-only, musl MIT, OpenSSL Apache 2.0 | `apk list -I` |
 
 ### Checked in the upstream repository
@@ -568,6 +608,32 @@ Federation AISBL and carry an SPDX identifier for the same licence.
 
 Adopting the vocabulary is not a claim of OPC UA compliance, which is a certification of a server's
 behaviour.
+
+### QUDT: the quantity-kind and unit vocabularies and the rows read from them
+
+[`scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl`](scripts/vocabularies/qudt-3.5.2-quantity-kinds.ttl)
+and [`qudt-3.5.2-units.ttl`](scripts/vocabularies/qudt-3.5.2-units.ttl) are
+`VOCAB_QUDT-QUANTITY-KINDS-ALL.ttl` and `VOCAB_QUDT-UNITS-ALL.ttl` at tag `v3.5.2` of
+[`github.com/qudt/qudt-public-repo`](https://github.com/qudt/qudt-public-repo), by QUDT.org. They are
+unmodified, byte for byte. QUDT licenses them under
+[Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/),
+as both files declare, and asks that attribution is made to QUDT.org. The repository's licence notice
+is beside them, in [`LICENSE-qudt-CC-BY-4.0.txt`](scripts/vocabularies/LICENSE-qudt-CC-BY-4.0.txt). The
+MIT licence above, which covers the rest of this repository, does not cover them.
+
+> The QUDT Ontologies are issued under a Creative Commons Attribution 4.0 International License
+> (CC BY 4.0), available at https://creativecommons.org/licenses/by/4.0/. Attribution should be made to
+> QUDT.org
+
+`scripts/generate-qudt-vocabulary.mjs` builds the `qudt_quantity_kinds` and `qudt_units` rows from them,
+in migration `0304`: each quantity kind's IRI, English label and description, and the IRI, label, symbol
+and UN/ECE Recommendation 20 code of the 83 units that MTConnect's unit names map to. The descriptions
+are changed from QUDT's text in one way: LaTeX is written out as plain text, HTML tags are removed,
+whitespace is collapsed, and where QUDT's plain-text description is German its English description is
+taken. QUDT's text is in those rows, in the definition an AAS export gives each concept, and on the
+Vocabulary page, which credits QUDT.org under CC BY 4.0. QUDT provides the material as it is, with no
+warranty, as the licence's disclaimer says. The units file's metadata also carries a notice from the
+Regenstrief Institute and the UCUM Organization, which covers the UCUM codes. None is taken.
 
 ### VDA 5050: the state schema and the fields read from it
 

@@ -8,7 +8,10 @@
  * ghcr.io/harri-llewelyn/aber/, or a values tag left empty for Chart.AppVersion) is not third-party.
  * A Dockerfile that copies from the named context `licenses` must be handed it by every build that
  * names it: a workflow's matrix entry, the dev loop's IMAGES and every documented `docker build`.
- * Every image built on supabase/postgres carries the written offers of its GPL extensions' source.
+ * Every image built on supabase/postgres carries the written offers of its GPL extensions' source,
+ * and a pinned licence text for each permissive extension NOTICE.md lists. Every base is pinned to
+ * a version, and every published Alpine-based image writes its OS packages' licences with
+ * licenses/os-packages.sh after its last apk step.
  *
  * Static: reads the tree and starts nothing. Usage: node scripts/check-image-licences.mjs
  */
@@ -112,6 +115,41 @@ export function dockerfileBases(text) {
 /** A reference without its digest: NOTICE.md names `python:3.12-slim`, a Dockerfile pins it by digest too. */
 export const withoutDigest = (ref) => ref.split('@')[0];
 
+/** A reference's repository and tag (`''` when it names none). */
+export function splitRef(ref) {
+  const bare = withoutDigest(ref);
+  const colon = bare.lastIndexOf(':');
+  return colon > bare.lastIndexOf('/') ? { repo: bare.slice(0, colon), tag: bare.slice(colon + 1) } : { repo: bare, tag: '' };
+}
+
+/**
+ * Whether a base names one build of its image: a digest, or a tag holding a full version
+ * (`2.31.0-pg17`, `24.22.3-alpine3.24`). `alpine`, `24-alpine`, `latest` or no tag move upstream,
+ * and NOTICE.md could not say which version's licences apply.
+ */
+export const isPinned = (ref) => /@sha256:[0-9a-f]{64}$/.test(ref) || /\d+\.\d+\.\d+/.test(splitRef(ref).tag);
+
+/** Bases a Dockerfile still names at a floating tag, on purpose: pinning them is a change of its own. */
+export const FLOATING_HELD = new Set(['python:3.13-slim']);
+
+/**
+ * The bases in `dockerfiles` ({ path, text }) that float and are not held, and each held one no
+ * Dockerfile names any more. Images built here, and references no ARG default resolves, are skipped.
+ */
+export function floatingBases(dockerfiles, held = FLOATING_HELD) {
+  const problems = [];
+  const named = new Set();
+  for (const { path, text } of dockerfiles) {
+    for (const ref of dockerfileBases(text)) {
+      if (ref.startsWith(OWN) || ref.includes('$')) continue;
+      named.add(withoutDigest(ref));
+      if (!isPinned(ref) && !held.has(ref)) problems.push(`${path}: FROM ${ref} floats; pin it to a version (x.y.z), as every other base is`);
+    }
+  }
+  for (const ref of held) if (!named.has(ref)) problems.push(`FLOATING_HELD holds ${ref}, which no Dockerfile names any more`);
+  return problems;
+}
+
 /** Every backticked image-shaped reference NOTICE.md names. */
 export function noticeImages(text) {
   const out = new Set();
@@ -180,6 +218,87 @@ export function licenceCopies(text) {
   return out;
 }
 
+/** The script in licenses/ that writes an Alpine-based image's OS packages' licences, and what it writes. */
+export const OS_PACKAGES = 'os-packages.sh';
+export const OS_PACKAGES_FILES = ['/usr/share/licenses/os-packages.txt', '/usr/share/licenses/os-packages-source.txt'];
+
+/** Bases whose image is Alpine Linux though their tag does not say so. */
+export const ALPINE_BASES = new Set(['timescale/timescaledb', 'supabase/postgres', 'swaggerapi/swagger-ui', 'nodered/node-red']);
+
+const APK_CHANGE = /\bapk\s+(?:add|del|upgrade|fix)\b/;
+
+/**
+ * A Dockerfile's final stage: the image it builds on, followed through earlier stages, and its
+ * instructions after FROM.
+ */
+export function finalStage(text) {
+  const args = {};
+  const stages = new Map();
+  let stage = null;
+  for (const line of instructions(text)) {
+    const arg = /^ARG\s+(\w+)(?:=(\S*))?/i.exec(line);
+    if (arg && !stage) {
+      if (arg[2] !== undefined && !(arg[1] in args)) args[arg[1]] = arg[2];
+      continue;
+    }
+    const from = /^FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?/i.exec(line);
+    if (from) {
+      const ref = from[1].replace(/\$\{(\w+)\}|\$(\w+)/g, (whole, a, b) => args[a || b] ?? whole);
+      stage = { base: stages.get(ref.toLowerCase()) ?? ref, lines: [] };
+      if (from[2]) stages.set(from[2].toLowerCase(), stage.base);
+      continue;
+    }
+    if (stage) stage.lines.push(line);
+  }
+  return stage;
+}
+
+/** Whether a final stage is Alpine Linux: its base's tag says so, its base is one, or it runs apk. */
+export function isAlpine(stage) {
+  const { repo, tag } = splitRef(stage.base);
+  return /alpine/.test(tag) || ALPINE_BASES.has(repo) || stage.lines.some((l) => /^RUN\s/i.test(l) && APK_CHANGE.test(l));
+}
+
+/** The Dockerfiles a workflow's image matrix publishes (`dockerfile:` entries). */
+export const publishedDockerfiles = (workflow) => [...workflow.matchAll(/^\s*dockerfile:\s*(\S+)\s*$/gm)].map((m) => m[1]);
+
+/**
+ * Where a published Alpine-based image would not carry its OS packages' licences. Its final stage
+ * must copy licenses/os-packages.sh and run it as root, with no apk step after it that changes the
+ * packages, or the list is not what the image ships. `dockerfiles` is { path, text } for each.
+ */
+export function osPackageProblems(dockerfiles) {
+  const problems = [];
+  for (const { path, text } of dockerfiles) {
+    const stage = finalStage(text);
+    if (!stage || !isAlpine(stage)) continue;
+    if (!licenceCopies(stage.lines.join('\n')).some((c) => c.set === OS_PACKAGES)) {
+      problems.push(`${path}'s final stage is Alpine and does not copy licenses/${OS_PACKAGES}, so its image carries no list of its OS packages' licences`);
+    }
+    let user = 'root';
+    let ran = -1;
+    let ranAs = 'root';
+    stage.lines.forEach((line, i) => {
+      const u = /^USER\s+(\S+)/i.exec(line);
+      if (u) user = u[1];
+      if (/^RUN\s/i.test(line) && line.includes(OS_PACKAGES)) {
+        ran = i;
+        ranAs = user;
+        if (APK_CHANGE.test(line.slice(line.indexOf(OS_PACKAGES)))) problems.push(`${path} changes its packages with apk after ${OS_PACKAGES} in one RUN, so the list is not what the image ships`);
+      }
+    });
+    if (ran === -1) {
+      problems.push(`${path}'s final stage is Alpine and never runs ${OS_PACKAGES}, so its image carries no list of its OS packages' licences`);
+      continue;
+    }
+    if (!/^(?:root|0)(?::(?:root|0))?$/.test(ranAs)) problems.push(`${path} runs ${OS_PACKAGES} as ${ranAs}; it writes /usr/share/licenses/ and must run as root`);
+    stage.lines.slice(ran + 1).forEach((line) => {
+      if (/^RUN\s/i.test(line) && APK_CHANGE.test(line)) problems.push(`${path} changes its packages with apk after running ${OS_PACKAGES}: "${line.slice(0, 80)}"`);
+    });
+  }
+  return problems;
+}
+
 /**
  * The written offers of source for the GPL extensions the base ships, under licenses/. Every image
  * built on OFFER_BASE copies them, and each names that base and the version and tag of its row in
@@ -223,6 +342,54 @@ export function noticeExtension(notice, name) {
     return repo && tag ? { version: cells[1], repo, tag } : null;
   }
   return null;
+}
+
+/** The header row of NOTICE.md's table of the extensions the base ships. */
+export const EXTENSIONS_TABLE = '| Extension or library |';
+
+/**
+ * That table's rows as { names, version, licence, repo, ref }: every name the first cell
+ * backticks, and the repository the last cell links with the ref after it (a tag, or `commit <sha>`).
+ */
+export function noticeExtensionRows(notice) {
+  const lines = notice.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.startsWith(EXTENSIONS_TABLE));
+  if (start === -1) return [];
+  const rows = [];
+  for (const line of lines.slice(start)) {
+    if (!line.startsWith('|')) break;
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    const names = [...(cells[0] ?? '').matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    const link = /\]\((https:\/\/github\.com\/[^)\s]+)\)(?:\s+commit)?\s+`([^`]+)`/.exec(cells[3] ?? '');
+    if (cells.length < 4 || !names.length || !link) continue;
+    rows.push({ names, version: cells[1], licence: cells[2], repo: link[1], ref: link[2] });
+  }
+  return rows;
+}
+
+/** A row whose licence asks for its notice in every copy, and whose text is not PostgreSQL's own. */
+export const isPermissiveRow = (row) => !/GPL/.test(row.licence) && row.repo !== 'https://github.com/postgres/postgres';
+
+/**
+ * Where the permissive extensions' texts and NOTICE.md disagree: a row with no folder under
+ * licenses/supabase-postgres/ named its first extension, a folder holding no pinned file, or a
+ * folder licenses/README.md does not name at the row's ref. `pinned` is SHA256SUMS's map.
+ */
+export function extensionTextProblems(notice, pinned, readme) {
+  const rows = noticeExtensionRows(notice).filter(isPermissiveRow);
+  if (!rows.length) return [`NOTICE.md's table headed "${EXTENSIONS_TABLE}" has no permissive row; the parse has stopped matching it`];
+  const problems = [];
+  for (const { names: [name], repo, ref } of rows) {
+    const folder = `supabase-postgres/${name}/`;
+    if (![...pinned.keys()].some((f) => f.startsWith(folder))) {
+      problems.push(`NOTICE.md lists ${name} (${repo} ${ref}), and licenses/${folder} holds no pinned licence text for it`);
+      continue;
+    }
+    const lines = readme.split(/\r?\n/).filter((l) => l.includes(`\`${folder}`));
+    if (!lines.length) problems.push(`licenses/README.md does not name licenses/${folder}`);
+    else if (!lines.every((l) => l.includes(`\`${ref}\``))) problems.push(`licenses/README.md names licenses/${folder} without ${ref}, the ref NOTICE.md says its text was read at`);
+  }
+  return problems;
 }
 
 /**
@@ -380,6 +547,26 @@ export function buildCommands(text) {
 const passesContext = (command) => /--build-context[ =]licenses=\.\/licenses(?![\w./-])/.test(command);
 
 /**
+ * A workflow matrix entry's `build_contexts`: its one value, or each line of a block scalar (`|`).
+ * build-push-action reads one context per line and does not split on a comma.
+ */
+export function matrixContexts(entry) {
+  const lines = entry.split('\n');
+  const at = lines.findIndex((l) => l.trim().startsWith('build_contexts:'));
+  if (at === -1) return [];
+  const value = lines[at].trim().slice('build_contexts:'.length).trim();
+  if (!/^[|>][-+]?$/.test(value)) return value ? [value] : [];
+  const indent = /^\s*/.exec(lines[at])[0].length;
+  const out = [];
+  for (const line of lines.slice(at + 1)) {
+    if (!line.trim()) continue;
+    if (/^\s*/.exec(line)[0].length <= indent) break;
+    out.push(line.trim());
+  }
+  return out;
+}
+
+/**
  * Where a build of `dockerfile` is not handed the `licenses` context: a workflow matrix entry
  * without it, a build-push-action step that drops the entry's contexts, the dev loop's IMAGES
  * entry, a documented `docker build`, or docker-bake.hcl.
@@ -389,9 +576,8 @@ export function namedContextProblems(dockerfile, { workflows, devCluster, texts,
   for (const { path, text } of workflows) {
     const chunks = text.split(/\n(?=\s*- name: )/);
     const entry = chunks.find((c) => c.split('\n').some((l) => l.trim() === `dockerfile: ${dockerfile}`));
-    if (entry) {
-      const contexts = entry.split('\n').map((l) => l.trim()).find((l) => l.startsWith('build_contexts:')) || '';
-      if (!contexts.split(/[\s,]+/).includes(NAMED_CONTEXT)) problems.push(`${path}'s matrix entry for ${dockerfile} passes no ${NAMED_CONTEXT} in build_contexts`);
+    if (entry && !matrixContexts(entry).includes(NAMED_CONTEXT)) {
+      problems.push(`${path}'s matrix entry for ${dockerfile} passes no ${NAMED_CONTEXT} in build_contexts`);
     }
     for (const step of chunks.filter((c) => /uses: docker\/build-push-action@/.test(c))) {
       const file = /^\s*file:\s*(.+?)\s*$/m.exec(step)?.[1];
@@ -489,7 +675,8 @@ function main() {
   const setDir = join(REPO, 'licenses', 'supabase-postgres');
   const folders = readdirSync(setDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
   const offer = existsSync(join(REPO, 'licenses', OFFERS[0].file)) ? read(`licenses/${OFFERS[0].file}`) : '';
-  const libraries = libraryProblems(read('NOTICE.md'), offer, folders, ['supabase-postgres', 'postgresql', 'postgis', 'pgrouting']);
+  const permissive = noticeExtensionRows(read('NOTICE.md')).filter(isPermissiveRow).map((r) => r.names[0]);
+  const libraries = libraryProblems(read('NOTICE.md'), offer, folders, ['supabase-postgres', 'postgresql', 'postgis', 'pgrouting', ...permissive]);
   for (const l of libraries) fail(l);
   if (!libraries.length) {
     const named = noticeLibraries(read('NOTICE.md')).filter((l) => /GPL/.test(l.licence)).map((l) => l.name);
@@ -510,6 +697,30 @@ function main() {
     pass(`${LOCK} pins ${lock.assets.length} archives for ${BASE_IMAGE}:${tags[0]}, every component at the version the images ship, `
       + `and both offers and NOTICE.md link ${releaseUrl(tags[0], lock.scope)}`);
   }
+
+  // 7. Every base a Dockerfile builds on names a version, so NOTICE.md can say whose licences apply.
+  const floating = floatingBases(onBase);
+  for (const f of floating) fail(f);
+  if (!floating.length) pass(`every base the ${dockerfiles.length} Dockerfiles build on names a version or a digest, but the held ${[...FLOATING_HELD].join(', ')}`);
+
+  // 8. The permissive extensions' texts: a pinned folder for each row NOTICE.md lists, at its ref.
+  const extensionTexts = extensionTextProblems(read('NOTICE.md'), texts, read('licenses/README.md'));
+  for (const e of extensionTexts) fail(e);
+  if (!extensionTexts.length) {
+    pass(`the ${permissive.length} permissive extensions and server libraries NOTICE.md lists each have a pinned licence text `
+      + 'in licenses/supabase-postgres/, which licenses/README.md names at the ref NOTICE.md gives');
+  }
+
+  // 9. Every published Alpine-based image writes its OS packages' licences after its last apk step.
+  const script = `licenses/${OS_PACKAGES}`;
+  const published = new Set(context.workflows.filter((w) => w.path === '.github/workflows/release.yml').flatMap((w) => publishedDockerfiles(w.text)));
+  const alpine = onBase.filter((d) => published.has(d.path) && isAlpine(finalStage(d.text) ?? { base: '', lines: [] }));
+  const os = osPackageProblems(alpine);
+  if (!published.size) os.push('.github/workflows/release.yml names no dockerfile: it publishes; the parse has stopped matching it');
+  if (!texts.has(OS_PACKAGES)) os.push(`${script} is not pinned in licenses/SHA256SUMS`);
+  else for (const f of OS_PACKAGES_FILES) if (!read(script).includes(f.split('/').pop())) os.push(`${script} does not write ${f}`);
+  for (const o of os) fail(o);
+  if (!os.length) pass(`the ${alpine.length} published Alpine-based images each run ${script} as root after their last apk step`);
 
   process.exit(failed ? 1 : 0);
 }

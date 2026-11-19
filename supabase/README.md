@@ -4071,6 +4071,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `fork_schema()` | `0165` | yes | Versions a schema (schema:manage) |
 | `gateway_is_playback_delivery_target()` | `0183` | no | A read the playback dialog makes. |
 | `historian_backup_state()` | `0001` | no | A read: the Backups page. |
+| `import_site_vocabulary()` | `0306` | yes | Imports a vocabulary read from an AAS file: Administrator only |
 | `is_active_capture_object()` | `0184` | no | A storage predicate; the write policies call require_mfa() in the arm beside it. |
 | `is_active_playback_capture()` | `0184` | no | A storage predicate the read policy calls. |
 | `is_own_avatar_object()` | `0213` | no | A person's own picture, in any role. |
@@ -4107,6 +4108,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `release_backup()` | `0001` | yes | Releases a kept backup |
 | `relocate_devices()` | `0165` | yes | Moves devices between cells |
 | `remove_app()` | `0217` | yes | Removes an app |
+| `remove_site_vocabulary()` | `0306` | yes | Removes an imported vocabulary and its concepts |
 | `request_backup()` | `0001` | yes | Takes a backup |
 | `revoke_service_principal()` | `0001` | yes | Revokes a machine identity |
 | `revoke_service_token()` | `0001` | yes | Revokes a service token |
@@ -4118,6 +4120,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `set_foreign_credential()` | `0178` | yes | Writes a credential to Vault: the archive, the backups, and each later one |
 | `set_notification_webhook_url()` | `0248` | yes | Sets where the platform's alerts are sent |
 | `set_own_picture()` | `0213` | no | A person's own picture, in any role. |
+| `set_site_vocabulary_sharing()` | `0306` | yes | Confirms, or withdraws, that an imported vocabulary's definitions may be shared |
 | `show_gateway_credential()` | `0164` | no | Shows a stored gateway credential again: a read, which the switch never refuses. |
 | `withdraw_alert_acknowledgement()` | `0231` | no | The other half of acknowledging an alert, which an Operator may do too. |
 
@@ -4259,7 +4262,8 @@ minutes, so raw telemetry over a day holds few of them.
   `timescaledb.retention.retainFor`), so raw is complete from its oldest reading on. `raw_from` is
   that reading, on every row. A window starting before it is `retention` only when `telemetry_1h`
   holds the series in the hours between, so a series that began later, or a young stack with
-  nothing dropped, is still read from raw. Nothing is marked: the rollups keep a last value only.
+  nothing dropped, is still read from raw. 0254 marked nothing here, since the series rollups keep
+  a last value only; 0313 marks each bucket that held more than one value, from the state rollups.
 - **Text and flags only.** It compares `val_string` and `val_bool`. A number's values are never
   compared, since nearly every reading of one is a change.
 - **Its bounds** are 50 series, 50,000 buckets times series as `telemetry_carried()` takes,
@@ -8762,11 +8766,12 @@ access control. Everything else about it follows from that.
 ### Connecting an AAS client
 
 `aas-api` is the live AAS repository. A client written against IDTA-01002 (AAS Part 2, the API)
-reads shells and submodels from it, with nothing exported first.
+reads shells, submodels and the ConceptDescriptions they reference from it, with nothing exported
+first.
 
 **The base URL** is `https://api.<domain>/functions/v1/aas-api` on a site, and
 `http://api.localhost/functions/v1/aas-api` on the development stack. A client adds `/shells`,
-`/submodels` and `/description` after it.
+`/submodels`, `/concept-descriptions` and `/description` after it.
 
 **What a request sends** is a bearer token in `Authorization`, and nothing else:
 
@@ -8806,15 +8811,31 @@ name its own.
   are still `<AAS_BASE_IRI><sparkplug_id>` and what follows it. The specific ids do not use the base
   IRI, so changing it leaves them alone.
 
+**A semantic id resolves without an export.** `/concept-descriptions` lists the ConceptDescription
+of every id the shells' submodels use, and `/concept-descriptions/{id}` fetches one by its base64url
+id. Each is the one the shell's JSON export carries, built by the same `buildConceptDescriptions()`.
+So a definition an imported vocabulary does not share stays out of both
+([Site vocabularies](../docs/vocabularies.md#site-vocabularies)).
+
+- **Each id is listed once, in id order.** `limit` counts ConceptDescriptions, and every page reads
+  every shell.
+- **An id no listed shell references is a `404`.** That holds whether or not the database defines
+  it, and for an id only an archived device's shell carries.
+- **Where two shells describe one id differently,** the first device's, in the order `/shells`
+  lists them, is served. That takes two schemas carrying one semantic id with descriptions of their
+  own.
+- **No profile is declared for them.** IDTA-01002 has no read-only profile for the
+  ConceptDescription Repository, and its one profile includes the writes.
+
 **What is not served:**
 
 - the Registry and Discovery interfaces;
-- concept descriptions, although the JSON export carries them;
 - writes: every route is a `GET`, and the advertised profiles are the read-only SSP-002 pair;
 - the `$metadata`, `$reference` and `$path` modifiers, which answer `404`. Only `/$value`
   is handled;
 - a search. `GET /shells` reads only `limit` and `cursor`, so a client that asks by
-  `assetIds` or `idShort` gets every shell;
+  `assetIds` or `idShort` gets every shell. `GET /concept-descriptions` likewise ignores `idShort`,
+  `isCaseOf` and `dataSpecificationRef`;
 - a page of submodels by count. On `/submodels`, `limit` counts devices, and a page holds every
   submodel of each.
 
@@ -9806,9 +9827,9 @@ weeks of raw however `retainFor` is set, and widening a policy does not restore 
 
 `timescale.telemetry_horizons` maps a view in `timescaledb/aggregates.sql` that reads `min()` from
 the raw hypertable and each rollup. It is evaluated on the other side for the reason
-`telemetry_latest` is: `postgres_fdw` pushes `WHERE` down but **not** `LIMIT`, so
-`ORDER BY time LIMIT 1` over the projection would stream the relation across the link to discard all
-but one row. Four rows cross instead. A null `oldest` means that relation is empty — not that it
+`telemetry_latest` is: four rows cross in one read, where the projection would take four, each a
+remote `ORDER BY time` that the platform stops reading after its first rows.
+A null `oldest` means that relation is empty — not that it
 fails to reach that far, which is a distinction the dialog acts on: an empty stack covers nothing at
 any resolution, so there is no better one to offer.
 
@@ -11531,17 +11552,28 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
 
 **A vocabulary's definitions reach the AAS export through `concept_definitions` (`0169`).** The
 view is one row per semantic id, `(semantic_id, name, definition, standard)`, from each
-vocabulary's own description column: the IDTA templates, ASHRAE 223P, OPC UA, ISO 22400, MTConnect
-(`0301`) and VDA 5050 (`0302`). An id held by two vocabularies takes the first in that order, the one
-whose ids are issued furthest from this deployment, and a row with no text is left out. The exporter
-reads the view in one query. An id no
-vocabulary holds but a known authority issues, such as a QUDT quantity kind, defers to that
-authority (`ID_AUTHORITIES` in `functions/_shared/aas/shell.ts`). Catalog text is used only for
-the rest, such as an id an Administrator typed. A new
+vocabulary's own description column: the IDTA templates, ASHRAE 223P, QUDT (`0304`), OPC UA, ISO 22400,
+MTConnect (`0301`) and VDA 5050 (`0302`). An id held by two vocabularies takes the first in that order,
+the one whose ids are issued furthest from this deployment, and a row with no text is left out. The
+exporter reads the view in one query. An id no vocabulary holds but a known authority issues, such as
+a QUDT quantity kind the seed leaves out, defers to that authority (`ID_AUTHORITIES` in
+`functions/_shared/aas/shell.ts`). Catalog text is used only for the rest, such as an id an
+Administrator typed. A new
 vocabulary with a description column adds an arm in a migration that redeclares the view; the
 columns stay the same, so `CREATE OR REPLACE VIEW` keeps its grants. It is `security_invoker`, so
 the vocabularies' own policies apply to the caller: `authenticated` and `service_role` read it,
 `anon` does not. `test_metric_catalog_seed.py` holds the precedence.
+
+**A site's own vocabulary is not added this way.** The list above is for a vocabulary Aber ships:
+generated from a source, replayed on every boot, and unwritable by the app. An Administrator
+imports a vocabulary of the site's from AAS ConceptDescriptions into `site_vocabularies` and
+`site_vocabulary_concepts` instead (`0306`), through `import_site_vocabulary()`. Nothing in that
+route seeds a row, so a migration never carries one and the seeded tables are never written. Its
+concepts reach the AAS export through the view's last arm, and only once the Administrator has
+confirmed that the licence lets their definitions be shared. An import skips every id a seeded
+vocabulary already defines, so adding a vocabulary here later does not clash with one a site
+imported: the seeded definition comes first in the view. See *Site vocabularies* in
+[`../docs/vocabularies.md`](../docs/vocabularies.md#site-vocabularies).
 
 ---
 

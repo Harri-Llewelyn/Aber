@@ -1,0 +1,370 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { api } from '../../api'
+import { PERMISSION_UUIDS } from '../../constants'
+import { requiresRolesTitle } from '../../hooks/usePermissions'
+import { useDisplayNames } from '../../hooks/useDisplayNames'
+import { useSortableRows } from '../../hooks/useTableSort'
+import { useUrlState } from '../../hooks/useUrlState'
+import { siteVocabularyUrl } from '../../routes'
+import { formatDateTime, plural } from '../../utils/format'
+import {
+  vocabularyLabel, conceptTooltip, metricsUsing, SOURCE_FORMAT_LABELS
+} from '../../utils/siteVocabulary'
+import { STANDARDS } from '../../utils/standards'
+import { ActionButton } from './ActionButton'
+import { EmptyState } from './EmptyState'
+import { ExpandAllToggle } from './ExpandAllToggle'
+import { IconBookOpen, IconUpload } from './Icons'
+import { LoadingState } from './LoadingState'
+import { PersonName } from './PersonName'
+import { SearchInput } from './SearchInput'
+import { SortHeader } from './SortHeader'
+import { Tooltip } from './Tooltip'
+import { VocabularySections } from './VocabularySections'
+import { ConfirmModal } from '../modals/ConfirmModal'
+import { ImportVocabularyModal } from '../modals/ImportVocabularyModal'
+
+/** The files table's sortable columns, each on what its cell shows. */
+const FILE_SORT = {
+  name: { type: 'text', value: f => f.name },
+  label: { type: 'text', value: f => f.label },
+  version: { type: 'text', value: f => f.version },
+  imported_by: { type: 'text', value: f => f.imported_by_name },
+  imported_at: { type: 'time', value: f => f.imported_at },
+  concept_count: { type: 'number', value: f => f.concept_count },
+  in_use: { type: 'number', value: f => f.in_use },
+  shared: { type: 'text', value: f => (f.definitions_shareable ? 'Shared' : 'Not shared') }
+}
+
+/**
+ * The Imported tab of the Vocabulary page: the vocabularies a site brought in from AAS files, its
+ * own naming or a standard it holds a copy of. It loads its own rows, because nothing on the page
+ * holds them (`site_vocabularies` and `site_vocabulary_concepts`, 0306): the files in a table, with
+ * what each is, who imported it and when, how many concepts it holds, how many metrics use it and
+ * whether its definitions are shared; then the concepts, with the same Use action and "N in use"
+ * count as the standards' tabs.
+ *
+ * Importing, removing and sharing are an Administrator's, behind the second factor: another role sees
+ * the buttons greyed, with who may press them. A removal says first how many metrics use the file.
+ * Sharing asks for a confirmation that says the licence is the site's responsibility. Each act ends
+ * in a toast that links to the file.
+ */
+function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
+  const [files, setFiles] = useState([])
+  const [concepts, setConcepts] = useState([])
+  const [catalog, setCatalog] = useState([])
+  const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState(null)
+  const [search, setSearch] = useUrlState('search')
+  const [focused] = useUrlState('file')
+  const [expanded, setExpanded] = useState({})
+  const [importing, setImporting] = useState(false)
+  const [removing, setRemoving] = useState(null)
+  const [sharing, setSharing] = useState(null)
+
+  const load = useCallback(async () => {
+    try {
+      // The catalog is read only to say which concepts and files are in use, so a failure there is
+      // defaulted rather than blanking the tab.
+      const [vocabularies, rows, cat] = await Promise.all([
+        api.get('/api/v1/site-vocabularies'),
+        api.get('/api/v1/site-vocabulary-concepts'),
+        api.get('/api/v1/metric-catalog').catch(() => [])
+      ])
+      setFiles(vocabularies || []); setConcepts(rows || []); setCatalog(cat || []); setLoadError(null)
+    } catch (e) {
+      setLoadError(e.message || 'Could not read the imported vocabularies')
+    } finally {
+      setLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const names = useDisplayNames(files.map(f => f.imported_by))
+  const deniedTitle = requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
+
+  // The ids a catalog metric carries, as its own or a further one: a concept with one is in use.
+  const used = useMemo(() => {
+    const ids = new Set()
+    for (const m of catalog) {
+      if (m.semantic_id) ids.add(m.semantic_id)
+      for (const f of m.further_semantic_ids || []) ids.add(f.semantic_id)
+    }
+    return ids
+  }, [catalog])
+
+  const filesById = useMemo(() => new Map(files.map(f => [f.id, f])), [files])
+  const query = search.trim().toLowerCase()
+
+  // One section for each file, its concepts as the chips; a search keeps the concepts that match.
+  const sections = useMemo(() => files.map(file => ({
+    key: `site:${file.id}`,
+    title: file.name,
+    hint: `${vocabularyLabel(file)}${file.version ? `, version ${file.version}` : ''}. ${plural(file.concept_count, 'concept')}.`,
+    items: concepts
+      .filter(c => c.vocabulary_id === file.id)
+      .filter(c => !query
+        || c.preferred_name.toLowerCase().includes(query)
+        || c.semantic_id.toLowerCase().includes(query)
+        || (c.definition || '').toLowerCase().includes(query))
+      .map(c => ({ id: c.semantic_id, name: c.preferred_name, concept: c }))
+  })).filter(s => !query || s.items.length > 0), [files, concepts, query])
+
+  const tab = useMemo(() => ({
+    label: 'Imported',
+    isUsed: item => used.has(item.concept.semantic_id),
+    tooltipFor: item => conceptTooltip(item.concept),
+    idFor: item => ({ label: 'Semantic ID', value: item.concept.semantic_id }),
+    metaFor: item => [item.concept.data_type, item.concept.unit].filter(Boolean).join(' · '),
+    onUse: onUseEntry
+      ? (item => onUseEntry({
+          standard: STANDARDS.CUSTOM,
+          siteConcept: item.concept,
+          siteVocabulary: filesById.get(item.concept.vocabulary_id)
+        }))
+      : undefined
+  }), [used, onUseEntry, filesById])
+
+  // A file named in the address (a toast links to it) opens; otherwise a section is open when opened,
+  // and while a search narrows the tab it is open unless closed.
+  const isOpen = (key) => (query || key === `site:${focused}` ? expanded[key] !== false : expanded[key] === true)
+  const toggle = (key) => setExpanded(prev => ({ ...prev, [key]: !isOpen(key) }))
+  const setAll = (open) => setExpanded(Object.fromEntries(sections.map(s => [s.key, open])))
+
+  const usedBy = (file) => metricsUsing(file, concepts, catalog).length
+
+  // The files as the table sorts and shows them: what each is, who imported it and how many metrics use it.
+  const rows = useMemo(() => files.map(file => ({
+    ...file,
+    label: vocabularyLabel(file),
+    imported_by_name: names.get(file.imported_by) || '',
+    in_use: metricsUsing(file, concepts, catalog).length
+  })), [files, concepts, catalog, names])
+  const [sortedFiles, sort] = useSortableRows(rows, FILE_SORT)
+
+  // The dialog has already toasted; the table reads the files again.
+  const imported = () => {
+    setImporting(false)
+    load()
+  }
+
+  const remove = async () => {
+    const result = await api.removeSiteVocabulary(removing.id)
+    setRemoving(null)
+    load()
+    showToast?.(`Vocabulary '${result.name}' removed`, 'success', { to: siteVocabularyUrl() })
+  }
+
+  const share = async (file, shareable) => {
+    const result = await api.setSiteVocabularySharing(file.id, shareable)
+    setSharing(null)
+    load()
+    showToast?.(
+      shareable
+        ? `The definitions of '${result.name}' are shared`
+        : `The definitions of '${result.name}' are no longer shared`,
+      'success', { to: siteVocabularyUrl(file.id) }
+    )
+  }
+
+  // Stopping is the safe direction, so it asks nothing; a refusal is shown, as the database worded it.
+  const stopSharing = (file) => share(file, false).catch(e => showToast?.(e.message, 'error'))
+
+  return (
+    <>
+      <div className="filter-bar">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search imported concepts…"
+          ariaLabel="Search the imported vocabularies"
+        />
+        <div className="filter-bar-actions">
+          <ActionButton
+            className="btn btn-primary"
+            permitted={canManage}
+            deniedTitle={deniedTitle}
+            onClick={() => setImporting(true)}
+          >
+            <IconUpload size={14} /> Import vocabulary
+          </ActionButton>
+        </div>
+      </div>
+
+      <div className="card-fill-scroll site-vocabulary-body">
+        {!loaded && <LoadingState label="imported vocabularies" />}
+        {loaded && loadError && (
+          <EmptyState icon={<IconBookOpen size={36} />} message={`${loadError}.`} />
+        )}
+
+        {loaded && !loadError && !canManage && (
+          <p className="form-hint site-vocabulary-note">
+            {deniedTitle} to import, remove or share a vocabulary. Every role reads them.
+          </p>
+        )}
+
+        {loaded && !loadError && files.length === 0 && (
+          <EmptyState icon={<IconBookOpen size={36} />} message="No vocabulary has been imported. Import an AAS file to bring its concepts in." />
+        )}
+
+        {loaded && !loadError && files.length > 0 && (
+          <>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <SortHeader sort={sort} column="name" title="The file's name.">Vocabulary</SortHeader>
+                    <SortHeader sort={sort} column="label" title="A published standard the site holds a copy of, or the site's own vocabulary.">What it is</SortHeader>
+                    <SortHeader sort={sort} column="version" title="The version the file states.">Version</SortHeader>
+                    <SortHeader sort={sort} column="imported_by" title="Who imported it.">Imported by</SortHeader>
+                    <SortHeader sort={sort} column="imported_at" title="When it was imported.">Imported</SortHeader>
+                    <SortHeader sort={sort} column="concept_count" className="num" title="How many concepts it holds.">Concepts</SortHeader>
+                    <SortHeader sort={sort} column="in_use" className="num" title="How many catalog metrics use one of its concepts or were started from it.">In use</SortHeader>
+                    <SortHeader sort={sort} column="shared" title="Whether an export carries the definitions. Until they are shared it carries the preferred names alone.">Definitions</SortHeader>
+                    <th className="row-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedFiles.map(file => (
+                    <tr key={file.id} aria-current={file.id === focused ? 'true' : undefined}>
+                      <td>
+                        <Tooltip text={`${SOURCE_FORMAT_LABELS[file.source_format] || file.source_format}. SHA-256 ${file.sha256}.${file.licence_note ? ` Licence: ${file.licence_note}` : ''}`}>
+                          <span>{file.name}</span>
+                        </Tooltip>
+                      </td>
+                      <td>
+                        {vocabularyLabel(file)}
+                        {file.kind === 'published_standard' && file.standard_publisher
+                          ? <span className="cell-meta">, {file.standard_publisher}</span> : null}
+                      </td>
+                      <td className="cell-meta">{file.version || '—'}</td>
+                      <td className="cell-meta">
+                        <PersonName name={names.get(file.imported_by)} id={file.imported_by} emailOnHover fallback="someone" />
+                      </td>
+                      <td className="cell-meta">{formatDateTime(file.imported_at)}</td>
+                      <td className="num">{file.concept_count}</td>
+                      <td className="num">{file.in_use}</td>
+                      <td>{file.definitions_shareable ? 'Shared' : 'Not shared'}</td>
+                      <td className="row-actions">
+                        {file.definitions_shareable ? (
+                          <ActionButton
+                            className="btn btn-ghost btn-sm"
+                            permitted={canManage}
+                            deniedTitle={deniedTitle}
+                            onClick={() => stopSharing(file)}
+                            aria-label={`Stop sharing the definitions of ${file.name}`}
+                          >
+                            Stop sharing
+                          </ActionButton>
+                        ) : (
+                          <ActionButton
+                            className="btn btn-ghost btn-sm"
+                            permitted={canManage}
+                            deniedTitle={deniedTitle}
+                            onClick={() => setSharing(file)}
+                            aria-label={`Share the definitions of ${file.name}`}
+                          >
+                            Share definitions
+                          </ActionButton>
+                        )}
+                        <ActionButton
+                          className="btn btn-ghost btn-sm"
+                          permitted={canManage}
+                          deniedTitle={deniedTitle}
+                          onClick={() => setRemoving(file)}
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          Remove
+                        </ActionButton>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="groups-header">
+              <ExpandAllToggle
+                anyOpen={sections.some(s => isOpen(s.key))}
+                onExpandAll={() => setAll(true)}
+                onCollapseAll={() => setAll(false)}
+                disabled={sections.length === 0}
+              />
+            </div>
+
+            {query && sections.length === 0 && (
+              <EmptyState
+                icon={<IconBookOpen size={36} />}
+                message={`Nothing in the imported vocabularies matches “${search}”.`}
+              />
+            )}
+
+            <div className="vocab-sections">
+              <VocabularySections
+                sections={sections}
+                tab={tab}
+                canAddMetric={canManage}
+                isOpen={isOpen}
+                toggle={toggle}
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      {importing && (
+        <ImportVocabularyModal showToast={showToast} onImported={imported} onClose={() => setImporting(false)} />
+      )}
+
+      {removing && (
+        <ConfirmModal
+          title={<>Remove vocabulary <span className="mono">{removing.name}</span></>}
+          size="md"
+          message={<>
+            This removes <strong>{removing.name}</strong> and its {plural(removing.concept_count, 'concept')} from this site.
+            {' '}{usedBy(removing) > 0
+              ? <><strong>{plural(usedBy(removing), 'catalog metric')}</strong> use it. They keep their ids, because an id is only a value, and lose the link to the file. An export defines their ids by the catalog's descriptions again.</>
+              : <>No catalog metric uses it.</>}
+            {' '}The file can be imported again.
+          </>}
+          confirmLabel="Remove vocabulary"
+          pendingLabel="Removing…"
+          onConfirm={remove}
+          onCancel={() => setRemoving(null)}
+        />
+      )}
+
+      {sharing && (
+        <ConfirmModal
+          title={<>Share the definitions of <span className="mono">{sharing.name}</span></>}
+          size="md"
+          message={<>
+            An export will carry the definition of each of its concepts, and so will the AAS API.
+            {' '}<strong>The licence is the site's responsibility.</strong> Confirm only that it lets you share these definitions.
+          </>}
+          confirmLabel="Share definitions"
+          pendingLabel="Sharing…"
+          confirmClassName="btn btn-primary"
+          onConfirm={() => share(sharing, true)}
+          onCancel={() => setSharing(null)}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * The tab descriptor `VocabularyPanel` takes for the vocabularies a site imported. A self-loading
+ * tab: it carries a `panel`, which reads its own rows, and no sections. `canManage` is the
+ * permission Add Metric is gated on, which is the Administrator's; `onUseEntry` hands a concept over
+ * to Add Metric on the Metrics page.
+ */
+export function siteVocabularyTab({ canManage, onUseEntry, showToast }) {
+  return {
+    id: 'Imported',
+    label: 'Imported',
+    hint: 'Vocabularies this site imported from AAS files: its own naming, or a standard it holds a copy of. An Administrator imports them.',
+    panel: <SiteVocabularyPanel canManage={canManage} onUseEntry={onUseEntry} showToast={showToast} />
+  }
+}

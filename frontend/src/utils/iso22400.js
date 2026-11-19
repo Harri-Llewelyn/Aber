@@ -52,12 +52,18 @@ export function iso22400Sections(vocabulary) {
     Utilization: 'How much of the available time the asset was scheduled to work.'
   }
 
-  return order.map(key => ({
-    key: `iso:${key}`,
-    title: key,
-    hint: hints[key] || null,
-    entries: buckets.get(key)
-  }))
+  // A family whose every KPI is deprecated says so first, so a reader who opens only its "?" learns it.
+  return order.map(key => {
+    const entries = buckets.get(key)
+    const allDeprecated = entries.every(k => kpiDeprecation(k))
+    const hint = hints[key] || null
+    return {
+      key: `iso:${key}`,
+      title: key,
+      hint: allDeprecated ? `Deprecated. ${hint || ''}`.trim() : hint,
+      entries
+    }
+  })
 }
 
 /**
@@ -76,6 +82,31 @@ export function iso22400Prefill(kpi) {
     standard: STANDARDS.ISO22400,
     description: kpi.description || ''
   }
+}
+
+/** Why a KPI is deprecated (0305), or null for a live one. */
+export function kpiDeprecation(kpi) {
+  return (kpi?.deprecated_reason || '').trim() || null
+}
+
+/** The KPIs that are deprecated, by name. */
+export function deprecatedKpis(vocabulary) {
+  return kpis(vocabulary).filter(k => kpiDeprecation(k)).map(k => k.name)
+}
+
+/**
+ * The line a KPI's tooltip ends with: why it is deprecated, else where its definition was read from,
+ * else null. A KPI is never both: the four with a source are live.
+ */
+export function kpiNote(kpi) {
+  const reason = kpiDeprecation(kpi)
+  return reason ? `Deprecated: ${reason}` : kpiSource(kpi)
+}
+
+/** The line a KPI's tooltip ends with: where its definition was read from, or null where it cites no source. */
+export function kpiSource(kpi) {
+  const source = (kpi?.source || '').trim()
+  return source ? `Source: ${source}` : null
 }
 
 /** One-line summary for a KPI chip's tooltip: what it is, then how it is computed. */

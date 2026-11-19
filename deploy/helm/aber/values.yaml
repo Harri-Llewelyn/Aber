@@ -1225,8 +1225,8 @@ i3xService:
   maxStreams: 50
   # The most stored rows one history series reads, and values it returns: a device's map of N
   # metrics counts N. A request's `limit` may ask for fewer. A series cut short answers 206,
-  # naming the instant it stops at, and the client asks again with that endTime. Keep it under
-  # about 6300: past that each read fetches its whole window (i3x/README.md -> History).
+  # naming the instant it stops at, and the client asks again with that endTime. The historian
+  # sends a read this many rows, and those sharing the last one's instant (i3x/README.md -> History).
   historyMaxRows: 1000
   # The most HasComponent descendants one value or history request returns under `components`,
   # summed over its elementIds. Past it the rest are left out and the answer is a 206.
@@ -1245,7 +1245,8 @@ nodeRed:
   image:
     # Built from node-red/Dockerfile. A custom image is required: settings.js lives on the data
     # volume and resolves require() from there, and it depends on internals pinned by the base tag.
-    #   docker build -f node-red/Dockerfile -t <repo>:<tag> node-red
+    #   docker build -f node-red/Dockerfile --build-context licenses=./licenses \
+    #     -t <repo>:<tag> node-red
     repository: ghcr.io/harri-llewelyn/aber/node-red
     tag: ""
     pullPolicy: IfNotPresent
@@ -1281,7 +1282,8 @@ frontend:
     # Built from frontend/Dockerfile with VITE_RUNTIME_CONFIG=true, so one image serves any
     # environment and reads its configuration from the /config.js ConfigMap:
     #   docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-    #     --build-context help=./help -t <repo>:<tag> frontend
+    #     --build-context help=./help --build-context licenses=./licenses \
+    #     -t <repo>:<tag> frontend
     repository: ghcr.io/harri-llewelyn/aber/frontend
     tag: ""
     pullPolicy: IfNotPresent

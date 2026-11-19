@@ -202,8 +202,12 @@ out.
 
 ## `aggregates.sql`
 
-**Why rollups.** `public.telemetry` in Supabase is a postgres_fdw projection, and the wrapper
-pushes WHERE down but not LIMIT. The rollups serve trend queries (Grafana reads this database
+**Why rollups.** `public.telemetry` in Supabase is a postgres_fdw projection. The wrapper sends this
+database a read's `WHERE`, and its `ORDER BY` and `LIMIT` only when its row estimate says the `LIMIT`
+cuts. The foreign tables have no statistics, so a read naming a device never gets them, and every row
+inside its time bounds crosses. A page of rows is read through `telemetry_page()` or
+`telemetry_rollup_page()` (0315), which send their own bound.
+The rollups serve trend queries (Grafana reads this database
 directly and never crosses the FDW); `telemetry_latest` serves latest-value lookups. The CSV export
 reads raw by default, because it is an export of observations, but may be asked for a rollup
 instead, which is the only way to export a period the raw retention window has already dropped
@@ -231,8 +235,9 @@ reader deciding "will this range come back empty?" needs the first, and only the
 answer it. It is created after the rollups because it reads them: on a fresh historian they do not
 exist until that section has run, and a view over a missing relation fails the whole Job
 (`docs/incidents.md`). It is evaluated here for the reason `telemetry_latest` is: four rows cross
-the FDW instead of the scan the Supabase side would need, and `ORDER BY time LIMIT 1` over the
-projection is not an alternative because LIMIT is not pushed down. Each `min()` is an index scan
+the FDW in one read. Over the projection the same answer is four reads: postgres_fdw sends each
+`min()` as a remote `ORDER BY time` with no `LIMIT`, and the platform stops reading after the first
+rows come back. Each `min()` is an index scan
 per chunk (MergeAppend over the per-chunk time indexes), so the cost is the chunk count, not the
 row count.
 
@@ -366,6 +371,57 @@ device a bucket on every read: 5 to 16 s for 1,000 devices over a day. These hol
   so the view costs no scan over postgres_fdw. `fdw_reader` may read the rollups and the view, and
   execute the function behind it. `test_device_rollups.py` holds the definitions, the policies, the
   backfill's window and the view.
+
+**History's text and flag charts mark a bucket that held more than one value from three state
+rollups of their own.** Past raw retention, History charts a text or a flag from the series
+rollups, which keep each bucket's last value only, so an hour that flipped between two states read
+as if it held its last value throughout. `telemetry_state_1m` holds, for each text or flag series
+and minute, four aggregates that compose up the hierarchy. `telemetry_state_5m` is built from it,
+and `telemetry_state_1h` from that, with the same aggregates of the aggregates.
+`telemetry_changes()` (platform migration `0313`) reads them for the buckets older than raw.
+
+| Column | What it says of a bucket |
+| :--- | :--- |
+| `any_true` | `bool_or(val_bool)`: the flag was true at some reading |
+| `all_true` | `bool_and(val_bool)`: the flag was true at every reading. `any_true AND NOT all_true` is a bucket that held both values |
+| `min_string`, `max_string` | The least and greatest text. `min_string <> max_string` is a bucket that held two values or more |
+| `n_rows` | How many readings, summed up the hierarchy |
+
+- **Why a family of its own.** A continuous aggregate's query cannot be altered, only dropped and
+  created again, and one created again fills only from raw. Adding these columns to the series
+  rollups would have lost every bucket older than raw: 180 days of `telemetry_1m`, 5 years of
+  `telemetry_1h`. So the series rollups are untouched.
+- **That, never how many.** A count of distinct values (`count(DISTINCT val_string)`) is accepted
+  in a continuous aggregate, but summing it up the hierarchy is silently wrong. A count of changes
+  needs `lag()`, and a continuous aggregate refuses window functions. So a mark past raw says "more
+  than one value", and its `marked_values` entry is NULL. Measured on TimescaleDB 2.31.0.
+- **Text and flag readings only** (`WHERE val_string IS NOT NULL OR val_bool IS NOT NULL`), so a
+  number's readings cost nothing here.
+- **Materialised only**, as the device rollups are. `telemetry_changes()` reads them only for
+  buckets older than raw, where real-time aggregation would add nothing but a scan of the raw tail.
+- **Their policies follow the series rollups'**: refreshed at each width's schedule over the last
+  25 hours, compressed after `rollup_compress_after` (segmented by `asset_id, metric_name`), and kept
+  as long as the series rollup of their width (`rollup_1m_retain`, `rollup_5m_retain`,
+  `rollup_1h_retain`), so one chart setting governs both families. `refresh_requested_rollups()`
+  refreshes them too, after the device rollups.
+- **They are created `WITH NO DATA`, and no boot fills them.** `backfill_state_rollups()`, a job
+  every 2 minutes, refreshes six hours of raw a run in the 1-minute rollup and then the same hours
+  in the 5-minute and hourly ones, until it reaches the hour holding raw's oldest reading.
+  `state_rollup_backfill` holds its progress, one row shaped as `device_rollup_backfill`'s, and the
+  step is `device_backfill_window()`. Its first chunk ends an hour inside the policies' 25 hours:
+  a policy refreshes whole buckets only, so it skips the hour it starts inside, and a first chunk
+  ending where the policies start left that hour in neither (measured on a private historian).
+- **The limit, said plainly in the help.** The family fills from raw, so on the day it ships it
+  reaches back as far as raw, 14 days by default, and grows from there. The years of `telemetry_1h`
+  already held get no marks. A site that needs every change for longer raises
+  `timescaledb.retention.retainFor`, at raw's storage cost.
+- **Cost**, measured over 8 days of raw on a private historian with 4 of 5 series states
+  (2026-11-06): the 1-minute state rollup held about 70% of `telemetry_1m`'s rows, so on a fleet of
+  mostly numbers it is the state metrics' share. The 1-minute refresh's raw scan roughly doubles
+  (5.2 s and 5.6 s from empty); the 5-minute and hourly ones are cheap.
+- **`fdw_reader` may read all three**, as it reads the device rollups. `test_state_rollups.py`
+  holds the definitions, each column, the composition up to 1 hour, the policies, the backfill, a
+  late replay, the grants and a second load of the files.
 
 **`telemetry_gapfill()` carries the last observation forward.** Under report-by-exception a metric
 that has not changed publishes nothing, so the aggregates emit one bucket in sixty for a steady

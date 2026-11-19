@@ -489,23 +489,31 @@ export function runNear(runs, t, slackMs = 0) {
 
 /**
  * A bucket series with the change read's marks laid on its buckets: `marked`, how many values each
- * bucket held, 0 where it held one or none. A text's or a flag's marked bucket is dotted along the
- * foot of its band (markedStretches()).
+ * bucket held, 0 where it held one or none. A mark with no count, a bucket older than raw
+ * retention, is 2, at least, and `uncounted` is true there. A text's or a flag's marked bucket is
+ * dotted along the foot of its band (markedStretches()).
  */
 export function markBuckets(series, starts, row) {
-  const at = new Map((row?.marked_ts || []).map((ts, i) => [Math.round(Date.parse(ts) / 1000), row.marked_values?.[i] ?? 2]))
+  const at = new Map((row?.marked_ts || []).map((ts, i) => [Math.round(Date.parse(ts) / 1000), row.marked_values?.[i] ?? null]))
   if (!at.size) return series
-  return { ...series, marked: starts.map(x => at.get(x) ?? 0) }
+  return {
+    ...series,
+    marked: starts.map(x => (at.has(x) ? at.get(x) ?? 2 : 0)),
+    uncounted: starts.map(x => at.has(x) && at.get(x) === null),
+  }
 }
 
-/** Each marked bucket of a series as a stretch of the window, clipped to it and to now, with its last value. */
+/**
+ * Each marked bucket of a series as a stretch of the window, clipped to it and to now, with its last
+ * value; `counted` is false where the read gave no count.
+ */
 export function markedStretches(series, starts, { start, end, now, minutes }) {
   const width = minutes * MINUTE
   const stop = Math.min(end, now)
   return (series.marked || []).flatMap((n, i) => {
     const from = Math.max(start, starts[i] * 1000)
     const to = Math.min(stop, starts[i] * 1000 + width)
-    return n > 1 && to > from ? [{ startMs: from, endMs: to, values: n, last: series.last[i] }] : []
+    return n > 1 && to > from ? [{ startMs: from, endMs: to, values: n, counted: !series.uncounted?.[i], last: series.last[i] }] : []
   })
 }
 
@@ -776,11 +784,12 @@ export function runWords(run, minutes) {
 /**
  * A marked bucket under the pointer in words: its stretch, how many values it held, and the last,
  * which is the one its box shows: "2 Nov 10:05 – 10:10 · 3 values in this bucket, RUNNING last".
+ * A mark with no count says "more than one value" instead.
  */
 export function markWords(mark, minutes, kind = 'state') {
   const sameDay = new Date(mark.startMs).toDateString() === new Date(mark.endMs).toDateString()
   const to = minutes < 1440 && sameDay ? clockWords(new Date(mark.endMs)) : momentWords(mark.endMs, minutes)
-  const held = kind === 'flag' ? 'both values' : `${mark.values} values`
+  const held = kind === 'flag' ? 'both values' : mark.counted === false ? 'more than one value' : `${mark.values} values`
   return `${momentWords(mark.startMs, minutes)} – ${to} · ${held} in this bucket, ${valueWords(kind, mark.last)} last`
 }
 

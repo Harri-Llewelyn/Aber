@@ -36,7 +36,7 @@ export const BUNDLE_PARTS = {
  */
 export const DEFAULT_MAX_TELEMETRY_ROWS = 200_000;
 export const DEFAULT_MAX_TRAIL_ROWS = 20_000;
-/** One PostgREST page. Keyset-paged on time, so the remote scan stops after this many rows. */
+/** One page. Keyset-paged on time, so the historian sends about this many rows a page. */
 export const TELEMETRY_PAGE_SIZE = 5_000;
 
 /**
@@ -131,12 +131,16 @@ export interface TelemetryPart {
 /**
  * Every row of one telemetry relation for one asset, newest first, up to the cap.
  *
- * KEYSET, NOT OFFSET. `postgres_fdw` pushes WHERE and ORDER BY to the historian but not LIMIT, so
- * an offset page re-reads the whole range remotely and discards it locally. A `time <= cursor`
- * page lets the local scan stop after one page of the remote cursor. The boundary instant is
- * re-read on the next page and its already-emitted metrics dropped, so a timestamp shared by
- * several metrics loses nothing. A page that adds no new row means one instant holds more rows
- * than a page, which no device produces; it stops the loop rather than spinning it.
+ * THROUGH THE PAGE READS. A page is telemetry_page() or telemetry_rollup_page() (0315), newest
+ * first with ties in metric order, so the historian sends the page's rows and those sharing its
+ * last instant. A read of the view would bring the asset's every row across for each page:
+ * postgres_fdw sends no LIMIT at the estimate a read naming a device gets.
+ *
+ * KEYSET, NOT OFFSET. A `time <= cursor` page brings across one page; an offset page would bring
+ * every row before it too. The boundary instant is re-read on the next page and its already-emitted
+ * metrics dropped, so a timestamp shared by several metrics loses nothing. A page that adds no new
+ * row means one instant holds more rows than a page, which no device produces; it stops the loop
+ * rather than spinning it.
  */
 export async function loadTelemetry(
   client: Client,
@@ -153,16 +157,13 @@ export async function loadTelemetry(
 
   while (rows.length < cap) {
     const want = Math.min(pageSize, cap - rows.length);
-    let query = client
-      .from(relation)
-      .select(columns.join(","))
-      .eq("asset_id", sparkplugId)
-      .order(timeColumn, { ascending: false })
-      .order("metric_name", { ascending: true })
-      .limit(want + seenAtCursor.size);
-    if (cursor) query = query.lte(timeColumn, cursor);
+    const args: Record<string, unknown> = { p_asset_id: sparkplugId, p_limit: want + seenAtCursor.size };
+    if (cursor) args.p_to = cursor;
+    const query = relation === "telemetry"
+      ? client.rpc("telemetry_page", args)
+      : client.rpc("telemetry_rollup_page", { p_resolution: "1h", ...args });
 
-    const { data, error } = await query;
+    const { data, error } = await query.select(columns.join(","));
     if (error) throw new Error(`${relation}: ${error.message}`);
     const page = (data ?? []) as Record<string, unknown>[];
 

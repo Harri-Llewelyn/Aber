@@ -96,7 +96,10 @@ services:
       NODE_RED_URL: "http://node-red:1880"
     volumes:
       - nodered_data:/data
-      - ./:/bundle:ro
+      # Its own script and nothing else. It runs as 1000, and the platform playbook makes this
+      # folder root's and 0750, so a mount of the whole folder is one it cannot enter. That would
+      # also hand it the folder's .env.
+      - ./flow-sync.mjs:/bundle/flow-sync.mjs:ro
     depends_on:
       # AFTER ENROLMENT, because /data/gitops -- the deploy key, the clone URL and the forge's host
       # key -- is written by bootstrap. Starting first would mean one failed tick and a wait.
