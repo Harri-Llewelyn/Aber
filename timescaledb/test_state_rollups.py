@@ -35,7 +35,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg2
-from psycopg2 import sql
 
 DB_HOST = os.getenv("TS_TEST_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("TS_TEST_PORT", "5433")
@@ -255,10 +254,12 @@ class StateRollups(unittest.TestCase):
         reader = connect(READER_USER, READER_PASSWORD)
         try:
             with reader.cursor() as cur:
-                for view in STATE:
-                    cur.execute(sql.SQL("SELECT count(*) >= 0 FROM {} WHERE bucket > now() - interval '1 hour'")
-                                .format(sql.Identifier("public", view)))
-                    self.assertTrue(cur.fetchone()[0])
+                cur.execute("SELECT count(*) >= 0 FROM public.telemetry_state_1m WHERE bucket > now() - interval '1 hour'")
+                self.assertTrue(cur.fetchone()[0])
+                cur.execute("SELECT count(*) >= 0 FROM public.telemetry_state_5m WHERE bucket > now() - interval '1 hour'")
+                self.assertTrue(cur.fetchone()[0])
+                cur.execute("SELECT count(*) >= 0 FROM public.telemetry_state_1h WHERE bucket > now() - interval '1 hour'")
+                self.assertTrue(cur.fetchone()[0])
         finally:
             reader.close()
 
