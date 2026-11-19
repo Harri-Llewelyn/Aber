@@ -3,8 +3,8 @@
  * Asserts that the migration chain completed and that the telemetry read surface answers. db-init
  * is a Helm hook that replays every file on every install and upgrade; there is no
  * applied-migrations ledger, so completion is `schema_bootstrap.completed_at`, which db-init clears
- * before the chain and stamps after it. The surface is every foreign table in the `timescale`
- * schema that `0001` builds on the historian's server, and the `public` views over them. Grafana's
+ * before the chain and stamps after it. The surface is the foreign tables in the `timescale`
+ * schema that the chain builds on the historian's server, and the `public` views over them. Grafana's
  * datasource health check reports OK throughout, since a connection test is not a permission test.
  * Each is selected, not merely looked up in the catalog: `to_regclass` does not say the foreign
  * table can be reached.
@@ -24,9 +24,9 @@ const fail = (m) => { failed = true; console.log(`  FAIL  ${m}`); };
 const pass = (m) => console.log(`  ok    ${m}`);
 
 /**
- * Everything `0001` builds on the historian's foreign server, with the live migration that creates
+ * What the chain builds on the historian's foreign server, with the live migration that creates
  * it. `created_by` is a label, never read as a filename: the lowest missing one is printed as
- * where the chain stopped. Since the squash before 1.0, `0001` recreates all of them.
+ * where the chain stopped. Since the squash before 1.0, `0001` recreates all but the later ones.
  */
 const SURFACE = [
   { relation: 'public.telemetry',            created_by: '0001' },
@@ -41,6 +41,10 @@ const SURFACE = [
   { relation: 'timescale.storage_footprint', created_by: '0001' },
   { relation: 'public.storage_footprint',    created_by: '0001' },
   { relation: 'timescale.telemetry_raw_window', created_by: '0001' },
+  // History's marks past raw retention: the historian's state rollups.
+  { relation: 'timescale.telemetry_state_1m', created_by: '0313' },
+  { relation: 'timescale.telemetry_state_5m', created_by: '0313' },
+  { relation: 'timescale.telemetry_state_1h', created_by: '0313' },
 ];
 
 /** psql inside the database pod, as the owner, over the socket: no password and no port-forward. */

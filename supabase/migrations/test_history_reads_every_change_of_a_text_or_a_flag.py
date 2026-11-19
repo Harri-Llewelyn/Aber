@@ -55,6 +55,10 @@ ROLLUP_COLUMNS = (
     " max_double double precision, last_double double precision, last_string text,"
     " last_bool boolean, n_rows bigint"
 )
+STATE_COLUMNS = (
+    "bucket timestamptz NOT NULL, asset_id text NOT NULL, metric_name text NOT NULL,"
+    " any_true boolean, all_true boolean, min_string text, max_string text, n_rows bigint"
+)
 SIGNATURE = ("public.telemetry_changes(timestamp with time zone, timestamp with time zone, interval,"
              " text[], text[], integer)")
 
@@ -86,6 +90,11 @@ class ChangesBase(unittest.TestCase):
         for rollup in ("telemetry_1m", "telemetry_5m", "telemetry_1h"):
             self.cur.execute(f"DROP FOREIGN TABLE timescale.{rollup} CASCADE;"
                              f"CREATE TABLE timescale.{rollup} ({ROLLUP_COLUMNS});"
+                             f"GRANT SELECT ON timescale.{rollup} TO authenticated, service_role;")
+        # The state rollups a read past raw marks from (0313), empty unless a test fills them.
+        for rollup in ("telemetry_state_1m", "telemetry_state_5m", "telemetry_state_1h"):
+            self.cur.execute(f"DROP FOREIGN TABLE IF EXISTS timescale.{rollup} CASCADE;"
+                             f"CREATE TABLE timescale.{rollup} ({STATE_COLUMNS});"
                              f"GRANT SELECT ON timescale.{rollup} TO authenticated, service_role;")
         self.cur.execute(
             "DROP FOREIGN TABLE timescale.telemetry CASCADE;"
@@ -284,7 +293,8 @@ class RawRetention(ChangesBase):
         rows = self.read(T0 - timedelta(hours=3), T0 + minutes(10), bucket="1 hour")
         self.assertEqual(rows[ON_PATH]["read"], "retention")
         self.assertEqual(rows[ON_PATH]["raw_from"], T0)
-        self.assertIsNone(rows[ON_PATH]["marked_ts"])
+        # The hour raw holds whole is counted from it (0313); the state rollups hold nothing older.
+        self.assertEqual(list(zip(rows[ON_PATH]["marked_ts"], rows[ON_PATH]["marked_values"])), [(T0, 2)])
         # Inside what raw holds, the same series is read from raw.
         self.assertEqual(self.read(T0, T0 + minutes(10))[ON_PATH]["read"], "changes")
 

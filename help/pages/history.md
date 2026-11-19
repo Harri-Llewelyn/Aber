@@ -236,14 +236,17 @@ A text or flag chart shows **the last value in each bucket** instead in three ca
 
 The line above the charts says which, for example **text and flags show the last value in each 1-hour bucket, past the 2,000-change cap**. A chart that shows something different from that line says so in its own title line.
 
-A bucket shows only the last value in it. So in the first two cases, the page also marks each bucket that held more than one value:
+A bucket shows only the last value in it. So the page also marks each bucket that held more than one value:
 
 - **On a state's band**, the bucket is dotted along its foot. The key says **more than one value in the bucket**. Point at it to read how many values it held, for example **10:05 – 10:10 · 3 values in this bucket, RUNNING last**.
 - **On a flag's band**, the bucket is dotted along its foot too. Pointing at it says **both values in this bucket**.
+- **A bucket older than the raw readings** is marked from the summaries. They keep whether a bucket held more than one value, but not how many. So pointing at a state's bucket says **more than one value in this bucket**.
 
 Buckets also make a flag's key less exact. A spell shorter than a bucket can be missed, so the shares and times are counted over buckets. The key then counts changes between buckets only, and says **at least**.
 
-To see every change again, zoom in, or choose a shorter window. A window older than the raw readings has no marks, because the summaries keep only each bucket's last value.
+To see every change again, zoom in, or choose a shorter window that the raw readings still hold.
+
+**Marks older than the raw readings reach back only so far.** The historian builds them from the raw readings. It started when it was upgraded to Aber 1.9, or installed, and reached back as far as the raw readings did then, 14 days by default. A bucket from before that has no mark, even if it held more than one value. If your site needs every change for longer, whoever installs Aber can keep the raw readings longer, with the install setting `timescaledb.retention.retainFor`. They then take more disk space.
 
 **Export CSV** is not affected. Its **Raw samples** are every reading, changes and repeats alike.
 

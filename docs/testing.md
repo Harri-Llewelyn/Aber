@@ -69,7 +69,7 @@ node scripts/check-image-licences.mjs
 # in operator row counts as failure while ignoring a rise, so a live daemon cannot make it flaky.
 # DID THE CHAIN FINISH? There is no migrations ledger, and an aborted db-init leaves the stack
 # running on a partially-migrated database. Checks the stamp db-init writes at the end of the chain,
-# then selects every object 0001 builds over the historian's foreign server, and names the migration
+# then selects the objects the chain builds over the historian's foreign server, and names the migration
 # that should have made any that is missing.
 node scripts/check-schema-surface.mjs
 

@@ -4261,7 +4261,8 @@ minutes, so raw telemetry over a day holds few of them.
   `timescaledb.retention.retainFor`), so raw is complete from its oldest reading on. `raw_from` is
   that reading, on every row. A window starting before it is `retention` only when `telemetry_1h`
   holds the series in the hours between, so a series that began later, or a young stack with
-  nothing dropped, is still read from raw. Nothing is marked: the rollups keep a last value only.
+  nothing dropped, is still read from raw. 0254 marked nothing here, since the series rollups keep
+  a last value only; 0313 marks each bucket that held more than one value, from the state rollups.
 - **Text and flags only.** It compares `val_string` and `val_bool`. A number's values are never
   compared, since nearly every reading of one is a change.
 - **Its bounds** are 50 series, 50,000 buckets times series as `telemetry_carried()` takes,

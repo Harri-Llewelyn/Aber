@@ -1435,14 +1435,14 @@ const apiMethods = {
   /**
    * History's read of a text or a flag (0254): one row per series of `assetIds` times
    * `metricNames`. `read` is `changes` (every change in [from, to), each at its time, and the value
-   * carried in) or why not: `change_cap`, `reading_cap` or `retention`, the first two with the
-   * buckets of `bucketMinutes` that held more than one value. Throws on a refusal or a historian it
-   * cannot reach.
+   * carried in) or why not: `change_cap`, `reading_cap` or `retention`, each with the buckets of
+   * `bucketMinutes` that held more than one value and how many, null for a bucket older than raw
+   * (0313). Throws on a refusal or a historian it cannot reach.
    *
    * @returns {Promise<Array<{ asset_id: string, metric_name: string, read: string,
    *   change_ts: ?string[], val_string: ?Array<?string>, val_bool: ?Array<?boolean>,
    *   carried_string: ?string, carried_bool: ?boolean, n_changes: ?number, marked_ts: ?string[],
-   *   marked_values: ?number[], raw_from: ?string }>>}
+   *   marked_values: ?Array<?number>, raw_from: ?string }>>}
    */
   readTelemetryChanges: async ({ from, to, bucketMinutes, assetIds, metricNames, maxChanges = HISTORY_MAX_CHANGES }, { signal } = {}) => {
     let call = supabase.rpc('telemetry_changes', {
