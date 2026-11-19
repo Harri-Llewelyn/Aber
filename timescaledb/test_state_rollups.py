@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg2
+from psycopg2 import sql
 
 DB_HOST = os.getenv("TS_TEST_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("TS_TEST_PORT", "5433")
@@ -255,18 +256,19 @@ class StateRollups(unittest.TestCase):
         try:
             with reader.cursor() as cur:
                 for view in STATE:
-                    cur.execute(f"SELECT count(*) >= 0 FROM public.{view} WHERE bucket > now() - interval '1 hour'")
+                    cur.execute(sql.SQL("SELECT count(*) >= 0 FROM {} WHERE bucket > now() - interval '1 hour'")
+                                .format(sql.Identifier("public", view)))
                     self.assertTrue(cur.fetchone()[0])
         finally:
             reader.close()
 
     def test_a_second_load_of_their_statements_changes_nothing(self):
-        sql = AGGREGATES.read_text(encoding="utf-8")
-        statements = re.findall(r"^CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_state_\w+\n.*?WITH NO DATA;", sql, re.S | re.M)
-        statements += re.findall(r"^ALTER MATERIALIZED VIEW telemetry_state_\w+ SET .*?;$", sql, re.M)
-        statements += re.findall(r"^CREATE TABLE IF NOT EXISTS public\.state_rollup_backfill \(.*?\n\);", sql, re.S | re.M)
-        statements += re.findall(r"^INSERT INTO public\.state_rollup_backfill .*?;$", sql, re.S | re.M)
-        statements += [s for s in re.findall(r"^DO \$\$\n.*?\nEND \$\$;", sql, re.S | re.M) if "'backfill_state_rollups'" in s]
+        source = AGGREGATES.read_text(encoding="utf-8")
+        statements = re.findall(r"^CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_state_\w+\n.*?WITH NO DATA;", source, re.S | re.M)
+        statements += re.findall(r"^ALTER MATERIALIZED VIEW telemetry_state_\w+ SET .*?;$", source, re.M)
+        statements += re.findall(r"^CREATE TABLE IF NOT EXISTS public\.state_rollup_backfill \(.*?\n\);", source, re.S | re.M)
+        statements += re.findall(r"^INSERT INTO public\.state_rollup_backfill .*?;$", source, re.S | re.M)
+        statements += [s for s in re.findall(r"^DO \$\$\n.*?\nEND \$\$;", source, re.S | re.M) if "'backfill_state_rollups'" in s]
         self.assertEqual(len(statements), 9, "aggregates.sql's state-rollup statements changed shape")
         before = self.snapshot()
         for statement in statements:
