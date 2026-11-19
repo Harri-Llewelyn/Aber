@@ -8762,7 +8762,8 @@ access control. Everything else about it follows from that.
 ### Connecting an AAS client
 
 `aas-api` is the live AAS repository. A client written against IDTA-01002 (AAS Part 2, the API)
-reads shells and submodels from it, with nothing exported first.
+reads shells, submodels and the ConceptDescriptions they reference from it, with nothing exported
+first.
 
 **The base URL** is `https://api.<domain>/functions/v1/aas-api` on a site, and
 `http://api.localhost/functions/v1/aas-api` on the development stack. A client adds `/shells`,
