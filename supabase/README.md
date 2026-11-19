@@ -8766,7 +8766,7 @@ reads shells and submodels from it, with nothing exported first.
 
 **The base URL** is `https://api.<domain>/functions/v1/aas-api` on a site, and
 `http://api.localhost/functions/v1/aas-api` on the development stack. A client adds `/shells`,
-`/submodels` and `/description` after it.
+`/submodels`, `/concept-descriptions` and `/description` after it.
 
 **What a request sends** is a bearer token in `Authorization`, and nothing else:
 
@@ -8806,15 +8806,31 @@ name its own.
   are still `<AAS_BASE_IRI><sparkplug_id>` and what follows it. The specific ids do not use the base
   IRI, so changing it leaves them alone.
 
+**A semantic id resolves without an export.** `/concept-descriptions` lists the ConceptDescription
+of every id the shells' submodels use, and `/concept-descriptions/{id}` fetches one by its base64url
+id. Each is the one the shell's JSON export carries, built by the same `buildConceptDescriptions()`.
+So a definition an imported vocabulary does not share stays out of both
+([Site vocabularies](../docs/vocabularies.md#site-vocabularies)).
+
+- **Each id is listed once, in id order.** `limit` counts ConceptDescriptions, and every page reads
+  every shell.
+- **An id no listed shell references is a `404`.** That holds whether or not the database defines
+  it, and for an id only an archived device's shell carries.
+- **Where two shells describe one id differently,** the first device's, in the order `/shells`
+  lists them, is served. That takes two schemas carrying one semantic id with descriptions of their
+  own.
+- **No profile is declared for them.** IDTA-01002 has no read-only profile for the
+  ConceptDescription Repository, and its one profile includes the writes.
+
 **What is not served:**
 
 - the Registry and Discovery interfaces;
-- concept descriptions, although the JSON export carries them;
 - writes: every route is a `GET`, and the advertised profiles are the read-only SSP-002 pair;
 - the `$metadata`, `$reference` and `$path` modifiers, which answer `404`. Only `/$value`
   is handled;
 - a search. `GET /shells` reads only `limit` and `cursor`, so a client that asks by
-  `assetIds` or `idShort` gets every shell;
+  `assetIds` or `idShort` gets every shell. `GET /concept-descriptions` likewise ignores `idShort`,
+  `isCaseOf` and `dataSpecificationRef`;
 - a page of submodels by count. On `/submodels`, `limit` counts devices, and a page holds every
   submodel of each.
 
