@@ -30,7 +30,8 @@
 -- -------------------------------------------------------------------------------------------------
 -- The instant of the p_rows-th newest row in the window, or NULL when it holds fewer. Every bound and
 -- list reaches the historian as a value, so postgres_fdw sends each WHERE and both aggregates whole.
--- The bins are counted first so the second aggregate sorts one bin, not the window.
+-- An omitted bound is `$n IS NULL`, which the planner folds away with its value before postgres_fdw
+-- sees it. The bins are counted first so the second aggregate sorts one bin, not the window.
 CREATE OR REPLACE FUNCTION public.telemetry_page_start(
     p_relation text,
     p_asset_id text,
@@ -46,7 +47,6 @@ CREATE OR REPLACE FUNCTION public.telemetry_page_start(
 DECLARE
     v_col    text;
     v_bin    interval;
-    v_where  text := '';
     v_bins   timestamp with time zone[];
     v_counts bigint[];
     v_acc    bigint := 0;
@@ -65,33 +65,31 @@ BEGIN
               USING ERRCODE = '22023';
     END IF;
 
-    IF p_asset_id IS NOT NULL THEN v_where := v_where || ' AND t.asset_id = $1'; END IF;
-    IF p_metric_name IS NOT NULL THEN v_where := v_where || ' AND t.metric_name = $2'; END IF;
-    IF p_from IS NOT NULL THEN v_where := v_where || format(' AND t.%I >= $3', v_col); END IF;
-    IF p_to IS NOT NULL THEN
-        v_where := v_where || format(' AND t.%I %s $4', v_col,
-                                     CASE WHEN p_to_inclusive IS FALSE THEN '<' ELSE '<=' END);
-    END IF;
-
     EXECUTE format($q$
       SELECT array_agg(o.b ORDER BY o.b DESC), array_agg(o.n ORDER BY o.b DESC)
-        FROM (SELECT date_bin($5, t.%1$I, timestamptz 'epoch') AS b, count(*) AS n
+        FROM (SELECT date_bin($7, t.%1$I, timestamptz 'epoch') AS b, count(*) AS n
                 FROM timescale.%2$I t
-               WHERE true %3$s
+               WHERE ($1::text IS NULL OR t.asset_id = $1) AND ($2::text IS NULL OR t.metric_name = $2)
+                 AND ($3::timestamptz IS NULL OR t.%1$I >= $3)
+                 AND ($4::timestamptz IS NULL OR CASE WHEN $5 THEN t.%1$I <= $4 ELSE t.%1$I < $4 END)
                GROUP BY 1) o
-    $q$, v_col, p_relation, v_where)
+    $q$, v_col, p_relation)
     INTO v_bins, v_counts
-    USING p_asset_id, p_metric_name, p_from, p_to, v_bin;
+    USING p_asset_id, p_metric_name, p_from, p_to, p_to_inclusive IS NOT FALSE, p_rows, v_bin;
 
     FOR v_k IN 1 .. coalesce(cardinality(v_bins), 0) LOOP
         IF v_acc + v_counts[v_k] >= p_rows THEN
             EXECUTE format($q$
-              SELECT (array_agg(t.%1$I ORDER BY t.%1$I DESC))[$7]
+              SELECT (array_agg(t.%1$I ORDER BY t.%1$I DESC))[$6]
                 FROM timescale.%2$I t
-               WHERE t.%1$I >= $5 AND t.%1$I < $6 %3$s
-            $q$, v_col, p_relation, v_where)
+               WHERE t.%1$I >= $7 AND t.%1$I < $8
+                 AND ($1::text IS NULL OR t.asset_id = $1) AND ($2::text IS NULL OR t.metric_name = $2)
+                 AND ($3::timestamptz IS NULL OR t.%1$I >= $3)
+                 AND ($4::timestamptz IS NULL OR CASE WHEN $5 THEN t.%1$I <= $4 ELSE t.%1$I < $4 END)
+            $q$, v_col, p_relation)
             INTO v_start
-            USING p_asset_id, p_metric_name, p_from, p_to, v_bins[v_k], v_bins[v_k] + v_bin, p_rows - v_acc;
+            USING p_asset_id, p_metric_name, p_from, p_to, p_to_inclusive IS NOT FALSE,
+                  (p_rows - v_acc)::integer, v_bins[v_k], v_bins[v_k] + v_bin;
             RETURN v_start;
         END IF;
         v_acc := v_acc + v_counts[v_k];
@@ -134,7 +132,6 @@ CREATE OR REPLACE FUNCTION public.telemetry_page(
     SET search_path TO 'public'
     AS $fn$
 DECLARE
-    v_where text := '';
     v_start timestamp with time zone;
 BEGIN
     IF p_limit IS NULL OR p_limit < 1 OR p_offset IS NULL OR p_offset < 0 THEN
@@ -145,22 +142,17 @@ BEGIN
     v_start := public.telemetry_page_start('telemetry', p_asset_id, p_metric_name, p_from, p_to,
                                            p_to_inclusive, p_limit::bigint + p_offset);
 
-    IF p_asset_id IS NOT NULL THEN v_where := v_where || ' AND t.asset_id = $1'; END IF;
-    IF p_metric_name IS NOT NULL THEN v_where := v_where || ' AND t.metric_name = $2'; END IF;
-    IF p_from IS NOT NULL THEN v_where := v_where || ' AND t."time" >= $3'; END IF;
-    IF p_to IS NOT NULL THEN
-        v_where := v_where || CASE WHEN p_to_inclusive IS FALSE THEN ' AND t."time" < $4' ELSE ' AND t."time" <= $4' END;
-    END IF;
-    IF v_start IS NOT NULL THEN v_where := v_where || ' AND t."time" >= $7'; END IF;
-
-    RETURN QUERY EXECUTE format($q$
+    RETURN QUERY EXECUTE $q$
       SELECT t."time", t.asset_id, t.metric_name, t.val_double, t.val_string, t.val_bool
         FROM timescale.telemetry t
-       WHERE true %s
+       WHERE ($1::text IS NULL OR t.asset_id = $1) AND ($2::text IS NULL OR t.metric_name = $2)
+         AND ($3::timestamptz IS NULL OR t."time" >= $3)
+         AND ($4::timestamptz IS NULL OR CASE WHEN $5 THEN t."time" <= $4 ELSE t."time" < $4 END)
+         AND ($6::timestamptz IS NULL OR t."time" >= $6)
        ORDER BY t."time" DESC, t.asset_id, t.metric_name
-       LIMIT $5 OFFSET $6
-    $q$, v_where)
-    USING p_asset_id, p_metric_name, p_from, p_to, p_limit, p_offset, v_start;
+       LIMIT $7 OFFSET $8
+    $q$
+    USING p_asset_id, p_metric_name, p_from, p_to, p_to_inclusive IS NOT FALSE, v_start, p_limit, p_offset;
 END;
 $fn$;
 
@@ -205,10 +197,15 @@ CREATE OR REPLACE FUNCTION public.telemetry_rollup_page(
     AS $fn$
 DECLARE
     v_rel   text;
-    v_where text := '';
     v_start timestamp with time zone;
 BEGIN
-    IF p_resolution IS NULL OR NOT p_resolution = ANY (ARRAY['1m', '5m', '1h']) THEN
+    IF p_resolution = '1m' THEN
+        v_rel := 'telemetry_1m';
+    ELSIF p_resolution = '5m' THEN
+        v_rel := 'telemetry_5m';
+    ELSIF p_resolution = '1h' THEN
+        v_rel := 'telemetry_1h';
+    ELSE
         RAISE EXCEPTION 'telemetry_rollup_page: the resolution is 1m, 5m or 1h, not %', quote_nullable(p_resolution)
               USING ERRCODE = '22023';
     END IF;
@@ -216,28 +213,22 @@ BEGIN
         RAISE EXCEPTION 'telemetry_rollup_page: a page is at least one row (p_limit %) after none or more (p_offset %)',
               p_limit, p_offset USING ERRCODE = '22023';
     END IF;
-    v_rel := 'telemetry_' || p_resolution;
 
     v_start := public.telemetry_page_start(v_rel, p_asset_id, p_metric_name, p_from, p_to,
                                            p_to_inclusive, p_limit::bigint + p_offset);
-
-    IF p_asset_id IS NOT NULL THEN v_where := v_where || ' AND t.asset_id = $1'; END IF;
-    IF p_metric_name IS NOT NULL THEN v_where := v_where || ' AND t.metric_name = $2'; END IF;
-    IF p_from IS NOT NULL THEN v_where := v_where || ' AND t.bucket >= $3'; END IF;
-    IF p_to IS NOT NULL THEN
-        v_where := v_where || CASE WHEN p_to_inclusive IS FALSE THEN ' AND t.bucket < $4' ELSE ' AND t.bucket <= $4' END;
-    END IF;
-    IF v_start IS NOT NULL THEN v_where := v_where || ' AND t.bucket >= $7'; END IF;
 
     RETURN QUERY EXECUTE format($q$
       SELECT t.bucket, t.asset_id, t.metric_name, t.sum_double / nullif(t.n_double, 0)::double precision,
              t.min_double, t.max_double, t.last_double, t.last_string, t.last_bool, t.n_double, t.n_rows
         FROM timescale.%I t
-       WHERE true %s
+       WHERE ($1::text IS NULL OR t.asset_id = $1) AND ($2::text IS NULL OR t.metric_name = $2)
+         AND ($3::timestamptz IS NULL OR t.bucket >= $3)
+         AND ($4::timestamptz IS NULL OR CASE WHEN $5 THEN t.bucket <= $4 ELSE t.bucket < $4 END)
+         AND ($6::timestamptz IS NULL OR t.bucket >= $6)
        ORDER BY t.bucket DESC, t.asset_id, t.metric_name
-       LIMIT $5 OFFSET $6
-    $q$, v_rel, v_where)
-    USING p_asset_id, p_metric_name, p_from, p_to, p_limit, p_offset, v_start;
+       LIMIT $7 OFFSET $8
+    $q$, v_rel)
+    USING p_asset_id, p_metric_name, p_from, p_to, p_to_inclusive IS NOT FALSE, v_start, p_limit, p_offset;
 END;
 $fn$;
 

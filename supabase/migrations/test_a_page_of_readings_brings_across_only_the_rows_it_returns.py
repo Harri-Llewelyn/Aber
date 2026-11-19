@@ -39,6 +39,7 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg2
 import psycopg2.errors
+from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
@@ -65,6 +66,15 @@ T0 = datetime(2026, 1, 5, 10, 0, tzinfo=timezone.utc)
 RAW = ('"time", asset_id, metric_name, val_double, val_string, val_bool')
 BUCKET = ("bucket, asset_id, metric_name, avg_double, min_double, max_double, last_double,"
           " last_string, last_bool, n_double, n_rows")
+ROLLUP_VIEWS = {"1m": "telemetry_1m", "5m": "telemetry_5m", "1h": "telemetry_1h"}
+# A read of the view as the readers made one, an omitted bound filtering nothing.
+VIEW_READ = sql.SQL(
+    "SELECT {columns} FROM {relation} t"
+    " WHERE (%(asset)s::text IS NULL OR t.asset_id = %(asset)s)"
+    "   AND (%(metric)s::text IS NULL OR t.metric_name = %(metric)s)"
+    "   AND (%(start)s::timestamptz IS NULL OR t.{at} >= %(start)s)"
+    "   AND (%(end)s::timestamptz IS NULL OR t.{at} < %(end)s OR (%(inclusive)s AND t.{at} = %(end)s))"
+    " ORDER BY t.{at} DESC, t.asset_id, t.metric_name LIMIT %(limit)s OFFSET %(offset)s;")
 
 
 def get_connection():
@@ -138,10 +148,10 @@ class PageBase(unittest.TestCase):
 
     def view(self, asset=None, metric=None, start=None, end=None, inclusive=True, limit=500, offset=0):
         """What a read of public.telemetry returned for the same bounds, its ties in device and metric order."""
-        where, args = self.where('"time"', asset, metric, start, end, inclusive)
-        self.cur.execute(f"SELECT {RAW} FROM public.telemetry t WHERE true{where}"
-                         " ORDER BY t.\"time\" DESC, t.asset_id, t.metric_name LIMIT %s OFFSET %s;",
-                         args + [limit, offset])
+        self.cur.execute(VIEW_READ.format(columns=sql.SQL(RAW), relation=sql.Identifier("public", "telemetry"),
+                                          at=sql.Identifier("time")),
+                         {"asset": asset, "metric": metric, "start": start, "end": end,
+                          "inclusive": inclusive, "limit": limit, "offset": offset})
         return self.cur.fetchall()
 
     def rollup_page(self, resolution, asset=None, metric=None, start=None, end=None, inclusive=True,
@@ -152,28 +162,12 @@ class PageBase(unittest.TestCase):
 
     def rollup_view(self, resolution, asset=None, metric=None, start=None, end=None, inclusive=True,
                     limit=500, offset=0):
-        where, args = self.where("bucket", asset, metric, start, end, inclusive)
-        self.cur.execute(f"SELECT {BUCKET} FROM public.telemetry_{resolution} t WHERE true{where}"
-                         " ORDER BY t.bucket DESC, t.asset_id, t.metric_name LIMIT %s OFFSET %s;",
-                         args + [limit, offset])
+        self.cur.execute(VIEW_READ.format(columns=sql.SQL(BUCKET),
+                                          relation=sql.Identifier("public", ROLLUP_VIEWS[resolution]),
+                                          at=sql.Identifier("bucket")),
+                         {"asset": asset, "metric": metric, "start": start, "end": end,
+                          "inclusive": inclusive, "limit": limit, "offset": offset})
         return self.cur.fetchall()
-
-    @staticmethod
-    def where(column, asset, metric, start, end, inclusive):
-        where, args = "", []
-        if asset is not None:
-            where += " AND t.asset_id = %s"
-            args.append(asset)
-        if metric is not None:
-            where += " AND t.metric_name = %s"
-            args.append(metric)
-        if start is not None:
-            where += f" AND t.{column} >= %s"
-            args.append(start)
-        if end is not None:
-            where += f" AND t.{column} {'<=' if inclusive else '<'} %s"
-            args.append(end)
-        return where, args
 
     def start(self, relation, asset=None, metric=None, start=None, end=None, inclusive=True, rows=1):
         self.cur.execute("SELECT public.telemetry_page_start(%s, %s, %s, %s, %s, %s, %s);",
