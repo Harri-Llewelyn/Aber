@@ -202,6 +202,8 @@ jobs:
             dockerfile: node-red/Dockerfile
             context: node-red
             build_args: ''
+            # The script that writes the OS packages' licences (licenses/README.md).
+            build_contexts: licenses=./licenses
           # Repository root: the i3X server compiles sparkplug_b.proto, which lives there. An
           # independent build despite sharing that need with ingestion; see i3x/Dockerfile.
           - name: i3x-service
@@ -230,7 +232,7 @@ jobs:
             context: timescaledb
             build_args: ''
             # The licence texts the image carries (licenses/README.md), which its context does not
-            # hold; supabase-db and db-init pass the same.
+            # hold; supabase-db, db-init, node-red and frontend pass the same.
             build_contexts: licenses=./licenses
           # The platform database: supabase/postgres with pgBackRest and tini, which physical backup
           # runs inside the server's own container.
@@ -267,9 +269,13 @@ jobs:
             build_args: |
               VITE_RUNTIME_CONFIG=true
               VITE_APP_VERSION=${{ needs.prepare-release.outputs.version }}
-            # The help pages the dashboard bundles, as the named context frontend/Dockerfile copies
-            # from. An entry without this key passes no extra context.
-            build_contexts: help=./help
+            # The help pages the dashboard bundles, and licenses/ for the OS packages' licences: the
+            # named contexts frontend/Dockerfile copies from, one per line, as build-push-action
+            # reads them (a comma does not separate two). An entry without this key passes no extra
+            # context.
+            build_contexts: |
+              help=./help
+              licenses=./licenses
     steps:
       - name: Checkout Code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0

@@ -1245,7 +1245,8 @@ nodeRed:
   image:
     # Built from node-red/Dockerfile. A custom image is required: settings.js lives on the data
     # volume and resolves require() from there, and it depends on internals pinned by the base tag.
-    #   docker build -f node-red/Dockerfile -t <repo>:<tag> node-red
+    #   docker build -f node-red/Dockerfile --build-context licenses=./licenses \
+    #     -t <repo>:<tag> node-red
     repository: ghcr.io/harri-llewelyn/aber/node-red
     tag: ""
     pullPolicy: IfNotPresent
@@ -1281,7 +1282,8 @@ frontend:
     # Built from frontend/Dockerfile with VITE_RUNTIME_CONFIG=true, so one image serves any
     # environment and reads its configuration from the /config.js ConfigMap:
     #   docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-    #     --build-context help=./help -t <repo>:<tag> frontend
+    #     --build-context help=./help --build-context licenses=./licenses \
+    #     -t <repo>:<tag> frontend
     repository: ghcr.io/harri-llewelyn/aber/frontend
     tag: ""
     pullPolicy: IfNotPresent

@@ -2761,7 +2761,9 @@ context stops at `COPY --from=help` with `pull access denied`: BuildKit reads `h
 name. In a checkout, `vite.config.js` adds `../help` to `server.fs.allow`, without which the dev
 server and vitest refuse to read a file outside this package. Drift check 105 holds the glob to
 every file in `help/` and to nothing outside it, and check 106 holds every build of the image to
-passing the context.
+passing the context. The nginx stage takes `licenses/` the same way, `--build-context
+licenses=./licenses`, for the script that writes the OS packages' licences into the image
+([`NOTICE.md`](../NOTICE.md)). `scripts/check-image-licences.mjs` holds every build to passing it.
 
 The pages are still free in CI: `ci.yml` classifies a diff with `*.md|docs/*`, and a `case` glob's
 `*` spans directory separators, so a `.md` file anywhere skips the end-to-end stack

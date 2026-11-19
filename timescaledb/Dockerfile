@@ -27,6 +27,11 @@ RUN apk upgrade --no-cache \
 # timescaledb/. NOTICE.md says what each covers.
 COPY --from=licenses timescaledb/ /usr/share/licenses/
 
+# And the OS packages': every Alpine package with its licence, and the written offer of the copyleft
+# ones' source, written after the last apk step so the list is what the image ships.
+COPY --from=licenses os-packages.sh /tmp/os-packages.sh
+RUN sh /tmp/os-packages.sh && rm /tmp/os-packages.sh
+
 # POSTGRES (70), FROM THE START. Started as that uid, the upstream entrypoint skips its chown and its
 # gosu, sets the data directory to 0700 (which its owner may do), and runs initdb or the server as
 # itself. PGDATA must be a directory 70 owns or may create: the chart's is a subdirectory of the

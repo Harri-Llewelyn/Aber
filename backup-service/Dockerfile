@@ -25,8 +25,12 @@ RUN apk upgrade --no-cache \
  && apk add --no-cache nodejs sqlite tar age aws-cli
 
 # THE LICENCES the base does not carry, as supabase/db/Dockerfile copies them, from the repository
-# root's licenses/ (NOTICE.md).
+# root's licenses/ (NOTICE.md). Then the OS packages': every Alpine package with its licence, and the
+# written offer of the copyleft ones' source, written after the last apk step so the list is what
+# the image ships.
 COPY licenses/supabase-postgres/ /usr/share/licenses/
+COPY licenses/os-packages.sh /tmp/os-packages.sh
+RUN sh /tmp/os-packages.sh && rm /tmp/os-packages.sh
 
 # The base's postgres user (100:101), the owner group the backup volume is given (fsGroup 101). The
 # forge's and the broker's volumes hold files other uids own at 0600, so the chart runs the service

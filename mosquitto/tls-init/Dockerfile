@@ -5,7 +5,7 @@
 # keys but has no X.509 SIGNING API, so a certificate cannot be issued from Node alone). No image
 # this stack already pins has both -- verified, not assumed, against the pinned tags:
 #
-#   node:24-alpine          node, no openssl
+#   node:24.22.3-alpine3.24 node, no openssl
 #   node:24-bookworm-slim   node, no openssl
 #   alpine:3.20             neither
 #   eclipse-mosquitto:2.0.20  neither
@@ -19,7 +19,7 @@
 # is parsed (see the escaping note in the script -- an unescaped `+` in a subject value is an RDN
 # separator), so the certificate this produces is coupled to
 # a major version of a tool, and "whatever :latest is today" is not a version.
-FROM node:24-alpine
+FROM node:24.22.3-alpine3.24
 
 RUN apk add --no-cache openssl
 

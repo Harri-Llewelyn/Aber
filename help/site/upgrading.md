@@ -1176,12 +1176,14 @@ The dashboard's help panel now carries every page in `help/`, so the dashboard's
 that folder (#770, #771). The release's images need nothing. A site that builds Aber's images
 itself adds one flag to the dashboard's build. That is an arm64 or air-gapped site following
 [*Images you must build*](../../deploy/k8s/README.md#images-you-must-build). Run the build from the
-repository root, with `NS` and `V` set as that section sets them:
+repository root, with `NS` and `V` set as that section sets them. From 1.9.0 the build takes
+`licenses/` as well, so the command below passes both:
 
 ```bash
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
                                     --build-arg VITE_APP_VERSION=$V \
                                     --build-context help=./help \
+                                    --build-context licenses=./licenses \
                                                 -t $NS/frontend:$V frontend
 ```
 
