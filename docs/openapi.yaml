@@ -707,8 +707,11 @@ paths:
         with `postgres_fdw`. `asset_id` holds the device's immutable **`sparkplug_id`**, not
         its UUID and not its editable name.
 
-        `postgres_fdw` pushes `WHERE` clauses to TimescaleDB but **not** `LIMIT`, so always
-        constrain the time window on large ranges:
+        **For a page newest first, call `/rest/v1/rpc/telemetry_page` instead.** `postgres_fdw`
+        sends TimescaleDB the `WHERE`, and the `ORDER BY` and `LIMIT` only when its row estimate
+        says the `LIMIT` cuts. The foreign table has no statistics, so a read naming a device never
+        gets them: every row inside the time bounds crosses, and is sorted and trimmed here. Always
+        constrain the time window:
 
         `?asset_id=eq.dev220000000000400080000&time=gte.2026-01-01T00:00:00Z&order=time.desc&limit=500`
 
@@ -775,10 +778,9 @@ paths:
         eventually be dropped; it cannot tell you what is there. A stack installed three weeks ago
         holds three weeks of raw however `retainFor` is set, and widening a policy does not restore
         chunks already deleted. This reads `min()` from each relation on the TimescaleDB side, so
-        four rows cross `postgres_fdw` rather than a scan — the same move `/rest/v1/telemetry_latest`
-        makes, and necessary for the same reason: the wrapper pushes `WHERE` down but not `LIMIT`,
-        so `order=time.asc&limit=1` over the projection would stream the relation to discard all
-        but one row.
+        four rows cross `postgres_fdw` in one read — the same move `/rest/v1/telemetry_latest`
+        makes. Over the projections the same answer is four reads, `order=time.asc&limit=1` on
+        each.
 
         A null `oldest` means that relation is empty. That is not the same as "does not reach that
         far": an empty stack covers nothing at any resolution.
@@ -899,6 +901,80 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/TelemetryBucket' } }
         '401':
           description: Granted to authenticated users only; `anon` is refused.
+
+  /rest/v1/rpc/telemetry_page:
+    post:
+      tags: [Telemetry]
+      summary: Read one page of telemetry, newest first
+      description: |
+        One page of `/rest/v1/telemetry` (`0315`): at most `p_limit` rows after `p_offset`, newest
+        first, rows that share an instant in device and metric order. Each argument is the view's
+        filter of the same name, and an omitted one filters nothing.
+
+        **The historian sends the page, not the window.** The function counts the window's rows by
+        the hour and finds the page's last instant, both on TimescaleDB. It then reads the rows from
+        that instant on: the page, an offset's rows before it, and any rows that share its last
+        instant. The same read of the view brings every row in the window across. The first two
+        reads are `telemetry_page_start()`, which this and `telemetry_rollup_page` share.
+
+        `STABLE` and `SECURITY INVOKER`, so it reads what the caller may read through the view,
+        and `GET` with the arguments as query parameters works as well as `POST`. `select` names
+        the columns.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                p_asset_id: { type: string, example: dev220000000000400080000, description: 'Device Sparkplug ID (devices.sparkplug_id). Omitted: every device.' }
+                p_metric_name: { type: string, example: Systems/TEMPERATURE, description: 'Omitted: every metric.' }
+                p_from: { type: string, format: date-time, description: 'At or after. Bound the window: the count reads every row in it.' }
+                p_to: { type: string, format: date-time, description: 'At or before, or before when `p_to_inclusive` is false.' }
+                p_to_inclusive: { type: boolean, default: true }
+                p_limit: { type: integer, minimum: 1, default: 500 }
+                p_offset: { type: integer, minimum: 0, default: 0, description: 'The rows it skips cross too: prefer a `p_to` keyset.' }
+      responses:
+        '200':
+          description: The page, newest first.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryRow' } }
+        '400': { description: '`p_limit` under 1 or `p_offset` under 0, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
+
+  /rest/v1/rpc/telemetry_rollup_page:
+    post:
+      tags: [Telemetry]
+      summary: Read one page of a telemetry rollup, newest first
+      description: |
+        As `/rest/v1/rpc/telemetry_page`, for `/rest/v1/telemetry_1m`, `_5m` or `_1h` (`0315`), with
+        the rollup views' columns. The buckets are counted in bins of 60: an hour, 5 hours or 60
+        hours. `p_resolution` comes first; the other arguments are `telemetry_page`'s.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_resolution]
+              properties:
+                p_resolution: { type: string, enum: [1m, 5m, 1h] }
+                p_asset_id: { type: string, example: dev220000000000400080000 }
+                p_metric_name: { type: string, example: Systems/TEMPERATURE }
+                p_from: { type: string, format: date-time, description: 'Bucket start at or after.' }
+                p_to: { type: string, format: date-time, description: 'Bucket start at or before, or before when `p_to_inclusive` is false.' }
+                p_to_inclusive: { type: boolean, default: true }
+                p_limit: { type: integer, minimum: 1, default: 500 }
+                p_offset: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: The page, newest first.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryBucket' } }
+        '400': { description: 'A resolution other than 1m, 5m or 1h, `p_limit` under 1 or `p_offset` under 0, refused before anything is read (`22023`).' }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+        '503': { description: 'The historian could not be reached.' }
 
   /rest/v1/rpc/telemetry_carried:
     post:
