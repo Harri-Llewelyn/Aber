@@ -1,4 +1,4 @@
-import { fail, pass, read } from './lib.mjs';
+import { fail, pass, read, sectionOf, upgradingGuide } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
 // 444. aas-api answers an id made from an earlier version's name on both submodel routes, through the
@@ -28,7 +28,7 @@ export default function check() {
 
   const docs = [
     ['docs/openapi.yaml', read('docs/openapi.yaml')],
-    ['the upgrade note', read('unreleased/upgrading/a-submodels-id-follows-its-schemas-lineage-and-carries-its-version.md')],
+    ['the upgrade note', sectionOf(upgradingGuide(), "### From 1.9.0, a schema's Submodel ids follow its lineage and carry its version")],
     ['help/site/running-the-server.md', read('help/site/running-the-server.md')],
   ];
   for (const [name, text] of docs) {

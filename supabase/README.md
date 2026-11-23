@@ -5734,6 +5734,1644 @@ the refusal of the name of who acknowledged a machine identity's alert to every 
 Administrator, the name of who scheduled or ended a window, the people named being the rows each role
 reads, a person with no name or only a picture left out, and the grants.
 
+### An area's name and a cell's name cannot be blank (0291)
+
+`areas_name_topic_safe` and `cells_name_topic_safe` refuse an empty name and the characters `/`, `+`
+and `#`, and do not trim: `name <> ''` lets a name of spaces through. The dashboard's dialogs trim
+first (`placeNameProblem()`), but PostgREST, an approved proposal, a machine identity that may write,
+an import and a script do not. An area's and a cell's name are segments of every Unified Namespace
+topic beneath them, so a name of spaces made a topic segment of spaces. `0284` did the same for
+devices and gateways.
+
+- **Two CHECKs, `areas_name_not_blank` and `cells_name_not_blank`: `btrim(name) <> ''`.** Each is
+  declared as `0284` declares its pair, compared by `live_constraint_definition()` and added only
+  where it is missing, so a replay scans nothing and keeps the constraint's oid. `btrim` removes
+  spaces only: a name of tabs or line breaks is still stored.
+- **The two topic CHECKs are not redefined.** The change that looks obvious is to make
+  `areas_name_topic_safe` and `cells_name_topic_safe` read `btrim(name) <> '' AND name !~ '[/+#]'`.
+  `0001` declares both, replays first on every boot and drops a CHECK whose definition differs from
+  its own. A redefinition here would be put back by the next boot and made again by this file, every
+  boot, with a new oid each time and a scan of the table under an `ACCESS EXCLUSIVE` lock.
+  `test_replay_recreates_only_what_differs.py` would fail on it too: every guard in the chain must
+  equal its live constraint. `0001` is released and is not edited, so a second CHECK beside each carries
+  the new rule. An empty name now names `areas_name_not_blank` or `cells_name_not_blank`, since
+  Postgres checks a table's CHECKs in the order of their names. A name with `/`, `+` or `#` still
+  names the topic CHECK.
+- **`cells_name_not_blank` is validated, though `cells_name_topic_safe` is `NOT VALID`.** The old CHECK
+  is `NOT VALID` because it was carried from the database the baseline was dumped from, and nothing
+  records why. It stays as it is. The new rule is blankness alone, and the stop below names every
+  blank cell, so validating the new CHECK can refuse nothing that the stop has not already named. A
+  cell that holds `/`, `+` or `#` is a rule `cells_name_topic_safe` never checked on rows already
+  there, and this file does not start to: such a row would be refused with a message that names no
+  row.
+- **A row that is already blank is named, never renamed.** Adding a CHECK scans the table and fails
+  on such a row with a message that names none. So the file looks first, in each table whose CHECK
+  is not there yet, and raises one error that names every blank row: its table, id, the date it was
+  made and what the name holds. db-init stops there, so no migration after `0291` is applied, and
+  the upgrade guide (`help/site/upgrading.md`, *From 1.9.0, an area or a cell cannot have a blank
+  name*) gives the query that finds them beforehand. An operator decides what each one is called, or
+  deletes it. A fresh install and the dev stack have none. A blank area or cell is unlikely, since
+  the dialogs refuse one, though New Cell accepted a name of spaces until 1.8.0. Both tables also hold a UNIQUE on `name`, so at most one
+  area or cell of any one run of spaces exists.
+- **Nothing in the platform writes a blank name.** No function in the chain inserts an area or a
+  cell, and an approved proposal applies the patch it was filed with, so a blank name in one aborts
+  the approval and leaves the proposal open.
+- **Every way in is held.** A write through the API or the service role fails with SQLSTATE 23514
+  naming the constraint, which PostgREST answers with HTTP 400. An approved proposal that carries a
+  blank name fails inside the approver's transaction, as an icon nobody drew does: the proposal stays
+  open and the row keeps its name. Filing the proposal is not refused, so the person who decides is
+  the one told. The dialogs are unchanged, because they already hold Save until there is a name, and
+  the database's refusal is the backstop for every other writer.
+
+`test_an_area_or_a_cell_cannot_have_a_blank_name.py` holds each CHECK on both tables (an empty name, a
+name of spaces and a real name, on an insert and on an update), the Administrator's write through
+the API's role, the service role and an approved proposal, `0001`'s two topic CHECKs as they were,
+and the file itself run inside a transaction: every blank row named and nothing renamed, only the
+table without its CHECK scanned, a cell holding a separator not stopping it, and the upgrade passing
+once the rows are named.
+
+### An automation's alert says its reading's unit (0292)
+
+`automation_value_words()` and `automation_threshold_words()` (`0283`) said a measured metric's value and
+threshold as they print, so an alert on a temperature read "82.4" against "80" in the bell, the alert
+counter's popover, History's Alerts tab, an email and a webhook. History and the device drawer say
+"82.4 °C" for the same reading. Only a time in state's share had a sign, and only a derived value its
+window.
+
+- **`unit_symbol(code)` holds the pairs of `UNIT_SYMBOLS`.** `frontend/src/utils/units.js` maps a unit
+  code to the symbol the dashboard shows ("°C" for `CELSIUS`). The function holds the same pairs and
+  answers `NULL` for a code with no symbol. It is `IMMUTABLE` with its `search_path` pinned to nothing,
+  since it reads no table. Mirror check 104 reads its `WHEN ... THEN` pairs and fails when the
+  dashboard has a code the database lacks, or the other way round, or the two spell a symbol
+  differently. It is granted to no API role, as `0283`'s functions are: the evaluator runs as the owner.
+- **`with_unit(text, code)` is `withUnit()`.** A `%` or a `°` stands against the number ("42%", "90°"),
+  and any other symbol follows a space ("82.4 °C"). A code with no symbol is printed as it is, as the
+  dashboard prints it, and no code leaves the text alone. Check 104 holds the two symbols that stand
+  against the number to the dashboard's. A derived rate's unit, `KILOWATT/HOUR`, has no pair here:
+  `unitSymbol()` builds that symbol in the browser, and no measured metric carries one.
+- **The two words functions are declared again, with one change.** A measured metric's value and
+  threshold take the unit its `metric_catalog` row holds, through `with_unit()`. Every other arm is
+  `0283`'s, line for line: a time in state's share is a percentage ("42% over the last hour", "90%"),
+  a derived metric's value is rounded and followed by its window ("4.167 over the last hour", "7 at the
+  last whole minute") with its threshold as it prints, and a metric the catalogue does not hold, or
+  holds with no unit, is the number as it prints. A derived row's own `units` is not read, so its words
+  are what they were.
+- **Only the words change.** `machine_condition_rows()` words its detail with both functions and
+  `evaluate_automations()` words the alert's summary with them, so no other function is redeclared. The
+  alert's `labels` and `values`, what is compared, a webhook's JSON `labels` and `values` and the CSV
+  export keep the metric's name and the numbers. The summary is what the bell, History's Alerts tab, an
+  email's *What* line and a webhook's `summary` show, and it is written once, when the alert starts
+  firing: an alert already firing at the upgrade keeps the text it was written with, and the next one
+  is worded with the unit. The email carries the symbol as UTF-8, as it carries a device's name.
+- **Grafana's alerts are unchanged.** Each platform alert's template in
+  `deploy/helm/aber/files/grafana-alerting/alert-rules.yaml` names its unit already: seconds, days,
+  `humanizeDuration`, `humanizePercentage`, or a noun after the count ("devices", "messages").
+
+`test_an_automations_alert_says_its_readings_unit.py` holds the symbols (every unit the Add Metric list
+offers, a code with none, volatility, `search_path` and grants), the spacing, each arm of the words, and
+an evaluation: a Celsius metric reads "82.4 °C" against "80 °C" in the detail and in the summary, a
+percent metric "42%", a unit with no symbol its code, and a metric with no unit as it did, with the
+alert's labels and values still the metric's name and the numbers.
+
+### A device can follow its gateway's location (0293)
+
+A device's location was one of In a cell, Area-Wide and Site-Wide, and **In a cell with no cell
+meant "inherit the gateway's cell"**. `device_locations` resolved that as `COALESCE(d.cell_id,
+g.cell_id)`. A gateway that is Area-Wide or Site-Wide has no cell, so every device inheriting from it
+resolved to Unassigned. The device took neither the area nor the site its gateway names, and the
+place had to be written twice, once on the gateway and once on the device.
+
+A device now has four locations: **Follow Gateway**, a cell, Area-Wide and Site-Wide. Follow Gateway
+takes whatever the gateway has when the device is read: the gateway's cell, its area, the whole site,
+or nothing. When the gateway's location changes, the devices that follow it move with it. A cell,
+Area-Wide and Site-Wide are the device's own, whatever its gateway does. Simulated and Playback
+devices are unchanged: they resolve to no place before any of this.
+
+- **`devices.location_scope` gains `gateway`, the column's default.** The device stores no cell and no
+  area (`devices_follow_gateway_has_no_place`: `location_scope <> 'gateway'` or both are NULL). A
+  gateway never takes the value: `gateways_location_scope_valid` is unchanged, and a gateway has no
+  gateway to follow.
+- **`0001` carries the value and the default, not this file.** `0001` replays first on every boot and
+  drops a CHECK whose definition differs from its own, then adds its own. A CHECK widened only here
+  would be narrowed again on the next boot, and the re-add would fail on the first row holding
+  `gateway`. So `devices_location_scope_valid` names the four values in `0001`'s table, its guard and
+  its re-add, and the column's default is `'gateway'` there, as `0196` did for
+  `third_party`. `0293` states neither: its self-check fails if either is not what it expects. The
+  default matters across a replay: until this file runs, `0001` has just set it, so a device
+  registered in that window must not meet a CHECK that wants a cell.
+- **Cell requires a cell.** `devices_cell_scope_names_a_cell` refuses `location_scope = 'cell'` with
+  no `cell_id`. A cell scope and an empty cell used to be the way to say "inherit", so every such
+  device is moved first.
+- **The move.** In one transaction, behind `LOCK TABLE devices IN SHARE ROW EXCLUSIVE MODE`, every
+  device with `location_scope = 'cell'` and no cell becomes `gateway`, the CHECK is added, and the
+  file raises a NOTICE with how many moved and where they now resolve: *N device(s) were In a cell
+  with no cell and now follow their gateway: A in its cell, B Area-Wide, C Site-Wide, D with no
+  place to take*. The lock keeps a write by the previous release's dashboard from slipping a row in
+  between. It is taken only where the CHECK is missing, so a replay locks nothing and moves nothing.
+  Each move is an `UPDATE` the audit trigger records, with the actor `migration`, so the Audit Trail
+  shows every device that changed. Where the gateway has a cell, nothing visible changes. Where it is
+  Area-Wide or Site-Wide, the device leaves Unassigned for that place, which is the fix. A site
+  can count them first: the upgrade guide
+  (`help/site/upgrading.md`, *From 1.9.0, a device can follow its gateway's location*) has the query.
+  The number is the site's own; this note cannot know it.
+- **`device_locations` gains three sources.** A device that follows its gateway reads the gateway's
+  scope: `followed_site` for a Site-Wide gateway (no cell, no area), `followed_area` for an Area-Wide
+  one (no cell, the gateway's area), `followed_cell` for one in a cell (that cell, and its area), and
+  `unassigned` when the gateway has no location or there is no gateway. The arms sit after the two
+  lanes and the two wide scopes and before the device's own cell, so a device that names its own
+  place is untouched and a lane still wins. Every column keeps its name, type and position, since
+  `CREATE OR REPLACE VIEW` cannot change them and `0001` replays its own text first. `inherited`
+  stays in the set, but nothing produces it now that a cell scope names its cell.
+  `frontend/src/utils/cellResolution.js` mirrors the view, and mirror checks `003`, `105` and `106`
+  hold the two together.
+- **What reads `location_source` follows.** `device_uns_paths` places a followed device under the site
+  alone, under its area, or under its cell, and skips a followed cell in no area as `cell_unfiled`,
+  so the Unified Namespace topic is where the device is shown. `automations_document()` calls a device
+  that follows a Site-Wide gateway Site-wide, as it calls a Site-Wide one. The i3X address space files
+  one under the site (`i3x/address_space.py`), and the dashboard's Devices list, Cell filter, Site
+  Map, Areas page and History's Overview put it in the lane or the area it follows. A reader that
+  asks only for the effective cell and area, such as `refuse_archiving_an_occupied_cell()` and the
+  suppression windows, needed nothing: a followed cell is the effective cell.
+- **A proposal carries the value through the actions it already has.** `proposable_columns()` lists
+  `location_scope` for a device, `validate_change_proposal()` checks only the names of the columns,
+  and `approve_proposal()` writes the row under the table's CHECKs. A patch that sets `gateway` and
+  leaves a cell beside it fails `devices_follow_gateway_has_no_place` on approval, inside the
+  approver's transaction, and the proposal stays open. No audit action, class or domain changes.
+- **`approve_quarantined_device()` takes the fourth scope.** It clears the cell and the area of a
+  device approved as `gateway`, as it clears them for `site_wide`, and refuses a cell scope that names
+  no cell in the words of the area-wide refusal (`a cell device must name its cell`, SQLSTATE
+  22023, which the edge function answers 400). The `approve-quarantine` function accepts `gateway`,
+  and reads a cell named with no scope as In a cell, which is what that request meant before. A
+  device that arrives follows its gateway, so a person who approves it and answers nothing leaves it
+  following.
+- **Deleting a cell moves its devices to Follow Gateway.** `devices.cell_id` is `ON DELETE SET NULL`,
+  which would now write a cell scope with no cell and fail the CHECK, so the nightly purge could not
+  delete an archived cell that a device behind a simulated gateway still names. A `BEFORE DELETE`
+  trigger on `cells`, `trg_cells_devices_follow_their_gateway_on_delete`, moves each device filed in
+  the cell to `gateway` first, and the foreign key finds nothing left to clear. It is `SECURITY
+  DEFINER`, so a person who may delete a cell need not be able to update devices, and each device is
+  an Audit Trail row under the deleter's name, as the `SET NULL` was.
+- **`relocate_devices()` takes it too.** A move can say `gateway`, which clears the cell and the area
+  as `site_wide` does. Dropping a device onto Unassigned used to be a `cell` move with no cell; it is
+  now a `gateway` move, and a `cell` move with no cell is refused in words
+  (`a cell move for device X must name cell_id`, SQLSTATE 22004) instead of by the CHECK. The batch
+  is still all or nothing, and the authority check, the limits and the audit rows are `0165`'s.
+  Nothing in the dashboard calls it.
+- **The API client's side.** A client that files a device in a cell by writing `cell_id` alone now
+  gets HTTP 400 naming `devices_follow_gateway_has_no_place`: the device follows its gateway, so the
+  request must also say `location_scope: "cell"`. The dashboard always sends all three keys. The
+  upgrade guide says so.
+
+`test_a_device_can_follow_its_gateways_location.py` holds each gateway location (a cell, Area-Wide,
+Site-Wide, none and no gateway) read through each of the four choices, a gateway that moves, the
+lanes ahead of the new arms, the CHECKs, the move over a database where its CHECK is dropped first
+(only the cell-scoped devices with no cell, each move in the Audit Trail, the NOTICE's count, a replay
+that changes nothing and keeps the constraints' oids), the UNS path and the automations document, a
+proposal, and approving as Follow Gateway. Checks `383` to `386` of `scripts/check-docs-drift.mjs`
+hold this note, the upgrade note, the help, the API reference and the approval path to what the file
+does.
+
+### A replay lane holds no 3D model of its own (0294)
+
+The device drawer offered the 3D model upload on every device, a replay lane included. The file went to
+`asset-3d-models/<lane id>/<file>` and the lane's `model_3d_path` named it. So the same model was
+uploaded twice, once for the machine and once for its lane, and a lane could show a model its machine
+lacked: on the dev stack "Assembly Device (replay)" had one and Assembly Device had none. A lane is a
+recording of a machine, not a second asset, so the model is the machine's and the lane shows it.
+
+- **A model a lane already holds moves to the machine, or is cleared.** The file is never copied, moved or
+  deleted. Where the machine has no model, its `model_3d_path` takes the lane's path and the lane's is set
+  to NULL, so the person's upload is kept. Where the machine has one, only the lane's is cleared. A path
+  names an object and nothing more: `devices_model_3d_path_shape` checks that it is `<uuid>/<file>.<ext>`
+  and not whose uuid that is, and the bucket is public-read, so the viewer, **Download** and the AAS `File`
+  URL read an object under a lane's id exactly as they read one under the machine's. Copying it under the
+  machine's id would have needed the Storage API: a row in `storage.objects` does not copy a file. Removing the model from the
+  machine deletes the object where it is, because the `DELETE` policy is not confined to a lane's folder.
+- **Each move is named in a `NOTICE`.** The lane, the path and what became of it, and a total after the
+  last. They are in db-init's log. The `UPDATE`s write an Audit Trail row each (`UPDATE` on `devices`, by
+  the migration), so the two devices show the change. A machine with two lanes that both held a model takes
+  the older lane's, in the order the lanes were made, and the other is cleared. A device whose `shadow_of`
+  is NULL, a lane whose machine was deleted before a lane followed its machine, is not a lane here and keeps
+  its path. A machine that is itself a lane takes nothing and the lane's path is cleared, though no such
+  lane can be made.
+- **`devices_a_replay_lane_has_no_model` keeps `model_3d_path` NULL where `shadow_of` is set.** It is added
+  after the move, as `NOT VALID`, and validated in its own statement. A replay finds no lane with a model,
+  and the guard compares `live_constraint_definition()` and adds the constraint only where it is missing or
+  reads otherwise. A write by an owner, an Administrator through the API's role, the service role or an
+  approved proposal fails with SQLSTATE 23514 naming the constraint. `model_3d_path` is a proposable column,
+  so a proposal that names a lane's path can be filed, and its approval fails inside the approver's
+  transaction and leaves the proposal open, as a blank name does (`0284`). The dashboard files none.
+- **`is_replay_lane_model_path()` is what the storage policy asks.** It is true when the first folder of an
+  object name is the id of a device with `shadow_of` set, in either case, and false for any name that is not
+  shaped `<uuid>/...`, so it never raises for `__gateway_probe__.bin`. It reads `devices` as the caller, as
+  `is_capture_subject_prefix()` does, and is executed by `authenticated` alone. It is not `SECURITY DEFINER`:
+  every signed-in role reads every device (`devices_select_authenticated`), and a definer function would need
+  an entry in the schema lint's allow-list, a file every migration's author appends to.
+- **The policy itself is in `supabase/storage-policies.sql`, not here.** `storage.objects` is storage-api's,
+  created after db-init has run, so every policy on it is stated in that file, which the storage-policies Job
+  applies on each boot. `asset_3d_models_insert_privileged` and `asset_3d_models_update_privileged` now end
+  with `AND NOT public.is_replay_lane_model_path(storage.objects.name)`, the update in both `USING` and
+  `WITH CHECK`, so an upload, an upsert of a lane's object and a rename into a lane's folder are refused.
+  Their names, roles and MFA arm are unchanged, so the `0251` table holds. `SELECT` and `DELETE` are
+  unchanged. The file's self-check refuses an `INSERT` or `UPDATE` arm without the refusal. The policy
+  refers to the function, so db-init must run first, and the Helm hook weights say it does (`-5` to `10`,
+  then `16` to `18`).
+- **A lane exports no model of its own.** `aas-export` reads the exported device's own `model_3d_path`, which
+  is now always NULL on a lane, so a lane's AAS (JSON or AASX) has no `VisualRepresentation` submodel. The
+  bundle is already withheld from a lane. The i3X address space carries no model. The machine's AAS carries
+  the model, whichever folder the object is in.
+- **The dashboard follows.** A lane's drawer offers **View 3D Model** when its machine has a model, and
+  nothing about a model when it has none. The view is read-only, and says whose model it is. A lane is never
+  offered **Add 3D Model…**, **Replace** or **Remove**.
+
+`test_a_replay_lane_holds_no_3d_model_of_its_own.py` holds the CHECK on both writers and on an approved
+proposal, the move's cases (a machine with none, one with a model, two lanes, an orphan, a lane of a lane),
+the `NOTICE`s and the migration as their author, a second run that changes nothing, the function for either
+case, an absent folder and a name that is no uuid, and the two policies and their self-check from
+`storage-policies.sql`, verbatim on a stand-in table.
+
+### A document of device schemas is checked and applied in one call (0295)
+
+The Schemas page exports and uploads schemas as YAML, as the Automations page does for automations. It
+parses a person's YAML into JSON and calls one function. **The database is the authority**: the stack has
+no `pg_jsonschema`, so `apply_device_schemas()` checks every field itself, and the JSON Schema the
+dashboard serves is a convenience that a test holds to it.
+
+- **`apply_device_schemas(p_doc, p_dry_run)`** answers a list with one result per schema: `index`,
+  `name`, `status` (`new`, `changed`, `unchanged` or `refused`), `id`, `version`, `schema_name`, `changes`,
+  `metrics` and `reasons`. Each reason is a `path` and a `message`; the path is a JSON path, such as
+  `$[0].metrics[1].minimum`, which the editor maps back to a line. Every field is checked and every reason
+  reported, so a file is fixed in one pass. **All or nothing:** with any refusal, or with `p_dry_run` true,
+  nothing is written, so the upload preview and the apply are one call. **It never deletes:** a schema the
+  file leaves out is left alone. It reuses `automation_reason()` and `automation_path()` for the shape of a
+  reason.
+- **A schema is found by its name, across versions.** A schema's versions are named `Robot_Arm_Schema`,
+  `Robot_Arm_Schema_v2`, `Robot_Arm_Schema_v3`: `fork_schema()` adds the suffix. The file names the schema,
+  and the function finds the lineage by the name without a trailing `_v<n>`
+  (`schema_version_base_name()`), whichever name the file writes. The version **in force** (`active`) is what
+  the file is compared with. A name that more than one version in force answers to is refused, and so is a
+  new schema whose name ends in a version, which Aber adds itself.
+- **What a file says about a schema** is its `name`, `description`, `semantic_id` and `semantic_id_type`, and
+  each metric by catalogue name with its `minimum` and `maximum`. `change_description` is the reason a
+  version exists, so it is used only when the file makes one. The comparison leaves out what the catalogue
+  owns (a metric's type, description and permitted values) and the order of the metrics, which a jsonb
+  `properties` does not keep. Both sides are rendered by `device_schema_document_of()`, so `unchanged` is
+  exact and writes nothing, not even an Audit Trail row.
+- **Versioning is kept.** A schema no lineage has is made as version 1 and **in force**, as the builder
+  makes one. A changed schema becomes a new **draft**, named, numbered and linked to its parent as
+  `fork_schema()` does (including the suffix it adds when a name is taken). Publishing stays a step of its
+  own, and a published version is never edited. A lineage that has a draft refuses a different change by
+  name, since `fork_schema()` refuses a second draft too; a file that says what the draft already says is
+  `unchanged`, so a second upload of a file is harmless. The draft is inserted once, with its content,
+  rather than by calling `fork_schema()` and editing the copy, so the Audit Trail has one row for it.
+- **The definition is built from the catalogue as the builders build it.** `schema_property_entry()` is
+  `catalogPropertyEntry()` in SQL: the type from the Sparkplug datatype, the catalogue's description, its
+  permitted values as an `enum` of the property's type, and for a number the range given. The suite holds it
+  to `test-harness/fixtures/schema-builder-output.json`, which the two dashboard builders and ingestion's
+  conformance check are held to. A changed schema keeps the rest of its stored definition, as a draft's Save
+  Draft does: a metric's `pattern`, `additionalProperties`, and a `required` list that loses what the file
+  drops.
+- **A metric** must be in `metric_catalog`. A **derived** metric is refused by name: nothing publishes one,
+  so a schema cannot model it. A **deprecated** metric is refused unless the schema already models it, so a
+  file exported from a schema that keeps one applies. A range is a number a double can hold, only on a metric
+  that is a number, and `minimum` is not above `maximum`. A metric's `semantic_id` is optional, and when
+  given must be the catalogue's own: a name that means another thing on this site is refused rather than
+  matched. It is never written to the catalogue.
+- **A file is bounded:** 200 schemas, and 1,000 metrics each. Both are in the schema too (`maxItems`, held
+  by mirror check 107).
+- **`device_schemas_document(p_ids)`** renders the schemas in force back to the document's shape, a list in
+  name order: every schema, or those of the lineages the ids given belong to, whichever version each id is. A
+  draft is not exported. `apply_device_schemas()` of the list reports every schema unchanged.
+- **Who:** `has_authority(ARRAY['schema:manage'])`, as `fork_schema()` asks, so the Administrator, and then
+  `require_mfa()`. A machine identity is refused even if it holds the permission, since the schemas table's
+  insert policy admits a person in a role and this function writes as its owner. Mirror check 108 holds the
+  Schemas page's gate to this. The function is `SECURITY DEFINER` with its path pinned, and `anon` may run
+  none of the new functions.
+- **The Audit Trail** is the `schemas` table's own trigger: one `INSERT` row for each schema made, naming the
+  person, with the row. A dry run, an unchanged schema and a refusal write none. No audit action or class is
+  added.
+
+**The JSON Schema** is
+[`frontend/public/json-schema/device-schemas.schema.json`](../frontend/public/json-schema/device-schemas.schema.json),
+served by the dashboard at `/json-schema/device-schemas.schema.json`, beside the automations one. It
+describes exactly this vocabulary with `additionalProperties: false` throughout and a description on every
+field, which the editor's hover help reads. `test_the_device_schemas_json_schema_and_the_function_agree.py`
+runs every file in [`supabase/device-schemas-fixtures/`](device-schemas-fixtures) through the
+schema (`jsonschema`) and through `apply_device_schemas(..., true)`, one document and one reason each, and
+fails if they disagree. A fixture marked `database` is what a schema cannot know (a metric that is not in the
+catalogue, a derived one, a range on a text metric, a name used twice): the schema must accept it and the
+function refuse it. Mirror check 107 holds the limits, patterns and keys the fixtures cannot reach.
+
+The file's self-check asserts that the writer is `SECURITY DEFINER`, pinned, and asks for `schema:manage`
+and the second factor, that `anon` may run neither browser-facing function and `authenticated` both, that
+the checker and the entry builder are no one's, that the checker refuses what it should, and that the entry
+builder writes the entry a builder writes.
+
+### An export saves a derived metric's values (0296)
+
+A derived metric ([#324](https://github.com/Harri-Llewelyn/Aber/issues/324)) has no readings, so
+`export_telemetry()` (`0279`) could not read one: it read the raw table or a rollup, and neither holds a
+row under a derived name. The dialog left such a metric out and said to export its inputs. `0296`
+declares `export_telemetry()` again, with the same arguments and the same return type, so that a name
+that is a derived metric (`metric_catalog.derivation`) is read through **`derived_series()`**
+(`0282`), the function History and the evaluator read. The file holds the numbers the chart shows.
+
+- **Everything `0279` checked is checked, first and in its order:** the roles, the second factor, the
+  window and `history.export_max_days`, the resolution, and the devices and metrics named. A measured
+  name is read exactly as before. One call still checks, reads and records.
+- **A derived metric is never raw.** It has buckets, no readings. Its bucket is the resolution's width
+  (1, 5 or 60 minutes) and **one minute where the resolution is `raw`**, which is the finest
+  `derived_series()` goes, so a Raw export that names a derived metric holds it at 1 minute, in the same
+  file as the raw readings, and the dashboard's comment rows say so. A row is the bucket's start and
+  its value, as a rollup's is, and a bucket that starts before the window is not in it.
+- **The unit is what History shows.** It is the catalogue's for a rate (`COUNT/HOUR`) and a sum, and
+  `% of the time` for a time in state (`c_share_unit`, held to the dashboard's `SHARE_UNIT` by mirror
+  check 110). Its **value is a fraction from 0 to 1**, as it is everywhere it is data, so the unit
+  column and the value disagree on purpose and the file's comment row says so.
+- **It starts where the window starts.** Raw is dropped long before the 1-minute rollup, so `raw_from`
+  and `read_from` speak of the measured names alone, and a derived metric's first row is the window's.
+  An export of derived metrics alone has no raw horizon.
+- **Its rows count against the same 50,000.** The rollup counts a measured name's rows, and nothing counts
+  a derived metric's, so its count is a bound: the devices that have every input of it times the
+  buckets that start in the hour. The devices are found by one remote aggregate over `telemetry_1h`,
+  which holds a series for as long as any rollup does and is read to now, so a device that lacks an input
+  costs the count nothing (it has no row). The hours, then the minutes of the hour that does not fit, are
+  walked as in `0279` over the measured count and this bound together, and the cut they name holds for
+  both reads. A bound that was short stops the read and trims to the cap, as a short count is trimmed.
+- **A derived read is chunked inside `derived_series()`'s own limits.** One metric at a time, a
+  chunk is as many of the devices that have its inputs, and as many whole buckets, as fit **5,000 rows**
+  (devices times buckets) and **250,000 minutes of input** (those times its inputs and the bucket's
+  minutes): `c_series_rows` and `c_series_minutes`, which drift check 408 holds to `0282`'s. A 14-day
+  export of one device's rate at 1 minute is 20,160 rows in five chunks. The calls are `derived_series()`'s,
+  so each reads through `telemetry_carried()` over `postgres_fdw` as a chart's does.
+- **The document names them:** `derived` lists each derived metric asked for with its `kind`, its
+  `definition` in words and its `unit`, so the browser can mark them. The browser writes one comment
+  row for each, `# DERIVED: Controller/PARTS_PER_HOUR = rate of Controller/PART_COUNT, per hour,
+  computed from the 1-minute rollup`, and keeps the five columns.
+- **The Audit Trail row names them too.** When a derived metric was asked for, the `TELEMETRY_EXPORTED`
+  row's `new_data` gains `derived`, each with its `name` and `definition`. With none it is the row `0279`
+  wrote. The action, the lane and the class are the ones `0232` and `0249` declare.
+- **`derivation_words(jsonb)` says a definition in the dashboard's words** ("rate of A, per hour",
+  "share of time A is X or Y", "A + B − C"), which mirror check 109 holds to `describeDerivation()`. No
+  browser role may call it: `export_telemetry()` is its one caller.
+
+**Replays.** The file is idempotent: both functions are `CREATE OR REPLACE`. `0279` runs first on the next
+boot and declares its version, and `0296` replaces it, so the self-check at the end of `0279` runs against
+the version it declared and the one here runs against this one. Both say a caller with no identity is
+refused before anything is read.
+
+`test_an_export_saves_a_derived_metrics_values.py` holds what is above, with local tables standing in for the
+historian: a measured and a derived name returning both, a derived metric of each kind at each resolution,
+Raw at 1 minute, a window that starts before raw does, the shared 50,000 and where the rows end, the
+chunks, the Audit Trail row, the roles, the second factor and the day limit as before, and a replay. The
+existing suite for `0279` runs against this function and holds the measured reads.
+
+### A document of derived metrics is checked and added in one call (0297)
+
+The Derived tab of the Metrics page exports derived metrics as YAML and takes an upload, through the editor
+and the preview the Automations and Schemas pages use. It parses a person's YAML into JSON and calls one
+function. An upload adds derived metrics and changes their descriptions, and nothing more. **The database is
+the authority**: the stack has no `pg_jsonschema`, so `apply_derived_metrics()` checks every field itself, and
+the JSON Schema the dashboard serves is a convenience that a test holds to it.
+
+- **`apply_derived_metrics(p_doc, p_dry_run)`** answers a list with one result per derived metric: `index`,
+  `name`, `status` (`new`, `changed`, `unchanged` or `refused`), `id`, `units`, `derivation`, `changes`,
+  `before`, `after` and `reasons`. Each reason is a `path` and a `message`; the path is a JSON path, such as
+  `$[0].inputs[1].metric`, which the editor maps back to a line. Every field is checked and every reason
+  reported, so a file is fixed in one pass. **All or nothing:** with any refusal, or with `p_dry_run` true,
+  nothing is written, so the upload preview and the apply are one call. It reuses `automation_reason()` and
+  `automation_path()` for the shape of a reason.
+- **A description is the one thing it changes.** A definition is fixed once saved (0267), so an upload never
+  changes a definition and never deletes. A name the catalogue lacks is added. A name it has with the same
+  definition and description is `unchanged` and writes nothing. A name it has with the same definition and
+  another description is `changed`. The definitions are compared with the states, and the inputs of a sum, in
+  name order (`derivation_canonical()`), so a file that lists them in another order is the same definition,
+  and a changed one keeps the order it was saved in.
+- **A change is shaped as `apply_automations()` shapes it.** `changes` lists the document keys that differ,
+  here only `["description"]`, and `before` and `after` hold their old and new values:
+  `{"description": "Parts per hour."}` and `{"description": null}`. They are `[]`, `{}` and `{}` for any other
+  status, so a dialog can draw a change of any key the same way. The dashboard shows the two in the preview,
+  and pressing the dialog's **Apply** is the person's acceptance. A dry run writes nothing.
+- **A file says what is saved.** A file that leaves out `description`, or gives it empty, for a metric that
+  has one clears it, and the preview shows the description before and after with **None** for the empty
+  side. An empty description and none are the same, and the text is compared trimmed, so a description that
+  differs only in the space at its ends is `unchanged`. This is how `apply_automations()` treats an
+  automation's description, and an export leaves an empty one out, so uploading an export changes nothing.
+- **The write is one `UPDATE public.metric_catalog SET description = ...`** on the row. The catalogue's
+  triggers allow it: `enforce_metric_catalog_immutability()` freezes only the name and the datatype, and
+  `enforce_derived_metric()` lets an `UPDATE` through that leaves the definition and the unit as they were.
+  The update policy asks what the insert policy asks, an Administrator behind the second factor, and mirror
+  check 112 holds the function to both. The self-check asserts the function makes that one `UPDATE` and has
+  no `DELETE`.
+- **Some names that exist are refused,** and the reason says what to do:
+  - another definition: add the new one under a new name, then deprecate the old one, choosing the new one as
+    **Superseded By**;
+  - a measured metric's name, which a derived metric cannot take, since its history would mix two sources;
+  - a deprecated derived metric's name: restore it on the Metrics page, or choose a new name.
+- **What a file says** is the `name`, the `description` and the definition: `kind`, then `input` for a
+  `counter_rate`, `input` and `states` for a `time_in_state`, `inputs` (a `metric` and a `sign` each) for a
+  `sum`. It never says the unit or the datatype: the trigger works the unit out and a derived metric is a
+  Double. A file with `units`, `unit` or `datatype` is refused, and says why. `description` is at most 4,000
+  characters and a file holds at most 1,000 metrics. A state is text, so a boolean's `true` is written in
+  quotes, and a state written as a YAML boolean is refused with that advice.
+- **An input the catalogue lacks is refused by name,** every one of them in the same pass, and the preview
+  does not offer to add it. So is an input that is itself a derived metric, or another metric of the file.
+  A deprecated input is accepted, as the table accepts it (`0267`'s suite holds that a deprecated input is
+  still an input).
+- **Every other refusal is the table's own words.** A new metric is saved in a subtransaction that is
+  undone (an `EXCEPTION` block that ends by raising a private `DM001`), so each row runs the checks of the
+  catalogue's triggers and constraints exactly as Add Derived Metric's insert does: an input of the wrong
+  datatype, a state it cannot report, inputs of a sum that differ in unit, a name a device has declared, a
+  group that differs from an existing one only in case. The reason is the sentence the trigger raised, and
+  `derived_metric_refusal_path()` places it at the input, the states, the inputs of a sum or the name it
+  names, from its first words. The unit a new row would get is what the trigger set, read back. Nothing
+  survives the undo, not the row and not its Audit Trail row. The suite holds each reason to the sentence a
+  direct `INSERT` raises.
+- **A new group is not registered.** Add Derived Metric registers the group of a name that has none yet. An
+  upload does not, because that would be a second Audit Trail row for one metric added. The Metrics page
+  lists a group that a metric's name begins with all the same (`knownGroupNames()`).
+- **`derived_metrics_document(p_ids)`** renders the derived metrics back to the document's shape, a list in
+  name order: every one, or those of the metric ids given. A deprecated one is not exported.
+  `apply_derived_metrics()` of the list reports every metric unchanged.
+- **Who:** `has_role(ARRAY['Administrator'])` and then `require_mfa()`, as `metric_catalog_insert_privileged`
+  asks of Add Derived Metric's insert and `metric_catalog_update_privileged` of an update. A machine identity holds no role and is refused. Mirror check 112
+  holds the Derived tab's buttons to this. The function is `SECURITY DEFINER` with its path pinned, `anon`
+  may run none of the new functions, and the MFA table above lists it.
+- **The Audit Trail** is the `metric_catalog` table's own trigger: one `INSERT` row for each metric added and
+  one `UPDATE` row for each changed, naming the person, with the row (an `UPDATE` holds the description before
+  and after). A dry run, an unchanged metric and a refusal write none. No audit action, class or domain is
+  added: `UPDATE` on `metric_catalog` is a kind the classifiers already know, filed in the asset lane.
+
+**The JSON Schema** is
+[`frontend/public/json-schema/derived-metrics.schema.json`](../frontend/public/json-schema/derived-metrics.schema.json),
+served by the dashboard at `/json-schema/derived-metrics.schema.json`, beside the others. It describes
+exactly this vocabulary with `additionalProperties: false` throughout, the keys of each kind written as
+`if`/`then` rules, and a description on every field, which the editor's hover help reads.
+`test_the_derived_metrics_json_schema_and_the_function_agree.py` runs every file in
+[`supabase/derived-metrics-fixtures/`](derived-metrics-fixtures) through the schema
+(`jsonschema`) and through `apply_derived_metrics(..., true)`, one document and one reason each, and fails if
+they disagree. A fixture marked `database` is what a schema cannot know (an input that is not in the
+catalogue, derived or of the wrong datatype, units that differ, a name that exists with another definition,
+a name used twice): the schema must accept it and the function refuse it. The `changed` fixtures are a name
+that exists with another description, or none: the schema accepts them and the function reports a change with
+the description before and after. Mirror check 111 holds the limits, patterns and keys the
+fixtures cannot reach.
+
+The file's self-check asserts that the writer is `SECURITY DEFINER`, pinned, asks for the Administrator
+role and the second factor, and makes one `UPDATE` of a description and no `DELETE`, that `anon` may run no new function and `authenticated` only the writer, the
+reader and the two small shapers the reader calls, that the checker refuses what it should, and that a
+definition in another order is the same one.
+
+### A schema's Submodel id follows its lineage (0298)
+
+A device's AAS Submodel for a schema was given its id from the name of the schema version that made it.
+`fork_schema()` names each version for itself (`Robot_Arm_Schema`, `Robot_Arm_Schema_v2`), and
+publishing moves each device to the new version, so **the id changed at every publish**. `aas-api`
+answered 404 for the old one, and a third-party AAS server that had been loaded with the shell
+collected one Submodel per version. The id now comes from the **lineage**: the name the first version
+was built with, which a lineage keeps for good.
+
+- **`schemas` gains `lineage_root_id` and `lineage_name`.** The first is the first version of the
+  lineage (a first version is its own root), a foreign key to `schemas(id)`. The second is that
+  version's `schema_name`, carried on every version so that no reader walks the chain or joins the
+  root: the exporter, `aas-api`, i3X and the dashboard read one row. Both are `NOT NULL`. The root's
+  name is the lineage's name for good, because a published version cannot be renamed
+  (`prevent_active_schema_mutation()`). A first version that is a draft can be renamed, and so can
+  any version by the owner, as a migration does; `trg_schemas_rename_their_lineage` then renames the
+  lineage on every later version.
+- **A trigger sets them, and nothing else does.** `trg_schemas_take_their_lineage` runs before every
+  insert and before an update of `schema_name`, `parent_schema_id` or either new column. A version
+  with no parent is its own root. Any other takes its parent's root and that root's name. So
+  `fork_schema()`, `apply_device_schemas()` (which inserts a draft with its parent) and a direct insert
+  (always a first version, `enforce_schema_version_provenance()`) all name their lineage, none of them
+  was redeclared, and no caller can supply or change one: a value a caller writes is derived again.
+  A published version still refuses an edit of either column from an application role.
+- **The fill, for a database that holds schemas.** In three steps, each its own transaction, in an
+  order that never leaves an insert failing: the columns are added without `NOT NULL`; the triggers
+  are made; then, under `LOCK TABLE schemas IN SHARE ROW EXCLUSIVE MODE`, every row still without a
+  lineage is filled through `parent_schema_id` and the columns are made `NOT NULL`. A schema the
+  previous release's dashboard inserts between the first two steps has none, and the third fills it.
+  The fill is **not an Audit Trail event**: neither the audit trigger nor the lineage trigger runs for
+  it, and both are enabled again before it ends. It records no choice, and one row per schema would
+  read as an edit of every schema. The lock is taken only where a column is still nullable, so a
+  replay locks nothing and fills nothing.
+- **The Submodel key is the lineage's name.** `shell.ts` makes it with `toIdShort()` of
+  `lineage_name`, so a schema never versioned keeps the id it exports today (its first version's name
+  is the lineage's), and a versioned one returns to its first id. The rules that keep ids unique on one
+  device are `submodelKeys.ts`'s, not the database's:
+  a draft attached beside the version in force is `<name>_v<n>` until it is published; two lineages
+  that map to one key leave the later, in root-id order, qualified with the first eight hex digits
+  of its root id, and the export counts them in `stats.submodel_key_clashes` beside
+  `unmapped_semantic_ids`; a key the operator declared is used as it stands and keeps the plain key.
+  Every schema-derived Submodel carries `administration.version`, the schema's version.
+- **`device_submodels.submodel_key` stays, as an override.** NULL, which is every row the Devices page
+  writes, means the lineage's name. It survives a publish, since publishing moves the row to the new
+  version. A second CHECK, `device_submodels_key_starts_with_a_letter`, tightens it to the idShort
+  pattern. It is a new constraint, and `0001`'s `device_submodels_key_is_id_short` is left as it is:
+  `0001` replays first on every boot and would add its own wider CHECK back under the same name. A key
+  that began with an underscore (the old CHECK allowed one, an idShort may not) is rewritten without it
+  first, and a key of nothing else goes back to NULL. The number rewritten is a NOTICE that starts
+  `0298:`, and each rewrite is an `UPDATE` the Audit Trail records, since it changes a Submodel id.
+  Nothing in Aber writes a key, so the number is expected to be zero. A replay finds the CHECK and
+  rewrites nothing.
+- **`aas-api` answers the old ids for one minor.** Both submodel routes also accept
+  `<globalAssetId>/submodel/<any version's name>/<role>` for a lineage the device carries, and serve
+  the current Submodel. `submodelOfAPreviousVersion()` reads `schemas` for the lineage's version names
+  only when the exact id was not found. Files carry only the new id. The upgrade guide
+  (*From 1.9.0, a schema's Submodel ids follow its lineage and carry its version*) says which ids move
+  and until when.
+- **i3X** names the source type of every version of one schema by the lineage, when the schema has no
+  semantic id (`schema_source_type_id()`).
+
+`test_a_submodel_s_id_follows_its_schema_s_lineage.py` holds each way a version comes to exist
+(`fork_schema()`, a draft inserted with a parent, a direct insert) and the name `fork_schema()` had to
+suffix, a lineage that no caller can forge or change, a renamed first version renaming its lineage, the
+fill over a database whose columns are dropped first (every row, a lineage of four versions, none in
+the Audit Trail, the triggers enabled again, a row inserted before the trigger existed), a replay that
+keeps every constraint's and trigger's oid, and the key CHECK with the rewrite and its NOTICE.
+`submodelKeys_test.ts` holds the key rules, `test_a_schemas_versions_share_one_source_type.py` the i3X
+source type, and `test_a_publish_keeps_the_submodel_id.py` (stack lane) a publish on a running stack.
+
+### A metric can carry more than one semantic id (0299)
+
+A concept often has several published identifiers: an OPC UA ExpandedNodeId, an ECLASS IRDI, an IEC CDD IRDI,
+and the element id a submodel template gives it. `metric_catalog.semantic_id` holds one. A site that
+implemented a template naming the same quantity another way had to overwrite the id the metric was named from,
+which loses where it came from and breaks whatever matched on the old id. AAS V3 states the equivalence itself:
+an element has a `semanticId` and `supplementalSemanticIds`, further References to the same concept. This
+migration stores them, exports them and lets a join find a metric by any of them. It adds a table and a view and
+changes no row.
+
+#### The table
+
+- **`metric_semantic_ids` has one row for each further id of a metric.** Its key is (`metric_id`,
+  `semantic_id`), so an id is listed once for a metric. The same id may be a further id of several metrics, and
+  the own id of another. `metric_id` references `metric_catalog(id)` and is deleted with it.
+- **Each row has its own type.** `semantic_id_type` is NOT NULL and is one of the three
+  `metric_catalog_semantic_id_type_valid` admits: `IRI`, `IRDI` and `ExpandedNodeId`. Every type exports the same
+  way, as an `ExternalReference` with one `GlobalReference` key, so the exporter takes no type. Mirror check 116
+  holds the two lists together. `source` says, in the writer's words, where the equivalence comes from. It is
+  optional, trimmed and at most 500 characters. A `semantic_id` is 1 to 2,000 characters, the length of an AAS
+  identifier, with no space at either end.
+- **Who added a row, and when, is the database's to say.** `created_at` and `created_by` are set by the trigger
+  whatever the writer sends, and kept by an update. `created_by` is the person's `auth.uid()`, or NULL for a
+  write with no session. There is no foreign key to `auth.users`: `device_nameplate.updated_by` has none
+  either, and the Audit Trail row names the actor in every case.
+- **`semantic_id` on the catalogue row keeps its meaning.** The REST API, i3X and the schema documents read the
+  metric's own id, as they did. The further ids are beside it, never in its place.
+- **An index on `semantic_id`** serves the question the crosswalk answers, "which metric did we map to this
+  concept?". The key serves the other direction.
+
+#### The rules
+
+- **A metric carries at most ten.** `enforce_metric_semantic_id()` counts the rows under an advisory lock, so
+  two writers adding to one metric take turns and the limit holds under both. The limit is 10 in the function
+  and `MAX_FURTHER_SEMANTIC_IDS` in the dashboard, and mirror check 115 holds the two together, with the
+  lengths. Drift check 451 holds the docs to them.
+- **A further id is never the metric's own.** The function refuses it with a sentence that says what a further id
+  is for.
+- **Only a metric with an id of its own carries further ids.** AAS refuses a `supplementalSemanticIds` without a
+  `semanticId` (AASd-118), so the table does not hold what the export could not carry. A derived metric, which has
+  no id (0267), carries none. The exporter writes none beside a missing `semanticId` as well, for a row an owner
+  wrote with a trigger off.
+- **A row is fixed once saved.** Which metric and which id it is cannot change: a wrong id is removed and the
+  right one added, and the Audit Trail shows both. `semantic_id_type` and `source` may be updated.
+- **The metric's own id cannot leave the rows beside it behind.** `enforce_metric_own_semantic_id()` is a
+  `BEFORE UPDATE OF semantic_id` trigger on `metric_catalog`. It refuses to clear the own id while further ids
+  exist, and to make one of them the own id, and says which to do first. An update that leaves the id alone is
+  not judged. An own id may be changed to any other.
+
+#### Who reads and who writes
+
+- **Every signed-in role reads, as it reads the catalogue.** `metric_semantic_ids_select_authenticated` is
+  `USING (true)`.
+- **An Administrator behind the second factor writes.** The insert, update and delete policies ask what
+  `metric_catalog_insert_privileged` and `metric_catalog_update_privileged` ask:
+  `has_role(ARRAY['Administrator']) AND (SELECT require_mfa())`. The catalogue has no delete policy, because it
+  deprecates; the further ids do, because a wrong one is removed. A Shopfloor Manager, an Operator, an Auditor, a
+  person with no role and a machine identity can read and cannot write: an insert is refused, and an update or a
+  delete matches no row.
+- **anon is revoked by name**, on the table and the view. `authenticated` holds SELECT, INSERT, UPDATE and DELETE
+  and not TRUNCATE, which row security does not govern; `service_role` holds everything. The two trigger
+  functions are executed by no browser-facing role.
+
+#### The Audit Trail
+
+- **Each add and remove is a row.** The audit trigger is `log_audit_trail_event('metric_id')`, so the entity is
+  the metric, as a nameplate and a schema attachment are the device: a metric's own changes and its further ids'
+  share one lane in the Audit Trail, and the drawer's **View Audit Trail** lists both. An INSERT is `created` and
+  a DELETE `lifecycle`, by the rules every table's rows follow, and an UPDATE the class its snapshots give. The
+  snapshot carries the id, its type and its source.
+- **The lane and the map are redeclared whole.** `audit_domain_for()` files `metric_semantic_ids` in the asset
+  lane beside `metric_catalog`: the same people write it and the same roles read it. `audit_trail_action_kinds()`
+  lists INSERT, UPDATE and DELETE on it, so the Audit Trail's filters offer the kind. Each is copied from the last
+  declaration (0232 and 0249) with every arm kept, and a self-check reads a few arms of every file before. Mirror
+  checks 42 and 43 hold `AUDIT_TRAIL_ENTITY_TYPES` and `AUDIT_TRAIL_ACTION_KINDS` to them.
+- **`audit_event_class()` is not declared again.** The classes of the new kind are the ones the generic rules give,
+  so the class indexes are unchanged and nothing is rebuilt (check 199).
+
+#### The crosswalk
+
+`metric_semantic_id_crosswalk` is a view with `security_invoker`: one row for each id a metric carries, with
+`held_as` `primary` for the id `metric_catalog.semantic_id` holds and `supplemental` for a further one, and the
+`source` of that row. Filter it by `semantic_id` to ask which metric carries a concept. A metric with no id has no
+row. The Digital Nameplate reader asks it for the six OPC 40001 Machinery concepts.
+
+#### Who reads a metric's semantic id
+
+Every reader of `metric_catalog.semantic_id` was read for whether it answers "which metric carries this
+concept?". Two do and now answer across both lists. The rest ask what the metric's own id is, and keep reading it
+alone. Drift check 450 refuses a new reader that is not listed here.
+
+| Reader | Reads | Why |
+| :--- | :--- | :--- |
+| `supabase/functions/_shared/aas/shell.ts` | **both** | The Property's `semanticId` is the own id and its `supplementalSemanticIds` the further ones. The Digital Nameplate join (`catalogBySemanticId`) finds a metric by either, the own id first. |
+| `frontend/src/api.js` | **both** | The nameplate reader reads the crosswalk, own id first, so the editor shows what the exporter will write. The catalogue read carries each metric's further ids beside the row. |
+| `i3x/i3x_service.py` | own id | A metric's i3X type is its catalogue row, in the namespace its own id is defined in (`metric_type_namespace()`). A further id names the same concept in another namespace, and the type has one. |
+| `ingestion/validate.py` | own id | It checks that i3X types carry the own id, as the metric's `sourceTypeId`. |
+
+The device-schema document (0295) also compares a metric's `semantic_id` with the catalogue's: that is the own
+id, the one a schema copies, and it stays so. The schema builder's metric picker marks a mapped metric by its own
+id. Neither asks which metric carries a concept.
+
+#### The export
+
+- **A Property carries `supplementalSemanticIds`** beside its `semanticId`: each further id, once, sorted, as
+  `semanticReference()` builds a Reference, and omitted when there are none, since the list is `minItems: 1`. A
+  metric with no id of its own exports none.
+- **Each further id has a ConceptDescription.** It is defined by `concept_definitions` when a vocabulary holds
+  it, and as any id no metric carries is otherwise. `concept_definitions` is not changed here. The loader reads
+  the definitions for these ids as well, so `conceptIdsFor()` names them.
+- **The element id of a template is not made primary here.** In a schema built from a submodel template the
+  template's element id is to be the `semanticId` and the metric's own id moves to the further ones. That is a
+  second step, made with Build Schema from Template, and it changes no existing export: a schema typed by hand
+  exports as it did.
+- **A database without the table exports as before.** The loader's read of `metric_semantic_ids` is tolerated, so
+  an edge function deployed before this migration still builds a shell.
+
+#### The dashboard
+
+Edit, on the Metrics page, lists a metric's further ids with their type and source and a **Remove** on each,
+and **Add Further ID** opens a field with the vocabulary search and an optional **Source**. **Save Metric** writes
+the removals, then the metric's own change, then the additions, in the order the rules above ask for. The calls are
+not one transaction, so a refusal after the first says what was already saved. The drawer lists the ids as text
+for every role, and a row of the catalogue says how many a metric carries.
+
+#### A replay
+
+The table, the index and the view are created if they are missing and replaced with the same text. Each policy and
+trigger is a `replay_policy()` or `replay_trigger()` call that takes no lock when the live object reads as stated.
+Both functions are redeclared and keep their grants. A replay writes no Audit Trail row and loses no row of the
+table, and the self-check reads shapes and arms and counts no rows.
+
+### The OPC UA vocabulary seeds more of what its NodeSets describe (0300)
+
+The OPC UA tab held 75 data points. The OPC Foundation's NodeSets declare many more scalars that a device
+can publish over Sparkplug B, so `0300` adds 49 of them and a seventh companion specification, OPC 40001-2
+Machinery Process Values. The vocabulary is 124 data points. Nothing is removed and no column changes.
+
+- **What it adds.** OPC 40001-2 (8): the reading, the setpoint, the status, the percentage and the four
+  limits of a process value. OPC 40010 Robotics (11): a controller's temperature, fans, input voltage,
+  energy and start-up, a motor's temperature, load and brake, and whether a task program is loaded. OPC
+  40001 Machinery (10): the operation counters and more of a machine's identification. OPC 40501 Machine
+  Tools (10), with the groups `Laser`, `EDMGenerator` and `Stacklight`. OPC 40540 Additive Manufacturing
+  (5), OPC 30050 PackML (3) and OPC 40001-4 Machinery Energy (2). The
+  [vocabularies document](../docs/vocabularies.md#opc-ua-companion-specifications) lists the count for
+  each specification and the reasons for what is left out.
+- **The rows are a block of this migration, not of `0002`.** `0002` is released and is not regenerated.
+  The generator, [`scripts/generate-opcua-vocabulary.mjs`](../scripts/generate-opcua-vocabulary.mjs),
+  now knows which block seeds each entry (`since`), and writes each block from its own entries. The three
+  marked regions of the file are the block: the `metric_groups` it registers, the rows, and the `COMMENT`
+  on the table, which names seven specifications.
+- **A block is written only while its migration is unreleased.** The generator takes that from the note
+  of the migration in `unreleased/migrations/`, which the release folds into this README and deletes. Once
+  the note is gone it only verifies the block, and stops if the block would now read differently, so a
+  NodeSet that moved under its pin, or an entry edited later, cannot rewrite a migration that has shipped.
+  [`scripts/check-opcua-seed-sync.mjs`](../scripts/check-opcua-seed-sync.mjs) holds every block to its
+  digest and to the rules for a row, refuses a row written outside a block in any migration, and checks
+  that each rewording of a group replaces the text an earlier block registered. The design is the header of
+  [`scripts/lib/opcua-seed-blocks.mjs`](../scripts/lib/opcua-seed-blocks.mjs). The next expansion adds a
+  third block the same way. What it does not do yet is revise a row a released block seeded.
+- **`ProcessValue` is one group for two specifications.** OPC 40001-2's rows join OPC 40540's in it, so
+  its description now covers both. `0002` inserted the group `ON CONFLICT DO NOTHING`, so a database that
+  holds it keeps the old text. `0300` replaces it with an `UPDATE` of the row, id
+  `57898b0a-5b8f-47da-95e9-bf40b382eba4`, guarded on the old text. A description an Administrator has since
+  edited is left as it is, and a replay matches no row. The name does not change, so
+  `enforce_metric_group_spelling()` is not involved. Both specifications list the group with the same
+  definition, and the generator refuses two that differ.
+- **The rows are replayed safely.** Each is `ON CONFLICT (companion_spec, name) DO UPDATE`, each group
+  `ON CONFLICT DO NOTHING`, and neither table is audited. The self-check asserts that the new specification
+  and the new groups are there, and counts nothing.
+- **Three datatypes are new to the seed.** The abstract `UInteger` becomes `UInt64` and `UtcTime` becomes
+  `DateTime`, as `Number` becomes `Double` and `Duration` becomes `Double`. `Byte` is allowed, for
+  `MonthOfConstruction`. The Add Metric form offers Double, Boolean and String, so it takes a `UInt64` as a
+  Double and a `DateTime` as a String, as it takes the other types it does not offer.
+- **Two definitions come from the IA NodeSet.** A Machine Tools stacklight's mode is an enumeration of IA,
+  and Machinery Energy's non-electrical totals hang from IA's `HasStatisticComponent`, which IA declares a
+  subtype of `HasComponent`. The generator reads IA's NodeSet, pinned at 1.01.4 as the others are, to
+  resolve both. It seeds nothing from it. It carries the same OPC Foundation MIT License 1.00 header.
+- **An enumeration's values are in its description.** OPC 40540 `Function` is typed as an enumeration, and
+  a device publishes it as the member's name. Its four names are the values to enter as the metric's
+  permitted values. `opcua_vocabulary` has no column for them, so the Add Metric form does not fill the
+  field. The generator holds the names to the NodeSet's definition and requires the description to say each.
+- **What a printer inherits is said on the tab.** OPC 40540's section hint says a printer is a machine
+  tool, so the Machine Tools and Machinery sections apply to it, and that its in-process readings are
+  Machinery Process Values that the vendor names.
+
+### An MTConnect concept carries its own definition (0301)
+
+An exported ConceptDescription takes its definition from `concept_definitions`, the view of the
+vocabularies' own text (`0169`). MTConnect had no arm in it, because `mtconnect_vocabulary` had no
+description column. A data item type was defined by catalog text: by the one description every live
+metric carrying it agreed on, or else by a sentence naming it, such as "POSITION, as MTConnect defines
+it." Each `POSITION` metric describes its own axis, so the first rule never held for the concept
+every axis shares. Catalog text is a site's own words, which is what the other vocabularies had
+already moved away from.
+
+- **`mtconnect_vocabulary.description` is new,** and holds the text MTConnect publishes for a data
+  item type. 248 of the 249 types have one. The other kinds (subtypes, units, components) keep NULL.
+  So does `ELEVATION`, which 2.8 added and the 2.7 XSD does not document.
+- **The source is `DataItemEnumEnum` in `MTConnectDevices_2.7.xsd`,** kept whole in
+  [`scripts/vocabularies/`](../scripts/vocabularies/README.md) and pinned by SHA-256, so CI needs
+  no network for it. 2.7 is the newest published XSD. The 2.8 files are JSON Schemas with no type
+  documentation, and the generator still reads those for the names. The file is `mtconnect/schema`
+  (Apache-2.0) and carries AMT's BSD-style licence in its header, which `NOTICE.md` reproduces.
+  `mtconnect/mtconnect_sysml_model`, where #513 looked, has no licence file and allows copying only
+  in the form received, so taking its documentation into a seed would be a modification it does not
+  permit.
+- **The text is rendered to plain words.** The model's markup is removed: `{{block(Component)}}` and
+  `{{term(…)}}` become their words, `{{property(Asset::assetId)}}` its member, `{{termplural(Asset)}}` its
+  plural, `{{cite(…)}}` its citation in square brackets, and the Markdown and XML entities around a
+  word are dropped. A form the renderer does not know stops the generator, so half-rendered text
+  cannot ship. `DataItemEnumEnum` lists `VARIABLE` twice, the second time among the interface request
+  types; the first entry is the data item type's, and a new repeat stops the build.
+- **The values are in this file's own generated block, not in `0002`.** `0002` is released, so its rows
+  cannot gain a column in place. `scripts/generate-mtconnect-vocabulary.mjs` writes the block, and
+  `scripts/check-mtconnect-seed-sync.mjs` checks its digest, its statement, the types it names and
+  that no markup is left. CI runs the generator and then the check.
+- **One `UPDATE` sets every description,** and touches a row only where its text differs. A replay on a
+  settled database writes no row. The text is upstream's, so an edit by hand does not outlive the
+  next boot.
+- **`concept_definitions` gains its MTConnect arm,** after ISO 22400's. `0169` orders the arms by how
+  far from this deployment each vocabulary's ids are issued, and MTConnect's are minted under
+  `aber.local`, as ISO 22400's are. The order is IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect. The
+  view is declared again with `CREATE OR REPLACE VIEW`: its columns do not change, so the grants and
+  `security_invoker` stay, and this file states the grants again. It is a view, so it carries no
+  `-- Redefines` line, which marks functions. `0302` declares the view again with one arm more.
+- **The exporter changes nothing.** `buildConceptDescriptions()` already takes `concept_definitions`
+  first. An MTConnect concept now has a row there, so its definition is MTConnect's.
+  The Vocabulary page's MTConnect tab shows the same text when you point at a data item type.
+- **The self-check** asserts that the column exists, that `POSITION` has a description and that the
+  view defines it by that text. It counts no totals, so a second boot passes.
+
+`test_an_mtconnect_concept_carries_its_own_definition.py` (db lane) holds the column, the text of three
+types as the XSD gives it, the view, MTConnect's place after ISO 22400 in the order, and the replay.
+`TestConceptDefinitions` in `test_metric_catalog_seed.py` now counts MTConnect among the vocabularies
+whose every described row is in the view. `test_an_mtconnect_concept_is_defined_by_mtconnects_text.py`
+(stack lane) reads the view as a signed-in person and exports a device whose metric carries an
+MTConnect id.
+
+### An AGV reading has a vocabulary (0302)
+
+AGVs were the one asset class on the pilot shopfloor with no vocabulary, and `docs/vocabularies.md` said
+so. An AGV's battery level, driving flag and operating mode were Custom metrics under names each site
+made up, so two sites' battery levels had nothing in common. VDA 5050 publishes the message a vehicle
+reports, `state`, as JSON Schema under the MIT licence, so its readings can be generated and guarded
+as the other vocabularies are. VDA 5050 3.0 calls the vehicle a mobile robot. Aber keeps the word AGV,
+which the pilot shopfloor uses, and the group, the tab and the help say what the VDA calls it.
+
+- **`vda5050_vocabulary` is new:** one row per scalar field of the `state` message that is a reading,
+  24 of them, keyed by its path in the message (`driving`, `powerSupply.stateOfCharge`,
+  `mobileRobotPosition.x`). Each has its datatype, the schema's unit and description, and an enum's
+  values as `permitted_values`: `operatingMode` has seven, `safetyState.activeEmergencyStop` three. It is a
+  table of its own, as ASHRAE 223P has one. VDA 5050 is not an OPC UA companion specification, so
+  filing it in `opcua_vocabulary` would misstate where it came from.
+- **The rows are generated from tag 3.0.0's `state.schema`,** kept whole in
+  [`scripts/vocabularies/`](../scripts/vocabularies/README.md) and pinned by SHA-256, with the VDA's
+  MIT licence beside it. `scripts/generate-vda5050-vocabulary.mjs` writes the block in this file, and
+  `scripts/check-vda5050-seed-sync.mjs` checks it. CI runs the generator and then the check, and the
+  generator refuses any other file.
+- **The walk resolves `$ref`s and enters no array.** Sparkplug B has no composite type, so `loads`,
+  `errors`, `actionStates`, `nodeStates` and the other lists of structures are refused, as the OPC UA
+  generator refuses STRUCTURE datatypes. The message header (`headerId`, `timestamp`, `version`,
+  `manufacturer`, `serialNumber`) is left out, because a device's identity comes from its Sparkplug topic,
+  and so are the order fields (`orderId`, `orderUpdateId`, `lastNodeSequenceId`), because Aber does not run
+  orders. Every scalar leaf is kept or excluded by name, with the reason. A leaf in neither list stops
+  the build, so a release that adds a field is read and decided on.
+- **A JSON number is a Double, an integer an Int64,** and a boolean and a string are a Boolean and a
+  String. None of the 24 is an integer today. The Add Metric form offers Double, Boolean and String, so an
+  Int64 would be a Double there, as an OPC UA integer is.
+- **Ids are minted here,** `https://aber.local/semantics/vda5050/v3.0/State/<path>`. The VDA issues
+  none, and one under its own name would assert an interoperability nobody agreed. The rule is
+  MTConnect's: this deployment's namespace, pinned to the major line, then the message the field is in
+  and its name. A CHECK on the table admits no other prefix.
+- **The metric group `AGV` is registered,** under VDA 5050. `enforce_metric_group_spelling()` makes the
+  first spelling of a group permanent. A metric is `AGV/<the path with slashes>`, because a name cannot
+  hold a dot: `velocity.vx` is `AGV/velocity/vx`. The insert does nothing where a site already made a
+  group of that name in another case, and the self-check looks for it without regard to case.
+- **`concept_definitions` gains its VDA 5050 arm,** after MTConnect's. Both vocabularies' ids are minted
+  under `aber.local`, as ISO 22400's are. The order is IDTA, ASHRAE 223P, OPC UA, ISO 22400, MTConnect,
+  VDA 5050. This file declares the whole view again, with every arm, because `0301`'s version has five. The
+  columns do not change, so the grants and `security_invoker` stay, and the file states the grants again.
+  It is a view, so it carries no `-- Redefines` line, which marks functions.
+- **Three fields have no definition.** `mobileRobotPosition.x`, `.y` and `.theta` carry a unit and no
+  description in the schema. Their description is NULL, and an export defines them by the catalog's text,
+  as it does an id no vocabulary holds. Nothing was written for them: a sentence of ours in a standard's
+  place is what `concept_definitions` exists to avoid.
+- **The unit is the schema's keyword and is not filled into Add Metric.** `unit` holds `m/s` and `rad` as
+  the VDA writes them. A metric's unit is an MTConnect UnitEnum name, so the form leaves Units to the
+  person adding the metric until the units of these readings are crosswalked.
+- **A position is a reading on the device,** never `devices.cell_id`: writing it there would fire the
+  Audit Trail's trigger on every update.
+- **No CHECK on `metric_catalog.standard` needed widening:** nothing constrains it, and `VDA 5050` is
+  stored as a metric's standard as the others are.
+- **Access is the other vocabularies'.** Row security is on, the one policy lets `authenticated` read, and
+  nobody writes: no role holds INSERT, UPDATE or DELETE, and the generated rows are written by the migration
+  as the owner. Anon is revoked by name. A block of rows is written only where a row differs, so a replay
+  on a settled database writes nothing.
+- **The self-check** asserts row security, that anon cannot read and no signed-in role can write, that the
+  group exists, that `driving` is defined by the schema's text, that no id is defined twice and that the
+  MTConnect arm is still in the view. It counts no totals, so a second boot passes.
+
+`test_an_agv_reading_has_a_vocabulary.py` (db lane) holds the 24 rows and their ids, types, enums and
+units, the table's access and its CHECKs, the group, the view's order, and the replay.
+`TestConceptDefinitions` in `test_metric_catalog_seed.py` now counts VDA 5050 among the vocabularies whose
+every described row is in the view. Mirror checks `117`, `118` and `119` hold the group, the id namespace and
+the standards' spellings to the dashboard, the generator and i3X.
+
+### A gateway shows what arrives from it (0303)
+
+A gateway's drawer showed what the gateway says about itself. It now also shows what the platform sees
+arriving from it: how many messages a second, whether messages are going missing, and when each of its
+devices last sent a reading. The first three figures are read the way the System page's are
+([*The System page shows what the stack is doing (0223)*](README.md#the-system-page-shows-what-the-stack-is-doing-0223)),
+and the device list's last readings are read live.
+
+| Figure | Source |
+| --- | --- |
+| Messages per second, over 5 minutes | `sum by (edge_node) (rate(aber_ingestion_messages_total[5m]))` |
+| Sequence gaps in the last hour | `sum by (edge_node) (increase(aber_ingestion_sequence_gaps_total[1h]))` |
+| Messages missed in the last hour | `sum by (edge_node) (increase(aber_ingestion_sequence_messages_missed_total[1h]))` |
+| Each device's last reading | `gateway_devices_last_reading()`, read live from the historian |
+
+**`edge_node` is the gateway's `sparkplug_id`.** The daemon takes it from the fourth level of the topic
+(`spBv1.0/<group>/<type>/<edge node>`), and resolves the gateway by that same value
+(`_resolve_gateway_row()`). `sparkplug_id` is generated from the gateway's id and has a unique index, so a
+series names one gateway. The broker's `gateway` role lets an account publish only under its own edge node,
+so the label's values are the gateways that hold an account.
+
+**The messages counter gained the label.** `aber_ingestion_messages_total` was labelled by `msg_type` alone,
+so Prometheus held one rate for the whole stack. It is now labelled by `msg_type` and `edge_node`: one series
+for each gateway and message type. Every reader was checked, and each gives the same answer:
+
+- The two alert rules that read it (*Ingestion Consuming Nothing* and *Historian Unreachable From
+  Ingestion*), the System page's figure and its split by message type, and CI's wait for the daemon to
+  consume all `sum()` it. The wait script adds every line of the family.
+- The load generator matched a whole label string, which the new label would have made match nothing, so it
+  would have read zero messages received. It now reads `msg_type` out of the labels and sums every edge
+  node.
+- A site's own panel or alert that does not sum the counter now answers once for each gateway and type
+  instead of once for each type. The upgrade guide says so.
+- **A message with no edge node in its topic** counts under `edge_node=""`. The daemon refuses a topic of
+  fewer than four levels before it counts, and a host's `STATE` message is `spBv1.0/STATE/<host id>`, so none
+  of those reaches the counter: no kind of message does in practice. Only a topic whose fourth level is
+  empty (`spBv1.0/<group>/NDATA/`) counts under `""`, and a gateway has no row for it.
+
+**A gateway's two loss series start at zero.** `aber_ingestion_sequence_gaps_total` and
+`…_messages_missed_total` were made at a gateway's first gap, so Prometheus held a counter that appeared at 1
+and showed no increase: the first gap in an hour read as none. The daemon now makes both at zero when it
+counts a gateway's first message.
+
+**One request, one answer.** `refresh_gateway_arrivals()` is `refresh_directory_figures()`'s sibling, and
+pg_cron runs it every minute (`refresh-gateway-arrivals`). It collects the answer to the previous run's
+request from `net._http_response`, writes `gateway_arrival_figures`, and fires the next request over the
+existing `supabase-db` → `prometheus:9090` route, to the address `directory_prometheus_url()` gives. The
+request id is in its own one-row `gateway_arrival_probe`. The query is fixed in the function: one vector for
+each figure, and a fourth, `sum(aber_ingestion_up)`, which says ingestion was scraped. Nothing from a
+browser becomes PromQL, and the network policy's route `why` names the third reader.
+
+**A gateway the answer names no series for reads 0, if ingestion was scraped.** A gateway is a series only
+once the daemon has counted something from it, so a gateway that has been silent since the daemon started has
+none. That is a true 0, and a missing gateway would otherwise read *not observed* beside gateways that sent.
+Without `ingestion_scraped` in the answer nothing is known about any gateway, whatever else it carries:
+Prometheus answers a rate for minutes after a target goes away. A sample that is not a figure (Infinity, NaN,
+a time that is not one) reads NULL for that figure, never a 0.
+
+**Fresh means evaluated within the last 3 minutes.** Every run rewrites every gateway's row from a 200 whose
+body is a successful Prometheus vector, or NULL: no answer yet, a timeout, a non-200, content that is not
+JSON, a result that is not a list, no Prometheus at all and an answer that did not observe ingestion each read
+*not observed*. The answer collected is a minute old and the next comes a minute later, so one missed run
+still reads. `gateway_arrivals` is the table as the dashboard reads it, with every column NULL when
+`observed_at` is older than 3 minutes, so a stopped job reads *not observed* and never the last value.
+
+**Whoever can read a gateway reads its figures.** The policy on `gateway_arrival_figures` asks
+`gateway_is_readable()`, which reads the `gateways` table as the caller, under the caller's own policies, so
+it follows them if they change. `gateways` lets every signed-in user read every row today. It is a function
+because `replay_policy()` compares a policy's statement with the one `pg_dump` writes, and a subquery is
+written over several lines, so it would be dropped and re-created on every boot. `gateway_arrivals` runs `security_invoker`, so the policy decides who
+sees a row. No role holds a write grant, `service_role` included, and there is no write policy. Anon is
+revoked by name. The counts are rounded, since `increase()` extrapolates (6.98 is 7), and a deleted gateway
+takes its row with it.
+
+**Each device's last reading is read live, on its own.** `gateway_devices_last_reading(p_gateway_id)` lists
+the gateway's devices that are not archived with the time of the newest reading of any of their series, as
+the caller, from the foreign `telemetry_latest`. It collects the device ids first and sends them as one
+array, so the historian is asked for those devices alone and nothing is joined across the link. A device
+with no reading has a NULL time, and a gateway with no device does not touch the historian. It raises when
+the historian cannot be reached, which the drawer shows as *not observed* for each device, and the three
+figures stand: they are a different read of a different database.
+
+**No Audit Trail rows.** The collector is not a person's act: pg_cron writes the table as its owner, and
+nothing it writes is a record of something done. No audit action, class or domain is added.
+
+The file's self-check asserts that the collector takes its address from the helper and names every figure,
+that it is scheduled every minute, that the table's policy asks `gateway_is_readable()` and has no write policy, that the
+view runs as the reader, and that `anon` may read, write or run none of it. The suite is
+`test_a_gateway_shows_what_arrives_from_it.py`: the function against recorded answers, the rows by role (and
+under a restriction on `gateways`), freshness, a replay that keeps one job, and each device's last reading.
+
+### A quantity kind has a vocabulary (0304)
+
+QUDT was cited in four places and seeded in none. The five BMS example readings carried a QUDT quantity
+kind typed by hand, and the check that held them to a fixed list could not prove the kinds were real. Add
+Metric's semantic id picker could not offer a kind. An AAS export left every IEC 61360 `unitId` empty, and
+i3X filed a kind's id in the local namespace. QUDT's vocabulary files are CC BY 4.0, which permits
+redistribution with attribution to QUDT.org, so they are kept in the repository and the rows are
+generated from them, as ASHRAE 223P's are.
+
+- **`qudt_quantity_kinds` is new:** every quantity kind QUDT 3.5.2 does not deprecate, 1126 of them
+  (`Temperature`, `VolumeFlowRate`). Each has QUDT's IRI, its English label and its description as plain
+  text. A kind names what a reading measures, not the reading, so no metric group and no `standard` is
+  registered for it. A metric stays MTConnect's, OPC UA's or Custom, and takes a kind as its semantic id
+  only where no other standard names the reading.
+- **`qudt_units` is new:** the 83 QUDT units that MTConnect's unit names map to, with each unit's label,
+  symbol and UN/ECE Recommendation 20 code. QUDT has 2932 units, and the others would only bury the
+  picker. The exporter does not read this table: it reads a TypeScript map generated from the
+  crosswalk, `supabase/functions/_shared/aas/qudtUnits.ts`, so the export makes no extra query, and the
+  seed-sync check holds the map and the table to the crosswalk.
+- **The rows are generated from QUDT's release v3.5.2,** whose two vocabulary files
+  [`scripts/vocabularies/`](../scripts/vocabularies/README.md) keeps whole and pins by SHA-256, with
+  QUDT's licence notice beside them. `scripts/generate-qudt-vocabulary.mjs` writes the two blocks in this
+  file, and `scripts/check-qudt-seed-sync.mjs` checks them. CI runs the crosswalk check, the generator
+  and then the check, and `git diff` fails the step when what the generator wrote is not what is
+  committed. The Turtle reader the ASHRAE 223P generator used is now `scripts/lib/turtle.mjs`, and both
+  generators import it. The 223P seed it writes is byte for byte what it was.
+- **What a row is.** The kinds file holds 1225 `quantitykind:` subjects. One has a wikidata match and no
+  type or label, so 1224 are kinds and 98 are deprecated. A description is QUDT's plain-text
+  description, else its `dcterms:description`, in English, with the LaTeX written out and the whitespace
+  collapsed. 122 of QUDT's plain-text descriptions are German, and those kinds take their English
+  description. 171 kinds have none, and their description is NULL: the view leaves them out, and an
+  export falls back as it does for an id no vocabulary defines. A LaTeX command the reader does not know
+  stops the generator.
+- **Ids are QUDT's own,** `http://qudt.org/vocab/quantitykind/<Name>` and `http://qudt.org/vocab/unit/<Name>`.
+  A CHECK on each table admits no other prefix. The key is the IRI, because two kinds can share a label.
+- **The crosswalk is a file,** [`mtconnect-units-to-qudt.json`](../scripts/vocabularies/mtconnect-units-to-qudt.json).
+  Each of the 100 MTConnect unit names maps to a QUDT unit or to nothing, with the reason. 83 map. A name
+  maps only where QUDT has exactly that unit in quantity and scale. `scripts/check-qudt-crosswalk.mjs`
+  fails when a name is missing, when it names one MTConnect does not, and when an IRI is not in the
+  units file or is deprecated there.
+- **`concept_definitions` gains its QUDT arm,** between ASHRAE 223P's and OPC UA's. The order is IDTA,
+  ASHRAE 223P, QUDT, OPC UA, ISO 22400, MTConnect, VDA 5050, so every later arm's precedence moves up one.
+  QUDT issues its own IRIs, as 223P does, and an id no two vocabularies share loses nothing by it. This
+  file declares the whole view again, as `0302` did, from `0302`'s body and one arm. The columns do not
+  change, so the grants and `security_invoker` stay, and the file states the grants again. It is a view, so
+  it carries no `-- Redefines` line, which marks functions. A later arm is added the same way.
+- **The AAS export sets `unitId`.** Where a metric's unit maps, the ConceptDescription's IEC 61360 content
+  carries the QUDT unit as an ExternalReference with one GlobalReference key, beside the free-text
+  `unit`. The IDTA JSON schema and XSD accept the shape. QUDT's own description now defines a kind in an
+  export, and "Temperature, as QUDT defines it." stays only for a kind the seed leaves out.
+- **Access is the other vocabularies'.** Row security is on, the one policy on each table lets
+  `authenticated` read, and nobody writes: no role holds INSERT, UPDATE or DELETE, and the generated rows
+  are written by the migration as the owner. Anon is revoked by name. Each block is one statement that
+  rewrites a row only where something differs, so a replay on a settled database writes nothing.
+- **The self-check** asserts row security on both tables, that anon cannot read and no signed-in role can
+  write, that `Temperature` is defined by QUDT's text, that `DEG_C` is a unit with its UN/ECE code, and
+  that no id is defined twice. It counts no totals, so a second boot passes.
+
+`test_a_quantity_kind_has_a_vocabulary.py` (db lane) holds the rows, the access and the checks, the view's
+order and the replay. `TestConceptDefinitions` in `test_metric_catalog_seed.py` now counts QUDT among the
+vocabularies whose every described row is in the view. Mirror checks `123` and `124` hold the namespaces,
+the release and the label to the dashboard, i3X and the exporter, and `119` leaves QUDT out of the standards
+the form offers. Drift check `47` is the join the example readings' kinds lacked: each must be a row.
+
+### An OEE KPI cites the source it was read from (0305)
+
+`iso22400_vocabulary` held eight KPIs that were written without the standard. The header of the archived
+migration that first seeded them says ISO 22400-2 is paywalled and that nothing was checked against the
+published text, and nobody has since. A purchased ISO standard is licensed to its reader, and Aber is
+distributed publicly, so rows taken from it would raise a redistribution question this project should not
+have to answer. Each row needs a source anyone can read. For four of them there is one: OPC 40501-1
+v1.02.0, Annex C, *KPI Calculation (Informative)*, which says "The KPI definitions used are taken from the
+ISO 22400-2 specification".
+
+- **`iso22400_vocabulary` gains `source text`,** filled for `AVAILABILITY`, `EFFECTIVENESS`, `QUALITY`
+  and `OEE`. It names the annex, its clause (C.2.4) and the formula in the annex's words:
+  `Availability = APT / PBT`, `Effectiveness = PRI x PQ / APT`, `Quality rate = GQ / PQ`, and OEE as their
+  product. The other four rows have none. No released view states the table's columns: `concept_definitions`
+  names the three it reads.
+- **The four descriptions are corrected to the annex.** The released seed quoted ISO 22400-2 names the annex
+  does not use, "Quality ratio" and "OEE index", so nobody could check them. The annex says "Quality rate"
+  and "OEE", and each description now says what its abbreviations say: APT, PBT, PRI, PQ and GQ. The formulas
+  are unchanged: they are the annex's, with the KPI's symbol in front. `0002` is released, and db-init
+  replays it first on every boot, so its upsert puts the old descriptions back and this file puts the
+  corrected ones over them. The four rows are written twice a boot, and the table ends it as this file
+  leaves it. `source` is not in `0002`'s column list, so it is never put back.
+- **`concept_sources` is new:** `(semantic_id, source)`, one row per id, `security_invoker`, with the grants
+  `concept_definitions` has. Its arms are QUDT (every seeded kind, "QUDT 3.5.2, QUDT.org, CC BY 4.0") and
+  ISO 22400 (a row with a source), in that order where an id is in both. **It is not a column of
+  `concept_definitions`.** That view's four columns are stated inline by `0169`, `0301`, `0302` and `0304`,
+  and db-init replays each of them on every boot. A view that gained a column would be redeclared narrower
+  by the next boot of the earlier file and fail with "cannot drop columns from view". This view's columns
+  are fixed from the start, so a vocabulary added later adds an arm and nothing else.
+- **`UTILIZATION`, `SCRAP_RATIO`, `MTBF` and `MTTR` are deprecated,** with `deprecated_reason` on the row
+  (NULL means live; no vocabulary table had a deprecation, so this is a column). `UTILIZATION` is not an
+  ISO 22400 KPI, so it cannot stay in a table whose name says it is. No free source publishes the formulas
+  of the other three: OPC 40001-1 Annex C maps `MachineryItemState` to ISO 22400 time elements and says
+  "This annex does not define any KPI values". A site that owns ISO 22400-2 can import it on the
+  Vocabulary page. The rows, their groups and their example metrics stay in 1.9, and are removed no
+  sooner than 1.10. `UTILIZATION`'s description loses the sentence asking a reader to verify it against
+  the standard. The ISO 22400 tab marks the four in words and says why. This is not a major change: an
+  install keeps any metric that carries one of these ids, since an id is only a value.
+- **The AAS export sets `sourceOfDefinition`** from `concept_sources` where a row exists and the
+  definition is the vocabulary's own: the IEC 61360 content carries the citation as text. A metric whose
+  description defines the concept is never credited to a vocabulary. The exporter starts the read beside
+  the definitions, so it adds no round trip, and without the view the export carries no source and
+  succeeds. The IDTA JSON schema and XSD accept the shape.
+- **The ISO 22400 tab shows the source** on its own line of a KPI's tooltip, and no line for a KPI that
+  cites none.
+- **Access is the other views'.** `authenticated` and `service_role` read it, `anon` does not, and nobody
+  writes. The self-check asserts the columns, that the four OEE rows cite the annex and are live, that the four
+  deprecated rows give a reason, that `AVAILABILITY` and the QUDT kind `Temperature` are in the view with
+  their sources, the grants, and that no id is in it twice.
+  It counts no totals, so a second boot passes.
+
+Nothing here was read from ISO 22400-2. Where a source says the annex takes its definitions from ISO 22400-2,
+that is the annex's own statement. `test_an_oee_kpi_cites_the_source_it_was_read_from.py` (db lane) holds the
+column, the corrected descriptions, the view's columns, arms and grants, and the replay, including `0002`
+putting the old text back and this file correcting it. `test_a_concept_description_names_its_unit_and_its_source.py`
+(unit lane) validates the JSON and the XML an export carries against the IDTA schemas, and
+`test_aas_export_units_and_sources.py` (stack lane) reads the source of `OEE/AVAILABILITY` from a deployed
+export.
+
+### A site can import a vocabulary from AAS ConceptDescriptions (0306)
+
+A site brings its own vocabulary: a group's naming standard, a customer's specification, or the concepts of a
+standard it holds a copy of. Until now each concept had to be typed as a Custom metric with a hand-copied
+semantic id, and an export defined it only by that metric's description. A ConceptDescription with the IEC 61360
+data specification is one dictionary entry (an identifier, a preferred name, a definition, a unit and a data
+type), and Aber already writes one for every semantic id in an export. The Administrator reads a file in the
+dashboard (an AASX package, or an AAS JSON or XML environment) and hands the rows to one function, which checks
+every one again.
+
+- **`site_vocabularies` is new:** one row for each imported file. It says what the file is: a published standard,
+  named by its name, edition and publisher (`ISO 22400-2`, `2014`, `ISO`), or the site's own vocabulary, with none of
+  the three. It holds the file's format (`aasx`, `aas-json` or `aas-xml`), its SHA-256, the version it states, a
+  licence note, `definitions_shareable`, and who imported it and when. A file whose SHA-256 is already held is
+  refused, naming the row that holds it. The seeded vocabulary tables stay generated and unwritable.
+- **`site_vocabulary_concepts` is new:** one row for each concept, keyed by its semantic id, so one id has one
+  definition across every file. It holds the id's type, the preferred name, the definition, the unit and its id,
+  and the data type. Removing a file removes its concepts.
+- **Every signed-in role reads both tables, and nobody writes them.** No role holds INSERT, UPDATE, DELETE or
+  TRUNCATE, an Administrator included. Anon is revoked by name. The three functions below run as the owner.
+- **Three functions, each Administrator only, behind the second factor, each filing one Audit Trail row.**
+  `import_site_vocabulary(p_file, p_concepts)` checks every row again: the id's shape and that its type is the
+  shape's (the rule of the dashboard's `inferSemanticIdType()`, held by mirror check 126), the required fields, the
+  lengths and the keys. It refuses the import on one row it would not store, naming up to five of them. It skips
+  each id that a seeded vocabulary, another file or the file itself already defines, and answers with the new row and
+  each skipped id and why. `remove_site_vocabulary(p_id)` removes a file, and `set_site_vocabulary_sharing(p_id,
+  p_shareable)` records the Administrator's confirmation that the licence lets the definitions be shared.
+- **`site_vocabulary_holders(p_ids)` says which vocabulary holds each id.** A seeded vocabulary counts by its table,
+  with or without text: a VDA 5050 field that has no description is held, though `concept_definitions` leaves it
+  out. The Import dialog's preview and the import itself ask the same question, so they agree.
+- **`concept_definitions` gains an arm, after QUDT's and every other,** the concepts of a vocabulary whose `definitions_shareable` is
+  true, last in precedence. Its `standard` is NULL: a site's own file is no standard Aber ships, and the dashboard's
+  list of standards stays closed. A vocabulary that is not shareable defines nothing there, so an export carries
+  its preferred names and defers the definitions to the file. The columns do not change, so the grants and
+  `security_invoker` stay. The view is declared whole, with the arms of `0302`.
+- **`metric_catalog.site_vocabulary_id` links a metric to the file it was started from.** It is NULL for every
+  metric that was not, and a CHECK refuses a link beside a `standard`: a typed "this is ISO 22400" carries no
+  evidence, while a file arrives with its SHA-256, version and importer. The link is `ON DELETE SET NULL`, so
+  removing a file keeps every metric and its id, and each cleared metric has a change in the Audit Trail. No view
+  states `metric_catalog`'s columns, so the column could be added here.
+- **The Audit Trail files three acts in the asset lane:** `SITE_VOCABULARY_IMPORTED` (created),
+  `SITE_VOCABULARY_REMOVED` (lifecycle) and `SITE_VOCABULARY_SHARING_CHANGED` (configuration). `audit_domain_for()`,
+  `audit_event_class()` and `audit_trail_action_kinds()` are declared whole with them. The new rules class actions
+  no row has been written for, so the class indexes need no rebuild, and the file rebuilds them only if such a row
+  exists. Setting sharing to the answer it already has is no change and files nothing.
+- **The CHECK on `source_format` is judged by its name alone,** and the self-check does not name the three formats.
+  A later file that reads another format (an OPC UA NodeSet2, `nodeset2`) widens it by swapping the constraint in
+  that file. Declaring the three again here would narrow it on the next boot.
+- **The self-check** asserts row security and the privileges, the two foreign keys' actions, the functions' grants and
+  search paths, the classifiers' new rows and the earlier ones they carry, and the site arm of the view alone, on rows
+  a subtransaction takes back: a shared concept is defined by the file's text with no standard, and an unshared
+  one is not. It counts no total, so a second boot passes.
+
+`test_a_site_can_import_a_vocabulary_from_aas_concept_descriptions.py` (db lane) holds the access to both tables, the
+three functions, the re-checks and the skips, the duplicate file, the Audit Trail rows, the site arm, the metric's link
+and its clearing, the id-shape rule and the replay. Mirror checks `126`, `127` and `128` hold the shape rule, the
+limits and the exporter's ISO 22400 rule to the dashboard.
+
+### A revoked credential stays revoked until a new one is issued (0308)
+
+The platform's record of a gateway's broker credential is read in three places, and they must agree.
+The dashboard reads it in `credentialState()` and `enrolmentStands()` (`utils/credentialState.js`). The
+database reads it in `gateway_has_broker_credential()`. All three count an enrolment, or a
+`CREDENTIAL_ISSUED` row, only while no revocation came after it. For a Remote gateway the database did
+not: it counted `enrolled_at` whatever `credential_revoked_at` said.
+
+#### A Remote gateway's enrolment stops counting once a revocation follows it
+
+`gateway_has_broker_credential()` is `0196`'s body with one arm narrowed: a Remote gateway holds a
+credential while `enrolled_at` is set and `credential_revoked_at` is empty or older than the
+enrolment. The arm for Host, Simulated and Third-party gateways is `0196`'s.
+
+A type change out of Remote revokes the credential and stamps it, and leaves `enrolled_at`. Changed back
+to Remote, the gateway read as holding a credential until it enrolled again, though its account was
+disabled. That had three costs:
+
+- Leaving Remote again asked the broker to disable an account that was already disabled, and stamped
+  again.
+- The Edit dialog's Type hint said *Saving ends the broker credential its appliance holds, and the
+  appliance is cut off*, and *Change type* asked first. None of it was true. The dialog now reads a
+  Remote gateway's credential through `enrolmentStands()`, as the drawer does, so it follows the
+  database.
+- Archiving and deleting asked for an account a revocation had already ended. The two triggers read the
+  function, so they take the corrected answer. An archived gateway's account was disabled when it was
+  archived, so deleting it, by hand or when its timer runs out, asks for nothing, as it already did for
+  a Host or Third-party gateway.
+
+Every reader of the function takes the corrected answer, and each was checked with a stamp newer than
+the enrolment: the archive and delete triggers (`revoke_credential_on_decommission()`), the type change
+(`clean_up_after_a_gateway_type_change()`) and the Edit dialog's question
+(`api.gatewayHoldsBrokerCredential()`, which the dialog asks for every type but Remote).
+
+`test_a_revoked_credential_stays_revoked_until_a_new_one_is_issued.py` holds the function's table for a
+Remote gateway (enrolled and never revoked, enrolled after the revocation, revoked after it enrolled,
+never enrolled) and that archiving and deleting ask for nothing where a revocation followed the
+enrolment, and ask for an account where none did. `test_gateway_lifecycle.py` holds the same in a
+gateway's whole life. Mirror check 129 holds the rule against `enrolmentStands()`, and the form's use
+of it.
+
+#### A restore leaves the stamp
+
+Archiving a gateway disables its broker account and stamps `credential_revoked_at`. Restoring it
+cleared the stamp and asked the broker for nothing, so the account stayed disabled while the record said
+the gateway held a credential. After a restore:
+
+- `credentialState()` read **Issued** where it should read **Revoked**, and Access Control showed the
+  Credential column as Issued beside a Broker column that said **Disabled**.
+- `gateway_has_broker_credential()` counted the old credential again.
+- A restored Remote gateway that had enrolled was offered no **Set Up Gateway**, because
+  `enrolmentStands()` read the cleared stamp as no revocation after the enrolment. The Restore dialog
+  tells a person to use it.
+
+`clear_credential_revoked_on_enrolment()` is the trigger function behind this, run `BEFORE UPDATE OF
+is_archived`. It now returns the row as it is. The trigger stays, because `0001` creates it with
+`replay_trigger()` on every boot: dropping it here would have the next boot create it and this file drop
+it again, each time. The stamp then keeps outranking an older enrolment or issue until a credential is
+issued, or the appliance enrols, after it. `credentialState()` and `gateway_credential_was_replaced()`
+already read it that way, so the dashboard's reading of a restored gateway needed no change.
+
+**`credential_revoked_at`'s column comment is restated**, since `0252`'s said that restoring clears it.
+
+**A gateway restored before the upgrade has no stamp**, so it reads as it did until a credential is
+issued or the appliance enrols. Nothing is written for it: the broker, not the record, says whether its
+account was enabled again since. Issuing it a credential, or setting it up again, puts the record right.
+
+`test_a_revoked_credential_stays_revoked_until_a_new_one_is_issued.py` holds that a restore leaves the
+stamp for a Remote gateway and a Host gateway, that the old credential is then not counted and one issued
+or enrolled after the stamp is, and that a gateway never revoked is not stamped. The two suites of a
+gateway's life hold the rows the lifecycle page lists, and the broker suite holds that the record and
+the broker agree after a restore.
+
+The file's self-check asserts that `anon` may not run either function, that the function a restore
+runs does not write the stamp, that its trigger is still there, and walks the four cases above.
+
+### An archived gateway is refused a setup token (0309)
+
+`issue_gateway_enrollment_token()` refused a Host gateway and a Third-party gateway, and did not refuse
+an archived one. Called for an archived Remote gateway, it burned any live token, wrote a new one and
+moved the row to `PENDING_ENROLLMENT`. The drawer hides **Set Up Gateway** on an archived gateway, so the
+call came from an API client, or from `gateway-bundle`, which an Administrator or a Shopfloor Manager can
+call with any gateway's id.
+
+Nothing could enrol with that token: `consume_gateway_enrollment_token()` and
+`peek_gateway_enrollment_token()` refuse an archived gateway. But the archived row then read **Awaiting
+setup**, and a restore brought it back holding a token that stayed live for up to a day.
+
+#### The issuer refuses it, as the credential issue does
+
+`authorize_host_gateway_credential()` already raises *gateway X is archived; restore it before minting a
+credential* with `invalid_parameter_value`, and its comment calls it the mirror of the setup token's
+issuer. `issue_gateway_enrollment_token()` now raises *gateway X is archived; restore it before issuing a
+setup token*, with the same code, after its two type checks and before it writes anything. The body is
+`0196`'s with that one check added.
+
+The refusal comes after the checks for a Host and a Third-party gateway, as it does in the credential
+issue, so a Host gateway that is archived is still told it runs on this host.
+
+#### `gateway-bundle` says so before it mints
+
+`gateway-bundle` reads the gateway before it mints, so that a bad id or a Host gateway costs no token. It
+now reads `is_archived` there too, and answers **400**, *That gateway is archived*, with
+*Restore it from Archived Entities or its drawer, then set it up. No enrolment token was minted.* The
+function's other refusals, for a Host and a Third-party gateway, are answered the same way. Without this
+the database's refusal reached the caller as *Could not issue an enrolment token*, with its own sentence
+in `details`. `gateway-install` calls no issuer: it reads a token that already exists through
+`peek_gateway_enrollment_token()`, which refuses an archived gateway.
+
+The dashboard needs no change. Its **Set Up Gateway** is not offered for an archived gateway, so the
+refusal is reached only by an API client.
+
+`test_gateway_lifecycle.py` holds the refusal and that nothing is written: no token, and a status that
+stays as it was. Drift check 498 holds the two issuers' refusals and `gateway-bundle`'s together.
+
+The file's self-check asserts that `anon` may not run the function, that it still refuses a Host and a
+Third-party gateway, and that it refuses an archived one.
+
+### A change of type on an archived gateway clears the old status (0310)
+
+`clean_up_after_a_gateway_type_change()` (`0252`) returned at once for an archived gateway. That is right
+for the setup tokens and the credential: archiving burned the one and revoked the other. It is wrong for
+the status. An archived Remote gateway that never enrolled keeps `PENDING_ENROLLMENT` when its type is
+changed to Host, and after a restore it reads **Awaiting setup**, with **Request Rebirth** withheld.
+That is the state `0252` clears for a gateway that is not archived.
+
+The Edit dialog is not offered on an archived gateway, because **Restore** replaces it, and a proposal
+cannot carry a type. The row policy still lets an Administrator or a Shopfloor Manager update the row,
+so only a direct write through the API reaches the case.
+
+#### The status follows the type, archived or not
+
+The function is `0252`'s with its early return narrowed. The first check is unchanged: a change that
+does not cross Remote's boundary ends nothing. After it, the setup-token burn, the credential
+revocation and the forgetting of the kept copy of a password are skipped for an archived gateway, as
+they were. The status step now runs for every gateway: one that becomes Remote, or leaves Remote in
+`PENDING_ENROLLMENT` or `AWAITING_BIRTH`, reads `OFFLINE`. Any other status is the gateway's own word.
+
+The other way to close it was to refuse a change of type on an archived gateway. A refusal would make an
+API write fail that works today, and the status is what a person who restores the gateway sees, so the
+clean-up is the default.
+
+`is_archived` is nullable on `gateways`, and `0252` treated a null as not archived: it ran the steps
+unless the value was true. The narrowed check does the same (`OLD.is_archived IS NOT TRUE`), so a row
+with a null still has its tokens and credential ended.
+
+**Nothing else changes for an archived gateway.** No revocation is asked, the stamp the archive wrote is
+left as it is, and the change and the status are one audited `UPDATE`.
+
+**Rows the earlier function left are repaired by `0252` already.** Its one-off statement, which runs on
+every boot, sets `OFFLINE` any gateway that is not Remote and is still in an enrolment state, archived or
+not. A gateway that was changed to Remote while archived kept the status it had, which that statement
+does not cover. This file does not rewrite those rows: nothing records that the status was left by a
+type change.
+
+`test_a_type_change_on_an_archived_gateway_clears_the_old_status.py` holds the status for each way across
+the boundary, at once and after a restore, that a gateway that was online keeps its own word, that a
+change among Host, Simulated and Third-party changes nothing, that no revocation is asked and the stamp
+stays, that the change is one audit row, and that a gateway that is not archived is cleaned up as before.
+`test_gateway_lifecycle.py` holds the row the lifecycle page lists.
+
+The file's self-check asserts that no browser-facing role may run the function, that the token and
+credential steps sit inside the skip for an archived gateway and the status step outside it, and that the
+trigger is still `BEFORE UPDATE OF deployment, is_simulated`.
+
+### A revocation is owed until the credential service confirms it (0311)
+
+Four steps end a gateway's broker credential: archiving it, deleting it, changing its type across
+Remote's boundary, and (`0312`) setting it up again for a new appliance. Each asks the credential
+service, through `pg_net`, to disable the gateway's broker account. The answer arrives after the
+transaction, and the revocation sweep judges it every 15 minutes (`0288`). Before this file the sweep
+did not ask again in every case:
+
+- An archived gateway was asked again only while `gateway_has_broker_credential()` said it held a
+  credential under its type **now**. A gateway changed away from Remote, or into it, holds no record
+  under its new type, so once it was archived a failed revocation of the old type's credential was
+  dropped.
+- `gateway_revocation_requests` goes with the gateway row by `ON DELETE CASCADE`. A revocation still
+  unanswered when the gateway was deleted was never asked again. The delete itself asked only while
+  the row read as holding a credential, and since `0308` an archived Remote gateway reads as holding
+  none.
+- With the credential service not configured, a change of type wrote nothing, so nothing was left to
+  ask once it was configured.
+
+#### What is owed, and where it is kept
+
+A revocation is **owed** from the moment a step ends the credential until a 2xx to its own request
+confirms it.
+
+- **A row of `gateway_revocation_requests`** is the debt of a gateway that exists. `request_id` is
+  empty until a call can be made. `0001` states the column `NOT NULL` in its `CREATE TABLE IF NOT
+  EXISTS` and never sets it again, so dropping the constraint here survives a replay. It is a
+  subtraction: the next fold carries it in its tail until every database has it.
+- **`owe_gateway_revocation()`** writes that row, clearing any request an earlier revocation left on
+  it, then asks through `revoke_gateway_credential()`. The earlier request's reply answers for the
+  earlier revocation, so a 2xx to it must not confirm this one. No API role may run it.
+- **`deleted_gateway_revocations`** keeps the debt of a deleted gateway, by the Sparkplug ID that
+  names its broker account, with the gateway's id, the time of the delete and the latest request. It
+  has no foreign key on purpose. RLS is on with no policy, and `service_role` may only read it. The
+  OpenAPI check lists it as not published, beside `gateway_revocation_requests`.
+- **`revoke_gateway_credential()`** is `0001`'s, and also writes its request id to a deleted gateway's
+  debt. A call that cannot be made writes nothing, so the debt waits.
+
+#### Each step owes it
+
+- **Archive** (`revoke_credential_on_decommission()`) owes the revocation of a credential the row
+  holds, and stamps `credential_revoked_at` whether or not the call could be made.
+- **Change of type** (`clean_up_after_a_gateway_type_change()`) does the same in the one audited
+  `UPDATE`. The body is `0310`'s, and an archived gateway's status step is unchanged.
+- **Delete** asks at once for a credential the row still holds. Then every revocation still owed,
+  whichever step asked it, moves with its request to `deleted_gateway_revocations`. One a 2xx already
+  confirmed is not owed, and nothing more is asked for it. So deleting an archived gateway asks
+  nothing at once, as before, and the archive's own request is still judged after the row has gone.
+- **Setup** (`0312`) owes the revocation of the credential an enrolled appliance holds.
+
+#### The sweep asks until a 2xx
+
+`sweep_gateway_credential_revocations()` judges every debt the same way, for an archived gateway as for
+one that is not, and for a deleted one:
+
+| | What the sweep does |
+| --- | --- |
+| A 2xx to its own request | the debt goes, and the stamp stays |
+| Any other reply, none five minutes on, or no request yet | asked again, with the stamp kept |
+| A credential issued or enrolled after the stamp, the gateway not archived | the debt goes and nothing is asked (`gateway_credential_was_replaced()`, `0288`) |
+| A deleted gateway's Sparkplug ID held again by a gateway enrolled or issued a credential after the delete | the debt goes and nothing is asked |
+| The credential service not configured | nothing is asked, and the debt waits for the next run |
+
+An archived gateway's stamp is no longer cleared when its call fails. It is asked again with the stamp
+kept, as a type change's is. An archived gateway is issued no credential and enrols none, so for it
+the stamp is the last word, as `0288` read it.
+
+**What an earlier release left.** An archived gateway with no stamp that ever enrolled, or was ever
+issued a credential, is what an archive left when its call could not be made, or what an earlier sweep
+left when it cleared the stamp of a call that failed. Its type may have changed since, so the sweep
+reads both records whatever the type: an archived gateway is out of service, and disabling its account
+is right whichever type holds it. The sweep owes and stamps it, whether or not it can ask, so a later
+change of type or a delete cannot lose it. A gateway that is not archived is not read this way: one
+with no stamp may hold a credential issued for its new type, and nothing says whether that came after
+the change. A type change on 1.8.0 that failed left a stamp and no request row, and nothing is asked
+for it, as `0288` says.
+
+#### Leaving Remote asks the forge sweep at once
+
+`forge-sweep` now removes the deploy keys of a gateway that is no longer Remote, from its own
+repository and from the platform repository, as it removes an archived gateway's. The repository is
+kept, and is not put into the forge's archive. Changed back to Remote and set up again, the new
+appliance's key is registered at enrolment. The clean-up asks `sweep_forge()` at once when a gateway
+with a repository leaves Remote, as an archive asks it, so the key goes within seconds rather than at
+the next quarter hour. `holdsDeployKey()` in `forge-sweep/keys.ts` is the rule, and
+`forge-sweep/keys_test.ts` its table.
+
+#### What it does not reach
+
+- **A call is checked when it is asked, not when `pg_net` sends it**, as `0288` says. A credential
+  issued or enrolled in the second or so between the two is disabled, and the person issues it again.
+- **A gateway deleted before the upgrade** left no debt. Its account may still be enabled.
+  `scripts/revoke-orphaned-broker-accounts.mjs` lists the broker accounts no gateway owns, and disables
+  them with `--yes`.
+- **The drawer says Revoked as soon as the revocation is owed.** The Broker column on Access Control is
+  the live answer.
+
+`test_a_revocation_is_owed_until_the_credential_service_confirms_it.py` holds an archived gateway asked
+again after a failed revocation whatever its type, a young request waiting, and a 2xx ending it. It
+holds a deleted gateway's debt asked until a 2xx after a change of type, an archive or the delete
+itself, a confirmed revocation not owed after a delete, and a gateway made again under the same id not
+disabled once it is given a credential. It holds a change of type, an archive and a delete recorded as
+owed while the credential service cannot be asked, and asked once it can. It holds a new revocation not
+confirmed by an earlier one's 2xx, an earlier release's leftover owed and stamped, and the forge asked at
+once. `test_gateway_lifecycle.py` holds the rows the lifecycle page changes, and
+`test_gateway_lifecycle_broker.py` a revocation the broker never received asked again after an archive
+and a delete. `test_credential_revocation.py` and `test_a_failed_type_change_revocation_is_retried.py`
+now hold an archived gateway's stamp kept through a retry.
+
+The file's self-check asserts that no API role may run `owe_gateway_revocation()`, that no browser-facing
+role may ask for a revocation, run the sweep or read the deleted gateways' debts, that `request_id` is
+nullable, that the archive, delete and type-change functions owe the revocation and the delete keeps
+it, and that the sweep reads the deleted gateways' debts and checks for a newer credential.
+
+### Setting up an enrolled gateway again revokes its credential at once (0312)
+
+A setup issued for a Remote gateway whose appliance has enrolled is for the appliance that replaces it:
+one that enrolled and never published, or one whose machine was replaced or rebuilt. The Re-issue
+Setup dialog says the issue *also revokes the broker credential its appliance is holding*, and
+[Remote gateways](../docs/remote-gateways.md#6-re-issuing-and-what-it-invalidates) says the same. It
+did not: the old password was replaced only when the new setup was redeemed.
+
+#### The setup owes the revocation
+
+`issue_gateway_enrollment_token()` is `0309`'s body with one step added before the token is written.
+When the gateway's enrolment stands, it owes the revocation of the credential the enrolled appliance
+holds (`owe_gateway_revocation()`, `0311`). It stamps `credential_revoked_at` in the `UPDATE` that sets
+`PENDING_ENROLLMENT`, so the Audit Trail holds one row for the setup and what it ended.
+
+- **"The enrolment stands"** is `gateway_has_broker_credential()`, whose Remote arm is the rule
+  `enrolmentStands()` reads in the dashboard (`0308`): `enrolled_at` is set and no revocation came
+  after it.
+- **A second setup straight after** finds the enrolment no longer standing, asks for nothing more and
+  writes no row, as before.
+- **A gateway that never enrolled**, or one a revocation already followed (restored, or changed
+  away from Remote and back), is asked for nothing.
+- **An enrolment a re-issue left standing before the upgrade**, on a gateway still waiting in
+  `PENDING_ENROLLMENT`, is revoked by the next setup. The status stays, and the stamp is one row.
+- **The refusals are `0309`'s**: an Operator, a Host or Third-party gateway, and an archived gateway.
+
+#### The new appliance replaces it
+
+Redeeming the new setup is the same as any enrolment. `enroll-gateway` asks the credential service to
+issue the account, which sets a new password and enables it again, and it writes `enrolled_at`. The
+enrolment is newer than the stamp, so `gateway_credential_was_replaced()` answers for it and the sweep
+drops the debt without asking, however its request was answered. A setup left unused keeps the old
+credential's revocation owed until a 2xx confirms it.
+
+The drawer offers **Re-issue Setup** for an enrolled appliance that is not online, OFFLINE or STALE as
+well as waiting for its first birth. It is never the primary there, and the dialog asks for the
+gateway's name first and says the old appliance's credential is revoked.
+
+#### What it does not reach
+
+- **A setup redeemed in the second or so before `pg_net` sends the revocation** has its new credential
+  disabled, as `0288` says of a credential issued then. Setting the gateway up again puts it right. A
+  person carrying a command or a bundle to an appliance takes longer than that.
+- **The deploy key** of the old appliance stays on the repository until the new one enrols, which
+  replaces it. Archiving the gateway removes it at once.
+
+`test_setting_up_an_enrolled_gateway_again_revokes_its_credential.py` holds the revocation for an
+appliance waiting for its first birth and for one gone quiet after publishing, the one audited row, a
+second setup asking for nothing more, the leftover of an earlier re-issue, a setup owed while the
+credential service cannot be asked, the gateways left alone, and the new enrolment stopping the sweep.
+`test_gateway_lifecycle.py` holds the two re-issue rows of the lifecycle page, and
+`test_gateway_lifecycle_broker.py` the account disabled at once and enabled again for the new appliance.
+
+The file's self-check asserts that `anon` may not run the function, that `0309`'s refusals stay, and
+that it owes the revocation of the credential an enrolment stands for.
+
+### History marks a bucket that held more than one value past raw retention (0313)
+
+Past raw retention, `telemetry_changes()` ([0254](README.md#history-reads-every-change-of-a-text-or-a-flag-0254))
+answered `retention` and marked nothing. The chart then showed each bucket's last value as if the
+bucket held it throughout, so an hour that flipped between two states read as one state
+([#1438](https://github.com/Harri-Llewelyn/Aber/issues/1438)). The historian now keeps three state
+rollups beside the series rollups, and the `retention` arm marks from them.
+
+#### The state rollups and their foreign tables
+
+`timescaledb/aggregates.sql` builds `telemetry_state_1m` from raw telemetry, text and flag
+readings only, then `telemetry_state_5m` from it and `telemetry_state_1h` from that. Each bucket
+keeps `any_true` and `all_true` (`bool_or` and `bool_and` of the flag), `min_string` and
+`max_string`, and `n_rows`. They compose up the hierarchy, so a wider bucket is as true as a
+narrow one. They say that a bucket held more than one value, never how many: a count of distinct
+values summed up the hierarchy is wrong, and a count of changes needs `lag()`, which a continuous
+aggregate refuses. [`timescaledb/README.md`](../timescaledb/README.md) has the reasoning, the
+policies, the backfill and the cost.
+
+0313 maps the three as `timescale.telemetry_state_1m`, `_5m` and `_1h`, as `0001` maps the series
+rollups. They are granted SELECT to `authenticated` and `service_role`, whom `telemetry_changes()`
+runs as, and revoked from `anon` by name. A foreign table persists across boots, so a changed
+column needs a statement of its own in a later migration.
+
+#### What the `retention` arm returns
+
+`read` is still `retention`, and every other arm, bound and column is 0254's. What changes is
+`marked_ts` and `marked_values`:
+
+- **A bucket older than raw** is marked when its state rollup says it held more than one value: a
+  flag with `any_true AND NOT all_true`, a text with `min_string <> max_string`. The rollup is the
+  widest of 1 minute, 5 minutes and 1 hour that divides the bucket, regrouped into it on the
+  historian, as `telemetry_carried()` ([0233](README.md#history-reads-each-series-carried-forward-0233))
+  reads the series rollups. Its `marked_values` entry is NULL: more than one value, not how many.
+- **A bucket raw holds whole** is counted from raw, as past a cap. Raw is complete from the hour
+  holding its oldest reading, so that is where the first such bucket starts. A day bucket holding
+  that hour is marked from the state rollup, whole. Over 1,000,000 readings in that part of the
+  window, the historian is not asked to count, as past a cap.
+- **A bucket the state rollups do not reach** is not marked, as before. They fill from raw, so
+  they reach back only to raw's reach on the day the historian was upgraded.
+
+The state read is one remote aggregate a series. With the bounds as parameters, postgres_fdw sends
+the `GROUP BY` and the `HAVING`, so only the marked buckets cross. The `HAVING` has no
+`coalesce()`: a text's flags and a flag's text are NULL, which drops a group as false does, and
+measured, a `coalesce()` kept the `HAVING` on the platform.
+
+The dashboard says "more than one value in this bucket" for a mark with no count, and a count for
+the others (`markBuckets()` and `markWords()`, `frontend/src/utils/history.js`).
+
+#### Tests
+
+`test_history_marks_buckets_past_raw_retention.py` holds the arm over local tables standing in for
+the foreign ones: each kind, each width's rollup, the composition into a wider bucket, a window
+across raw's horizon, a day bucket raw holds only part of, the bound, and the grants.
+`test_history_reads_every_change_of_a_text_or_a_flag.py` stands the state rollups in too, and its
+`retention` case now expects the hour raw holds to be counted. `timescaledb/test_state_rollups.py`
+holds the historian's side on a running stack. The file's self-check asserts one form of the
+function, its grants, the three foreign tables and their grants, and that the refusals come before
+any read, so it holds on a stack with no historian.
+
+### A page of readings brings across only the rows it returns (0315)
+
+A read of readings newest first, a page at a time, used to bring across every row inside its time
+bounds. `telemetry_page()` and `telemetry_rollup_page()` read one page, and the historian sends that
+page's rows and almost nothing else. The dashboard's `/api/v1/telemetry` route, i3X's history and the
+AAS bundle's telemetry parts read through them.
+
+#### What went wrong
+
+`public.telemetry` and the rollup views are read over postgres_fdw. postgres_fdw sends the historian
+an `ORDER BY` and a `LIMIT` only when its own row estimate says the `LIMIT` cuts. The foreign tables
+have no statistics. With none, postgres_fdw takes a table to hold 10 pages, about 600 rows of
+telemetry, and each condition shrinks that. A read naming a device estimates 1 to 4 rows, and one
+naming a device and a metric estimates 1. So no page of 500, 1,000 or 5,000 rows was ever sent its
+`LIMIT`, or its `ORDER BY`. The historian sent every row inside the bounds, and the platform sorted
+them and kept the page.
+
+Measured on a private historian and platform database, the chart's retention and compression, no
+statistics, with one week at 1 Hz of `A/Temp` (604,800 rows), `A/Pressure` every 5 s and `B/Temp`
+at 1 Hz. Each read is the SQL PostgREST ran for it, explained as a custom plan and as a generic one.
+PostgREST prepares its statements, and may use the generic plan from a connection's sixth run. The
+two crossed the same rows, except the bundle's first raw page, whose generic plan was sent its
+`ORDER BY` and `LIMIT` (5,000 rows, 30 ms):
+
+| Reader | Rows asked for | Rows that crossed before | Time before | Rows that cross now | Time now |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Dashboard route, one metric over the week | 500 | 604,800 | 1.58 s | 500 | 104 ms |
+| Dashboard route, the third page of the same | 500 after 1,000 | 604,800 | 1.58 s | 1,500 | 57 ms |
+| Dashboard route, one device over the week | 500 | 725,760 | 1.74 s | 500 | 61 ms |
+| Dashboard route, one metric's minutes | 500 | 10,080 | 48 ms | 500 | 22 ms |
+| i3X, one metric's window | 1,001 | 604,800 | 1.55 s | 1,001 | 49 ms |
+| i3X, one device's window | 1,001 | 725,760 | 1.81 s | 1,002 | 54 ms |
+| i3X, the read before a device's window | 1,000 | 723,528 | 1.84 s | 1,000 | 57 ms |
+| i3X, one metric's 1-minute buckets | 1,001 | 10,080 | 33 ms | 1,001 | 16 ms |
+| i3X, the buckets before a device's window | 1,000 | 20,100 | 57 ms | 1,000 | 15 ms |
+| AAS bundle, the first raw page | 5,000 | 725,760 | 1.90 s | 5,000 | 73 ms |
+| AAS bundle, a later raw page | 5,001 | 722,094 | 1.88 s | 5,001 | 85 ms |
+| AAS bundle, the first hourly page | 5,000 | 338 | 7 ms | 338 | 10 ms |
+
+Through PostgREST, a request for the two newest rows of `A/Temp` took 1.59 s before and 0.12 s now. The export
+(`export_telemetry()`, 0279) already reads a stretch its counts bound, and crossed 49,980 rows for its
+50,000-row cap over the same week; it is unchanged.
+
+#### What each read sends
+
+Each page read makes three remote reads. Every bound reaches the historian as a value, so
+postgres_fdw sends each one whole:
+
+1. **A count of the window's rows by the hour,** as one remote aggregate (`date_bin()` and
+   `count(*)`, `GROUP BY`). A rollup is counted in bins of 60 of its buckets: an hour for
+   `telemetry_1m`, 5 hours for `telemetry_5m` and 60 hours for `telemetry_1h`. At most one row a bin
+   crosses: 336 for 14 days of raw.
+2. **The instant of the page's last row,** from the one bin that holds it:
+   `(array_agg(time ORDER BY time DESC))[n]`, one remote aggregate. One row crosses.
+3. **The rows from that instant on,** with `time >= <that instant>` in the remote `WHERE`. The rows of
+   the page cross, with the rows of an offset before it and any rows that share the page's last
+   instant. They are sorted and trimmed here, as before.
+
+`telemetry_page_start()` does the first two, for both reads. A window that holds fewer rows than the
+page has no start, and is read whole: fewer rows than the page cross.
+
+#### What each read returns
+
+The rows the view read returned, in its order, with its page boundaries. Newest first, then device,
+then metric, so rows that share an instant always come in one order: the view read left their order
+to the sort. The dashboard's offset pages, i3X's resume point and the bundle's keyset pages are
+unchanged.
+
+The arguments are the view read's filters: a device (`p_asset_id`) and a metric (`p_metric_name`),
+either omitted for every one, a lower bound (`p_from`, inclusive), an upper bound (`p_to`, inclusive
+unless `p_to_inclusive` is false), `p_limit` (at least 1) and `p_offset` (at least 0).
+`telemetry_rollup_page()` takes `p_resolution` first (`1m`, `5m` or `1h`) and returns the rollup
+views' columns, `avg_double` as they compute it. A bad page is refused (`22023`) before anything is
+read.
+
+#### What else was tried
+
+- **The cost options on the foreign tables.** postgres_fdw refuses `fdw_startup_cost` and
+  `fdw_tuple_cost` on a foreign table (`invalid option`): they are options of the server, and a
+  server option moves every plan over it, History's aggregates and the evaluator's joins included.
+  Measured on the server of the private pair only: `fdw_tuple_cost` at 1, 50 or 100 left the
+  one-metric page a local sort, and `fdw_startup_cost` at 10,000 sent its `ORDER BY` without its
+  `LIMIT`. Neither was seen to carry the bound.
+- **`use_remote_estimate`** fixes the plan, and costs 4 to 80 ms of planning on every read (measured
+  2026-09-28). **`ANALYZE`** on the foreign tables made the estimates worse. Both depend on
+  statistics, which a fresh stack does not have.
+- **A rank over the whole window** (`array_agg(time ORDER BY time DESC)` over every row of it) crosses
+  one row too, but builds an array of the window's every timestamp on the historian: 6 MB for a week
+  of one device at 1 Hz, and close to PostgreSQL's 1 GB limit on one value for a device of a hundred
+  metrics at 1 Hz over 14 days. Counting the bins first sorts one bin.
+
+#### What it costs the historian
+
+The count reads every row in the window, as the old read did, and sends one row an hour instead of
+every row. Over a week at 1 Hz it took 48 ms. A count from the 1-minute rollup's `n_rows` would read
+60 times fewer rows for a 1 Hz series, but a rollup that has not caught up with a late replay counts
+short, and the page would then miss rows. The raw count is exact, and all three reads see one remote
+snapshot (postgres_fdw's repeatable-read transaction), so the instant is the one the page ends at.
+
+#### Who may call them
+
+`authenticated` and `service_role`, as for the telemetry views, and not `anon` (revoked by name). They
+are `STABLE` and `SECURITY INVOKER` with the `search_path` pinned, so they read the historian as the
+caller, and PostgREST serves them over `GET` as well as `POST`. Nothing is written, so no second
+factor is asked for.
+
 > Notes for migrations not yet released are files in [`unreleased/migrations/`](../unreleased/migrations/README.md). The release folds each into a section above this one, in number order.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)

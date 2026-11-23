@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { fail, pass, read, REPO } from './lib.mjs';
+import { fail, pass, read, REPO, sectionOf, supabaseReadme, upgradingGuide } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
 // 475. The documents count the QUDT rows the seed holds and the MTConnect unit names the crosswalk
@@ -45,8 +45,8 @@ export default function check() {
     ['the Verified identities table in docs/vocabularies.md', doc, [`${withComma(kinds)} kinds and ${units} units seeded`]],
     ['docs/openapi.yaml', read('docs/openapi.yaml'), [`${units} of QUDT's`, `${none} of the ${names} names map to none`]],
     [`${file}'s header`, sql, [`${kinds} of them`, `the ${units} QUDT units`, `${none} of the ${names} names`]],
-    ['its migration note', read('unreleased/migrations/0304.md'), [`${kinds} of them`, `the ${units} QUDT units`, `${mapped} map.`]],
-    ['its upgrade note', read('unreleased/upgrading/a-quantity-kind-has-a-vocabulary.md'), [`${kinds} quantity kinds`, `${mapped} of MTConnect's ${names} unit`]],
+    ['its migration note', sectionOf(supabaseReadme(), '### A quantity kind has a vocabulary (0304)'), [`${kinds} of them`, `the ${units} QUDT units`, `${mapped} map.`]],
+    ['its upgrade note', sectionOf(upgradingGuide(), '### From 1.9.0, a quantity kind has a vocabulary'), [`${kinds} quantity kinds`, `${mapped} of MTConnect's ${names} unit`]],
   ];
   for (const [where, text, wanted] of claims) {
     for (const claim of wanted) {

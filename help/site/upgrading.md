@@ -105,6 +105,22 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
   profile: see [*every container drops the capabilities it does not need*](#from-120-every-container-drops-the-capabilities-it-does-not-need).
+- **A device, gateway, area or cell with a blank name?** Rename it first, or the upgrade stops: see
+  [*a device or a gateway cannot have a blank name*](#from-190-a-device-or-a-gateway-cannot-have-a-blank-name)
+  and [*an area or a cell cannot have a blank name*](#from-190-an-area-or-a-cell-cannot-have-a-blank-name).
+- **A script or API client that writes a device's location?** Check it first: see
+  [*a device can follow its gateway's location*](#from-190-a-device-can-follow-its-gateways-location).
+- **Upgrading the historian apart from the rest?** Upgrade it with the release: see
+  [*History marks a text or flag bucket older than the raw readings*](#from-190-history-marks-a-text-or-flag-bucket-older-than-the-raw-readings).
+- **Gateways archived, deleted or changed to or from Remote before the upgrade?** Plan to check their
+  broker accounts 15 minutes after it: see
+  [*a revocation is asked until the broker confirms it*](#from-190-a-revocation-is-asked-until-the-broker-confirms-it).
+- **A Remote gateway set up with the install command before 1.9.0?** Plan two steps for it after the
+  upgrade: see [*flow sync starts on an appliance the install command set up*](#from-190-flow-sync-starts-on-an-appliance-the-install-command-set-up).
+- **Aber's images built on site?** Add the `licenses` build context first: see
+  [*the dashboard's and Node-RED's images are built with `licenses/`*](#from-190-the-dashboards-and-node-reds-images-are-built-with-licenses).
+- **A Grafana panel or alert rule of your own that reads `aber_ingestion_messages_total`?** Check it
+  first: see [*`aber_ingestion_messages_total` is labelled by gateway*](#from-190-aber_ingestion_messages_total-is-labelled-by-gateway).
 
 ### The command
 
@@ -2078,7 +2094,7 @@ change in the Audit Trail, from the migration. A saved 10.5 in **Open proposals 
 stopped every proposal in 1.8.x. It becomes 10.
 
 An API client that writes a part value to one of them now gets HTTP 400, with `<key> must be a whole
-number`.
+number`, followed by `of days`, `of hours` or `of seconds` where the key ends in one.
 
 ### From 1.9.0, a credential revoked by a change of a gateway's type is asked for again
 
@@ -2098,8 +2114,687 @@ To check a gateway whose type you changed:
 2. Find the gateway. If **Credential** says **Revoked** and **Broker** says **Active**, the old
    account still works.
 3. Issue the gateway a new credential. Use **Generate Broker Credential** on Gateways for a Host,
-   Simulated or Third-party gateway, or **Set Up Gateway** for a Remote one. The new password
-   replaces the old.
+   Simulated or Third-party gateway. The new password replaces the old.
+4. For a Remote gateway, use **Set Up Gateway**, and enrol the appliance again with the install
+   command or bundle it gives. The new password replaces the old once the appliance enrols. Until
+   then, **Broker** stays **Active**.
+
+### From 1.9.0, an area or a cell cannot have a blank name
+
+Before you upgrade, check that no area or cell has an empty name or a name of spaces. The database
+now refuses one (migration `0291`).
+
+Most sites have none. The dashboard refuses a blank name, but its New Cell dialog accepted a name of
+spaces until 1.8.0. A cell made then, a script, an import or an API client can have left one. Run
+this. No rows means you can upgrade:
+
+```bash
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+  "SELECT 'area' AS kind, id, created_at, name FROM public.areas WHERE btrim(name) = ''
+   UNION ALL
+   SELECT 'cell', id, created_at, name FROM public.cells WHERE btrim(name) = ''
+   ORDER BY 1, 2;"
+```
+
+Give each row a name, or delete it if it was a mistake. Open it on the **Areas** or **Cells** page and
+choose **Edit Details**. Then upgrade.
+
+If you upgrade first, db-init stops at `0291` and does not apply the migrations after it. Its log
+names each row, with its table, id and the date it was made. Name them, then run `helm upgrade`
+again with the same values. Nothing is renamed for you, because only you know what each one is.
+
+An API client that writes a blank name now gets HTTP 400, naming `areas_name_not_blank` or
+`cells_name_not_blank`. The dashboard already says "Give the area a name" or "Give the cell a name".
+
+### From 1.9.0, a device can follow its gateway's location
+
+A device now has four locations: **Follow Gateway**, a cell, Area-Wide and Site-Wide. Follow Gateway
+takes whatever place the device's gateway has, and moves when the gateway does. There is nothing to
+run. The upgrade moves the devices that need it (migration `0293`).
+
+**What moves.** Until now, **In a cell** with no cell chosen meant "inherit from the gateway", and it
+reached only the gateway's cell. A device behind an Area-Wide or Site-Wide gateway showed as
+Unassigned. The upgrade turns every device that was In a cell with no cell into **Follow Gateway**:
+
+- Where its gateway is in a cell, the device stays in that cell. Nothing you can see changes.
+- Where its gateway is Area-Wide or Site-Wide, the device leaves **Unassigned** for that place.
+- Where its gateway has no location, or it has no gateway, the device stays Unassigned.
+
+A device with a cell of its own, or marked Area-Wide or Site-Wide, is not touched. It keeps its place
+whatever its gateway does. Each move is a row in the Audit Trail, made by `migration`.
+
+**To see how many devices move, run this before you upgrade.** Your site's number is yours, and these
+notes cannot know it. The upgrade also prints it in db-init's log, as a line that starts `0293:`.
+
+```bash
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+  "SELECT count(*) AS devices_to_move,
+          count(*) FILTER (WHERE g.cell_id IS NOT NULL) AS in_its_gateways_cell,
+          count(*) FILTER (WHERE g.location_scope = 'area_wide') AS area_wide_with_its_gateway,
+          count(*) FILTER (WHERE g.location_scope = 'site_wide') AS site_wide_with_its_gateway
+     FROM public.devices d LEFT JOIN public.gateways g ON g.id = d.gateway_id
+    WHERE d.location_scope = 'cell' AND d.cell_id IS NULL;"
+```
+
+**If an API client or a script writes a device's location,** change it before you upgrade. Each of
+these is now refused with HTTP 400:
+
+- A request that writes `cell_id` alone, for a new device or one that follows its gateway, fails
+  `devices_follow_gateway_has_no_place`. A device that follows its gateway has no cell. Send
+  `location_scope` as `cell` with the `cell_id`.
+- `location_scope` of `cell` with no `cell_id` fails `devices_cell_scope_names_a_cell`. To follow the
+  gateway, send `gateway`, with no cell and no area.
+- `/rest/v1/rpc/relocate_devices` and the `approve-quarantine` function refuse a move or an approval
+  with `location_scope` of `cell` and no `cell_id`. On 1.8.x it meant no cell of the device's own.
+  Send `gateway` instead.
+
+The dashboard already sends all three. A device you create without a location follows its gateway.
+
+**Where the answer shows.** `device_locations` has three new values of `location_source`:
+`followed_cell`, `followed_area` and `followed_site`. A program that reads the view and switches on
+the value must treat them as the place they follow. `inherited` is no longer given: a device that
+took its gateway's cell now reads `followed_cell`. The Unified Namespace topic of a device that
+follows its gateway is made from the gateway's place, so it changes when the gateway moves. A device
+that leaves Unassigned starts to publish under a topic, if the bridge is on.
+
+### From 1.9.0, History marks a text or flag bucket older than the raw readings
+
+From 1.9.0, a History chart of a text or a flag older than the raw readings marks each bucket that
+held more than one value. Before, such a chart showed only each bucket's last value. Pointing at a
+marked text says **more than one value in this bucket**, without a count, and a marked flag says
+**both values in this bucket**.
+
+The marks come from three new summaries on the historian: `telemetry_state_1m`, `_5m` and `_1h`.
+`helm upgrade` creates them in its `timescaledb-maintenance` step, before db-init, as it creates the
+other summaries. So upgrade the whole release, historian included. If only the platform database
+is upgraded, History's Device, Cell and Metric tabs fail to load a window older than the raw
+readings that holds a text or a flag.
+
+**The marks start from the upgrade.** The summaries are built from the raw readings, so on the day
+of the upgrade they reach back as far as the raw readings do, 14 days by default
+(`timescaledb.retention.retainFor`). An older bucket gets no mark, even if it held more than one
+value. Nothing goes back to fill them from the hourly summaries you already hold.
+
+They fill in the background:
+
+- **The last 25 hours** fill within minutes, as the other summaries' refresh does.
+- **Older raw readings** fill six hours at a time, every 2 minutes, until they reach the oldest raw
+  reading. That is about two hours for 14 days. The historian's log says
+  `backfill_state_rollups: the state rollups reach raw telemetry's oldest hour` when it is done.
+
+To see how far it has got, run this. `done` is true once it has reached the oldest raw reading:
+
+```bash
+kubectl -n aber exec -i statefulset/timescaledb -- psql -U postgres -d postgres -c \
+  "SELECT reached, done, chunk_ms FROM public.state_rollup_backfill;"
+```
+
+**They take disk space.** On a site where most metrics are texts or flags, the 1-minute summary
+holds about 70% as many rows as `telemetry_1m`. On a site of mostly numbers, it holds the share
+that the texts and flags make up. They follow the retention and compression settings the other
+summaries have (`timescaledb.rollups.*`), so there is no new setting. The 1-minute summary's
+refresh reads the raw readings a second time, which roughly doubles that read.
+
+### From 1.9.0, a revocation is asked until the broker confirms it
+
+Archiving a gateway, deleting it, changing its type to or from Remote, and setting a Remote gateway up
+again each end its broker credential. Aber now asks the broker to disable the account until the broker
+confirms it, every 15 minutes, whatever the gateway's type. It keeps asking after the gateway is
+archived or deleted, and when the credential service is not configured yet (migrations `0311` and
+`0312`).
+
+#### What to check after you upgrade
+
+1. Wait 15 minutes after the upgrade. In that time Aber asks the broker again for every revocation it
+   has a record of, and for every archived gateway that ever held a credential.
+2. Sign in as an Administrator and open **Access Control › Broker credentials**.
+3. Look for a **Broker** column that reads **Active** for a gateway that is archived, or whose
+   **Credential** reads **Revoked**. If one stays Active, the credential service cannot be reached:
+   check that it is running.
+4. Look for a gateway that is not archived and whose type changed to or from Remote before the
+   upgrade. If its account is Active and the gateway should not be connecting, give it a new
+   credential. Use **Generate Broker Credential**, or **Re-issue Setup** for a Remote gateway. Either
+   replaces the old password.
+5. Look for accounts marked **No gateway**. They belong to gateways deleted before the upgrade, which
+   Aber has no record of. List them with `node scripts/revoke-orphaned-broker-accounts.mjs`, and
+   disable them with `--yes`. The script never deletes an account.
+
+#### What changes
+
+- **Re-issue Setup** for an enrolled gateway disables the old appliance's broker account at once. The
+  new appliance is given a new password when it enrols. The drawer now offers Re-issue Setup for an
+  enrolled gateway that is offline or stale, after you type its name. It is never offered while the
+  gateway is online.
+- **Changing a gateway's type away from Remote** removes its appliance's deploy key from the forge, as
+  archiving does. The repository is kept. Set the gateway up again to give a new appliance a key.
+- **An archived gateway's Credential reads Revoked** while Aber is still asking the broker. It used to
+  flip back to Issued while a failed request waited to be asked again.
+
+A script of your own that reads `gateway_revocation_requests` should expect `request_id` to be empty
+for a revocation that could not be asked yet. A deleted gateway's revocation is kept in
+`deleted_gateway_revocations` until the broker confirms it. Nothing needs doing before you upgrade.
+
+### From 1.9.0, flow sync starts on an appliance the install command set up
+
+On a Remote gateway set up with the install command, the appliance's `flow-sync` service never
+started. It restarted in a loop, logging *Cannot find module '/bundle/flow-sync.mjs'*. So a flow
+approved in the forge never reached that appliance, its `appliance` branch got no reports, and the
+drawer's convergence rows stayed empty. Telemetry was not affected.
+
+The cause was the folder's permissions. `flow-sync` runs as user 1000, and it mounted the whole
+`/opt/aber-gateway` folder, which the platform playbook makes root's with mode `0750`. It now mounts
+only its own script. A bundle you copied by hand was usually not affected, because you own the
+folder you copied. A gateway first set up on 1.9.0 is not affected.
+
+Nothing needs doing before you upgrade. The fix reaches an appliance when it converges to the
+platform at `v1.9.0`. An appliance converges to the tag in its gateway's `platform.yml`, and only a
+pull request moves that tag. An affected appliance cannot fetch the pull request, because `flow-sync`
+is what fetches it, so it stays on the tag it enrolled with. After the upgrade, do this once for each
+such gateway:
+
+1. In the forge, change `tag` in the gateway's `platform.yml` to `v1.9.0` by pull request, and merge
+   it. Do this first: without it, the appliance goes back to its old tag at the next converge, and
+   `flow-sync` stops again.
+2. On the appliance, set the tag it converges to until `flow-sync` has fetched, and converge:
+
+   ```bash
+   R=/var/lib/aber-gateway/data/gitops/repository.json
+   sudo jq '.platform_tag = "v1.9.0"' "$R" > /tmp/repository.json
+   sudo cp /tmp/repository.json "$R"
+   rm /tmp/repository.json
+   sudo systemctl start aber-gateway-converge
+   ```
+
+The converge installs the new compose file and starts `flow-sync`. Within five minutes, `flow-sync`
+fetches the gateway's repository, deploys any flow approved while it was down, and the gateway's
+`appliance` branch gets its first report. From then on the appliance takes its tag from
+`platform.yml`, as every other does. To check it is running:
+
+```bash
+sudo docker logs --tail 20 aber-gateway-flow-sync
+```
+
+### From 1.9.0, the dashboard's and Node-RED's images are built with `licenses/`
+
+The release's images need nothing. A site that builds Aber's images itself adds one flag to two
+builds, the dashboard's and Node-RED's. That is an arm64 or air-gapped site following
+[*Images you must build*](../../deploy/k8s/README.md#images-you-must-build). Run both builds from the
+repository root, with `NS` and `V` set as that section sets them:
+
+```bash
+docker build -f node-red/Dockerfile --build-context licenses=./licenses \
+                                                -t $NS/node-red:$V node-red
+docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
+                                    --build-arg VITE_APP_VERSION=$V \
+                                    --build-context help=./help \
+                                    --build-context licenses=./licenses \
+                                                -t $NS/frontend:$V frontend
+```
+
+Without `--build-context licenses=./licenses`, the build stops with `pull access denied` for
+`licenses`. Both images now list the licences of their operating system's packages under
+`/usr/share/licenses/`, as every Alpine-based image Aber publishes does
+([`NOTICE.md`](../../NOTICE.md)). The script that writes the list is in `licenses/`.
+
+### From 1.9.0, `aber_ingestion_messages_total` is labelled by gateway
+
+From 1.9.0, `aber_ingestion_messages_total` carries an `edge_node` label beside `msg_type`. It is one series
+for each gateway and message type, where it was one for each message type. Aber's own alert rules and its
+System page add the series up, so they read as before. No Grafana dashboard the chart ships reads it.
+There is nothing to run.
+
+Check any panel, alert rule or recording rule of your own that reads the counter. One that does not add
+the series up now answers once for each gateway, where it answered once for each message type:
+
+```promql
+# Before: one line for each message type. Now: one for each gateway and type.
+rate(aber_ingestion_messages_total{msg_type="ddata"}[5m])
+
+# The stack's rate, as before:
+sum(rate(aber_ingestion_messages_total{msg_type="ddata"}[5m]))
+```
+
+- **An alert that reads the series one by one changes meaning.** A rule such as
+  `rate(aber_ingestion_messages_total[5m]) == 0` now fires for each gateway that goes quiet, and no
+  longer for the daemon as a whole. Wrap it in `sum(...)` for the stack, or keep it for each gateway on
+  purpose with `sum by (edge_node) (...)`.
+- **A query that names the type is unchanged.** `{msg_type="ddata"}` still selects. Add `sum` or
+  `sum by (msg_type)` around it.
+- **A script that reads the exposition line by line** sees a label it did not before. A line is
+  `aber_ingestion_messages_total{edge_node="gwy…",msg_type="ddata"} 12.0`, the labels in name order, so
+  match the `msg_type` by name and add up every edge node.
+- **Storage grows by one series for each gateway and message type**, which is a few hundred on a site of
+  a hundred gateways.
+
+The first gap in a gateway's sequence numbers is also counted now. The daemon makes
+`aber_ingestion_sequence_gaps_total` and `aber_ingestion_sequence_messages_missed_total` for a gateway at
+zero when it counts its first message, where they were made at its first gap and showed no increase for it.
+The **Sparkplug Message Loss** rule can fire on a gateway's first gap after the daemon starts.
+
+### From 1.9.0, a device's nameplate no longer carries ConnectionMethod or Status
+
+From 1.9.0, the Digital Nameplate of a device's AAS export has no `ConnectionMethod` and no `Status`.
+There is nothing to run, and no row changes. The shell that the `aas-api` function serves is built the
+same way, so it loses both too.
+
+- **`ConnectionMethod` said nothing true about the asset.** Every device reaches Aber over Sparkplug B,
+  so the value was always that, or empty. A device admitted from Quarantine had none, and its nameplate
+  still carried the empty element.
+- **`Status` was a live state frozen into a file.** It copied the device's `status`, ONLINE or OFFLINE,
+  as it was when the file was saved. It was also not the state the Devices page shows. A device that had
+  never connected read OFFLINE, and a quarantined device read ONLINE.
+
+Neither moves into another submodel. The nameplate keeps its IDTA elements, `AssetSparkplugId`,
+`EdgeGatewayName` and `EdgeGatewaySparkplugId`.
+
+**If a program reads either element,** stop reading it. A request to `aas-api` for either one by its path
+gets HTTP 404, as for any element the shell does not have. Nothing replaces `ConnectionMethod`. To read
+a device's state live, ask i3X, which gives each value a quality as it is read, or read `status` on
+`/rest/v1/devices`.
+
+A file exported before the upgrade keeps the two elements it was saved with.
+
+### From 1.9.0, a schema's Submodel ids follow its lineage and carry its version
+
+A device's AAS Submodels for a schema no longer change id when you publish a new version of the
+schema. Each also says which version made it. There is nothing to run. The upgrade fills in what it
+needs (migration `0298`). Read this if an ERP, PLM or MES, or an AAS server you load shells into,
+holds a Submodel id.
+
+**Which ids move.** Until 1.9.0 a Submodel's id was made from the name of the schema version.
+Publishing `Robot_Arm_Schema_v2` moved the Submodel of every device on it from
+`<globalAssetId>/submodel/Robot_Arm_Schema/OperationalTelemetry` to
+`<globalAssetId>/submodel/Robot_Arm_Schema_v2/OperationalTelemetry`. From 1.9.0 the id is made from
+the name the schema's first version was built with, so:
+
+- **A schema that was never versioned keeps the id it has.** Nothing moves, unless it shares its key
+  with another schema (see below).
+- **A schema that has been versioned goes back to its first id**, the one its first export carried.
+  `.../submodel/Robot_Arm_Schema/OperationalTelemetry`, whichever version is in force.
+- **A publish leaves the id where it was from now on.** Each Submodel's `administration.version` is
+  the schema's version, as a string: `"2"`. A consumer that cached a Submodel sees the version move.
+  This applies to OperationalTelemetry and KeyPerformanceIndicators. Other Submodels carry none.
+- **On a device with more than one schema, the `idShort` moves with the id.** It carries the same
+  key: `Robot_Arm_Schema_v2_OperationalTelemetry` becomes `Robot_Arm_Schema_OperationalTelemetry`.
+  A consumer that finds a Submodel by its `idShort` must change too.
+- **i3X names a schema's type by its first version.** A schema with no semantic id had its
+  version's name as its `sourceTypeId`, which its devices carry too. It now has the first version's
+  name: `Robot_Arm_Schema_v2` becomes `Robot_Arm_Schema`. An i3X client that stored it must change.
+
+To see which schemas have more than one version, and so which devices' ids move:
+
+```bash
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+  "SELECT lineage_name, count(*) AS versions, max(version) AS latest
+     FROM public.schemas GROUP BY lineage_root_id, lineage_name HAVING count(*) > 1
+    ORDER BY lineage_name;"
+```
+
+**The AAS API answers the old ids until 1.10.0.** Both Submodel routes, `/submodels/{id}` and
+`/shells/{id}/submodels/{id}`, also accept an id made from any version's name, for a schema the device
+carries. They return the current Submodel, and its `id` is the new one. A client that stored an old id
+keeps working. Change what you stored to the new id before 1.10.0, which removes the old ones. Only the
+AAS API does this.
+
+**A file holds only the new id.** A JSON export and an `.aasx` carry no old id, because an AAS has no
+way to give one Submodel two ids. What you imported before the upgrade holds the old ids. Import the
+shell again, and delete the Submodels under the old ids on the other server. `npm run
+aas:push-basyx -- --replace` replaces a Submodel by its id, so from here a new publish no longer adds a
+second Submodel beside the first. Without `--replace`, the script skips a Submodel whose id the server
+already holds, so a new version's content reaches the server only with it.
+
+**Two things can still change an id.**
+
+- **A draft attached beside the version in force** has the key `<name>_v<n>` until you publish it,
+  so the two Submodels differ. A draft attached alone keeps the plain key, so publishing it moves
+  nothing.
+- **Two schemas that map to one key** stay apart. `Robot-Arm` and `Robot_Arm` are two schemas, and
+  both make the key `Robot_Arm`. The later one, in the order of its first version's id, gets the first
+  eight hex digits of that id added: `Robot_Arm_1f3a9c2e`. The export counts these in
+  `stats.submodel_key_clashes`. To choose a key yourself, set `device_submodels.submodel_key` on the
+  attachment.
+
+**`device_submodels.submodel_key` is an override.** It is the key in the Submodel's id, as typed, and it
+survives a publish. Nothing in the dashboard sets it, so it is empty unless a script wrote it. It must
+now start with a letter. A key that began with an underscore is rewritten without it by the upgrade,
+and one of underscores alone is cleared. The Audit Trail records each rewrite. db-init's log gives the
+number on a line with `0298:`.
+
+**The schema list gains two columns.** `/rest/v1/schemas` returns `lineage_name` and `lineage_root_id`
+on every version. They are the first version's name and id. A script that finds a schema's versions can
+filter on `lineage_root_id` instead of working them out from the names. The dashboard names a schema in
+Approvals, in the publish message and in the Validate Payload hint by its lineage and version once:
+`Robot_Arm_Schema v2`.
+
+### From 1.9.0, an automation's alert says the unit of its reading
+
+An alert raised by an automation now says the unit of a measured reading, as History does. For a
+temperature in `CELSIUS` it said "Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5, above 80 for 5m". It now
+says "Lathe 3: Spindle/BEARING_TEMPERATURE is 82.5 °C, above 80 °C for 5m". A percentage stands against
+the number ("42%"), and a unit with no symbol is printed as its code.
+
+This is the alert's `summary`: the alert counter, **History**'s Alerts tab, an alert's tooltip on
+Devices and the Site Map, the **What** line of an email and the `summary` of a webhook's message. Its `labels` and `values` are unchanged. The
+metric is still its name, and `values.value` and `values.threshold` are still numbers.
+
+If a script reads the number out of an automation alert's `summary`, read `values.value` instead. A
+pattern such as `is ([0-9.]+),` no longer matches a reading that has a unit.
+
+An alert that is firing when you upgrade keeps the text it started with. The next one says the unit.
+
+### From 1.9.0, a schema is exported as YAML and Download JSON is gone
+
+On the Schemas page, a schema's one export is now **Export YAML** in its drawer. **Export** in the
+toolbar saves the schemas ticked, or every schema in force, as `device-schemas.yaml`. **Upload** reads
+the file back, here or on another site. The detail dialog no longer has a **Download JSON** button.
+
+#### What to do
+
+If you open a schema's definition in a JSON Schema tool, note that the YAML file is not that definition.
+It names each metric by its catalogue name and holds its range. Aber builds the definition from the
+catalogue when the file is uploaded.
+
+The stored definition is still in the API. To read one version's, as JSON:
+
+```text
+GET /rest/v1/schemas?schema_name=eq.<the version's name>&select=schema_definition
+```
+
+A version's name carries its number after the first, for example `Robot_Arm_Schema_v2`.
+[`docs/openapi.yaml`](../../docs/openapi.yaml) has the call, under `/rest/v1/schemas`.
+
+### From 1.9.0, an archived gateway is refused a setup token
+
+Asking for a setup token, an install command or a bundle for an archived gateway is now refused. Restore
+the gateway first (migration `0309`).
+
+It used to succeed. The token could not be used while the gateway was archived, but the gateway then
+read **Awaiting setup**, and a restore brought it back holding a token that stayed live for up to a day.
+
+The dashboard never offers **Set Up Gateway** for an archived gateway, so you only meet this if a script
+of your own calls `issue_gateway_enrollment_token()`, or posts to the `gateway-bundle` function, for a
+gateway you have archived. The function answers **400**, *That gateway is archived*. The database call
+raises `invalid_parameter_value`, with *gateway X is archived; restore it before issuing a setup token*.
+
+To set an archived gateway up again, restore it on the **Archived Entities** page or from its drawer.
+Then set it up. Nothing needs doing before you upgrade.
+
+### From 1.9.0, a restored gateway keeps its revocation stamp
+
+Restoring an archived gateway used to clear `credential_revoked_at`, the time its broker account was
+disabled. The account stayed disabled, so the record said Issued where the broker said Disabled. A restore
+now leaves the stamp (migration `0308`).
+
+What you see after you restore a gateway:
+
+- The **Credential** column on Access Control reads **Revoked**, beside a **Broker** column that reads
+  **Disabled**. The two now agree.
+- A **Remote** gateway is offered **Set Up Gateway** in its drawer, as the Restore dialog says. Run it to
+  give the appliance a new setup command. The appliance enrols again and is given a new credential.
+- A **Host**, **Simulated** or **Third-party** gateway is offered **Generate Broker Credential**, as before.
+
+A gateway you restored before the upgrade keeps the record it has. It reads **Issued** beside a disabled
+account until you issue it a credential or set it up again.
+
+A script of your own that reads `credential_revoked_at` and takes an empty value to mean the gateway is
+active should now read an enrolment or a `CREDENTIAL_ISSUED` row after the stamp as well. The dashboard
+does the same: the stamp outranks an enrolment or an issue only while it is the later one.
+
+Nothing needs doing before you upgrade.
+
+### From 1.9.0, a replay lane shows its machine's 3D model
+
+A replay lane no longer holds a 3D model of its own. It shows the model of the device it was recorded
+from. You do not need to do anything. The upgrade moves the models that lanes already hold (migration
+`0294`).
+
+For each replay lane that holds a model:
+
+- **If its device has no model,** the device takes the lane's model and the lane is cleared. The model
+  now shows on the device, and the lane shows it from there.
+- **If its device has a model,** the lane's is cleared and the device keeps its own.
+- **If a device has two lanes that both hold one,** the device takes the older lane's and the other is
+  cleared.
+
+No file is moved, copied or deleted. The file stays in the `asset-3d-models` bucket, where the lane's
+upload put it, and the device's model opens and downloads from there as before. A link to it that
+someone copied still works. **Remove** on the device deletes the file.
+
+To see which lanes hold a model before you upgrade, run this. No rows means nothing moves:
+
+```bash
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+  "SELECT l.name AS lane, l.model_3d_path AS lane_model, m.name AS device, m.model_3d_path AS device_model
+     FROM public.devices l JOIN public.devices m ON m.id = l.shadow_of
+    WHERE l.model_3d_path IS NOT NULL ORDER BY 1;"
+```
+
+db-init names each lane it moves or clears in its log, and each change is a row in the Audit Trail,
+written by the migration.
+
+After the upgrade, a lane's drawer offers **View 3D Model** when its device has one, and nothing about a
+model when it has none. The view is read-only, and says whose model it is. To change a model, open the
+device it was recorded from.
+
+Two things refuse a model on a lane from now on. An API client that sets `model_3d_path` on a lane gets
+HTTP 400, naming `devices_a_replay_lane_has_no_model`. A client that uploads a file to
+`asset-3d-models/<lane id>/...` is refused by the storage policy. Upload to the device instead.
+
+A lane's AAS export carries no 3D model, because the lane has none. Export the device.
+
+### From 1.9.0, `devices.connection_method` is deprecated
+
+From 1.9.0, the dashboard no longer sends a device's connection method, and nothing in Aber uses the
+column. It still works in 1.9.x, and it is removed no sooner than 1.10.0. There is nothing to run.
+
+- **The dashboard stops writing it.** The Devices form, the dialog that approves a device from
+  Quarantine and a change proposal for a device no longer carry it. Saving a device leaves the stored
+  value as it is.
+- **The REST API still accepts it.** `/rest/v1/devices` reads and writes `connection_method`, and
+  `docs/openapi.yaml` marks it deprecated. A change proposal that names it is still applied when it is
+  approved. The Audit Trail still files a change to it as Configuration.
+- **It is removed no sooner than 1.10.0.** Change any script that reads or writes it before then.
+  Nothing replaces it: the value was always Sparkplug B, or empty, so a script that reads it learns
+  nothing.
+- **Its value no longer reaches the AAS export.** See [*a device's nameplate no longer carries
+  ConnectionMethod or Status*](upgrading.md#from-190-a-devices-nameplate-no-longer-carries-connectionmethod-or-status).
+
+### From 1.9.0, four ISO 22400 KPIs are deprecated
+
+From 1.9.0, `UTILIZATION`, `SCRAP_RATIO`, `MTBF` and `MTTR` are deprecated in the ISO 22400 vocabulary. They
+still work in 1.9.x, and they are removed no sooner than 1.10.0. There is nothing to run.
+
+- **The Vocabulary page marks them.** The ISO 22400 tab says **deprecated** on each, and the line under its
+  tooltip says why. `UTILIZATION` is not an ISO 22400 KPI, and its description now says so. No free
+  source publishes the formulas of the other three.
+- **They stay through 1.9.x.** The four rows, their groups (`Quality`, `Utilization` and `Maintenance`) and
+  the example metrics that use them are all still there. Add Metric still offers them.
+- **Your metrics are not changed.** An id is only a value, so a metric that carries one of these ids keeps
+  it after 1.10.0 too. Its ConceptDescription in an AAS export then takes the catalog's description, as it
+  does for any id no vocabulary defines.
+- **What replaces them is an import.** A site that owns ISO 22400-2 can import it on the Vocabulary page,
+  with its licence recorded. Its concepts carry the ids your file gives them, not these, so the import
+  does not define a metric that keeps one of these ids. To have it defined by the import, give the metric
+  the imported concept's id in **Edit** on the Metrics page, and add the old id as a further id if a
+  consumer matches on it. Do that before 1.10.0 if you want its definition to stay a vocabulary's own.
+- **A script that reads `/rest/v1/iso22400_vocabulary`** gets a `deprecated_reason` on each row: the reason
+  for these four, and null for the other four. `docs/openapi.yaml` marks the four deprecated. They are not
+  the OEE KPIs: `AVAILABILITY`, `EFFECTIVENESS`, `QUALITY` and `OEE` stay, cited to OPC 40501-1.
+
+### From 1.9.0, a device's metric groups go by one name
+
+The Devices page called a device's metric groups **Type**, **Classification** and **Device Type**.
+They are now **Metric groups** everywhere: the roster's column, the filter, the details panel's row
+and the line in **Edit Details**. You do not need to do anything.
+
+Two findings were listed among the groups: **Unmodelled** and **Out of vocabulary**. They are not
+groups, so they have moved:
+
+- **In the roster,** they are warning badges in the **Status** column. In the details panel, they are
+  warning badges beside the state.
+- **In the filters,** **Out of vocabulary** joins **Publishing unmodelled metrics** in **Status**, and
+  **Needs attention** now counts it.
+
+A link or a bookmark that used the old filter still works. Opening it rewrites the address once:
+
+| Old link | Opens |
+| :--- | :--- |
+| `/devices?type=Axes` | **Metric groups** on **Axes**, as `/devices?group=Axes` |
+| `/devices?type=Unmodelled` | **Status** on **Publishing unmodelled metrics** |
+| `/devices?type=Out of vocabulary` | **Status** on **Out of vocabulary** |
+
+A bookmark that sorted by the old column (`?sort=type`) opens in the usual order. Sort by **Metric
+groups** again to save a new one.
+
+### From 1.9.0, an export saves a derived metric's values
+
+From 1.9.0, **Export CSV** on History saves a derived metric's values. 1.8.0 left it out and said to export
+its inputs. The upgrade declares one function again, adds one it calls, and changes no row. There is
+nothing to run.
+
+- **Every tab that exports offers it:** Device, Overview, Cell, Area and Metric. A derived metric has no
+  readings, so its rows are its values for each bucket of the resolution you choose. With **Raw samples**
+  they come at 1 minute, in the same file as the raw readings.
+- **The file keeps its five columns.** Each derived metric has a comment row that starts with `# DERIVED:` and
+  gives its definition. A time in state is a fraction from 0 to 1, with the unit `% of the time`.
+- **A script that calls `/rest/v1/rpc/export_telemetry`** finds a new `derived` list in the document. It is
+  empty when no derived metric was asked for, and nothing else in the document changes.
+- **The Audit Trail** names each derived metric exported, with its definition.
+- **The limits are the same:** at most 14 days (or what **Settings** says) and 50,000 rows, derived rows
+  included.
+
+### From 1.9.0, a metric can carry more than one semantic id
+
+From 1.9.0, a metric can carry further semantic ids beside its own. The upgrade adds a table and a view and
+changes no row. There is nothing to run, and nothing changes in an export until an Administrator adds one.
+
+- **In the dashboard,** **Edit** on the Metrics page lists a metric's **Further Semantic IDs**. Add one when a
+  submodel template names a quantity by an id other than the one the metric was named from. The metric keeps its
+  own id.
+- **In an AAS export,** a metric with further ids has them as `supplementalSemanticIds` on its Property, beside
+  its `semanticId`, and a ConceptDescription for each. A metric with none exports as before. A consumer that
+  matches on `semanticId` alone sees what it saw.
+- **The Digital Nameplate** is also filled from a metric that carries one of its six OPC 40001 Machinery ids as
+  a further id. A metric that carries the id as its own still answers first.
+- **`metric_catalog.semantic_id` keeps its meaning.** The REST API, i3X and the device-schema documents read the
+  metric's own id, as before.
+- **A script that edits the catalogue** finds new routes: `/rest/v1/metric_semantic_ids` to read and write the
+  further ids, and `/rest/v1/metric_semantic_id_crosswalk` to ask which metric carries an id, own or further. A
+  metric carries at most 10, none equal to its own id. Clearing the own id of a metric that carries further ids is
+  now refused, and says to remove them first. So is changing its own id to one of its further ids.
+- **A script that reads the Audit Trail** finds a new `entity_type`, `metric_semantic_ids`, in the asset lane.
+  Its rows are filed under the metric's id, so they appear with the metric's own history.
+- **An edge function deployed before the database** still builds a shell, without the further ids.
+
+### From 1.9.0, a site can import a vocabulary from AAS ConceptDescriptions
+
+From 1.9.0, the Vocabulary page has an **Imported** tab. An Administrator can bring a vocabulary of the site's
+own into it from an AAS file: an `.aasx` package, or an AAS JSON or XML environment. The upgrade adds two tables,
+one column on the metric catalog, and the functions that import a vocabulary, remove one, set whether its
+definitions are shared, and say which vocabulary holds an id. It imports nothing and changes no metric. There is
+nothing to run.
+
+- **Nothing changes in an export until a vocabulary is imported.** An imported concept's ConceptDescription takes
+  the file's preferred name. Its definition stays out of the export, and says the file defines it, until an
+  Administrator confirms on the Imported tab that the licence allows sharing it. Until then, a metric that
+  carries one of the file's ids also leaves its own description out of the export, because it may copy the
+  licensed text.
+- **The Imported tab is for every role to read, and for an Administrator to change.** Importing, removing and
+  sharing each ask for the second factor while it is required, and each change writes a row to the Audit Trail.
+  Removing a vocabulary also records the change to each metric that was linked to it.
+- **A metric started from an imported concept** is a local extension linked to its file. The Metrics page labels
+  it by the file, such as *ISO 22400-2:2014 (site licence)*, and the Standard filter lists each published standard
+  that was imported. Removing the file keeps the metric and its id and clears the link.
+- **A script that reads `/rest/v1/concept_definitions`** can now find a row whose `standard` is null. It is the
+  concept of an imported vocabulary whose definitions are shared. The columns are the same.
+- **A script that reads the Audit Trail** finds a new `entity_type`, `site_vocabularies`, in the asset lane, with
+  three new actions: `SITE_VOCABULARY_IMPORTED`, `SITE_VOCABULARY_REMOVED` and `SITE_VOCABULARY_SHARING_CHANGED`.
+- **A script that reads `/rest/v1/metric_catalog`** finds a new column, `site_vocabulary_id`, null for every metric
+  that was not started from an imported concept.
+- **The dashboard reads the file in the browser.** It opens an `.aasx` with the `fflate` library, which the edge
+  functions already use. It refuses a file over 25 MB, and a package that is larger than its limits once it is
+  unpacked, and says why. The browser checks the file's SHA-256 only on a page served over HTTPS, so a dashboard
+  on plain HTTP cannot import, and says so.
+- **An edge function deployed before the database** still builds a shell, without the imported names.
+
+### From 1.9.0, a quantity kind has a vocabulary
+
+From 1.9.0, the Vocabulary page has a **QUDT** tab. It lists 1126 quantity kinds, such as `Temperature` and
+`VolumeFlowRate`, from QUDT 3.5.2. An AAS export now says which QUDT unit a metric's unit is. The upgrade
+adds two tables and changes no metric. There is nothing to run.
+
+- **The kinds are offered where no other standard names the reading.** Add Metric's semantic id search
+  lists them for a Custom metric and an ASHRAE 223P metric. **Edit** lists them as a further id of any
+  metric that has a semantic id of its own. A metric keeps the id its standard gives it: an MTConnect `TEMPERATURE` stays MTConnect's.
+- **Your metrics are not changed.** A metric that already carries a QUDT id, such as the BMS example
+  readings, keeps it.
+- **An export defines a kind by QUDT's own text.** It said "Temperature, as QUDT defines it." Now the
+  ConceptDescription carries QUDT's description. A kind QUDT describes in no English text keeps the old
+  sentence.
+- **An export carries `unitId` for most units.** The free-text `unit` is unchanged, `CELSIUS`. Beside it,
+  `unitId` is a reference to QUDT's unit, `http://qudt.org/vocab/unit/DEG_C`. 83 of MTConnect's 100 unit
+  names have one. A script that reads a ConceptDescription's `unit` keeps working. One that rejects a
+  field it does not know must accept `unitId`.
+- **i3X lists a new namespace,** `http://qudt.org/vocab/quantitykind?projection=i3X`, once a metric
+  carries a kind as its own id. The types of such a metric moved from the local namespace.
+- **A script that reads `/rest/v1/qudt_quantity_kinds` or `/rest/v1/qudt_units`** gets QUDT's ids and labels,
+  each kind's description and each unit's symbol. QUDT is under CC BY 4.0. Credit QUDT.org where you republish
+  them.
+
+### From 1.9.0, an OEE KPI cites the source it was read from
+
+From 1.9.0, the Vocabulary page's ISO 22400 tab says where four KPIs were read from: availability,
+effectiveness, quality and OEE. The source is OPC 40501-1 v1.02.0, Annex C.2.4, which is free to read. The
+upgrade adds a column, `source`, and one view. There is nothing to run.
+
+- **The four descriptions changed.** They used ISO 22400-2 names that the annex does not use, "Quality
+  ratio" and "OEE index". They now say "Quality rate" and "Overall equipment effectiveness", and what the
+  annex's abbreviations stand for. The formulas, the units and the semantic ids are the same. A metric that
+  carries one of these ids keeps its own name and description.
+- **An AAS export carries `sourceOfDefinition`** in the IEC 61360 content of a concept whose definition
+  comes from a vocabulary that names a source. These are the four OEE KPIs and every QUDT quantity kind.
+  A consumer that rejects a field it does not know must accept it.
+- **A script that reads `/rest/v1/iso22400_vocabulary`** gets a `source` on each row: the citation for the
+  four, and null for the others. `/rest/v1/concept_sources` lists every id that has one.
+- **A tool that compares exports** sees the four concepts' new definitions and their `sourceOfDefinition` as a
+  change. Re-baseline it.
+
+### From 1.9.0, an AGV reading has a vocabulary
+
+From 1.9.0, the Vocabulary page has a **VDA 5050** tab, and Add Metric has a **VDA 5050** standard. They
+list the 24 readings an automated guided vehicle reports in the `state` message. One is the battery's
+charge. Another says whether the vehicle is driving. The upgrade adds one table and one metric group, and
+changes no metric. There is nothing to run.
+
+- **The group `AGV` is registered.** A site that already made a group called `agv`, `Agv` or `AGV` keeps
+  its own spelling. The upgrade registers nothing for it. A metric named `AGV/...` is accepted as before.
+- **Your AGV metrics are not changed.** A Custom metric a site named by hand keeps its name and its
+  readings. To name one after the vocabulary, add the new metric from the Vocabulary page and deprecate
+  the old one. A metric's name cannot change.
+- **A metric made from a field is named by its path.** `velocity.vx` becomes `AGV/velocity/vx`. The
+  datatype, the semantic id and any fixed set of values are filled in. The unit is not: the VDA writes
+  `m/s`, and a unit here is an MTConnect name.
+- **A script that reads `/rest/v1/vda5050_vocabulary`** gets the 24 fields. Each has its path as `name`,
+  its datatype and its semantic id. It has its unit and description where the schema gives them.
+- **An AAS export** defines a concept carrying one of these ids by the schema's description of the field,
+  where the schema gives one.
+  i3X lists a new namespace, `https://aber.local/semantics/vda5050/v3.0`, once a metric carries one of the ids.
+
+### From 1.9.0, an exported MTConnect concept is defined by MTConnect's text
+
+From 1.9.0, an AAS export defines each MTConnect data item type by the text MTConnect publishes for it.
+Before, it used the one description every live metric carrying the type agreed on. Failing that, it used
+a sentence naming the type, such as "POSITION, as MTConnect defines it." The upgrade adds one column and
+changes no metric. There is nothing to run.
+
+- **What changes in a file you already export:** the `definition` of each MTConnect ConceptDescription.
+  `POSITION` is now "point along an axis in a cartesian coordinate system." The ConceptDescription's id,
+  name, unit and data type are the same.
+- **A metric's own description is not touched.** It still shows on the Metrics page and in the shell's
+  property. It no longer defines the shared concept.
+- **A script that reads `/rest/v1/mtconnect_vocabulary`** finds a new `description` field. It is null
+  for subtypes, units and components, and for `ELEVATION`, which MTConnect 2.7 does not describe.
+- **A tool that compares exports** sees the new text as a change. Re-baseline it.
 
 ## Backups
 
