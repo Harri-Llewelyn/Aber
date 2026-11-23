@@ -2624,7 +2624,7 @@ main:focus { outline: none; }
 .modal-lg { max-width: 640px; }
 
 /* Two columns of fields: the nameplate, whose sixteen IEC 63278 properties read as pairs, and Add
-   Metric and Add Derived Metric, whose name and kind fields share a row. */
+   Metric and Add Derived Metric, which build a metric's name from a row of short fields. */
 .modal-xl { max-width: 720px; }
 
 /* A table, or content that needs a table's width: a device's configuration parameters, the token
