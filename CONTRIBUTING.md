@@ -106,6 +106,7 @@ not add a line to a shared list.
 | A drift check | `scripts/drift-checks/<NNN>-<name>.mjs` | `NNN` is the check's number, padded to three digits, with its letter if it has one (`004b`). Export a default function. Import what you share from `./lib.mjs`. |
 | A mirror check | `scripts/mirror-checks/<NNN>-<name>.mjs` | The same, with that directory's `lib.mjs`. |
 | A Python suite | The top of the suite file | A `# suite:` header with `lanes:` and `why:`, before the docstring. [`scripts/python-suites.mjs`](scripts/python-suites.mjs) describes it. `node scripts/run-python-suites.mjs --list` prints every suite. |
+| A lib test | A new `*.test.mjs` in `node-red/`, `scripts/`, `scripts/lib/` or `scripts/lint/` | Nothing else to edit: `npm run test:lib` finds it. `node scripts/run-lib-tests.mjs --list` prints every file it runs. |
 | A function a migration redefines | The header comment of that migration | `-- Redefines public.<fn>: <why>`, one line for each function. Never inside the function's body. |
 | A migration's section of the README | `unreleased/migrations/<NNNN>.md` | The whole section, `### <title> (NNNN)`. [`unreleased/migrations/README.md`](unreleased/migrations/README.md) says how. |
 | An upgrade note | `unreleased/upgrading/<name>.md` | The whole section, `### From X.Y.Z, <what changes>`. [`unreleased/upgrading/README.md`](unreleased/upgrading/README.md) says how. |
