@@ -1149,20 +1149,24 @@ describe('Context panel layout invariants', () => {
 })
 
 describe('The actions, two to a row', () => {
-  it('fill two 200px columns where they fit, and one where they do not', () => {
-    const rule = APP_CSS.match(/\n\.context-panel-actions \{([\s\S]*?)\n\}/)[1]
+  it('fill two 200px columns where they fit, and one where they do not, in the grid every section uses', () => {
+    const rule = APP_CSS.match(/\n\.context-buttons \{([\s\S]*?)\n\}/)[1]
     expect(rule).toMatch(/display:\s*grid/)
     expect(rule).toMatch(/grid-template-columns:\s*repeat\(auto-fill, minmax\(200px, 1fr\)\)/)
+    // The Actions section's own rule rules it off, and lays out nothing.
+    expect(APP_CSS.match(/\n\.context-panel-actions \{([\s\S]*?)\n\}/)[1]).not.toMatch(/display:|grid/)
   })
 
-  it('give the label, the primary and a danger action the whole row', () => {
-    const span = APP_CSS.match(/\n((?:\.context-panel-actions > [^,{]+,\n)+\.context-panel-actions > [^{]+) \{ grid-column: 1 \/ -1; \}/)
+  it('give the label, the primary, a danger action and a lone action the whole row', () => {
+    const span = APP_CSS.match(/\n((?:\.context-buttons > [^,{]+,\n)+\.context-buttons > [^{]+) \{ grid-column: 1 \/ -1; \}/)
     expect(span).not.toBeNull()
     const selectors = span[1].split(',\n').map(s => s.trim())
     expect(selectors).toEqual([
-      '.context-panel-actions > .context-panel-section-label',
-      '.context-panel-actions > .btn-primary',
-      '.context-panel-actions > .context-action-danger',
+      '.context-buttons > .context-panel-section-label',
+      '.context-buttons > .btn-primary',
+      '.context-buttons > .context-action-danger',
+      '.context-buttons > .context-action:only-child',
+      '.context-buttons > .context-panel-section-label:first-child + .context-action:last-child',
     ])
   })
 

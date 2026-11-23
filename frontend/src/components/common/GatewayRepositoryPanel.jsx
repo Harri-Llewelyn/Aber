@@ -129,49 +129,45 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
           and the appliance never reads.
         </div>
       )}
-      {/* Real links, so middle-click and copy-link work. The compare view appears once the
-          appliance has pushed its branch. */}
-      <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+      {/* Real links, so middle-click and copy-link work, in the drawer's grid of buttons. The
+          compare view appears once the appliance has pushed its branch. */}
+      <div className="context-buttons gateway-repository-links">
         {gateway.forge_appliance_sha && (
           <Tooltip text="What the appliance reports it is running, against what was approved on main">
             <a
-              className="btn btn-ghost"
+              className="btn btn-ghost btn-sm context-action"
               href={gatewayCompareUrl(gateway)}
               target="_blank"
               rel="noopener noreferrer"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
               <IconGitCompare size={13} /> Running vs approved <IconExternalLink size={10} />
             </a>
           </Tooltip>
         )}
         <a
-          className="btn btn-ghost"
+          className="btn btn-ghost btn-sm context-action"
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
         >
           <IconGitBranch size={13} /> Open in the forge <IconExternalLink size={10} />
         </a>
         <Tooltip text="This gateway's issues in the forge">
           <a
-            className="btn btn-ghost"
+            className="btn btn-ghost btn-sm context-action"
             href={`${url}/issues`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
             <IconAlertCircle size={13} /> Issues <IconExternalLink size={10} />
           </a>
         </Tooltip>
         <Tooltip text="This gateway's wiki in the forge">
           <a
-            className="btn btn-ghost"
+            className="btn btn-ghost btn-sm context-action"
             href={`${url}/wiki`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
             <IconBookOpen size={13} /> Wiki <IconExternalLink size={10} />
           </a>

@@ -3902,21 +3902,6 @@ span.area-plan-pin { cursor: inherit; }
 
 .area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
-/* The turns' row, between the heading and the plan, starting at the left: Save Turn and Discard
-   follow the turns, and wrap below them as a pair in a narrow drawer, so the turns never move. */
-.area-plan-panel-actions { display: flex; align-items: center; justify-content: flex-start; gap: 4px; flex-wrap: wrap; }
-
-/* Save Turn and Discard, while a turn is unsaved: the height of the turns beside them, not of a
-   Settings row. */
-.area-plan-panel-actions .setting-actions { min-height: 0; }
-
-/* Replace and Remove under the plan's card, two to a row as the panel's own actions are. */
-.area-plan-panel-buttons {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 6px;
-}
-
 /* An area with no plan gets the target rather than a button: the file is usually already in a
    folder somebody is dragging from. */
 .area-plan-panel-drop {
@@ -5110,19 +5095,31 @@ a.chip { text-decoration: none; }
 .context-field-group-warning .group-heading-icon,
 .context-field-group-warning .group-heading-detail { color: var(--warning-text); }
 
-/* Two to a row in a drawer wide enough for two 200px columns, one in a narrower one, in every
-   drawer. The label, the primary action and a danger action take the whole row. */
-.context-panel-actions {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+/* Every drawer section's buttons, the Actions section's among them: two to a row in a drawer wide
+   enough for two 200px columns, one in a narrower one. Each is a `.context-action`. The label, the
+   primary action, a danger action and a section's only button take the whole row. A section that
+   needs its own spacing adds a class beside this one, never a grid of its own. */
+.context-buttons {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 6px;
 }
-.context-panel-actions > .context-panel-section-label,
-.context-panel-actions > .btn-primary,
-.context-panel-actions > .context-action-danger { grid-column: 1 / -1; }
+.context-buttons > .context-panel-section-label,
+.context-buttons > .btn-primary,
+.context-buttons > .context-action-danger,
+.context-buttons > .context-action:only-child,
+.context-buttons > .context-panel-section-label:first-child + .context-action:last-child { grid-column: 1 / -1; }
+/* SaveDiscard's pair joins the grid as two buttons of its own. */
+.context-buttons > .setting-actions { display: contents; }
+
+/* The Actions section, ruled off from the fields and the facts above it. */
+.context-panel-actions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+/* A gateway's Repository links, under the paragraph that says what the repository is for. */
+.gateway-repository-links { margin-top: 8px; }
 
 .context-panel-section-label {
   font-size: 11px;
@@ -5200,8 +5197,9 @@ a.chip { text-decoration: none; }
 
 /* A drawer's Suppression windows section (common/SuppressionWindows.jsx): each window a ruled row,
    its state as a word beside the reason, the times and who under it, the acts at its foot. The
-   reason wraps rather than cuts: it is what the reader came for, and it is at most 200 characters. */
-.suppression-windows { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+   reason wraps rather than cuts: it is what the reader came for, and it is at most 200 characters.
+   The acts, and Schedule window… under the list, are `.context-buttons` grids. */
+.suppression-windows { display: flex; flex-direction: column; gap: 6px; }
 /* Flex so its HelpTip sits on the label's line, as a field label's does. */
 .suppression-windows > .context-panel-section-label { margin-bottom: 0; display: flex; align-items: center; }
 .suppression-windows .context-field-empty { font-size: 11px; }
@@ -5219,7 +5217,7 @@ a.chip { text-decoration: none; }
 .suppression-window-head .badge { flex-shrink: 0; }
 .suppression-window-reason { font-size: 12px; color: var(--text-primary); line-height: 1.35; overflow-wrap: anywhere; min-width: 0; }
 .suppression-window-meta { color: var(--text-muted); line-height: 1.35; }
-.suppression-window-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+.suppression-window-actions { margin-top: 3px; }
 /* The dialog's start and end side by side, one above the other in a narrow dialog. */
 .suppression-window-times { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 14px; }
 

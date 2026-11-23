@@ -76,6 +76,9 @@ export const HelpDrawerContext = createContext(null)
  * @param {node} children Sections that are tools, rendered after the actions so an unknown height
  * cannot push them off the drawer.
  *
+ * A section's buttons, in either slot, are laid out as the actions are: each a `context-action`,
+ * in a `context-buttons` container.
+ *
  * @param {Function} onClose Called by the X, by Escape, and by anything else that clears selection.
  *
  * @param {string} subject What the drawer shows, as one noun, used in the region label and on the
@@ -174,7 +177,7 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fi
           {beforeActions && <div className="context-panel-facts">{beforeActions}</div>}
 
           {actions.length > 0 && (
-            <div className="context-panel-actions">
+            <div className="context-panel-actions context-buttons">
               <div className="context-panel-section-label">Actions</div>
               {orderedActions.map((a, i) => {
                 const cls = `btn btn-sm ${a.primary ? 'btn-primary' : 'btn-ghost'} context-action${a.danger ? ' context-action-danger' : ''}`
