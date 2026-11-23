@@ -20,6 +20,12 @@ npm run test:py:stack    # lane: stack — needs a running stack (npm run dev:te
 # Each is spawned as its own `python <file>`, as the lane commands above do; run one that way.
 node scripts/run-python-suites.mjs --list
 
+# The Node lib tests: every *.test.mjs directly in node-red/, scripts/, scripts/lib/ or scripts/lint/.
+# They are DISCOVERED, not listed: the runner finds them in the folders scripts/lib-tests.mjs names
+# and hands each to `node --test` by its path. To add one, create the file in one of those folders.
+# There is nothing else to edit. A *.test.mjs anywhere else stops the run and fails
+# check-docs-drift, naming the file.
+#
 # The broker-credential machinery whose failure is silent, in isolation and with no stack: the
 # boot reconcile that must never lose a client, the control-API protocol, and the filter deciding
 # which accounts the orphan sweep may disable — which is what keeps it from revoking
@@ -55,6 +61,10 @@ node scripts/run-python-suites.mjs --list
 # fold of `unreleased/` into the upgrade guide and the migrations' README (`scripts/fold-unreleased.mjs`):
 # the order, the links rewritten, and that a second run changes nothing.
 npm run test:lib
+
+# The files test:lib runs, one path a line; it runs nothing. Any other argument goes to
+# `node --test`: `npm run test:lib -- --test-reporter=dot` prints one dot for each test.
+node scripts/run-lib-tests.mjs --list
 
 # NOTICE.md names every third-party image values.yaml pins, a chart template names or a Dockerfile is
 # built FROM. Each licence text in licenses/ is the file licenses/SHA256SUMS pins, and every build
