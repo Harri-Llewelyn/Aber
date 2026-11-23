@@ -1493,9 +1493,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               </div>
             )}
 
-            {/* No connection-method field: every device reaches Aber over Sparkplug B, so the form
-                sends no connection_method. */}
-
             {/* The rationale, only when proposing: it is written to an approver who has not stood
                 in front of the machine. */}
             {proposeMode && (
@@ -1764,8 +1761,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           },
           // Each derived metric its inputs make possible, with its current value and its window.
           ...[derivedValuesField({ device: selectedDevice, schemas, catalog })].filter(Boolean),
-          /* Connection method is not shown: every device reaches Aber over Sparkplug B, and nothing
-             acts on the column. The column is deprecated, and the dashboard writes none. */
           {
             label: 'Description',
             value: selectedDevice.description || null,

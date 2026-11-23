@@ -291,7 +291,7 @@ BEGIN
     -- reported_identity carries over deliberately: the physical device keeps publishing under
     -- the id it announced, and that is what ingestion has to keep resolving. Without it the
     -- merged device is re-quarantined on its very next birth. The candidate's deliberately
-    -- provisioned fields (gateway_id, connection_method, its device_submodels) are left alone.
+    -- provisioned fields (gateway_id, its device_submodels) are left alone.
     UPDATE public.devices
        SET status            = v_quarantined.status,
            first_dbirth_at   = COALESCE(v_candidate.first_dbirth_at, v_quarantined.first_dbirth_at),

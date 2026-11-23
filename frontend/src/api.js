@@ -4049,7 +4049,7 @@ const apiMethods = {
       const deviceIds = idsOf('devices', 'device_nameplate');
       const [devices, nameplates, schemas, areas, cells, gateways, proposersRes] = await Promise.all([
         readByIds('devices',
-          'id,name,description,connection_method,cell_id,area_id,location_scope,model_3d_path,is_archived',
+          'id,name,description,cell_id,area_id,location_scope,model_3d_path,is_archived',
           'id', deviceIds),
         readByIds('device_nameplate', '*', 'device_id', deviceIds),
         readByIds('schemas', 'id,schema_name,lineage_name,version,status,parent_schema_id', 'id', idsOf('schemas')),
@@ -4252,8 +4252,6 @@ const apiMethods = {
         name: body.asset_name,
         description: emptyToNull(body.description),
         gateway_id: gatewayIdFrom(body),
-        // Written only when the caller names it. The column is deprecated, and the dashboard sends none.
-        ...('connection_method' in body ? { connection_method: emptyToNull(body.connection_method) } : {}),
         // NO `schema_id`: schemas are attached afterwards through PUT .../schemas.
         // NO `status`. It is observed, never asserted: ingestion writes ONLINE on a DBIRTH, and the
         // column defaults to OFFLINE for a device that has not connected. Sending one here claims a
@@ -4713,7 +4711,6 @@ const apiMethods = {
       // are the same thing to every reader of a description, and two representations of one state is
       // how a `WHERE description IS NULL` starts missing rows.
       if ('description' in body) patch.description = emptyToNull(body.description);
-      if ('connection_method' in body) patch.connection_method = emptyToNull(body.connection_method);
       // Not emptyToNull: the column is NOT NULL with a default of 'audit', so an absent key is how the
       // caller says "leave it alone", and the CHECK constraint refuses anything outside the two values.
       if ('conformance_policy' in body) patch.conformance_policy = body.conformance_policy;

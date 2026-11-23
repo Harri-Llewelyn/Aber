@@ -60,8 +60,8 @@ describe('what a form would change', () => {
   })
 
   it('never proposes a device’s connection method', () => {
-    // The column is deprecated: the form has no box for it, so a stale form key is dropped, and an
-    // open proposal that names it is still read back by column.
+    // Devices have no such column: the form has no box for it, so a stale form key is dropped, and
+    // an open proposal filed before 1.10.0 that names it fills no box.
     expect(Object.values(PROPOSAL_FORMS.device.fields)).not.toContain('connection_method')
     const patch = patchFromForm('device',
       { ...current, connection_method: 'Sparkplug B' },

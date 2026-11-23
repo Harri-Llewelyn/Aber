@@ -374,7 +374,7 @@ class TestWhatMayBeProposed(ProposalCase):
             self.fail("expected the patch to be refused")
         except psycopg2.errors.InvalidParameterValue as err:
             self.assertIn("status", str(err))
-            self.assertIn("connection_method", str(err))
+            self.assertIn("model_3d_path", str(err))
 
     def test_an_allowlisted_column_is_accepted(self):
         self.assertIsNotNone(self.propose({"description": "the one by the door"}))

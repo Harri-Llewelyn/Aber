@@ -620,7 +620,7 @@ BEGIN
     v_allowed := public.proposable_columns(v_proposal.entity_type);
     FOREACH v_key IN ARRAY ARRAY(SELECT jsonb_object_keys(v_proposal.patch)) LOOP
         IF NOT (v_key = ANY (v_allowed)) THEN
-            RAISE EXCEPTION 'proposal % names % , which is not proposable on %',
+            RAISE EXCEPTION 'proposal % names % , which is not proposable on %; reject it, and ask for a new proposal without it',
                 p_proposal_id, v_key, v_proposal.entity_type
                 USING ERRCODE = 'invalid_parameter_value';
         END IF;
@@ -650,7 +650,6 @@ BEGIN
         UPDATE public.devices
            SET name              = v_merged.name,
                description       = v_merged.description,
-               connection_method = v_merged.connection_method,
                cell_id           = v_merged.cell_id,
                area_id           = v_merged.area_id,
                location_scope    = v_merged.location_scope,
@@ -863,7 +862,7 @@ BEGIN
     -- reported_identity carries over deliberately: the physical device keeps publishing under
     -- the id it announced, and that is what ingestion has to keep resolving. Without it the
     -- merged device is re-quarantined on its very next birth. The candidate's deliberately
-    -- provisioned fields (gateway_id, connection_method, its device_submodels) are left alone.
+    -- provisioned fields (gateway_id, its device_submodels) are left alone.
     UPDATE public.devices
        SET status            = v_quarantined.status,
            first_dbirth_at   = COALESCE(v_candidate.first_dbirth_at, v_quarantined.first_dbirth_at),
@@ -6427,8 +6426,7 @@ CREATE OR REPLACE FUNCTION public.proposable_columns(p_entity_type text) RETURNS
     -- `area_id` joins `cell_id` and `location_scope`: the three together say where an asset sits,
     -- and the table's CHECKs decide whether the triple is sayable, so one proposal can relocate.
     WHEN 'devices' THEN ARRAY[
-      'name', 'description', 'connection_method',
-      'cell_id', 'area_id', 'location_scope', 'model_3d_path'
+      'name', 'description', 'cell_id', 'area_id', 'location_scope', 'model_3d_path'
     ]
     WHEN 'device_nameplate' THEN ARRAY[
       'manufacturer_name', 'manufacturer_product_designation', 'manufacturer_product_type',
@@ -11247,7 +11245,6 @@ CREATE TABLE IF NOT EXISTS public.devices (
     is_archived boolean DEFAULT false,
     archived_at timestamp with time zone,
     auto_delete_at timestamp with time zone,
-    connection_method text,
     first_dbirth_at timestamp with time zone,
     sparkplug_id text GENERATED ALWAYS AS (('dev'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21))) STORED,
     reported_identity text,
@@ -11287,7 +11284,6 @@ ALTER TABLE public.devices
     ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false,
     ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS auto_delete_at timestamp with time zone,
-    ADD COLUMN IF NOT EXISTS connection_method text,
     ADD COLUMN IF NOT EXISTS first_dbirth_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS sparkplug_id text GENERATED ALWAYS AS (('dev'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21))) STORED,
     ADD COLUMN IF NOT EXISTS reported_identity text,
@@ -11313,7 +11309,6 @@ ALTER TABLE public.devices
     ALTER COLUMN is_archived SET DEFAULT false,
     ALTER COLUMN archived_at DROP DEFAULT,
     ALTER COLUMN auto_delete_at DROP DEFAULT,
-    ALTER COLUMN connection_method DROP DEFAULT,
     ALTER COLUMN first_dbirth_at DROP DEFAULT,
     ALTER COLUMN reported_identity DROP DEFAULT,
     ALTER COLUMN quarantine_reason DROP DEFAULT,

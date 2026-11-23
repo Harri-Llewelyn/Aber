@@ -102,7 +102,7 @@ BEGIN
     v_allowed := public.proposable_columns(v_proposal.entity_type);
     FOREACH v_key IN ARRAY ARRAY(SELECT jsonb_object_keys(v_proposal.patch)) LOOP
         IF NOT (v_key = ANY (v_allowed)) THEN
-            RAISE EXCEPTION 'proposal % names % , which is not proposable on %',
+            RAISE EXCEPTION 'proposal % names % , which is not proposable on %; reject it, and ask for a new proposal without it',
                 p_proposal_id, v_key, v_proposal.entity_type
                 USING ERRCODE = 'invalid_parameter_value';
         END IF;
@@ -132,7 +132,6 @@ BEGIN
         UPDATE public.devices
            SET name              = v_merged.name,
                description       = v_merged.description,
-               connection_method = v_merged.connection_method,
                cell_id           = v_merged.cell_id,
                area_id           = v_merged.area_id,
                location_scope    = v_merged.location_scope,
@@ -334,7 +333,7 @@ BEGIN
     -- reported_identity carries over deliberately: the physical device keeps publishing under
     -- the id it announced, and that is what ingestion has to keep resolving. Without it the
     -- merged device is re-quarantined on its very next birth. The candidate's deliberately
-    -- provisioned fields (gateway_id, connection_method, its device_submodels) are left alone.
+    -- provisioned fields (gateway_id, its device_submodels) are left alone.
     UPDATE public.devices
        SET status            = v_quarantined.status,
            first_dbirth_at   = COALESCE(v_candidate.first_dbirth_at, v_quarantined.first_dbirth_at),
