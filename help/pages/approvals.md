@@ -50,7 +50,7 @@ An Administrator or a Shopfloor_Manager decides every kind. A machine identity n
 
 The record may show an old proposal to publish a schema draft, under its raw name. That kind can no longer be filed or decided. Whoever may create a schema draft may also publish it, on the Schemas page.
 
-The record may also show an old proposal that names a device's connection method. Approving it still saves the value. Aber no longer uses it.
+The record may also show an old proposal that names a device's connection method. Devices no longer have one, so approving it is refused. Reject it, and ask for a new proposal without it.
 
 ## What this page cannot do
 

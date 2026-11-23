@@ -8261,7 +8261,6 @@ components:
             origin of whichever stack uploaded it. The public URL is composed at read time from
             AAS_MODEL_PUBLIC_BASE. CHECK-constrained on the file extension. Always null on a replay
             lane (`shadow_of` set): the database refuses one, and the lane shows its machine's.
-        connection_method: { type: string, nullable: true, deprecated: true, example: Sparkplug B, description: 'Ignored by the AAS export, and the dashboard no longer sends it: every device reaches Aber over Sparkplug B. Deprecated in 1.9.0, and removed no sooner than 1.10.0.' }
         shadow_of:
           type: string
           format: uuid
@@ -8309,7 +8308,6 @@ components:
         status: { type: string, enum: [ONLINE, OFFLINE] }
         is_quarantined: { type: boolean }
         model_3d_path: { type: string, nullable: true }
-        connection_method: { type: string, nullable: true, deprecated: true, description: 'Ignored by the AAS export, and the dashboard no longer sends it: every device reaches Aber over Sparkplug B. Deprecated in 1.9.0, and removed no sooner than 1.10.0.' }
         is_archived: { type: boolean }
 
     DeviceLocation:
