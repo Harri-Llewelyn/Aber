@@ -29,8 +29,8 @@ import {
 } from '../../utils/semanticIdSources'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import {
-  DERIVED_DATATYPE, SHARE_UNIT_WORDS, appliesToValue, isShare, describeDerivation, isDerived, kindLabel, matchesDerivedSearch, derivationText,
-  unitOf,
+  DERIVED_DATATYPE, SHARE_UNIT_WORDS, appliesToDevices, appliesToNone, appliesToRule, isShare, describeDerivation, isDerived, kindLabel,
+  matchesDerivedSearch, derivationText, unitOf,
 } from '../../utils/derivedMetric'
 import { metricDevices } from '../../utils/history'
 import { unitAndCode } from '../../utils/units'
@@ -51,6 +51,7 @@ import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { RouteLink } from '../common/RouteLink'
+import { OverflowText } from '../common/OverflowText'
 import { deviceUrl, metricHistoryUrl, metricUrl, trailUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
@@ -198,6 +199,22 @@ const Definition = ({ derivation }) => (
     ))}
   </>
 )
+
+/**
+ * A derived metric's Applies To: a chip for each device, in name order, that opens it on the Devices
+ * page. It wraps with no cap, as the Schemas drawer's Devices field does, and a name too long for the
+ * drawer is cut and slides on hover or focus. With none, what no device reports yet.
+ */
+const AppliesTo = ({ devices, derivation }) => (devices.length === 0 ? appliesToNone(derivation) : (
+  <div className="context-device-list">
+    {appliesToDevices(devices).map(d => (
+      <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} title={`Open ${d.asset_name} on the Devices page`}>
+        <IconCpu size={11} />
+        <OverflowText className="chip-name">{d.asset_name}</OverflowText>
+      </RouteLink>
+    ))}
+  </div>
+))
 
 /** The Uncatalogued table's sortable columns. Declared By is a list of devices; Devices counts it. */
 const UNCATALOGUED_SORT = {
@@ -1474,14 +1491,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             help: 'How Aber computes it from other metrics. It cannot be changed: a different definition is a new derived metric.'
           },
           // The devices in service that report every input: the ones the Metric tab compares it across.
+          // The help names the inputs once; View History compares the devices on one scale.
           isDerived(selected) && devices && {
             label: 'Applies To',
-            value: appliesToValue(
-              metricDevices(devices, schemas, selected.name, { catalog }).map(d => d.asset_name),
-              selected.derivation
-            ),
+            value: <AppliesTo devices={metricDevices(devices, schemas, selected.name, { catalog })} derivation={selected.derivation} />,
             full: true,
-            help: 'Every device in service that reports all its inputs. Nothing is stored: the value is computed when it is drawn.'
+            help: `${appliesToRule(selected.derivation)} Each opens on the Devices page. Nothing is stored: the value is computed when it is drawn.`
           },
           !isDerived(selected) && { label: 'Standard', value: selected.standard_label || selected.standard || LOCAL_EXTENSION_LABEL },
           !isDerived(selected) && { label: 'Category', value: selected.category || null },

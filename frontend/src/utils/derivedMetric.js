@@ -299,33 +299,19 @@ export const unitOf = (metric) => (isShare(metric?.derivation) ? SHARE_UNIT : (m
 const listWords = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`)
 
 /**
- * The derived drawer's Applies to line, as two parts: `lead`, which the drawer's field label says, and
- * `rest`. The devices that report every input (the Metric tab's rule): the first two and how many more
- * past three, then what they report. With none, it says what no device reports yet. The names are in
- * the order a table sorts them, so the two named are the same whichever order the devices were read in.
+ * The derived drawer's Applies To lists the devices that report every input (the Metric tab's rule),
+ * a chip for each. These are its order and its words.
  */
 // The collation utils/tableSort.js gives a text column ("Press 2" before "Press 10", case aside). This
 // module imports nothing, because the mirror check loads it in Node.
 const nameOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
-function appliesTo(names, derivation) {
-  const inputs = derivationInputs(derivation)
-  const deviceNames = [...names].sort(nameOrder.compare)
-  if (deviceNames.length === 0) return { lead: 'Applies to no device yet', rest: `none reports ${listWords(inputs)}` }
-  const shown = deviceNames.length > 3
-    ? `${deviceNames.slice(0, 2).join(', ')} and ${deviceNames.length - 2} more`
-    : listWords(deviceNames)
-  return { lead: 'Applies to', rest: `${shown}, ${deviceNames.length === 1 ? 'the device that reports' : 'the devices that report'} ${listWords(inputs)}` }
-}
+/** The devices in the order a table sorts their names, whichever order they were read in. A copy. */
+export const appliesToDevices = (devices) =>
+  [...devices].sort((a, b) => nameOrder.compare(a.asset_name ?? '', b.asset_name ?? ''))
 
-/** The whole line: "Applies to: Press 1, Press 2 and 3 more, the devices that report Controller/PART_COUNT". */
-export function appliesToWords(deviceNames, derivation) {
-  const { lead, rest } = appliesTo(deviceNames, derivation)
-  return `${lead}: ${rest}`
-}
+/** What the devices report, said once in the field's help: "The devices in service that report Power/A and Power/B." */
+export const appliesToRule = (derivation) => `The devices in service that report ${listWords(derivationInputs(derivation))}.`
 
-/** What the drawer's Applies To field holds beside its label: the line without "Applies to". */
-export function appliesToValue(deviceNames, derivation) {
-  const { rest } = appliesTo(deviceNames, derivation)
-  return deviceNames.length === 0 ? `No device yet: ${rest}` : rest
-}
+/** The field with no device: "No device yet: none reports Controller/PART_COUNT". */
+export const appliesToNone = (derivation) => `No device yet: none reports ${listWords(derivationInputs(derivation))}`
