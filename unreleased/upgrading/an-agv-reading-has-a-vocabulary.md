@@ -15,5 +15,6 @@ changes no metric. There is nothing to run.
   `m/s`, and a unit here is an MTConnect name.
 - **A script that reads `/rest/v1/vda5050_vocabulary`** gets the 24 fields. Each has its path as `name`,
   its datatype and its semantic id. It has its unit and description where the schema gives them.
-- **An AAS export** defines a concept carrying one of these ids by the schema's description of the field.
+- **An AAS export** defines a concept carrying one of these ids by the schema's description of the field,
+  where the schema gives one.
   i3X lists a new namespace, `https://aber.local/semantics/vda5050/v3.0`, once a metric carries one of the ids.

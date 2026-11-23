@@ -6,7 +6,7 @@ adds two tables and changes no metric. There is nothing to run.
 
 - **The kinds are offered where no other standard names the reading.** Add Metric's semantic id search
   lists them for a Custom metric and an ASHRAE 223P metric. **Edit** lists them as a further id of any
-  metric. A metric keeps the id its standard gives it: an MTConnect `TEMPERATURE` stays MTConnect's.
+  metric that has a semantic id of its own. A metric keeps the id its standard gives it: an MTConnect `TEMPERATURE` stays MTConnect's.
 - **Your metrics are not changed.** A metric that already carries a QUDT id, such as the BMS example
   readings, keeps it.
 - **An export defines a kind by QUDT's own text.** It said "Temperature, as QUDT defines it." Now the
@@ -18,5 +18,6 @@ adds two tables and changes no metric. There is nothing to run.
   field it does not know must accept `unitId`.
 - **i3X lists a new namespace,** `http://qudt.org/vocab/quantitykind?projection=i3X`, once a metric
   carries a kind as its own id. The types of such a metric moved from the local namespace.
-- **A script that reads `/rest/v1/qudt_quantity_kinds` or `/rest/v1/qudt_units`** gets QUDT's ids, labels
-  and descriptions. QUDT is under CC BY 4.0. Credit QUDT.org where you republish them.
+- **A script that reads `/rest/v1/qudt_quantity_kinds` or `/rest/v1/qudt_units`** gets QUDT's ids and labels,
+  each kind's description and each unit's symbol. QUDT is under CC BY 4.0. Credit QUDT.org where you republish
+  them.

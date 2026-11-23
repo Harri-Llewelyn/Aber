@@ -3,8 +3,9 @@
 Before you upgrade, check that no area or cell has an empty name or a name of spaces. The database
 now refuses one (migration `0291`).
 
-Most sites have none. The dashboard has always refused a blank name, so only a script, an import or
-an API client can have left one. Run this. No rows means you can upgrade:
+Most sites have none. The dashboard refuses a blank name, but its New Cell dialog accepted a name of
+spaces until 1.8.0. A cell made then, a script, an import or an API client can have left one. Run
+this. No rows means you can upgrade:
 
 ```bash
 kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \

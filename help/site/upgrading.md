@@ -2078,7 +2078,7 @@ change in the Audit Trail, from the migration. A saved 10.5 in **Open proposals 
 stopped every proposal in 1.8.x. It becomes 10.
 
 An API client that writes a part value to one of them now gets HTTP 400, with `<key> must be a whole
-number`.
+number`, followed by `of days`, `of hours` or `of seconds` where the key ends in one.
 
 ### From 1.9.0, a credential revoked by a change of a gateway's type is asked for again
 
@@ -2098,8 +2098,10 @@ To check a gateway whose type you changed:
 2. Find the gateway. If **Credential** says **Revoked** and **Broker** says **Active**, the old
    account still works.
 3. Issue the gateway a new credential. Use **Generate Broker Credential** on Gateways for a Host,
-   Simulated or Third-party gateway, or **Set Up Gateway** for a Remote one. The new password
-   replaces the old.
+   Simulated or Third-party gateway. The new password replaces the old.
+4. For a Remote gateway, use **Set Up Gateway**, and enrol the appliance again with the install
+   command or bundle it gives. The new password replaces the old once the appliance enrols. Until
+   then, **Broker** stays **Active**.
 
 ## Backups
 

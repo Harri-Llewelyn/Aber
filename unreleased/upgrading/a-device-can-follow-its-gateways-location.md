@@ -28,19 +28,23 @@ kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supaba
     WHERE d.location_scope = 'cell' AND d.cell_id IS NULL;"
 ```
 
-**If an API client or a script writes a device's location,** change it before you upgrade. Both
-changes are refusals with HTTP 400 that name the constraint:
+**If an API client or a script writes a device's location,** change it before you upgrade. Each of
+these is now refused with HTTP 400:
 
 - A request that writes `cell_id` alone, for a new device or one that follows its gateway, fails
   `devices_follow_gateway_has_no_place`. A device that follows its gateway has no cell. Send
   `location_scope` as `cell` with the `cell_id`.
 - `location_scope` of `cell` with no `cell_id` fails `devices_cell_scope_names_a_cell`. To follow the
   gateway, send `gateway`, with no cell and no area.
+- `/rest/v1/rpc/relocate_devices` and the `approve-quarantine` function refuse a move or an approval
+  with `location_scope` of `cell` and no `cell_id`. On 1.8.x it meant no cell of the device's own.
+  Send `gateway` instead.
 
 The dashboard already sends all three. A device you create without a location follows its gateway.
 
 **Where the answer shows.** `device_locations` has three new values of `location_source`:
 `followed_cell`, `followed_area` and `followed_site`. A program that reads the view and switches on
-the value must treat them as the place they follow. The Unified Namespace topic of a device that
+the value must treat them as the place they follow. `inherited` is no longer given: a device that
+took its gateway's cell now reads `followed_cell`. The Unified Namespace topic of a device that
 follows its gateway is made from the gateway's place, so it changes when the gateway moves. A device
 that leaves Unassigned starts to publish under a topic, if the bridge is on.

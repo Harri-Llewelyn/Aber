@@ -16,7 +16,7 @@ changes no row. There is nothing to run, and nothing changes in an export until 
 - **A script that edits the catalogue** finds new routes: `/rest/v1/metric_semantic_ids` to read and write the
   further ids, and `/rest/v1/metric_semantic_id_crosswalk` to ask which metric carries an id, own or further. A
   metric carries at most 10, none equal to its own id. Clearing the own id of a metric that carries further ids is
-  now refused, and says to remove them first.
+  now refused, and says to remove them first. So is changing its own id to one of its further ids.
 - **A script that reads the Audit Trail** finds a new `entity_type`, `metric_semantic_ids`, in the asset lane.
   Its rows are filed under the metric's id, so they appear with the metric's own history.
 - **An edge function deployed before the database** still builds a shell, without the further ids.

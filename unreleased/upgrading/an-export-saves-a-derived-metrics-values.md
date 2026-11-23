@@ -1,7 +1,8 @@
 ### From 1.9.0, an export saves a derived metric's values
 
 From 1.9.0, **Export CSV** on History saves a derived metric's values. 1.8.0 left it out and said to export
-its inputs. The upgrade declares one function again and changes no row. There is nothing to run.
+its inputs. The upgrade declares one function again, adds one it calls, and changes no row. There is
+nothing to run.
 
 - **Every tab that exports offers it:** Device, Overview, Cell, Area and Metric. A derived metric has no
   readings, so its rows are its values for each bucket of the resolution you choose. With **Raw samples**

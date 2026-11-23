@@ -11,12 +11,19 @@ Publishing `Robot_Arm_Schema_v2` moved the Submodel of every device on it from
 `<globalAssetId>/submodel/Robot_Arm_Schema_v2/OperationalTelemetry`. From 1.9.0 the id is made from
 the name the schema's first version was built with, so:
 
-- **A schema that was never versioned keeps the id it has.** Nothing moves.
+- **A schema that was never versioned keeps the id it has.** Nothing moves, unless it shares its key
+  with another schema (see below).
 - **A schema that has been versioned goes back to its first id**, the one its first export carried.
   `.../submodel/Robot_Arm_Schema/OperationalTelemetry`, whichever version is in force.
 - **A publish leaves the id where it was from now on.** Each Submodel's `administration.version` is
   the schema's version, as a string: `"2"`. A consumer that cached a Submodel sees the version move.
   This applies to OperationalTelemetry and KeyPerformanceIndicators. Other Submodels carry none.
+- **On a device with more than one schema, the `idShort` moves with the id.** It carries the same
+  key: `Robot_Arm_Schema_v2_OperationalTelemetry` becomes `Robot_Arm_Schema_OperationalTelemetry`.
+  A consumer that finds a Submodel by its `idShort` must change too.
+- **i3X names a schema's type by its first version.** A schema with no semantic id had its
+  version's name as its `sourceTypeId`, which its devices carry too. It now has the first version's
+  name: `Robot_Arm_Schema_v2` becomes `Robot_Arm_Schema`. An i3X client that stored it must change.
 
 To see which schemas have more than one version, and so which devices' ids move:
 
@@ -37,7 +44,8 @@ AAS API does this.
 way to give one Submodel two ids. What you imported before the upgrade holds the old ids. Import the
 shell again, and delete the Submodels under the old ids on the other server. `npm run
 aas:push-basyx -- --replace` replaces a Submodel by its id, so from here a new publish no longer adds a
-second Submodel beside the first.
+second Submodel beside the first. Without `--replace`, the script skips a Submodel whose id the server
+already holds, so a new version's content reaches the server only with it.
 
 **Two things can still change an id.**
 
@@ -52,8 +60,9 @@ second Submodel beside the first.
 
 **`device_submodels.submodel_key` is an override.** It is the key in the Submodel's id, as typed, and it
 survives a publish. Nothing in the dashboard sets it, so it is empty unless a script wrote it. It must
-now start with a letter. A key that began with an underscore is rewritten without it by the upgrade, and
-the Audit Trail records each rewrite. The number is a line in db-init's log that starts `0298:`.
+now start with a letter. A key that began with an underscore is rewritten without it by the upgrade,
+and one of underscores alone is cleared. The Audit Trail records each rewrite. db-init's log gives the
+number on a line with `0298:`.
 
 **The schema list gains two columns.** `/rest/v1/schemas` returns `lineage_name` and `lineage_root_id`
 on every version. They are the first version's name and id. A script that finds a schema's versions can
