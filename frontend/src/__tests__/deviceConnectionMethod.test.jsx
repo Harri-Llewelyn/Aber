@@ -6,9 +6,9 @@ import { ApproveQuarantineModal } from '../components/modals/ApproveQuarantineMo
 import { api } from '../api'
 
 /**
- * A device's connection method is deprecated: every device reaches Aber over Sparkplug B, so no
- * dashboard form sends one. The row below holds one, as a device created before 1.9.0 does, to show
- * that saving the form does not write it back.
+ * A device has no connection method: every device reaches Aber over Sparkplug B, and the API refuses
+ * the field. No dashboard form sends one. The row below still holds one, as a row read before the
+ * upgrade to 1.10.0 does, to show that saving the form does not write it back.
  */
 
 vi.mock('../api', async () => {
