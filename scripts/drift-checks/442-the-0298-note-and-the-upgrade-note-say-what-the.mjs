@@ -3,7 +3,7 @@ import { fail, pass, read, supabaseReadme, upgradingGuide } from './lib.mjs';
 // -------------------------------------------------------------------------------------------------
 // 442. The 0298 section and its upgrade note say what the migration does: the two columns, the trigger
 // that sets them and the CHECK it adds, by the names the file declares; the notice a rewritten key
-// prints; that the fill is not an Audit Trail event; and, in the upgrade note, that the AAS API answers
+// prints; that the fill is not an Audit Trail event; and, in the upgrade note, that the AAS API answered
 // an old id until 1.10.0, that a file holds only the new one, and the eight hex digits and the stat a
 // clash is settled by. The migration's header cites its section by title.
 // -------------------------------------------------------------------------------------------------
@@ -27,7 +27,7 @@ export default function check() {
   const at = readme.indexOf(SECTION);
   const section = at < 0 ? '' : readme.slice(at, readme.indexOf('\n### ', at + 4) < 0 ? undefined : readme.indexOf('\n### ', at + 4));
   if (!section) problems442.push(`supabase/README.md (with the notes folded in) has no "${SECTION}" section`);
-  for (const phrase of ['lineage_root_id', 'lineage_name', 'trg_schemas_take_their_lineage', 'device_submodels_key_starts_with_a_letter', 'not an Audit Trail event', '0298:', 'submodel_key_clashes', 'submodelOfAPreviousVersion']) {
+  for (const phrase of ['lineage_root_id', 'lineage_name', 'trg_schemas_take_their_lineage', 'device_submodels_key_starts_with_a_letter', 'not an Audit Trail event', '0298:', 'submodel_key_clashes']) {
     if (section && !section.includes(phrase)) problems442.push(`the 0298 section does not mention ${phrase}`);
   }
 

@@ -6274,12 +6274,12 @@ was built with, which a lineage keeps for good.
   `0298:`, and each rewrite is an `UPDATE` the Audit Trail records, since it changes a Submodel id.
   Nothing in Aber writes a key, so the number is expected to be zero. A replay finds the CHECK and
   rewrites nothing.
-- **`aas-api` answers the old ids for one minor.** Both submodel routes also accept
-  `<globalAssetId>/submodel/<any version's name>/<role>` for a lineage the device carries, and serve
-  the current Submodel. `submodelOfAPreviousVersion()` reads `schemas` for the lineage's version names
-  only when the exact id was not found. Files carry only the new id. The upgrade guide
-  (*From 1.9.0, a schema's Submodel ids follow its lineage and carry its version*) says which ids move
-  and until when.
+- **`aas-api` answered the old ids for one minor, through 1.9.** Both submodel routes also accepted
+  `<globalAssetId>/submodel/<any version's name>/<role>` for a lineage the device carried, and served
+  the current Submodel, when the exact id was not found. Files carried only the new id. The upgrade
+  guide (*From 1.9.0, a schema's Submodel ids follow its lineage and carry its version*) says which
+  ids moved. 1.10.0 removed the fallback, so an old id now answers 404 (*From 1.10.0, aas-api no
+  longer answers a Submodel's old id*).
 - **i3X** names the source type of every version of one schema by the lineage, when the schema has no
   semantic id (`schema_source_type_id()`).
 

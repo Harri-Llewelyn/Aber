@@ -6892,8 +6892,7 @@ paths:
 
         The element routes hang off this path too, so
         `/shells/{aasIdentifier}/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}`
-        works exactly as the direct form does. Append `/$value` for ValueOnly. An id made from an
-        earlier version's name is answered here too, as on the direct route, until 1.10.0.
+        works exactly as the direct form does. Append `/$value` for ValueOnly.
       parameters:
         - name: aasIdentifier
           in: path
@@ -6991,10 +6990,9 @@ paths:
         **A schema's Submodels keep their id when a version is published.** The id is made from the
         name the schema's first version was built with, and `administration.version` says which
         version made the Submodel. Until 1.9.0 the id carried the name of the version, so it changed
-        at every publish. For one minor release this route also answers an id made from any version's
-        name (`.../submodel/Robot_Arm_Schema_v2/OperationalTelemetry`) for a schema the device carries,
-        and returns the current Submodel, with its current `id`. The old ids are removed no sooner
-        than 1.10.0. A file holds only the current id.
+        at every publish. Only an id the shell carries is answered, so such an old id
+        (`.../submodel/Robot_Arm_Schema_v2/OperationalTelemetry`) answers `404` since 1.10.0.
+        `/shells/{aasIdentifier}/submodel-refs` lists the current ids.
       parameters:
         - name: submodelIdentifier
           in: path

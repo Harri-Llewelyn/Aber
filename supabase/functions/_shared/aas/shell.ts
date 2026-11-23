@@ -779,15 +779,6 @@ export async function loadDeviceRecord(
 
 // Construction
 
-export interface SchemaSubmodels {
-  schemaId: string;
-  rootId: string;
-  /** False for a draft attached beside the version in force, whose key carries its version. */
-  kept: boolean;
-  /** `OperationalTelemetry` and `KeyPerformanceIndicators`, whichever the schema made. */
-  ids: Record<string, string>;
-}
-
 export interface BuiltShell {
   /** The AAS Part 5 Environment: what an AASX package holds and what AAS tools accept as JSON. */
   environment: Record<string, unknown>;
@@ -796,11 +787,6 @@ export interface BuiltShell {
   /** The single shell, already inside `environment`, for the same reason. */
   shell: Record<string, unknown>;
   stats: Record<string, unknown>;
-  /**
-   * Each attached schema, the lineage it belongs to and the Submodel ids it made by role. aas-api
-   * answers a previous version's id from the entry with `kept` of the same lineage.
-   */
-  schemaSubmodels: SchemaSubmodels[];
   /** `devices.model_3d_path`, or null. aas-export needs it to decide whether to bundle. */
   modelPath: string | null;
   modelUrl: string | null;
@@ -1021,7 +1007,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
   // The key in each Submodel's id comes from the schema's lineage, so a publish leaves it where it
   // was. `lineage_name` and `lineage_root_id` are on every row since 0298; a row without them (a
   // fixture) is its own lineage.
-  const { keys: submodelKeys, clashes: keyClashes, current } = assignSubmodelKeys(
+  const { keys: submodelKeys, clashes: keyClashes } = assignSubmodelKeys(
     schemas.map((schema) => ({
       id: String(schema.id),
       rootId: String(schema.lineage_root_id ?? schema.id),
@@ -1031,7 +1017,6 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
       declaredKey: keyBySchema.get(String(schema.id)) ?? null,
     })),
   );
-  const schemaSubmodels: SchemaSubmodels[] = [];
 
   for (const schema of schemas) {
     const modelled = modelledMetrics(
@@ -1053,21 +1038,13 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     const single = schemas.length === 1;
     // The schema version that produced the Submodel: a consumer that cached one sees it move.
     const administration = { version: String(Number(schema.version) || 1) };
-    const made: SchemaSubmodels = {
-      schemaId: String(schema.id),
-      rootId: String(schema.lineage_root_id ?? schema.id),
-      kept: current.has(String(schema.id)),
-      ids: {},
-    };
-    schemaSubmodels.push(made);
 
     if (telemetryProps.length > 0) {
       const elements = [collection("Metrics", telemetryProps)];
       if (linkedSegment) elements.push(collection("Segments", [linkedSegment]));
-      made.ids.OperationalTelemetry = submodelId(`${baseKey}/OperationalTelemetry`);
       submodels.push({
         modelType: "Submodel",
-        id: made.ids.OperationalTelemetry,
+        id: submodelId(`${baseKey}/OperationalTelemetry`),
         // Keeps the well-known idShort while only one schema is attached, so a consumer looking
         // for OperationalTelemetry still finds it; qualifies it once there is more than one.
         idShort: single ? "OperationalTelemetry" : `${baseKey}_OperationalTelemetry`,
@@ -1079,10 +1056,9 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     }
 
     if (kpiProps.length > 0) {
-      made.ids.KeyPerformanceIndicators = submodelId(`${baseKey}/KeyPerformanceIndicators`);
       submodels.push({
         modelType: "Submodel",
-        id: made.ids.KeyPerformanceIndicators,
+        id: submodelId(`${baseKey}/KeyPerformanceIndicators`),
         idShort: single ? "KeyPerformanceIndicators" : `${baseKey}_KeyPerformanceIndicators`,
         kind: "Instance",
         administration,
@@ -1221,5 +1197,5 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
       : {}),
   };
 
-  return { environment, submodels, shell, stats, schemaSubmodels, modelPath, modelUrl };
+  return { environment, submodels, shell, stats, modelPath, modelUrl };
 }
