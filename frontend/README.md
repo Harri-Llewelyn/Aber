@@ -2342,12 +2342,14 @@ its current value; Export saves its values. The database's rules are in
   `api.readDerivedCurrent()` when the drawer opens on the device. A device with no value says so, a
   failed read says that, and a device none apply to has no line. The windows are `derivedWindowMinutes()`,
   held to `derived_window_minutes()` by mirror check 94.
-- **The derived drawer's Applies To** (`appliesToValue()`) names the devices in service that report all
-  the inputs, by the Metric tab's own function (`metricDevices()`): the first two and how many more past
-  three, or "No device yet: none reports …".
-- `derivedMetricReads.test.js`, `historyDerivedMetric.test.jsx`, `devicesDerivedValues.test.jsx` and
-  `derivedMetrics.test.jsx` hold the rule, the reads, the tag, the fold, the Export rule, the drawer's
-  line and Applies To.
+- **The derived drawer's Applies To lists the devices in service that report all the inputs**, by the
+  Metric tab's own function (`metricDevices()`): a chip each that opens the device, in name order
+  (`appliesToDevices()`) and with no cap, as the Schemas drawer's Devices field lists them. The field's
+  help names the inputs once (`appliesToRule()`). With none, the field says "No device yet: none reports
+  …" (`appliesToNone()`).
+- `derivedMetricReads.test.js`, `historyDerivedMetric.test.jsx`, `devicesDerivedValues.test.jsx`,
+  `derivedMetrics.test.jsx` and `metricAppliesToChips.test.jsx` hold the rule, the reads, the tag, the
+  fold, the Export rule, the drawer's line and Applies To.
 
 ### History's Alerts tab
 
