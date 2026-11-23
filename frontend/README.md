@@ -433,6 +433,18 @@ stops being usable as the catalog grows: Deprecate Metric's Superseded By, and t
 draft, which adds each metric's stored keys with `renderNote`. The vocabulary pickers in Add Metric
 (MTConnect's data item types and the others) are still grouped dropdowns.
 
+### A dialog's width is named by its content
+
+`Modal`'s `size` is a step of one scale in `App.css`, named by what earns it: `sm` 400px for a
+question with no field, the default 480px for stacked form fields, `md` 560px for a form with a list
+in it, `lg` 640px for content rather than input, `xl` 720px for two columns of fields, and `wide`
+900px for a table. `full` is the window, for a viewer. A form is never `sm`. A dialog with steps
+keeps its widest step from first to last, so one that ends by showing a secret is `lg` throughout.
+Sibling dialogs share a step: an asset's create and edit forms are all `md`, and both Add Metric
+dialogs are `xl`. Drift check 530 holds the families, and fails when one's members disagree or an
+`sm` dialog holds a field. Every step uses `.modal`'s padding except `full`, and a rule for one
+dialog's layout hangs on its own class (`className`), never on its step.
+
 ### A dialog takes focus
 
 `Modal` renders a native `<dialog>` and opens it with `showModal()`, following the WAI-ARIA dialog

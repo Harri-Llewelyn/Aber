@@ -114,7 +114,7 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
     <Modal
       title="Import vocabulary"
       icon={<IconUpload size={18} />}
-      size="lg"
+      size="md"
       onClose={close}
       lead="Read an AAS file and keep its concepts as a vocabulary of this site. Nothing is written until you import."
       problem={problem}

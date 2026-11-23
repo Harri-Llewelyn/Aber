@@ -320,7 +320,6 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
       {removing && (
         <ConfirmModal
           title={<>Remove vocabulary <span className="mono">{removing.name}</span></>}
-          size="md"
           message={<>
             This removes <strong>{removing.name}</strong> and its {plural(removing.concept_count, 'concept')} from this site.
             {' '}{usedBy(removing) > 0
@@ -338,7 +337,6 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
       {sharing && (
         <ConfirmModal
           title={<>Share the definitions of <span className="mono">{sharing.name}</span></>}
-          size="md"
           message={<>
             An export will carry the definition of each of its concepts, and so will the AAS API.
             {' '}<strong>The licence is the site's responsibility.</strong> Confirm only that it lets you share these definitions.

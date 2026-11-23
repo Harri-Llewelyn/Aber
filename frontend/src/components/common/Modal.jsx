@@ -4,7 +4,8 @@ import { FormProblem } from './FormProblem'
 import { IconAlertTriangle, IconX } from './Icons'
 import { Tooltip } from './Tooltip'
 
-const SIZES = { sm: 'modal-sm', md: 'modal-md', lg: 'modal-lg', xl: 'modal-xl', wide: 'modal-wide', full: 'modal-full' }
+/** The width steps App.css defines. `default` is the bare `.modal`, as leaving `size` out is. */
+const SIZES = { sm: 'modal-sm', default: '', md: 'modal-md', lg: 'modal-lg', xl: 'modal-xl', wide: 'modal-wide', full: 'modal-full' }
 
 /** The open dialogs, oldest first. The last is on top, and everything outside it is inert. */
 const openDialogs = []
@@ -86,7 +87,6 @@ function returnFocus(dialog) {
  * <Modal
  *   title="Rename area"
  *   icon={<IconEdit size={18} />}
- *   size="md"
  *   onClose={() => setOpen(false)}
  *   lead="The name is shown on the Site Map and in the Audit Trail."
  *   initialFocus={nameRef}
@@ -109,11 +109,13 @@ function returnFocus(dialog) {
  *
  * @param {React.ReactNode} [icon] Shown before the title; pass a sized icon element.
  *
- * @param {'sm'|'md'|'lg'|'xl'|'wide'|'full'} [size] A step of the width scale in App.css: sm 400px,
- * default 480px, md 560px, lg 640px, xl 720px, wide 900px. Pick by content: sm for a yes/no
- * question, md for a form with a list, lg for a document, xl for two columns, wide for a table.
- * `full` is the window less a margin, in height as well, for a view that is the dialog's whole
- * point (an area's plan, a device's 3D model); pass `fill` with it.
+ * @param {'sm'|'default'|'md'|'lg'|'xl'|'wide'|'full'} [size] A step of the width scale in App.css,
+ * named by the content that earns it: sm 400px for a question with no field, default 480px for
+ * stacked form fields, md 560px for a form with a list in it, lg 640px for content rather than input,
+ * xl 720px for two columns of fields, wide 900px for a table. Leaving it out is the default step.
+ * `full` is the window less a margin, in height as well, for a view that is the dialog's whole point
+ * (an area's plan, a device's 3D model); pass `fill` with it. A form is never sm, and sibling dialogs
+ * share a step: drift check 530 holds both.
  *
  * @param {Function} onClose Called by Escape, the close button, a close request from the browser
  * (Android's back gesture) and (when enabled) the backdrop. A dialog that must not close while work
@@ -156,6 +158,9 @@ function returnFocus(dialog) {
  *
  * @param {React.ReactNode} [headerActions] Controls that sit in the header row beside the close
  * button, for an act on what the dialog shows (an export button on a table).
+ *
+ * @param {string} [className] A class on the box beside its step, for a layout rule one dialog needs
+ * (the schema detail dialog's footer wraps). Never a width: that is `size`.
  */
 export function Modal({
   title,
@@ -171,6 +176,7 @@ export function Modal({
   closeOnOverlay = false,
   headerActions = null,
   fill = false,
+  className,
   children
 }) {
   const titleId = useId()
@@ -215,7 +221,7 @@ export function Modal({
     if (ref.current === topDialog() && nothingFocused()) ref.current.focus()
   })
 
-  const modalClass = `modal${SIZES[size] ? ` ${SIZES[size]}` : ''}`
+  const modalClass = ['modal', SIZES[size], className].filter(Boolean).join(' ')
 
   return (
     <dialog

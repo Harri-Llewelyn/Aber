@@ -92,7 +92,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
     <Modal
       title="Add a person"
       icon={<IconUser size={18} />}
-      size="md"
+      size="lg"
       onClose={busy ? () => {} : close}
       lead="They sign in to the dashboard with this email address, and can do what the role allows."
       initialFocus={emailRef}

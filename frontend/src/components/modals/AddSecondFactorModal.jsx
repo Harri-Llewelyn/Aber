@@ -79,7 +79,6 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
     <Modal
       title="Add Authenticator"
       icon={<IconScan size={18} />}
-      size="md"
       onClose={busy ? () => {} : cancel}
       lead={enrolment
         ? 'Scan the QR code with your authenticator app, or type the key into it. Then enter the 6-digit code the app shows.'

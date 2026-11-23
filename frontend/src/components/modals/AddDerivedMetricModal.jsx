@@ -116,7 +116,7 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
     <Modal
       title="Add Derived Metric"
       icon={<IconPlus size={18} />}
-      size="wide"
+      size="xl"
       onClose={adding ? () => {} : onCancel}
       problem={problem}
       error={error}

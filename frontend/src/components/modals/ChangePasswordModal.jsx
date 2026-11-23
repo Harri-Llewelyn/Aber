@@ -45,7 +45,6 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
     <Modal
       title="Change your password"
       icon={<IconLock size={18} />}
-      size="md"
       onClose={busy ? () => {} : onClose}
       lead="This browser stays signed in. Other browsers signed in as you are signed out within the hour."
       initialFocus={currentRef}

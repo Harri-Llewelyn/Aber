@@ -10,7 +10,6 @@ export function RestoreMetricModal({ metric, replacement, onConfirm, onCancel })
   return (
     <ConfirmModal
       title={<>Restore metric <span className="mono">{metric.name}</span></>}
-      size="md"
       icon={<IconRefreshCw size={18} />}
       message={<>
         {metric.derivation ? (

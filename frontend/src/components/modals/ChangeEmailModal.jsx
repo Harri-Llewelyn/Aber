@@ -46,7 +46,6 @@ export function ChangeEmailModal({ person, onClose, onChanged, showToast }) {
     <Modal
       title={`Change the email address for ${person.email}`}
       icon={<IconUser size={18} />}
-      size="md"
       onClose={busy ? () => {} : onClose}
       lead="They sign in with the new address from now on. Every session they have ends, so they will have to sign in again. Nothing is sent to either address, so tell them yourself."
       initialFocus={inputRef}

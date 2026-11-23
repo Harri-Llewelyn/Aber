@@ -2606,35 +2606,35 @@ main:focus { outline: none; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* The modal width scale. `.modal` itself is the default step (480px), a column of stacked form
-   fields; the steps below are named after the kind of content that earns them. Every step inherits
-   `.modal`'s height cap and `.modal-body`'s scrolling. */
+/* The modal width scale. `.modal` itself is the default step (480px), for stacked form fields; the
+   steps below are named after the kind of content that earns them. Every step inherits `.modal`'s
+   height cap and `.modal-body`'s scrolling, and every step but `full` its padding. A form is never
+   `sm`, and sibling dialogs share a step: drift check 530 holds both. */
 
-/* A yes/no question and nothing else. Narrower than a form on purpose: a short line of text set
-   across 480px reads as an unfinished dialog. */
+/* A question with no field. Narrower than a form on purpose: a short line of text set across 480px
+   reads as an unfinished dialog. */
 .modal-sm { max-width: 400px; }
 
-/* A form with a list in it -- a picker, a payload editor. The list needs the width; the fields
-   above it do not suffer from having it. */
+/* A form with a list in it: a picker, a payload editor, an asset's create and edit form. The list
+   needs the width; the fields above it do not suffer from having it. */
 .modal-md { max-width: 560px; }
 
-/* Content rather than input: a document list, a schema definition, a config dump. */
+/* Content rather than input: a document list, a schema definition, a config dump, a secret shown
+   once. A dialog with steps takes its widest step's, so a form that shows a secret next is here. */
 .modal-lg { max-width: 640px; }
 
-/* Two columns of fields. Only the nameplate needs this, and it needs it because IEC 63278 gives
-   it sixteen properties that read as pairs. */
+/* Two columns of fields: the nameplate, whose sixteen IEC 63278 properties read as pairs, and Add
+   Metric and Add Derived Metric, which build a metric's name from a row of short fields. */
 .modal-xl { max-width: 720px; }
 
-/* For a modal holding a TABLE rather than a form. `.modal`'s 480px is sized for stacked fields;
-   the telemetry inspector is four columns and was unreadable at that width -- which is the whole
-   reason it left the context panel. */
-.modal-wide {
-  max-width: 900px;
-  padding: 20px 22px;
-}
+/* A table, or content that needs a table's width: a device's configuration parameters, the token
+   inventory, Play back capture's device map, the schema builder's metric list, the derived metrics'
+   YAML editor, and Keyboard shortcuts' groups two to a row. */
+.modal-wide { max-width: 900px; }
 
 /* The window less a margin, in height as well: for a view that is the dialog's whole point, an
-   area's plan or a device's 3D model. Used with `fill`, so the viewer takes what the header leaves. */
+   area's plan or a device's 3D model. Used with `fill`, so the viewer takes what the header leaves.
+   The one step with a padding of its own: a thinner frame gives the viewer the room. */
 .modal-full {
   max-width: none;
   width: calc(100% - 48px);
@@ -7459,10 +7459,20 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   outline-offset: 2px;
 }
 
-/* Keyboard shortcuts dialog: a column of keys against a column of prose. The keys column is fixed
-   rather than sized to content, so the descriptions start on one line down the whole dialog. */
-.shortcut-group { margin-top: var(--stack); }
-.shortcut-group:first-of-type { margin-top: 12px; }
+/* Keyboard shortcuts dialog: its groups two to a row at the wide step, so the list does not scroll
+   at 1920 × 917, and one to a row on a narrow window. In each, a column of keys against a column of
+   prose. The keys column is fixed rather than sized to content, so the descriptions start on one
+   line down the whole group. */
+.shortcut-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: var(--stack) 28px;
+  align-items: start;
+  margin-top: 12px;
+}
+
+/* A grid item, which would otherwise keep its content's width and push its neighbour sideways. */
+.shortcut-group { min-width: 0; }
 
 .shortcut-group-title {
   font-size: 11px;
@@ -8110,8 +8120,9 @@ ol.gateway-steps {
   color: var(--success-text);
 }
 
-/* The schema detail dialog's five footer buttons do not fit one row at its width. */
-.modal-lg .modal-actions { flex-wrap: wrap; }
+/* The schema detail dialog's footer holds up to four buttons, which wrap rather than run past the
+   box when one row cannot hold them. */
+.schema-detail-modal .modal-actions { flex-wrap: wrap; }
 
 /* AUTOMATIONS. The list's select and switch columns, the chip that names the entity a list is
    narrowed to, the page of one automation, the editor's frame and the apply dialog's results. Every

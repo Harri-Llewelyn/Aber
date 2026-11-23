@@ -43,7 +43,6 @@ export function DisplayNameModal({ person, onClose, onSaved, showToast }) {
     <Modal
       title={`Change the name for ${person.email}`}
       icon={<IconUser size={18} />}
-      size="md"
       onClose={busy ? () => {} : onClose}
       lead="Shown first, with their email address beside it. Their email address does not change, and stays how they sign in."
       initialFocus={inputRef}

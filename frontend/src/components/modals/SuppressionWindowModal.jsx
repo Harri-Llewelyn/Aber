@@ -89,7 +89,6 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
     <Modal
       title={action}
       icon={<IconBellOff size={18} />}
-      size="sm"
       onClose={pending ? () => {} : onCancel}
       lead={<>
         {covers(kind, subjectName)} are recorded, but not counted, coloured or sent, from the start to

@@ -306,6 +306,7 @@ export function SchemaDetailModal({
       }
       icon={editable ? <IconGitBranch size={18} /> : <IconLock size={18} />}
       size="lg"
+      className="schema-detail-modal"
       fill={editable}
       onClose={onClose}
       problem={problem}

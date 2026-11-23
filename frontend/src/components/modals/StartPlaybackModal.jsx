@@ -203,6 +203,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
     <Modal
       title={`Play back capture${capture.note ? ` — ${capture.note}` : ''}`}
       icon={<IconPlay size={18} />}
+      size="wide"
       onClose={pending ? () => {} : onCancel}
       lead={<>
         {plural(capture.message_count, 'message')} recorded from{' '}

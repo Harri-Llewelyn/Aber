@@ -16,7 +16,10 @@ import { Modal } from '../common/Modal'
  *
  * @param {React.ReactNode} [icon] A sized icon element shown before the title.
  *
- * @param {'sm'|'md'} [size] Width step; `sm` for a plain question, `md` when `children` hold a form.
+ * @param {'sm'|'default'|'md'} [size] A step of Modal's width scale, for what `children` hold: sm
+ * 400px for a question with no field (the default here), default 480px for stacked form fields, md
+ * 560px for a form with a list in it. A typed gate is not a field: a confirm with only `requireTyped`
+ * stays sm.
  *
  * @param {React.ReactNode} message What will happen, in the lead paragraph.
  *

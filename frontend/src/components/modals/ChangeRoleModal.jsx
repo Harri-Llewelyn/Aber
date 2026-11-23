@@ -41,7 +41,6 @@ export function ChangeRoleModal({ person, onClose, onChanged, showToast }) {
     <Modal
       title={`Change the role for ${personLabel(person)}`}
       icon={<IconShieldCheck size={18} />}
-      size="md"
       onClose={busy ? () => {} : onClose}
       lead="Choose the role they should hold. Nothing changes until you select Change Role."
       initialFocus={selectRef}
