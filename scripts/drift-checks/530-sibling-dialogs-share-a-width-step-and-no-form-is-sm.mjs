@@ -153,7 +153,7 @@ export default function check() {
       const step = size === undefined ? (m[1] === 'Modal' ? 'default' : 'sm') : size;
       const body = src[end - 1] === '/' ? '' : children(src, end + 1, m[1]);
       if (body === null) { problems530.push(`${file}:${line}: could not find the </${m[1]}> that closes this dialog`); continue; }
-      dialogs.push({ file, line, kind: m[1], step, title: propText(tag, 'title'), body });
+      dialogs.push({ file, line, step, title: propText(tag, 'title'), body });
     }
   }
 

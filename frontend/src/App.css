@@ -8117,8 +8117,8 @@ ol.gateway-steps {
   color: var(--success-text);
 }
 
-/* The schema detail dialog's footer holds up to four buttons, which wrap rather than run past the box
-   when one row cannot hold them. */
+/* The schema detail dialog's footer holds up to four buttons, which wrap rather than run past the
+   box when one row cannot hold them. */
 .schema-detail-modal .modal-actions { flex-wrap: wrap; }
 
 /* AUTOMATIONS. The list's select and switch columns, the chip that names the entity a list is
