@@ -2,10 +2,10 @@
 #   lanes: stack
 #   why: 0298 and the exporter -- that publishing a schema version leaves a device's Submodel id where
 #     it was and moves administration.version, in the JSON export and through aas-api; that aas-api
-#     answers the id an earlier version's name made, on both submodel routes, with the current
-#     Submodel; that a name no version of the device's lineages ever had is still a 404; and that the
-#     file carries only the new id. A wrong id here is a third-party AAS server that collects one
-#     Submodel per version, or an ERP reading a Submodel that stopped existing at the last publish.
+#     answers the lineage's id on both submodel routes, and an id an earlier version's name made with
+#     404 on both, as any id the shell does not carry; and that the file carries only the new id. A
+#     wrong id here is a third-party AAS server that collects one Submodel per version, or an ERP
+#     reading a Submodel that stopped existing at the last publish.
 
 """
 Publishing a schema version keeps a device's Submodel id (0298), against a running stack.
@@ -207,22 +207,24 @@ class TestPublishingKeepsTheSubmodelId(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(body["administration"], {"version": "2"})
 
-    def test_aas_api_serves_the_current_submodel_under_the_old_id(self):
+    def test_aas_api_answers_the_old_id_with_404(self):
         old = self.after["id"].replace(f"/{SCHEMA_NAME}/", f"/{SCHEMA_NAME}_v2/")
         status, body = call("GET", f"{API}/submodels/{b64url(old)}", TOKEN)
-        self.assertEqual(status, 200, body)
-        # The current Submodel, which carries the id the files carry.
-        self.assertEqual(body["id"], self.after["id"])
-        self.assertEqual(body["administration"], {"version": "2"})
+        self.assertEqual(status, 404, body)
+        # The body any id the shell does not carry gets.
+        self.assertEqual(body["messages"][0]["text"], f"No submodel with identifier '{old}'")
 
-    def test_the_route_through_the_shell_serves_the_old_id_too(self):
+    def test_the_route_through_the_shell_answers_the_old_id_with_404_and_the_new_one(self):
         shell = self.environment["assetAdministrationShells"][0]
         old = self.after["id"].replace(f"/{SCHEMA_NAME}/", f"/{SCHEMA_NAME}_v2/")
         status, body = call("GET", f"{API}/shells/{b64url(shell['id'])}/submodels/{b64url(old)}", TOKEN)
+        self.assertEqual(status, 404, body)
+        self.assertEqual(body["messages"][0]["text"], f"Shell '{shell['id']}' has no submodel '{old}'")
+        status, body = call("GET", f"{API}/shells/{b64url(shell['id'])}/submodels/{b64url(self.after['id'])}", TOKEN)
         self.assertEqual(status, 200, body)
         self.assertEqual(body["id"], self.after["id"])
 
-    def test_a_name_no_version_had_is_still_not_found(self):
+    def test_a_name_no_version_had_is_not_found_either(self):
         unknown = self.after["id"].replace(f"/{SCHEMA_NAME}/", f"/{SCHEMA_NAME}_v9/")
         status, _ = call("GET", f"{API}/submodels/{b64url(unknown)}", TOKEN)
         self.assertEqual(status, 404)
@@ -234,10 +236,12 @@ class TestPublishingKeepsTheSubmodelId(unittest.TestCase):
 
 
 class TestSource(unittest.TestCase):
-    def test_both_submodel_routes_try_the_old_id_after_the_exact_one(self):
+    def test_both_submodel_routes_find_the_exact_id_only(self):
         source = (REPO_ROOT / "supabase" / "functions" / "aas-api" / "index.ts").read_text(encoding="utf-8")
-        self.assertEqual(source.count("await submodelIn("), 2)
-        self.assertIn('from "../_shared/aas/previousSubmodelIds.ts"', source)
+        self.assertEqual(source.count("submodelIn(built, "), 2)
+        self.assertIn("return built.submodels.find((s) => s.id === identifier) ?? null;", source)
+        self.assertNotIn("previousSubmodelIds", source)
+        self.assertFalse((REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "previousSubmodelIds.ts").exists())
 
 
 if __name__ == "__main__":

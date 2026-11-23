@@ -1,6 +1,5 @@
 import { assignSubmodelKeys, shortRootId } from "./submodelKeys.ts";
 import { buildEnvironment, type DeviceRecord } from "./shell.ts";
-import { submodelOfAPreviousVersion } from "./previousSubmodelIds.ts";
 
 // Local rather than an assertion library: a test import would enter deno.lock and the image's graph.
 const assert = {
@@ -126,9 +125,12 @@ Deno.test("a draft attached beside its version in force takes a version-qualifie
   // More than one schema: the idShort is qualified by the key, so the two differ as well.
   const shorts = built.submodels.map((s) => s.idShort).filter((s) => String(s).startsWith("Robot"));
   assert.equal(new Set(shorts).size, 4);
+  // The version in force keeps the plain key, and the draft's key carries its version.
+  const versionOf = (key: string) =>
+    built.submodels.find((s) => s.id === `${PREFIX}/${key}/OperationalTelemetry`)?.administration;
   assert.equal(
-    built.schemaSubmodels.map((s) => [s.schemaId, s.kept]),
-    [["s1", true], ["s2", false]],
+    [versionOf("Robot_Arm_Schema"), versionOf("Robot_Arm_Schema_v2")],
+    [{ version: "1" }, { version: "2" }],
   );
 });
 
@@ -215,82 +217,4 @@ Deno.test("assignSubmodelKeys qualifies with a short form of the root id and kee
     ["r", "Arm_11111111_2"],
   ]);
   assert.equal(declared.clashes, 2);
-});
-
-Deno.test("an earlier version's id resolves to the lineage's current Submodel", async () => {
-  const rows = record([schema("s2", "Robot_Arm_Schema_v2", 2, "active", ARM)]);
-  const built = buildEnvironment(rows);
-  // The names every version of the lineage has had: 1, 2 and a v3 that is still a draft.
-  const versions = [
-    { lineage_root_id: ROOT_A, schema_name: "Robot_Arm_Schema" },
-    { lineage_root_id: ROOT_A, schema_name: "Robot_Arm_Schema_v2" },
-    { lineage_root_id: ROOT_A, schema_name: "Robot_Arm_Schema_v3" },
-    { lineage_root_id: ROOT_B, schema_name: "Somebody_Elses" },
-  ];
-  const client = {
-    from: (table: string) => {
-      if (table !== "schemas") throw new Error(`read ${table}`);
-      return {
-        select: () => ({
-          in: (_column: string, roots: string[]) =>
-            Promise.resolve({
-              data: versions.filter((v) => roots.includes(v.lineage_root_id)),
-              error: null,
-            }),
-        }),
-      };
-    },
-  };
-  const current = `${PREFIX}/Robot_Arm_Schema/OperationalTelemetry`;
-  for (const old of ["Robot_Arm_Schema_v2", "Robot_Arm_Schema_v3"]) {
-    const found = await submodelOfAPreviousVersion(client, built, `${PREFIX}/${old}/OperationalTelemetry`);
-    assert.equal(found?.id, current);
-  }
-  const kpi = await submodelOfAPreviousVersion(client, built, `${PREFIX}/Robot_Arm_Schema_v3/KeyPerformanceIndicators`);
-  assert.equal(kpi?.id, `${PREFIX}/Robot_Arm_Schema/KeyPerformanceIndicators`);
-
-  // Not a lineage this device carries, not a role the lineage makes, not this shell.
-  assert.equal(
-    await submodelOfAPreviousVersion(client, built, `${PREFIX}/Somebody_Elses/OperationalTelemetry`),
-    null,
-  );
-  assert.equal(
-    await submodelOfAPreviousVersion(client, built, `${PREFIX}/Robot_Arm_Schema_v2/DerivedMetrics`),
-    null,
-  );
-  assert.equal(
-    await submodelOfAPreviousVersion(
-      client,
-      built,
-      "https://aber.local/ids/asset/dev2/submodel/Robot_Arm_Schema_v2/OperationalTelemetry",
-    ),
-    null,
-  );
-});
-
-Deno.test("a draft's own id is not served as an old id of the version in force", async () => {
-  // Both attached: the draft's qualified key is a current id, found by the caller before this is
-  // asked. Asked anyway, the answer is the version in force, never the draft.
-  const rows = record([
-    schema("s1", ARM.name, 1, "active", ARM),
-    schema("s2", "Robot_Arm_Schema_v2", 2, "draft", ARM),
-  ]);
-  const built = buildEnvironment(rows);
-  const client = {
-    from: () => ({
-      select: () => ({
-        in: () =>
-          Promise.resolve({
-            data: [{ lineage_root_id: ROOT_A, schema_name: "Robot_Arm_Schema_v3" }],
-            error: null,
-          }),
-      }),
-    }),
-  };
-  const found = await submodelOfAPreviousVersion(
-    client,
-    built,
-    `${PREFIX}/Robot_Arm_Schema_v3/OperationalTelemetry`,
-  );
-  assert.equal(found?.id, `${PREFIX}/Robot_Arm_Schema/OperationalTelemetry`);
 });

@@ -24,8 +24,6 @@ export interface SubmodelKeys {
   keys: Map<string, string>;
   /** Keys that were already taken and were qualified to stay apart. */
   clashes: number;
-  /** The schemas that stand for their lineage: the one in force, or the highest version. */
-  current: Set<string>;
 }
 
 /** The first eight hex digits of a lineage's root id, which tells two lineages with one name apart. */
@@ -90,5 +88,5 @@ export function assignSubmodelKeys(schemas: KeyedSchema[]): SubmodelKeys {
     taken.add(key);
     keys.set(schema.id, key);
   }
-  return { keys, clashes, current: new Set(keeper.values()) };
+  return { keys, clashes };
 }

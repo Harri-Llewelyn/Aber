@@ -22,7 +22,7 @@ export default function check() {
     problems441.push('shell.ts makes a Submodel key from the version\'s own schema_name again');
   }
   for (const id of ['OperationalTelemetry', 'KeyPerformanceIndicators']) {
-    const block = loop.slice(loop.indexOf(`made.ids.${id} =`));
+    const block = loop.slice(loop.indexOf(`id: submodelId(\`\${baseKey}/${id}\`)`));
     const submodel = block.slice(0, block.indexOf('});'));
     if (!/administration,/.test(submodel)) problems441.push(`shell.ts does not give the ${id} Submodel its administration.version`);
   }

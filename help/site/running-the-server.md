@@ -213,8 +213,9 @@ plus the asset's `sparkplug_id`. Once a shell has left the site, whoever importe
 identifiers.
 Changing the IRI would then give every asset a new identity.
 A Submodel built from a schema keeps its id when you publish a new version of the schema. Its
-`administration.version` says which version made it. The AAS API still answers the ids that carried
-a version's name until 1.10.0, and a file holds only the current one.
+`administration.version` says which version made it. Before 1.9.0, a publish moved the id to one with
+the new version's name. The AAS API answers such an old id with 404, and a file holds only the
+current one.
 
 A shell also names its asset by its serial number, its manufacturer's product URI and its Sparkplug
 id. They are the shell's `specificAssetIds`. They don't use the base IRI, so changing the IRI
