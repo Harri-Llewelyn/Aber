@@ -18,9 +18,10 @@ import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import { JobHistory } from './CaptureHistory'
 import {
-  IconCpu, IconDownload, IconInfo, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash, IconUpload,
-  IconX
+  IconClipboardList, IconCpu, IconDownload, IconInfo, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash,
+  IconUpload, IconX
 } from '../common/Icons'
+import { OverflowText } from '../common/OverflowText'
 import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
 import { Badge } from '../common/Badge'
@@ -700,22 +701,22 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               { label: 'Via gateway', value: selected.context },
               {
                 label: 'Schema',
-                // A button that navigates: the schema says which metrics this device is supposed to
-                // publish, which is the next question after a capture recorded something
-                // unexpected.
+                // A chip that opens the schema, as the Devices drawer draws it: the schema says which
+                // metrics this device is supposed to publish, the next question after a capture
+                // recorded something unexpected.
                 value: selectedSchemas.length > 0
                   ? (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    <div className="context-device-list">
                       {selectedSchemas.map(s => (
                         <RouteLink
                           key={s.schema_uuid}
-                          className="btn btn-ghost btn-sm"
+                          className="chip chip-link"
                           to={schemaUrl(s.schema_uuid)}
                           onNavigate={onSelectSchema ? () => onSelectSchema(s.schema_uuid) : undefined}
                           title={`Open ${s.schema_name} on the Schemas page`}
                         >
-                          {s.schema_name}
-                          {s.version ? <Badge size="sm" className="badge-follow">v{s.version}</Badge> : null}
+                          <IconClipboardList size={11} />
+                          <OverflowText className="chip-name">{s.schema_name}</OverflowText>
                         </RouteLink>
                       ))}
                     </div>
