@@ -75,12 +75,17 @@ A file is a list of schemas. Each is a set of these keys.
 
 Things to know:
 
-- **A schema is found by its name.** A schema's versions are called `Robot_Arm_Schema`,
-  `Robot_Arm_Schema_v2`, `Robot_Arm_Schema_v3`. Aber adds the suffix when it versions the schema. The
-  file names the schema, and Aber finds it on any site by that name with one trailing `_v<n>` taken off.
-  When a version's name is already taken, Aber numbers it further, as `Robot_Arm_Schema_v2_2`. The file
-  then names the schema by that whole name, so another site finds it only where its versions are named
-  the same.
+- **A schema is found by its lineage's name.** A schema's versions are called `Robot_Arm_Schema`,
+  `Robot_Arm_Schema_v2`, `Robot_Arm_Schema_v3`. Aber adds the suffix when it versions the schema. When a
+  version's name is already taken, Aber numbers it further, as `Robot_Arm_Schema_v2_2`. Every version
+  carries the name of the first, `Robot_Arm_Schema`: the lineage's name. An export writes it, and Aber
+  finds the schema by it on any site, whatever its versions are called.
+- **A name no lineage has is found by its versions' names.** Aber takes one trailing `_v<n>` off the
+  name and off each version's name, and finds the versions where the two agree. A file exported before
+  Aber 1.10 named a schema that way, such as `Robot_Arm_Schema_v2_2` for the lineage above, and still
+  applies. Where the name is a lineage's, and other versions' names without their `_v<n>` match it too,
+  the lineage whose name it is wins. Two schemas in one file that find one lineage are refused, as a
+  name used twice.
 - **A metric is named by its catalogue name.** Its type, its description and its permitted values come
   from the catalogue, as the schema builder writes them. The file does not repeat them.
 - **A metric the catalogue lacks is refused by name.** So is a derived metric: nothing publishes one,
@@ -121,7 +126,8 @@ it twice: once with `p_dry_run` true for the preview, once with it false when th
   values, the order of the metrics and `change_description` do not make a schema changed.
 
 `device_schemas_document(p_ids)` renders the schemas in force back to this shape, in name order: every
-schema, or those of the lineages the ids given belong to. A draft is not exported.
+schema, or those of the lineages the ids given belong to, whichever version an id is. Each is named by
+its lineage. A draft is not exported.
 `apply_device_schemas(device_schemas_document(), true)` reports every schema unchanged.
 
 ## Who may, and what is recorded

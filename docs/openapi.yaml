@@ -2804,9 +2804,10 @@ paths:
         a preview and an apply are the same call. It never deletes: a schema the document leaves out is left
         alone.
 
-        A schema is found by its `name`, without a trailing `_v2`. A schema that does not exist is made as
-        version 1 and in force. A changed one becomes a new draft version, named and linked as `fork_schema`
-        does, and a published version is never edited. A lineage that has a draft refuses a different change.
+        A schema is found by its lineage's name (`lineage_name`). A name no lineage has, as in a file
+        written before 1.10, is matched by a version's name without a trailing `_v2`. A schema that does
+        not exist is made as version 1 and in force. A changed one becomes a new draft version, named and
+        linked as `fork_schema` does, and a published version is never edited. A lineage that has a draft refuses a different change.
         Each schema written is one `INSERT` row in the Audit Trail, by the `schemas` table's trigger; an
         unchanged schema writes none.
 
