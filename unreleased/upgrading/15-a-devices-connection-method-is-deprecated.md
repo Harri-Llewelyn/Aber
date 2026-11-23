@@ -13,4 +13,4 @@ column. It still works in 1.9.x, and it is removed no sooner than 1.10.0. There 
   Nothing replaces it: the value was always Sparkplug B, or empty, so a script that reads it learns
   nothing.
 - **Its value no longer reaches the AAS export.** See [*a device's nameplate no longer carries
-  ConnectionMethod or Status*](./a-devices-nameplate-no-longer-carries-connectionmethod-or-status.md).
+  ConnectionMethod or Status*](./08-a-devices-nameplate-no-longer-carries-connectionmethod-or-status.md).

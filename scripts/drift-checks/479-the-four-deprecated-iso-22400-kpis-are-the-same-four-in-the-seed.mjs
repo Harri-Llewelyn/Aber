@@ -34,7 +34,7 @@ export default function check() {
     problems479.push(`${file} gives ${reasons.length} reasons that say "removed no sooner than 1.10.0", and deprecates ${names.length} KPIs`);
   }
 
-  const note = read('unreleased/upgrading/four-iso-22400-kpis-are-deprecated.md');
+  const note = read('unreleased/upgrading/16-four-iso-22400-kpis-are-deprecated.md');
   if (!note.startsWith('### From 1.9.0, ') || !note.split('\n')[0].includes('deprecated')) {
     problems479.push('the upgrade note does not open "### From 1.9.0, ... deprecated", which the release notes list under Deprecated');
   }

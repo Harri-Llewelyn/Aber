@@ -46,7 +46,7 @@ export default function check() {
     ['docs/openapi.yaml', read('docs/openapi.yaml'), [`${units} of QUDT's`, `${none} of the ${names} names map to none`]],
     [`${file}'s header`, sql, [`${kinds} of them`, `the ${units} QUDT units`, `${none} of the ${names} names`]],
     ['its migration note', read('unreleased/migrations/0304.md'), [`${kinds} of them`, `the ${units} QUDT units`, `${mapped} map.`]],
-    ['its upgrade note', read('unreleased/upgrading/a-quantity-kind-has-a-vocabulary.md'), [`${kinds} quantity kinds`, `${mapped} of MTConnect's ${names} unit`]],
+    ['its upgrade note', read('unreleased/upgrading/21-a-quantity-kind-has-a-vocabulary.md'), [`${kinds} quantity kinds`, `${mapped} of MTConnect's ${names} unit`]],
   ];
   for (const [where, text, wanted] of claims) {
     for (const claim of wanted) {

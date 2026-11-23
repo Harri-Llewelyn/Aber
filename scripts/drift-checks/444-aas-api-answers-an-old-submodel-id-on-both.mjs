@@ -28,7 +28,7 @@ export default function check() {
 
   const docs = [
     ['docs/openapi.yaml', read('docs/openapi.yaml')],
-    ['the upgrade note', read('unreleased/upgrading/a-submodels-id-follows-its-schemas-lineage-and-carries-its-version.md')],
+    ['the upgrade note', read('unreleased/upgrading/09-a-submodels-id-follows-its-schemas-lineage-and-carries-its-version.md')],
     ['help/site/running-the-server.md', read('help/site/running-the-server.md')],
   ];
   for (const [name, text] of docs) {
