@@ -1,12 +1,12 @@
 /**
  * The browser's side of reading a derived metric (0282): which derived metrics a device's reports
  * make possible, how a read is split from the measured ones, what a window that is too long for one says,
- * how the Area tab folds a cell, and the drawer's Applies To line.
+ * how the Area tab folds a cell, and the order and the words of the drawer's Applies To.
  */
 import { describe, it, expect } from 'vitest'
 import { HISTORY_MAX_ROWS } from '../api'
 import {
-  DERIVED_MAX_BUCKET_MINUTES, DERIVED_MAX_MINUTES, DERIVED_MAX_ROWS, SHARE_UNIT, appliesToValue, appliesToWords, currentWords,
+  DERIVED_MAX_BUCKET_MINUTES, DERIVED_MAX_MINUTES, DERIVED_MAX_ROWS, SHARE_UNIT, appliesToDevices, appliesToNone, appliesToRule, currentWords,
   derivedDefinitions, derivedInputCount, derivedReportedBy, derivedWindowMinutes, percentWords, splitDerived, unitOf,
 } from '../utils/derivedMetric'
 import {
@@ -224,37 +224,21 @@ describe('a time in state as a percentage', () => {
   })
 })
 
-describe("a derived metric's Applies To line", () => {
-  const names = (n) => Array.from({ length: n }, (_, i) => `Press ${i + 1}`)
-
-  it('names the devices that report the inputs, as the dashboard lists them', () => {
-    expect(appliesToWords(names(1), counter)).toBe('Applies to: Press 1, the device that reports Controller/PART_COUNT')
-    expect(appliesToWords(names(2), counter)).toBe('Applies to: Press 1 and Press 2, the devices that report Controller/PART_COUNT')
-    expect(appliesToWords(names(3), counter)).toBe('Applies to: Press 1, Press 2 and Press 3, the devices that report Controller/PART_COUNT')
+describe("a derived metric's Applies To", () => {
+  it('lists the devices as a table sorts them, whatever order they were read in, and leaves that order alone', () => {
+    const read = ['Press 4', 'Press 10', 'press 2', 'Press 1', 'Press 3'].map((name, i) => device(`d${i}`, name, []))
+    expect(appliesToDevices(read).map(d => d.asset_name)).toEqual(['Press 1', 'press 2', 'Press 3', 'Press 4', 'Press 10'])
+    expect(read[0].asset_name).toBe('Press 4')
   })
 
-  it('says how many more past three', () => {
-    expect(appliesToWords(names(5), counter)).toBe('Applies to: Press 1, Press 2 and 3 more, the devices that report Controller/PART_COUNT')
-    expect(appliesToWords(names(4), counter)).toBe('Applies to: Press 1, Press 2 and 2 more, the devices that report Controller/PART_COUNT')
-  })
-
-  it('names the first two as a table sorts them, whatever order the devices were read in', () => {
-    const read = ['Press 4', 'Press 10', 'press 2', 'Press 1', 'Press 3']
-    expect(appliesToWords(read, counter)).toBe('Applies to: Press 1, press 2 and 3 more, the devices that report Controller/PART_COUNT')
-    expect(read[0]).toBe('Press 4')
-  })
-
-  it('says every input of a sum', () => {
-    expect(appliesToWords(names(2), power)).toBe('Applies to: Press 1 and Press 2, the devices that report Power/A and Power/B')
+  it('says once what the devices report, every input of a sum', () => {
+    expect(appliesToRule(counter)).toBe('The devices in service that report Controller/PART_COUNT.')
+    expect(appliesToRule(power)).toBe('The devices in service that report Power/A and Power/B.')
   })
 
   it('says what no device reports yet when there is none', () => {
-    expect(appliesToWords([], counter)).toBe('Applies to no device yet: none reports Controller/PART_COUNT')
-    expect(appliesToWords([], power)).toBe('Applies to no device yet: none reports Power/A and Power/B')
-  })
-
-  it("is the same line without 'Applies to' beside the drawer's label", () => {
-    expect(appliesToValue(names(5), counter)).toBe('Press 1, Press 2 and 3 more, the devices that report Controller/PART_COUNT')
-    expect(appliesToValue([], state)).toBe('No device yet: none reports Controller/EXECUTION')
+    expect(appliesToNone(counter)).toBe('No device yet: none reports Controller/PART_COUNT')
+    expect(appliesToNone(power)).toBe('No device yet: none reports Power/A and Power/B')
+    expect(appliesToNone(state)).toBe('No device yet: none reports Controller/EXECUTION')
   })
 })

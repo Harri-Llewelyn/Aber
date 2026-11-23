@@ -186,7 +186,7 @@ describe('the Derived tab', () => {
   })
 })
 
-describe("a derived metric's Applies To line", () => {
+describe("a derived metric's Applies To", () => {
   const press = (n, metrics) => ({ asset_id: 'p' + n, asset_name: 'Press ' + n, last_birth_metrics: metrics, status: 'ONLINE', location_source: 'inherited' })
   const serve = (devices) => api.get.mockImplementation((path) => {
     if (path.startsWith('/api/v1/devices')) return Promise.resolve(devices)
@@ -201,26 +201,28 @@ describe("a derived metric's Applies To line", () => {
     return drawer
   }
   const line = (drawer) => within(drawer).getByText('Applies To').closest('.context-field').textContent
+  const chips = (drawer) => [...within(drawer).getByText('Applies To').closest('.context-field').querySelectorAll('a.chip')].map(a => a.textContent)
 
-  it('names the devices that report every input', async () => {
+  it('lists the devices that report every input', async () => {
     serve([press(1, ['Controller/PART_COUNT']), press(2, ['Controller/PART_COUNT', 'Other/X']), press(3, ['Other/X'])])
     renderTab()
     const drawer = await open('Controller/PARTS_PER_HOUR')
-    expect(line(drawer)).toContain('Press 1 and Press 2, the devices that report Controller/PART_COUNT')
+    expect(chips(drawer)).toEqual(['Press 1', 'Press 2'])
   })
 
-  it('says how many more when it is more than three, and uses the Metric tab rule: every input', async () => {
+  it('lists every device past three, with no count of the rest', async () => {
     serve([1, 2, 3, 4, 5].map(n => press(n, ['Controller/PART_COUNT'])))
     renderTab()
     const drawer = await open('Controller/PARTS_PER_HOUR')
-    expect(line(drawer)).toContain('Press 1, Press 2 and 3 more, the devices that report Controller/PART_COUNT')
+    expect(chips(drawer)).toEqual(['Press 1', 'Press 2', 'Press 3', 'Press 4', 'Press 5'])
+    expect(line(drawer)).not.toContain('more')
   })
 
   it('needs every input of a sum, not one', async () => {
     serve([press(1, ['Power/PHASE_A']), press(2, ['Power/PHASE_A', 'Power/PHASE_B'])])
     renderTab()
     const drawer = await open('Power/TOTAL')
-    expect(line(drawer)).toContain('Press 2, the device that reports Power/PHASE_A and Power/PHASE_B')
+    expect(chips(drawer)).toEqual(['Press 2'])
   })
 
   it('says no device reports the inputs yet, and what they are', async () => {
@@ -234,7 +236,7 @@ describe("a derived metric's Applies To line", () => {
     serve([{ ...press(1, ['Controller/PART_COUNT']), is_archived: true }, press(2, ['Controller/PART_COUNT'])])
     renderTab()
     const drawer = await open('Controller/PARTS_PER_HOUR')
-    expect(line(drawer)).toContain('Press 2, the device that reports Controller/PART_COUNT')
+    expect(chips(drawer)).toEqual(['Press 2'])
   })
 
   it('says nothing when the devices could not be read', async () => {
