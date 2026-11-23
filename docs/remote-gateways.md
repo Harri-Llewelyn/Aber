@@ -176,14 +176,22 @@ Re-issue when:
 
 * the token expired before the appliance was started (the modal counts down and says so);
 * the appliance was replaced, or its volume was destroyed;
-* a gateway stays in `AWAITING_BIRTH` and never publishes. The modal names this case, because
-  re-issuing there also revokes the broker credential its appliance already holds.
+* a gateway stays in `AWAITING_BIRTH` and never publishes.
 
-The drawer's **Set Up Gateway** and **Re-issue Setup** actions are deliberately absent once a gateway
-is `ONLINE`. Re-issuing then
-would invalidate the credential a working appliance is using: a destructive action dressed up as a
-convenience. To rotate a live gateway's credential, run
-`node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>`, or re-enrol on purpose.
+**Re-issuing for a gateway whose appliance enrolled revokes its broker credential at once.** The old
+appliance's account is disabled as the new setup is issued, and the platform keeps asking the broker
+until it confirms. The new appliance is given a new password when it enrols. The modal says so before
+it mints.
+
+The drawer offers **Re-issue Setup** for an enrolled gateway that is `AWAITING_BIRTH`, `OFFLINE` or
+STALE. It is deliberately absent once a gateway is `ONLINE`. Re-issuing then would cut off the
+credential a working appliance is using: a destructive action dressed up as a convenience. To rotate a
+live gateway's credential, run `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>`, or
+re-enrol on purpose.
+
+The old appliance's deploy key stays on the gateway's repository until the new appliance enrols and its
+key replaces it. For an appliance that is lost or stolen, **archive** the gateway instead: that removes
+the key at once ([*An appliance that is lost, stolen or scrapped*](#an-appliance-that-is-lost-stolen-or-scrapped)).
 
 ### A rebuilt appliance is a re-issue, and keeps its repository
 
@@ -425,7 +433,8 @@ Broker **credentials** are different: they can be revoked immediately (see below
 **Archiving the gateway is the revocation.** It disables the broker account: the appliance's live
 session is dropped at once, and its next connection is refused. Do it the moment hardware goes
 missing, not as part of a later tidy-up. The Access Control page shows the account as *Disabled*
-once the change has landed.
+once the change has landed. If the credential service cannot be reached, Aber asks again every
+fifteen minutes until it confirms, even if the gateway is deleted meanwhile.
 
 The broker password is on the appliance in plaintext, in `/data/gateway.env`. That is unavoidable,
 since something has to connect. The damage is deliberately limited: the gateway's broker role

@@ -8,7 +8,7 @@ To use the page, read [its help](../help/pages/gateways.md). The design reasons 
 [Remote gateways](remote-gateways.md).
 
 Every row says what the step **should** leave. Where today's code does something else, the row carries a
-key such as **[D1]**, and [*Where the code differs*](#where-the-code-differs) says what. Where only a live
+key such as **[Dn]**, with a number for n, and [*Where the code differs*](#where-the-code-differs) says what. Where only a live
 gateway can show a cell, the cell says so.
 
 ## The types
@@ -49,10 +49,13 @@ Each table covers one group of steps. A row is one step for one type, from the s
   with a success toast, which also files a bell notification.
 
 A revocation is asked of the broker through `pg_net`, so the database cannot see the answer in the
-same transaction. The sweep runs every 15 minutes and judges each request by its reply. The README's
-sections on [0252](../supabase/README.md#changing-a-gateways-type-cleans-up-after-the-old-type-0252) and
-[0288](../supabase/README.md#a-failed-revocation-after-a-change-of-type-is-asked-again-0288) say which
-failed requests it asks again.
+same transaction. A revocation is **owed** from the step that ends the credential until a reply
+confirms it. The sweep runs every 15 minutes and judges each request by its reply. It asks again for
+one that failed, or that could not be asked, whatever the gateway's type, archived or not, and after
+the gateway is deleted. It stops early only when a credential issued or enrolled after the revocation
+replaces the one it ends. The README's section on
+[0288](../supabase/README.md#a-failed-revocation-after-a-change-of-type-is-asked-again-0288) says how
+the retry began, and its section on `0311` how a revocation stays owed.
 
 ## Registration and setup
 
@@ -67,8 +70,8 @@ Setup is a Remote gateway's own step. The other types are issued a credential in
 | **Register** a Playback gateway | Not by a person | n/a | n/a | n/a | n/a | n/a | The seed makes it. Every API role is refused when it tries to mark a gateway Playback. |
 | **Setup issued**, Remote, `OFFLINE` | `PENDING_ENROLLMENT`, read as AWAITING SETUP | One live token. It lasts 30 minutes by default and a day at most. | None | No account | None | Set Up Gateway (primary). Request Rebirth is disabled until the first birth. | One `UPDATE` of the status. The toast says the install command was issued, and links to the gateway. A downloaded bundle's toast has no link. |
 | **Setup re-issued**, Remote, `PENDING_ENROLLMENT` | Unchanged | The earlier token is cancelled and one new token is live | None | No account | None | Set Up Gateway. It asks the person to type the gateway's name first. | None: the status did not change. Same toast. |
-| **Setup re-issued**, Remote, `AWAITING_BIRTH` | Back to `PENDING_ENROLLMENT` | One new token is live | `enrolled_at` is kept. The stamp is set as the revocation is asked. | The account is disabled at once. Redeeming the new setup enables it with a new password. | The repository is kept | Re-issue Setup (primary), then Set Up Gateway | One `UPDATE` of the status. Same toast. |
-| **Setup re-issued**, Remote, enrolled and published, its appliance rebuilt | Back to `PENDING_ENROLLMENT` | One new token is live | `enrolled_at` is kept. The stamp is set as the revocation is asked. | The account is disabled at once. Redeeming the new setup enables it with a new password. | The repository is kept. The new appliance's key replaces the old. | Re-issue Setup, which asks first. Today the drawer offers nothing: **[D7]** | One `UPDATE` of the status. Same toast. |
+| **Setup re-issued**, Remote, `AWAITING_BIRTH` | Back to `PENDING_ENROLLMENT` | One new token is live | `enrolled_at` is kept. The stamp is set, whether or not the call can be made. | The account is disabled at once, and asked again until a reply confirms it. Redeeming the new setup enables it with a new password. | The repository is kept | Re-issue Setup (primary), then Set Up Gateway | One `UPDATE` that carries the status and the stamp. Same toast. |
+| **Setup re-issued**, Remote, enrolled and published, its appliance rebuilt | Back to `PENDING_ENROLLMENT` | One new token is live | `enrolled_at` is kept. The stamp is set, whether or not the call can be made. | The account is disabled at once, and asked again until a reply confirms it. Redeeming the new setup enables it with a new password. | The repository is kept. The old key stays until the new appliance's key replaces it at enrolment. | Re-issue Setup while the gateway is `OFFLINE` or STALE, never while it is online. It is not the primary, and it asks for the gateway's name first. | One `UPDATE` that carries the status and the stamp. Same toast. |
 | **Setup issued**, Third-party, Host, Simulated or Playback | Unchanged | None: the issue is refused | None | None | None | No setup action | None. The refusal names the type. |
 | **Setup issued**, an archived Remote gateway | Refused | None | None | None | None | No setup action | A refusal that names the gateway and says to restore it first. Nothing is written. |
 | **Setup expires unused**, Remote, `PENDING_ENROLLMENT` | Unchanged: still AWAITING SETUP | The token stays unconsumed past its expiry. Redeeming it, and the installer, answer as for an unknown token. | None | No account | None | Set Up Gateway (primary) | Nothing is written. |
@@ -102,14 +105,14 @@ ends anything: Remote to another type, or another type to Remote.
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Remote, `OFFLINE` with no token, to another type** | `OFFLINE` | None | None | None: it holds no account | None | Generate Broker Credential | One `UPDATE`. The toast says it was saved. |
 | **Remote, `PENDING_ENROLLMENT`, to another type** | `OFFLINE` | Cancelled | None | None: it never enrolled | None | Generate Broker Credential | One `UPDATE`. The toast says the unused setup command was cancelled. |
-| **Remote, enrolled, to another type** | `OFFLINE` if it was `PENDING_ENROLLMENT` or `AWAITING_BIRTH`. Otherwise its own word: an online appliance reads ONLINE until the broker drops it. | Cancelled | The stamp is set as the revocation is asked. `enrolled_at` stays. | The account is disabled. If the call fails, the sweep asks again every 15 minutes until a reply says it landed, or until a credential issued or enrolled after the change replaces it. | The repository is kept as it is (confirmed by the live walk, item 5) | Generate Broker Credential. Save asks first. | One `UPDATE` that carries the status and the stamp. The toast says the credential is ended. |
-| **A dashboard-issued type, with a credential, to Remote** | `OFFLINE` | None | The stamp is set. The kept copy is forgotten. | The account is disabled, and re-enabled when the appliance enrols | None | Set Up Gateway (primary), because a revocation stands | One `UPDATE`. The toast says the credential is ended, and to set it up from the drawer. Save asks first. |
+| **Remote, enrolled, to another type** | `OFFLINE` if it was `PENDING_ENROLLMENT` or `AWAITING_BIRTH`. Otherwise its own word: an online appliance reads ONLINE until the broker drops it. | Cancelled | The stamp is set, whether or not the call can be made. `enrolled_at` stays. | The account is disabled. If the call fails, or the credential service is not configured, the sweep asks again every 15 minutes until a reply says it landed, archived, deleted or not. It stops early if a credential issued or enrolled after the change replaces it. | The sweep removes the deploy key, as archiving does, and the change asks it at once. The repository is kept, out of the forge's archive. | Generate Broker Credential. Save asks first. | One `UPDATE` that carries the status and the stamp. The toast says the credential is ended. |
+| **A dashboard-issued type, with a credential, to Remote** | `OFFLINE` | None | The stamp is set, whether or not the call can be made. The kept copy is forgotten. | The account is disabled, and asked again until a reply says it landed. It is re-enabled when the appliance enrols. | None | Set Up Gateway (primary), because a revocation stands | One `UPDATE`. The toast says the credential is ended, and to set it up from the drawer. Save asks first. |
 | **A dashboard-issued type, with no credential, to Remote** | `OFFLINE` | None | None | None | None | Set Up Gateway (primary) | One `UPDATE`. The toast says to set it up. |
 | **Among Third-party, Host and Simulated** | Unchanged | None | Unchanged. The kept copy stays. | Unchanged | None | Unchanged | One `UPDATE`. Nothing is said to have ended. |
 | **The same type saved again** | Unchanged | Unchanged | Unchanged | Unchanged | Unchanged | Unchanged | One `UPDATE` for whatever else changed. |
 | **Any type, to or from Playback** | Refused by a constraint | n/a | n/a | n/a | n/a | The drawer has no Edit Details | A refusal. The Playback gateway stays as the seed made it. |
-| **An archived gateway**, to another type | As for a gateway that is not archived: `OFFLINE` if it becomes Remote, or leaves Remote in `PENDING_ENROLLMENT` or `AWAITING_BIRTH`. Otherwise its own word. | Already cancelled | Unchanged | Already disabled | n/a | Restore Gateway | One `UPDATE` |
-| **Remote, to another type and back**, never enrolled again | `OFFLINE` | None | `enrolled_at` is older than the stamp, so no enrolment stands. The database still counts the old one as held. **[D5]** | Disabled | The repository is kept | Set Up Gateway (primary) | One `UPDATE` each way |
+| **An archived gateway**, to another type | As for a gateway that is not archived: `OFFLINE` if it becomes Remote, or leaves Remote in `PENDING_ENROLLMENT` or `AWAITING_BIRTH`. Otherwise its own word. | Already cancelled | Unchanged | Already disabled. A revocation still owed is asked again whatever the new type. | The key was removed when it was archived | Restore Gateway | One `UPDATE` |
+| **Remote, to another type and back**, never enrolled again | `OFFLINE` | None | `enrolled_at` is older than the stamp, so no enrolment stands, and the database counts none. Leaving Remote again asks for no second revocation. | Disabled | The repository is kept, with no deploy key until the appliance enrols again | Set Up Gateway (primary) | One `UPDATE` each way |
 
 ## Renaming and changing the Sparkplug group
 
@@ -133,16 +136,16 @@ says why.
 | Step and type | Status | Setup token | Record | Broker | Forge | Drawer | Audit and toast |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Archive**, Remote, `PENDING_ENROLLMENT` or `OFFLINE`, never enrolled | Unchanged. The dashboard leaves an archived gateway out of every warning. | Cancelled | None: no account was ever issued, so none is asked for | None | None | Restore Gateway | One `UPDATE` with `archived_at` and the timer. The toast says it was archived. |
-| **Archive**, Remote, enrolled | Unchanged until the broker drops the session | Cancelled | The stamp is set as the revocation is asked | The account is disabled and its session dropped. Asked again every 15 minutes until a reply says it landed. | The sweep removes the deploy key and archives the repository, read-only. Archiving asks it at once. | Restore Gateway | One `UPDATE`. The toast says it was archived. |
-| **Archive**, Third-party, Host or Simulated, with a credential | Unchanged | None | The stamp is set. The kept copy is forgotten. | The account is disabled. Asked again until a reply says it landed. | None | Restore Gateway | One `UPDATE`. The toast says it was archived. |
+| **Archive**, Remote, enrolled | Unchanged. Ingestion refuses an archived gateway's traffic, so no death is recorded when the broker drops the session, and the live status reads STALE once the heartbeats stop (confirmed by the live walk, item 5). | Cancelled | The stamp is set, whether or not the call can be made, and stays while it is asked again | The account is disabled and its session dropped. Asked again every 15 minutes until a reply says it landed, even if the type is changed or the gateway deleted. | The sweep removes the deploy key and archives the repository, read-only. Archiving asks it at once. | Restore Gateway | Three `UPDATE`s: the archive and the revocation stamp, in one transaction under the person, then the forge's archive stamp under the service (confirmed by the live walk, item 5). The toast says it was archived. |
+| **Archive**, Third-party, Host or Simulated, with a credential | Unchanged | None | The stamp is set, whether or not the call can be made. The kept copy is forgotten. | The account is disabled. Asked again until a reply says it landed, even if the type is changed or the gateway deleted. | None | Restore Gateway | One `UPDATE`. The toast says it was archived. |
 | **Archive**, Third-party, Host or Simulated, with no credential | Unchanged | None | None | None: nothing is asked | None | Restore Gateway | One `UPDATE` |
 | **Archive**, Playback | Refused while it is the only Playback gateway | n/a | n/a | n/a | n/a | The drawer has no Archive Gateway | A refusal |
 | **Restore**, Remote, never enrolled | Unchanged: `PENDING_ENROLLMENT` stays so | None: a cancelled token does not come back | None | None | None | Set Up Gateway (primary) | One `UPDATE` clearing `archived_at` and the timer. The toast says it was restored. |
-| **Restore**, Remote, enrolled | Unchanged | None | The stamp stays, so the record keeps reading Revoked until a credential is issued or enrolled after the restore. Today it is cleared: **[D1]** | The account stays disabled until the appliance enrols again | The repository comes back out of the forge's archive. The deploy key does not come back, and the appliance enrols again to be given one. | Set Up Gateway (primary). Today it is not offered: **[D2]** | One `UPDATE`. The toast says it was restored. |
-| **Restore**, Third-party, Host or Simulated, with a credential | Unchanged | None | The stamp stays. Today it is cleared: **[D1]** | The account stays disabled until a credential is issued | None | Generate Broker Credential. No kept copy comes back. | One `UPDATE`. The toast says it was restored. |
+| **Restore**, Remote, enrolled | Unchanged | None | The stamp stays, so the record keeps reading Revoked until a credential is issued or enrolled after the restore. | The account stays disabled until the appliance enrols again | The repository comes back out of the forge's archive. The deploy key does not come back, and the appliance enrols again to be given one. | Set Up Gateway (primary) | Two `UPDATE`s: the restore under the person, then the forge clearing its archive stamp under the service (confirmed by the live walk, item 5). The toast says it was restored. |
+| **Restore**, Third-party, Host or Simulated, with a credential | Unchanged | None | The stamp stays. | The account stays disabled until a credential is issued | None | Generate Broker Credential. No kept copy comes back. | One `UPDATE`. The toast says it was restored. |
 | **Restore**, any type, with no credential | Unchanged | None | None | None | None | As an active gateway | One `UPDATE` |
-| **Auto-delete**, any type but Playback | The row goes | Go with the row | Gone | A Remote account, or one with a credential issued after the stamp, is asked for once more. Otherwise nothing: it was disabled when the gateway was archived. | The sweep removes any key left and archives the repository. A repository is never deleted. | n/a | One `DELETE`, by the retention job, and a tombstone on the Archived Entities page. It runs nightly at 03:30. A gateway with no timer, or one a playback names, is skipped. |
-| **Delete**, any type but Playback | The row goes | Go with the row | Gone | As for auto-delete | As for auto-delete | n/a | One `DELETE`, and a tombstone for an archived gateway. The toast says it was permanently deleted. |
+| **Auto-delete**, any type but Playback | The row goes | Go with the row | Gone. A revocation still owed is kept by the Sparkplug ID. | Nothing more is asked once the archive's revocation is confirmed. One still owed outlives the row, and the sweep asks until a reply confirms it. | The sweep removes any key left and archives the repository. A repository is never deleted. | n/a | One `DELETE`, by the retention job, and a tombstone on the Archived Entities page. It runs nightly at 03:30. A gateway with no timer, or one a playback names, is skipped. |
+| **Delete**, any type but Playback | The row goes | Go with the row | Gone. A revocation still owed is kept by the Sparkplug ID. | An archived gateway: as for auto-delete. One that is not archived and holds a credential: its account is disabled, and the sweep asks until a reply confirms it. | As for auto-delete | n/a | One `DELETE`, and a tombstone for an archived gateway. The toast says it was permanently deleted. |
 
 ## Proposals
 
@@ -157,15 +160,9 @@ columns in the approver's transaction.
 
 ## Where the code differs
 
-Each key below is a row above. A difference is a bug, and the suite marks it as expected to fail so that
-whoever fixes it has to remove the mark and this text with it.
-
-| Key | What the code does today | How it is confirmed |
-| :--- | :--- | :--- |
-| **[D1]** | *Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled.* The record then reads Issued and the database counts the old credential again. | `test_gateway_lifecycle.py` and `test_gateway_lifecycle_broker.py`, expected to fail |
-| **[D2]** | *The Restore dialog sends a person to a setup action the drawer does not offer.* The drawer offers Set Up Gateway to an enrolled Remote gateway only while a revocation stands, and [D1] removes it. The dialog also names Host and Simulated gateways, and leaves out Third-party. | `test_gateway_lifecycle.py` for the row [D1] leaves, and `gatewayTypeChange.test.jsx` for the drawer's rule |
-| **[D5]** | *`gateway_has_broker_credential()` counts a Remote gateway's enrolment after the credential was revoked.* A Remote gateway changed away and back reads as holding a credential. Leaving it again asks for a second revocation, and the Edit dialog says it ends a credential the gateway does not hold. | `test_gateway_lifecycle.py`, expected to fail |
-| **[D7]** | *A Remote gateway whose appliance was rebuilt has no Re-issue Setup in the drawer.* [Re-issuing, and what it invalidates](remote-gateways.md#6-re-issuing-and-what-it-invalidates) says to re-issue for a replaced appliance. The drawer offers it only while the gateway waits for its first birth, or after its enrolment was revoked. | `gatewayTypeChange.test.jsx`, which holds the drawer's rule |
+Today the code does what every row above says. When a row and the code disagree, the row carries a key, such as
+**[Dn]**, and this section names the bug by its title. The suites then mark that row as expected to fail, so
+whoever fixes it has to remove the mark and the key with it.
 
 ## How the code is held to this page
 
