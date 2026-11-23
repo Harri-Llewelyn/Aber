@@ -83,37 +83,39 @@ export function ShortcutsModal({ onClose, singleKeyShortcuts = true }) {
     <Modal
       title="Keyboard shortcuts"
       icon={<IconKeyboard size={18} />}
-      size="md"
+      size="wide"
       closeOnOverlay
       onClose={onClose}
       lead={singleKeyShortcuts ? null : 'Single-key shortcuts are turned off, so the keys marked Off do nothing. Profile › Appearance turns them back on.'}
     >
-      {groups.map(group => (
-        <div className="shortcut-group" key={group.title}>
-          <div className="shortcut-group-title">{group.title}</div>
-          {group.items.map(item => (
-            <div
-              className={`shortcut-row${item.singleKey && !singleKeyShortcuts ? ' shortcut-row-off' : ''}`}
-              key={`${group.title}-${item.description}`}
-            >
-              <div className="shortcut-keys">
-                {item.keys.map((key, i) => (
-                  <React.Fragment key={key}>
-                    {/* `or` between alternatives: joining ↑ ↓ or ← → with a plus would read as
-                        a chord nobody can press. */}
-                    {i > 0 && <span className="shortcut-join">{item.join === 'or' ? 'or' : '+'}</span>}
-                    <kbd className="shortcut-key">{key}</kbd>
-                  </React.Fragment>
-                ))}
+      <div className="shortcut-groups">
+        {groups.map(group => (
+          <div className="shortcut-group" key={group.title}>
+            <div className="shortcut-group-title">{group.title}</div>
+            {group.items.map(item => (
+              <div
+                className={`shortcut-row${item.singleKey && !singleKeyShortcuts ? ' shortcut-row-off' : ''}`}
+                key={`${group.title}-${item.description}`}
+              >
+                <div className="shortcut-keys">
+                  {item.keys.map((key, i) => (
+                    <React.Fragment key={key}>
+                      {/* `or` between alternatives: joining ↑ ↓ or ← → with a plus would read as
+                          a chord nobody can press. */}
+                      {i > 0 && <span className="shortcut-join">{item.join === 'or' ? 'or' : '+'}</span>}
+                      <kbd className="shortcut-key">{key}</kbd>
+                    </React.Fragment>
+                  ))}
+                </div>
+                <div className="shortcut-description">
+                  {item.description}
+                  {item.singleKey && !singleKeyShortcuts && <span className="badge badge-sm badge-neutral shortcut-off">Off</span>}
+                </div>
               </div>
-              <div className="shortcut-description">
-                {item.description}
-                {item.singleKey && !singleKeyShortcuts && <span className="badge badge-sm badge-neutral shortcut-off">Off</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
+            ))}
+          </div>
+        ))}
+      </div>
     </Modal>
   )
 }

@@ -475,6 +475,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       {showForm && (
         <Modal
           title={editing ? 'Edit Area' : 'New Area'}
+          size="md"
           onClose={() => { setShowForm(false); setEditingProposal(null) }}
           problem={formProblem}
           error={formError}

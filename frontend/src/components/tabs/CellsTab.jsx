@@ -495,6 +495,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
       {showForm && (
         <Modal
           title={editing ? 'Edit Cell' : 'New Cell'}
+          size="md"
           onClose={closeForm}
           problem={formProblem}
           error={formError}

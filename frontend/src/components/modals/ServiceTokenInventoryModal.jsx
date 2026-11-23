@@ -103,7 +103,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
   return (
     <Modal
       title={`Tokens for “${principalName}”`}
-      size="lg"
+      size="wide"
       onClose={close}
       lead={<>
         Every unexpired mint is a live credential — issuing another <strong>adds</strong> one

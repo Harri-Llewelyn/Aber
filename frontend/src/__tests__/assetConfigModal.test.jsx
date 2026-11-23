@@ -82,7 +82,7 @@ describe('Configuration Parameters modal width', () => {
     // The body scrolls, not the dialog, so the header and footer stay in view.
     expect(base).not.toMatch(/overflow/)
     // The wide step must not redeclare either and quietly drop them.
-    const wide = APP_CSS.match(/\n\.modal-wide \{([\s\S]*?)\n\}/)[1]
+    const wide = APP_CSS.match(/\n\.modal-wide \{([^}]*)\}/)[1]
     expect(wide).not.toMatch(/max-height/)
     expect(wide).not.toMatch(/overflow-y/)
   })

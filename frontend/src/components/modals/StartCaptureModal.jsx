@@ -46,7 +46,6 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
     <Modal
       title={`${existing ? 'Replace capture' : 'Record capture'} — ${subject.name}`}
       icon={<IconRecord size={18} />}
-      size="sm"
       onClose={pending ? () => {} : onCancel}
       error={error}
       footer={

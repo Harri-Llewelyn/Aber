@@ -938,7 +938,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         <ConfirmModal
           title="Change gateway type"
           icon={<IconShieldAlert size={18} />}
-          size="md"
           message={<>
             Saving <strong>{editing.gateway_name}</strong> as {gatewayTypeLabel(formType)} ends{' '}
             {holdsCredential === null ? 'any' : 'the'} broker credential{' '}

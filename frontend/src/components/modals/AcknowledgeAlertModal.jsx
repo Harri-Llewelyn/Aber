@@ -40,7 +40,6 @@ export function AcknowledgeAlertModal({ alert, onConfirm, onCancel }) {
     <Modal
       title="Acknowledge alert"
       icon={<IconCheck size={18} />}
-      size="sm"
       onClose={pending ? () => {} : onCancel}
       lead={<>
         <strong>{alert.alert_name}</strong> stays in the list, marked with your name and reason. It

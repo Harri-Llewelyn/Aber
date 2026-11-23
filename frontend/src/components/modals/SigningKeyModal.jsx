@@ -64,6 +64,7 @@ export function SigningKeyModal({ issuedAt, onIssued, onClose, showToast }) {
     <Modal
       title="Signing key"
       icon={<IconLock size={18} />}
+      size="lg"
       onClose={busy ? () => {} : onClose}
       error={confirming ? error : copyFailed ? COPY_REFUSED : null}
       footer={confirming ? (

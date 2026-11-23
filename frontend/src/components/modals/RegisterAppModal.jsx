@@ -156,7 +156,7 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
     <Modal
       title="Register an app"
       icon={<IconGlobe size={18} />}
-      size="md"
+      size="lg"
       onClose={busy ? () => {} : onClose}
       lead="An app signs people in with their Aber account. It learns who they are and reaches nothing else. Each person allows it once."
       initialFocus={nameRef}

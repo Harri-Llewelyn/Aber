@@ -293,7 +293,6 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
     <Modal
       title="Reject this proposal"
       icon={<IconX size={18} />}
-      size="sm"
       onClose={busy ? () => {} : onCancel}
       problem={problem}
       error={error}

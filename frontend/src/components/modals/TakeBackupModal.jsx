@@ -30,7 +30,6 @@ export function TakeBackupModal({ holds, onConfirm, onCancel }) {
     <Modal
       title="Take a backup"
       icon={<IconHardDrive size={18} />}
-      size="sm"
       onClose={pending ? () => {} : onCancel}
       lead={<>
         Taken by the backup service onto its own volume: {holds}. A backup taken here

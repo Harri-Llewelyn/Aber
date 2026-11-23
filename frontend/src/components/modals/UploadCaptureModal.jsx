@@ -74,7 +74,6 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
     <Modal
       title="Upload capture"
       icon={<IconUpload size={18} />}
-      size="sm"
       onClose={pending ? () => {} : onCancel}
       problem={problem}
       error={error}

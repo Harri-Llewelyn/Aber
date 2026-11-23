@@ -14,7 +14,7 @@ export function ArchiveModal({ entityId, displayName, onArchive, onCancel }) {
   return (
     <ConfirmModal
       title="Archive entity"
-      size="md"
+      size="default"
       icon={<IconArchive size={18} />}
       message={<>
         Archiving <strong>{displayName}</strong> <span className="mono">[{entityId}]</span> takes

@@ -51,7 +51,6 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
   return (
     <Modal
       title={`Describe “${principal.name}”`}
-      size="lg"
       onClose={close}
       lead="The name and purpose only. What the identity holds is fixed at creation: a wider grant would reach every token already issued for it, so that is a new machine identity."
       initialFocus={nameRef}

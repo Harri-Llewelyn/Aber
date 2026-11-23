@@ -73,7 +73,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
   return (
     <Modal
       title="New machine identity"
-      size="lg"
+      size="md"
       onClose={close}
       lead={<>
         An identity for a process that reaches this stack's <strong>database</strong> through the
