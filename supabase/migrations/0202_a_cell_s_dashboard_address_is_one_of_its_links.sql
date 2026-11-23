@@ -42,8 +42,7 @@ CREATE OR REPLACE FUNCTION public.proposable_columns(p_entity_type text) RETURNS
     -- `area_id` joins `cell_id` and `location_scope`: the three together say where an asset sits,
     -- and the table's CHECKs decide whether the triple is sayable, so one proposal can relocate.
     WHEN 'devices' THEN ARRAY[
-      'name', 'description', 'connection_method',
-      'cell_id', 'area_id', 'location_scope', 'model_3d_path'
+      'name', 'description', 'cell_id', 'area_id', 'location_scope', 'model_3d_path'
     ]
     WHEN 'device_nameplate' THEN ARRAY[
       'manufacturer_name', 'manufacturer_product_designation', 'manufacturer_product_type',

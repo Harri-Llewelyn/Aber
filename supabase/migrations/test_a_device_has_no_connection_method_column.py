@@ -1,9 +1,9 @@
 # suite:
 #   lanes: db
-#   why: 0317 drops devices.connection_method, and 0001 adds it back on every boot, so the suite
-#     replays the boot itself and rebuilds 1.9.0's column for the upgrade. Its faults are a failed
-#     boot, a function still naming the column, and a proposal filed before the upgrade applied
-#     with the key left out.
+#   why: 0317 drops devices.connection_method on the first boot of an upgrade, once, and an empty
+#     database never meets that boot, so the suite rebuilds 1.9.0's column and allowlist. Its faults
+#     are a failed boot, a replay that brings the column back or locks devices, a function still
+#     naming the column, and a proposal filed before the upgrade applied with the key left out.
 
 """
 A device has no connection_method column (0317).
@@ -12,21 +12,25 @@ A device has no connection_method column (0317).
 
 Requires the Supabase database (54322 by default) and the schema the chain declares.
 
-1.9.0 deprecated `devices.connection_method`. 0317 drops it:
+1.9.0 deprecated `devices.connection_method`. 0317 drops it, guarded by its existence:
 
-  * the column is gone, no function or view names it but in a comment or an old snapshot, the
-    device lane does not admit it, and a new proposal that names it is refused when it is filed;
+  * the column is gone, no function or view names it but audit_event_class() reading an old
+    snapshot, the device lane does not admit it, and a new proposal that names it is refused when
+    it is filed;
+  * a later boot does not bring it back: 0001's statements for devices add no column and use no
+    attribute number, and 0317 finds nothing to do and takes no lock on devices;
+  * on an upgrade, the values go with the column and the log counts them;
   * a proposal filed before the upgrade that names it is refused when someone approves it, with
     what to do, and is never applied with the key left out; it can still be rejected, and the
-    upgrade note's query lists it;
-  * a boot replays 0001's column, 0165 and 0202 with it, then 0317 drops it again, every time.
+    upgrade note's query lists it.
 
-An upgrade is 1.9.0's column rebuilt inside the test's transaction, as
+An upgrade is 1.9.0's column and allowlist rebuilt inside the test's transaction, as
 test_a_cell_has_no_grafana_url_column.py rebuilds cells.grafana_url. Every test rolls back.
 """
 import glob
 import json
 import os
+import re
 import unittest
 import uuid
 
@@ -40,6 +44,7 @@ DB_USER = os.getenv("SUPABASE_DB_USER", "postgres")
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgres"))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+MIGRATION_0001 = glob.glob(os.path.join(HERE, "0001_*.sql"))[0]
 MIGRATION_0165 = glob.glob(os.path.join(HERE, "0165_*.sql"))[0]
 MIGRATION_0202 = glob.glob(os.path.join(HERE, "0202_*.sql"))[0]
 MIGRATION_0317 = glob.glob(os.path.join(HERE, "0317_*.sql"))[0]
@@ -51,11 +56,10 @@ HAS_COLUMN = (
     "SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.devices'::regclass "
     "                  AND attname = 'connection_method' AND NOT attisdropped);"
 )
-
-# What 0001 runs on every boot: the column back, empty, and its default dropped.
-BASELINE_COLUMN = (
-    "ALTER TABLE public.devices ADD COLUMN IF NOT EXISTS connection_method text; "
-    "ALTER TABLE public.devices ALTER COLUMN connection_method DROP DEFAULT;"
+ATTRIBUTE_NUMBERS = "SELECT relnatts FROM pg_class WHERE oid = 'public.devices'::regclass;"
+LOCKS_ON_DEVICES = (
+    "SELECT count(*) FROM pg_locks "
+    " WHERE pid = pg_backend_pid() AND relation = 'public.devices'::regclass;"
 )
 
 # The upgrade note's query, word for word: the open proposals that name the key.
@@ -79,6 +83,17 @@ def get_connection():
 def read(path):
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+def baseline_devices_statements():
+    """0001's statements that declare public.devices: its CREATE TABLE and two ALTER TABLEs."""
+    statements = re.findall(
+        r"^(?:CREATE TABLE IF NOT EXISTS public\.devices \(|ALTER TABLE public\.devices\n)[^;]*;$",
+        read(MIGRATION_0001), re.M,
+    )
+    if len(statements) != 3:
+        raise AssertionError(f"0001 declares devices in {len(statements)} statements, not 3")
+    return statements
 
 
 class Base(unittest.TestCase):
@@ -116,9 +131,12 @@ class Base(unittest.TestCase):
                 (user_id, role),
             )
 
-    def _has_column(self):
-        self.cur.execute(HAS_COLUMN)
+    def _one(self, sql):
+        self.cur.execute(sql)
         return self.cur.fetchone()[0]
+
+    def _has_column(self):
+        return self._one(HAS_COLUMN)
 
     def _device(self):
         # A random id: sparkplug_id is generated from its first 21 hex characters under a UNIQUE.
@@ -172,9 +190,18 @@ class Base(unittest.TestCase):
             self.cur.execute(sql)
         return [n.strip() for n in self.conn.notices]
 
-    def _full_boot(self):
-        """The parts of a boot that touch the column: 0001's, then 0165, 0202 and 0317."""
-        return self._boot(BASELINE_COLUMN, self.sql_0165, self.sql_0202, self.sql_0317)
+    def _rebuild_1_9(self):
+        """
+        1.9.0's devices: the column, and the device lane admitting it. The allowlist is today's
+        with the key added, which is all 0317's predecessors differed by.
+        """
+        self.cur.execute("ALTER TABLE public.devices ADD COLUMN connection_method text;")
+        definition = self._one(
+            "SELECT pg_get_functiondef('public.proposable_columns(text)'::regprocedure);")
+        lane = "WHEN 'devices' THEN ARRAY["
+        self.assertEqual(definition.count(lane), 1, definition)
+        self.cur.execute(definition.replace(lane, lane + "'connection_method', "))
+        self.assertIn("connection_method", self._one("SELECT public.proposable_columns('devices');"))
 
 
 class TheColumnIsGone(Base):
@@ -182,15 +209,12 @@ class TheColumnIsGone(Base):
     def test_devices_has_no_connection_method(self):
         self.assertFalse(self._has_column())
 
-    def test_no_function_names_it_but_in_a_comment_or_an_old_snapshot(self):
-        # Past audit rows carry it, so audit_event_class() reads it out of a snapshot as a JSON key.
-        # approve_quarantined_device() (0293) names it in a comment, which nothing runs.
+    def test_no_function_names_it_but_the_audit_classifier_reading_an_old_snapshot(self):
         self.cur.execute(
             "SELECT p.oid::regprocedure::text FROM pg_proc p "
             "  JOIN pg_namespace n ON n.oid = p.pronamespace "
             " WHERE n.nspname = 'public'"
-            "   AND replace(regexp_replace(p.prosrc, '--[^\\n]*', '', 'g'), '-> ''connection_method''', '')"
-            "       ~ '\\mconnection_method\\M' ORDER BY 1;"
+            "   AND replace(p.prosrc, '-> ''connection_method''', '') ~ '\\mconnection_method\\M' ORDER BY 1;"
         )
         self.assertEqual(self.cur.fetchall(), [])
 
@@ -202,8 +226,7 @@ class TheColumnIsGone(Base):
         self.assertEqual(self.cur.fetchall(), [])
 
     def test_the_device_lane_does_not_admit_it(self):
-        self.cur.execute("SELECT public.proposable_columns('devices');")
-        lane = self.cur.fetchone()[0]
+        lane = self._one("SELECT public.proposable_columns('devices');")
         self.assertNotIn("connection_method", lane)
         # A superset, not the set: a later file may widen the lane.
         self.assertLessEqual({"name", "description", "cell_id", "area_id", "location_scope",
@@ -224,27 +247,94 @@ class TheColumnIsGone(Base):
         self.cur.execute("SELECT name, description FROM public.devices WHERE id = %s;", (device,))
         self.assertEqual(self.cur.fetchone(), (f"{name}_Renamed", "By the door"))
 
-    def test_a_replay_of_0317_alone_finds_nothing_to_do(self):
+
+class ALaterBoot(Base):
+    """Every boot after the drop: nothing brings the column back, and 0317 does nothing."""
+
+    def test_the_baselines_statements_for_devices_add_no_column_and_no_attribute_number(self):
+        before = self._one(ATTRIBUTE_NUMBERS)
+        self._boot(*baseline_devices_statements())
+        self.assertFalse(self._has_column())
+        self.assertEqual(self._one(ATTRIBUTE_NUMBERS), before)
+
+    def test_0317_finds_nothing_to_do_and_takes_no_lock_on_devices(self):
+        self.assertEqual(self._one(LOCKS_ON_DEVICES), 0)
         notices = self._boot(self.sql_0317)
         self.assertEqual([n for n in notices if "0317:" in n], [])
+        self.assertEqual(self._one(LOCKS_ON_DEVICES), 0)
+
+    def test_the_files_that_named_it_replay_without_it(self):
+        before = self._one(ATTRIBUTE_NUMBERS)
+        notices = self._boot(*baseline_devices_statements(), self.sql_0165, self.sql_0202, self.sql_0317)
+        self.assertEqual([n for n in notices if "0317:" in n], [])
         self.assertFalse(self._has_column())
+        self.assertEqual(self._one(ATTRIBUTE_NUMBERS), before)
+        self.assertFalse(self._one(
+            "SELECT prosrc ~ '\\mconnection_method\\M' FROM pg_proc "
+            " WHERE oid = 'public.approve_proposal(uuid)'::regprocedure;"))
+        self.assertNotIn("connection_method", self._one("SELECT public.proposable_columns('devices');"))
+
+    def test_a_device_proposal_applies_after_a_boot(self):
+        self._boot(self.sql_0165, self.sql_0202, self.sql_0317)
+        device, name = self._device()
+        proposal = self._propose(device, {"name": f"{name}_Booted"})
+        self.assertEqual(self._approve(proposal), "applied")
+        self.cur.execute("SELECT name FROM public.devices WHERE id = %s;", (device,))
+        self.assertEqual(self.cur.fetchone()[0], f"{name}_Booted")
 
 
-class AProposalFiledBeforeTheUpgrade(Base):
-    """
-    Filed on 1.9.0, while the device lane admitted the key, and still open at the upgrade. 0202 is
-    replayed for 1.9.0's allowlist, the proposal is filed, then 0317 runs as the upgrade's boot does.
-    """
+class AnUpgrade(Base):
+    """0317 on a database 1.9.0 left: the column, and the device lane admitting it."""
 
     def setUp(self):
         super().setUp()
-        self._boot(BASELINE_COLUMN, self.sql_0165, self.sql_0202)
+        self._rebuild_1_9()
+
+    def test_the_column_goes_with_its_values_and_the_log_counts_them(self):
+        devices = [self._device()[0] for _ in range(4)]
+        for device, value in zip(devices, ("Sparkplug B", "Modbus TCP", "", "  ")):
+            self.cur.execute("UPDATE public.devices SET connection_method = %s WHERE id = %s;",
+                             (value, device))
+        notices = self._boot(self.sql_0165, self.sql_0202, self.sql_0317)
+        self.assertFalse(self._has_column())
+        counted = [n for n in notices if "0317: devices.connection_method dropped" in n]
+        self.assertEqual(len(counted), 1, notices)
+        self.assertIn("with the value 2 device(s) held", counted[0])
+
+    def test_each_devices_audit_rows_already_hold_its_value(self):
+        device, _ = self._device()
+        self.cur.execute("UPDATE public.devices SET connection_method = 'Modbus TCP' WHERE id = %s;",
+                         (device,))
+        self._boot(self.sql_0165, self.sql_0202, self.sql_0317)
+        self.cur.execute(
+            "SELECT new_data ->> 'connection_method' FROM public.audit_trail "
+            " WHERE entity_type = 'devices' AND entity_id = %s AND action = 'UPDATE' ORDER BY id DESC LIMIT 1;",
+            (device,),
+        )
+        self.assertEqual(self.cur.fetchone()[0], "Modbus TCP")
+
+    def test_the_second_boot_finds_nothing_to_do(self):
+        self._boot(self.sql_0165, self.sql_0202, self.sql_0317)
+        after_drop = self._one(ATTRIBUTE_NUMBERS)
+        notices = self._boot(*baseline_devices_statements(), self.sql_0165, self.sql_0202, self.sql_0317)
+        self.assertEqual([n for n in notices if "0317:" in n], [])
+        self.assertFalse(self._has_column())
+        self.assertEqual(self._one(ATTRIBUTE_NUMBERS), after_drop)
+
+
+class AProposalFiledBeforeTheUpgrade(Base):
+    """Filed on 1.9.0, while the device lane admitted the key, and still open at the upgrade."""
+
+    def setUp(self):
+        super().setUp()
+        self._rebuild_1_9()
         self.device, self.name = self._device()
         self.proposal = self._propose(self.device, {"name": f"{self.name}_Renamed",
                                                     "connection_method": "Modbus TCP"})
         self.other_device, _ = self._device()
         self.plain = self._propose(self.other_device, {"description": "No key here"})
-        self._boot(self.sql_0317)
+        # The upgrade's boot: 0165 and 0202 declare today's functions, then 0317 drops the column.
+        self._boot(self.sql_0165, self.sql_0202, self.sql_0317)
 
     def test_approving_it_is_refused_and_says_what_to_do(self):
         with self.assertRaises(psycopg2.errors.InvalidParameterValue) as caught:
@@ -279,45 +369,6 @@ class AProposalFiledBeforeTheUpgrade(Base):
         listed = [str(row[0]) for row in self.cur.fetchall()]
         self.assertIn(self.proposal, listed)
         self.assertNotIn(self.plain, listed)
-
-
-class EveryBoot(Base):
-    """0001 adds the column back, empty, on every boot; 0317 drops it again."""
-
-    def test_an_upgrades_first_boot_drops_the_values_and_counts_them(self):
-        self._boot(BASELINE_COLUMN)
-        held = [self._device()[0] for _ in range(2)]
-        blank = [self._device()[0] for _ in range(2)]
-        for device, value in zip(held + blank, ("Sparkplug B", "Modbus TCP", "", "  ")):
-            self.cur.execute("UPDATE public.devices SET connection_method = %s WHERE id = %s;",
-                             (value, device))
-        notices = self._boot(self.sql_0165, self.sql_0202, self.sql_0317)
-        self.assertFalse(self._has_column())
-        counted = [n for n in notices if "0317: devices.connection_method dropped" in n]
-        self.assertEqual(len(counted), 1, notices)
-        self.assertIn("with the value 2 device(s) held", counted[0])
-
-    def test_each_later_boot_adds_it_back_empty_and_drops_it_without_a_word(self):
-        for boot in (1, 2):
-            with self.subTest(boot=boot):
-                notices = self._full_boot()
-                self.assertEqual([n for n in notices if "0317:" in n], [])
-                self.assertFalse(self._has_column())
-                self.cur.execute(
-                    "SELECT prosrc ~ '\\mconnection_method\\M' FROM pg_proc "
-                    " WHERE oid = 'public.approve_proposal(uuid)'::regprocedure;"
-                )
-                self.assertFalse(self.cur.fetchone()[0])
-                self.cur.execute("SELECT public.proposable_columns('devices');")
-                self.assertNotIn("connection_method", self.cur.fetchone()[0])
-
-    def test_a_device_proposal_applies_after_a_boot(self):
-        self._full_boot()
-        device, name = self._device()
-        proposal = self._propose(device, {"name": f"{name}_Booted"})
-        self.assertEqual(self._approve(proposal), "applied")
-        self.cur.execute("SELECT name FROM public.devices WHERE id = %s;", (device,))
-        self.assertEqual(self.cur.fetchone()[0], f"{name}_Booted")
 
 
 if __name__ == "__main__":
