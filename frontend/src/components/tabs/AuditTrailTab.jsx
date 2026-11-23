@@ -845,16 +845,19 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
 
       <p className="trail-causation-hint">{hint}</p>
 
+      {/* Alone in its grid, so it spans the drawer, as a section's only button does. */}
       {offerControl && (
-        <Tooltip text="Loads every row the transaction wrote, whatever it touched. It clears the entity, action and Changed by filters and shows deleted entities.">
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm trail-causation-all"
-            onClick={() => onShowTransaction(event.causation_id)}
-          >
-            Show whole transaction
-          </button>
-        </Tooltip>
+        <div className="context-buttons trail-causation-all">
+          <Tooltip text="Loads every row the transaction wrote, whatever it touched. It clears the entity, action and Changed by filters and shows deleted entities.">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm context-action"
+              onClick={() => onShowTransaction(event.causation_id)}
+            >
+              Show whole transaction
+            </button>
+          </Tooltip>
+        </div>
       )}
 
       <ul className="trail-causation-list">

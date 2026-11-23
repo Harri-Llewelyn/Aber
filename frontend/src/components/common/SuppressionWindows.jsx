@@ -121,11 +121,11 @@ export function SuppressionWindows({ kind, subjectId, subjectName, cell = null, 
                   {fromCell && <> · From cell {cell?.name || 'its cell'}</>}
                 </div>
                 {canWrite && !fromCell && (
-                  <div className="suppression-window-actions">
-                    <button type="button" className="btn btn-ghost btn-sm" tabIndex={tab} onClick={() => setChanging(w)}>
+                  <div className="context-buttons suppression-window-actions">
+                    <button type="button" className="btn btn-ghost btn-sm context-action" tabIndex={tab} onClick={() => setChanging(w)}>
                       Change…
                     </button>
-                    <button type="button" className="btn btn-ghost btn-sm" tabIndex={tab} onClick={() => setEnding(w)}>
+                    <button type="button" className="btn btn-ghost btn-sm context-action" tabIndex={tab} onClick={() => setEnding(w)}>
                       {current ? 'End now' : 'Cancel window'}
                     </button>
                   </div>
@@ -135,10 +135,13 @@ export function SuppressionWindows({ kind, subjectId, subjectName, cell = null, 
           })}
         </ul>
       )}
+      {/* Alone in its grid, so it spans the drawer under the list. */}
       {canWrite && (
-        <button type="button" className="btn btn-ghost btn-sm" tabIndex={tab} onClick={() => setScheduling(true)}>
-          <IconPlus size={12} /> Schedule window…
-        </button>
+        <div className="context-buttons">
+          <button type="button" className="btn btn-ghost btn-sm context-action" tabIndex={tab} onClick={() => setScheduling(true)}>
+            <IconPlus size={12} /> Schedule window…
+          </button>
+        </div>
       )}
 
       {scheduling && (

@@ -654,8 +654,9 @@ describe('area card grid', () => {
 describe('area plan row', () => {
   it('wraps its buttons rather than squeezing the plan state to one word a line', () => {
     expect(APP_CSS.match(/\.area-plan-panel-row \{([\s\S]*?)\n\}/)[1]).toMatch(/flex-wrap:\s*wrap/)
-    // A button group that may not shrink cannot wrap onto its own line and fit it.
-    expect(APP_CSS.match(/\.area-plan-panel-actions \{([^}]*)\}/)[1]).not.toMatch(/flex-shrink:\s*0/)
+    // A button group that may not shrink cannot wrap onto its own line and fit it. The turns are the
+    // drawer's grid of buttons (`.context-buttons`), with no rule of their own to stop that.
+    expect(APP_CSS.match(/\.area-plan-panel-actions \{([^}]*)\}/)?.[1] ?? '').not.toMatch(/flex-shrink:\s*0/)
   })
 })
 

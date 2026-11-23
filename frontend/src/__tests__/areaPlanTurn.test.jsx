@@ -216,7 +216,7 @@ describe('Turn left and Turn right', () => {
     expect(area.plan_rotation).toBe(90)
   })
 
-  it('offer Save Turn and Discard beside them while the turn is unsaved, as the Settings page offers Save and Discard', () => {
+  it('offer Save Turn and Discard after them while the turn is unsaved, as the Settings page offers Save and Discard', () => {
     panel()
     expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
     expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull()
