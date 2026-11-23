@@ -6929,10 +6929,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   margin: 0 0 8px 0;
 }
 
-/* Its own row under the hint: a full-width control here would read as the section's heading. */
-.trail-causation-all {
-  margin-bottom: 8px;
-}
+/* Show whole transaction's `.context-buttons` grid, spaced from the list under it. */
+.trail-causation-all { margin-bottom: 8px; }
 
 .trail-causation-list {
   list-style: none;

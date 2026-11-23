@@ -703,8 +703,9 @@ height is not known, and above the actions it could push Edit Details off the dr
 - **A drawer section's buttons use the Actions grid.** Each is a `context-action` in a
   `context-buttons` grid, the rule the Actions section uses. A section's only button spans the
   drawer, as the primary and a danger action do, and the rest are two to a row where they fit.
-  Suppression windows, a gateway's Repository links and an area's plan buttons use it, so a drawer
-  has one kind of button. A section adds a class for its own spacing, never a grid of its own.
+  Suppression windows, a gateway's Repository links, an area's plan buttons and the Audit Trail's
+  Show whole transaction use it, so a drawer has one kind of button. A section adds a class for its
+  own spacing, never a grid of its own.
 - **A row the item's kind can never fill is not shown. A row it could fill, but has not yet, says
   *Not set*.** A Host gateway has no appliance, so a CA expiry, a disk, memory, load, a flow hash, a
   platform tag and a custom playbook can never be reported for it. Its drawer drew all seven, each
