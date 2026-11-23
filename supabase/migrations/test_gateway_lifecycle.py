@@ -21,7 +21,8 @@ the Vault or the revocation call, and a test run as the owner would not notice o
 
 WHAT THE BROKER IS TO THIS SUITE. A revocation is asked of the credential service through pg_net, so
 it is the request in `net.http_request_queue` and the row in `gateway_revocation_requests` that are
-asserted, with the stamp `credential_revoked_at`. The account itself, in Dynamic Security, is read by
+asserted, with the stamp `credential_revoked_at`, and for a deleted gateway the row it leaves in
+`deleted_gateway_revocations`. The account itself, in Dynamic Security, is read by
 supabase/functions/enroll-gateway/test_gateway_lifecycle_broker.py in the stack lane.
 
 KNOWN BUGS. A row the code gets wrong today carries a `known_bug` mark with the bug's title, which is
@@ -397,14 +398,34 @@ class RegistrationAndSetup(Lifecycle):
         self.assertEqual(len(self.consume(second)), 1)
 
     def test_setup_for_an_appliance_that_never_published_returns_it_to_awaiting_setup(self):
-        gid, _ = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
+        gid, sparkplug_id = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
         enrolled_at = self.row(gid)["enrolled_at"]
         self.issue_setup(gid)
         row = self.row(gid)
         self.assertEqual(row["status"], "PENDING_ENROLLMENT")
-        self.assertEqual(row["enrolled_at"], enrolled_at, "the enrolment is the record of the credential it holds")
+        self.assertEqual(row["enrolled_at"], enrolled_at, "the enrolment is kept, older than the stamp")
         self.assertEqual(self.tokens(gid), (1, 0))
-        self.assertEqual(self.actions(gid), ["INSERT", "UPDATE"])
+        self.assertEqual(self.actions(gid), ["INSERT", "UPDATE"], "the status and the stamp are one row")
+        self.assertIsNotNone(row["credential_revoked_at"], "the enrolled appliance's credential is ended at once")
+        self.assertEqual(self.revocations_asked(sparkplug_id), 1)
+        self.assertTrue(self.request_recorded(gid))
+        self.assertFalse(self.holds_credential(gid))
+
+    def test_setup_for_a_rebuilt_appliance_revokes_the_old_one_s_credential_at_once(self):
+        gid, sparkplug_id = self.gateway("remote", status="OFFLINE", enrolled=True)
+        self.issue_setup(gid)
+        row = self.row(gid)
+        self.assertEqual(row["status"], "PENDING_ENROLLMENT")
+        self.assertIsNotNone(row["enrolled_at"])
+        self.assertIsNotNone(row["credential_revoked_at"])
+        self.assertEqual(self.revocations_asked(sparkplug_id), 1)
+        self.assertEqual(self.tokens(gid), (1, 0))
+        # The new appliance's enrolment is newer than the stamp, so it holds the credential.
+        raw = self.issue_setup(gid)
+        self.assertEqual(self.revocations_asked(sparkplug_id), 1, "a second setup in a row revokes nothing more")
+        self.old_stamp(gid)
+        self.enrol(gid, raw)
+        self.assertTrue(self.holds_credential(gid))
 
     def test_setup_is_refused_to_every_type_that_is_not_remote(self):
         for kind in DASHBOARD_ISSUED:
@@ -706,7 +727,6 @@ class ChangingTheType(Lifecycle):
         self.restore(gid)
         self.assertEqual(self.row(gid)["status"], "OFFLINE")
 
-    @known_bug("gateway_has_broker_credential() counts a Remote gateway's enrolment after the credential was revoked")
     def test_a_remote_gateway_changed_away_and_back_holds_no_credential(self):
         gid, sparkplug_id = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
         self.change_type(gid, "host")
@@ -714,7 +734,6 @@ class ChangingTheType(Lifecycle):
         self.old_stamp(gid)
         self.assertFalse(self.holds_credential(gid), "the credential was revoked and the appliance has not enrolled again")
 
-    @known_bug("gateway_has_broker_credential() counts a Remote gateway's enrolment after the credential was revoked")
     def test_leaving_remote_again_asks_for_no_second_revocation(self):
         gid, sparkplug_id = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
         self.change_type(gid, "host")
@@ -722,6 +741,25 @@ class ChangingTheType(Lifecycle):
         before = self.revocations_asked(sparkplug_id)
         self.change_type(gid, "host")
         self.assertEqual(self.revocations_asked(sparkplug_id), before)
+
+    def test_leaving_remote_asks_the_forge_to_remove_the_deploy_key(self):
+        gid, _ = self.gateway("remote", status="ONLINE", enrolled=True)
+        self.cur.execute("UPDATE public.gateways SET forge_repository_at = now() WHERE id = %s;", (gid,))
+        before = self.forge_sweeps_asked()
+        self.change_type(gid, "host")
+        self.assertEqual(self.forge_sweeps_asked(), before + 1, "the old appliance's key waits for the next quarter hour")
+        self.assertFalse(self.row(gid)["is_archived"], "the repository is kept, and so is the gateway")
+        self.change_type(gid, "remote")
+        self.assertEqual(self.forge_sweeps_asked(), before + 1, "entering Remote has no key to remove")
+
+    def test_a_change_made_while_the_credential_service_cannot_be_asked_is_owed(self):
+        gid, sparkplug_id = self.gateway("remote", status="AWAITING_BIRTH", enrolled=True)
+        self.cur.execute("SELECT id FROM vault.secrets WHERE name = 'gateway_revoke_secret';")
+        self.cur.execute("SELECT vault.update_secret(%s, '');", (self.cur.fetchone()["id"],))
+        self.change_type(gid, "host")
+        self.assertEqual(self.revocations_asked(sparkplug_id), 0)
+        self.assertIsNotNone(self.row(gid)["credential_revoked_at"])
+        self.assertTrue(self.request_recorded(gid), "nothing is left for the sweep to ask once the service is configured")
 
 
 # -------------------------------------------------------------------------------------------------
@@ -895,7 +933,6 @@ class Restoring(Lifecycle):
         self.assertTrue(self.issue_credential(gid))
         self.assertTrue(self.holds_credential(gid))
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
     def test_restoring_an_enrolled_remote_gateway_keeps_its_credential_revoked(self):
         gid, _ = self.gateway("remote", status="ONLINE", enrolled=True)
         self.archive(gid)
@@ -904,7 +941,6 @@ class Restoring(Lifecycle):
         self.assertIsNotNone(self.row(gid)["credential_revoked_at"],
                              "the account is still disabled, and the record now says it is not")
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
     def test_restoring_a_dashboard_issued_gateway_does_not_count_its_old_credential_again(self):
         gid, _ = self.gateway("host", **ISSUED_STATES["issued"])
         self.archive(gid)
@@ -942,14 +978,14 @@ class DeletingAndAutoDeleting(Lifecycle):
         self.cur.execute("SELECT * FROM public.gateways WHERE id = %s;", (gid,))
         return self.cur.fetchone()
 
-    def test_the_retention_job_asks_for_an_enrolled_remote_gateway_s_account_once_more(self):
+    def test_the_retention_job_asks_for_nothing_where_archiving_disabled_the_account(self):
         gid, sparkplug_id = self.gateway("remote", status="ONLINE", enrolled=True)
         self.archive(gid)
         self.expire(gid)
         before = self.revocations_asked(sparkplug_id)
         self.purge()
         self.assertIsNone(self.row_or_none(gid))
-        self.assertEqual(self.revocations_asked(sparkplug_id), before + 1)
+        self.assertEqual(self.revocations_asked(sparkplug_id), before, "the account was disabled when the gateway was archived")
         self.assertEqual(self.actions(gid)[-1], "DELETE")
 
     def test_a_deleted_gateway_takes_its_tokens_and_its_copy_and_leaves_a_tombstone_if_it_was_archived(self):
@@ -974,6 +1010,30 @@ class DeletingAndAutoDeleting(Lifecycle):
                 gid, sparkplug_id = self.gateway(kind, **spec)
                 self.as_(self.manager, "DELETE FROM public.gateways WHERE id = %s;", (gid,))
                 self.assertEqual(self.revocations_asked(sparkplug_id), 1)
+
+    def test_a_revocation_still_owed_outlives_the_row_and_one_confirmed_does_not(self):
+        for confirmed in (False, True):
+            with self.subTest(confirmed=confirmed):
+                self.cur.execute("SAVEPOINT owed;")
+                gid, sparkplug_id = self.gateway("remote", status="ONLINE", enrolled=True)
+                self.archive(gid)
+                self.expire(gid)
+                self.cur.execute("SELECT request_id FROM public.gateway_revocation_requests WHERE gateway_id = %s;", (gid,))
+                request_id = self.cur.fetchone()["request_id"]
+                if confirmed:
+                    self.cur.execute("INSERT INTO net._http_response (id, status_code, content) VALUES (%s, 200, '{}');",
+                                     (request_id,))
+                before = self.revocations_asked(sparkplug_id)
+                self.purge()
+                self.assertEqual(self.revocations_asked(sparkplug_id), before, "the delete asks nothing it owed already")
+                self.cur.execute("SELECT request_id FROM public.deleted_gateway_revocations WHERE sparkplug_id = %s;",
+                                 (sparkplug_id,))
+                kept = self.cur.fetchone()
+                if confirmed:
+                    self.assertIsNone(kept, "a confirmed revocation is owed no longer")
+                else:
+                    self.assertEqual(kept["request_id"], request_id, "the sweep has nothing left to ask for the deleted gateway")
+                self.cur.execute("ROLLBACK TO SAVEPOINT owed;")
 
     def test_deleting_a_gateway_that_holds_none_asks_for_nothing(self):
         for kind, spec in (("remote", REMOTE_STATES["pending"]), ("host", ISSUED_STATES["plain"])):

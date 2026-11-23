@@ -347,9 +347,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const remoteWithheld = !proposeMode && enrolmentBlocked && formType === GATEWAY_TYPES.REMOTE
     && (!editing || editing.deployment !== 'remote')
 
-  // A Remote gateway holds the credential it enrolled for, the remote arm of
-  // gateway_has_broker_credential(). The other types' answer reads the Audit Trail, so it is asked
-  // for the one gateway whose dialog opens.
+  // A Remote gateway holds the credential it enrolled for while no revocation came after it, as the
+  // remote arm of gateway_has_broker_credential() reads it. The other types' answer reads the Audit
+  // Trail, so it is asked for the one gateway whose dialog opens.
   const editingId = showForm && editing && !proposeMode ? editing.gateway_id : null
   const editingRemote = editing?.deployment === 'remote'
   useEffect(() => {
@@ -362,7 +362,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       .catch(() => {})
     return () => { cancelled = true }
   }, [editingId, editingRemote])
-  const holdsCredential = editingRemote ? !!editing.enrolled_at : editingHoldsCredential
+  const holdsCredential = editingRemote ? enrolmentStands(editing) : editingHoldsCredential
   // What saving the chosen type ends, said in the Type hint and asked before Save where a
   // credential ends. Null when registering, proposing, or keeping the type.
   const typeChange = editingId ? gatewayTypeChange(editing, formType, holdsCredential) : null
@@ -490,15 +490,18 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // The panel's one primary: setup while pending, else the console, else Restore when archived,
   // else Edit. The Playback gateway cannot be edited, so its credential takes Edit's place.
   const selectedPending = !!selected && isGatewayPending(selected)
-  // Setup while it is unfinished, and for a Remote gateway with no enrolment standing, as one just
-  // changed to Remote has, unless it is online: setting it up would replace a working credential.
+  // Setup while it is unfinished, or while no enrolment stands, as for one just changed to Remote.
+  // Re-issue for an enrolled appliance that is not online, as for a rebuilt one: it revokes the old
+  // credential at once, so it is never the primary there, and never offered while the gateway is online.
+  const awaitsSetup = !!selected && (selectedPending || !enrolmentStands(selected))
+  const reissuesSetup = !!selected && (selected.status === 'AWAITING_BIRTH' || enrolmentStands(selected))
   const offersSetup = !!selected && !selected.is_archived && selected.deployment === 'remote' && canManage
-    && (selectedPending || (!enrolmentStands(selected) && !isGatewayOnline(selected)))
+    && (selectedPending || !isGatewayOnline(selected))
   const offersCredential = !!selected && !selected.is_archived && credentialIssuedHere(selected) && canManage
   // Administrator only, as show_gateway_credential() is; never the Playback gateway, which keeps no copy.
   const offersShownCredential = offersCredential && !selected.is_shadow && userRole === 'Administrator'
   const primaryAction = !selected ? null
-    : offersSetup ? 'setup'
+    : offersSetup && awaitsSetup ? 'setup'
     : offersCredential && selectedPending ? 'credential'
     : selected.access_url ? 'launch'
     : selected.is_archived ? 'restore'
@@ -1252,11 +1255,12 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             pending: rebirthingId === selected.gateway_id,
             pendingLabel: 'Requesting…'
           },
-          // Setup while it is unfinished, and for AWAITING_BIRTH so an appliance that enrolled and never
-          // published can be re-issued. Absent once ONLINE, since re-issuing invalidates a working
-          // credential. Confirms first, unlike the dialog straight after creation.
+          // Setup while it is unfinished, and Re-issue Setup for an appliance that enrolled and is not
+          // online: one that never published, or one replaced or rebuilt. Absent once ONLINE, since
+          // re-issuing revokes a working credential. Confirms first, unlike the dialog straight after
+          // creation.
           offersSetup && {
-            label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Setup' : 'Set Up Gateway',
+            label: reissuesSetup ? 'Re-issue Setup' : 'Set Up Gateway',
             icon: <IconDownload size={13} />,
             primary: primaryAction === 'setup',
             // Withheld, not hidden, while the deployment cannot issue setup: the banner says why.
@@ -1266,13 +1270,16 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               gateway_name: selected.gateway_name,
               sparkplug_id: selected.sparkplug_id,
               status: selected.status,
+              revokesCredential: reissuesSetup,
               confirmFirst: true
             }),
             title: enrolmentBlocked
               ? 'Remote gateways cannot be enrolled on this deployment yet'
               : selected.status === 'AWAITING_BIRTH'
-                ? 'This appliance enrolled but has not published. Re-issuing invalidates its current credential.'
-                : 'Issue an install command, or a bundle, to set this gateway up on its appliance'
+                ? 'This appliance enrolled but has not published. Re-issuing revokes its broker credential at once.'
+                : reissuesSetup
+                  ? 'For an appliance that was replaced or rebuilt. Re-issuing revokes the broker credential the old one holds, at once.'
+                  : 'Issue an install command, or a bundle, to set this gateway up on its appliance'
           },
           // Host, Simulated and Third-party gateways have no enrolment lifecycle. Not on an archived
           // gateway, since a credential issued then would resurrect the row. This is the only place a

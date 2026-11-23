@@ -28,9 +28,13 @@ export default function check() {
       'directory_figures_probe holds the System page\'s. RLS on with no policy and nothing granted ' +
       'to anon/authenticated; the Gateways drawer reads the figures from gateway_arrivals',
     gateway_revocation_requests:
-      'the in-flight pg_net request id behind each archived gateway\'s revocation stamp (0158). RLS ' +
+      'the revocation each gateway owes, and the pg_net request id behind it (0158, 0311). RLS ' +
       'on with no policy, nothing granted to anon/authenticated, and service_role may only read it: ' +
-      'revoke_gateway_credential() writes it and the revocation sweep deletes it',
+      'owe_gateway_revocation() and revoke_gateway_credential() write it and the revocation sweep deletes it',
+    deleted_gateway_revocations:
+      'the revocation a deleted gateway still owes, by its Sparkplug ID, and its pg_net request id (0311). ' +
+      'RLS on with no policy, nothing granted to anon/authenticated, and service_role may only read it: ' +
+      'the delete trigger and revoke_gateway_credential() write it and the revocation sweep deletes it',
     forge_sweep_lease:
       'one row saying which forge-sweep pass may run (0156). RLS on with no policy, nothing granted ' +
       'to anon/authenticated, and service_role may only read it: it moves through three service_role ' +

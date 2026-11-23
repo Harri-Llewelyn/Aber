@@ -4,11 +4,12 @@
 #     broker has Dynamic Security, so only a stack can say whether an account is enabled, disabled or
 #     absent after a step, and whether the platform's record agrees. A Host and a Third-party gateway
 #     are issued, re-issued, archived, restored and deleted; a Remote gateway is enrolled through
-#     enroll-gateway, type-changed, archived, restored and deleted. A record that says a credential is
-#     held while the broker refuses it, or the reverse, is silent: nothing errors and the gateway just
-#     stays out. Needs no gateway online: it connects as the account it has just made, once, to a
-#     probe topic. SKIPS, with its reason, without the stack, the seeded Administrator or the credential
-#     service's token in its container.
+#     enroll-gateway, set up again, type-changed, archived, restored and deleted. A revocation the
+#     broker never received is asked again after the gateway is archived and deleted. A record that
+#     says a credential is held while the broker refuses it, or the reverse, is silent: nothing errors
+#     and the gateway just stays out. Needs no gateway online: it connects as the account it has just
+#     made, once, to a probe topic. SKIPS, with its reason, without the stack, the seeded
+#     Administrator or the credential service's token in its container.
 
 """
 The broker's account against the platform's record, after each lifecycle step (docs/gateway-lifecycle.md).
@@ -217,11 +218,15 @@ class BrokerLifecycle(unittest.TestCase):
         self.assertEqual(status, 200, body)
         return body["password"]
 
-    def setup_and_enrol(self, gid):
-        """The Set Up Gateway button, then the appliance redeeming the token. Returns the password."""
+    def issue_setup(self, gid):
+        """The Set Up Gateway or Re-issue Setup button, as the dashboard calls it. Returns the token."""
         _, rows = rest("/rpc/issue_gateway_enrollment_token", method="POST", bearer=self.admin_token,
                        body={"p_gateway_id": gid, "p_ttl_minutes": 30})
-        status, payload = enroll(rows[0]["token"], agent_version="1.4.2")
+        return rows[0]["token"]
+
+    def setup_and_enrol(self, gid):
+        """The Set Up Gateway button, then the appliance redeeming the token. Returns the password."""
+        status, payload = enroll(self.issue_setup(gid), agent_version="1.4.2")
         self.assertEqual(status, 200, payload)
         return payload["mqtt_password"]
 
@@ -240,6 +245,34 @@ class BrokerLifecycle(unittest.TestCase):
         deployment, simulated = {"remote": ("remote", False), "third_party": ("third_party", False),
                                  "host": ("host", False), "simulated": ("host", True)}[kind]
         self.patch(gid, {"deployment": deployment, "is_simulated": simulated})
+
+    def as_if_the_revocation_never_landed(self, gid, sparkplug_id):
+        """
+        What a revocation the broker never received leaves: the account enabled, and the platform's
+        debt with no confirmed request. The account is turned back on through the credential service's
+        admin credential, as delete_broker_account() deletes one.
+        """
+        if str(uuid.UUID(gid)) != gid or sparkplug_id_of(gid) != sparkplug_id:
+            raise ValueError(f"not this suite's gateway: {gid!r} {sparkplug_id!r}")
+        stack_exec.run(
+            "credential", "sh", "-c",
+            'mosquitto_ctrl -h "${MQTT_HOST:-mosquitto}" -u "$MQTT_DYNSEC_ADMIN_USER" '
+            f'-P "$MQTT_DYNSEC_ADMIN_PASSWORD" dynsec enableClient {sparkplug_id}',
+        )
+        sql_text(
+            "INSERT INTO public.gateway_revocation_requests (gateway_id, request_id, requested_at) "
+            f"VALUES ('{gid}', NULL, now()) ON CONFLICT (gateway_id) DO UPDATE SET request_id = NULL, requested_at = now()")
+        self.wait_for_account(sparkplug_id, disabled=False)
+
+    def owed_after_delete(self, sparkplug_id):
+        return sql_text(f"SELECT count(*) FROM public.deleted_gateway_revocations WHERE sparkplug_id = '{sparkplug_id}'") != "0"
+
+    def sweep_until_confirmed(self, sparkplug_id):
+        """The revocation sweep, run as pg_cron runs it, until the deleted gateway's debt is confirmed."""
+        def confirmed():
+            sql_text("SELECT public.sweep_gateway_credential_revocations()")
+            return not self.owed_after_delete(sparkplug_id)
+        wait_until(confirmed, f"the sweep never had {sparkplug_id}'s revocation confirmed", interval=5)
 
     # -- what the platform says, and what the broker says -----------------------------------------
 
@@ -341,7 +374,6 @@ class DashboardIssued(BrokerLifecycle):
         self.assertTrue(self.account(sparkplug_id)["disabled"], "restoring re-enabled the broker account")
         self.assert_refused(sparkplug_id, password)
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
     def test_after_a_restore_the_record_agrees_with_the_account(self):
         gid, sparkplug_id = self.new_gateway("host")
         self.issue_credential(gid)
@@ -372,6 +404,19 @@ class DashboardIssued(BrokerLifecycle):
                 self.assertIsNotNone(client, "the plugin forgot the account, which a revocation does not do")
                 self.assertTrue(client["disabled"])
                 self.assert_refused(sparkplug_id, password)
+
+    def test_a_revocation_that_never_landed_is_asked_again_after_the_gateway_is_deleted(self):
+        gid, sparkplug_id = self.new_gateway("host")
+        password = self.issue_credential(gid)
+        self.archive(gid)
+        self.wait_for_account(sparkplug_id, disabled=True)
+        self.as_if_the_revocation_never_landed(gid, sparkplug_id)
+
+        delete_gateway_and_wait_for_revoke(gid, sparkplug_id)
+        self.assertTrue(self.owed_after_delete(sparkplug_id), "the revocation still owed went with the row")
+        self.sweep_until_confirmed(sparkplug_id)
+        self.assertTrue(self.account(sparkplug_id)["disabled"])
+        self.assert_refused(sparkplug_id, password)
 
     def test_changing_among_the_dashboard_issued_types_leaves_the_account_enabled(self):
         gid, sparkplug_id = self.new_gateway("host")
@@ -419,11 +464,38 @@ class RemoteEnrolled(BrokerLifecycle):
         gid, sparkplug_id = self.new_gateway("remote")
         first = self.setup_and_enrol(gid)
         before = len(broker_clients())
-        second = self.setup_and_enrol(gid)
+        token = self.issue_setup(gid)
+        # The setup ends the first appliance's credential at once. Enrolling before that lands would
+        # race it, which no person standing at an appliance does.
+        self.wait_for_account(sparkplug_id, disabled=True)
+        status, payload = enroll(token, agent_version="1.4.2")
+        self.assertEqual(status, 200, payload)
+        second = payload["mqtt_password"]
         self.assertNotEqual(first, second)
         self.assertEqual(len(broker_clients()), before, "a second enrolment made a second account")
         self.assert_accepted(sparkplug_id, second)
         self.assert_refused(sparkplug_id, first)
+        self.assert_agree(gid, sparkplug_id)
+
+    def test_setting_up_an_enrolled_gateway_again_disables_its_account_at_once(self):
+        gid, sparkplug_id = self.new_gateway("remote")
+        old = self.setup_and_enrol(gid)
+        self.assert_accepted(sparkplug_id, old)
+
+        token = self.issue_setup(gid)
+        self.wait_for_account(sparkplug_id, disabled=True)
+        self.assert_refused(sparkplug_id, old)
+        record = self.record(gid)
+        self.assertEqual(record["status"], "PENDING_ENROLLMENT")
+        self.assertIsNotNone(record["credential_revoked_at"])
+        self.assert_agree(gid, sparkplug_id)
+
+        # The new appliance is given a credential of its own, and the old one stays out.
+        status, payload = enroll(token, agent_version="1.4.2")
+        self.assertEqual(status, 200, payload)
+        self.wait_for_account(sparkplug_id, disabled=False)
+        self.assert_accepted(sparkplug_id, payload["mqtt_password"])
+        self.assert_refused(sparkplug_id, old)
         self.assert_agree(gid, sparkplug_id)
 
     def test_leaving_remote_disables_the_account_and_the_record_says_so(self):
@@ -443,6 +515,23 @@ class RemoteEnrolled(BrokerLifecycle):
                 self.assert_accepted(sparkplug_id, issued)
                 self.assert_refused(sparkplug_id, password)
                 self.assert_agree(gid, sparkplug_id)
+
+    def test_a_change_of_type_that_never_landed_is_asked_again_after_an_archive_and_a_delete(self):
+        gid, sparkplug_id = self.new_gateway("remote")
+        password = self.setup_and_enrol(gid)
+        self.change_type(gid, "host")
+        self.wait_for_account(sparkplug_id, disabled=True)
+        self.as_if_the_revocation_never_landed(gid, sparkplug_id)
+        self.assert_accepted(sparkplug_id, password)
+
+        # The archive's type holds no credential, so it asks nothing; the change's debt is what stays.
+        self.archive(gid)
+        self.assertTrue(self.revocation_asked(gid))
+        delete_gateway_and_wait_for_revoke(gid, sparkplug_id)
+        self.assertTrue(self.owed_after_delete(sparkplug_id), "the revocation still owed went with the row")
+        self.sweep_until_confirmed(sparkplug_id)
+        self.assertTrue(self.account(sparkplug_id)["disabled"])
+        self.assert_refused(sparkplug_id, password)
 
     def test_leaving_remote_before_enrolment_makes_no_account(self):
         gid, sparkplug_id = self.new_gateway("remote")
@@ -478,7 +567,6 @@ class RemoteEnrolled(BrokerLifecycle):
         self.assertTrue(self.account(sparkplug_id)["disabled"], "restoring re-enabled the broker account")
         self.assert_refused(sparkplug_id, password)
 
-    @known_bug("Restoring a gateway clears its credential's revocation stamp while the broker account stays disabled")
     def test_after_a_restore_an_enrolled_gateway_s_record_agrees_with_the_account(self):
         gid, sparkplug_id = self.new_gateway("remote")
         self.setup_and_enrol(gid)

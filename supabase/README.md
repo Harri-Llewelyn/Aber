@@ -4204,10 +4204,11 @@ issued under, and revoking on a guess could cut off a gateway that works.
 
 **What it does not reach.**
 
-- **The forge repository** of a Remote gateway that enrolled is kept, with the deploy key its
-  appliance registered. Archiving archives the repository and removes the key; a type change does
-  neither, so the old appliance can still read its repository until the key is removed in the
-  forge.
+- **The forge repository** of a Remote gateway that enrolled is kept. Archiving archives the
+  repository and removes the deploy key; a type change did neither. Since `0311` the forge sweep
+  removes the key of a gateway that is no longer Remote, the change asks the sweep at once, and the
+  repository is kept out of the archive (*A revocation is owed until the credential service confirms
+  it (0311)*).
 - **A failed revocation was not asked again.** The sweep judged archived gateways alone, and a type
   change's stamp was never judged. `0288` asks again, and stops when a credential issued or enrolled
   since replaces the one it ends (*A failed revocation after a change of type is asked again (0288)*).
@@ -5634,7 +5635,7 @@ credential revoked, and the broker account still worked for whoever held the old
 | Any other reply, or none in five minutes | the stamp is cleared, and the same run asks again | the stamp stays, and the run asks again |
 | Asked again | for an archived gateway that holds a credential and has no stamp, 200 a run | for each row that failed, oldest first, 200 a run |
 | A credential issued or enrolled after the stamp | the archive's rule, unchanged | the row is dropped and nothing is asked |
-| The stamp is cleared (a restore) | the row goes | the row goes |
+| The gateway is restored | n/a: it is no longer archived | the stamp and the row stay (0308) |
 
 **A retry must never disable a newer credential.** After a type change the gateway can be issued a
 credential for its new type under the same broker account name, the Sparkplug ID. A retry after that
@@ -5663,6 +5664,8 @@ in the Vault, the old row stays and the next run asks again.
   its call landed, so nothing is asked for it. The Broker column on Access Control shows an account
   still Active that should be Disabled, and issuing the gateway a credential replaces its password.
 - **A gateway archived while its type change's call is unanswered** is judged by the archive's rule.
+  Since `0311` that rule asks again too, whatever the gateway's type, and a delete keeps what is
+  still owed (*A revocation is owed until the credential service confirms it (0311)*).
 - **The drawer says Revoked as soon as the call is queued**, for an archive as for a type change.
   The Broker column on Access Control is the live answer. `utils/credentialState.js` is unchanged.
 
@@ -5675,8 +5678,8 @@ not a 2xx and after five minutes with none, with the stamp kept; a young request
 asked again; asking until one succeeds; the run that cannot ask leaving the row; the retry never
 running after a credential issued or an enrolment after the stamp, over several runs and when the
 credential comes after a retry; a credential before the stamp, another gateway's and another
-action's stopping nothing; the archive path as it was, and a restore ending the request; the stamp
-with no row asked for nothing; and the helper's truth table.
+action's stopping nothing; the archive path as it was, and a restore leaving the stamp and the
+request; the stamp with no row asked for nothing; and the helper's truth table.
 
 ### An acknowledger is shown by name (0290)
 

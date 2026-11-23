@@ -220,7 +220,8 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                 Only one token works at a time. Issuing this <strong>invalidates any bundle or
                 command already issued</strong> for this gateway — an appliance started with the old one
                 is refused at enrolment, with an error that cannot say why.
-                {gateway.status === 'AWAITING_BIRTH' && (
+                {/* Once this dialog has issued, the enrolment no longer stands, and nothing more is revoked. */}
+                {(gateway.status === 'AWAITING_BIRTH' || gateway.revokesCredential) && !bundle && (
                   <> This gateway has already enrolled, so this also revokes the broker credential
                     its appliance is holding.</>
                 )}

@@ -3,8 +3,9 @@ import { compare, lastDefinition, need, read, SCHEMA } from './lib.mjs';
 // 68. What a change of type ends, one rule in the trigger and the Edit form (0252). The trigger, and
 // 0252's one-off clean-up, move a gateway that leaves Remote out of the enrolment states
 // gatewayStatus.js counts as pending. The form says a setup command is cancelled for the state
-// issue_gateway_enrollment_token() writes, and reads a Remote gateway's credential from the column
-// gateway_has_broker_credential()'s remote arm reads. A state one side adds leaves a gateway reading
+// issue_gateway_enrollment_token() writes, and reads a Remote gateway's credential through
+// enrolmentStands(), which names the column gateway_has_broker_credential()'s remote arm reads (check
+// 129 holds the rest of that rule). A state one side adds leaves a gateway reading
 // Awaiting setup after its type changed; another column has the form say nothing ends where the
 // trigger revokes.
 export default function check() {
@@ -33,7 +34,7 @@ export default function check() {
 
   const has = lastDefinition('CREATE OR REPLACE FUNCTION public.gateway_has_broker_credential(', '$$;', 'gateway_has_broker_credential()');
   const arm = has && need(has.body, /g\.deployment = 'remote' AND g\.([a-z_]+) IS NOT NULL/, `gateway_has_broker_credential()'s remote arm (${has.file})`);
-  const jsArm = need(read('frontend/src/components/tabs/GatewaysTab.jsx'), /editingRemote \? !!editing\.([a-z_]+)/,
-    "the Edit form's Remote credential in GatewaysTab.jsx");
-  if (arm && jsArm) compare('gatewayTypeChange', `the column a Remote gateway's credential is read from (${has.file}) and the form's`, jsArm[1], arm[1]);
+  const jsArm = need(read('frontend/src/utils/credentialState.js'), /export function enrolmentStands\(gateway\) \{\s*return !!gateway\?\.([a-z_]+)/,
+    "the column enrolmentStands() reads in credentialState.js");
+  if (arm && jsArm) compare('gatewayTypeChange', `the column a Remote gateway's credential is read from (${has.file}) and enrolmentStands()'s`, jsArm[1], arm[1]);
 }

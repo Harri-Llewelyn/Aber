@@ -30,8 +30,13 @@ export default function check() {
     for (const m of read(suite).matchAll(/@known_bug\("([^"]+)"\)/g)) held.set(plain(m[1]), suite);
   }
 
+  // With every difference fixed the section says so in this sentence instead of a table, so a table
+  // this check can no longer read still fails.
+  const NONE = 'Today the code does what every row above says.';
+  const saysNone = section.includes(NONE);
   const problems495 = [];
-  if (!rows.length) problems495.push('docs/gateway-lifecycle.md has no differences in a table this check can read under "Where the code differs"');
+  if (!rows.length && !saysNone) problems495.push(`docs/gateway-lifecycle.md has no differences in a table this check can read under "Where the code differs", and does not say "${NONE}"`);
+  if (rows.length && saysNone) problems495.push(`"Where the code differs" says "${NONE}" and still lists ${rows.length}`);
   const defined = new Set(rows.map((r) => r.key));
   for (const key of used) {
     if (!defined.has(key)) problems495.push(`a table row cites [${key}], which "Where the code differs" does not define`);
@@ -52,6 +57,8 @@ export default function check() {
   if (problems495.length) {
     fail('docs/gateway-lifecycle.md and the lifecycle suites disagree about what the code gets wrong:\n' + problems495.map((p) => `        ${p}`).join('\n'));
   } else {
-    pass(`the ${rows.length} differences docs/gateway-lifecycle.md names are cited by its tables, and each the suites mark as a known bug is named there`);
+    pass(rows.length
+      ? `the ${rows.length} differences docs/gateway-lifecycle.md names are cited by its tables, and each the suites mark as a known bug is named there`
+      : 'docs/gateway-lifecycle.md says the code does what every row says, and no suite marks a known bug');
   }
 }

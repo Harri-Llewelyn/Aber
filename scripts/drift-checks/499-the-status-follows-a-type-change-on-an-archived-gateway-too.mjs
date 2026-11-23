@@ -24,7 +24,8 @@ export default function check() {
     const skip = body.search(/IF OLD\.is_archived IS NOT TRUE THEN/);
     const status = body.search(/NEW\.status := 'OFFLINE'/);
     const copy = body.search(/DELETE FROM vault\.secrets/);
-    const revoke = body.search(/revoke_gateway_credential\(/);
+    // 0311 owes the revocation through owe_gateway_revocation(), which asks revoke_gateway_credential().
+    const revoke = body.search(/(?:owe_gateway_revocation|revoke_gateway_credential)\(/);
     const burn = body.search(/UPDATE public\.gateway_enrollment_tokens/);
     if (skip < 0 || status < 0 || copy < 0 || revoke < 0 || burn < 0) {
       problems499.push(`${file} declares clean_up_after_a_gateway_type_change() last, in a shape this check cannot read: it needs the archived skip, the token burn, the revocation, the kept copy and the status`);
