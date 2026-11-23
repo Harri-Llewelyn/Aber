@@ -74,10 +74,8 @@ export const HelpDrawerContext = createContext(null)
  * above the actions, and a section of fixed height.
  *
  * @param {node} children Sections that are tools, rendered after the actions so an unknown height
- * cannot push them off the drawer.
- *
- * A section's buttons, in either slot, are laid out as the actions are: each a `context-action`,
- * in a `context-buttons` container.
+ * cannot push them off the drawer. A section's buttons, in this slot or `beforeActions`, are laid
+ * out as the actions are: each a `context-action`, in a `context-buttons` grid.
  *
  * @param {Function} onClose Called by the X, by Escape, and by anything else that clears selection.
  *
