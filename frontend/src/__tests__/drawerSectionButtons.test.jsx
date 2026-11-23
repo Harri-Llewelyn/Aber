@@ -33,7 +33,13 @@ const { ContextPanel } = await import('../components/common/ContextPanel')
 const { CellsTab } = await import('../components/tabs/CellsTab')
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
-const ruleOf = (selector) => APP_CSS.match(new RegExp(`\\n${selector} \\{([^}]*)\\}`))?.[1]
+/** The body of the rule App.css starts on a line of its own with `selector {`, or undefined. */
+const ruleOf = (selector) => {
+  const start = APP_CSS.indexOf(`\n${selector} {`)
+  if (start < 0) return undefined
+  const open = APP_CSS.indexOf('{', start)
+  return APP_CSS.slice(open + 1, APP_CSS.indexOf('}', open))
+}
 
 const HOUR = 3600 * 1000
 const iso = (ms) => new Date(ms).toISOString()
@@ -50,19 +56,19 @@ const expectDrawerButton = (el) => {
 
 describe('the grid every drawer section uses', () => {
   it('is declared once, as .context-buttons, and the Actions section adds only its rule', () => {
-    expect(ruleOf('\\.context-buttons')).toMatch(/grid-template-columns:\s*repeat\(auto-fill, minmax\(200px, 1fr\)\)/)
+    expect(ruleOf('.context-buttons')).toMatch(/grid-template-columns:\s*repeat\(auto-fill, minmax\(200px, 1fr\)\)/)
     expect(APP_CSS.split('minmax(200px, 1fr)')).toHaveLength(2)
-    expect(ruleOf('\\.context-panel-actions')).not.toMatch(/grid/)
+    expect(ruleOf('.context-panel-actions')).not.toMatch(/grid/)
   })
 
   it('takes SaveDiscard\'s pair as two buttons of its own', () => {
-    expect(ruleOf('\\.context-buttons > \\.setting-actions')).toMatch(/display:\s*contents/)
+    expect(ruleOf('.context-buttons > .setting-actions')).toMatch(/display:\s*contents/)
   })
 
   it('leaves no section to shrink its buttons to their own width', () => {
     // A flex column aligned to its start drew Schedule window… at its own width.
-    expect(ruleOf('\\.suppression-windows')).not.toMatch(/align-items:\s*flex-start/)
-    expect(ruleOf('\\.suppression-window-actions')).not.toMatch(/display:/)
+    expect(ruleOf('.suppression-windows')).not.toMatch(/align-items:\s*flex-start/)
+    expect(ruleOf('.suppression-window-actions')).not.toMatch(/display:/)
   })
 
   it('is what the Actions section is drawn in', () => {
