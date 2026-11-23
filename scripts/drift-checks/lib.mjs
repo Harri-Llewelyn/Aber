@@ -140,3 +140,17 @@ export const upgradingGuide = () => foldedText(GUIDE, foldGuide);
 
 /** A file's text: the two documents above as they will be after the release, any other as it is. */
 export const readDoc = (p) => (p === README ? supabaseReadme() : p === GUIDE ? upgradingGuide() : read(p));
+
+/**
+ * The section of `text` that starts at the line `heading`, up to the next heading of the same level,
+ * or '' when there is no such line. A check that read a note in unreleased/ reads its section here
+ * once the release has folded it in.
+ */
+export function sectionOf(text, heading) {
+  const lines = text.split('\n');
+  const at = lines.indexOf(heading);
+  if (at < 0) return '';
+  const next = `${heading.slice(0, heading.indexOf(' '))} `;
+  const end = lines.findIndex((line, i) => i > at && line.startsWith(next));
+  return lines.slice(at, end < 0 ? lines.length : end).join('\n');
+}
