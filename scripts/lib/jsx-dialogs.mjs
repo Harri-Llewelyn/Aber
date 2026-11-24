@@ -1,6 +1,6 @@
 /**
  * Reads the dialogs in a JSX source: each <Modal> and <ConfirmModal>, its opening tag with its props
- * as written, and what it holds. Drift checks 530 and 544 use it. It is not a parser: it walks the
+ * as written, and what it holds. Drift checks 530, 544 and 561 use it. It is not a parser: it walks the
  * source, skipping string and template literals and tracking braces, which is as much as those
  * sources need, and says so where it cannot read one.
  *
@@ -42,7 +42,7 @@ function walk(src, start, stop) {
 }
 
 /** The `>` that ends the JSX opening tag whose `<` is at `start`, or -1. */
-const tagEnd = (src, start) => walk(src, start + 1, (c, depth) => c === '>' && depth === 0);
+export const tagEnd = (src, start) => walk(src, start + 1, (c, depth) => c === '>' && depth === 0);
 
 /** Where top-level prop `name` of an opening tag starts its value, or -1. */
 export function propAt(tag, name) {
