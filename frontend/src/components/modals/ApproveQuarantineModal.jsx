@@ -4,26 +4,22 @@ import { ActionButton } from '../common/ActionButton'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
 import { Modal } from '../common/Modal'
-import { usePendingKey } from '../../hooks/usePendingAction'
+import { ConfirmModal } from './ConfirmModal'
+import { usePendingAction } from '../../hooks/usePendingAction'
 import { gatewayAcceptsDevices } from '../../utils/gatewayType'
 import {
   SCOPE_GATEWAY, SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, followedPlaceFix, followedPlaceLine, resolveDeviceLocation
 } from '../../utils/cellResolution'
 
 export function ApproveQuarantineModal({ item, cells, gateways, areas = [], suggestion, onApprove, onMerge, onCancel }) {
-  // One key space across both buttons: approving as new and merging into the suggested match are
-  // two answers to the same question, so running one locks the other.
-  const [busy, runBusy] = usePendingKey()
-  // A refusal from approve-quarantine, as it worded it. The dialog stays open on one.
+  const [busy, runBusy] = usePendingAction()
+  // A refusal from approve-quarantine, as it worded it. The dialog stays open on one. A refused
+  // merge is shown in Accept match's own question.
   const [error, setError] = useState(null)
-  const decide = (key, act) => runBusy(key, async () => {
-    setError(null)
-    try {
-      await act()
-    } catch (err) {
-      setError(err.message)
-    }
-  })
+  // The device Accept Match asks about. Nothing is merged until the question is answered, and it goes
+  // if that device is no longer the one suggested, as when it has sent its own first birth since.
+  const [acceptingId, setAcceptingId] = useState(null)
+  const accepting = !!suggestion && suggestion.candidateId === acceptingId
 
   const isGateway = item.entity_type === 'GATEWAY'
   const [assetName, setAssetName] = useState(item.asset_name)
@@ -55,18 +51,23 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
     ? (scope === SCOPE_AREA_WIDE ? 'Choose which area the device serves' : 'Choose which cell the device is in')
     : null
 
-  const handleSave = () => decide('approve', () => onApprove(item.asset_id, {
-    asset_name: assetName,
-    active_gateway_id: gatewayId,
-    cell_id: cellId,
-    area_id: scope === SCOPE_AREA_WIDE ? location.area_id : '',
-    location_scope: scope
-  }))
-
-  const handleAcceptMatch = () => decide('merge', () => onMerge(item.asset_id, suggestion.candidateId))
+  const handleSave = () => runBusy(async () => {
+    setError(null)
+    try {
+      await onApprove(item.asset_id, {
+        asset_name: assetName,
+        active_gateway_id: gatewayId,
+        cell_id: cellId,
+        area_id: scope === SCOPE_AREA_WIDE ? location.area_id : '',
+        location_scope: scope
+      })
+    } catch (err) {
+      setError(err.message)
+    }
+  })
 
   return (
-    // Escape, the close button and Cancel do nothing while a decision is in flight.
+    // Escape, the close button and Cancel do nothing while an approval is in flight.
     <Modal
       title={<>Approve Discovered {isGateway ? 'Gateway' : 'Device'} <span className="mono">[{item.asset_name}]</span></>}
       icon={<IconShieldAlert size={18} />}
@@ -76,11 +77,11 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
       error={error}
       footer={
         <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={!!busy}>Cancel</button>
+          <button className="btn btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
           <ActionButton
-            pending={busy === 'approve'}
+            pending={busy}
             pendingLabel="Approving…"
-            disabled={busy === 'merge' || problem !== null}
+            disabled={problem !== null}
             onClick={handleSave}
             title={problem ?? undefined}
           >
@@ -107,22 +108,52 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
           <div>
             <strong>This looks like it might be <span className="mono">{suggestion.candidateName}</span></strong>
             <div className="form-hint">
-              A provisioned device awaiting its first birth ({suggestion.evidence}). If this was a
-              mistyped device name, accepting the match keeps that device's existing configuration and
-              discards this quarantined duplicate, rather than approving it as a brand new device.
+              A provisioned device awaiting its first birth ({suggestion.evidence}). If this is the
+              same machine publishing under another ID, accepting the match keeps that device's
+              existing configuration and deletes this quarantined duplicate, rather than approving it
+              as a brand new device. It asks first.
             </div>
             <ActionButton
               className="btn btn-primary btn-sm"
-              pending={busy === 'merge'}
-              pendingLabel="Merging…"
-              disabled={busy === 'approve'}
-              onClick={handleAcceptMatch}
+              disabled={busy}
+              onClick={() => setAcceptingId(suggestion.candidateId)}
               title="Merge this quarantined device into the suggested provisioned device"
             >
               Accept Match
             </ActionButton>
           </div>
         </div>
+      )}
+
+      {/* Inside this dialog, so it opens over it and Escape closes it first. What it says carries over
+          is what approve_quarantined_device() writes on the device that is kept (drift check 573). */}
+      {accepting && (
+        <ConfirmModal
+          title="Accept match"
+          icon={<IconShieldAlert size={18} />}
+          message={
+            `Merge the quarantined device '${item.asset_name}'` +
+            (item.reported_identity ? ` (published as ${item.reported_identity})` : '') +
+            ` into '${suggestion.candidateName}'? '${suggestion.candidateName}' is kept, and the quarantined device is deleted.`
+          }
+          confirmLabel="Accept Match"
+          pendingLabel="Merging…"
+          onConfirm={() => onMerge(item.asset_id, suggestion.candidateId)}
+          onCancel={() => setAcceptingId(null)}
+        >
+          <p className="form-hint">
+            <strong>Carried over:</strong> the ID it publishes under, its status, the time of its first
+            birth, and the values its birth announced. {`Its messages then arrive as '${suggestion.candidateName}'.`}
+          </p>
+          <p className="form-hint">
+            <strong>Not carried over:</strong> its name, gateway, location and schemas, and anything else
+            set on it, such as a nameplate, links or captures. These are deleted with it. Readings already
+            recorded for it do not move.
+          </p>
+          <p className="form-hint">
+            {`'${suggestion.candidateName}' keeps its own gateway. If the device publishes through another, it is held in Quarantine again.`}
+          </p>
+        </ConfirmModal>
       )}
 
       <div className="form-group">
