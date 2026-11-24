@@ -345,12 +345,12 @@ cut before the name is (`OverflowText`): a Filters panel's section says what is 
 ### Cut text slides on hover or focus
 
 `common/OverflowText.jsx` draws one line that may not fit, cut with an ellipsis at rest. While the
-pointer is on it, or on the button or link it sits in, or that control has keyboard focus, text
-that is really cut slides at about reading pace (`SLIDE_PX_PER_SECOND`) until its end shows. It
-slides back when they leave.
+pointer is on it, or on the button, link or label it sits in, or that control has keyboard focus,
+text that is really cut slides at about reading pace (`SLIDE_PX_PER_SECOND`) until its end shows. It
+slides back when they leave. A label's focus is its checkbox's.
 
 - It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
-  control's tooltip must carry the whole text.
+  control's tooltip must carry the whole text, or the text must wrap there (a list picker's rows).
 - It measures as it activates (`scrollWidth` against `clientWidth`), as `CopyableId` does, so a
   drawer opening needs no listener. `onMeasure(cut)` hears each measurement.
 - A section heading's `detail` (`GroupHeading`) is its button's tooltip while it is cut, and only
@@ -424,14 +424,27 @@ stays on the title's first line however long the title is. Controls too wide to 
 characters (the Site Map's legend in the expanded plan) wrap to a line below it, and narrow to the
 row.
 
-**One metric list serves the schema builder and Add Derived Metric** (`common/MetricPicker.jsx`): the
-search, the standard filter and the grouped, tickable list. The list narrows what is shown, never
-what is chosen, because the dialog holds the choice. `single` makes the ticks radio buttons for a
-dialog that takes one metric. A caller that cannot show a long list at the window's height gives it
-one with `listStyle`. A catalog metric is always chosen from this list, never from a dropdown, which
-stops being usable as the catalog grows: Deprecate Metric's Superseded By, and the schema editor for a
-draft, which adds each metric's stored keys with `renderNote`. The vocabulary pickers in Add Metric
-(MTConnect's data item types and the others) are still grouped dropdowns.
+**A long list is chosen from a list picker** (`common/ListPicker.jsx`): a search, then rows with a
+tick that scroll inside themselves. The search narrows what is shown, never what is chosen, because
+the dialog holds the choice. `single` makes the ticks radio buttons for a dialog that takes one. The
+list takes the height the dialog leaves; a caller that cannot show a long list at the window's height
+gives it one with `listStyle`, or a class with `listClass`. With a `legend` it is a fieldset, named by
+the legend and by how many are selected. Its rows are native checkboxes, so Tab and Space need no
+handler. Two pickers build on it.
+
+- **`MetricPicker`** groups the catalog's metrics and adds the standard filter. A catalog metric is
+  always chosen from it, never from a dropdown, which stops being usable as the catalog grows: the
+  schema builder, Add Derived Metric, Deprecate Metric's Superseded By, and the schema editor for a
+  draft, which adds each metric's stored keys with `renderNote`. The vocabulary pickers in Add Metric
+  (MTConnect's data item types and the others) are still grouped dropdowns.
+- **`SchemaPicker`** lists the schemas a device can have, in Register New Device and Edit Device
+  Configuration. A row is two lines: the name and version, with the Schemas page's badge while the
+  version is not in force, over the metric count and the description. The search reads the name, the
+  description and the names of the metrics a schema models, all from the definition the page already
+  holds. A schema found by a metric names it in place of its description, so the row is no taller. The
+  list has one height whether the site has one schema or sixty. The schemas ticked as it opens come
+  first, and ticking moves no row. Under reduced motion a row's cut text wraps: a tooltip on a row
+  would cover the rows under it.
 
 ### A dialog's width is named by its content
 

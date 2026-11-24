@@ -12,12 +12,14 @@ const RETURN_MS = 250
  * on the control it sits in, or that control has keyboard focus, text that is really cut slides
  * until its end is in view and holds there; it slides back when they leave. It never moves by
  * itself, and under reduced motion it does not move at all, so the control's tooltip must carry
- * the whole text. The whole text is always in the DOM, so a screen reader hears all of it.
+ * the whole text, or a style let it wrap there. The whole text is always in the DOM, so a screen
+ * reader hears all of it.
  *
  * The control is the nearest button, link, label or focusable element around it; without one, the
- * text reacts to the pointer alone. A label's focus is its checkbox's or its field's. Measured as it activates (`scrollWidth` against `clientWidth`), so
- * a drawer opening or the window narrowing needs no listener. `onMeasure(cut)` hears each
- * measurement, so the control can give its tooltip only to text that is really cut.
+ * text reacts to the pointer alone. A label's focus is its checkbox's. Measured as it activates
+ * (`scrollWidth` against `clientWidth`), so a drawer opening or the window narrowing needs no
+ * listener. `onMeasure(cut)` hears each measurement, so the control can give its tooltip only to
+ * text that is really cut.
  *
  *   <button type="button" onClick={open}><OverflowText className="trail-lane-name">{name}</OverflowText></button>
  */

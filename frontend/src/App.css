@@ -7917,7 +7917,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 
 /* The device form's schema list (SchemaPicker): a fixed height, so neither the site's schemas nor a
    search changes the dialog's, and shorter only while there is none to list. */
-.schema-picker-list { flex: none; height: 220px; }
+.schema-picker-list { flex: none; height: 200px; }
 .schema-picker-list-none { flex: none; min-height: 0; }
 .schema-picker-list input { flex-shrink: 0; }
 .schema-picker-list .list-picker-label { padding-block: 6px; }
@@ -7941,6 +7941,8 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .schema-picker-version,
 .schema-picker-detail { font-size: 11px; color: var(--text-muted); }
 .schema-picker-detail { gap: 3px; }
+/* The metric a search found: at the line's own size, so saying which makes no row taller. */
+.schema-picker-detail .mono { font-size: inherit; line-height: 1; }
 .schema-picker-head > :not(.schema-picker-name),
 .schema-picker-count { flex-shrink: 0; white-space: nowrap; }
 /* Cut text slides unless motion is reduced. Here it then wraps: a tooltip on a row would cover the

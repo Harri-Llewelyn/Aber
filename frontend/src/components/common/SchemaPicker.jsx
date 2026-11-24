@@ -11,7 +11,7 @@ const matches = (row, needle) => schemaHit(row.schema, row.metrics, needle) !== 
 
 /** What the search found a schema by, in place of its description. */
 function FoundBy({ metrics: [first, ...rest] }) {
-  return <>models <span className="mono">{first}</span>{rest.length > 0 && `, and ${rest.length} more that match`}</>
+  return <>models <span className="mono">{first}</span>{rest.length > 0 && ` and ${plural(rest.length, 'more match', 'more matches')}`}</>
 }
 
 /** A row: its name and version, and its status while it is not in force, over its metric count and description. */
@@ -20,7 +20,7 @@ function SchemaRow({ schema, metrics, needle, id }) {
   return (
     <span className="schema-picker-row">
       <span className="schema-picker-head">
-        <OverflowText className="schema-picker-name">{schema.schema_name}</OverflowText>
+        <OverflowText className="schema-picker-name">{schema.schema_name}</OverflowText>{' '}
         {isInForce(schema)
           ? <span className="schema-picker-version" id={`${id}-version`}>v{schemaVersion(schema)}</span>
           : <span className={`badge badge-sm ${statusBadgeClass(schemaStatus(schema))}`} id={`${id}-version`}>{schemaVersionLabel(schema)}</span>}
@@ -28,7 +28,7 @@ function SchemaRow({ schema, metrics, needle, id }) {
       <span className="schema-picker-detail" id={`${id}-detail`}>
         <span className="schema-picker-count">{metrics.length === 0 ? 'No metrics' : plural(metrics.length, 'metric')}</span>
         {(found.length > 0 || schema.description) && (
-          <OverflowText>· {found.length > 0 ? <FoundBy metrics={found} /> : schema.description}</OverflowText>
+          <>{' '}<OverflowText>· {found.length > 0 ? <FoundBy metrics={found} /> : schema.description}</OverflowText></>
         )}
       </span>
     </span>
