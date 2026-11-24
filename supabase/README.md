@@ -11393,6 +11393,44 @@ a clone of `<repo>.wiki.git` with the key and a push to it succeed). The wiki th
 being a place only people wrote; [Accepted risks](../docs/security-model.md#an-appliances-deploy-key-can-write-its-repositorys-wiki) records the
 decision to keep it there.
 
+**The branch rules do not cover tags, so tags have two rules of their own (1.9.1).** Git takes a short
+name for a tag before a branch, on a remote and in a checkout: with both, `git fetch origin main`
+brings in the tag's commit. Until 1.9.1 the puller named `main` short, and the key and both teams could
+make a tag of that name. Both ends are closed, because an appliance takes its half only when its
+`platform.yml` moves:
+
+- **The appliance names every ref in full** (drift check 551), and takes no tags into its checkout.
+- **The forge refuses the tag.** `ensureTagProtection()` keeps two rules on each gateway repository, at
+  enrolment before anything reads the repository or a key can write it, and on every sweep (drift
+  check 552). A tag named `main` or `appliance`, in any case, is the machine account's alone. Every
+  other tag is both teams'. No deploy key is on either list, so a key makes no tag at all.
+
+The rules' patterns are exact complements, and the reason is how `gitea/gitea:28.3.0` decides, each
+point measured:
+
+| Question | Answer |
+| :--- | :--- |
+| Which rule decides, when several match a name? | Any of them: whoever one matching rule admits is admitted. So a rule for every tag, beside one for `main`, opens `main` |
+| Does a pattern match without case? | No. A pattern between slashes is a Go regular expression, with no negative lookahead, and any other is a glob whose `*` crosses a slash |
+| Does an empty list admit nobody? | Yes: not the organisation's owner and not a site administrator. The API refuses to make a rule with one |
+| Who can delete or move a protected tag? | Those its rule admits, by push or through the API. So the machine account is on the list, and the sweep can delete a tag it finds |
+| Can a team member change a rule? | No: 403 from the API, and 404 from the settings pages |
+| Does a release get round it? | No. Making one, publishing a draft of one and renaming its tag are all refused |
+
+Any other rule could only admit more people, so the sweep removes one. Nothing in Aber offers one.
+
+A tag already under such a name is deleted by the first sweep, with the release made from it, and is
+listed as `untagged` in the summary and named with its commit in the log. The exact spelling alone,
+because Git matches a ref with case. Gitea's API cannot delete a tag on a file or a folder, which no
+appliance can deploy either: the sweep reports one as an error until somebody deletes it on the
+forge's volume.
+
+**A gateway's repository is read by object id** (`fileAtCommit()`, drift check 553). With a tag named
+`main`, Gitea's contents call reads the tag for `ref=main` and for no ref, and its trees and commits
+calls read the tag for `main`. The contents and raw calls also take a branch or a tag NAMED as a
+commit's id ahead of the commit, and both teams can push a branch of any name. The branches call reads
+the branch, and the trees and blobs calls given an id read that object.
+
 **The webhook records both heads.** Its branch filter, `*`, covers both; the sweep patches a hook
 registered with an older filter. Gitea resolves a push's hooks when it processes the queued push
 rather than when the push happens, so the incident template committed a moment before the hook is

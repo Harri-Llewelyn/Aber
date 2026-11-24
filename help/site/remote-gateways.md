@@ -460,7 +460,8 @@ behaviour:
 
 * the `appliance` rule admits pushes from deploy keys and from no login, and blocks force-push;
 * `main` admits no deploy key;
-* a `**` rule closes every other branch to them.
+* a `**` rule closes every other branch to them;
+* two tag rules close every tag to them, and nobody can make a tag named `main` or `appliance`.
 
 So the deploy key, which can now write, lets an appliance *report* and never *deploy*. The machine
 account cannot write the branch either (its contents API answers 403 there). So what the branch holds
@@ -485,6 +486,8 @@ requires), and adds two checks of its own:
 | The tracked branch's history was rewritten | A force-push cannot be told from a legitimate advance, so following one would deploy something no pull request ever showed. A revert must be a new commit. |
 | A committed `mqtt-broker` node id has no credential here | Node-RED would start, report success, and hand that node an empty username. The broker refuses it with no stated cause, and the *next* deploy destroys the credential this appliance still holds. |
 | The file is not a flow array, or looks like `flows_cred.json` | The same two shape checks `forge-events` makes on a proposal, made again where they matter. |
+
+The second refusal holds until you decide what to do: see [*Troubleshooting*](#troubleshooting).
 
 Commit the appliance's own `/data/flows.json`, never a flow that has been through an import dialog.
 The third refusal is the one worth knowing about, because a convenient action causes it. The
@@ -574,6 +577,32 @@ The appliance holds a credential but is not publishing. Check `docker compose lo
 **Nothing at all in the dashboard, and bootstrap never ran.**
 Run `docker compose ps`. If `bootstrap` exited non-zero, `node-red` will not have started at all
 (`depends_on: service_completed_successfully`). Its logs give the reason.
+
+**The appliance's log says the tracked branch no longer contains a commit.**
+The appliance holds a commit that `main` does not. It keeps running what it has, and changes nothing
+until you decide. `sudo docker logs aber-gateway-flow-sync` names the commit. First find out where it
+came from. Open it in the forge, at `<the forge>/gateways/<the repository>/commit/<the commit>`, where
+it opens even when no branch holds it.
+
+* **You know the commit:** somebody put `main` back to an earlier one. Start the appliance again from
+  `main`, below.
+* **You do not know it, and it changed `custom.yml` or `platform.yml`:** the appliance ran that as
+  root. Archive the gateway, rebuild the machine, restore the gateway and set it up again.
+* **You do not know it, and it changed only `flows.json`:** read that flow. If nothing in it could have
+  changed the machine, start the appliance again from `main`, below. If you are not sure, rebuild.
+
+To start again from `main`, run this on the appliance:
+
+```bash
+sudo docker exec aber-gateway-flow-sync rm -rf /data/gitops/repo
+sudo docker restart aber-gateway-flow-sync
+sudo systemctl start aber-gateway-converge
+```
+
+The second command fetches the repository again and deploys `main`'s flow. The third runs the platform
+playbook and `main`'s own `custom.yml`; an appliance the playbook has never run on has no such
+service, and does not need it. If `main` holds no `flows.json`, the flow that was running stays until
+you put one there.
 
 **The gateway is `ONLINE` but its devices are not.**
 They are in the quarantine queue awaiting approval
