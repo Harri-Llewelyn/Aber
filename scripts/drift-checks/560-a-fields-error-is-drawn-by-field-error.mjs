@@ -26,8 +26,8 @@ const RULES = [
   },
   {
     what: 'role="alert"',
-    // A role given as a string, or chosen by an expression.
-    found: /\brole=(?:"alert"|\{[^}\n]*['"]alert['"])/g,
+    // A role given as a string, chosen by an expression, or spread from an object.
+    found: /\brole(?:="alert"|=\{[^}\n]*['"]alert['"]|:\s*['"]alert['"])/g,
     parts: [FIELD],
     allowed: [
       [`${COMPONENTS}common/Modal.jsx`, 1, 'the dialog\'s error slot: a refused act, not a field'],
