@@ -337,6 +337,9 @@ describe('a device’s and a gateway’s fields', () => {
     saysNothing(group)
     type(group, 'Plant/B')
     saysWhy(group, 'cannot contain /')
+    // Under the hint, which has no id to be named by.
+    const hint = screen.getByText(/^The second level of every topic/)
+    expect(hint.compareDocumentPosition(namedError(group, /./)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     type(group, '')
     saysWhy(group, 'A Sparkplug group cannot be empty.')
   })

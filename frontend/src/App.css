@@ -7866,8 +7866,10 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .form-hint.hint-warning > svg,
 .form-hint.hint-danger > svg { vertical-align: -2px; }
 
-/* A problem may quote what was typed, which may hold no space to break at. */
+/* A problem may quote what was typed, which may hold no space to break at. A value in it keeps the
+   line's size and colour; `.mono` sets its own. */
 .form-hint.hint-danger { overflow-wrap: anywhere; }
+.form-hint.hint-danger .mono { font-size: inherit; color: inherit; }
 
 /* A FieldError over its control rather than beneath it: the metric picker, which fills the dialog. */
 .field-error-above { margin: 0 0 4px; }

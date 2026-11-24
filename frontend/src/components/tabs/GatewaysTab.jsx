@@ -927,7 +927,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               onChange={e => setForm(f => ({ ...f, sparkplug_group: e.target.value }))}
               {...fieldErrorProps(groupProblem, 'gateway-sparkplug-group-error')}
             />
-            <FieldError id="gateway-sparkplug-group-error" error={groupProblem} />
             {offeredGroup && (
               <Tooltip text="The group this gateway was last seen publishing under">
                 <button
@@ -962,6 +961,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 address.
               </div>
             )}
+            <FieldError id="gateway-sparkplug-group-error" error={groupProblem} />
           </div>
         )}
         <div className="form-group">

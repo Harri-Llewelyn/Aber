@@ -59,6 +59,9 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
           <AreaPlanPin x={value.x} y={value.y} status="normal" selected Icon={cellIconComponent(cellIcon)} label="This cell" title="Where this cell will be shown" />
         )}
       </AreaPlan>
+      {/* Straight under the plan, so a click that places nothing says why in view. Not a field's: the
+          plan takes no focus. */}
+      <FieldError error={refusal} />
       <div className="area-plan-placement-footer">
         <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
           {shown ? `Placed ${formatPlace({ plan_x: shown.x, plan_y: shown.y })}.` : 'Not placed — the Site Map does not draw the cell until it is.'}
@@ -72,8 +75,6 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
           </Tooltip>
         )}
       </div>
-      {/* Not a field's: the plan is clicked, and takes no focus. */}
-      <FieldError error={refusal} />
     </div>
   )
 }
