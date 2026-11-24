@@ -8422,7 +8422,7 @@ they were cancelled or they failed — and an inner join would make exactly thos
 their note as well, which is the only handle they have.
 
 **A service principal's name comes from two places.** The audit row *is* the record of the
-identity, which is why `api.js` lists tokens by reading this lane; the three identities a migration
+identity, which is why `api.js` lists tokens by reading this lane; the identities a migration
 pinned are named from `KNOWN_PRINCIPALS` in `utils/serviceIdentities.js`, and one an Administrator
 created from the Access Control page is named from its `machine_principals` row (`0125`), read by
 the same two roles that may read this lane. An id in neither keeps its uuid rather than taking
@@ -11681,7 +11681,7 @@ is named there too; the search still cannot reach that name, for the reason stat
 typed is not right once the report is renamed or the client moves lines, and a table with no
 write policy had no way to say so. `describe_machine_principal(p_principal_id, p_name,
 p_purpose)` is the one write path after creation: Administrator only, machine principals only,
-**rows that exist only**, so the three identities a migration pinned are refused with a message
+**rows that exist only**, so the identities a migration pinned are refused with a message
 saying their name lives in the dashboard's registry rather than *not found*. The name stays
 unique ignoring case, excluding the row being renamed. An unchanged save writes nothing and
 returns `NULL`; a change is a `PRINCIPAL_DESCRIBED` row on the *Machine identities* category carrying

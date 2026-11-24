@@ -10,8 +10,8 @@ const PURPOSE_MAX = 500
 
 /**
  * Rename a machine identity created from the Access Control page, or change its purpose. Offered
- * only for a row that has a `machine_principals` entry: the three identities a migration pinned
- * are named in the dashboard's registry, and the RPC refuses them.
+ * only for a row that has a `machine_principals` entry: an identity a migration pinned is
+ * named in the dashboard's registry, and the RPC refuses it.
  *
  * No permissions here, deliberately. Widening what a principal holds is a change of authority that
  * every token already signed for it would carry at once; that is a new principal, not an edit.
