@@ -33,8 +33,8 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 
 const DATA_DIR = process.env.NODE_RED_DATA_DIR || '/data';
@@ -125,13 +125,23 @@ function git(args, cwd = CHECKOUT) {
   }).trim();
 }
 
-function gitClone(url, args, target) {
-  mkdirSync(dirname(target), { recursive: true });
-  execFileSync('git', ['clone', '--quiet', ...args, url, target], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, GIT_SSH_COMMAND: sshCommand(), GIT_TERMINAL_PROMPT: '0' },
-  });
+/**
+ * A branch by its full name, which is how every command here names one. Git takes a short name for a
+ * tag before a branch, and a tag is something nobody approved.
+ */
+const branchRef = (branch) => `refs/heads/${branch}`;
+
+/**
+ * A checkout with the forge as its origin and nothing in it yet: what comes in is what a fetch names
+ * in full, and no tag. Made beside the target and renamed, so a pass that dies here leaves no target.
+ */
+function newCheckout(url, target) {
+  const making = `${target}.new`;
+  rmSync(making, { recursive: true, force: true });
+  mkdirSync(making, { recursive: true });
+  git(['init', '--quiet'], making);
+  git(['remote', 'add', 'origin', url], making);
+  renameSync(making, target);
 }
 
 /**
@@ -141,7 +151,7 @@ function gitClone(url, args, target) {
  * revert must be a new commit.
  */
 function fetchBranch(branch) {
-  git(['fetch', '--quiet', 'origin', branch], CHECKOUT);
+  git(['fetch', '--quiet', '--no-tags', 'origin', branchRef(branch)], CHECKOUT);
 
   const remote = git(['rev-parse', 'FETCH_HEAD'], CHECKOUT);
   let local = null;
@@ -172,13 +182,13 @@ function fetchBranch(branch) {
   return { local, remote };
 }
 
-/** Clone on first run, fetch afterwards. Returns the revision now checked out. */
+/** Make the checkout on the first run, and fetch into it. Returns the revision now checked out. */
 function syncCheckout(repository) {
   const branch = repository.branch || 'main';
 
   if (!existsSync(join(CHECKOUT, '.git'))) {
     log(`cloning ${repository.ssh_url} (${branch})`);
-    gitClone(repository.ssh_url, ['--branch', branch, '--single-branch'], CHECKOUT);
+    newCheckout(repository.ssh_url, CHECKOUT);
   }
 
   const { remote } = fetchBranch(branch);
@@ -466,11 +476,11 @@ function prepareReportCheckout(repository) {
   const tracked = repository.branch || 'main';
   if (!existsSync(join(REPORT_CHECKOUT, '.git'))) {
     log(`cloning ${repository.ssh_url} again for the '${REPORT_BRANCH}' branch`);
-    gitClone(repository.ssh_url, ['--branch', tracked, '--single-branch'], REPORT_CHECKOUT);
+    newCheckout(repository.ssh_url, REPORT_CHECKOUT);
   }
   let remoteHead = null;
   try {
-    git(['fetch', '--quiet', 'origin', REPORT_BRANCH], REPORT_CHECKOUT);
+    git(['fetch', '--quiet', '--no-tags', 'origin', branchRef(REPORT_BRANCH)], REPORT_CHECKOUT);
     remoteHead = git(['rev-parse', 'FETCH_HEAD'], REPORT_CHECKOUT);
   } catch {
     // No such branch at the forge yet: the first report creates it.
@@ -479,7 +489,7 @@ function prepareReportCheckout(repository) {
     git(['checkout', '--quiet', '--force', '-B', REPORT_BRANCH, remoteHead], REPORT_CHECKOUT);
     return remoteHead;
   }
-  git(['fetch', '--quiet', 'origin', tracked], REPORT_CHECKOUT);
+  git(['fetch', '--quiet', '--no-tags', 'origin', branchRef(tracked)], REPORT_CHECKOUT);
   const root = git(['rev-list', '--max-parents=0', 'FETCH_HEAD'], REPORT_CHECKOUT).split('\n')[0];
   git(['checkout', '--quiet', '--force', '-B', REPORT_BRANCH, root], REPORT_CHECKOUT);
   return null;
@@ -544,7 +554,7 @@ async function reportOnce() {
     '-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`,
     'commit', '--quiet', '--no-verify', '-m', subject,
   ], REPORT_CHECKOUT);
-  git(['push', '--quiet', 'origin', `${REPORT_BRANCH}:${REPORT_BRANCH}`], REPORT_CHECKOUT);
+  git(['push', '--quiet', 'origin', `${branchRef(REPORT_BRANCH)}:${branchRef(REPORT_BRANCH)}`], REPORT_CHECKOUT);
 
   const revision = git(['rev-parse', 'HEAD'], REPORT_CHECKOUT);
   writeFileSync(REPORTED, JSON.stringify({ digest, revision, pushed_at: new Date().toISOString() }, null, 2));

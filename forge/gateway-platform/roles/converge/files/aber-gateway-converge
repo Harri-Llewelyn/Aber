@@ -122,15 +122,17 @@ install_trust() {
   bundle="$tmp/bundle.pem"
 
   # Bare, shallow, one branch: the roots and nothing else. Discarded at the end of the pass rather
-  # than kept, so there is no checkout on this box that can fall behind or be edited.
-  if ! git clone --quiet --bare --depth 1 --single-branch --branch main "$PLATFORM_URL" "$tmp/repo" 2>/dev/null; then
+  # than kept, so there is no checkout on this box that can fall behind or be edited. The branch by
+  # its full name, because Git takes a short one for a tag first.
+  if ! { git init --quiet --bare "$tmp/repo" \
+      && git --git-dir="$tmp/repo" fetch --quiet --depth 1 --no-tags "$PLATFORM_URL" refs/heads/main; } 2>/dev/null; then
     TRUST_RECORD=$(trust_record failed "" "" false "could not read main of the platform repository")
     log "could not read main of the platform repository; keeping the root this appliance holds"
     rm -rf "$tmp"
     return 0
   fi
 
-  if ! git --git-dir="$tmp/repo" show "main:$TRUST_PATH" > "$bundle" 2>/dev/null; then
+  if ! git --git-dir="$tmp/repo" show "FETCH_HEAD:$TRUST_PATH" > "$bundle" 2>/dev/null; then
     # Every platform published before this mechanism existed. Not a failure: the root enrolment
     # installed is still the root the broker presents.
     TRUST_RECORD=$(trust_record absent "" "" false "main carries no $TRUST_PATH")
