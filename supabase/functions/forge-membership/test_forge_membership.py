@@ -8,9 +8,10 @@
 #     ended elsewhere is sent back through the door; and Gitea's own sign-out link ends the door's
 #     session alone and sends the browser to the dashboard's /sign-out, while the same person's
 #     session in another browser is still served; and end_my_door_sessions() (0208), the dashboard's
-#     Sign Out, ends the door's session and leaves the dashboard's own served. Needs the stack, the
-#     forge, the seeded personas AND the gateways organisation (one enrolment creates it), and skips
-#     without any of them.
+#     Sign Out, ends the door's session and leaves the dashboard's own served. A person who has
+#     never been to the forge opens a repository's link and lands on the repository. Needs the
+#     stack, the forge, the seeded personas AND the gateways organisation (one enrolment creates
+#     it), and skips without any of them.
 
 """
 The forge's door, end to end, and the room behind it.
@@ -29,6 +30,7 @@ and that a person whose role has gone stops seeing them -- both of which need th
 import http.cookiejar
 import json
 import os
+import secrets
 import sys
 import unittest
 import urllib.error
@@ -36,6 +38,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "test-harness"))
+import stack_exec  # noqa: E402
 import stack_sign_in  # noqa: E402  -- waits out the lane's shared sign-in limit
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
@@ -111,13 +114,21 @@ def request(url, method="GET", headers=None, body=None, jar=None):
         return err.code, {k.lower(): v for k, v in err.headers.items()}, err.read().decode(errors="replace")
 
 
-def forge_as_machine(path, method="GET"):
-    status, _, text = request(f"{FORGE_URL}{path}", method=method, headers={"Authorization": f"token {MACHINE_TOKEN}"})
+def forge_as_machine(path, method="GET", body=None):
+    status, _, text = request(f"{FORGE_URL}{path}", method=method, body=body,
+                              headers={"Authorization": f"token {MACHINE_TOKEN}"})
     return status, (json.loads(text) if text.strip() else None)
 
 
-def sign_in(email):
-    status, body = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, PASSWORD)
+def as_service(path, method="GET", body=None):
+    """One call as service_role: the publishable key at the gateway, the service-role JWT as the bearer."""
+    status, _, text = request(f"{SUPABASE_URL}{path}", method=method, body=body,
+                              headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {SERVICE_ROLE_KEY}"})
+    return status, (json.loads(text) if text.strip() else None)
+
+
+def sign_in(email, password=PASSWORD):
+    status, body = stack_sign_in.password_grant(SUPABASE_URL, PUBLISHABLE_KEY, email, password)
     if status == stack_sign_in.NO_SUCH_ACCOUNT:
         raise unittest.SkipTest(f"could not sign in as {email} ({status}); the seed personas are absent")
     if status != 200:
@@ -130,10 +141,16 @@ def through_the_door(email):
     jar = cookie_jar()
     status, headers, _ = request(f"{FORGE_URL}/", jar=jar)
     assert status == 302, f"the door did not redirect ({status})"
-    authorize_url = headers["location"]
+    complete_the_login(jar, headers["location"], email)
+    status, _, _ = request(f"{FORGE_URL}/", jar=jar)
+    return jar, status
+
+
+def complete_the_login(jar, authorize_url, email, password=PASSWORD):
+    """The sign-in the door asked for, through its callback. Returns where the callback sends the browser."""
     assert "/auth/v1/oauth/authorize" in authorize_url, authorize_url
 
-    token = sign_in(email)
+    token = sign_in(email, password)
     status, headers, _ = request(authorize_url)
     assert status in (302, 303), f"authorize did not redirect to consent ({status})"
     authorization_id = urllib.parse.parse_qs(urllib.parse.urlparse(headers["location"]).query)["authorization_id"][0]
@@ -159,10 +176,26 @@ def through_the_door(email):
         callback = json.loads(text)["redirect_url"]
     assert callback.startswith(f"{FORGE_URL}/oauth2/callback"), callback
 
-    status, _, _ = request(callback, jar=jar)
+    status, headers, _ = request(callback, jar=jar)
     assert status == 302, f"the callback did not complete the login ({status})"
-    status, _, _ = request(f"{FORGE_URL}/", jar=jar)
-    return jar, status
+    return headers["location"]
+
+
+# What a browser sends with a link a person opens, and not with a script's fetch.
+PAGE_LOAD = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
+
+
+def open_page(url, jar):
+    """A page load, followed as a browser follows it: each (path and query, status), and the last body."""
+    hops = []
+    while len(hops) < 10:
+        status, headers, text = request(url, headers=PAGE_LOAD, jar=jar)
+        parts = urllib.parse.urlsplit(url)
+        hops.append((parts.path + (f"?{parts.query}" if parts.query else ""), status))
+        if status not in (302, 303):
+            return hops, text
+        url = urllib.parse.urljoin(url, headers["location"])
+    raise AssertionError(f"still redirected after {len(hops)} requests: {hops}")
 
 
 def team_id(name):
@@ -177,25 +210,106 @@ def members_of(name):
     return {m["login"] for m in members}
 
 
+def require_the_forge():
+    if not PUBLISHABLE_KEY or not SERVICE_ROLE_KEY:
+        raise unittest.SkipTest("SUPABASE_PUBLISHABLE_KEY and SUPABASE_SERVICE_ROLE_KEY must be set")
+    if not MACHINE_TOKEN:
+        skip_or_fail("GITEA_MACHINE_TOKEN is unset; read it from the <release>-forge-token Secret")
+    status, _ = forge_as_machine("/api/v1/version")
+    if status != 200:
+        skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")
+    # NOT gated by REQUIRE_FORGE, unlike the guard above. A forge that is up but holds no
+    # gateway organisation is a stack with no gateways enrolled yet, which a fresh install is
+    # and which no amount of forge availability changes; the lane does not order the suites,
+    # so gating this would make the door's result depend on which suite ran first.
+    status, _ = forge_as_machine(f"/api/v1/orgs/{ORGANISATION}")
+    if status != 200:
+        raise unittest.SkipTest(
+            f"the '{ORGANISATION}' organisation does not exist yet; enrol one gateway to create it"
+        )
+
+
+class TestAFirstVisitByALink(unittest.TestCase):
+    """
+    A PERSON THE FORGE HAS NEVER SEEN OPENS A LINK TO A REPOSITORY. Gitea registers a login while it
+    serves that login's first request, when nobody has put it in a team, so without the door's bounce
+    the first answer is Gitea's "not found" and only the second visit shows the repository.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        require_the_forge()
+
+    def test_it_lands_on_the_repository_it_names(self):
+        email, password, login = self.a_new_manager()
+        name = self.a_private_repository()
+        path = f"/{ORGANISATION}/{name}"
+        status, _ = forge_as_machine(f"/api/v1/users/{login}")
+        self.assertEqual(status, 404, "the forge already knows this person, so this is not a first visit")
+
+        jar = cookie_jar()
+        status, headers, _ = request(f"{FORGE_URL}{path}", headers=PAGE_LOAD, jar=jar)
+        self.assertEqual(status, 302, "the door did not ask for a sign-in")
+        link = complete_the_login(jar, headers["location"], email, password)
+        self.assertEqual(urllib.parse.urlsplit(link).path, path, "the sign-in did not come back to the link")
+
+        hops, text = open_page(link, jar)
+        self.assertEqual([status for _, status in hops], [302, 303, 200], hops)
+        self.assertEqual([urllib.parse.urlsplit(hop).path for hop, _ in hops], [path, "/user/login", path], hops)
+        title = text[text.find("<title>"):text.find("</title>")]
+        self.assertIn(f"{ORGANISATION}/{name}", title, "the page is not the repository's")
+        self.assertIn(login, members_of("managers"))
+
+        # The forge knows them now, so the same link is served as it is.
+        hops, _ = open_page(link, jar)
+        self.assertEqual(hops, [(path, 200)])
+
+    # -- the person and the repository, both removed afterwards ----------------------------------
+
+    def a_new_manager(self):
+        """(email, password, forge login) of a Shopfloor_Manager nobody has signed in as."""
+        email, password = f"first-visit-{secrets.token_hex(6)}@aber.local", secrets.token_urlsafe(24)
+        status, person = as_service("/auth/v1/admin/users", "POST",
+                                    {"email": email, "password": password, "email_confirm": True})
+        self.assertEqual(status, 200, person)
+        self.addCleanup(self.remove_the_person, email, person["id"])
+        status, roles = as_service("/rest/v1/roles?name=eq.Shopfloor_Manager&select=id")
+        self.assertEqual(status, 200, roles)
+        status, body = as_service("/rest/v1/user_roles", "POST", {"user_id": person["id"], "role_id": roles[0]["id"]})
+        self.assertEqual(status, 201, body)
+        return email, password, person["id"]
+
+    def a_private_repository(self):
+        name = f"first-visit-{secrets.token_hex(6)}"
+        status, body = forge_as_machine(f"/api/v1/orgs/{ORGANISATION}/repos", "POST",
+                                        {"name": name, "private": True, "auto_init": True, "default_branch": "main"})
+        self.assertEqual(status, 201, body)
+        self.addCleanup(forge_as_machine, f"/api/v1/repos/{ORGANISATION}/{name}", "DELETE")
+        return name
+
+    def remove_the_person(self, email, user_id):
+        problems = []
+        # The machine account is no site administrator, so the forge's account goes from inside its pod.
+        if forge_as_machine(f"/api/v1/users/{user_id}")[0] == 200:
+            gone = stack_exec.run("forge", "su-exec", "git", "gitea", "admin", "user", "delete",
+                                  "--username", user_id, "--purge")
+            if gone.returncode != 0:
+                problems.append(f"the forge still holds {user_id}: {gone.stderr.strip()[-300:]}")
+        status, body = as_service(f"/auth/v1/admin/users/{user_id}", "DELETE")
+        if status != 200 and "23503" in json.dumps(body):
+            # The Audit Trail names the person (their approval of the forge's sign-in), so they cannot
+            # be deleted. Removed as manage-people removes one: no role, and sign-in blocked.
+            as_service(f"/rest/v1/user_roles?user_id=eq.{user_id}", "DELETE")
+            status, body = as_service(f"/auth/v1/admin/users/{user_id}", "PUT", {"ban_duration": "876000h"})
+        if status != 200:
+            problems.append(f"remove {email} on Access Control ({status}: {body})")
+        self.assertEqual(problems, [])
+
+
 class TestTheDoor(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not PUBLISHABLE_KEY or not SERVICE_ROLE_KEY:
-            raise unittest.SkipTest("SUPABASE_PUBLISHABLE_KEY and SUPABASE_SERVICE_ROLE_KEY must be set")
-        if not MACHINE_TOKEN:
-            skip_or_fail("GITEA_MACHINE_TOKEN is unset; read it from the <release>-forge-token Secret")
-        status, _ = forge_as_machine("/api/v1/version")
-        if status != 200:
-            skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")
-        # NOT gated by REQUIRE_FORGE, unlike the guard above. A forge that is up but holds no
-        # gateway organisation is a stack with no gateways enrolled yet, which a fresh install is
-        # and which no amount of forge availability changes; the lane does not order the suites,
-        # so gating this would make the door's result depend on which suite ran first.
-        status, _ = forge_as_machine(f"/api/v1/orgs/{ORGANISATION}")
-        if status != 200:
-            raise unittest.SkipTest(
-                f"the '{ORGANISATION}' organisation does not exist yet; enrol one gateway to create it"
-            )
+        require_the_forge()
 
     def test_an_administrator_lands_in_the_administrators_team(self):
         email, sub, team = PERSONAS["Administrator"]

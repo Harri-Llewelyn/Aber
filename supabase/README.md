@@ -11074,7 +11074,8 @@ because each one produces a stack that looks fine and is not when it is forgotte
 - **The placement filter fails open on a 5xx.** `forge-membership` runs as `ext_authz` with
   `failure_mode_allow`: a function that cannot answer lets the request through, because the role
   in the token was already admitted by RBAC; a 403 and a 302 (a dead session, to
-  `/oauth2/signout`) are honoured, and only the `Authorization` header travels to it.
+  `/oauth2/signout`; a first visit, to `/user/login`) are honoured. The method, the path and three
+  headers travel to it: `Authorization`, and the `Accept` and `Sec-Fetch-Mode` that tell a page load.
 - **Clusters are `STRICT_DNS`.** Envoy re-resolves on its refresh interval, and a recreated
   container changes address.
 
@@ -11251,6 +11252,34 @@ and the person placed in the team that role warrants — `administrators` or `ma
 token was signed is taken out of both teams and refused. What that does not cover is a revoked
 login that never returns, which is what [the sweep on a timer](#what-a-gateways-repository-comes-with-and-how-the-forge-reports-back-archived-migration-0095)
 is for.
+
+**A first visit lands on the page its link names.** Gitea registers a login while it serves that
+login's first request, after the door has answered. So that request finds nobody to place, and a
+gateway's repository, which is private, is "not found" to a login in no team. A page load by a login
+Gitea does not know is therefore bounced once
+([`firstVisit.ts`](functions/forge-membership/firstVisit.ts)):
+
+1. The function answers 302 to Gitea's own `/user/login?redirect_to=<the path and query>`, and lets
+   that path through.
+2. Gitea registers the login there and answers 303 to the path it was given.
+3. The request that comes back finds the login registered. It is placed before Gitea answers.
+
+A page load is a `GET` with `Sec-Fetch-Mode: navigate`. A browser on plain HTTP sends no
+`Sec-Fetch-Mode`, and there it is a `GET` whose `Accept` names `text/html`. Every other request of an
+unregistered login is let through unplaced.
+
+**A visit is bounced at most once, whatever Gitea answers.** The return address carries
+`aber_first_visit=<the login>`, and a request carrying it for its own login is let through. It holds
+the login so that a link copied from one person's address bar still works for the next. The return
+address is otherwise the request's own path and query, so it stays on the forge's host. A path that
+starts `//` or holds a backslash is not bounced, because Gitea would send it to `/` (measured against
+`gitea/gitea:28.3.0`).
+
+Two first page loads that reach Gitea in the same instant race to register the login. The one that
+loses gets Gitea's sign-in page, and a reload goes on to the page it asked for (measured as above).
+
+Nothing here could register the login itself. The machine account is no site administrator, and
+`forge-api` serves the edge functions no web route.
 
 **Authorisation stays in Postgres.** `user_roles` and `has_role()` decide who passes the door;
 Gitea's teams decide what they may do inside, and the team is a function of the verified role,

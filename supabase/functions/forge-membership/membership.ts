@@ -1,0 +1,232 @@
+import { createClient } from "@supabase/supabase-js";
+import { serviceRoleClient } from "../_shared/serviceClient.ts";
+
+/**
+ * Places a forge login in the team its Postgres role maps to, and takes it out of the one it does
+ * not, on the way through the forge's door. This is the `ext_authz` step of the `forge` listener in
+ * supabase/envoy.yaml: every non-static request reaches here with the caller's verified access
+ * token, and this resolves their role from `user_roles` (the only source) and places them through
+ * the machine account. Revocation is immediate: a token whose role has been removed is refused on
+ * its next request.
+ *
+ * Gitea registers a login while it serves that login's first request, so a first visit finds nobody
+ * to place. A page load is then bounced once through Gitea's sign-in path (firstVisit.ts), and comes
+ * back to the page it asked for as a login that is placed before Gitea answers. An unregistered
+ * login's other requests, and a page load already bounced, are let through unplaced.
+ *
+ * Answers: 200, the caller holds an admitted role and is in its team (or is not yet registered);
+ * 302, either the token verified but GoTrue no longer has its session, and the browser is sent to
+ * the door's sign-out path, or this is a first visit's bounce; 403, the caller's role does not open
+ * the forge, with the login removed from both teams first; 5xx, this could not do its job, and the
+ * listener's `failure_mode_allow` lets the request through on the role the token carries, losing
+ * only placement.
+ *
+ * The machine account is the only Gitea credential here, and the identity acted on is always the
+ * verified token's `sub`, never a parameter. A person who never returns is unseated by
+ * `forge-sweep`, which re-does this placement over the forge's own member lists on a timer (0099).
+ */
+
+import { resolveUserRole } from "../_shared/roles.ts";
+import { corsHeaders } from "../_shared/cors.ts";
+import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
+import { firstVisitBounce, REGISTERING_PATH } from "./firstVisit.ts";
+import {
+  ensureOrganisation,
+  ensurePlatformOrganisation,
+  FORGE_TEAMS,
+  type ForgeConfig,
+  type ForgeTeamRole,
+  forgeApi,
+  forgeConfig,
+  PLATFORM_READERS_TEAM,
+} from "../_shared/forge.ts";
+
+/**
+ * How long a placement is believed before it is re-done: long enough that a page's dozen requests
+ * cost one round of calls, short enough that a role change lands within minutes. Revocation is not
+ * bounded by this; the role lookup runs on every request.
+ */
+const PLACEMENT_TTL_MS = 5 * 60 * 1000;
+
+interface Placement {
+  role: ForgeTeamRole;
+  at: number;
+}
+
+// Per-worker, so a cold worker simply re-places. Nothing here is authoritative.
+const placed = new Map<string, Placement>();
+let teamIds: Record<ForgeTeamRole, number> | null = null;
+/** The platform organisation's readers team, which every admitted role is seated in. */
+let readersId: number | null = null;
+
+function json(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+/** A 302 the browser follows: Envoy forwards a denied answer's status and its `location` header. */
+function sendOn(location: string, why: Record<string, unknown>): Response {
+  return new Response(JSON.stringify({ ...why, next: location }), {
+    status: 302,
+    headers: { ...corsHeaders, "Content-Type": "application/json", Location: location },
+  });
+}
+
+function isAdmitted(role: string | null): role is ForgeTeamRole {
+  return role !== null && Object.hasOwn(FORGE_TEAMS, role);
+}
+
+/** Whether Gitea has registered this login yet. 404 on the first request is the ordinary case. */
+async function forgeUserExists(cfg: ForgeConfig, username: string): Promise<boolean> {
+  const response = await forgeApi(cfg, "GET", `/users/${username}`);
+  if (response.ok) return true;
+  if (response.status === 404) return false;
+  throw new Error(`could not look up '${username}' in the forge (${response.status})`);
+}
+
+/**
+ * Exactly one gateway team, or none, and the platform readers team with either. The removal runs
+ * even when the addition does, so a role that moved from one team to the other leaves the first.
+ */
+async function placeInTeams(
+  cfg: ForgeConfig,
+  ids: Record<ForgeTeamRole, number>,
+  readers: number,
+  username: string,
+  role: ForgeTeamRole | null,
+): Promise<void> {
+  const seats: { id: number; team: string; wanted: boolean }[] = [
+    ...(Object.keys(FORGE_TEAMS) as ForgeTeamRole[]).map((candidate) => ({
+      id: ids[candidate],
+      team: FORGE_TEAMS[candidate],
+      wanted: candidate === role,
+    })),
+    { id: readers, team: PLATFORM_READERS_TEAM, wanted: role !== null },
+  ];
+  for (const { id, team, wanted } of seats) {
+    if (wanted) {
+      const added = await forgeApi(cfg, "PUT", `/teams/${id}/members/${username}`);
+      if (!added.ok) {
+        throw new Error(`could not place '${username}' in '${team}' (${added.status})`);
+      }
+    } else {
+      // Asked before removing: Gitea answers 204 to removing a non-member and records the removal
+      // in its audit log anyway, which on every placement would log one that never happened.
+      const member = await forgeApi(cfg, "GET", `/teams/${id}/members/${username}`);
+      await member.body?.cancel();
+      if (member.status === 404) continue;
+      if (!member.ok) {
+        throw new Error(`could not read whether '${username}' is in '${team}' (${member.status})`);
+      }
+      const removed = await forgeApi(cfg, "DELETE", `/teams/${id}/members/${username}`);
+      if (!removed.ok && removed.status !== 404) {
+        throw new Error(`could not remove '${username}' from '${team}' (${removed.status})`);
+      }
+    }
+  }
+}
+
+export async function handler(req: Request): Promise<Response> {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return json({ error: "Missing Authorization header" }, 401);
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const token = authHeader.slice("Bearer ".length);
+
+  // Authentication: the token the listener verified is verified again here, against GoTrue rather
+  // than against the shared secret, which is what also catches a session signed out since.
+  const asCaller = createClient(supabaseUrl, gatewayKey(), {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data: { user }, error: userError } = await asCaller.auth.getUser(token);
+  if (userError || !user) {
+    // A dead session is sent back through the door, not refused: the listener accepted this token,
+    // and only GoTrue knows the session behind it is gone. A 401 would leave the browser stuck on a
+    // cookie the door still honours, so the answer is a redirect to the door's own sign-out path,
+    // which clears every cookie and starts a fresh login.
+    console.log(`forge-membership: ${userError?.message ?? "no user"}; sending the browser back through the door`);
+    return sendOn("/oauth2/signout", { error: "Session ended", details: userError?.message });
+  }
+
+  // Authorisation: user_roles, read with the service key -- a lookup, not a decision made by the
+  // caller's own access. A failed lookup is not evidence of a role; it is a 5xx below.
+  // A const, so the isAdmitted() result held in `admitted` below narrows it to a team role; a `let`
+  // does not narrow through a check stored in a variable.
+  const asService = serviceRoleClient(supabaseUrl, serviceKey);
+  const role = await resolveUserRole(asService, user.id).catch((err) => {
+    console.error(`forge-membership: role lookup threw for ${user.id}: ${err instanceof Error ? err.message : err}`);
+    return undefined;
+  });
+  if (role === undefined) return json({ error: "Could not resolve the caller's role" }, 503);
+
+  const cfg = forgeConfig();
+  if (!cfg) {
+    // A door with no forge behind it, or a forge whose token has not arrived. The listener lets
+    // this through; there is nothing to place yet.
+    return json({ error: "This deployment has no forge configured, or its token has not arrived yet" }, 503);
+  }
+
+  const username = user.id;
+  const admitted = isAdmitted(role);
+
+  try {
+    const cached = placed.get(username);
+    if (admitted && cached && cached.role === role && Date.now() - cached.at < PLACEMENT_TTL_MS) {
+      return json({ sub: username, role, team: FORGE_TEAMS[role], placed: true, cached: true }, 200);
+    }
+
+    if (!teamIds) teamIds = await ensureOrganisation(cfg);
+    if (readersId === null) readersId = await ensurePlatformOrganisation(cfg);
+
+    if (!(await forgeUserExists(cfg, username))) {
+      // The first request through the door: Gitea has not created the user yet. The next request
+      // will find them. NOT cached, for exactly that reason.
+      placed.delete(username);
+      if (!admitted) {
+        return json({ error: `Role '${role ?? "none"}' does not open the forge` }, 403);
+      }
+      const bounce = firstVisitBounce(req, username);
+      if (bounce) {
+        console.log(`forge-membership: ${user.email} (${username}) is new to the forge; sending the browser through ${REGISTERING_PATH}`);
+        return sendOn(bounce, { sub: username, role, placed: false, reason: "not yet registered" });
+      }
+      return json({ sub: username, role, team: FORGE_TEAMS[role], placed: false, reason: "not yet registered" }, 200);
+    }
+
+    await placeInTeams(cfg, teamIds, readersId, username, admitted ? role : null);
+
+    if (!admitted) {
+      placed.delete(username);
+      console.warn(`forge-membership: ${user.email} (${username}) holds role '${role ?? "none"}' and was removed from every team`);
+      return json({ error: `Role '${role ?? "none"}' does not open the forge` }, 403);
+    }
+
+    if (!cached || cached.role !== role) {
+      console.log(`forge-membership: ${user.email} (${username}) placed in '${FORGE_TEAMS[role]}'`);
+    }
+    placed.set(username, { role, at: Date.now() });
+    return json({ sub: username, role, team: FORGE_TEAMS[role], placed: true }, 200);
+  } catch (err) {
+    // A 5xx lets the request through (failure_mode_allow) and says why here; the person sees the
+    // forge with whatever membership they already had.
+    teamIds = null;
+    readersId = null;
+    placed.delete(username);
+    return serverError(req, "forge-membership", err, {
+      status: 502,
+      error: "Could not place the caller in a forge team",
+      context: `placement FAILED for ${user.email} (${username})`,
+    });
+  }
+}
