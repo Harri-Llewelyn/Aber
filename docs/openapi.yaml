@@ -7526,9 +7526,13 @@ paths:
         - bearerAuth: []
       responses:
         '200':
-          description: The caller holds an admitted role and is in its team, or is not yet registered in the forge (the first request through the door).
+          description: The caller holds an admitted role and is in its team, or is not yet registered in the forge (a first visit's request that is not a page load, or a page load already sent on once).
         '302':
-          description: The token verified but GoTrue no longer holds its session (a sign-out, a timebox). `Location` is the door's `/oauth2/signout`, which clears the cookies and starts a fresh login.
+          description: |
+            One of two. The token verified but GoTrue no longer holds its session (a sign-out, a timebox):
+            `Location` is the door's `/oauth2/signout`, which clears the cookies and starts a fresh login.
+            Or a first visit's page load: `Location` is Gitea's `/user/login?redirect_to=<the path asked
+            for>`, which registers the login and sends the browser back.
         '401':
           description: No bearer token at all.
         '403':
