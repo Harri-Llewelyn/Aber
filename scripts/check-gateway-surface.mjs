@@ -22,13 +22,15 @@
  * throwaway people it makes with the secret key: a Shopfloor Manager at aal1 refused on both
  * consent calls while MFA is required, and admitted for Grafana and once it is not; an Operator
  * admitted. It turns security.require_mfa_for_managers on and back to what it found, which ends
- * every covered person's app sessions but Grafana's, and deletes both people. Every mode shares
- * EXPECTED so two inventories cannot drift.
+ * every covered person's app sessions but Grafana's, and deletes both people. With FORGE_DOOR_URL or
+ * STUDIO_DOOR_URL set, --runtime also asks that door whether it resolves dot segments. Every mode
+ * shares EXPECTED so two inventories cannot drift.
  *
  * Usage: node scripts/check-gateway-surface.mjs | --runtime [baseUrl] | --runtime
  * --authenticated [baseUrl] (needs SUPABASE_PUBLISHABLE_KEY) | --runtime --consent [baseUrl] (needs
  * SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY). The base URL is the first non-flag argument,
- * or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the runtime modes
+ * or SUPABASE_URL. The two doors are port-forwards of ports 8002 and 8001, never the ingress, whose
+ * proxy resolves dot segments itself. No dependencies: this runs in CI before any `npm install`, and the runtime modes
  * use `node:http`; see probeOnce.
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -383,6 +385,39 @@ if (RUNTIME) {
         );
       }
     });
+  }
+
+  // The two doors, each asked only where its port-forward is named. With no session a door answers
+  // with its redirect to sign in, whose state carries the address it was asked for: the resolved one,
+  // or the path the admission step would be asked about. The forge's /api/ passes with no session, so
+  // a dot segment out of it must meet the sign-in too.
+  for (const [door, at, prefixes] of [
+    ['the forge', process.env.FORGE_DOOR_URL, ['/', '/api/', '/assets/']],
+    ['Studio', process.env.STUDIO_DOOR_URL, ['/']],
+  ]) {
+    if (!at) {
+      console.log(`  --   ${door}'s door: not probed (set ${door === 'Studio' ? 'STUDIO' : 'FORGE'}_DOOR_URL to a port-forward of it)`);
+      continue;
+    }
+    for (const prefix of prefixes) {
+      for (const dot of ['..', '%2e%2e']) {
+        const path = `${prefix}${dot}/${dot}/gateway-surface-probe`;
+        const { status, headers, error } = await probeOnce(`${at.replace(/\/+$/, '')}/`, {}, { rawPath: path });
+        let asked = null;
+        try {
+          const state = new URL(headers.location || '').searchParams.get('state') || '';
+          // As written: new URL() would resolve its dot segments here.
+          asked = JSON.parse(Buffer.from(state, 'base64url').toString()).url;
+        } catch { /* no redirect to sign in, or one this cannot read */ }
+        const label = `${door}'s door, ${path}`;
+        if (error) runtimeProblems.push(`${label}: ${error}`);
+        else if (status !== 302 || typeof asked !== 'string') {
+          runtimeProblems.push(`${label}: answered HTTP ${status}, not the redirect to sign in. A dot segment carried the request past the door.`);
+        } else if (asked.includes('..') || asked.toLowerCase().includes('%2e%2e')) {
+          runtimeProblems.push(`${label}: the door was asked for ${asked}, so its admission step is asked about the raw path. normalize_path is off.`);
+        } else runtimeOk.push(`${label} is resolved before the door decides`);
+      }
+    }
   }
 
   // Response headers. nosniff on every routed response, the gateway's own refusals included;
@@ -1117,6 +1152,27 @@ const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name:
   } else if (inside.length) {
     pass(`each of the ${inside.length} exemption(s) inside a gated prefix comes before its gate`);
   }
+}
+
+// ---- 4b. A listener that asks a function to admit a request resolves its path first. ------------
+// The edge runtime resolves dot segments and picks the function by the first segment left, so on a
+// raw path the caller chooses which function admits them.
+{
+  const before = problems.length;
+  const listeners = [...template.split(/^ {2}clusters:/m)[0].matchAll(/^ {4}- name: ([a-z-]+)$/gm)].map((m) => m[1]);
+  const asking = listeners.filter((name) => listenerText(name).includes('- name: envoy.filters.http.ext_authz'));
+  for (const name of asking) {
+    if (!/^ {16}normalize_path: true$/m.test(listenerText(name))) {
+      fail(`${ENVOY_TEMPLATE}: the ${name} listener asks a function to admit each request and does not set normalize_path: true, so a ../ picks which function.`);
+    }
+  }
+  for (const name of ['studio', 'forge']) {
+    if (!asking.includes(name)) fail(`${ENVOY_TEMPLATE}: the ${name} listener asks no function whether a request is admitted, so a revoked role keeps its session.`);
+    if (listenerText(name).includes('path_with_escaped_slashes_action')) {
+      fail(`${ENVOY_TEMPLATE}: the ${name} listener acts on escaped slashes, and a branch name in the forge's URLs holds %2F.`);
+    }
+  }
+  if (problems.length === before) pass(`each of the ${asking.length} listeners that ask a function to admit a request resolve its path first`);
 }
 
 // ---- 5. The API listener keeps its sign-in limit, response headers and access log. ------------

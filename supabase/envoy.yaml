@@ -756,6 +756,9 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: studio
+                # Dot segments are resolved before any filter runs. The edge runtime resolves them itself and
+                # answers for the first segment left, so a raw /../<function> would ask another function to admit.
+                normalize_path: true
                 # Who opened the console, from the verified token, so a 403 line names the refused identity.
                 # %REQ_WITHOUT_QUERY% because the callback carries the authorization code in its query string; it
                 # is an extension and must be registered below, or Envoy refuses the whole config.
@@ -930,6 +933,9 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: forge
+                # As Studio's. Escaped slashes are left alone, unlike forge-api's: a branch name in a page's URL
+                # holds %2F.
+                normalize_path: true
                 access_log:
                   - name: envoy.access_loggers.stdout
                     typed_config:

@@ -2010,7 +2010,7 @@ jobs:
       - name: Verify The Live Gateway Surface — Envoy, In-Cluster
         run: |
           set -eu
-          kubectl -n $NS port-forward svc/supabase-envoy 18080:8000 >/tmp/port-forward.log 2>&1 &
+          kubectl -n $NS port-forward svc/supabase-envoy 18080:8000 18082:8002 >/tmp/port-forward.log 2>&1 &
           PF=$!
           trap 'kill $PF 2>/dev/null || true' EXIT
           # Wait for the tunnel, not for a 2xx: every gated route answers 401 to an unauthenticated
@@ -2026,6 +2026,8 @@ jobs:
             -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d)
           export SUPABASE_PUBLISHABLE_KEY
           test -n "$SUPABASE_PUBLISHABLE_KEY"
+          # The forge's door too. Studio is off here, and its listener is the same shape.
+          export FORGE_DOOR_URL=http://127.0.0.1:18082
           node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
 
       # The migration model's central invariant, checked: there is no migrations ledger, db-init
