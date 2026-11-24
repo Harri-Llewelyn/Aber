@@ -12,19 +12,23 @@ import { serverError } from "../_shared/failure.ts";
  * One pass: every member of either team whose `user_roles` row no longer maps to that team is
  * removed; every login the forge knows that holds an admitted role is placed in its team; every
  * gateway repository has its push webhook, `main` closed to pushes, the `appliance` rule that
- * admits deploy keys alone and the `**` rule that admits none, and its deploy keys reconciled
- * with the gateway row (an active Remote gateway's keys are read-write on its own repository; the
- * keys of one that is archived, deleted or no longer Remote are removed, which is the third
- * revocation handle beside `disableClient` and the enrolment token); an archived gateway's
- * repository is put into the forge's archive and a restored one taken back out (#197), which is
- * what stops a retired gateway reading, in the forge's
- * own listing, exactly like one in service; and every other repository in the organisation -- a
- * playbook somebody made by hand -- has `main` protected the same way, without the incident
- * template, because a flow a gateway may later adopt should have been reviewed from the start.
- * Nothing is created that enrolment would not create, and nothing is ever deleted but a key: a
- * repository outlives its gateway row on purpose, because its wiki is where a plant's notes about
- * that gateway live. A member who is not a dashboard identity was put there by hand and is left
- * alone.
+ * admits deploy keys alone, the `**` rule that admits none, the rule on the machine account's own
+ * branches that admits nobody else, and its deploy keys reconciled with the gateway row (an active
+ * Remote gateway's keys are read-write on its own repository; the keys of one that is archived,
+ * deleted or no longer Remote are removed, which is the third revocation handle beside
+ * `disableClient` and the enrolment token); an archived gateway's repository is put into the forge's
+ * archive and a restored one taken back out (#197), which is what stops a retired gateway reading,
+ * in the forge's own listing, exactly like one in service; and every other repository in the
+ * organisation -- a playbook somebody made by hand -- has `main` protected the same way, without the
+ * incident template, because a flow a gateway may later adopt should have been reviewed from the
+ * start.
+ *
+ * Last, each Remote gateway in service whose `main` names an older platform release than this one
+ * is proposed the move: one pull request from the machine account, for an Administrator to approve.
+ * That pull request and its branch are the one thing a pass makes that enrolment would not, and one
+ * a person closed is not made again. Nothing is ever deleted but a key: a repository outlives its
+ * gateway row on purpose, because its wiki is where a plant's notes about that gateway live. A
+ * member who is not a dashboard identity was put there by hand and is left alone.
  *
  * Authorised by FORGE_SWEEP_SECRET in `x-sweep-secret`, not by the anon key: the edge runtime boots
  * with VERIFY_JWT=false, and the gateway's key check proves only that the caller holds a key that
@@ -42,6 +46,7 @@ import {
   DEPLOY_KEY_TITLE,
   ensureApplianceProtection,
   ensureBranchProtection,
+  ensureBumpProtection,
   ensureDeployKey,
   ensureOrganisation,
   ensurePlatformOrganisation,
@@ -57,7 +62,10 @@ import {
   PLATFORM_ORGANISATION,
   PLATFORM_READERS_TEAM,
   PLATFORM_REPOSITORY,
+  platformTag,
+  platformTagExists,
   platformVersion,
+  proposePlatformBump,
   type PublishSpec,
   publishToForge,
   publishTrust,
@@ -67,6 +75,7 @@ import {
 } from "../_shared/forge.ts";
 import { GATEWAY_CUSTOM_EXAMPLE_DIGEST, GATEWAY_CUSTOM_EXAMPLE_FILES } from "../_shared/gatewayCustomExample.generated.ts";
 import { GATEWAY_PLATFORM_DIGEST, GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
+import { releaseTag } from "../_shared/platformBump.ts";
 import { holdsDeployKey, type KeyedGateway } from "./keys.ts";
 
 /** The platform repository, as the key functions address it. */
@@ -94,6 +103,13 @@ const PAGE = 50;
  */
 const LEASE_SECONDS = 300;
 
+/**
+ * What one pass spends on proposing platform bumps: this many pull requests, and none begun this
+ * far into the worker's 60 seconds. The next pass carries on where it stopped.
+ */
+const BUMPS_PER_PASS = 10;
+const BUMP_BEFORE_MS = 30_000;
+
 /** A holder id as claim_forge_sweep() returns it. */
 const LEASE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -114,11 +130,13 @@ interface Summary {
   published: string[];
   /** A gateway row taught that its repository exists (`forge_repository_at`). */
   recorded: string[];
+  /** A platform bump's pull request opened on a gateway's repository, or an older one closed for it. */
+  proposed: string[];
   /**
    * Something the sweep declined to do and was right to decline, so no retry clears it and nothing
-   * failed: a released tag found at other content than this build ships. Separate from `errors`
-   * because an operator watching `errors` is watching for a forge it could not reach or a key it
-   * could not re-register, and this is neither.
+   * failed: a released tag found at other content than this build ships, or a platform.yml it
+   * cannot propose a bump of. Separate from `errors` because an operator watching `errors` is
+   * watching for a forge it could not reach or a key it could not re-register, and this is neither.
    */
   warnings: string[];
   errors: string[];
@@ -356,7 +374,8 @@ async function recordArchived(
 /**
  * The repository half. A gateway's repository gets what enrolment gives one, or the forge's
  * archive if its gateway has been archived; any other repository in the organisation gets `main`
- * protected. A repository that already has everything costs a handful of reads.
+ * protected. A repository that already has everything costs a handful of reads. Returns the
+ * repositories of the Remote gateways in service, less any that failed.
  *
  * THE ARCHIVE IS WHAT MAKES A RETIRED GATEWAY LOOK RETIRED (#197). Archiving already revoked the
  * thing that matters -- the broker account -- and the sweep already removes the deploy key, so
@@ -371,7 +390,7 @@ async function sweepRepositories(
   admin: ReturnType<typeof serviceRoleClient>,
   platform: boolean,
   summary: Summary,
-): Promise<void> {
+): Promise<string[]> {
   const { data, error } = await admin
     .from("gateways")
     .select("sparkplug_id, is_archived, deployment, forge_repository_at, forge_archived_at");
@@ -395,6 +414,7 @@ async function sweepRepositories(
     `/orgs/${FORGE_ORGANISATION}/repos`,
     `the repositories of '${FORGE_ORGANISATION}'`,
   );
+  const inService: string[] = [];
   for (const { name, archived } of repositories) {
     const named = GATEWAY_REPOSITORY.exec(name);
     const gateway = named ? gateways.get(named[1]) : undefined;
@@ -430,9 +450,11 @@ async function sweepRepositories(
       await recordArchived(admin, named[1], gateway, false);
       if (await ensureBranchProtection(cfg, name, { seedTemplate: true })) summary.protected.push(name);
       if (await ensureApplianceProtection(cfg, name)) summary.protected.push(`${name} (appliance)`);
+      if (await ensureBumpProtection(cfg, name)) summary.protected.push(`${name} (platform bumps)`);
       if (await ensureWebhook(cfg, name)) summary.hooked.push(name);
       await sweepDeployKeys(cfg, name, named[1], gateway, platform, summary);
       await recordRepository(admin, name, named[1], gateway, summary);
+      if (gateway.deployment === "remote") inService.push(name);
     } catch (err) {
       summary.errors.push(`${name}: ${err instanceof Error ? err.message : err}`);
     }
@@ -442,6 +464,50 @@ async function sweepRepositories(
       await sweepPlatformKeys(cfg, gateways, summary);
     } catch (err) {
       summary.errors.push(`${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  return inService;
+}
+
+/** The repositories whose platform.yml this worker has already logged as one it cannot propose for. */
+const saidDeclined = new Set<string>();
+
+/**
+ * The platform bump, for each gateway repository in service: after everything a pass must do, so a
+ * fleet to be proposed for never holds up a key to be revoked. Only a release tag that is published
+ * is proposed, so a development build and a forge the playbook has not reached propose nothing.
+ */
+async function sweepBumps(cfg: ForgeConfig, inService: string[], started: number, summary: Summary): Promise<void> {
+  const version = platformVersion();
+  const tag = version && platformTag(version);
+  if (!tag || !releaseTag(tag)) return;
+  try {
+    if (!(await platformTagExists(cfg, tag))) return;
+  } catch (err) {
+    summary.errors.push(`no platform bump was proposed: ${err instanceof Error ? err.message : err}`);
+    return;
+  }
+
+  let opened = 0;
+  for (const name of inService) {
+    if (opened >= BUMPS_PER_PASS || Date.now() - started > BUMP_BEFORE_MS) {
+      console.log("forge-sweep: stopped proposing platform bumps for this pass; the next one carries on");
+      return;
+    }
+    try {
+      const bump = await proposePlatformBump(cfg, name, tag);
+      if (bump.opened !== null) {
+        opened += 1;
+        summary.proposed.push(`${name}: opened #${bump.opened} for ${tag}`);
+      }
+      for (const number of bump.closed) summary.proposed.push(`${name}: closed #${number}, which was for an older tag`);
+      if (bump.declined) {
+        summary.warnings.push(`${name}: ${bump.declined}`);
+        if (!saidDeclined.has(name)) console.warn(`forge-sweep: ${name}: ${bump.declined}`);
+        saidDeclined.add(name);
+      }
+    } catch (err) {
+      summary.errors.push(`${name}: ${err instanceof Error ? err.message : err}`);
     }
   }
 }
@@ -575,6 +641,7 @@ function tally(summary: Summary): string {
     `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
     `archived ${summary.archived.length}, restored ${summary.restored.length}, ` +
     `published ${summary.published.length}, recorded ${summary.recorded.length}, ` +
+    `proposed ${summary.proposed.length}, ` +
     `warnings ${summary.warnings.length}, errors ${summary.errors.length}` +
     (summary.errors.length ? `: ${summary.errors.join("; ")}` : "");
 }
@@ -596,6 +663,7 @@ async function releaseLease(admin: ReturnType<typeof serviceRoleClient>, holder:
 let saidNoForge = false;
 
 export default async function handler(req: Request): Promise<Response> {
+  const started = Date.now();
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   // Not configured is 503, not 401: a stack that never set the secret has nothing to check
@@ -644,14 +712,15 @@ export default async function handler(req: Request): Promise<Response> {
     holder = claimed.data as string;
   }
 
-  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], archived: [], restored: [], published: [], recorded: [], warnings: [], errors: [] };
+  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], archived: [], restored: [], published: [], recorded: [], proposed: [], warnings: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
     const readersId = await ensurePlatformOrganisation(cfg);
     await sweepMembership(cfg, admin, teamIds, readersId, summary);
     // The platform repository before the gateway repositories, so the keys have somewhere to go.
     const platform = await sweepPlatform(cfg, summary);
-    await sweepRepositories(cfg, admin, platform, summary);
+    const inService = await sweepRepositories(cfg, admin, platform, summary);
+    if (platform) await sweepBumps(cfg, inService, started, summary);
   } catch (err) {
     return serverError(req, "forge-sweep", err, {
       status: 502,
@@ -669,7 +738,7 @@ export default async function handler(req: Request): Promise<Response> {
   // catch block that logs nothing of its own and would otherwise reach only the response body.
   const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length +
     summary.rekeyed.length + summary.revoked.length + summary.archived.length + summary.restored.length +
-    summary.published.length + summary.recorded.length;
+    summary.published.length + summary.recorded.length + summary.proposed.length;
   if (changed || summary.errors.length) console.log(`forge-sweep: ${tally(summary)}`);
   return json(summary, 200);
 }

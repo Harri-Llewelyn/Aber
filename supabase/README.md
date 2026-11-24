@@ -11733,6 +11733,42 @@ modes; measured), and the enrolment response carries `platform_ssh_url` and `pla
 `bootstrap.mjs` records in `repository.json` for the converge script on the host. The sweep keeps
 both links per gateway and removes the platform one when the gateway is archived or gone.
 
+**Who moves the pointer.** The sweep proposes the move and an Administrator approves it. A gateway's
+`main` needs one approval from `administrators`, and the forge lets no author approve their own pull
+request, so on a site with one Administrator a bump they proposed themselves could never be merged.
+At the end of a pass, after everything it must do, `proposePlatformBump()` gives each Remote gateway
+in service whose `main` names an older release one pull request from the machine account. It changes
+the characters of one tag and leaves every other byte of `platform.yml` as it was; what
+[`platformBump.ts`](functions/_shared/platformBump.ts) cannot point at, it declines, in the summary's
+`warnings`. Only `vX.Y.Z` tags are compared, as versions: another shape, or a newer tag, was chosen by
+somebody. There is one for each tag, whatever became of it, so closing it is an answer and the sweep
+does not ask again; a newer platform's proposal closes the older one with a comment that names it. A
+pass opens ten at most and begins none after thirty seconds, inside the worker's sixty. The forge
+holds all of it, so there is no row and no migration.
+
+**The branch is the machine account's alone, and that is the security of it.** The bump is made on
+`aber-platform-<tag>`, under a rule of its own that `ensureBumpProtection()` puts beside the others:
+the `**` rule admits the two teams, and the machine account is in neither, so it answers 403 there.
+The new rule's push list names the machine account, and so does its merge list, which is the half
+that is easy to leave out. A merge is not a push: without that list an Administrator merged a pull
+request of their own into Aber's branch (200), and could then have approved as Aber's what they had
+written; with it, 405, forced or not. The rule has an explicit priority because Gitea puts one
+created without it last, where `**` would decide first. The branch's name holds no slash because a
+rule is addressed by name in the API's path, and the `forge-api` listener refuses an escaped slash.
+Every read is pinned to `main`'s commit, so that they describe one state, and the branch is made at
+that commit. It is proposed only once it points at one commit on top that changes `platform.yml` alone.
+One found without a pull request, which is what a pass that died part-way leaves, is held to the same.
+
+**Measured against `gitea/gitea:28.3.0`.** An appliance's read-write key is refused a push, a new
+branch, a deletion and a force-push there. The hook delivers the machine account's push like anyone's,
+and `aber/flow-shape` is posted within a second. The machine account may not approve its own (422), a
+member of `managers` approves without it counting, and a member of `administrators` approves and
+merges. Once a branch is deleted the API answers `refs/pull/N/head` as a pull request's `head.ref`,
+and `head.label` keeps the branch's name, so the label is what a tag's proposal is found by. In a pull
+request's text a link that starts with `/` is the repository's and one that starts with `/:root/` is
+the forge's; the API's `html_url` names whatever host the call was made to, which from the functions
+is an internal one. `test_forge_sweep_proposes_the_platform_bump.py` covers it.
+
 **What the appliance does with it** is the converge role's: `aber-gateway-converge`, on an hourly
 timer, reads the tag from the puller's checkout of the gateway's `main`, runs `ansible-pull`
 against the platform repository at that tag with the deploy key and the pinned host key, and

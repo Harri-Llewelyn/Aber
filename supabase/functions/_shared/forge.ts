@@ -27,6 +27,19 @@
 // The trust bundle below is keyed by the same pin the appliance and the one-liner compute, so it
 // is computed by the same code rather than by a second reading of the same RFC.
 import { spkiPin } from "./caPin.ts";
+import {
+  BUMP_BRANCH_PREFIX,
+  bumpBody,
+  bumpBranch,
+  type BumpPull,
+  bumpTitle,
+  decideBump,
+  exactText,
+  findPlatformTag,
+  isOlderRelease,
+  supersededComment,
+  withPlatformTag,
+} from "./platformBump.ts";
 
 export interface ForgeConfig {
   /**
@@ -1092,6 +1105,261 @@ async function seedPlatformPointer(cfg: ForgeConfig, name: string, tag: string):
   console.log(`forge: '${name}' points at the platform ${tag}`);
 }
 
+/** The rule on the branches Aber proposes a platform bump from, and on no others. */
+const BUMP_RULE = `${BUMP_BRANCH_PREFIX}*`;
+
+/**
+ * The rule that gives the machine account the branches it proposes a platform bump from, and closes
+ * them to everyone else: the `**` rule admits the two teams and not the machine account. No deploy
+ * key, no person and no force-push. No pull request merged INTO one either, because a merge is not a
+ * push: without the merge list an Administrator can merge their own change into Aber's branch and
+ * then approve it as Aber's (measured against gitea/gitea:28.3.0).
+ *
+ * Its priority is below the `**` rule's: the lowest that matches decides, and Gitea puts a rule
+ * created without one last. A found rule that disagrees is patched. Returns whether anything was
+ * changed.
+ */
+export async function ensureBumpProtection(cfg: ForgeConfig, name: string): Promise<boolean> {
+  const path = `/repos/${FORGE_ORGANISATION}/${name}/branch_protections`;
+  const listed = await forgeApi(cfg, "GET", path);
+  if (!listed.ok) throw await refused(`could not list the branch rules on '${name}'`, listed);
+  const rules = await listed.json() as ({ rule_name: string; priority: number } & Record<string, unknown>)[];
+  const catchAll = rules.find((r) => r.rule_name === CATCH_ALL_RULE)?.priority ?? 1000;
+  const found = rules.find((r) => r.rule_name === BUMP_RULE);
+
+  const wanted = {
+    enable_push: true,
+    enable_push_whitelist: true,
+    push_whitelist_usernames: [cfg.user],
+    push_whitelist_teams: [],
+    push_whitelist_deploy_keys: false,
+    enable_force_push: false,
+    enable_merge_whitelist: true,
+    merge_whitelist_usernames: [cfg.user],
+    merge_whitelist_teams: [],
+    enable_bypass_allowlist: false,
+  };
+  const priority = Math.min(500, catchAll - 1);
+  if (!found) {
+    const created = await forgeApi(cfg, "POST", path, { rule_name: BUMP_RULE, ...wanted, priority });
+    if (!created.ok) throw await refused(`could not create the '${BUMP_RULE}' rule on '${name}'`, created);
+    console.log(`forge: '${BUMP_RULE}' on '${name}' admits the machine account alone`);
+    return true;
+  }
+
+  const differs = Object.entries(wanted).some(([field, value]) =>
+    JSON.stringify(found[field] ?? (Array.isArray(value) ? [] : false)) !== JSON.stringify(value)
+  );
+  if (!differs && found.priority < catchAll) return false;
+  const patched = await forgeApi(cfg, "PATCH", `${path}/${encodeURIComponent(BUMP_RULE)}`, { ...wanted, priority });
+  if (!patched.ok) throw await refused(`could not correct the '${BUMP_RULE}' rule on '${name}'`, patched);
+  console.warn(`forge: the '${BUMP_RULE}' rule on '${name}' disagreed with the policy; corrected`);
+  return true;
+}
+
+/** Whether the platform repository carries a tag. */
+export async function platformTagExists(cfg: ForgeConfig, tag: string): Promise<boolean> {
+  const found = await forgeApi(
+    cfg,
+    "GET",
+    `/repos/${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}/tags/${encodeURIComponent(tag)}`,
+  );
+  if (found.ok) return true;
+  if (found.status === 404) return false;
+  throw await refused(`could not read tag ${tag} on '${PLATFORM_REPOSITORY}'`, found);
+}
+
+/** The commit a branch points at, or null when there is no such branch. */
+async function branchCommit(cfg: ForgeConfig, name: string, branch: string): Promise<string | null> {
+  const found = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/branches/${branch}`);
+  if (found.status === 404) return null;
+  if (!found.ok) throw await refused(`could not read '${branch}' on '${name}'`, found);
+  return ((await found.json()) as { commit: { id: string } }).commit.id;
+}
+
+/** A gateway repository's `platform.yml` at a commit, byte for byte, or why it cannot be read. */
+async function pointerAt(
+  cfg: ForgeConfig,
+  name: string,
+  commit: string,
+): Promise<{ sha: string; text: string } | { reason: string }> {
+  const read = await forgeApi(
+    cfg,
+    "GET",
+    `/repos/${FORGE_ORGANISATION}/${name}/contents/${PLATFORM_POINTER_PATH}?ref=${commit}`,
+  );
+  if (read.status === 404) return { reason: "it is not there" };
+  if (!read.ok) throw await refused(`could not read '${PLATFORM_POINTER_PATH}' on '${name}'`, read);
+  const file = await read.json() as { type?: string; sha?: string; encoding?: string; content?: string | null };
+  if (file.type !== "file" || !file.sha || file.encoding !== "base64" || typeof file.content !== "string") {
+    return { reason: "it is not a file that can be changed here" };
+  }
+  const text = exactText(file.content);
+  return text === null ? { reason: "it is not UTF-8" } : { sha: file.sha, text };
+}
+
+/** The machine account's own pull requests in a gateway's repository, in every state. */
+async function bumpPulls(cfg: ForgeConfig, name: string): Promise<BumpPull[]> {
+  const all: BumpPull[] = [];
+  for (let page = 1; ; page += 1) {
+    const listed = await forgeApi(
+      cfg,
+      "GET",
+      `/repos/${FORGE_ORGANISATION}/${name}/pulls?state=all&poster=${encodeURIComponent(cfg.user)}&limit=50&page=${page}`,
+    );
+    if (!listed.ok) throw await refused(`could not list the pull requests on '${name}'`, listed);
+    const batch = await listed.json() as {
+      number: number;
+      state: string;
+      head: { label: string; repo_id: number };
+      base: { repo_id: number };
+    }[];
+    // `label` and not `ref`: once the branch is deleted the ref reads refs/pull/N/head, and the label
+    // still reads the branch's name (measured against gitea/gitea:28.3.0).
+    all.push(
+      ...batch
+        .filter((p) => p.head.repo_id === p.base.repo_id)
+        .map((p) => ({ number: p.number, open: p.state === "open", branch: p.head.label })),
+    );
+    if (batch.length < 50) return all;
+  }
+}
+
+/**
+ * Whether a commit is the bump and nothing more: one past `base`, touching `platform.yml` alone and
+ * leaving it as wanted.
+ */
+async function isOnlyTheBump(cfg: ForgeConfig, name: string, base: string, commit: string, wanted: string): Promise<boolean> {
+  const compared = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/compare/${base}...${commit}`);
+  if (!compared.ok) throw await refused(`could not compare ${commit} on '${name}' with main`, compared);
+  const { total_commits, commits } = await compared.json() as {
+    total_commits: number;
+    commits?: { sha: string; parents?: unknown[]; files?: { filename: string }[] }[];
+  };
+  const last = commits?.[0];
+  if (total_commits !== 1 || last?.sha !== commit || last.parents?.length !== 1) return false;
+  if (last.files?.length !== 1 || last.files[0].filename !== PLATFORM_POINTER_PATH) return false;
+  const pointer = await pointerAt(cfg, name, commit);
+  return "text" in pointer && pointer.text === wanted;
+}
+
+/**
+ * The branch a bump is proposed from, made at `base` and given its one commit. Returns why it cannot
+ * be used, or null. One found without a pull request is what a pass that died part-way left, and is
+ * used when it is still at `base` or holds only the bump; anything else on it is not proposed as
+ * Aber's.
+ */
+async function makeBumpBranch(
+  cfg: ForgeConfig,
+  name: string,
+  branch: string,
+  base: string,
+  pointer: { sha: string },
+  wanted: string,
+  message: string,
+): Promise<string | null> {
+  const path = `/repos/${FORGE_ORGANISATION}/${name}`;
+  const found = await branchCommit(cfg, name, branch);
+  if (found !== null && found !== base) {
+    return await isOnlyTheBump(cfg, name, base, found, wanted)
+      ? null
+      : `the branch ${branch} is already there and holds something else`;
+  }
+  if (found === null) {
+    const created = await forgeApi(cfg, "POST", `${path}/branches`, { new_branch_name: branch, old_ref_name: base });
+    if (created.status === 409) return `the name ${branch} is taken, so the forge will not make the branch`;
+    if (!created.ok) throw await refused(`could not create '${branch}' on '${name}'`, created);
+  }
+  const committed = await forgeApi(cfg, "PUT", `${path}/contents/${PLATFORM_POINTER_PATH}`, {
+    content: base64(wanted),
+    sha: pointer.sha,
+    branch,
+    message,
+  });
+  if (!committed.ok) throw await refused(`could not commit the bump to '${branch}' on '${name}'`, committed);
+  const { commit } = await committed.json() as { commit: { sha: string; parents?: { sha: string }[] } };
+  const ours = commit.parents?.length === 1 && commit.parents[0].sha === base &&
+    (await branchCommit(cfg, name, branch)) === commit.sha &&
+    await isOnlyTheBump(cfg, name, base, commit.sha, wanted);
+  return ours ? null : `the branch ${branch} did not come out as one commit on main`;
+}
+
+/** What one call did about a gateway's platform tag. */
+export interface PlatformBump {
+  /** The pull request it opened, by number. */
+  opened: number | null;
+  /** The machine account's older pull requests it closed. */
+  closed: number[];
+  /** Why it could not propose one, when no retry clears it. */
+  declined: string | null;
+}
+
+/**
+ * Propose the platform at `tag` in a gateway's repository, when its `main` names an older release.
+ * The pull request is the machine account's, so an Administrator approves a change nobody on the
+ * site wrote: the forge lets no author approve their own, and a site may have one Administrator.
+ *
+ * One for each tag, whatever became of it, and an older one still open is closed for it. A tag that
+ * is not a release, or is newer, was chosen by somebody and is left alone. The caller has checked
+ * that `tag` is published.
+ */
+export async function proposePlatformBump(cfg: ForgeConfig, name: string, tag: string): Promise<PlatformBump> {
+  const path = `/repos/${FORGE_ORGANISATION}/${name}`;
+  const bump: PlatformBump = { opened: null, closed: [], declined: null };
+  const decline = (reason: string) => ({ ...bump, declined: `no bump to ${tag} is proposed: ${reason}` });
+
+  // Every read below is pinned to this one commit, so that they describe one state.
+  const base = await branchCommit(cfg, name, "main");
+  if (base === null) return decline("there is no branch main");
+  const pointer = await pointerAt(cfg, name, base);
+  if ("reason" in pointer) return decline(`${PLATFORM_POINTER_PATH} on main cannot be used, ${pointer.reason}`);
+  const found = findPlatformTag(pointer.text);
+  if ("reason" in found) return decline(`${PLATFORM_POINTER_PATH} on main cannot be used, ${found.reason}`);
+  if (!isOlderRelease(found.tag, tag)) return bump;
+
+  const { existing, supersedes } = decideBump(await bumpPulls(cfg, name), tag);
+  if (existing === null) {
+    const branch = bumpBranch(tag);
+    const unusable = await makeBumpBranch(
+      cfg,
+      name,
+      branch,
+      base,
+      pointer,
+      withPlatformTag(pointer.text, found, tag),
+      bumpTitle(tag),
+    );
+    if (unusable) return decline(unusable);
+
+    // `/:root/` is the forge's own address in a pull request's text, where a plain `/` is the
+    // repository's (measured). Not the API's html_url: it names whatever host the call was made to.
+    const comparison = await platformTagExists(cfg, found.tag)
+      ? `/:root/${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}/compare/${found.tag}...${tag}`
+      : null;
+    const opened = await forgeApi(cfg, "POST", `${path}/pulls`, {
+      head: branch,
+      base: "main",
+      title: bumpTitle(tag),
+      body: bumpBody(found.tag, tag, comparison),
+    });
+    if (!opened.ok) throw await refused(`could not open the bump's pull request on '${name}'`, opened);
+    bump.opened = ((await opened.json()) as { number: number }).number;
+    console.log(`forge: opened #${bump.opened} on '${name}', from ${found.tag} to ${tag}`);
+  }
+
+  const by = (existing ?? bump.opened)!;
+  for (const number of supersedes) {
+    // Closed first, so a close that keeps failing does not add a comment on every pass.
+    const closed = await forgeApi(cfg, "PATCH", `${path}/pulls/${number}`, { state: "closed" });
+    if (!closed.ok) throw await refused(`could not close #${number} of '${name}'`, closed);
+    bump.closed.push(number);
+    const said = await forgeApi(cfg, "POST", `${path}/issues/${number}/comments`, { body: supersededComment(by, tag) });
+    if (!said.ok) throw await refused(`could not comment on #${number} of '${name}'`, said);
+    console.log(`forge: closed #${number} on '${name}' for #${by}`);
+  }
+  return bump;
+}
+
 /**
  * The appliance's own key on its own repository, read-write, and no other key beside it: a
  * re-enrolment is a replaced appliance, and the key the old one held would otherwise stay able to
@@ -1261,6 +1529,7 @@ export async function provisionGatewayRepository(
     // BEFORE THE KEY: a writable key on a repository whose other branches are still open would be
     // a key that can push anywhere for the moment between the two calls.
     await ensureApplianceProtection(cfg, name);
+    await ensureBumpProtection(cfg, name);
     await ensureOnlyDeployKey(cfg, name, sparkplugId, publicKey);
     console.log(`forge: ${sparkplugId} pulls ${repo.full_name} over ${repo.ssh_url} and reports on '${APPLIANCE_BRANCH}'`);
 

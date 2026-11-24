@@ -245,7 +245,9 @@ gateway keeps the clone URL and host key it enrolled with. So an upgrade is some
   within five minutes by default ([`remote-gateways.md`](remote-gateways.md#proposing-a-flow)).
 - **A gateway's operating system follows the platform playbook at the tag its `platform.yml` names.**
   An upgrade publishes the new version's playbook, but each gateway stays on its own tag until a pull
-  request in its repository moves it. Move one gateway first.
+  request in its repository moves it. Aber opens that pull request after the upgrade, and an
+  Administrator approves it
+  ([how](remote-gateways.md#who-may-approve-and-the-change-aber-proposes)). Move one gateway first.
 
 ### New capabilities degrade instead of breaking
 
@@ -2294,7 +2296,10 @@ such gateway:
 
 1. In the forge, change `tag` in the gateway's `platform.yml` to `v1.9.0` by pull request, and merge
    it. Do this first: without it, the appliance goes back to its old tag at the next converge, and
-   `flow-sync` stops again.
+   `flow-sync` stops again. Another Administrator approves that pull request: a gateway's `main` needs
+   one Administrator's approval, and the forge never lets an author approve their own. On a site with
+   one Administrator, add a second on **Access Control** (**Add Person**), approve as them in a private
+   window, merge, then **Remove Access**.
 2. On the appliance, set the tag it converges to until `flow-sync` has fetched, and converge:
 
    ```bash

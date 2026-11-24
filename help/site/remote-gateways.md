@@ -501,6 +501,9 @@ editor's **Import copy** gives every node a new id. `docker compose logs flow-sy
 | Shopfloor_Manager | signs in with their dashboard identity; may open and review a pull request, and merge one an administrator has approved |
 | Operator, Auditor | no login — the gateway's `forge` listener answers 403 after the OAuth flow |
 
+An author never approves their own pull request: see
+[*Who may approve, and the change Aber proposes*](#who-may-approve-and-the-change-aber-proposes).
+
 **Proposing a change is a pull request in the forge, under the author's own name.** The drawer's
 **Repository** link opens the gateway's repository. The `flows.json` exported from the appliance's
 Node-RED editor goes in as a commit on a branch, and the pull request is the proposal. `main` is
@@ -518,7 +521,46 @@ appliance enrols with a deploy key, and a host-run gateway never enrols.
 
 **`flows_cred.json` is never committed.** It is encrypted with a secret that exists only in the
 appliance's `.env`, so a copy on Aber would be either useless or dangerous. Proposing it by mistake
-is now caught in the forge rather than on the appliance, as the next section describes.
+is now caught in the forge rather than on the appliance
+([*The forge checks the shape before you can merge it*](#the-forge-checks-the-shape-before-you-can-merge-it)).
+
+### Who may approve, and the change Aber proposes
+
+**Nobody approves their own pull request.** The forge refuses it, for an Administrator too. So when
+your site's only Administrator proposes a change, a second Administrator has to approve it:
+
+1. Add one on **Access Control**, with **Add Person**.
+2. Sign in as them in a private window, and approve the pull request in the forge.
+3. Merge it, then choose **Remove Access** for them.
+
+A change a Shopfloor Manager proposes needs no second Administrator.
+
+**Aber proposes the platform bump itself.** After an upgrade, Aber opens one pull request in the
+repository of each Remote gateway in service that is on an older release. It moves the `tag` in
+`platform.yml` to the release your site now runs, and changes nothing else. The author is Aber's own
+account, `aber_platform`, so your one Administrator can approve it:
+
+1. In the gateway's drawer, choose **Open in the forge**, then **Pull Requests**. Look for *Converge to
+   the platform at* and the release. It appears within about fifteen minutes of the upgrade. A site
+   with more than ten such gateways gets ten every fifteen minutes.
+2. Read what changes, and approve it. The text links what is different between the two releases.
+3. Merge it. The appliance fetches the change within five minutes and converges within the hour. The
+   drawer's **Platform** row then shows the new release.
+
+Do one gateway first, and check it before you merge the others. A gateway stays as it is until you
+merge its own pull request.
+
+* **To keep a gateway where it is**, close its pull request. Aber does not open another for that
+  release. It opens one for the next. You can reopen a closed one.
+* **When a newer release arrives first**, Aber opens the newer pull request and closes its older one.
+* **A tag you chose yourself is left alone**: a branch, a commit, a pre-release such as
+  `v1.10.0-rc.1`, or a release newer than your Aber.
+* **If `main`'s `platform.yml` changes meanwhile**, the forge may report a conflict. Close Aber's pull
+  request, and move the tag in a change of your own.
+* **If Aber cannot tell which line to change**, it opens nothing. The functions log says why.
+
+Only Aber can write the branch it proposes from, so nobody can approve a change of their own as
+Aber's.
 
 ### The forge checks the shape before you can merge it
 

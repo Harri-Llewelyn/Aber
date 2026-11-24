@@ -209,8 +209,8 @@ Each was measured by driving the platform's own calls (`_shared/forge.ts`, `forg
 | Scope | What needs it | Without it |
 | :--- | :--- | :--- |
 | `write:organization` | The `gateways` and `platform` organisations, their teams, every seat placed or removed, the repository listing | `POST /orgs` answers 403 with `read:organization`; `GET /orgs/gateways` with neither |
-| `write:repository` | Repositories, branch rules, deploy keys, the push webhook, commits, tags, commit statuses, the archive mark, raw reads | `POST /orgs/gateways/repos` answers 403 with `read:repository` |
-| `write:issue` | The *Incident* label enrolment creates | `POST /repos/…/labels` answers 403 |
+| `write:repository` | Repositories, branch rules, deploy keys, the push webhook, commits, tags, commit statuses, a platform bump's pull request, the archive mark, raw reads | `POST /orgs/gateways/repos` answers 403 with `read:repository` |
+| `write:issue` | The *Incident* label enrolment creates, and the comment on a platform bump that a newer one replaces | `POST /repos/…/labels` answers 403, and so does `POST /repos/…/issues/{n}/comments` (measured against 28.3.0) |
 | `read:user` | Looking up a person's forge login before seating them | `GET /users/{name}` answers 403 |
 
 Everything else is refused. `test_forge_sweep.py` asserts two of the refusals: adding an SSH key to
