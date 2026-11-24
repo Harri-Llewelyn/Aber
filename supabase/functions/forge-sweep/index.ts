@@ -53,12 +53,15 @@ import {
   ensureHeldByTeams,
   ensureOrganisation,
   ensurePlatformOrganisation,
+  ensureProposals,
   ensureTagProtection,
   ensureWebhook,
+  findRepository,
   finishBranchRules,
   FORGE_ORGANISATION,
   FORGE_TEAMS,
   type ForgeConfig,
+  type ForgeRepository,
   type ForgeTeamRole,
   forgeApi,
   forgeConfig,
@@ -71,6 +74,8 @@ import {
   type PublishSpec,
   publishToForge,
   publishTrust,
+  refuseMirror,
+  repositoryNameFor,
   setRepositoryArchived,
   TRUST_PREFIX,
   type TrustRoot,
@@ -298,6 +303,18 @@ async function sweepDeployKeys(
 }
 
 /**
+ * A gateway's key on a repository that is no gateway's: the repository was the gateway's under another
+ * name, which nothing here holds as one. Removed, so that no appliance deploys from it.
+ */
+async function sweepStrayKeys(cfg: ForgeConfig, name: string, summary: Summary): Promise<void> {
+  for (const key of await listDeployKeys(cfg, { name })) {
+    if (!DEPLOY_KEY_TITLE.test(key.title)) continue;
+    await deleteDeployKey(cfg, { name }, key);
+    summary.revoked.push(`${name}: '${key.title}'`);
+  }
+}
+
+/**
  * The platform repository's keys against the gateway rows: a key titled for a gateway that is
  * archived, gone or no longer Remote is removed. A key somebody titled by hand is left alone.
  */
@@ -387,13 +404,13 @@ async function sweepHolders(cfg: ForgeConfig, name: string, summary: Summary): P
  * appliance reads is reported with its commit, since an appliance may have followed it; one the
  * forge will not remove is an error on every pass until it is gone.
  */
-async function sweepTags(cfg: ForgeConfig, name: string, summary: Summary): Promise<void> {
+async function sweepTags(cfg: ForgeConfig, name: string, summary: Summary): Promise<boolean> {
   const { changed, found } = await ensureTagProtection(cfg, name);
-  if (changed) summary.protected.push(`${name} (tags)`);
   for (const { tag, commit, removed } of found) {
     if (removed) summary.untagged.push(`${name}: '${tag}' at ${commit}`);
     else summary.errors.push(`${name}: the forge would not remove the tag '${tag}' at ${commit}`);
   }
+  return changed;
 }
 
 /**
@@ -433,13 +450,29 @@ async function sweepRepositories(
 
   // `archived` comes from the listing, so the reconciliation below costs a PATCH only where the
   // forge and the row disagree. Gitea puts it on every repository it lists.
-  const repositories = await listAll<{ name: string; archived?: boolean; default_branch?: string }>(
+  const listed = await listAll<ForgeRepository>(
     cfg,
     `/orgs/${FORGE_ORGANISATION}/repos`,
     `the repositories of '${FORGE_ORGANISATION}'`,
   );
-  for (const { name, archived, default_branch } of repositories) {
-    const named = GATEWAY_REPOSITORY.exec(name);
+  const repositories = new Map(listed.map((r) => [r.id, r]));
+  const names = new Set(listed.map(({ name }) => name));
+  // A gateway's repository that is not listed under its name may be there under another.
+  for (const [sparkplugId, { forge_repository_at }] of gateways) {
+    const name = repositoryNameFor(sparkplugId);
+    if (!forge_repository_at || names.has(name)) continue;
+    try {
+      const found = await findRepository(cfg, name);
+      if (!found) continue;
+      if (repositories.has(found.id)) summary.protected.push(`${name} (name)`);
+      repositories.set(found.id, found);
+    } catch (err) {
+      summary.errors.push(`${name}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  for (const { name, archived, default_branch, mirror, has_pull_requests } of repositories.values()) {
+    // A name is the same to Gitea in any case. One whose gateway is gone has no row to be renamed by.
+    const named = GATEWAY_REPOSITORY.exec(name.toLowerCase());
     const gateway = named ? gateways.get(named[1]) : undefined;
     try {
       // A repository somebody made by hand: `main` protected and nothing else. One they also
@@ -448,9 +481,9 @@ async function sweepRepositories(
       // `gateway: false` is not a default: a playbook is not a gateway, so its rule is made closed,
       // nothing is seeded into it and a rule somebody tuned stays.
       if (!named) {
-        if (!archived && await ensureBranchProtection(cfg, name, { gateway: false })) {
-          summary.protected.push(name);
-        }
+        if (archived) continue;
+        if (await ensureBranchProtection(cfg, name, { gateway: false })) summary.protected.push(name);
+        await sweepStrayKeys(cfg, name, summary);
         continue;
       }
 
@@ -475,11 +508,24 @@ async function sweepRepositories(
       if (await setRepositoryArchived(cfg, name, false, archived)) summary.restored.push(name);
       await recordArchived(admin, named[1], gateway, false);
       await sweepHolders(cfg, name, summary);
-      await sweepTags(cfg, name, summary);
-      if (await ensureBranchProtection(cfg, name, { gateway: true })) summary.protected.push(name);
-      if (await ensureApplianceProtection(cfg, name)) summary.protected.push(`${name} (appliance)`);
-      if (await finishBranchRules(cfg, name)) summary.protected.push(`${name} (rules)`);
-      if (await ensureDefaultBranch(cfg, name, default_branch)) summary.protected.push(`${name} (default branch)`);
+      await refuseMirror(cfg, name, mirror);
+      // Each by itself: one that fails leaves the others done. Nothing is registered unless all are.
+      let held = true;
+      const hold = async (what: string, step: () => Promise<boolean>) => {
+        try {
+          if (await step()) summary.protected.push(what);
+        } catch (err) {
+          held = false;
+          summary.errors.push(`${what}: ${err instanceof Error ? err.message : err}`);
+        }
+      };
+      await hold(`${name} (proposals)`, () => ensureProposals(cfg, name, has_pull_requests));
+      await hold(`${name} (tags)`, () => sweepTags(cfg, name, summary));
+      await hold(name, () => ensureBranchProtection(cfg, name, { gateway: true }));
+      await hold(`${name} (appliance)`, () => ensureApplianceProtection(cfg, name));
+      await hold(`${name} (rules)`, () => finishBranchRules(cfg, name));
+      await hold(`${name} (default branch)`, () => ensureDefaultBranch(cfg, name, default_branch));
+      if (!held) continue;
       if (await ensureWebhook(cfg, name)) summary.hooked.push(name);
       await sweepDeployKeys(cfg, name, named[1], gateway, platform, summary);
       await recordRepository(admin, name, named[1], gateway, summary);

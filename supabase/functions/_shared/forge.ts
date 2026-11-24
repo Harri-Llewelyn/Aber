@@ -47,9 +47,15 @@ export interface ForgeConfig {
 }
 
 export interface ForgeRepository {
+  id: number;
+  name: string;
   full_name: string;
   ssh_url: string;
   default_branch: string;
+  archived?: boolean;
+  /** A pull mirror: the forge fetches its branches from elsewhere, under no rule. */
+  mirror?: boolean;
+  has_pull_requests?: boolean;
 }
 
 /**
@@ -238,6 +244,10 @@ export async function forgeApi(
   path: string,
   body?: unknown,
 ): Promise<Response> {
+  // fetch resolves a dot segment, so a name that is one would make this another call.
+  if (path.split("?")[0].split("/").some((segment) => segment === "." || segment === "..")) {
+    throw new Error(`'${path}' is not a path of the forge's API`);
+  }
   return await fetch(`${cfg.baseUrl}/api/v1${path}`, {
     method,
     headers: {
@@ -312,6 +322,25 @@ export async function ensureOrganisation(
 }
 
 /**
+ * A gateway's repository under its own name, or null. Gitea finds a repository by a name it had before,
+ * and in any case, and so does an appliance's clone (measured); the sweep and forge-events know it by
+ * this name alone. So one that a person renamed is given its name back, unless it is another gateway's.
+ */
+export async function findRepository(cfg: ForgeConfig, name: string): Promise<ForgeRepository | null> {
+  const found = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
+  if (found.status === 404) return null;
+  if (!found.ok) throw await refused(`could not read repository '${name}'`, found);
+  const repo = await found.json() as ForgeRepository;
+  if (repo.name === name) return repo;
+  const is = repo.name.toLowerCase();
+  if (!repo.full_name.startsWith(`${FORGE_ORGANISATION}/`) || (is !== name && GATEWAY_REPOSITORY.test(is))) return null;
+  const renamed = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${repo.name}`, { name });
+  if (!renamed.ok) throw await refused(`could not give '${repo.name}' its name back, '${name}'`, renamed);
+  console.warn(`forge: '${repo.name}' was '${name}', and is again`);
+  return await renamed.json() as ForgeRepository;
+}
+
+/**
  * Create the gateway's repository in the organisation, or return the one already there.
  * `auto_init` matters: a repository with no default branch gives the appliance nothing to clone,
  * and git reports "remote HEAD refers to a nonexistent ref".
@@ -321,11 +350,8 @@ async function ensureRepository(
   name: string,
   gatewayName: string,
 ): Promise<ForgeRepository> {
-  const existing = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
-  if (existing.ok) return await existing.json() as ForgeRepository;
-  if (existing.status !== 404) {
-    throw await refused(`could not read repository '${name}'`, existing);
-  }
+  const existing = await findRepository(cfg, name);
+  if (existing) return existing;
 
   const created = await forgeApi(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/repos`, {
     name,
@@ -340,8 +366,8 @@ async function ensureRepository(
   // 409 here is a race between two enrolments of one gateway, and the loser reads what the winner
   // made. A repository outlives its appliance so a re-flashed gateway gets its flow history back.
   if (created.status === 409) {
-    const raced = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
-    if (raced.ok) return await raced.json() as ForgeRepository;
+    const raced = await findRepository(cfg, name);
+    if (raced) return raced;
   }
   throw await refused(`could not create repository '${name}'`, created);
 }
@@ -526,6 +552,32 @@ export async function ensureHeldByTeams(
 }
 
 /**
+ * Take a gateway's repository from every appliance, because of something about it that no rule closes
+ * and nobody but a person can put right. Aber's own repositories are never in that state.
+ */
+async function takeFromAppliance(cfg: ForgeConfig, name: string, why: string): Promise<never> {
+  for (const key of await listDeployKeys(cfg, { name })) await deleteDeployKey(cfg, { name }, key);
+  throw new Error(`'${name}' ${why}. Its deploy keys are removed, so no appliance deploys from it`);
+}
+
+/** A gateway's repository is no mirror, whose `main` would be what another place makes it. */
+export async function refuseMirror(cfg: ForgeConfig, name: string, mirror: boolean | undefined): Promise<void> {
+  if (mirror) await takeFromAppliance(cfg, name, "is a mirror, so what its 'main' holds is decided elsewhere and under no rule");
+}
+
+/**
+ * Proposals are on: an approval is given on one. A person who held the repository could turn them off,
+ * and the forge then answers 404 for those that are open. Returns whether they were turned on again.
+ */
+export async function ensureProposals(cfg: ForgeConfig, name: string, on: boolean | undefined): Promise<boolean> {
+  if (on !== false) return false;
+  const turned = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${name}`, { has_pull_requests: true });
+  if (!turned.ok) throw await refused(`could not turn proposals on for '${name}'`, turned);
+  console.warn(`forge: '${name}' took no proposals; turned on again`);
+  return true;
+}
+
+/**
  * Dismiss every approval on the proposals open against a branch. Gitea counts an approval by what the
  * rule said when it was given, so one given while the rule was looser would still merge (measured).
  */
@@ -694,6 +746,17 @@ function anotherBranch(name: string): boolean {
   return /^[A-Za-z0-9._/-]+$/.test(name) && !READ_BRANCHES.includes(name.toLowerCase());
 }
 
+/**
+ * A rule's name as the forge-api listener carries it in a path, its slashes as they are, or null for one
+ * that has no such path: the listener refuses an escaped slash or backslash, merges slashes and resolves
+ * a dot segment.
+ */
+function rulePath(rule: string): string | null {
+  const segments = rule.split("/");
+  if (rule.includes("\\") || segments.some((s) => s === "" || s === "." || s === "..")) return null;
+  return segments.map(encodeURIComponent).join("/");
+}
+
 /** Whether another rule can stay: it is on one other branch and asks of it what `main`'s rule asks. */
 function loosensNothing(rule: BranchRule): boolean {
   const { open, unapproved, passable } = looser(rule);
@@ -705,20 +768,34 @@ function loosensNothing(rule: BranchRule): boolean {
  * removed: the first match by priority decides, so one that matches `main` ahead of ours would be the
  * rule on it. Then a `main` just made is given what the repository carries from the start, which only
  * the machine account may commit while its rule is in that state, and closed to it too. A pass that
- * dies between leaves the rule in that state for the next. Returns whether anything was changed.
+ * dies between leaves the rule in that state for the next. A rule whose name no call can carry would
+ * stay, so the repository is taken from the appliance instead. Returns whether anything was changed.
  */
 export async function finishBranchRules(cfg: ForgeConfig, name: string): Promise<boolean> {
   const path = `/repos/${FORGE_ORGANISATION}/${name}/branch_protections`;
-  const listed = await forgeApi(cfg, "GET", path);
-  if (!listed.ok) throw await refused(`could not list the branch rules on '${name}'`, listed);
-  const rules = await listed.json() as BranchRule[];
+  const list = async (): Promise<BranchRule[]> => {
+    const listed = await forgeApi(cfg, "GET", path);
+    if (!listed.ok) throw await refused(`could not list the branch rules on '${name}'`, listed);
+    return await listed.json() as BranchRule[];
+  };
+  const others = (all: BranchRule[]) => all.filter((r) => !GATEWAY_BRANCH_RULES.includes(r.rule_name) && !loosensNothing(r));
+  const rules = await list();
+  const found = others(rules);
   let changed = false;
-  for (const { rule_name } of rules.filter((r) => !GATEWAY_BRANCH_RULES.includes(r.rule_name) && !loosensNothing(r))) {
-    const removed = await forgeApi(cfg, "DELETE", `${path}/${encodeURIComponent(rule_name)}`);
-    if (!removed.ok && removed.status !== 404) throw await refused(`could not remove the '${rule_name}' rule from '${name}'`, removed);
+  for (const { rule_name } of found) {
+    const at = rulePath(rule_name);
+    if (at === null) continue;
+    const removed = await forgeApi(cfg, "DELETE", `${path}/${at}`);
+    // 400 is the listener's own refusal of a path. Whether the rule is gone is read below.
+    if (!removed.ok && removed.status !== 400 && removed.status !== 404) {
+      throw await refused(`could not remove the '${rule_name}' rule from '${name}'`, removed);
+    }
+    if (!removed.ok) continue;
     console.warn(`forge: removed the branch rule '${rule_name}' from '${name}', which is not one of Aber's`);
     changed = true;
   }
+  const kept = found.length ? others(await list()).map((r) => JSON.stringify(r.rule_name)) : [];
+  if (kept.length) await takeFromAppliance(cfg, name, `has the branch rule ${kept.join(", ")}, which cannot be removed through the forge's API`);
 
   const main = rules.find((r) => r.rule_name === MAIN_BRANCH);
   if (!main || !openToTheMachineAccount(cfg, main)) return changed;
@@ -746,8 +823,8 @@ export async function finishBranchRules(cfg: ForgeConfig, name: string): Promise
 export async function ensureDefaultBranch(cfg: ForgeConfig, name: string, current: string | undefined): Promise<boolean> {
   if (current === undefined || current === MAIN_BRANCH) return false;
   const path = `/repos/${FORGE_ORGANISATION}/${name}`;
-  const ruled = anotherBranch(current);
-  if (!ruled) {
+  const at = anotherBranch(current) ? rulePath(current) : null;
+  if (at === null) {
     for (const key of await listDeployKeys(cfg, { name })) await deleteDeployKey(cfg, { name }, key);
   }
   const rule = {
@@ -761,7 +838,7 @@ export async function ensureDefaultBranch(cfg: ForgeConfig, name: string, curren
     status_check_contexts: [FLOW_SHAPE_CONTEXT],
     priority: 1,
   };
-  const held = ruled ? await forgeApi(cfg, "PATCH", `${path}/branch_protections/${encodeURIComponent(current)}`, rule) : null;
+  const held = at === null ? null : await forgeApi(cfg, "PATCH", `${path}/branch_protections/${at}`, rule);
   const made = held?.status === 404
     ? await forgeApi(cfg, "POST", `${path}/branch_protections`, { branch_name: current, ...rule })
     : held;
@@ -776,7 +853,7 @@ export async function ensureDefaultBranch(cfg: ForgeConfig, name: string, curren
   console.warn(
     `forge: the default branch of '${name}' was '${current}'; it is 'main' again. An appliance that enrolled while it was ` +
       `'${current}' follows that branch until it is set up again; ` +
-      (ruled ? "a change to it now needs the approval 'main' needs" : "its key was removed, so that it cannot"),
+      (at === null ? "its key was removed, so that it cannot" : "a change to it now needs the approval 'main' needs"),
   );
   return true;
 }
@@ -1053,9 +1130,14 @@ function repoPath(ref: RepositoryRef): string {
 }
 
 export async function listDeployKeys(cfg: ForgeConfig, ref: RepositoryRef): Promise<DeployKey[]> {
-  const listed = await forgeApi(cfg, "GET", `/repos/${repoPath(ref)}/keys?limit=50`);
-  if (!listed.ok) throw await refused(`could not list the deploy keys on '${repoPath(ref)}'`, listed);
-  return await listed.json() as DeployKey[];
+  const all: DeployKey[] = [];
+  for (let page = 1;; page += 1) {
+    const listed = await forgeApi(cfg, "GET", `/repos/${repoPath(ref)}/keys?page=${page}&limit=50`);
+    if (!listed.ok) throw await refused(`could not list the deploy keys on '${repoPath(ref)}'`, listed);
+    const batch = await listed.json() as DeployKey[];
+    all.push(...batch);
+    if (batch.length < 50) return all;
+  }
 }
 
 export async function deleteDeployKey(cfg: ForgeConfig, ref: RepositoryRef, key: DeployKey): Promise<void> {
@@ -1675,6 +1757,7 @@ export async function provisionGatewayRepository(
   try {
     await ensureOrganisation(cfg);
     const repo = await ensureRepository(cfg, name, gatewayName);
+    await refuseMirror(cfg, name, repo.mirror);
     // OUT OF THE ARCHIVE BEFORE ANYTHING IS WRITTEN TO IT. Everything below is a write and Gitea
     // refuses writes to an archived repository. A gateway restored from the archive keeps a
     // read-only repository until forge-sweep's next pass (0114), and re-enrolling the appliance
@@ -1686,6 +1769,7 @@ export async function provisionGatewayRepository(
     // hand, or copied from another, arrives with an administrator, and can arrive with rules and a tag.
     const { kept } = await ensureHeldByTeams(cfg, name);
     if (kept.length) throw new Error(`the forge would not take '${name}' from ${kept.map((login) => `'${login}'`).join(", ")}`);
+    await ensureProposals(cfg, name, repo.has_pull_requests);
     const { found } = await ensureTagProtection(cfg, name);
     const left = found.filter((t) => !t.removed).map((t) => `'${t.tag}'`);
     if (left.length) throw new Error(`the forge would not remove the tag ${left.join(", ")} from '${name}'`);

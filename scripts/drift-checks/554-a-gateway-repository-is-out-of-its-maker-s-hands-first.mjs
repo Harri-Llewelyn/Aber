@@ -5,8 +5,11 @@ import { allFiles, fail, pass, read } from './lib.mjs';
 // Gitea makes whoever creates a repository its administrator. Enrolment and the sweep take that away
 // before anything else (ensureHeldByTeams), put Aber's branch rules right in place, and only then
 // remove any other (finishBranchRules): a rule created on a gateway's repository and missing from
-// GATEWAY_BRANCH_RULES would be removed by every pass. The branch an approval covers is `main`, so
-// nothing hands out, records or deploys the repository's default branch.
+// GATEWAY_BRANCH_RULES would be removed by every pass. A rule's name is whatever a person made it, so it
+// goes into a path through rulePath() alone: the forge-api listener refuses an escaped slash, and fetch
+// resolves a dot segment, which would make removing a rule named `..` removing the repository. The
+// branch an approval covers is `main`, so nothing hands out, records or deploys the repository's
+// default branch.
 // -------------------------------------------------------------------------------------------------
 const FORGE = 'supabase/functions/_shared/forge.ts';
 const SWEEP = 'supabase/functions/forge-sweep/index.ts';
@@ -35,11 +38,11 @@ export default function check() {
     }
   };
   inOrder(`${FORGE}: provisionGatewayRepository()`, body(forge, 'export async function provisionGatewayRepository('), [
-    'ensureHeldByTeams(cfg, name)', 'ensureTagProtection(cfg, name)', 'ensureBranchProtection(cfg, name)',
+    'refuseMirror(cfg, name', 'ensureHeldByTeams(cfg, name)', 'ensureProposals(cfg, name', 'ensureTagProtection(cfg, name)', 'ensureBranchProtection(cfg, name)',
     'ensureApplianceProtection(cfg, name)', 'finishBranchRules(cfg, name)', 'ensureDefaultBranch(cfg, name', 'ensureOnlyDeployKey(cfg, name']);
   inOrder(`${SWEEP}: sweepRepositories(), for a gateway in service`,
     body(sweep, 'async function sweepRepositories(').split('setRepositoryArchived(cfg, name, false')[1] ?? '', [
-      'sweepHolders(cfg, name, summary)', 'sweepTags(cfg, name, summary)', 'ensureBranchProtection(cfg, name, { gateway: true })',
+      'sweepHolders(cfg, name, summary)', 'refuseMirror(cfg, name', 'ensureProposals(cfg, name', 'sweepTags(cfg, name, summary)', 'ensureBranchProtection(cfg, name, { gateway: true })',
       'ensureApplianceProtection(cfg, name)', 'finishBranchRules(cfg, name)', 'ensureDefaultBranch(cfg, name', 'sweepDeployKeys(cfg, name']);
 
   const ours = /const GATEWAY_BRANCH_RULES: string\[\] = \[([^\]]*)\]/.exec(forge)?.[1].split(',').map((n) => n.trim()).filter(Boolean) ?? [];
@@ -51,6 +54,10 @@ export default function check() {
     if (!ours.includes(name)) problems554.push(`${FORGE}: GATEWAY_BRANCH_RULES does not list ${name}`);
   }
 
+  for (const named of ['finishBranchRules', 'ensureDefaultBranch']) {
+    const text = body(forge, `export async function ${named}(`);
+    if (!text.includes('rulePath(') || /encodeURIComponent\(/.test(text)) problems554.push(`${FORGE}: ${named}() does not take a rule's name into a path through rulePath()`);
+  }
   if (!forge.includes('export const MAIN_BRANCH = "main";')) problems554.push(`${FORGE} does not name main as MAIN_BRANCH`);
   if (!read(FLOW_SYNC).includes("const TRACKED_BRANCH = 'main';")) problems554.push(`${FLOW_SYNC} does not track MAIN_BRANCH as TRACKED_BRANCH`);
   for (const file of allFiles.filter((f) => f.startsWith('supabase/functions/') && f.endsWith('.ts') && !/_test\.ts$|\.generated\.ts$/.test(f))) {

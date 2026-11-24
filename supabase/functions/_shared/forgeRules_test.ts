@@ -3,8 +3,13 @@ import {
   ensureBranchProtection,
   ensureDefaultBranch,
   ensureHeldByTeams,
+  ensureProposals,
+  findRepository,
   finishBranchRules,
+  forgeApi,
   type ForgeConfig,
+  listDeployKeys,
+  refuseMirror,
 } from "./forge.ts";
 
 // Local rather than an assertion library: a test import would enter deno.lock and the image's graph.
@@ -40,6 +45,10 @@ interface Forge {
   pushers: string[][];
   /** Dismissals the forge answers 500 to before it answers one. */
   failing: number;
+  /** What the repository is called now. */
+  name: string;
+  /** Whether the repository takes proposals: the forge answers 404 for them when it does not. */
+  proposals: boolean;
 }
 
 const forge = (over: Partial<Forge> = {}): Forge => ({
@@ -53,6 +62,8 @@ const forge = (over: Partial<Forge> = {}): Forge => ({
   calls: [],
   pushers: [],
   failing: 0,
+  name: REPO,
+  proposals: true,
   ...over,
 });
 
@@ -116,13 +127,17 @@ function pushersOf(rules: Rule[]): string[] {
   return open;
 }
 
-/** The calls these functions make, answered as Gitea answers them. */
+/** The calls these functions make, answered as Gitea answers them behind the gateway's forge-api listener. */
 async function withForge<T>(state: Forge, body: () => Promise<T>): Promise<T> {
   const json = (value: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(value), { status }));
   const nothing = () => Promise.resolve(new Response(null, { status: 204 }));
   const saved = globalThis.fetch;
   globalThis.fetch = ((url: string, init: RequestInit) => {
-    const path = decodeURIComponent(url.slice(`${CFG.baseUrl}/api/v1/repos/gateways/${REPO}`.length).split("?")[0]);
+    const asked = new URL(url).pathname;
+    // The listener refuses an escaped slash or backslash, and merges slashes.
+    if (/%2f|%5c/i.test(asked)) return json({}, 400);
+    const [, of, rest] = /^\/api\/v1\/repos\/gateways\/([^/]+)(.*)$/.exec(asked.replace(/\/+/g, "/"))!;
+    const path = decodeURIComponent(rest);
     const query = new URLSearchParams(url.split("?")[1] ?? "");
     const sent = init.body ? JSON.parse(init.body as string) : {};
     const done = (response: Promise<Response>) => {
@@ -134,9 +149,16 @@ async function withForge<T>(state: Forge, body: () => Promise<T>): Promise<T> {
     };
     const paged = <I>(items: I[]) => json(items.slice((Number(query.get("page") ?? 1) - 1) * 50, Number(query.get("page") ?? 1) * 50));
 
-    if (path === "") {
-      state.defaultBranch = sent.default_branch;
-      return done(json({ default_branch: state.defaultBranch }));
+    if (path === "" && init.method === "GET") {
+      // Found by the name it had before, which is REPO.
+      const found = of === REPO || of === state.name;
+      return found ? json({ id: 1, name: state.name, full_name: `gateways/${state.name}` }) : json({}, 404);
+    }
+    if (path === "" && init.method === "PATCH") {
+      state.name = sent.name ?? state.name;
+      state.defaultBranch = sent.default_branch ?? state.defaultBranch;
+      state.proposals = sent.has_pull_requests ?? state.proposals;
+      return done(json({ id: 1, name: state.name, full_name: `gateways/${state.name}`, default_branch: state.defaultBranch }));
     }
     if (path === "/collaborators") return done(paged(state.holders.map((login) => ({ login }))));
     if (path.startsWith("/collaborators/")) {
@@ -145,7 +167,7 @@ async function withForge<T>(state: Forge, body: () => Promise<T>): Promise<T> {
       state.holders = state.holders.filter((h) => h !== login);
       return done(nothing());
     }
-    if (path === "/keys") return done(json(state.keys));
+    if (path === "/keys") return done(paged(state.keys));
     if (path.startsWith("/keys/")) {
       state.keys = state.keys.filter((k) => `/keys/${k.id}` !== path);
       return done(nothing());
@@ -174,6 +196,7 @@ async function withForge<T>(state: Forge, body: () => Promise<T>): Promise<T> {
       }
       return done(json({}));
     }
+    if (path.startsWith("/pulls") && !state.proposals) return json({}, 404);
     if (path === "/pulls") return done(paged(state.pulls));
     const review = /^\/pulls\/(\d+)\/reviews(?:\/(\d+)\/dismissals)?$/.exec(path);
     if (review) {
@@ -400,4 +423,72 @@ Deno.test("a default branch that no rule can close costs the old key", async () 
     equal(await withForge(state, () => ensureDefaultBranch(CFG, REPO, current)), true, current);
     equal([state.keys, state.rules, state.defaultBranch], [[], [], "main"], current);
   }
+});
+
+Deno.test("a rule is removed by its name, a slash and all", async () => {
+  for (const name of ["{main,x/y}", "feature/**", "{main,é}", "{main,?a=b#c}", "m%61in", "{main,.}", "{main,x/}"]) {
+    const state = forge({ rules: [rule(name, { enable_push: true, priority: -5 }), closed("main"), appliance(), catchAll()], keys: [{ id: 1, title: "gateway x", key: "ssh-ed25519 A", read_only: false }] });
+    equal(await putRight(state), [false, false, true], name);
+    equal([state.rules.map((r) => r.rule_name), state.keys.length], [["main", "appliance", "**"], 1], name);
+  }
+});
+
+Deno.test("a rule whose name no path carries costs the keys, and names no other call", async () => {
+  for (const name of ["..", ".", "../..", "x/../main", "{main,a//b}", "main/", "/main", "ma\\x69n", "{main,x/./y}"]) {
+    const state = forge({ rules: [rule(name, { enable_push: true, priority: -5 }), closed("main"), appliance(), catchAll()], keys: [{ id: 1, title: "gateway x", key: "ssh-ed25519 A", read_only: false }] });
+    let said = "";
+    await putRight(state).catch((err) => said = err.message);
+    equal(said.includes(JSON.stringify(name)) && said.includes("deploy keys are removed"), true, name);
+    equal([state.calls, state.keys, state.rules.length], [["DELETE /keys/1"], [], 4], name);
+  }
+});
+
+Deno.test("a path with a dot segment is never asked of the forge", async () => {
+  for (const path of ["/repos/gateways/x/branch_protections/..", "/repos/gateways/./x", "/repos/gateways/x/../y?a=b"]) {
+    const refused = await withForge(forge(), () => forgeApi(CFG, "DELETE", path)).then(() => false, () => true);
+    equal(refused, true, path);
+  }
+  const state = forge();
+  equal((await withForge(state, () => forgeApi(CFG, "GET", `/repos/gateways/${REPO}/keys?title=../x`))).ok, true, "a query is not a path");
+});
+
+Deno.test("proposals are on before an approval on one is dismissed", async () => {
+  const review = { id: 9, state: "APPROVED", official: true, dismissed: false };
+  const state = forge({
+    rules: [rule("*", { enable_push: true, priority: -5 }), closed("main", { required_approvals: 0 }), appliance(), catchAll()],
+    pulls: [{ number: 3, base: { ref: "main" }, reviews: [review] }],
+    proposals: false,
+  });
+  equal(await withForge(state, () => ensureProposals(CFG, REPO, false)), true);
+  equal(await putRight(state), [true, false, true]);
+  equal([review.dismissed, pushersOf(state.rules)], [true, []]);
+  for (const on of [true, undefined]) equal(await withForge(forge(), () => ensureProposals(CFG, REPO, on)), false);
+});
+
+Deno.test("a mirror is refused, and costs the keys", async () => {
+  const state = forge({ keys: [{ id: 1, title: "gateway x", key: "ssh-ed25519 A", read_only: false }] });
+  for (const mirror of [false, undefined]) await withForge(state, () => refuseMirror(CFG, REPO, mirror));
+  equal(state.calls, []);
+  const said = await withForge(state, () => refuseMirror(CFG, REPO, true)).then(() => "", (err) => err.message);
+  equal([said.includes("is a mirror"), state.keys], [true, []]);
+});
+
+Deno.test("a repository is known by its own name alone, and one that was renamed has it back", async () => {
+  const state = forge({ name: "line-three" });
+  const found = await withForge(state, () => findRepository(CFG, REPO));
+  equal([found?.name, state.name, state.calls], [REPO, REPO, ["PATCH "]]);
+  equal((await withForge(state, () => findRepository(CFG, REPO)))?.name, REPO);
+  equal(state.calls, ["PATCH "], "a second look changes nothing");
+
+  const cased = forge({ name: REPO.toUpperCase() });
+  equal((await withForge(cased, () => findRepository(CFG, REPO)))?.name, REPO);
+
+  // Renamed as another gateway's, it is that gateway's: this one has none.
+  const other = forge({ name: `gateway-gwy${"b".repeat(21)}` });
+  equal([await withForge(other, () => findRepository(CFG, REPO)), other.calls], [null, []]);
+});
+
+Deno.test("every deploy key is read, past the first page", async () => {
+  const keys = Array.from({ length: 101 }, (_, id) => ({ id, title: `key ${id}`, key: "ssh-ed25519 A", read_only: false }));
+  equal((await withForge(forge({ keys }), () => listDeployKeys(CFG, { name: REPO }))).length, 101);
 });
