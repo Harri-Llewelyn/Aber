@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { IconUser, IconLock, IconAlertTriangle, IconCopy, IconCheck } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { copyText } from '../common/CopyableId'
 import { useUrlTab } from '../../hooks/useUrlState'
 import { PROFILE_TABS } from '../../navigation'
@@ -204,18 +205,18 @@ function DisplayNameRow({ displayName, onSave, isPerson, showToast }) {
           placeholder={loading ? 'Loading…' : 'Your name, as colleagues know it'}
           disabled={loading || saving}
           autoComplete="name"
-          aria-invalid={problem ? 'true' : undefined}
-          aria-describedby="profile-display-name-detail"
+          {...fieldErrorProps(problem, 'profile-display-name-error', 'profile-display-name-detail')}
         />
         <div id="profile-display-name-detail" className="setting-bounds profile-detail">
           {`Up to ${DISPLAY_NAME_MAX} characters.`}
         </div>
+        <FieldError id="profile-display-name-error" error={problem} />
       </>)}
       actions={(<>
         <SaveDiscard dirty={dirty} disabled={saving} saveBlocked={problem}
           onSave={save}
           onDiscard={() => { setDraft(null); setError(null) }} />
-        {(problem || error) && <div className="setting-error" role="status">{problem || error}</div>}
+        {error && <div className="setting-error" role="status">{error}</div>}
       </>)}
     />
   )

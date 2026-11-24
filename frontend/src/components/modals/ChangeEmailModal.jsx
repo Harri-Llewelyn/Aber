@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { IconUser } from '../common/Icons'
@@ -82,12 +83,12 @@ export function ChangeEmailModal({ person, onClose, onChanged, showToast }) {
           disabled={busy}
           ref={inputRef}
           aria-required="true"
-          aria-invalid={problem ? 'true' : undefined}
-          aria-describedby="change-email-hint"
+          {...fieldErrorProps(problem, 'change-email-error', 'change-email-hint')}
         />
-        <div id="change-email-hint" className={problem ? 'form-hint hint-danger' : 'form-hint'}>
-          {problem || 'Their role, name and history stay. Approvals and Archived Entities keep the address they had when they acted.'}
+        <div id="change-email-hint" className="form-hint">
+          Their role, name and history stay. Approvals and Archived Entities keep the address they had when they acted.
         </div>
+        <FieldError id="change-email-error" error={problem} />
       </div>
     </Modal>
   )

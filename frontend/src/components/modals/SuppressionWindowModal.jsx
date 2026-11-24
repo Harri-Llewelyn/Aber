@@ -2,8 +2,9 @@ import React, { useRef, useState } from 'react'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { useSetting } from '../../hooks/useSettings'
 import { ActionButton } from '../common/ActionButton'
+import { FormProblem } from '../common/FormProblem'
 import { Modal } from '../common/Modal'
-import { IconAlertTriangle, IconBellOff } from '../common/Icons'
+import { IconBellOff } from '../common/Icons'
 import { localMinute, parseLocal } from '../../utils/timeWindow'
 import { formatDateTime } from '../../utils/format'
 import {
@@ -163,11 +164,7 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
           : 'In local time. A start already past is now.'}
       </p>
       {/* Why the confirm is off, said where the person is looking, not only in its hover tip. */}
-      <p className="form-hint hint-danger" aria-live="polite">
-        {touched && problem && problem !== 'Nothing has changed' && (
-          <><IconAlertTriangle size={12} /> {problem}</>
-        )}
-      </p>
+      <FormProblem problem={touched && problem !== 'Nothing has changed' ? problem : null} />
     </Modal>
   )
 }

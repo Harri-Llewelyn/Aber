@@ -44,6 +44,7 @@ import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { HelpLink } from '../common/HelpLink'
 import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
@@ -924,9 +925,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               disabled={proposeMode}
               value={form.sparkplug_group ?? ''}
               onChange={e => setForm(f => ({ ...f, sparkplug_group: e.target.value }))}
-              aria-invalid={groupProblem ? true : undefined}
+              {...fieldErrorProps(groupProblem, 'gateway-sparkplug-group-error')}
             />
-            {groupProblem && <div className="form-hint hint-danger" role="alert">{groupProblem}</div>}
+            <FieldError id="gateway-sparkplug-group-error" error={groupProblem} />
             {offeredGroup && (
               <Tooltip text="The group this gateway was last seen publishing under">
                 <button

@@ -20,6 +20,7 @@ import { ActionButton } from '../common/ActionButton'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
+import { FieldError } from '../common/FieldError'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
@@ -506,6 +507,15 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
      proposal this form adds to: one open proposal per asset per person, so a second change extends
      the first. */
   const proposeMode = !canManage && canPropose
+
+  // Said on the change to Enforce, not on the state: what Enforce discards cannot be fetched back.
+  const enforcing = form.conformance_policy === 'enforce'
+    && editing?.conformance_policy !== 'enforce'
+    && formSchemas.length > 0
+    ? "From the next message, a value contradicting this device's schema will not be written to the historian "
+      + 'and cannot be recovered. The violation is still recorded in the Audit Trail. Schema changes take up '
+      + 'to five minutes to take effect.'
+    : null
 
   /**
    * The note under a field a proposal may not name. Disabled with the reason printed, rather than
@@ -1459,6 +1469,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   disabled={proposeMode}
                   value={form.conformance_policy || 'audit'}
                   onChange={e => setForm(f => ({ ...f, conformance_policy: e.target.value }))}
+                  // A choice that can be saved, so not aria-invalid.
+                  aria-describedby={enforcing ? 'device-conformance-error' : undefined}
                 >
                   <option value="audit">Audit — record the violation, keep the reading</option>
                   <option value="enforce">Enforce — record it and DROP the reading</option>
@@ -1478,18 +1490,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   </div>
                 )}
 
-                {/* Shown on the change, not on the state: what Enforce discards cannot be fetched
-                    back. */}
-                {form.conformance_policy === 'enforce'
-                  && editing.conformance_policy !== 'enforce'
-                  && formSchemas.length > 0 && (
-                  <div className="form-hint hint-danger">
-                    From the next message, a value contradicting this device's schema will not be
-                    written to the historian and cannot be recovered. The violation is still
-                    recorded in the Audit Trail. Schema changes take up to five minutes to take
-                    effect.
-                  </div>
-                )}
+                <FieldError id="device-conformance-error" error={enforcing} />
               </div>
             )}
 

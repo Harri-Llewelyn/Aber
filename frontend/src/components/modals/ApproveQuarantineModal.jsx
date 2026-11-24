@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError } from '../common/FieldError'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
 import { Modal } from '../common/Modal'
@@ -94,11 +95,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
       <div className="form-group">
         <label className="form-label">Published Sparkplug ID</label>
         <CopyableId value={item.reported_identity} label="published device id" />
-        {item.quarantine_reason && (
-          <div className="form-hint hint-danger">
-            <IconAlertTriangle size={12} /> {item.quarantine_reason}
-          </div>
-        )}
+        <FieldError error={item.quarantine_reason} />
       </div>
 
       {!isGateway && suggestion && (

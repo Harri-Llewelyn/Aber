@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { IconUser } from '../common/Icons'
 import { DISPLAY_NAME_MAX, displayNameProblem, normaliseDisplayName } from '../../utils/displayName'
@@ -76,12 +77,12 @@ export function DisplayNameModal({ person, onClose, onSaved, showToast }) {
           autoComplete="off"
           disabled={busy}
           ref={inputRef}
-          aria-invalid={problem ? 'true' : undefined}
-          aria-describedby="display-name-hint"
+          {...fieldErrorProps(problem, 'display-name-error', 'display-name-hint')}
         />
-        <div id="display-name-hint" className={problem ? 'form-hint hint-danger' : 'form-hint'}>
-          {problem || `Up to ${DISPLAY_NAME_MAX} characters. Leave it empty to show their email address alone.`}
+        <div id="display-name-hint" className="form-hint">
+          {`Up to ${DISPLAY_NAME_MAX} characters. Leave it empty to show their email address alone.`}
         </div>
+        <FieldError id="display-name-error" error={problem} />
       </div>
     </Modal>
   )

@@ -2786,6 +2786,10 @@ main:focus { outline: none; }
   box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
+/* A control whose value is refused, with why in the FieldError beneath it. After :focus, so the
+   border stays while the focus ring is drawn round it. */
+.form-control[aria-invalid="true"] { border-color: var(--danger); }
+
 /* Placeholders bound to the theme explicitly rather than the browser default. --text-muted, not
    --text-dim, which measures 2.45:1 against --bg-base in dark mode. */
 /* A field that cannot be edited: the page background, muted text, no focus ring. */
@@ -7861,6 +7865,12 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .form-hint.hint-danger { color: var(--danger-text); }
 .form-hint.hint-warning > svg,
 .form-hint.hint-danger > svg { vertical-align: -2px; }
+
+/* A problem may quote what was typed, which may hold no space to break at. */
+.form-hint.hint-danger { overflow-wrap: anywhere; }
+
+/* A FieldError over its control rather than beneath it: the metric picker, which fills the dialog. */
+.field-error-above { margin: 0 0 4px; }
 
 .form-hint-inline { font-weight: 400; font-size: 11px; color: var(--text-muted); }
 

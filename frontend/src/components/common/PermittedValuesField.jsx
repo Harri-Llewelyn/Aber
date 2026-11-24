@@ -1,4 +1,5 @@
 import React from 'react'
+import { FieldError, fieldErrorProps } from './FieldError'
 import { Tooltip } from './Tooltip'
 import { datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 
@@ -32,13 +33,10 @@ export function PermittedValuesField({ idPrefix, datatype, value, onChange, erro
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder={PLACEHOLDER[type]}
-          aria-invalid={error ? true : undefined}
-          style={error ? { borderColor: 'var(--danger)' } : undefined}
+          {...fieldErrorProps(error, `${id}-error`)}
         />
       </Tooltip>
-      {error && (
-        <div role="alert" style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '4px' }}>{error}</div>
-      )}
+      <FieldError id={`${id}-error`} error={error} />
     </div>
   )
 }

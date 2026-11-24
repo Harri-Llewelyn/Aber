@@ -4,6 +4,7 @@ import {
 } from '../common/Icons'
 import CopyableId from '../common/CopyableId'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError } from '../common/FieldError'
 import { datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { modelledMetrics } from '../../utils/deviceTags'
 import { storedSemanticIdPair } from '../../utils/standards'
@@ -407,11 +408,11 @@ export function SchemaDetailModal({
             or permitted values from the Metrics page as it is now. Saving or publishing writes them into this draft.
           </p>
         )}
-        {editable && badRanges.length > 0 && (
-          <div role="alert" className="form-hint hint-danger" style={{ margin: '0 0 4px' }}>
-            <IconAlertTriangle size={12} /> Fix the range of {badRanges.join(' ')}
-          </div>
-        )}
+        <FieldError
+          id="schema-detail-ranges-error"
+          error={editable && badRanges.length > 0 ? `Fix the range of ${badRanges.join(' ')}` : null}
+          className="field-error-above"
+        />
 
         {editable ? (
           // The schema builder's list. The search and the standard filter narrow what is listed, never
@@ -427,6 +428,7 @@ export function SchemaDetailModal({
                 name={m.name}
                 range={shownRange(m.name)}
                 onChange={range => setRanges(prev => ({ ...prev, [m.name]: range }))}
+                errorId="schema-detail-ranges-error"
               />
             )}
           />

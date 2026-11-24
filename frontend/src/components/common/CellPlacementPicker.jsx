@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { AreaPlan, AreaPlanPin } from './AreaPlan'
+import { FieldError } from './FieldError'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { planAspect, planRotation, placeInFrame, nearestConflict, isPlaced, formatPlace, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
 import { Tooltip } from './Tooltip'
@@ -59,9 +60,9 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
         )}
       </AreaPlan>
       <div className="area-plan-placement-footer">
-        <span style={{ fontSize: '11px', color: refusal ? 'var(--danger)' : 'var(--text-muted)' }} role={refusal ? 'alert' : undefined}>
-          {refusal || (shown ? `Placed ${formatPlace({ plan_x: shown.x, plan_y: shown.y })}.` : 'Not placed — the Site Map does not draw the cell until it is.')}
-          {!refusal && !disabled && ' Click the plan where the cell is.'}
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          {shown ? `Placed ${formatPlace({ plan_x: shown.x, plan_y: shown.y })}.` : 'Not placed — the Site Map does not draw the cell until it is.'}
+          {!disabled && ' Click the plan where the cell is.'}
         </span>
         {value && !disabled && (
           <Tooltip text="Take the cell off the plan; it stays in the area">
@@ -71,6 +72,8 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
           </Tooltip>
         )}
       </div>
+      {/* Not a field's: the plan is clicked, and takes no focus. */}
+      <FieldError error={refusal} />
     </div>
   )
 }

@@ -8,6 +8,7 @@ import {
   SITE_VOCABULARY_LIMITS as LIMITS, SOURCE_FORMAT_LABELS, VOCABULARY_KINDS, standardCitation
 } from '../../utils/siteVocabulary'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { IconUpload } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
@@ -144,19 +145,16 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
           className="form-control"
           accept=".aasx,.json,.xml,application/json,text/xml,application/xml"
           aria-required="true"
-          aria-describedby={`${uid}-file-hint`}
+          {...fieldErrorProps(fileProblem, `${uid}-file-error`, `${uid}-file-hint`)}
           disabled={pending}
           onChange={choose}
         />
-        <div
-          className={fileProblem ? 'form-hint hint-danger' : 'form-hint'}
-          id={`${uid}-file-hint`}
-          role={fileProblem ? 'alert' : undefined}
-        >
-          {fileProblem || (reading
+        <div className="form-hint" id={`${uid}-file-hint`}>
+          {reading
             ? 'Reading the file…'
-            : 'An .aasx package, or an AAS JSON or XML environment, up to 25 MB. Only its ConceptDescriptions with IEC 61360 content are taken.')}
+            : 'An .aasx package, or an AAS JSON or XML environment, up to 25 MB. Only its ConceptDescriptions with IEC 61360 content are taken.'}
         </div>
+        <FieldError id={`${uid}-file-error`} error={fileProblem} />
       </div>
 
       {preview && (

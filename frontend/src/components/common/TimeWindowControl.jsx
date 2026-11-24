@@ -1,8 +1,9 @@
 import React, { useEffect, useId, useState } from 'react'
+import { FieldError, fieldErrorProps } from './FieldError'
 import { ToolbarPopover } from './FiltersPopover'
 import { SegmentedControl } from './SegmentedControl'
 import { Tooltip } from './Tooltip'
-import { IconAlertTriangle, IconCalendar, IconChevronLeft, IconChevronRight, IconZoomIn, IconZoomOut } from './Icons'
+import { IconCalendar, IconChevronLeft, IconChevronRight, IconZoomIn, IconZoomOut } from './Icons'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
   ALL_TIME, JUMPS, SPANS, SPAN_IDS, TIME_PRESETS, canStep, canZoomIn, canZoomOut, chooseSpan, holdsNow,
@@ -35,11 +36,6 @@ function WindowButton({ name, tip = name, off, reason, onStep, children }) {
   )
 }
 
-/** Why a choice is refused, in the form fields' error style; a live region, so a screen reader hears it. */
-function Refusal({ reason }) {
-  return reason ? <p className="form-hint hint-danger" role="alert"><IconAlertTriangle size={12} /> {reason}</p> : null
-}
-
 /**
  * The popover's three groups: Jump to, Rolling and Custom range. `onChoose` takes the new window.
  * Under a `limit`, a rolling range or a custom one over it is refused here and the window stays.
@@ -59,6 +55,7 @@ function WindowChoices({ value, ranges, allTime, spans, now, limit, onChoose }) 
   const [edited, setEdited] = useState(false)
   const customOver = rangeOk && overLimit({ kind: 'custom', from, to }, limit, now)
   const reason = limit?.reason
+  const customError = edited && customOver ? reason : null
 
   const option = (win, text, key) => {
     const chosen = sameWindow(win, value)
@@ -120,7 +117,8 @@ function WindowChoices({ value, ranges, allTime, spans, now, limit, onChoose }) 
           {ranges.map(r => option(rollingWindow(r.value, ranges), r.label, r.value))}
           {allTime && option(ALL_TIME, 'All time', 'all')}
         </div>
-        <Refusal reason={refused ? reason : null} />
+        {/* Not a field's: the range pressed is aria-disabled, and its tooltip says the same. */}
+        <FieldError error={refused ? reason : null} />
       </div>
 
       <div className="time-window-group" role="group" aria-labelledby={`${id}-custom`}>
@@ -132,16 +130,16 @@ function WindowChoices({ value, ranges, allTime, spans, now, limit, onChoose }) 
           <label className="time-window-field">
             <span>From</span>
             <Tooltip text="In local time.">
-              <input type="datetime-local" className="form-control" value={from} onChange={e => { setFrom(e.target.value); setEdited(true) }} />
+              <input type="datetime-local" className="form-control" value={from} onChange={e => { setFrom(e.target.value); setEdited(true) }} {...fieldErrorProps(customError, `${id}-custom-error`)} />
             </Tooltip>
           </label>
           <label className="time-window-field">
             <span>To</span>
             <Tooltip text="In local time. The range stops at the start of this minute.">
-              <input type="datetime-local" className="form-control" value={to} onChange={e => { setTo(e.target.value); setEdited(true) }} />
+              <input type="datetime-local" className="form-control" value={to} onChange={e => { setTo(e.target.value); setEdited(true) }} {...fieldErrorProps(customError, `${id}-custom-error`)} />
             </Tooltip>
           </label>
-          <Refusal reason={edited && customOver ? reason : null} />
+          <FieldError id={`${id}-custom-error`} error={customError} />
           <button type="submit" className="btn btn-sm btn-primary" disabled={!rangeOk || customOver}>Show range</button>
         </form>
       </div>
@@ -289,11 +287,7 @@ export function TimeWindowControl({
         </span>
       )}
 
-      {refused && limit && (
-        <p className="form-hint hint-danger time-window-problem" role="alert">
-          <IconAlertTriangle size={12} /> {limit.reason}
-        </p>
-      )}
+      <FieldError error={refused && limit ? limit.reason : null} className="time-window-problem" />
 
       <div className="sr-only" role="status" aria-live="polite">{news}</div>
     </div>
