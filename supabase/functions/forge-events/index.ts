@@ -29,9 +29,9 @@ import { serverError } from "../_shared/failure.ts";
 
 import {
   APPLIANCE_BRANCH,
+  fileAtCommit,
   FLOW_SHAPE_CONTEXT,
   FORGE_ORGANISATION,
-  forgeApi,
   forgeConfig,
   GATEWAY_REPOSITORY,
   postCommitStatus,
@@ -115,13 +115,13 @@ function subjectOf(message: string | undefined): string | null {
 async function flowHashAt(repository: string, sha: string): Promise<string | null> {
   const cfg = forgeConfig();
   if (!cfg) return null;
-  const raw = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${repository}/raw/${FLOW_FILE}?ref=${sha}`);
-  if (raw.status === 404) return null;
-  if (!raw.ok) {
-    console.warn(`forge-events: could not read ${FLOW_FILE} of '${repository}' at ${sha.slice(0, 12)} (${raw.status})`);
+  try {
+    const file = await fileAtCommit(cfg, { name: repository }, FLOW_FILE, sha);
+    return file && hex(await crypto.subtle.digest("SHA-256", file.bytes));
+  } catch (err) {
+    console.warn(`forge-events: could not read ${FLOW_FILE} of '${repository}' at ${sha.slice(0, 12)} (${err instanceof Error ? err.message : err})`);
     return null;
   }
-  return hex(await crypto.subtle.digest("SHA-256", await raw.arrayBuffer()));
 }
 
 /**
@@ -158,20 +158,22 @@ async function checkFlowShape(repository: string, sha: string): Promise<Record<s
   const cfg = forgeConfig();
   if (!cfg) return { posted: false, reason: "this deployment has no forge configured" };
 
-  const raw = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${repository}/raw/${FLOW_FILE}?ref=${sha}`);
-  if (raw.status === 404) {
-    await postCommitStatus(cfg, repository, sha, "success", `no ${FLOW_FILE} in this commit`);
-    return { state: "success", detail: `no ${FLOW_FILE}` };
-  }
-  if (!raw.ok) {
-    const detail = `could not read ${FLOW_FILE} (${raw.status})`;
+  let file;
+  try {
+    file = await fileAtCommit(cfg, { name: repository }, FLOW_FILE, sha);
+  } catch (err) {
+    const detail = `could not read ${FLOW_FILE} (${err instanceof Error ? err.message : err})`;
     await postCommitStatus(cfg, repository, sha, "error", detail);
     return { state: "error", detail };
+  }
+  if (!file) {
+    await postCommitStatus(cfg, repository, sha, "success", `no ${FLOW_FILE} in this commit`);
+    return { state: "success", detail: `no ${FLOW_FILE}` };
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await raw.text());
+    parsed = JSON.parse(new TextDecoder().decode(file.bytes));
   } catch (err) {
     const detail = `${FLOW_FILE} is not valid JSON (${err instanceof Error ? err.message : err})`;
     await postCommitStatus(cfg, repository, sha, "failure", detail);
@@ -225,17 +227,19 @@ function field(source: Record<string, unknown> | null, name: string, max = 200):
 async function convergenceAt(repository: string, sha: string): Promise<ConvergenceRecord> {
   const cfg = forgeConfig();
   if (!cfg) return NO_CONVERGENCE;
-  const raw = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${repository}/raw/${CONVERGED_FILE}?ref=${sha}`);
-  // The ordinary state of an appliance that runs the bundle without the platform playbook.
-  if (raw.status === 404) return NO_CONVERGENCE;
-  if (!raw.ok) {
-    console.warn(`forge-events: could not read ${CONVERGED_FILE} of '${repository}' at ${sha.slice(0, 12)} (${raw.status})`);
+  let file;
+  try {
+    file = await fileAtCommit(cfg, { name: repository }, CONVERGED_FILE, sha);
+  } catch (err) {
+    console.warn(`forge-events: could not read ${CONVERGED_FILE} of '${repository}' at ${sha.slice(0, 12)} (${err instanceof Error ? err.message : err})`);
     return NO_CONVERGENCE;
   }
+  // The ordinary state of an appliance that runs the bundle without the platform playbook.
+  if (!file) return NO_CONVERGENCE;
 
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(await raw.text()) as Record<string, unknown>;
+    parsed = JSON.parse(new TextDecoder().decode(file.bytes)) as Record<string, unknown>;
     if (typeof parsed !== "object" || parsed === null) throw new Error("not an object");
   } catch (err) {
     console.warn(`forge-events: ${CONVERGED_FILE} of '${repository}' is not readable JSON (${err instanceof Error ? err.message : err})`);
