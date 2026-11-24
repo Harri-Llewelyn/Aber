@@ -17,8 +17,8 @@ export function useTypedGate(required, label = 'name') {
 }
 
 /**
- * The field of a typed gate: the last thing in the dialog's body, above its buttons. Draws nothing
- * when the gate has no text. Which acts take one is in ConfirmModal's `requireTyped`.
+ * The field of a typed gate, straight after the words that say what is lost. Draws nothing when the
+ * gate has no text. Which acts take one is in ConfirmModal's `requireTyped`.
  *
  * @param {Object} gate What `useTypedGate()` returned.
  * @param {boolean} [disabled] While the act runs.

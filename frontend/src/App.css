@@ -2727,6 +2727,12 @@ main:focus { outline: none; }
   color: var(--text-muted);
 }
 
+/* What a dialog says names a record, and a name may hold no space to break at: a long one wraps
+   anywhere, so the body never scrolls sideways for it. */
+.modal-lead,
+.modal-body > .form-hint,
+.modal-body > .callout { overflow-wrap: anywhere; }
+
 .modal-error-icon { flex-shrink: 0; margin-top: 2px; color: var(--danger); }
 
 .form-group {

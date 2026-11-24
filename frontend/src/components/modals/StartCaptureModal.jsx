@@ -81,6 +81,8 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
         </div>
       )}
 
+      <TypedGate gate={gate} disabled={pending} />
+
       <div className="form-group">
         <label className="form-label" htmlFor="capture-note">Note (optional)</label>
         <input
@@ -131,8 +133,6 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
         Recording starts by asking the gateway to rebirth. The gateway and its devices send their
         birth certificates again, and the capture keeps them: a playback needs them.
       </p>
-
-      <TypedGate gate={gate} disabled={pending} />
     </Modal>
   )
 }

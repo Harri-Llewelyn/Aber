@@ -539,9 +539,10 @@ with Restore Access; it is guarded because a slip blocks a person's sign-in at o
 - **The text to type is the record's own name,** as the dialog shows it: a person's email address,
   because a display name may not be unique, and a capture's gateway or device. The label says which
   ("Type the device name to confirm"), through `requireTypedLabel`.
-- **A dialog with fields of its own** holds the same field, `TypedGate`, with `useTypedGate()`. It is
-  the last thing in the body, and its button takes the gate's `open` and `reason`. Recording again
-  and uploading over a stored capture do this, because each destroys that capture.
+- **A dialog with fields of its own** holds the same field, `TypedGate`, with `useTypedGate()`. It
+  goes straight after the words that say what is lost, so it is in view as the dialog opens, and the
+  dialog's button takes the gate's `open` and `reason`. Recording again and uploading over a stored
+  capture do this, because each destroys that capture.
 - **A dialog that says its act cannot be undone has a gate,** or is in drift check 544's list with
   the reason it has none. The check also names every gated dialog.
 - **A gateway's credential and setup dialogs ask for its name too,** before they cut off whatever
