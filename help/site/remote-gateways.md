@@ -432,7 +432,7 @@ connection to a gateway; the same rule keeps `node_exporter` unscraped.
 
 The appliance's running flow lives on a Docker volume, on hardware in a plant. After each pass,
 `flow-sync` pushes a copy of it to the repository's `appliance` branch, and the approved flow is on
-`main`. So `docker compose down -v` or a failed SD card loses only what changed since the last pass.
+`main`. So a failed SD card, or clearing the appliance, loses only what changed since the last pass.
 
 **Watching it land.** The drawer's **Committed** row shows the head of `main` as soon as the forge
 reports the push. Its **Flow** row shows the hash of the flow the appliance last deployed, reported
@@ -441,7 +441,7 @@ on every heartbeat from `/data/gitops/deployed.json`. Then:
 * *main moved, deploying* means the appliance has not checked since the merge;
 * *matches main* means it has;
 * *differs from main*, more than ten minutes after a merge, means the appliance refused the commit or
-  cannot reach the forge. `docker compose logs flow-sync` on the appliance says which.
+  cannot reach the forge. [Its log](#read-why-nothing-is-reported) on the appliance says which.
 
 An edit made in the appliance's editor is in neither hash, and the next approved deploy overwrites
 it.
