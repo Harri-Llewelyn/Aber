@@ -21,9 +21,9 @@ transaction, as the System page's suite does, and the tests that want an outage 
 table as it is, which raises on connect. One class reads a real historian when
 ABER_TEST_HISTORIAN names one (see the end of this file); every other test rolls back.
 
-pg_cron runs evaluate_automations() on this database every minute, and one run at a time does anything.
-Each test holds the run's lock from before its first write to its rollback, so the scheduled run is the
-one that finds nothing to do.
+pg_cron runs evaluate_automations() on this database every minute, and a run that meets another does
+nothing. Each test holds the run's lock from before its first write to its rollback, so the scheduled
+run is the one that does nothing.
 
 What is held here:
 
