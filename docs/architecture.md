@@ -313,8 +313,8 @@ and for `aas-api` alike.
 
 - **The base IRI is the site's**, `supabaseFunctions.aas.baseIri`. The default, under `aber.local`, belongs
   to nobody. Changing it changes every id above, so it is fixed once a shell has been exported or read.
-- **`<key>` is the schema lineage's name** as an idShort, unless the device's schema declares another.
-  `assignSubmodelKeys()` in [`submodelKeys.ts`](../supabase/functions/_shared/aas/submodelKeys.ts) has the
+- **`<key>` is the schema lineage's name** as an idShort, unless `device_submodels.submodel_key` gives
+  another. `assignSubmodelKeys()` in [`submodelKeys.ts`](../supabase/functions/_shared/aas/submodelKeys.ts) has the
   rule for two that clash.
 - **`specificAssetIds`** also names the asset by its serial number, its product URI and its
   `sparkplug_id` ([Connecting an AAS client](../supabase/README.md#connecting-an-aas-client)).
@@ -374,11 +374,11 @@ historian's column and what is read from it.
 Several tables say what a row is about with two columns: `entity_type`, a word for the kind, and
 `entity_id`, which one.
 
-**A new word is the table's name:** lower case, plural, with underscores. The audit trigger stores the
-table's name, so almost every word is one already, and the Audit Trail turns each into the label a
-person reads. A thing with no table in `public` takes the name its table would have, as `service_logs`
-does. A new column uses these same words. A column that already holds singular words keeps its style, so
-a new word there is singular too.
+**A new word is the table's name:** lower case with underscores, and plural for a new table. The audit
+trigger stores the table's name, so almost every word is one already, and the Audit Trail turns each
+into the label a person reads. A thing with no table in `public` takes the name its table would have, as
+`service_logs` does. A new column uses these same words. A column that already holds singular words
+keeps its style, so a new word there is singular too.
 
 `audit_trail.entity_type` holds these. Drift check 566 holds the list to the dashboard's
 `AUDIT_TRAIL_ENTITY_TYPES` and to `audit_trail_action_kinds()`.
