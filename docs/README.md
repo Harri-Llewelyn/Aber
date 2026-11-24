@@ -7,7 +7,9 @@ To install Aber or use it, start in [`help/`](../help/README.md) instead. It hol
 guide, the tutorial, the glossary and the dashboard's help.
 
 The [architecture overview](architecture.md#repository-map) lists every folder in the repository
-and what each covers. Each component's own README sits beside its code.
+and what each covers. Each component's own README sits beside its code. The
+overview also says [how Aber identifies things](architecture.md#how-aber-identifies-things): the key and
+the public ids of each kind.
 
 The [gateway lifecycle](gateway-lifecycle.md) says what each step of a gateway's life leaves behind, for each
 type: its status, setup tokens, credential record, broker account, forge repository and Audit Trail rows.

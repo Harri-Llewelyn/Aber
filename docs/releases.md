@@ -61,9 +61,10 @@ Anything a running site would notice as a break. Concretely, any of:
 - **A values key removed or renamed** without a default that keeps the old spelling working.
 - **A change to an identifier a site already holds.** These are the expensive ones because they
   reach outside this repository: the `sparkplug_id` derivation, the site's Sparkplug group, the
-  `aber.local` semantic namespace that AAS exports and i3X type ids are minted into, a
+  `aber.local` namespaces that AAS exports' semantic ids and i3X's types are minted into, a
   `metric_catalog` name, or the `aber_ingestion_*` Prometheus metric prefix that every dashboard and
-  alert rule queries.
+  alert rule queries. [How Aber identifies things](architecture.md#how-aber-identifies-things) lists
+  the ids of each kind of thing, and which a site holds outside Aber.
 - **A change to the shape of a topic** the platform publishes or consumes.
 - **Dropping support for a Kubernetes version** the previous release supported.
 - **A change `helm upgrade` cannot carry**, which moves [the floor](../help/site/upgrading.md#the-floor-100): a
