@@ -1,12 +1,12 @@
 ## What this page is for
 
-This page holds reference vocabularies: the published sets of terms that industrial standards define. Use them to label a metric in this deployment with the same term somebody else's system already uses. The standards are for reading, and nothing in them is edited. The **Imported** tab holds vocabularies your own site brought in. [The Imported tab](#the-imported-tab) says how.
+This page holds reference vocabularies: the published sets of terms that industrial standards define. Use them to label a metric in this deployment with the same term somebody else's system already uses. The standards are for reading, and nothing in them is edited. The **Templates** tab lists the IDTA submodel templates, and [The Templates tab](#the-templates-tab) says how to read one. The **Imported** tab holds vocabularies your own site brought in. [The Imported tab](#the-imported-tab) says how.
 
 ## What the controls do
 
 - **The six standard tabs**, MTConnect, ISO 22400, OPC UA, ASHRAE 223P, QUDT and VDA 5050, each show one standard's entries in the same card. Switching tab keeps the search text, so the same search can be tried on each standard in turn.
 - **Point at a tab**, or move to it with the keyboard, to read what that standard covers. What each standard is, and what to watch for in it, is under **The six standards** below.
-- **Search** filters the selected standard by name and by the text shown on hover. For example, an ISO 22400 KPI is found by its formula. A search opens the sections that match.
+- **Search** filters the selected standard by name and by the text shown on hover. For example, an ISO 22400 KPI is found by its formula. A search opens the sections that match. On the Templates tab it also finds an element by any of its ids, and shows what that element is inside.
 - **The sections** group each standard's entries. MTConnect has data item types, components, sub types and units. ISO 22400 has KPI families, OPC UA has companion specifications, ASHRAE 223P has superclasses, QUDT has one for each first letter, and VDA 5050 has the parts of the vehicle state. Sections start collapsed.
 - A section header shows **N in use** when catalog metrics already use N of its entries. Where a section needs explaining, a **?** sits beside its title. A header stays at the top of the card while its entries scroll under it.
 - **Expand all** is at the start of the line above the sections, at the far left. It opens every section of the selected standard, and reads **Collapse all** while any is open. Collapse all also closes the sections a search opened, and keeps the search.
@@ -77,6 +77,31 @@ The readings an automated guided vehicle (AGV) reports in the `state` message of
 - **Only readings are here.** The message header, the order fields and the lists, such as `loads` and `errors`, are left out. A list cannot be a metric, and a device's identity comes from its Sparkplug topic.
 - **A position is a reading on the device.** It is never the cell the device is in.
 - **This lists the readings and nothing more.** A vehicle must still publish them as Sparkplug B metrics. Connecting a fleet that speaks VDA 5050 is separate work.
+
+## The Templates tab
+
+The Templates tab lists **submodel templates** from IDTA, the Industrial Digital Twin Association. A submodel is one part of an Asset Administration Shell, such as its nameplate. A template says which elements a submodel of that kind holds.
+
+To read a template:
+
+1. Open its section. There is one for each template, named with its version.
+2. Read down the rows. Each element follows the one it is inside, and is stepped in under it.
+3. Read across a row for the element's type and how many of it there are. **One** and **One or more** mean the template asks for it. **Zero or one** and **Zero or more** mean it is optional.
+4. Click an id to copy it. The template's own id is at the top of the section.
+
+- **An element can have further ids.** The Digital Nameplate names most elements by an IEC CDD id, and gives the ECLASS one as a further id. Each has its own copy button.
+- **A name that ends in `[0]`** is what each item of a list is. So `Markings[0]` is one marking, and `MarkingName` inside it is that marking's name.
+- **Not stated** means the template does not say how many. A dash in place of an id means it gives none.
+- **Under a name** is what the template says of the element, and the example it gives. Many elements have neither. The definitions IEC CDD and ECLASS wrote are left out, because those bodies license them separately.
+
+Two templates are listed:
+
+- **Digital Nameplate** (IDTA 02006): who made a machine, its serial number and its markings. Its `AddressInformation` has nothing inside it here. Its elements come from another IDTA template, which is not listed.
+- **Asset Interfaces Description** (IDTA 02017): where a machine's data can be read, over HTTP, Modbus or MQTT. It names its elements by the W3C's Web of Things ids.
+
+**A template is for looking up.** Nothing on this tab starts a metric or changes anything, and every role sees the same. Listing a template does not make a device's export conform to it.
+
+The elements come from IDTA's own files, which are under CC BY 4.0. The credit is on the tab, and the licence is linked from it.
 
 ## The Imported tab
 

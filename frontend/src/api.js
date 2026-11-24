@@ -3825,6 +3825,24 @@ const apiMethods = {
       return data || [];
     }
 
+    if (path.startsWith('/api/v1/idta-template-elements')) {
+      // Reference data (migration 0320), generated from IDTA's submodel templates (CC BY 4.0) and read-only to
+      // the app: every element of each template, nested ones included, in the template's own order. Read in
+      // pages of 1000, the most a server may be set to return, since a further template may pass that.
+      const rows = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('idta_template_elements')
+          .select('*')
+          .order('template_id', { ascending: true })
+          .order('ordinal', { ascending: true })
+          .range(from, from + 999);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if ((data || []).length < 1000) return rows;
+      }
+    }
+
     // Checked before /metric-catalog: startsWith on the shorter path would otherwise not match,
     // but keeping the more specific route first makes the ordering intent explicit.
     if (path.startsWith('/api/v1/metric-groups')) {
