@@ -37,10 +37,7 @@ TEMPLATES = {
     NAMEPLATE: ("Digital Nameplate", "IDTA 02006", "3.0.3", "idta-02006-3-0-3-digital-nameplate.json"),
     AID: ("Asset Interfaces Description", "IDTA 02017", "1.0.1", "idta-02017-1-0-1-asset-interfaces-description.json"),
 }
-COLUMNS = ("template_id, template_name, template_number, template_version, path, parent_path, ordinal, id_short,"
-           " model_type, value_type, semantic_id, semantic_id_type, supplemental_semantic_ids, cardinality,"
-           " definition, example_value")
-READ_ALL = f"SELECT {COLUMNS} FROM public.idta_template_elements ORDER BY template_id, ordinal"
+READ_ALL = "SELECT * FROM public.idta_template_elements ORDER BY template_id, ordinal"
 APP_ROLES = ("Administrator", "Shopfloor_Manager", "Operator", "Auditor")
 
 
@@ -300,11 +297,10 @@ class TestReplay(TemplateTestCase):
         sql = MIGRATION.read_text(encoding="utf-8")
 
         def probe(cur):
-            read = f"SELECT xmin::text, {COLUMNS} FROM public.idta_template_elements ORDER BY template_id, ordinal"
-            cur.execute(read)
+            cur.execute("SELECT xmin::text, e.* FROM public.idta_template_elements e ORDER BY template_id, ordinal")
             before = cur.fetchall()
             cur.execute(sql)
-            cur.execute(read)
+            cur.execute("SELECT xmin::text, e.* FROM public.idta_template_elements e ORDER BY template_id, ordinal")
             return before, cur.fetchall()
         before, after = self.in_transaction(probe)
         self.assertGreater(len(before), 0)
