@@ -26,6 +26,9 @@ import { serverError } from "../_shared/failure.ts";
  * that gateway live. A member who is not a dashboard identity was put there by hand and is left
  * alone.
  *
+ * Tags are the exception to both: the rules on a gateway repository's tags are these and no others,
+ * and a tag named as a branch the appliance reads is deleted, with the release made from it.
+ *
  * Authorised by FORGE_SWEEP_SECRET in `x-sweep-secret`, not by the anon key: the edge runtime boots
  * with VERIFY_JWT=false, and the gateway's key check proves only that the caller holds a key that
  * ships in every browser bundle. An unset secret is 503, never a pass. The identities acted on come
@@ -45,6 +48,7 @@ import {
   ensureDeployKey,
   ensureOrganisation,
   ensurePlatformOrganisation,
+  ensureTagProtection,
   ensureWebhook,
   FORGE_ORGANISATION,
   FORGE_TEAMS,
@@ -102,6 +106,8 @@ interface Summary {
   removed: string[];
   hooked: string[];
   protected: string[];
+  /** A tag removed because it was named as a branch the appliance reads, and the commit it named. */
+  untagged: string[];
   /** Keys re-registered read-write on an active gateway's repository. */
   rekeyed: string[];
   /** Keys removed from the repository of a gateway that is archived, deleted or no longer Remote. */
@@ -354,6 +360,20 @@ async function recordArchived(
 }
 
 /**
+ * The tags of a gateway's repository (ensureTagProtection). A tag that was there under a name the
+ * appliance reads is reported with its commit, since an appliance may have followed it; one the
+ * forge will not remove is an error on every pass until it is gone.
+ */
+async function sweepTags(cfg: ForgeConfig, name: string, summary: Summary): Promise<void> {
+  const { changed, found } = await ensureTagProtection(cfg, name);
+  if (changed) summary.protected.push(`${name} (tags)`);
+  for (const { tag, commit, removed } of found) {
+    if (removed) summary.untagged.push(`${name}: '${tag}' at ${commit}`);
+    else summary.errors.push(`${name}: the forge would not remove the tag '${tag}' at ${commit}`);
+  }
+}
+
+/**
  * The repository half. A gateway's repository gets what enrolment gives one, or the forge's
  * archive if its gateway has been archived; any other repository in the organisation gets `main`
  * protected. A repository that already has everything costs a handful of reads.
@@ -428,6 +448,7 @@ async function sweepRepositories(
       // is still read-only until this call, and everything after it is a write.
       if (await setRepositoryArchived(cfg, name, false, archived)) summary.restored.push(name);
       await recordArchived(admin, named[1], gateway, false);
+      await sweepTags(cfg, name, summary);
       if (await ensureBranchProtection(cfg, name, { seedTemplate: true })) summary.protected.push(name);
       if (await ensureApplianceProtection(cfg, name)) summary.protected.push(`${name} (appliance)`);
       if (await ensureWebhook(cfg, name)) summary.hooked.push(name);
@@ -571,7 +592,7 @@ function leaseUnreadable(req: Request, error: unknown): Response {
 /** A pass's counts, and its errors in full, for the log. */
 function tally(summary: Summary): string {
   return `placed ${summary.placed.length}, removed ${summary.removed.length}, ` +
-    `hooked ${summary.hooked.length}, protected ${summary.protected.length}, ` +
+    `hooked ${summary.hooked.length}, protected ${summary.protected.length}, untagged ${summary.untagged.length}, ` +
     `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
     `archived ${summary.archived.length}, restored ${summary.restored.length}, ` +
     `published ${summary.published.length}, recorded ${summary.recorded.length}, ` +
@@ -644,7 +665,7 @@ export default async function handler(req: Request): Promise<Response> {
     holder = claimed.data as string;
   }
 
-  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], archived: [], restored: [], published: [], recorded: [], warnings: [], errors: [] };
+  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], untagged: [], rekeyed: [], revoked: [], archived: [], restored: [], published: [], recorded: [], warnings: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
     const readersId = await ensurePlatformOrganisation(cfg);
@@ -667,7 +688,7 @@ export default async function handler(req: Request): Promise<Response> {
   // one thing declined already said so through console.warn where it was decided. It is counted
   // rather than repeated here for the same reason -- unlike an `errors` entry, which is raised in a
   // catch block that logs nothing of its own and would otherwise reach only the response body.
-  const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length +
+  const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length + summary.untagged.length +
     summary.rekeyed.length + summary.revoked.length + summary.archived.length + summary.restored.length +
     summary.published.length + summary.recorded.length;
   if (changed || summary.errors.length) console.log(`forge-sweep: ${tally(summary)}`);

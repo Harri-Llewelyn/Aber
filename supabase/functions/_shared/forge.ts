@@ -19,6 +19,10 @@
  * other branch to them. Measured against gitea/gitea:1.27.3: the key can also push to the wiki,
  * which no rule covers; docs/security-model.md records that under accepted risks.
  *
+ * Branch rules do not cover tags, and Git takes a short name for a tag before a branch. So tag rules
+ * let a deploy key make no tag at all, and nobody but the machine account make one named as a branch
+ * that is read here or on the appliance (ensureTagProtection).
+ *
  * Failure here is non-fatal: by the time this runs the token is spent and the broker credential
  * exists, and telemetry needs nothing from the forge. A failure is logged loudly, `repository`
  * comes back null, and the response says so.
@@ -336,6 +340,67 @@ async function ensureRepository(
   throw await refused(`could not create repository '${name}'`, created);
 }
 
+/** The commit a branch is at, or null when there is none. The branches call never reads a tag. */
+async function branchHead(cfg: ForgeConfig, ref: RepositoryRef, branch: string): Promise<string | null> {
+  const found = await forgeApi(cfg, "GET", `/repos/${repoPath(ref)}/branches/${branch}`);
+  if (found.status === 404) return null;
+  if (!found.ok) throw await refused(`could not read the branch '${branch}' of '${repoPath(ref)}'`, found);
+  return ((await found.json()) as { commit?: { id?: string } }).commit?.id ?? null;
+}
+
+/** One entry of a tree, by the tree's id or its commit's, or null when it has none of that name. */
+async function treeEntry(
+  cfg: ForgeConfig,
+  ref: RepositoryRef,
+  id: string,
+  name: string,
+): Promise<{ type: string; sha: string } | null> {
+  for (let page = 1;; page += 1) {
+    const listed = await forgeApi(cfg, "GET", `/repos/${repoPath(ref)}/git/trees/${id}?page=${page}&per_page=1000`);
+    if (!listed.ok) throw await refused(`could not read the tree ${id.slice(0, 12)} of '${repoPath(ref)}'`, listed);
+    const { tree, truncated } = await listed.json() as {
+      tree?: { path: string; type: string; sha: string }[] | null;
+      truncated?: boolean;
+    };
+    const entry = tree?.find((e) => e.path === name);
+    if (entry) return entry;
+    if (!truncated) return null;
+  }
+}
+
+/**
+ * A file at a commit, with its blob's id, or null when the commit has no such file. Found by object
+ * id at every step, because Gitea's contents and raw calls take a branch or a tag NAMED as the
+ * commit's id ahead of the commit, and both teams can push a branch of any name. Measured against
+ * gitea/gitea:28.3.0.
+ */
+export async function fileAtCommit(
+  cfg: ForgeConfig,
+  ref: RepositoryRef,
+  path: string,
+  commit: string,
+): Promise<{ sha: string; bytes: Uint8Array } | null> {
+  const segments = path.split("/");
+  let sha = commit;
+  for (const [i, segment] of segments.entries()) {
+    const entry = await treeEntry(cfg, ref, sha, segment);
+    if (entry?.type !== (i === segments.length - 1 ? "blob" : "tree")) return null;
+    sha = entry.sha;
+  }
+  const blob = await forgeApi(cfg, "GET", `/repos/${repoPath(ref)}/git/blobs/${sha}`);
+  if (!blob.ok) throw await refused(`could not read '${path}' of '${repoPath(ref)}'`, blob);
+  // Gitea leaves the content out above its blob limit, 10 MiB by default.
+  const { content } = await blob.json() as { content?: string | null };
+  if (typeof content !== "string") throw new Error(`'${path}' of '${repoPath(ref)}' is larger than the forge's API gives`);
+  return { sha, bytes: Uint8Array.from(atob(content), (c) => c.charCodeAt(0)) };
+}
+
+/** A file on `main` of a gateway's repository, or null when `main` has no such file. */
+async function fileOnMain(cfg: ForgeConfig, name: string, path: string) {
+  const commit = await branchHead(cfg, { name }, "main");
+  return commit === null ? null : await fileAtCommit(cfg, { name }, path, commit);
+}
+
 const INCIDENT_LABEL = "incident";
 const INCIDENT_TEMPLATE_PATH = ".gitea/ISSUE_TEMPLATE/incident.md";
 
@@ -356,9 +421,7 @@ async function seedIssueTemplate(cfg: ForgeConfig, name: string): Promise<void> 
     throw await refused(`could not create the '${INCIDENT_LABEL}' label on '${name}'`, label);
   }
 
-  const present = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/contents/${INCIDENT_TEMPLATE_PATH}`);
-  if (present.ok) return;
-  if (present.status !== 404) throw await refused(`could not read '${INCIDENT_TEMPLATE_PATH}' on '${name}'`, present);
+  if (await fileOnMain(cfg, name, INCIDENT_TEMPLATE_PATH)) return;
 
   const template = [
     "---",
@@ -403,17 +466,16 @@ async function seedIssueTemplate(cfg: ForgeConfig, name: string): Promise<void> 
  * Absent on every repository not seeded from the template, which is the ordinary case.
  */
 async function dropCopiedManifest(cfg: ForgeConfig, name: string): Promise<void> {
-  const path = `/repos/${FORGE_ORGANISATION}/${name}/contents/${PLATFORM_MANIFEST_PATH}`;
-  const present = await forgeApi(cfg, "GET", path);
-  if (present.status === 404) return;
-  if (!present.ok) {
-    console.warn(`forge: could not check '${PLATFORM_MANIFEST_PATH}' on '${name}' (${present.status}); leaving it`);
+  let present;
+  try {
+    present = await fileOnMain(cfg, name, PLATFORM_MANIFEST_PATH);
+  } catch (err) {
+    console.warn(`forge: could not check '${PLATFORM_MANIFEST_PATH}' on '${name}' (${err instanceof Error ? err.message : err}); leaving it`);
     return;
   }
-  const { sha } = await present.json() as { sha?: string };
-  if (!sha) return;
-  const removed = await forgeApi(cfg, "DELETE", path, {
-    sha,
+  if (!present) return;
+  const removed = await forgeApi(cfg, "DELETE", `/repos/${FORGE_ORGANISATION}/${name}/contents/${PLATFORM_MANIFEST_PATH}`, {
+    sha: present.sha,
     message: "Remove the manifest copied from the template; this repository is this gateway's own",
     branch: "main",
   });
@@ -593,6 +655,152 @@ export async function ensureApplianceProtection(cfg: ForgeConfig, name: string):
     changed = true;
   }
   return changed;
+}
+
+/**
+ * The branches the appliance and the platform read, which no tag may share a name with: Git takes a
+ * short name for a tag before a branch, and so do Gitea's contents and trees calls.
+ */
+const READ_BRANCHES = ["main", APPLIANCE_BRANCH];
+
+/**
+ * The patterns of the two tag rules: one matches the given names in any case, the other every other
+ * name. Exact complements, because Gitea admits whoever any matching rule admits. Spelt out, because
+ * Go's regular expressions have no negative lookahead, and Gitea matches a rule with case. The
+ * slashes are how Gitea takes a regular expression rather than a glob.
+ */
+export function tagPatterns(names: string[]): { named: string; others: string } {
+  const either = (c: string) => `${c.toUpperCase()}${c}`;
+  const named = names.map((name) => [...name].map((c) => `[${either(c)}]`).join(""));
+  // What may follow, given what is left of each name that reads the same so far.
+  const others = (rest: string[]): string => {
+    const heads = [...new Set(rest.filter(Boolean).map((r) => r[0]))];
+    const branches = [
+      heads.length ? `[^${heads.map(either).join("")}].*` : ".+",
+      ...heads.map((c) => `[${either(c)}]${others(rest.filter((r) => r[0] === c).map((r) => r.slice(1)))}`),
+    ];
+    return `(?:${branches.join("|")})${rest.includes("") ? "" : "?"}`;
+  };
+  return { named: `/^(?:${named.join("|")})$/`, others: `/^${others(names)}$/` };
+}
+
+interface TagRule {
+  id: number;
+  name_pattern: string;
+  whitelist_usernames?: string[] | null;
+  whitelist_teams?: string[] | null;
+}
+
+/** A tag found under a name none may carry, and whether it is gone. */
+export interface FoundTag {
+  tag: string;
+  /** The commit it named, or the object itself where that is not a commit. */
+  commit: string;
+  removed: boolean;
+}
+
+export interface TagProtection {
+  /** Whether a rule was made, corrected or removed. */
+  changed: boolean;
+  found: FoundTag[];
+}
+
+/**
+ * The commit a tag names, or null when there is no such tag. Asked of the refs: Gitea's tags call
+ * answers 404 for a tag on a file or a folder, and its list answers 500 beside one (measured).
+ */
+async function tagCommit(cfg: ForgeConfig, path: string, tag: string): Promise<string | null> {
+  const listed = await forgeApi(cfg, "GET", `${path}/git/refs/tags/${tag}`);
+  if (listed.status === 404) return null;
+  if (!listed.ok) throw await refused(`could not look for the tag '${tag}' at '${path}'`, listed);
+  // Every ref under that prefix, so the exact one is picked out.
+  const refs = await listed.json() as { ref: string; object: { type: string; sha: string } }[];
+  const object = refs.find(({ ref }) => ref === `refs/tags/${tag}`)?.object;
+  if (!object) return null;
+  if (object.type !== "tag") return object.sha;
+  const annotated = await forgeApi(cfg, "GET", `${path}/tags/${tag}`);
+  if (!annotated.ok) return object.sha;
+  return ((await annotated.json()) as { commit?: { sha?: string } }).commit?.sha ?? object.sha;
+}
+
+/**
+ * Remove a tag, and the release made from it, which Gitea will not let a tag go without. Asked more
+ * than once because Gitea looks a tag up without case, so one that also exists in another case is
+ * the one it may take first (measured). Returns whether it is gone.
+ */
+async function removeTag(cfg: ForgeConfig, path: string, tag: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const deleted = await forgeApi(cfg, "DELETE", `${path}/tags/${tag}`);
+    if (deleted.status === 409) await forgeApi(cfg, "DELETE", `${path}/releases/tags/${tag}`);
+    if ((await tagCommit(cfg, path, tag)) === null) return true;
+  }
+  return false;
+}
+
+/**
+ * The two tag rules on a gateway's repository, and no other. A tag named as a branch in
+ * READ_BRANCHES, in any case, is the machine account's to make and to delete and nobody else's, an
+ * administrator's and a site administrator's included; every other tag is both teams' and no deploy
+ * key's. Any other rule could only open what these close, since Gitea admits whoever any matching
+ * rule admits, so one is removed. Then a tag already under such a name is removed, in its exact
+ * spelling alone, because Git matches a ref with case. One the forge will not remove is returned,
+ * not thrown. Measured against gitea/gitea:28.3.0.
+ */
+export async function ensureTagProtection(cfg: ForgeConfig, name: string): Promise<TagProtection> {
+  const path = `/repos/${FORGE_ORGANISATION}/${name}`;
+  const { named, others } = tagPatterns(READ_BRANCHES);
+  const wanted: { name_pattern: string; whitelist_usernames: string[]; whitelist_teams: string[] }[] = [
+    { name_pattern: named, whitelist_usernames: [cfg.user], whitelist_teams: [] },
+    { name_pattern: others, whitelist_usernames: [], whitelist_teams: Object.values(FORGE_TEAMS) },
+  ];
+  const listRules = async (): Promise<TagRule[]> => {
+    const listed = await forgeApi(cfg, "GET", `${path}/tag_protections`);
+    if (!listed.ok) throw await refused(`could not list the tag rules on '${name}'`, listed);
+    return await listed.json() as TagRule[];
+  };
+  const spelt = (list: string[] | null | undefined) => (list ?? []).map((n) => n.toLowerCase()).sort().join(" ");
+  const agrees = (rule: TagRule | undefined, want: typeof wanted[number]) =>
+    rule !== undefined && spelt(rule.whitelist_usernames) === spelt(want.whitelist_usernames) &&
+    spelt(rule.whitelist_teams) === spelt(want.whitelist_teams);
+
+  let changed = false;
+  const rules = await listRules();
+  const kept = new Set<number>();
+  for (const want of wanted) {
+    const mine = rules.filter((r) => r.name_pattern === want.name_pattern);
+    const rule = mine.find((r) => agrees(r, want)) ?? mine[0];
+    if (rule) kept.add(rule.id);
+    if (agrees(rule, want)) continue;
+    const written = rule
+      ? await forgeApi(cfg, "PATCH", `${path}/tag_protections/${rule.id}`, want)
+      : await forgeApi(cfg, "POST", `${path}/tag_protections`, want);
+    // A sweep and an enrolment at once: the other may have made it first.
+    if (!written.ok && !(await listRules()).some((r) => r.name_pattern === want.name_pattern && agrees(r, want))) {
+      throw await refused(`could not set a tag rule on '${name}'`, written);
+    }
+    changed = true;
+  }
+  for (const rule of rules.filter((r) => !kept.has(r.id))) {
+    const removed = await forgeApi(cfg, "DELETE", `${path}/tag_protections/${rule.id}`);
+    if (!removed.ok && removed.status !== 404) throw await refused(`could not remove a tag rule from '${name}'`, removed);
+    console.warn(`forge: removed the tag rule '${rule.name_pattern}' from '${name}', which could only admit more people`);
+    changed = true;
+  }
+  if (changed) console.log(`forge: the tags of '${name}' are protected`);
+
+  const found: FoundTag[] = [];
+  for (const tag of READ_BRANCHES) {
+    const commit = await tagCommit(cfg, path, tag);
+    if (commit === null) continue;
+    // Said before it is done, so a pass that dies here has still named the commit.
+    console.warn(
+      `forge: '${name}' carries a tag named '${tag}' at ${commit}, which an appliance could follow in place of the branch; removing it`,
+    );
+    const removed = await removeTag(cfg, path, tag);
+    if (!removed) console.warn(`forge: the tag '${tag}' on '${name}' could not be removed`);
+    found.push({ tag, commit, removed });
+  }
+  return { changed, found };
 }
 
 interface DeployKey {
@@ -792,7 +1000,10 @@ function base64(text: string): string {
   return btoa(String.fromCharCode(...new TextEncoder().encode(text)));
 }
 
-/** A file's text at a ref, or null when absent. */
+/**
+ * A file's text at a ref, or null when absent. For the platform organisation's repositories, where
+ * nobody else can make a branch or a tag; a gateway's is read by fileAtCommit().
+ */
 async function fileAt(cfg: ForgeConfig, ref: RepositoryRef, path: string, at: string): Promise<string | null> {
   const raw = await forgeApi(cfg, "GET", `/repos/${repoPath(ref)}/raw/${path}?ref=${encodeURIComponent(at)}`);
   if (raw.status === 404) return null;
@@ -1068,9 +1279,7 @@ export async function publishTrust(
  * afterwards it is changed by pull request. A repository that already holds one keeps it.
  */
 async function seedPlatformPointer(cfg: ForgeConfig, name: string, tag: string): Promise<void> {
-  const present = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/contents/${PLATFORM_POINTER_PATH}`);
-  if (present.ok) return;
-  if (present.status !== 404) throw await refused(`could not read '${PLATFORM_POINTER_PATH}' on '${name}'`, present);
+  if (await fileOnMain(cfg, name, PLATFORM_POINTER_PATH)) return;
   const content = [
     "# The tag of platform/gateway-platform this appliance converges to. Changed by pull request:",
     "# a fleet bump is one pull request per gateway, and a canary is one gateway. `vars` are",
@@ -1254,6 +1463,11 @@ export async function provisionGatewayRepository(
     // one path that finds the repository shut. An archived gateway never reaches here: archiving
     // burns its unredeemed tokens, so it has nothing to redeem.
     await setRepositoryArchived(cfg, name, false);
+    // Before anything reads the repository or a key can write it: one made by hand, or copied from
+    // another, can arrive with a tag.
+    const { found } = await ensureTagProtection(cfg, name);
+    const left = found.filter((t) => !t.removed).map((t) => `'${t.tag}'`);
+    if (left.length) throw new Error(`the forge would not remove the tag ${left.join(", ")} from '${name}'`);
     await ensureBranchProtection(cfg, name);
     // BEFORE THE KEY: a writable key on a repository whose other branches are still open would be
     // a key that can push anywhere for the moment between the two calls.
