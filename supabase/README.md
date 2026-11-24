@@ -4045,7 +4045,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `app_approvals()` | `0217` | no | A read: who allows an app. |
 | `apply_automations()` | `0256` | yes | Applies a document of automations (a preview too: the same call) |
 | `apply_derived_metrics()` | `0297` | yes | Applies a document of derived metrics: adds the new and changes a description (a preview too: the same call) |
-| `apply_device_schemas()` | `0295` | yes | Applies a document of device schemas (a preview too: the same call; schema:manage) |
+| `apply_device_schemas()` | `0318` | yes | Applies a document of device schemas (a preview too: the same call; schema:manage) |
 | `approve_proposal()` | `0165` | yes | Applies a proposed change |
 | `audit_trail_backup_job_ids_matching()` | `0001` | no | A read: the Audit Trail's search. |
 | `audit_trail_user_ids_matching()` | `0203` | no | A read: the Audit Trail's search. |
@@ -4068,7 +4068,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `end_my_session()` | `0211` | no | A person's own session, in any role. |
 | `export_telemetry()` | `0279` | yes | Exports readings from History, which is data leaving the site |
 | `foreign_credential_is_set()` | `0178` | no | A read: whether a credential is set, never what it is. |
-| `fork_schema()` | `0165` | yes | Versions a schema (schema:manage) |
+| `fork_schema()` | `0318` | yes | Versions a schema (schema:manage) |
 | `gateway_is_playback_delivery_target()` | `0183` | no | A read the playback dialog makes. |
 | `historian_backup_state()` | `0001` | no | A read: the Backups page. |
 | `import_site_vocabulary()` | `0306` | yes | Imports a vocabulary read from an AAS file: Administrator only |
@@ -12098,7 +12098,8 @@ draft, and publishing it.
 from the parent, and publishing must repoint every device and archive the predecessor in one
 transaction. `enforce_schema_version_provenance()` rejects a directly-inserted version and
 `prevent_active_schema_mutation()` rejects a directly-flipped status — **no manual version input is
-possible**.
+possible**. The draft's name is computed as well: `<lineage_name>_v<version>`, numbered further
+(`X_v2_2`) while that name is taken (`0318`).
 
 The freeze is **deny-by-default**: the guard diffs `to_jsonb(NEW)` against `to_jsonb(OLD)` with
 `status` removed, so a column added later is frozen when it exists, not when someone remembers.

@@ -65,7 +65,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/metricGroup.js` | the `metric_group` generated column and the spelling trigger |
 | `utils/cellResolution.js` | `public.device_locations` |
 | `utils/gatewayStatus.js` | `public.gateway_status` (90 s threshold) |
-| `utils/schemaVersion.js` | `public.schema_version_base_name()` |
+| `utils/schemaVersion.js` | the name `fork_schema()` gives a new version (`nextVersionName()`, mirror check 142), and `public.schema_version_base_name()` |
 | `utils/deviceTags.js` | `ingestion/validate.py`'s Python mirror |
 | `utils/sparkplugDatatype.js` | `functions/_shared/aas/sparkplugToXsd.ts` |
 | `utils/model3d.js` | `functions/_shared/aas/model3dContentType.ts` |
