@@ -162,7 +162,9 @@ async function checkFlowShape(repository: string, sha: string): Promise<Record<s
   try {
     file = await fileAtCommit(cfg, { name: repository }, FLOW_FILE, sha);
   } catch (err) {
-    const detail = `could not read ${FLOW_FILE} (${err instanceof Error ? err.message : err})`;
+    // The forge's own words go to the log: a status is read by everyone with the repository.
+    console.warn(`forge-events: could not read ${FLOW_FILE} of '${repository}' at ${sha.slice(0, 12)} (${err instanceof Error ? err.message : err})`);
+    const detail = `could not read ${FLOW_FILE}`;
     await postCommitStatus(cfg, repository, sha, "error", detail);
     return { state: "error", detail };
   }
