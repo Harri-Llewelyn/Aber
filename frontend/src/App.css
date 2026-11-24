@@ -7930,8 +7930,8 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* GATEWAYS: the setup and credential dialogs. */
 
 /* Exempts the typed-name label's uppercasing, so the operator is not told to type capitals that
-   are not in the name. */
-.gateway-typed-name { text-transform: none; color: var(--text-primary); }
+   are not in the name. A long name wraps, as a typed gate's does. */
+.gateway-typed-name { text-transform: none; color: var(--text-primary); overflow-wrap: anywhere; }
 
 .gateway-block-head {
   display: flex;

@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -183,5 +185,16 @@ describe('straight after registering a Remote gateway', () => {
 describe('setupRevokesCredential()', () => {
   it('is false for no gateway, as the drawer asks it with none open', () => {
     expect(setupRevokesCredential(null)).toBe(false)
+  })
+})
+
+describe('the name to type', () => {
+  it('wraps when it is long, so the dialog never scrolls sideways for it', async () => {
+    await openAccessControl(STATES[0].row)
+    fireEvent.click(await screen.findByRole('button', { name: 'Bundle' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.querySelector('label .gateway-typed-name')).toHaveTextContent(NAME)
+    const css = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+    expect(css.match(/\n\.gateway-typed-name \{([^}]*)\}/)[1]).toMatch(/overflow-wrap:\s*anywhere/)
   })
 })
