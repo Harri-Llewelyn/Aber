@@ -47,7 +47,12 @@ aber_install() {
   command -v curl >/dev/null || die "curl is not installed"
 
   if [ -f "$DATA_DIR/.enrolled.json" ]; then
-    die "this appliance is already enrolled ($(jq -r '.sparkplug_id // "?"' "$DATA_DIR/.enrolled.json" 2>/dev/null)); refusing to run again. To start over, remove $DATA_DIR and $COMPOSE_DIR and re-issue the command."
+    die "this appliance is already enrolled ($(jq -r '.sparkplug_id // "?"' "$DATA_DIR/.enrolled.json" 2>/dev/null)); refusing to run again. To start over, clear the old enrolment, which deletes it and anything this appliance has not reported:
+
+  sudo docker compose -p aber-gateway down -v &&
+  sudo rm -rf $DATA_DIR $COMPOSE_DIR
+
+Then paste the command again, or a newly issued one if it has expired. This run has not spent its token."
   fi
 
   say "installing $GATEWAY from $PLATFORM_URL"

@@ -197,8 +197,8 @@ flow whose broker node has a new id would authenticate with an empty username �
 it and the editor reports only *"Connection failed to broker"*. `flow-sync` refuses to deploy such
 a commit for exactly that reason, and names the offending node in its log:
 
-```
-docker compose logs flow-sync
+```bash
+sudo docker logs --tail 20 aber-gateway-flow-sync
 ```
 
 **`flows_cred.json` is deliberately never committed.** It is encrypted with the secret in this
@@ -230,19 +230,67 @@ certificate is not trusted: `platform-root.pem` must hold the root that issued i
   `mosquitto.external.loadBalancerIP`; any other address goes in the platform chart's
   `mosquitto.tls.extraIpSans` or `mosquitto.tls.extraDnsSans`.
 
+**The dashboard says the platform failed** — the last convergence stopped, and its journal says why:
+
+```bash
+sudo journalctl -u aber-gateway-converge -n 30 --no-pager
+```
+
+**The dashboard says there is no report from this appliance** — the report is `flow-sync`'s, and its
+log says what stops it:
+
+```bash
+sudo docker logs --tail 20 aber-gateway-flow-sync
+```
+
 **You lost the editor password**
+
+On an appliance set up with the install command, whose project is in `/opt/aber-gateway`:
+
+```bash
+sudo docker compose --project-directory /opt/aber-gateway run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password &&
+sudo docker compose --project-directory /opt/aber-gateway restart node-red
+```
+
+On one set up with a bundle, in the bundle's folder:
 
 ```bash
 docker compose run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password
 docker compose restart node-red
 ```
 
-This keeps the enrolment, the flow and the broker credential — it only rewrites `settings.js`.
+Either prints a new password **once**. It keeps the enrolment, the flow and the broker credential —
+it only rewrites `settings.js`.
 
 ## Starting over
 
+Setting this machine up again needs its old enrolment cleared first. Clearing it deletes the
+enrolment and anything this appliance has not reported, such as readings still in its buffer. The
+token in `.env` is already spent, so a fresh start also needs a **new command or bundle** from the
+dashboard.
+
+**Set up with the install command**, or converged by the platform playbook since. Its project is in
+`/opt/aber-gateway`:
+
 ```bash
-docker compose down -v      # destroys /data, and with it this appliance's enrolment
+sudo docker compose -p aber-gateway down -v &&
+sudo rm -rf /var/lib/aber-gateway/data /opt/aber-gateway
 ```
 
-The token in `.env` is already spent, so a fresh start needs a **new bundle** from the dashboard.
+- **`down -v` is not enough here.** The playbook binds the volume to `/var/lib/aber-gateway/data`.
+  Docker removes the volume and leaves that folder, with the enrolment in it.
+- **The folders are not enough either.** A container still running keeps the old folder mounted. The
+  next install then stops with `error mounting ... no such file or directory`. Its token is not
+  spent: run both lines, then the same install command.
+- **Nothing else needs removing.** The converge timer does nothing until the appliance enrols again,
+  and the installer replaces the rest.
+
+**Set up with a bundle.** In the bundle's folder:
+
+```bash
+docker compose down -v
+```
+
+Here `/data` is a Docker volume of its own, so this removes the enrolment with it. Without it, a new
+bundle started over the old one finds the enrolment, says *already enrolled* and does nothing. One
+started in another folder stops, because the old one's containers hold their names.
