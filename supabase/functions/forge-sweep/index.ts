@@ -26,8 +26,10 @@ import { serverError } from "../_shared/failure.ts";
  * that gateway live. A member who is not a dashboard identity was put there by hand and is left
  * alone.
  *
- * Tags are the exception to both: the rules on a gateway repository's tags are these and no others,
- * and a tag named as a branch the appliance reads is deleted, with the release made from it.
+ * A gateway's repository is the exception. It is held by the two teams, so anybody who holds it by
+ * name is removed first. Its branch rules and tag rules are Aber's and no others, each put right in
+ * place before another is removed, so `main` is never without its own. Its default branch is `main`.
+ * And a tag named as a branch the appliance reads is deleted, with the release made from it.
  *
  * Authorised by FORGE_SWEEP_SECRET in `x-sweep-secret`, not by the anon key: the edge runtime boots
  * with VERIFY_JWT=false, and the gateway's key check proves only that the caller holds a key that
@@ -43,13 +45,17 @@ import {
   CUSTOM_EXAMPLE_REPOSITORY,
   deleteDeployKey,
   DEPLOY_KEY_TITLE,
+  deployKeyTitle,
   ensureApplianceProtection,
   ensureBranchProtection,
+  ensureDefaultBranch,
   ensureDeployKey,
+  ensureHeldByTeams,
   ensureOrganisation,
   ensurePlatformOrganisation,
   ensureTagProtection,
   ensureWebhook,
+  finishBranchRules,
   FORGE_ORGANISATION,
   FORGE_TEAMS,
   type ForgeConfig,
@@ -273,6 +279,13 @@ async function sweepDeployKeys(
     return;
   }
   for (const key of keys) {
+    // Aber has titled every gateway's key this way. Another was added by a person who held the
+    // repository, and would be registered for writing below.
+    if (key.title !== deployKeyTitle(sparkplugId)) {
+      await deleteDeployKey(cfg, { name }, key);
+      summary.revoked.push(`${name}: '${key.title}'`);
+      continue;
+    }
     if (key.read_only) {
       await ensureDeployKey(cfg, { name }, sparkplugId, key.key, false);
       summary.rekeyed.push(`${name}: '${key.title}'`);
@@ -360,6 +373,16 @@ async function recordArchived(
 }
 
 /**
+ * Who holds a gateway's repository beside its teams (ensureHeldByTeams): nobody. One the forge will
+ * not remove is an error on every pass.
+ */
+async function sweepHolders(cfg: ForgeConfig, name: string, summary: Summary): Promise<void> {
+  const { removed, kept } = await ensureHeldByTeams(cfg, name);
+  for (const login of removed) summary.removed.push(`${login} from '${name}'`);
+  for (const login of kept) summary.errors.push(`${name}: the forge would not take it from '${login}'`);
+}
+
+/**
  * The tags of a gateway's repository (ensureTagProtection). A tag that was there under a name the
  * appliance reads is reported with its commit, since an appliance may have followed it; one the
  * forge will not remove is an error on every pass until it is gone.
@@ -410,22 +433,22 @@ async function sweepRepositories(
 
   // `archived` comes from the listing, so the reconciliation below costs a PATCH only where the
   // forge and the row disagree. Gitea puts it on every repository it lists.
-  const repositories = await listAll<{ name: string; archived?: boolean }>(
+  const repositories = await listAll<{ name: string; archived?: boolean; default_branch?: string }>(
     cfg,
     `/orgs/${FORGE_ORGANISATION}/repos`,
     `the repositories of '${FORGE_ORGANISATION}'`,
   );
-  for (const { name, archived } of repositories) {
+  for (const { name, archived, default_branch } of repositories) {
     const named = GATEWAY_REPOSITORY.exec(name);
     const gateway = named ? gateways.get(named[1]) : undefined;
     try {
       // A repository somebody made by hand: `main` protected and nothing else. One they also
       // archived is left entirely alone -- protecting a branch is a write, and Gitea refuses
       // writes to an archived repository, so the attempt would be an error on every pass.
-      // `seedTemplate: false` is not a default: ensureBranchProtection() seeds unless told not
-      // to, and a playbook is not a gateway -- it gets no incident template.
+      // `gateway: false` is not a default: a playbook is not a gateway, so its rule is made closed,
+      // nothing is seeded into it and a rule somebody tuned stays.
       if (!named) {
-        if (!archived && await ensureBranchProtection(cfg, name, { seedTemplate: false })) {
+        if (!archived && await ensureBranchProtection(cfg, name, { gateway: false })) {
           summary.protected.push(name);
         }
         continue;
@@ -436,6 +459,9 @@ async function sweepRepositories(
       // thing the archive prevents this pass from removing. A pass that dies between the two
       // leaves the keys gone and the archive to the next one.
       if (!gateway || gateway.is_archived) {
+        // Somebody who holds it could take it out of the archive. Gitea removes one from an archived
+        // repository too (measured).
+        await sweepHolders(cfg, name, summary);
         await sweepDeployKeys(cfg, name, named[1], gateway, platform, summary);
         await recordRepository(admin, name, named[1], gateway, summary);
         if (await setRepositoryArchived(cfg, name, true, archived)) summary.archived.push(name);
@@ -448,9 +474,12 @@ async function sweepRepositories(
       // is still read-only until this call, and everything after it is a write.
       if (await setRepositoryArchived(cfg, name, false, archived)) summary.restored.push(name);
       await recordArchived(admin, named[1], gateway, false);
+      await sweepHolders(cfg, name, summary);
       await sweepTags(cfg, name, summary);
-      if (await ensureBranchProtection(cfg, name, { seedTemplate: true })) summary.protected.push(name);
+      if (await ensureBranchProtection(cfg, name, { gateway: true })) summary.protected.push(name);
       if (await ensureApplianceProtection(cfg, name)) summary.protected.push(`${name} (appliance)`);
+      if (await finishBranchRules(cfg, name)) summary.protected.push(`${name} (rules)`);
+      if (await ensureDefaultBranch(cfg, name, default_branch)) summary.protected.push(`${name} (default branch)`);
       if (await ensureWebhook(cfg, name)) summary.hooked.push(name);
       await sweepDeployKeys(cfg, name, named[1], gateway, platform, summary);
       await recordRepository(admin, name, named[1], gateway, summary);

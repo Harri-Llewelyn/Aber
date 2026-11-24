@@ -33,7 +33,7 @@ export default function check() {
     ['ensureTagProtection(cfg, name)', 'ensureBranchProtection(cfg, name)', 'ensureApplianceProtection(cfg, name)', 'ensureOnlyDeployKey(cfg, name']);
   if (!body(sweep, 'async function sweepTags(').includes('ensureTagProtection(cfg, name)')) problems552.push(`${SWEEP}: sweepTags() does not call ensureTagProtection(cfg, name)`);
   inOrder(`${SWEEP}: sweepRepositories(), for a gateway in service`, body(sweep, 'async function sweepRepositories(').split('setRepositoryArchived(cfg, name, false')[1] ?? '',
-    ['sweepTags(cfg, name, summary)', 'ensureBranchProtection(cfg, name, { seedTemplate: true })', 'ensureApplianceProtection(cfg, name)', 'sweepDeployKeys(cfg, name']);
+    ['sweepTags(cfg, name, summary)', 'ensureBranchProtection(cfg, name, { gateway: true })', 'ensureApplianceProtection(cfg, name)', 'sweepDeployKeys(cfg, name']);
 
   if (problems552.length) {
     fail('a gateway repository can be given a key before its tags are closed:\n' + problems552.map((p) => `        ${p}`).join('\n'));
