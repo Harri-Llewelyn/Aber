@@ -49,8 +49,8 @@ describe('lineageName and lineageVersionLabel', () => {
   });
 
   it('do not rebuild the lineage from a suffixed name', () => {
-    // fork_schema() named this one X_v2_2_v3 because X_v2 and X_v2_2 were taken. Stripping one _v<n>
-    // would say X_v2_2; the lineage says X.
+    // A version made before 0318 may be called X_v2_2_v3: X_v2 was taken, and fork_schema() named
+    // the next one from its parent's name. Stripping one _v<n> would say X_v2_2; the lineage says X.
     const v3 = { schema_name: 'X_v2_2_v3', lineage_name: 'X', version: 3 };
     expect(lineageVersionLabel(v3)).toBe('X v3');
   });

@@ -161,7 +161,7 @@ class EveryVersionNamesItsLineage(Base):
         self.publish(v2["id"])
         v3 = self.fork(v2["id"])
         self.as_owner()
-        self.assertEqual(v3["schema_name"], self.name("Arm") + "_v2_2_v3")
+        self.assertEqual(v3["schema_name"], self.name("Arm") + "_v3")
         self.assertEqual(self.lineage(v3["id"]), (root, self.name("Arm")))
 
     def test_a_draft_inserted_with_a_parent_names_its_lineage_as_apply_device_schemas_makes_one(self):

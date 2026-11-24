@@ -63,7 +63,7 @@ describe('schemaVersion — name derivation (mirrors public.schema_version_base_
     expect(baseSchemaName(null)).toBe('')
   })
 
-  it('derives the next version name from the base, not from the current name', () => {
+  it('derives the next version name from the base of a row that has no lineage_name', () => {
     expect(nextVersionName(schema())).toBe('Robot_Arm_Schema_v2')
     expect(nextVersionName(schema({ schema_name: 'Robot_Arm_Schema_v2', version: 2 })))
       .toBe('Robot_Arm_Schema_v3')
