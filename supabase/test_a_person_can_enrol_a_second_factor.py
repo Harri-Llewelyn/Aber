@@ -134,6 +134,8 @@ class ASecondFactorEnrolsAndResets(unittest.TestCase):
         cls.admin_id = claims(cls.admin)["sub"]
         cls.person_id = None
         cls.person_tokens = []
+        # Python also runs a class clean-up when setUpClass raises, and the account may then have access.
+        cls.addClassCleanup(cls.clean_up)
         cls.password = cls.prepare_person()
         # A factor a failed run left behind would answer the enrolment below with a name conflict.
         token = cls.person_sign_in()
@@ -142,7 +144,7 @@ class ASecondFactorEnrolsAndResets(unittest.TestCase):
             must("reset a factor an earlier run left", cls.manage({"action": "reset-mfa", "user_id": cls.person_id}))
 
     @classmethod
-    def tearDownClass(cls):
+    def clean_up(cls):
         problems = []
         if cls.person_id:
             # A run that stopped part-way may have left a factor; a finished one reset it.

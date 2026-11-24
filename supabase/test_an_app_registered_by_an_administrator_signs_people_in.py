@@ -198,16 +198,14 @@ class RegisteredApps(unittest.TestCase):
             if stack.STRICT:
                 raise AssertionError(f"{reason}, and REQUIRE_SEEDED_ACCOUNTS is set")
             raise unittest.SkipTest(reason)
+        cls.ids = []
+        # Python also runs a class clean-up when setUpClass raises, a skip for the second factor included.
+        cls.addClassCleanup(cls.clean_up)
         cls.admin_token, cls.admin_id = stack.sign_in(ADMIN)
         cls.person_token, cls.person_id = stack.sign_in(PERSON)
         cls.suffix = secrets.token_hex(3)
-        cls.ids = []
-        try:
-            cls.apps["confidential"] = cls.register(f"Run Test Viewer {cls.suffix}", CONFIDENTIAL_REDIRECT, "confidential")
-            cls.apps["public"] = cls.register(f"Run Test Plant App {cls.suffix}", PUBLIC_REDIRECT, "public")
-        except BaseException:
-            cls.tearDownClass()
-            raise
+        cls.apps["confidential"] = cls.register(f"Run Test Viewer {cls.suffix}", CONFIDENTIAL_REDIRECT, "confidential")
+        cls.apps["public"] = cls.register(f"Run Test Plant App {cls.suffix}", PUBLIC_REDIRECT, "public")
         status, _, text = stack.request("/auth/v1/.well-known/openid-configuration")
         assert status == 200, f"discovery answered {status}: {text[:200]}"
         cls.discovery = json.loads(text)
@@ -216,9 +214,9 @@ class RegisteredApps(unittest.TestCase):
         cls.jwks = json.loads(text)
 
     @classmethod
-    def tearDownClass(cls):
+    def clean_up(cls):
         # remove_app() revokes every approval of the app and ends every session it holds.
-        for app_id in getattr(cls, "ids", []):
+        for app_id in cls.ids:
             stack.request("/rest/v1/rpc/remove_app", method="POST", token=cls.admin_token, body={"p_client_id": app_id})
         if getattr(cls, "admin_token", None):
             stack.sign_out(cls.admin_token)

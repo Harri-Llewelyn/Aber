@@ -153,6 +153,9 @@ class GatewayEnrollmentBase(unittest.TestCase):
                     f"(found {found}) -- apply supabase/seed.sql first"
                 )
 
+            # Before the rows are made: a subclass's setUpClass can skip after this one returns, and
+            # Python then runs a class clean-up but not tearDownClass.
+            cls.addClassCleanup(cls.delete_gateways)
             # A REMOTE gateway and a HOST one, because the issuing RPC refuses the second and
             # that refusal is a property worth holding onto: a bundle for a host-run gateway would
             # mint a broker credential nothing could ever present.
@@ -171,7 +174,7 @@ class GatewayEnrollmentBase(unittest.TestCase):
             conn.close()
 
     @classmethod
-    def tearDownClass(cls):
+    def delete_gateways(cls):
         conn = get_connection()
         cur = conn.cursor()
         try:

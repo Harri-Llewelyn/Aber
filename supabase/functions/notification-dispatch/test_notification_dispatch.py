@@ -112,6 +112,9 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
         cls.saved_vault = {n: psql(f"SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = {literal(n)}") or None
                            for n in VAULT_NAMES}
 
+        # Class clean-ups, last first, which Python also runs when setUpClass raises: each is registered
+        # just before what it undoes.
+        cls.addClassCleanup(stack_exec.remove_probe, RECEIVER)
         started = stack_exec.run_probe(
             RECEIVER, stack_exec.default_probe_image(),
             "python -c \"import base64; exec(base64.b64decode('" + base64.b64encode(RECEIVER_PY.encode()).decode() + "'))\"",
@@ -125,6 +128,7 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
         # host allowed. Written as the owner, so through the vault's own functions.
         cls.key = "whsec_" + base64.b64encode(secrets.token_bytes(32)).decode()
         cls.url = f"http://{cls.receiver_ip}:{PORT}/hook/{uuid.uuid4().hex}"
+        cls.addClassCleanup(cls.put_back)
         cls.set_vault({"notification_webhook_url": cls.url, "notification_webhook_signing_key": cls.key})
         psql("UPDATE public.system_settings SET value = '\"warning\"' WHERE key = 'notifications.webhook_min_severity'")
         psql("UPDATE public.system_settings SET value = '12' WHERE key = 'notifications.reminder_hours'")
@@ -132,16 +136,13 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
              + "::jsonb WHERE key = 'notifications.webhook_allowed_hosts'")
 
     @classmethod
-    def tearDownClass(cls):
-        try:
-            psql(f"DELETE FROM public.platform_alerts WHERE fingerprint LIKE {literal(FINGERPRINT + '%')}")
-            for key, value in cls.saved_settings.items():
-                if value:
-                    psql(f"UPDATE public.system_settings SET value = {literal(value)}::jsonb WHERE key = {literal(key)}"
-                         f" AND value IS DISTINCT FROM {literal(value)}::jsonb")
-            cls.set_vault(cls.saved_vault)
-        finally:
-            stack_exec.remove_probe(RECEIVER)
+    def put_back(cls):
+        psql(f"DELETE FROM public.platform_alerts WHERE fingerprint LIKE {literal(FINGERPRINT + '%')}")
+        for key, value in cls.saved_settings.items():
+            if value:
+                psql(f"UPDATE public.system_settings SET value = {literal(value)}::jsonb WHERE key = {literal(key)}"
+                     f" AND value IS DISTINCT FROM {literal(value)}::jsonb")
+        cls.set_vault(cls.saved_vault)
 
     @classmethod
     def set_vault(cls, values):

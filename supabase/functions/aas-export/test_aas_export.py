@@ -1201,7 +1201,7 @@ class TestVisualRepresentation(unittest.TestCase):
     This attaches a real object to the real device and removes it again, rather than asserting
     against a fixture: the point is that Storage, the RLS policies, the column's CHECK and the
     exporter's URL composition all line up, and only an end-to-end attachment exercises that.
-    Scoped to this run's own artefact and cleaned up in tearDownClass, per the discipline
+    Scoped to this run's own artefact and removed in a class clean-up, per the discipline
     validate.py is held to.
     """
 
@@ -1214,6 +1214,7 @@ class TestVisualRepresentation(unittest.TestCase):
     def setUpClass(cls):
         cls.path = f"{DEVICE_ID}/{cls.MODEL_NAME}"
         cls.previous = None
+        cls.addClassCleanup(cls.detach)
 
         status, body = _storage_request(
             "POST", f"/object/{MODEL_BUCKET}/{cls.path}",
@@ -1258,7 +1259,7 @@ class TestVisualRepresentation(unittest.TestCase):
             cls.zip = zipfile.ZipFile(io.BytesIO(res.read()))
 
     @classmethod
-    def tearDownClass(cls):
+    def detach(cls):
         # Detach BEFORE deleting the object, the same order the UI uses: the reverse would leave
         # the row briefly pointing at nothing, and an export in that window publishes a dead link.
         try:
@@ -1679,13 +1680,28 @@ console.log(JSON.stringify({
         self.assertIn(["audit_domain", "asset"], filters)
 
 
+def remove_stored_bundle(bundle: dict) -> None:
+    """The stored copy a bundle's stats name, removed as the Administrator: the bucket's delete policy
+    admits that role alone."""
+    key, bucket = bundle.get("object_key"), bundle.get("bucket")
+    if not (bundle.get("stored") and key and bucket):
+        return
+    req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1/object/{bucket}/{key}", method="DELETE")
+    req.add_header("apikey", PUBLISHABLE_KEY)
+    req.add_header("Authorization", f"Bearer {TOKEN}")
+    try:
+        urllib.request.urlopen(req, timeout=30).read()
+    except urllib.error.URLError as err:  # pragma: no cover - reported, never silently skipped
+        print(f"[test_aas_export] bundle object {key} not removed: {err}")
+
+
 @unittest.skipUnless(LIVE, SKIP_REASON)
 class TestAssetBundle(unittest.TestCase):
     """
     `format=bundle` against the deployed function: the same AASX with the four supplementary parts,
     a stored copy in the cold tier's bucket, and a row in `asset_exports`.
 
-    The stored object is deleted on teardown, as the Administrator the suite signs in as (the
+    The stored object is deleted in a class clean-up, as the Administrator the suite signs in as (the
     bucket's delete policy admits that role alone). The `asset_exports` row cannot be: the table has
     no write policy for any role, by design, so a run leaves one row that names a device the fixture
     then deletes -- which is precisely the state the Archived Entities page's Retired tab exists to
@@ -1694,6 +1710,8 @@ class TestAssetBundle(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        cls.bundle = {}
+        cls.addClassCleanup(lambda: remove_stored_bundle(cls.bundle))
         req = urllib.request.Request(
             f"{SUPABASE_URL}/functions/v1/aas-export?format=bundle",
             data=json.dumps({"device_id": DEVICE_ID}).encode(),
@@ -1706,23 +1724,9 @@ class TestAssetBundle(unittest.TestCase):
             cls.status = res.status
             cls.headers = lower_headers(res.headers)
             cls.payload = res.read()
-        cls.zip = zipfile.ZipFile(io.BytesIO(cls.payload))
         cls.stats = json.loads(cls.headers.get("x-aas-stats", "{}"))
         cls.bundle = cls.stats.get("bundle", {})
-
-    @classmethod
-    def tearDownClass(cls):
-        key = cls.bundle.get("object_key")
-        bucket = cls.bundle.get("bucket")
-        if not (cls.bundle.get("stored") and key and bucket):
-            return
-        req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1/object/{bucket}/{key}", method="DELETE")
-        req.add_header("apikey", PUBLISHABLE_KEY)
-        req.add_header("Authorization", f"Bearer {TOKEN}")
-        try:
-            urllib.request.urlopen(req, timeout=30).read()
-        except urllib.error.URLError as err:  # pragma: no cover - reported, never silently skipped
-            print(f"[test_aas_export] bundle object {key} not removed: {err}")
+        cls.zip = zipfile.ZipFile(io.BytesIO(cls.payload))
 
     def rest_get(self, path: str):
         req = urllib.request.Request(f"{SUPABASE_URL}/rest/v1{path}")
@@ -1845,20 +1849,7 @@ class TestAssetBundleByRole(unittest.TestCase):
             raise unittest.SkipTest("the seeded manager and operator accounts could not sign in")
         cls.status, cls.payload, cls.headers = take_bundle(cls.manager)
         cls.bundle = json.loads(cls.headers.get("x-aas-stats", "{}")).get("bundle", {})
-
-    @classmethod
-    def tearDownClass(cls):
-        # As the Administrator: the bucket's delete policy admits that role alone.
-        key, bucket = cls.bundle.get("object_key"), cls.bundle.get("bucket")
-        if not (cls.bundle.get("stored") and key and bucket):
-            return
-        req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1/object/{bucket}/{key}", method="DELETE")
-        req.add_header("apikey", PUBLISHABLE_KEY)
-        req.add_header("Authorization", f"Bearer {TOKEN}")
-        try:
-            urllib.request.urlopen(req, timeout=30).read()
-        except urllib.error.URLError as err:  # pragma: no cover - reported, never silently skipped
-            print(f"[test_aas_export] bundle object {key} not removed: {err}")
+        cls.addClassCleanup(remove_stored_bundle, cls.bundle)
 
     def test_a_shopfloor_manager_takes_a_bundle_of_the_asset_lane(self):
         self.assertEqual(self.status, 200, self.payload[:300])

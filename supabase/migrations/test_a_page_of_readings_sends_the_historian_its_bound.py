@@ -78,7 +78,9 @@ class APageSendsItsBound(unittest.TestCase):
             raise unittest.SkipTest("DB_PASSWORD or SUPABASE_DB_PASSWORD is unset; run this through `npm run dev:test`.")
         try:
             cls.ts = connect(TS_HOST, TS_PORT, TS_NAME, TS_USER, TS_PASSWORD)
+            cls.addClassCleanup(cls.ts.close)
             cls.db = connect(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+            cls.addClassCleanup(cls.db.close)
         except psycopg2.OperationalError as err:
             raise unittest.SkipTest(f"a database is unreachable: {err}") from err
         with cls.db.cursor() as cur:
@@ -97,15 +99,8 @@ class APageSendsItsBound(unittest.TestCase):
                             "SET client_min_messages = notice;")
             except psycopg2.Error as err:
                 raise unittest.SkipTest(f"auto_explain cannot be set here: {err}") from err
+        cls.addClassCleanup(cls.remove)
         cls.plant()
-
-    @classmethod
-    def tearDownClass(cls):
-        if getattr(cls, "ts", None) is not None:
-            cls.remove()
-            cls.ts.close()
-        if getattr(cls, "db", None) is not None:
-            cls.db.close()
 
     # ---- the device's readings -----------------------------------------------------------------
     @classmethod
