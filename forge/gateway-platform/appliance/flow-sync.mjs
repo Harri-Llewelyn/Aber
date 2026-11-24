@@ -59,6 +59,9 @@ const MARKER = join(DATA_DIR, '.enrolled.json');
 /** The one file a gateway repository holds. Must agree with FLOW_PATH in _shared/forge.ts. */
 const FLOW_FILE = 'flows.json';
 
+/** The branch an Administrator approves, and the only one deployed. Must agree with MAIN_BRANCH in _shared/forge.ts. */
+const TRACKED_BRANCH = 'main';
+
 /** The branch this appliance reports on. Must agree with APPLIANCE_BRANCH in _shared/forge.ts. */
 const REPORT_BRANCH = 'appliance';
 /** A second checkout for the report branch, so the puller's is never dirtied. */
@@ -182,16 +185,26 @@ function fetchBranch(branch) {
   return { local, remote };
 }
 
-/** Make the checkout on the first run, and fetch into it. Returns the revision now checked out. */
+/**
+ * Make the checkout on the first run, and fetch into it. Returns the revision now checked out. An
+ * enrolment before 1.9.1 recorded the repository's default branch, which is not followed: the
+ * approval is a rule on `main`.
+ */
 function syncCheckout(repository) {
-  const branch = repository.branch || 'main';
+  if (repository.branch && repository.branch !== TRACKED_BRANCH) {
+    throw new Error(
+      `REFUSING TO SYNC: ${REPOSITORY} names the branch '${repository.branch}', and an approval covers `
+      + `'${TRACKED_BRANCH}' alone. This appliance goes on running what it has. Put what it should run on `
+      + `'${TRACKED_BRANCH}' and set the gateway up again.`,
+    );
+  }
 
   if (!existsSync(join(CHECKOUT, '.git'))) {
-    log(`cloning ${repository.ssh_url} (${branch})`);
+    log(`cloning ${repository.ssh_url} (${TRACKED_BRANCH})`);
     newCheckout(repository.ssh_url, CHECKOUT);
   }
 
-  const { remote } = fetchBranch(branch);
+  const { remote } = fetchBranch(TRACKED_BRANCH);
   return remote;
 }
 
@@ -445,7 +458,7 @@ async function syncOnce() {
     DEPLOYED,
     JSON.stringify({
       revision,
-      branch: repository.branch || 'main',
+      branch: TRACKED_BRANCH,
       flow_sha256: sha256(text),
       deployed_at: new Date().toISOString(),
       source: 'flow-sync',
@@ -473,7 +486,6 @@ function reportContent() {
  * files, never the other way round.
  */
 function prepareReportCheckout(repository) {
-  const tracked = repository.branch || 'main';
   if (!existsSync(join(REPORT_CHECKOUT, '.git'))) {
     log(`cloning ${repository.ssh_url} again for the '${REPORT_BRANCH}' branch`);
     newCheckout(repository.ssh_url, REPORT_CHECKOUT);
@@ -489,7 +501,7 @@ function prepareReportCheckout(repository) {
     git(['checkout', '--quiet', '--force', '-B', REPORT_BRANCH, remoteHead], REPORT_CHECKOUT);
     return remoteHead;
   }
-  git(['fetch', '--quiet', '--no-tags', 'origin', branchRef(tracked)], REPORT_CHECKOUT);
+  git(['fetch', '--quiet', '--no-tags', 'origin', branchRef(TRACKED_BRANCH)], REPORT_CHECKOUT);
   const root = git(['rev-list', '--max-parents=0', 'FETCH_HEAD'], REPORT_CHECKOUT).split('\n')[0];
   git(['checkout', '--quiet', '--force', '-B', REPORT_BRANCH, root], REPORT_CHECKOUT);
   return null;

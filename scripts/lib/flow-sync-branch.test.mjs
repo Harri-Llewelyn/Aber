@@ -98,11 +98,11 @@ function forge(name) {
 }
 
 /** An enrolled appliance's /data, as bootstrap.mjs leaves it, on the platform flow. */
-function appliance(name, repository) {
+function appliance(name, repository, branch = 'main') {
   const data = `${root}/${name}`;
   mkdirSync(`${data}/gitops`, { recursive: true });
   writeFileSync(`${data}/flows.json`, flow('enrolment'));
-  writeFileSync(`${data}/gitops/repository.json`, JSON.stringify({ ssh_url: repository.bare, branch: 'main' }));
+  writeFileSync(`${data}/gitops/repository.json`, JSON.stringify({ ssh_url: repository.bare, branch }));
   writeFileSync(`${data}/gitops/known_hosts`, 'forge ssh-ed25519 AAAA\n');
   writeFileSync(`${data}/gitops/id_ed25519`, 'not a real key\n');
   writeFileSync(`${data}/gitops/nodered.json`, JSON.stringify({ username: 'sync', password: 'not-a-real-key' }));
@@ -196,4 +196,26 @@ test('an appliance that already followed such a tag refuses the branch until its
   const { said } = await box.pass();
   assert.equal(box.running(), flow('approved-1'), said);
   assert.equal(box.head(), repository.ref('refs/heads/main'));
+});
+
+test('an appliance told another branch refuses it, and reports what it goes on running', { skip: SKIP }, async () => {
+  const repository = forge('told');
+  const trunk = repository.plant('told', { 'flows.json': flow('on-trunk') });
+  git(repository.bare, 'update-ref', 'refs/heads/trunk', trunk);
+  git(repository.bare, 'update-ref', '-d', 'refs/tags/told');
+  const box = appliance('told-data', repository, 'trunk');
+  const { said } = await box.pass();
+  assert.match(said, /REFUSING TO SYNC: .* names the branch 'trunk'/);
+  assert.equal(box.running(), flow('enrolment'));
+  assert.equal(existsSync(box.checkout), false);
+  const report = repository.ref('refs/heads/appliance');
+  assert.ok(report, said);
+  assert.equal(git(repository.bare, 'show', `${report}:flows.json`), flow('enrolment').trim());
+});
+
+test('an appliance told no branch deploys main', { skip: SKIP }, async () => {
+  const repository = forge('untold');
+  const box = appliance('untold-data', repository, null);
+  const { said } = await box.pass();
+  assert.equal(box.running(), flow('approved-1'), said);
 });

@@ -34,6 +34,7 @@ import {
   FORGE_ORGANISATION,
   forgeConfig,
   GATEWAY_REPOSITORY,
+  MAIN_BRANCH,
   postCommitStatus,
 } from "../_shared/forge.ts";
 
@@ -58,7 +59,7 @@ interface PushPayload {
   ref?: string;
   before?: string;
   after?: string;
-  repository?: { name?: string; default_branch?: string; owner?: { login?: string } };
+  repository?: { name?: string; owner?: { login?: string } };
   head_commit?: Commit | null;
   commits?: Commit[];
   pusher?: { login?: string; email?: string; full_name?: string };
@@ -296,7 +297,7 @@ export default async function handler(req: Request): Promise<Response> {
   if (!named) return json({ ignored: `repository '${repository}' is not a gateway's` }, 200);
   const sparkplugId = named[1];
 
-  const tracked = `refs/heads/${payload.repository?.default_branch || "main"}`;
+  const tracked = `refs/heads/${MAIN_BRANCH}`;
   const reported = `refs/heads/${APPLIANCE_BRANCH}`;
   const branch = payload.ref === tracked ? "main" : payload.ref === reported ? APPLIANCE_BRANCH : null;
 
