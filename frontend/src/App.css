@@ -7958,10 +7958,17 @@ pre.gateway-code {
 pre.gateway-code-wrap { white-space: pre-wrap; }
 
 /* A command to run on an appliance, in a drawer (ApplianceCommand). Under a row's value or as it; the
-   row's tone stays on its value. */
+   row's tone stays on its value. A drawer is too narrow for a line of one, so it wraps between words,
+   and inside one only where a word is longer than the block. */
 .appliance-command { color: var(--text-primary); }
 .appliance-command > .context-field-label { margin-top: 8px; }
-.appliance-command > pre.gateway-code { margin: 4px 0 6px; padding: 8px; font-size: 11px; }
+.appliance-command > pre.gateway-code {
+  margin: 4px 0 6px;
+  padding: 8px;
+  font-size: 11px;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
 .appliance-command-help { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
 .appliance-command-help:hover,
 .appliance-command-help:focus-visible { text-decoration: underline; }
