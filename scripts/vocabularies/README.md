@@ -122,13 +122,13 @@ use. IDTA never changes a released file, and publishes a correction as a new fol
 1. Download its JSON from the repository at a commit you record here, and read the repository's licence
    at that commit.
 2. Read its ConceptDescriptions. If one carries another body's text (VDI, ISO, DIN), stop and settle
-   the licence first: `--vendor` only knows IEC CDD and ECLASS.
+   the licence first: `--vendor` only knows the ids IEC CDD and ECLASS issue.
 3. Write the copy to keep: `node scripts/generate-idta-template.mjs --vendor <downloaded.json> scripts/vocabularies/idta-<number>-<name>.json`.
    It prints both SHA-256s.
 4. Add its line to `TEMPLATES` in `scripts/lib/idta-template.mjs`. If the last block there is released, add
    a block for the migration that seeds the template, and the marker pair in it.
-5. Run `node scripts/generate-idta-template.mjs` and review the rows. A model type, a cardinality or an id
-   the reader does not know stops it.
+5. Run `node scripts/generate-idta-template.mjs` and review the rows. A model type, a qualifier, a
+   cardinality or an id the reader does not know stops it. Decide what it means, and teach the reader.
 6. Add its column above, and update `docs/vocabularies.md` and `NOTICE.md`.
 
 **Moving to a newer release of a template already seeded** is not built: the generator refuses two lines

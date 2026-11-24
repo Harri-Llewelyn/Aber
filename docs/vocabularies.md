@@ -462,8 +462,8 @@ of each. A submodel that names the template's id claims to hold them. Built as m
   `Markings[0].MarkingName`, so an idShort that repeats in two collections is two rows. `parent_path` and
   `ordinal` give the tree: read by `ordinal`, each element follows its parent.
 - **Another template is a file plus one line.** The file goes in `scripts/vocabularies/`, and the line in
-  `TEMPLATES` (`scripts/lib/idta-template.mjs`). The generator stops at a model type, a cardinality or an id
-  it does not know, rather than dropping the element. A block is written only while its migration is
+  `TEMPLATES` (`scripts/lib/idta-template.mjs`). The generator stops at a model type, a qualifier, a
+  cardinality or an id it does not know, rather than dropping it. A block is written only while its migration is
   unreleased, as the OPC UA blocks are, so the next template goes in a block of the migration that adds it.
 - **A table of its own, beside `idta_submodel_templates`.** The older table is released, and its key,
   `(template_id, id_short)`, cannot hold a nested element. Its 20 rows stay exactly as they are, with their

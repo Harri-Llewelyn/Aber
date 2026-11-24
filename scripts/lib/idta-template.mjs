@@ -57,14 +57,20 @@ export const MODEL_TYPES = [
 /** How many of an element its parent may hold, as a template's cardinality qualifier says it. */
 export const CARDINALITIES = ['One', 'ZeroToOne', 'ZeroToMany', 'OneToMany'];
 
-/** The qualifier types templates name it by: `SMT/Cardinality` now, `Cardinality` in older files. */
-const CARDINALITY_QUALIFIERS = ['SMT/Cardinality', 'Cardinality'];
+/** The qualifier types templates name it by: `SMT/Cardinality` now, the others in older files. */
+const CARDINALITY_QUALIFIERS = ['SMT/Cardinality', 'Cardinality', 'Multiplicity'];
+
+/** A qualifier whose text is part of what the template says of the element. */
+const CONSTRAINT_QUALIFIER = 'Constraint';
+
+/** Qualifiers left out: a rule for filling in further ids, and a remark to the template's own authors. */
+const UNREAD_QUALIFIERS = ['Select', 'Comment'];
 
 /** What the AASX Package Explorer writes where nobody wrote a definition. */
 const EMPTY_TEXT = 'EMPTY';
 
-/** An identifier IEC CDD (0112) or ECLASS (0173) issued, alone or first of a pair. */
-const isDictionaryId = (id) => id.startsWith('0112/') || id.startsWith('0173-');
+/** An identifier IEC CDD (0112) or ECLASS (0173) issued: an IRDI, or a web address that ends in one. */
+const isDictionaryId = (id) => id.split('/').some((part, at, parts) => part.startsWith('0173-') || (part === '0112' && at < parts.length - 1));
 
 const ID_SHORT = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
@@ -114,18 +120,18 @@ export function withoutDictionaryText(environment) {
   return { ...environment, conceptDescriptions: (environment.conceptDescriptions ?? []).filter((concept) => !issued.has(concept)) };
 }
 
+/** JSON with two spaces, which is how IDTA's newer files are written. */
+const written = (environment) => JSON.stringify(environment, null, 2);
+
 /**
- * The bytes to vendor for a template's downloaded text. A file with no dictionary text is kept byte
- * for byte. Otherwise it is written again as upstream writes it, in JSON with two spaces, so its
- * diff against upstream is the ConceptDescriptions that were taken out and nothing else.
+ * The text to vendor for a template's downloaded one. A file with no dictionary text is kept byte for
+ * byte. Otherwise it is written again without it. `reformatted` says that upstream's layout is not this
+ * one, so the copy's diff against upstream is more than the ConceptDescriptions that were taken out.
  */
 export function vendoredText(text) {
   const environment = JSON.parse(text);
-  if (dictionaryConcepts(environment).length === 0) return text;
-  if (JSON.stringify(environment, null, 2) !== text) {
-    throw new Error('the file is not JSON with two spaces, so writing it again would change more than was taken out');
-  }
-  return JSON.stringify(withoutDictionaryText(environment), null, 2);
+  if (dictionaryConcepts(environment).length === 0) return { text, reformatted: false };
+  return { text: written(withoutDictionaryText(environment)), reformatted: written(environment) !== text };
 }
 
 /** The elements inside one, by its type. A type that nests in a way this does not read stops the build. */
@@ -194,6 +200,9 @@ function exampleOf(element) {
 }
 
 function cardinalityOf(element, path) {
+  const known = [...CARDINALITY_QUALIFIERS, CONSTRAINT_QUALIFIER, ...UNREAD_QUALIFIERS];
+  const unknown = (element.qualifiers ?? []).find(({ type }) => !known.includes(type));
+  if (unknown) throw new Error(`${path}: the qualifier ${JSON.stringify(unknown.type)} is not read`);
   const stated = (element.qualifiers ?? []).filter(({ type }) => CARDINALITY_QUALIFIERS.includes(type));
   if (stated.length === 0) return null;
   if (stated.length > 1) throw new Error(`${path}: ${stated.length} cardinalities`);
@@ -255,7 +264,7 @@ export function templateRows(environment, { samples = [] } = {}) {
     const semanticId = globalReference(element.semanticId, path);
     const description = said(element.description);
     const concept = semanticId === null ? null : defined.get(semanticId) ?? null;
-    const constraints = (element.qualifiers ?? []).filter(({ type }) => type === 'Constraint').map(({ value }) => collapse(value ?? ''));
+    const constraints = (element.qualifiers ?? []).filter(({ type }) => type === CONSTRAINT_QUALIFIER).map(({ value }) => collapse(value ?? ''));
     rows.push({
       path,
       parent_path: parent?.path ?? null,

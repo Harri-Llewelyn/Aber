@@ -12,7 +12,7 @@
  *
  * `--vendor` writes the copy to keep from a file downloaded from that repository. It leaves out the
  * ConceptDescriptions whose text an IEC CDD or ECLASS dictionary issued, and prints both SHA-256s for
- * the README and TEMPLATES. Nothing else of the file changes.
+ * the README and TEMPLATES. Nothing else of the file changes but, where it says so, its layout.
  *
  * How a template is read is scripts/lib/idta-template.mjs. Each block is in the migration that seeds it
  * (0320 for the first two, never 0002, which is released). It is written only while that migration is
@@ -34,10 +34,10 @@ const [flag, from, to] = process.argv.slice(2);
 if (flag === '--vendor') {
   if (!from || !to) throw new Error('--vendor takes the downloaded file and the file to write');
   const source = readFileSync(resolve(from), 'utf8');
-  const kept = vendoredText(source);
+  const { text: kept, reformatted } = vendoredText(source);
   writeFileSync(resolve(to), kept, 'utf8');
   console.log(`${from}\n  sha256:${sha256(source)} (${Buffer.byteLength(source)} bytes), ${dictionaryConcepts(JSON.parse(source)).length} ConceptDescriptions with IEC CDD or ECLASS text`);
-  console.log(`${to}\n  sha256:${sha256(kept)} (${Buffer.byteLength(kept)} bytes), ${source === kept ? 'byte for byte the same' : 'those left out'}`);
+  console.log(`${to}\n  sha256:${sha256(kept)} (${Buffer.byteLength(kept)} bytes), ${source === kept ? 'byte for byte the same' : `those left out${reformatted ? ', and the JSON laid out again' : ''}`}`);
   process.exit(0);
 }
 if (flag) throw new Error(`unknown argument ${flag}`);

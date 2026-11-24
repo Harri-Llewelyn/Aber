@@ -118,6 +118,9 @@ test('a cardinality is read under either name it has gone by, and none is null',
   assert.equal(rows['Parts[0]'].cardinality, 'ZeroToMany');
   assert.equal(rows.Parts.cardinality, 'ZeroToOne');
   assert.equal(rows['Maker.Note'].cardinality, null);
+  const older = clone(SYNTHETIC);
+  older.submodels[0].submodelElements[0].qualifiers = [cardinality('ZeroToMany', 'Multiplicity')];
+  assert.equal(byPath(templateRows(older)).Maker.cardinality, 'ZeroToMany');
 });
 
 test('a text in several languages gives its English, on one line, and one with none gives nothing', () => {
@@ -160,6 +163,7 @@ test('what it does not read stops the build rather than being dropped', () => {
     ['a repeated path', withElement(element({ idShort: 'Maker' })), /Maker: two elements have this path/],
     ['an unknown model type', withElement(element({ modelType: 'Widget' })), /model type "Widget" is not read/],
     ['a cardinality of its own', withElement(element({ qualifiers: [cardinality('Some')] })), /cardinality "Some"/],
+    ['a qualifier nobody has decided on', withElement(element({ qualifiers: [{ type: 'ExampleValue', value: 'x' }] })), /qualifier "ExampleValue" is not read/],
     ['two cardinalities', withElement(element({ qualifiers: [cardinality('One'), cardinality('One', 'Cardinality')] })), /2 cardinalities/],
     ['a model reference', withElement(element({ semanticId: { type: 'ModelReference', keys: [{ type: 'ConceptDescription', value: 'x' }] } })), /not one GlobalReference/],
     ['a reference of two keys', withElement(element({ semanticId: { type: 'ExternalReference', keys: [...reference('https://a.test').keys, ...reference('https://b.test').keys] } })), /not one GlobalReference/],
@@ -185,24 +189,26 @@ const CARRYING = {
     concept('0112/2///61987#ABA565#009', [{ language: 'en', text: 'an IEC CDD text' }]),
     concept('0173-1#02-AAO677#004', [{ language: 'en', text: 'an ECLASS text' }]),
     concept('https://example.test/Case', [{ language: 'en', text: 'a text for an ECLASS concept' }], { isCaseOf: [reference('0173-1#02-AAQ837#005')] }),
+    concept('https://api.example.test/0173-1-02-ABI002-003', [{ language: 'en', text: 'an ECLASS text by its web address' }]),
+    concept('https://cdd.example.test/0112/2///61987%23ABA565', [{ language: 'en', text: 'an IEC CDD text by its web address' }]),
   ],
 };
 
 test('a file that carries an IEC CDD or ECLASS text is refused, and the vendored one carries none', () => {
-  assert.equal(dictionaryConcepts(CARRYING).length, 3);
-  assert.throws(() => templateRows(clone(CARRYING)), /text of 3 IEC CDD or ECLASS concept\(s\), such as 0112/);
+  assert.equal(dictionaryConcepts(CARRYING).length, 5);
+  assert.throws(() => templateRows(clone(CARRYING)), /text of 5 IEC CDD or ECLASS concept\(s\), such as 0112/);
   const kept = withoutDictionaryText(clone(CARRYING));
   assert.deepEqual(kept.conceptDescriptions.map(({ id }) => id), SYNTHETIC.conceptDescriptions.map(({ id }) => id));
   assert.deepEqual(kept.submodels, CARRYING.submodels, 'nothing else changes: the elements keep their IRDIs');
   assert.doesNotThrow(() => templateRows(kept));
 });
 
-test('vendoring keeps a clean file byte for byte, and refuses to reformat one', () => {
+test('vendoring keeps a clean file byte for byte, and says when it lays one out again', () => {
   const odd = JSON.stringify(SYNTHETIC);
-  assert.equal(vendoredText(odd), odd);
-  const text = JSON.stringify(CARRYING, null, 2);
-  assert.equal(vendoredText(text), JSON.stringify(withoutDictionaryText(clone(CARRYING)), null, 2));
-  assert.throws(() => vendoredText(JSON.stringify(CARRYING)), /not JSON with two spaces/);
+  assert.deepEqual(vendoredText(odd), { text: odd, reformatted: false });
+  const kept = JSON.stringify(withoutDictionaryText(clone(CARRYING)), null, 2);
+  assert.deepEqual(vendoredText(JSON.stringify(CARRYING, null, 2)), { text: kept, reformatted: false });
+  assert.deepEqual(vendoredText(JSON.stringify(CARRYING)), { text: kept, reformatted: true });
 });
 
 // ---------------------------------------------------------------------------------------------
