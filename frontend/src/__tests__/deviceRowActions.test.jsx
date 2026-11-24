@@ -80,9 +80,9 @@ describe('device row actions', () => {
     await show([device()])
 
     expect(inRow().queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
-    // Readings are not a row control: the panel's View History opens the device's charts.
+    // Readings are not a row control: the panel's View in History opens the device's charts.
     expect(inRow().queryByText('Telemetry')).not.toBeInTheDocument()
-    expect(openPanel().getByText('View History')).toBeInTheDocument()
+    expect(openPanel().getByText('View in History')).toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Config/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /Audit Trail/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
@@ -95,7 +95,7 @@ describe('device row actions', () => {
     const labels = panelLabels()
     for (const expected of [/Audit Trail/i, /Configuration Parameters/i,
       /Export…/, /Archive Device/i,
-      /Digital Nameplate/i, /View History/i, /Edit Details/i]) {
+      /Digital Nameplate/i, /View in History/i, /Edit Details/i]) {
       expect(labels).toMatch(expected)
     }
     // History shows each metric's latest reading and exports them, so the panel has no View Telemetry.
@@ -240,12 +240,12 @@ describe('device 3D model action', () => {
     expect(within(dialog()).queryByText(/Drop a 3D model here/i)).toBeNull()
   })
 
-  it('sits right after View History', async () => {
+  it('sits right after View in History', async () => {
     await show([device()])
     openPanel()
 
     const labels = actionButtons().map(b => b.textContent.trim())
-    expect(labels.indexOf('Add 3D Model…')).toBe(labels.indexOf('View History') + 1)
+    expect(labels.indexOf('Add 3D Model…')).toBe(labels.indexOf('View in History') + 1)
   })
 
   it('is one action and nothing else: the drawer has no 3D section, viewer or drop zone', async () => {

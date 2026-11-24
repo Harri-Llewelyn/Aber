@@ -213,8 +213,7 @@ describe('alerting device chip', () => {
     const el = await chip()
     // Both halves: the colour the legend promises, and a mark that survives without it.
     expect(el).toHaveTextContent('WARNING')
-    expect(screen.getByText(/Alerts firing \(1\)/)).toBeInTheDocument()
-    expect(screen.getByText('Thermal Excursion')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Warnings' })).getByText('Alert firing: Thermal Excursion')).toBeInTheDocument()
   })
 
   it('flags a critical alert as ALARM, matching the Devices page', async () => {
@@ -231,7 +230,7 @@ describe('alerting device chip', () => {
     expect(el).toHaveTextContent('ACKNOWLEDGED')
     expect(el).not.toHaveTextContent(/ALARM|WARNING/)
     expect(el.querySelector('.badge-dot').style.background).toBe('transparent')
-    expect(screen.getByText(/Alerts firing \(1\)/).closest('.context-field, div').parentElement).toHaveTextContent(/acknowledged/)
+    expect(within(screen.getByRole('list', { name: 'Warnings' })).getByText('Alert acknowledged: Thermal Excursion')).toBeInTheDocument()
   })
 
   // Archived wins: the device is out of service, so the cell neither lists it nor relays its alert.
@@ -244,7 +243,7 @@ describe('alerting device chip', () => {
     fireEvent.click(await pin())
     await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
     expect(screen.queryByText('Simulated_CNC_01')).toBeNull()
-    expect(screen.queryByText(/Alerts firing/)).toBeNull()
+    expect(screen.queryByText(/Alert firing: /)).toBeNull()
   })
 })
 

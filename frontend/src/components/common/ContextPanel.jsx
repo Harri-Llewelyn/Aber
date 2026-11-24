@@ -56,7 +56,7 @@ export const HelpDrawerContext = createContext(null)
  * under the alert and above the fields, `danger` before `warning`. `text` is the whole sentence; a
  * row it explains may keep a short mark of its own. A falsy entry is left out.
  *
- * @param {object} recordId { label, value }: the record's own id, the first field, monospace and
+ * @param {object} recordId { label, value, help? }: the record's own id, the first field, monospace and
  * copied on a click. Labelled `<Kind> UUID` for a uuid and `<Kind> ID` otherwise. Every drawer about
  * a record passes one (drawerOrder.test.jsx lists those that are not about a record).
  *
@@ -125,8 +125,8 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, al
   const shownWarnings = warnings.filter(Boolean)
   // The record's id, then its description, then the rest: one order for every drawer.
   const orderedFields = [
-    ...(recordId ? [{ label: recordId.label, value: recordId.value, mono: true, copyable: true }] : []),
-    ...(description ? [{ label: 'Description', value: description.value, help: description.help, full: true }] : []),
+    ...(recordId ? [{ ...recordId, mono: true, copyable: true }] : []),
+    ...(description ? [{ ...description, label: 'Description', full: true }] : []),
     ...fields,
   ]
 

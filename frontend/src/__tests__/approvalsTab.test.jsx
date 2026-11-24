@@ -766,7 +766,7 @@ describe('a machine proposer is named, and marked as a machine', () => {
 
 describe('arriving from another page', () => {
   it('points the queue at one device when that is what was asked for', async () => {
-    // The device drawer's "N changes awaiting decision" sends the machine's uuid, which matches
+    // The device drawer's "View in Approvals (N)" sends the machine's uuid, which matches
     // nothing a person would type and exactly the rows that drawer was talking about.
     mockLoad([
       deviceProposal({ id: 'open-1', entity_id: 'dev-1', target_label: 'Lathe_01' }),

@@ -1,5 +1,5 @@
 /**
- * The Metrics page's drawer says View History on every tab it opens one on (Metric Catalog, Derived and
+ * The Metrics page's drawer says View in History on every tab it opens one on (Metric Catalog, Derived and
  * Deprecated Metrics), as the Devices, Cells and Areas drawers do: an ordinary link to the History page's
  * Metric tab with that metric chosen, shown to every role. The Metric tab reads the metric from that
  * address. uPlot draws on a canvas jsdom does not have, so a stand-in is mounted.
@@ -107,7 +107,7 @@ afterEach(() => {
   window.history.pushState({}, '', '/')
 })
 
-describe("the Metrics page's drawer: View History", () => {
+describe("the Metrics page's drawer: View in History", () => {
   it('builds the Metric tab path, the metric one encoded segment, as the tab builds its own', () => {
     expect(metricHistoryUrl('Spindle/LOAD')).toBe('/history/metric/Spindle%2FLOAD')
     expect(metricHistoryUrl('Spindle/LOAD')).toBe(metricHistoryPath('Spindle/LOAD'))
@@ -116,41 +116,41 @@ describe("the Metrics page's drawer: View History", () => {
 
   it('is on the Metric Catalog drawer, a link to the Metric tab on that metric', async () => {
     const panel = await openDrawer({ name: 'Spindle/LOAD' })
-    expect(panel.getByRole('link', { name: /View History/ })).toHaveAttribute('href', '/history/metric/Spindle%2FLOAD')
+    expect(panel.getByRole('link', { name: /View in History/ })).toHaveAttribute('href', '/history/metric/Spindle%2FLOAD')
   })
 
   it('is on the Derived drawer, with no special case for a derived metric', async () => {
     const panel = await openDrawer({ tab: 'Derived', name: 'Spindle/LOAD_PER_HOUR' })
-    expect(panel.getByRole('link', { name: /View History/ })).toHaveAttribute('href', '/history/metric/Spindle%2FLOAD_PER_HOUR')
+    expect(panel.getByRole('link', { name: /View in History/ })).toHaveAttribute('href', '/history/metric/Spindle%2FLOAD_PER_HOUR')
   })
 
   it('is on the Deprecated Metrics drawer', async () => {
     const panel = await openDrawer({ tab: 'Deprecated Metrics', name: 'Power/OLD_METER' })
-    expect(panel.getByRole('link', { name: /View History/ })).toHaveAttribute('href', '/history/metric/Power%2FOLD_METER')
+    expect(panel.getByRole('link', { name: /View in History/ })).toHaveAttribute('href', '/history/metric/Power%2FOLD_METER')
   })
 
-  it('sits before View Audit Trail, as the Cells and Areas drawers place it', async () => {
+  it('sits before View in Audit Trail, as the Cells and Areas drawers place it', async () => {
     const panel = await openDrawer({ name: 'Spindle/LOAD' })
     const links = panel.getAllByRole('link').map(l => l.textContent.trim())
-    expect(links.findIndex(t => /View History/.test(t))).toBeGreaterThanOrEqual(0)
-    expect(links.findIndex(t => /View History/.test(t))).toBeLessThan(links.findIndex(t => /View Audit Trail/.test(t)))
+    expect(links.findIndex(t => /View in History/.test(t))).toBeGreaterThanOrEqual(0)
+    expect(links.findIndex(t => /View in History/.test(t))).toBeLessThan(links.findIndex(t => /View in Audit Trail/.test(t)))
   })
 
   it('is shown to a reader who cannot open the Audit Trail', async () => {
     const panel = await openDrawer({ name: 'Spindle/LOAD', hasPermission: (p) => p !== PERMISSION_UUIDS.AUDIT_TRAIL_READ })
-    expect(panel.queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
-    expect(panel.getByRole('link', { name: /View History/ })).toHaveAttribute('href', '/history/metric/Spindle%2FLOAD')
+    expect(panel.queryByRole('link', { name: /View in Audit Trail/ })).toBeNull()
+    expect(panel.getByRole('link', { name: /View in History/ })).toHaveAttribute('href', '/history/metric/Spindle%2FLOAD')
   })
 
   it('is shown to a reader who holds no permission at all, whose Deprecate is off', async () => {
     const panel = await openDrawer({ name: 'Spindle/LOAD', hasPermission: () => false })
-    expect(panel.getByRole('link', { name: /View History/ })).toHaveAttribute('href', '/history/metric/Spindle%2FLOAD')
+    expect(panel.getByRole('link', { name: /View in History/ })).toHaveAttribute('href', '/history/metric/Spindle%2FLOAD')
     expect(panel.getByRole('button', { name: 'Deprecate' })).toBeDisabled()
   })
 
   it('opens the History page on that metric when it is followed', async () => {
     const panel = await openDrawer({ name: 'Spindle/LOAD' })
-    fireEvent.click(panel.getByRole('link', { name: /View History/ }))
+    fireEvent.click(panel.getByRole('link', { name: /View in History/ }))
     expect(window.location.pathname).toBe('/history/metric/Spindle%2FLOAD')
   })
 })
@@ -159,7 +159,7 @@ describe('the Metric tab at that address', () => {
   it('opens on the metric the drawer named, and reads it across the devices that report it', async () => {
     // The address the drawer gives, followed as a link, then the page that answers to it.
     const panel = await openDrawer({ name: 'Spindle/LOAD' })
-    const href = panel.getByRole('link', { name: /View History/ }).getAttribute('href')
+    const href = panel.getByRole('link', { name: /View in History/ }).getAttribute('href')
     cleanup()
     window.history.pushState({}, '', href)
     render(<HistoryTab showToast={vi.fn()} userRole="Operator" />)

@@ -717,7 +717,7 @@ describe('Tables shed what the panel now carries', () => {
     expect(onSelectGateway).toHaveBeenCalledWith('gw-1')
   })
 
-  it('keeps readings out of the narrow panel: View History opens the device on the History page', async () => {
+  it('keeps readings out of the narrow panel: View in History opens the device on the History page', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
@@ -734,7 +734,7 @@ describe('Tables shed what the panel now carries', () => {
     expect(within(panel()).queryByText('Attached Document Links')).toBeNull()
     expect(within(panel()).queryByRole('table')).toBeNull()
     expect(within(panel()).queryByText('View Telemetry')).toBeNull()
-    expect(within(panel()).getByRole('link', { name: /View History/ }).getAttribute('href')).toMatch(/^\/history\/device\//)
+    expect(within(panel()).getByRole('link', { name: /View in History/ }).getAttribute('href')).toMatch(/^\/history\/device\//)
   })
 
   it('answers WHICH devices a gateway carries, which the row can only count', async () => {
@@ -768,7 +768,7 @@ describe('Tables shed what the panel now carries', () => {
     const p = within(panel())
     expect(p.getByText('Edit Details')).toBeTruthy()
     expect(p.getByText('Attached Links')).toBeTruthy()
-    expect(p.getByText('View Audit Trail')).toBeTruthy()
+    expect(p.getByText('View in Audit Trail')).toBeTruthy()
     expect(p.getByText(/Archive Cell/i)).toBeTruthy()
     // The accordion is gone from the drawer too -- it was a cramped list in a 360px column, and
     // Attached Links opens the full editor.
@@ -787,7 +787,7 @@ describe('The panel is the single home for entity actions', () => {
     expect(headers).not.toContain('Actions')
 
     const p = within(panel_after(() => fireEvent.click(list().getByText('Host_Gateway_NodeRED'))))
-    for (const label of ['Edit Details', 'View Audit Trail', 'Attached Links']) {
+    for (const label of ['Edit Details', 'View in Audit Trail', 'Attached Links']) {
       expect(p.getByText(label)).toBeTruthy()
     }
     expect(p.getByText(/Archive Gateway/i)).toBeTruthy()
@@ -827,7 +827,7 @@ describe('The panel is the single home for entity actions', () => {
     expect(archive.className).toMatch(/context-action-danger/)
   })
 
-  /* jsdom does no layout, so the guard is on the rules. View Audit Trail is an <a> and the actions
+  /* jsdom does no layout, so the guard is on the rules. View in Audit Trail is an <a> and the actions
      around it are <button>s; Edit Details is a primary and the rest are ghosts. */
   it('draws every action one height, whatever its element and its variant', () => {
     const btn = APP_CSS.match(/\n\.btn \{([\s\S]*?)\n\}/)[1]
@@ -1123,11 +1123,11 @@ describe('Context panel layout invariants', () => {
     const fields = panel().querySelectorAll('.context-panel-body > dl')
     expect(fields).toHaveLength(1)
     expect([...fields[0].querySelectorAll('dt')].map(dt => dt.textContent)).toEqual([
-      'Device UUID', 'Sparkplug Device ID', 'Sparkplug Topic Path',
-      'Serving Gateway', 'Location', 'Unified Namespace Topic', 'Schema', 'Metric groups', 'Description'
+      'Device UUID', 'Description', 'Sparkplug Device ID', 'Sparkplug Topic Path',
+      'Serving Gateway', 'Location', 'Unified Namespace Topic', 'Schema', 'Metric groups'
     ])
 
-    // Nothing between the fields and the actions, and nothing of the model in the drawer.
+    // No facts, and nothing of the model in the drawer.
     expect(panel().querySelector('.context-panel-facts')).toBeNull()
     expect(within(panel()).queryByText('3D Model')).toBeNull()
     expect(within(panel()).queryByTestId('model-3d-input')).toBeNull()
@@ -1136,7 +1136,7 @@ describe('Context panel layout invariants', () => {
     expect(fields[0].compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(actions).getByRole('button', { name: /3D Model/ })).toBeInTheDocument()
 
-    // After the actions is one tool, the Suppression windows, whose height is not known.
+    // One tool, the Suppression windows, between the fields and the actions.
     const tools = panel().querySelector('.context-panel-extras')
     expect([...tools.children].map(c => c.className)).toEqual(['suppression-windows'])
   })

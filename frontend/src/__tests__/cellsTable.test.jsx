@@ -333,17 +333,17 @@ describe('the row and its drawer', () => {
     )
   })
 
-  it('offers Archive Cell, and no Show Its Devices, on an empty cell', async () => {
+  it('offers Archive Cell, and no View in Devices, on an empty cell', async () => {
     renderCells({}, { cells: [{ ...CELL, gateways: [], gateway_count: 0 }], devices: [] })
     await ready()
     fireEvent.click(within(table()).getByText('Assembly Line 1'))
     await waitFor(() => expect(panel()).toBeTruthy())
 
     expect(within(panel()).getByRole('button', { name: /Archive Cell/ })).toBeEnabled()
-    expect(within(panel()).queryByText('Show Its Devices')).toBeNull()
+    expect(within(panel()).queryByText('View in Devices')).toBeNull()
   })
 
-  it('links Show Its Devices to the Devices page on this cell, with every lifecycle', async () => {
+  it('links View in Devices to the Devices page on this cell, with every lifecycle', async () => {
     renderCells({}, {
       devices: [device(), device({ asset_id: 'dev-q', asset_name: 'Unknown_01', is_quarantined: true })]
     })
@@ -351,7 +351,7 @@ describe('the row and its drawer', () => {
     fireEvent.click(within(table()).getByText('Assembly Line 1'))
     await waitFor(() => expect(panel()).toBeTruthy())
 
-    const link = within(panel()).getByRole('link', { name: /Show Its Devices/ })
+    const link = within(panel()).getByRole('link', { name: /View in Devices/ })
     expect(link.getAttribute('href')).toBe('/devices?cell=cell-1&lifecycle=active,archived')
     // The Devices page's list leaves quarantined devices to its Quarantine table.
     expect(tooltipOf(link)).toMatch(/1 quarantined device is in its Quarantine table\.$/)

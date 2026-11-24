@@ -2559,6 +2559,10 @@ export function AuditTrailTab({ userRole, showToast }) {
             </div>
           </div>
         )}
+        // The audit row's own id. It identifies THIS mutation rather than the entity it touched, which
+        // is what you need to quote when two edits a second apart are being told apart.
+        recordId={selected && { label: 'Mutation ID', value: String(selected.event_id), help: MUTATION_ID_HELP }}
+        description={selected && { value: selected.description }}
         fields={selected ? [
           { label: 'Recorded', value: new Date(selected.timestamp).toLocaleString() },
           {
@@ -2573,18 +2577,7 @@ export function AuditTrailTab({ userRole, showToast }) {
             value: selected.entity_id,
             copyable: true,
             mono: true,
-            
             help: ENTITY_ID_HELP
-          },
-          // The audit row's own id. It identifies THIS mutation rather than the entity it touched,
-          // which is what you need to quote when two edits a second apart are being told apart.
-          {
-            label: 'Mutation ID',
-            value: String(selected.event_id),
-            copyable: true,
-            mono: true,
-            
-            help: MUTATION_ID_HELP
           },
           // Only when there is one: rows written before causation existed carry none.
           ...(selected.causation_id
@@ -2593,11 +2586,9 @@ export function AuditTrailTab({ userRole, showToast }) {
                 value: String(selected.causation_id),
                 copyable: true,
                 mono: true,
-                
                 help: TRANSACTION_ID_HELP
               }]
-            : []),
-          { label: 'Description', value: selected.description, full: true }
+            : [])
         ] : []}
         actions={drawerActions}
         beforeActions={selected && selectedAnalysis && (

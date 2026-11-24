@@ -29,6 +29,7 @@ import {
 } from '../../utils/cellResolution'
 import { areaWideInService, inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { isPlaced } from '../../utils/areaPlans'
+import { areaWarnings, cellWarnings } from '../../utils/drawerWarnings'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { areaIconComponent } from '../../utils/areaIcon'
 import {
@@ -581,8 +582,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       // Each action is offered only while the lane holds something to act on. Both are marked
       // primary; the panel draws the first one offered as the primary.
       actions: onNavigateTab ? [
-        laneAssets.length > 0 && { label: 'Open Devices page', icon: <IconCpu size={13} />, primary: true, to: tabUrl('devices'), onClick: () => onNavigateTab('devices'), title: `File these ${laneAssets.length} device(s) on the Devices page` },
-        laneGateways.length > 0 && { label: 'Open Gateways page', icon: <IconRadio size={13} />, primary: true, to: tabUrl('gateways'), onClick: () => onNavigateTab('gateways'), title: `File these ${laneGateways.length} gateway(s) on the Gateways page` }
+        laneAssets.length > 0 && { label: 'View in Devices', icon: <IconCpu size={13} />, primary: true, to: tabUrl('devices'), onClick: () => onNavigateTab('devices'), title: `File these ${laneAssets.length} device(s) on the Devices page` },
+        laneGateways.length > 0 && { label: 'View in Gateways', icon: <IconRadio size={13} />, primary: true, to: tabUrl('gateways'), onClick: () => onNavigateTab('gateways'), title: `File these ${laneGateways.length} gateway(s) on the Gateways page` }
       ].filter(Boolean) : []
     }
   })() : null
@@ -607,8 +608,10 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           {selectedArea.is_archived && <ArchivedBadge size="sm" />}
         </>
       ),
+      warnings: areaWarnings(selectedArea, areaCells),
+      recordId: { label: 'Area UUID', value: selectedArea.area_id },
+      description: { value: selectedArea.description },
       fields: [
-        { label: 'Description', value: selectedArea.description || null, full: true },
         {
           label: 'Cells',
           value: areaCells.length
@@ -638,7 +641,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       ],
       actions: [
         {
-          label: 'Open on Areas page', icon: <IconLayoutDashboard size={13} />, primary: true,
+          label: 'View in Areas', icon: <IconLayoutDashboard size={13} />, primary: true,
           to: onSelectArea ? areaUrl(selectedArea.area_id) : tabUrl('areas'),
           onClick: () => onSelectArea ? onSelectArea(selectedArea.area_id) : onNavigateTab?.('areas'),
           title: 'Edit this area, or upload its plan, on the Areas page'
@@ -660,28 +663,28 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         {selectedCell.is_archived && <ArchivedBadge size="sm" />}
       </>
     ),
+    warnings: [
+      // Firing against devices in this cell. Acknowledged from the alert counter in the top bar.
+      ...selectedAlerts.map(({ device, alert }) => ({
+        id: `alert-${device.asset_id}`,
+        tone: alert.severity === 'critical' ? 'danger' : 'warning',
+        text: (
+          <>
+            <strong>{alertState(alert) === 'acknowledged' ? 'Alert acknowledged' : 'Alert firing'}: {alert.alert_name}</strong>
+            {' '}— {device.asset_name}{alert.summary ? `: ${alert.summary}` : ''}
+          </>
+        )
+      })),
+      ...cellWarnings(selectedCell)
+    ],
+    recordId: selectedCell && { label: 'Cell UUID', value: selectedCell.cell_id },
+    description: selectedCell && { value: selectedCell.description },
     fields: selectedCell ? [
       {
         label: 'Where',
-        value: selectedCellArea ? selectedCellArea.area_name : 'Unfiled — in no area yet',
+        value: selectedCellArea ? selectedCellArea.area_name : 'Unfiled',
         full: true,
         help: 'The area this cell is filed in, as set on the Cells page'
-      },
-      { label: 'Description', value: selectedCell.description || null, full: true },
-      selectedAlerts.length > 0 && {
-        label: `Alerts firing (${selectedAlerts.length})`,
-        value: (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {selectedAlerts.map(({ device, alert }) => (
-              <div key={device.asset_id} style={{ fontSize: '12px' }}>
-                <strong style={{ color: 'var(--danger-text)' }}>{alert.alert_name}</strong> — {device.asset_name}{alert.summary ? `: ${alert.summary}` : ''}
-                {alertState(alert) === 'acknowledged' && <> <IconCheck size={10} aria-hidden="true" /> acknowledged</>}
-              </div>
-            ))}
-          </div>
-        ),
-        full: true,
-        help: 'Firing against devices in this cell. Acknowledge one from the alert counter in the top bar.'
       },
       {
         label: 'Gateways',
@@ -701,7 +704,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     ].filter(Boolean) : [],
     actions: selectedCell ? [
       {
-        label: 'Open on Cells page', icon: <IconLayoutDashboard size={13} />, primary: true,
+        label: 'View in Cells', icon: <IconLayoutDashboard size={13} />, primary: true,
         to: onSelectCell ? cellUrl(selectedCell.cell_id) : tabUrl('cells'),
         onClick: () => onSelectCell ? onSelectCell(selectedCell.cell_id) : onNavigateTab?.('cells'),
         title: 'Edit this cell, or place it on its area plan, on the Cells page'

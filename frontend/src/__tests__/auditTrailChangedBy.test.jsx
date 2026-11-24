@@ -113,7 +113,7 @@ describe('Changed by', () => {
     await waitFor(() => expect(param('changed_by')).toBe(`${NIA},${OWAIN}`))
   })
 
-  it('arrives from a link carrying the id, as View Their Changes writes it', async () => {
+  it('arrives from a link carrying the id, as View in Audit Trail writes it', async () => {
     window.history.replaceState(null, '', changesByUrl(LOADER))
     await show()
     expect(trailUrls()[0]).toContain(`changed_by=${LOADER}`)

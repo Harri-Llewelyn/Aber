@@ -166,12 +166,12 @@ describe('one automation', () => {
 
   it('links to its history in the Audit Trail by its own id, for a reader of the Audit Trail', async () => {
     await show()
-    expect(screen.getByRole('link', { name: /View Audit Trail/ })).toHaveAttribute('href', '/audit-trail?search=row-1&type=AUTOMATION')
+    expect(screen.getByRole('link', { name: /View in Audit Trail/ })).toHaveAttribute('href', '/audit-trail?search=row-1&type=AUTOMATION')
   })
 
   it('leaves the Audit Trail link out for a role that cannot open it', async () => {
     await show({ permitted: (p) => p !== PERMISSION_UUIDS.AUDIT_TRAIL_READ })
-    expect(screen.queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: /View in Audit Trail/ })).toBeNull()
   })
 
   it('says so, with a way back, when no automation has the id', async () => {

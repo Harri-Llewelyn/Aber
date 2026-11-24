@@ -157,35 +157,35 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
     expect(onSelectSchema).toHaveBeenCalledWith('sch-machining')
   })
 
-  it("device drawer -> View History opens the History page's Device tab on that device", async () => {
+  it("device drawer -> View in History opens the History page's Device tab on that device", async () => {
     render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await openRow('Sim_CNC_Mill_01')
 
-    const action = within(panel()).getByRole('link', { name: /View History/ })
+    const action = within(panel()).getByRole('link', { name: /View in History/ })
     expect(action).toHaveAttribute('href', '/history/device/dev-1')
     fireEvent.click(action)
     expect(window.location.pathname).toBe('/history/device/dev-1')
   })
 
-  it("cell drawer -> View History opens the History page's Cell tab on that cell, as the device drawer's does", async () => {
+  it("cell drawer -> View in History opens the History page's Cell tab on that cell, as the device drawer's does", async () => {
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await openRow('Assembly Line 1')
 
-    const action = within(panel()).getByRole('link', { name: /View History/ })
+    const action = within(panel()).getByRole('link', { name: /View in History/ })
     expect(action).toHaveAttribute('href', '/history/cell/cell-1')
     expect(cellHistoryUrl('cell-1')).toBe('/history/cell/cell-1')
     fireEvent.click(action)
     expect(window.location.pathname).toBe('/history/cell/cell-1')
   })
 
-  it("area drawer -> View History opens the History page's Area tab on that area, as the cell drawer's does", async () => {
+  it("area drawer -> View in History opens the History page's Area tab on that area, as the cell drawer's does", async () => {
     api.get.mockImplementation(routeGet({ areas: [{ area_id: 'area-1', area_name: 'Hall B', description: null, icon: 'Factory', cells: [], plan_path: null, plan_aspect: null }] }))
     render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await openRow('Hall B')
 
-    const action = within(panel()).getByRole('link', { name: /View History/ })
+    const action = within(panel()).getByRole('link', { name: /View in History/ })
     expect(action).toHaveAttribute('href', '/history/area/area-1')
     expect(areaHistoryUrl('area-1')).toBe('/history/area/area-1')
     fireEvent.click(action)

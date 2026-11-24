@@ -44,7 +44,7 @@ beforeEach(() => {
   });
 });
 
-/** Opens the page at the address another page's "View Audit Trail" links to. */
+/** Opens the page at the address another page's "View in Audit Trail" links to. */
 const handOver = (id, type) => {
   window.history.replaceState(null, '', trailUrl(id, type));
   return render(<AuditTrailTab />);

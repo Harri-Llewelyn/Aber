@@ -20,6 +20,7 @@ import { AreaIcon } from '../../utils/areaIcon'
 import { placeNameProblem, unsBridgeOn, unsPathIndex } from '../../utils/unsPath'
 import { unsFilterField, UnsRenameNote } from '../common/UnsPlace'
 import { isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
+import { cellWarnings } from '../../utils/drawerWarnings'
 import { useSetting } from '../../hooks/useSettings'
 import { CellPlacementPicker } from '../common/CellPlacementPicker'
 import { ExpandablePlanPreview } from '../common/AreaPlanPreview'
@@ -637,9 +638,10 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             {selectedCell.is_archived && <ArchivedBadge size="sm" />}
           </>
         )}
+        warnings={cellWarnings(selectedCell)}
+        recordId={selectedCell && { label: 'Cell UUID', value: selectedCell.cell_id }}
+        description={selectedCell && { value: selectedCell.description }}
         fields={selectedCell ? [
-          { label: 'Cell UUID', value: selectedCell.cell_id, mono: true, copyable: true },
-          { label: 'Description', value: selectedCell.description || null, full: true },
           {
             label: 'Area',
             value: selectedCell.area_id
@@ -664,7 +666,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             value: !selectedCell.area_id
               ? null
               : !isPlaced(selectedCell)
-                ? 'Not placed — set a place in Edit Details'
+                ? 'Not placed'
                 : selectedCellArea
                   ? <ExpandablePlanPreview area={selectedCellArea} cells={cells} highlightCellId={selectedCell.cell_id} />
                   : "Placed on its area's plan",
@@ -770,14 +772,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           {
             // Ungated, as the History page is: the machines of this cell compared over time, one
             // metric on one scale, and their hours of the day.
-            label: 'View History', icon: <IconChartLine size={13} />,
+            label: 'View in History', icon: <IconChartLine size={13} />,
             to: cellHistoryUrl(selectedCell.cell_id),
             title: "Compare this cell's machines over time on the History page"
           },
           /* Withheld from a reader who may not open the page: the nav hides Audit Trail without
              `audit_trail:read`. `.filter(Boolean)` drops it. */
           canReadTrail && {
-            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            label: 'View in Audit Trail', icon: <IconHistory size={13} />,
             to: trailUrl(selectedCell.cell_id, 'CELL'),
             onClick: () => onViewTrail?.(selectedCell),
             title: 'Open the immutable audit trace for this cell'
@@ -797,7 +799,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           // Beside Archive Cell, as the way to what holds it. The Devices page's roster leaves
           // quarantined devices to its Quarantine table, so the tooltip counts those.
           selectedCellDevices.length > 0 && {
-            label: 'Show Its Devices', icon: <IconCpu size={13} />,
+            label: 'View in Devices', icon: <IconCpu size={13} />,
             to: devicesInCellUrl(selectedCell.cell_id),
             title: `Open the Devices page on this cell's devices, archived ones included.${selectedCellQuarantined
               ? ` ${plural(selectedCellQuarantined, 'quarantined device')} ${selectedCellQuarantined === 1 ? 'is' : 'are'} in its Quarantine table.`
@@ -823,7 +825,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           },
         ].filter(Boolean) : []}
       >
-        {/* A tool of unknown height, so after the actions: every device in the cell when an alert is read. */}
+        {/* Every device in the cell when an alert is read. */}
         {selectedCell && (
           <SuppressionWindows
             kind="cell"

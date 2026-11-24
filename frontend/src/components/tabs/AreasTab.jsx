@@ -19,6 +19,7 @@ import {
   SCOPE_AREA_WIDE, isAreaWideSource, groupCellsByArea, groupDevicesByCell
 } from '../../utils/cellResolution'
 import { isPlaced } from '../../utils/areaPlans'
+import { areaWarnings } from '../../utils/drawerWarnings'
 import { areaWideIn, archiveRefusal } from '../../utils/areaArchive'
 import { areaWideInService, inServiceDevices, inServiceGateways } from '../../utils/inService'
 import { CellIcon } from '../../utils/cellIcon'
@@ -602,9 +603,10 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             {plural(countsOf(selectedArea).cells, 'Cell')} · {plural(countsOf(selectedArea).gateways, 'Gateway')} · {plural(countsOf(selectedArea).devices, 'Device')}
           </Badge>
         )}
+        warnings={areaWarnings(selectedArea, selectedCells)}
+        recordId={selectedArea && { label: 'Area UUID', value: selectedArea.area_id }}
+        description={selectedArea && { value: selectedArea.description }}
         fields={selectedArea ? [
-          { label: 'Area UUID', value: selectedArea.area_id, mono: true, copyable: true },
-          { label: 'Description', value: selectedArea.description || null, full: true },
           {
             label: 'Cells',
             value: selectedCells.length
@@ -665,12 +667,12 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           {
             // Ungated, as the History page is: the cells of this area compared over time, one metric on
             // one scale, each its mean or total, and their hours of the day.
-            label: 'View History', icon: <IconChartLine size={13} />,
+            label: 'View in History', icon: <IconChartLine size={13} />,
             to: areaHistoryUrl(selectedArea.area_id),
             title: "Compare this area's cells over time on the History page"
           },
           canReadTrail && {
-            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            label: 'View in Audit Trail', icon: <IconHistory size={13} />,
             to: trailUrl(selectedArea.area_id, 'AREA'),
             onClick: () => onViewTrail?.(selectedArea),
             title: 'Open the immutable audit trace for this area'
