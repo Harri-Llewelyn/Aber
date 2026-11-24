@@ -761,6 +761,14 @@ on a gateway's repository, people in either team included, and the appliance nam
 full. Both teams make any other tag. The design is in
 [`supabase/README.md`](../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-archived-migration-0104).
 
+A person has what their team has there, and no more (from 1.9.1). Gitea makes whoever creates a
+repository its administrator, also after their role has gone, so enrolment and every sweep remove
+anybody who holds a gateway's repository by name. They put back what makes the approval on `main` real,
+remove any other rule that could loosen it, and keep `main` the default branch, the only branch an
+appliance is told. What stays outside is what a repository made by hand already held when its gateway
+enrolled: that is deployed as it is, and nobody approved it
+([*A gateway seeded from the example*](remote-gateways.md#a-playbook-of-the-gateways-own)).
+
 The wiki is a second git repository beside the first, and Gitea has no
 rule for it: a clone of `<repo>.wiki.git` with the key and
 a push to it succeed. A compromised appliance, or its key taken from a cabinet, could therefore

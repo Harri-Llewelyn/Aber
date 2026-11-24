@@ -461,7 +461,8 @@ behaviour:
 * the `appliance` rule admits pushes from deploy keys and from no login, and blocks force-push;
 * `main` admits no deploy key;
 * a `**` rule closes every other branch to them;
-* two tag rules close every tag to them, and nobody can make a tag named `main` or `appliance`.
+* two tag rules close every tag to them, and nobody can make a tag named `main` or `appliance`;
+* nobody holds the repository by name, its maker included, so nobody can change a rule.
 
 So the deploy key, which can now write, lets an appliance *report* and never *deploy*. The machine
 account cannot write the branch either (its contents API answers 403 there). So what the branch holds

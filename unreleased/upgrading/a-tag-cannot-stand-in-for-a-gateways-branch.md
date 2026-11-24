@@ -5,7 +5,8 @@ takes a short name for a tag before a branch. So a tag named `main` decided what
 deployed: its flow, and the repository's own `custom.yml`, which runs as root. No approval stood in the
 way. The gateway's own key could make such a tag, and so could anybody who can write the repository,
 which a Shopfloor Manager can on every gateway. The advisory is
-[GHSA-84xw-m29x-9r4r](https://github.com/Harri-Llewelyn/Aber/security/advisories/GHSA-84xw-m29x-9r4r).
+[GHSA-84xw-m29x-9r4r](https://github.com/Harri-Llewelyn/Aber/security/advisories/GHSA-84xw-m29x-9r4r),
+which also covers [who holds a gateway's repository](nobody-holds-a-gateways-repository-by-name.md).
 
 It is closed at both ends. The forge's end needs nothing from you. The appliance's needs one pull
 request for each Remote gateway.
