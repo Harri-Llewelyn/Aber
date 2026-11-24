@@ -66,6 +66,9 @@ export const nextVersion = (schema) => schemaVersion(schema) + 1
 export const nextVersionName = (schema) =>
   `${schema?.lineage_name || baseSchemaName(schema?.schema_name)}_v${nextVersion(schema)}`
 
+/** Whether a version is the one its lineage is judged by now: neither a draft nor superseded. */
+export const isInForce = (schema) => schemaStatus(schema) === SCHEMA_STATUS.ACTIVE
+
 /** Only a draft is editable. This is the single predicate every read-only affordance reads. */
 export const isSchemaEditable = (schema) => schemaStatus(schema) === SCHEMA_STATUS.DRAFT
 

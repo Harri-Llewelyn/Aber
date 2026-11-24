@@ -14,8 +14,8 @@ const RETURN_MS = 250
  * itself, and under reduced motion it does not move at all, so the control's tooltip must carry
  * the whole text. The whole text is always in the DOM, so a screen reader hears all of it.
  *
- * The control is the nearest button, link or focusable element around it; without one, the text
- * reacts to the pointer alone. Measured as it activates (`scrollWidth` against `clientWidth`), so
+ * The control is the nearest button, link, label or focusable element around it; without one, the
+ * text reacts to the pointer alone. A label's focus is its checkbox's or its field's. Measured as it activates (`scrollWidth` against `clientWidth`), so
  * a drawer opening or the window narrowing needs no listener. `onMeasure(cut)` hears each
  * measurement, so the control can give its tooltip only to text that is really cut.
  *
@@ -30,7 +30,7 @@ export function OverflowText({ children, className = '', onMeasure }) {
   useEffect(() => {
     const el = outer.current
     if (!el) return undefined
-    const host = el.parentElement?.closest('button, a, [tabindex]') || el
+    const host = el.parentElement?.closest('button, a, label, [tabindex]') || el
     let hovered = false
     let focused = false
     let settle = null
@@ -54,12 +54,12 @@ export function OverflowText({ children, className = '', onMeasure }) {
     }
 
     // Keyboard focus only: a click's focus would hold the text slid after the pointer has gone.
-    const keyboardFocus = () => {
-      try { return host.matches(':focus-visible') } catch { return true }
+    const keyboardFocus = (e) => {
+      try { return e.target.matches(':focus-visible') } catch { return true }
     }
     const onEnter = () => { hovered = true; update() }
     const onLeave = () => { hovered = false; update() }
-    const onFocus = () => { focused = keyboardFocus(); update() }
+    const onFocus = (e) => { focused = keyboardFocus(e); update() }
     const onBlur = () => { focused = false; update() }
 
     host.addEventListener('mouseenter', onEnter)

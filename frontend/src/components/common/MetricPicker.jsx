@@ -1,4 +1,5 @@
-import React, { useId, useMemo, useState } from 'react'
+import React, { useCallback, useState } from 'react'
+import { ListPicker } from './ListPicker'
 import { Tooltip } from './Tooltip'
 import { datatypeLabel } from '../../utils/sparkplugDatatype'
 import { groupCatalog } from '../../utils/metricGroup'
@@ -7,11 +8,7 @@ import { STANDARD_OPTIONS, LOCAL_EXTENSION_LABEL } from '../../utils/standards'
 /** Sentinel for the standard filter's default. Not a `standard` value -- '' means local extension. */
 const ANY_STANDARD = '__any__'
 
-/** A metric picker's row, shared with a draft's editor: the label with its tick, then any range. */
-export const PICKER_ROW = { display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border)' }
-export const PICKER_ROW_LABEL = {
-  display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 auto', minWidth: 0, padding: '8px 12px', cursor: 'pointer'
-}
+const NO_MATCH = 'No matching catalog metrics.'
 
 /**
  * A group's band in a metric picker: the group's name, and how many of its listed metrics are
@@ -30,15 +27,31 @@ export function MetricGroupHeading({ group, picked, title }) {
   )
 }
 
+/** A typed search finds a metric by its name or its description. */
+const metricMatches = (m, needle) =>
+  m.name.toLowerCase().includes(needle) || (m.description || '').toLowerCase().includes(needle)
+
+/** Grouped as on the Metrics page, and applied to the search results so a filtered list stays navigable. */
+const metricGroups = (metrics) => groupCatalog(metrics).map(group => ({
+  key: group.label,
+  items: group.metrics,
+  heading: picked => (
+    <MetricGroupHeading
+      group={group}
+      picked={picked}
+      title={group.isUngrouped ? 'Metric names carrying no "Group/Metric" prefix' : `Metrics named "${group.label}/…"`}
+    />
+  )
+}))
+
 /**
  * The catalog's metrics to choose from, as the schema builder lists them and Add Derived Metric does:
- * a search box and a standard filter, then the metrics grouped by their name's first segment, each
- * with a tick. It draws two siblings, the filter row and the scrolling list, so the caller's flex
- * column decides their height (`listStyle` overrides the list's).
+ * a ListPicker with a standard filter, its metrics grouped by their name's first segment. It draws
+ * two siblings, the filter row and the scrolling list, so the caller's flex column decides their
+ * height (`listStyle` overrides the list's).
  *
- * The search and the filter narrow what is LISTED, never what is chosen: the caller holds the
- * choice, and a metric hidden by either stays chosen. A schema legitimately mixes standards, such
- * as ISO KPIs beside the MTConnect observations they are computed from.
+ * A metric hidden by the search or the filter stays chosen. A schema legitimately mixes standards,
+ * such as ISO KPIs beside the MTConnect observations they are computed from.
  *
  * @param {object[]} metrics The metrics that can be chosen, already scoped by the caller (the
  * schema builder leaves out deprecated and derived ones).
@@ -57,33 +70,24 @@ export function MetricGroupHeading({ group, picked, title }) {
  */
 export function MetricPicker({
   metrics, isPicked, onPick, single = false, isDisabled, renderExtra, renderNote, showUnits = false, listStyle,
-  emptyText = 'No matching catalog metrics.'
+  emptyText = NO_MATCH
 }) {
-  const [search, setSearch] = useState('')
   const [standard, setStandard] = useState(ANY_STANDARD)
-  const groupName = useId()
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return metrics.filter(m => {
-      if (standard !== ANY_STANDARD && (m.standard || '') !== standard) return false
-      if (!q) return true
-      return m.name.toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q)
-    })
-  }, [metrics, search, standard])
+  const passes = useCallback(m => standard === ANY_STANDARD || (m.standard || '') === standard, [standard])
 
   return (
-    <>
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-        <input
-          className="form-control"
-          style={{ flex: '1 1 auto' }}
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search catalog metrics…"
-          aria-label="Search catalog metrics"
-        />
-        {/* Filters the list only; what is chosen survives a change here. */}
+    <ListPicker
+      items={metrics}
+      keyOf={m => m.metric_uuid}
+      isPicked={isPicked}
+      onPick={onPick}
+      single={single}
+      isDisabled={isDisabled}
+      searchLabel="Search catalog metrics"
+      matches={metricMatches}
+      passes={passes}
+      // Filters the list only; what is chosen survives a change here.
+      filters={(
         <Tooltip text="Metrics already selected stay selected.">
           <select
             className="form-control"
@@ -100,59 +104,28 @@ export function MetricPicker({
             ))}
           </select>
         </Tooltip>
-      </div>
-      {/* Takes the height the fields above leave, and scrolls inside itself. */}
-      <div style={{ flex: '1 1 auto', minHeight: '160px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)', ...listStyle }}>
-        {filtered.length === 0 ? (
-          <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-            {metrics.length === 0 ? emptyText : 'No matching catalog metrics.'}
-          </div>
-        ) : (
-          // Grouped as on the Metrics page, and applied to the search results so a filtered list
-          // stays navigable.
-          groupCatalog(filtered).map(group => (
-            <div key={group.label}>
-              <MetricGroupHeading
-                group={group}
-                picked={group.metrics.filter(isPicked).length}
-                title={group.isUngrouped ? 'Metric names carrying no "Group/Metric" prefix' : `Metrics named "${group.label}/…"`}
-              />
-              {group.metrics.map(m => {
-                const picked = isPicked(m)
-                const blocked = !picked && !!isDisabled?.(m)
-                const extra = renderExtra?.(m, picked) ?? null
-                return (
-                  // Any extra sits outside the label, so using it never toggles the tick.
-                  <div key={m.metric_uuid} style={{ ...PICKER_ROW, paddingRight: extra ? '12px' : 0 }}>
-                    <label style={{ ...PICKER_ROW_LABEL, ...(blocked ? { cursor: 'not-allowed', opacity: 0.55 } : {}) }}>
-                      <input
-                        type={single ? 'radio' : 'checkbox'}
-                        name={single ? groupName : undefined}
-                        checked={picked}
-                        disabled={blocked}
-                        onChange={() => onPick(m)}
-                      />
-                      <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
-                      {renderNote?.(m, picked)}
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
-                      {showUnits && m.units && <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{m.units}</span>}
-                      {/* Which standard a metric came from is what makes a mixed-standard choice
-                          legible; the tick marks the ones carrying an AAS semantic id. */}
-                      <Tooltip text={m.semantic_id ? `Semantic id ${m.semantic_id}` : null}>
-                        <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
-                          {m.standard || LOCAL_EXTENSION_LABEL}{m.semantic_id ? ' ✓' : ''}
-                        </span>
-                      </Tooltip>
-                      {m.description && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>{m.description}</span>}
-                    </label>
-                    {extra}
-                  </div>
-                )
-              })}
-            </div>
-          ))
-        )}
-      </div>
-    </>
+      )}
+      groupsOf={metricGroups}
+      renderItem={(m, { picked }) => (
+        <>
+          <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
+          {renderNote?.(m, picked)}
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
+          {showUnits && m.units && <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{m.units}</span>}
+          {/* Which standard a metric came from is what makes a mixed-standard choice
+              legible; the tick marks the ones carrying an AAS semantic id. */}
+          <Tooltip text={m.semantic_id ? `Semantic id ${m.semantic_id}` : null}>
+            <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
+              {m.standard || LOCAL_EXTENSION_LABEL}{m.semantic_id ? ' ✓' : ''}
+            </span>
+          </Tooltip>
+          {m.description && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>{m.description}</span>}
+        </>
+      )}
+      renderExtra={renderExtra}
+      listStyle={listStyle}
+      emptyText={emptyText}
+      noMatchText={NO_MATCH}
+    />
   )
 }
