@@ -9,15 +9,15 @@ import { allFiles, fail, pass, read, supabaseReadme } from './lib.mjs';
 // -------------------------------------------------------------------------------------------------
 export default function check() {
   const problems565 = [];
-  const migrations = allFiles.filter((f) => /^supabase\/migrations\/\d{4}_[^/]*\.sql$/.test(f)).sort();
+  // [file, text] of each migration, in the order they apply.
+  const migrations = allFiles.filter((f) => /^supabase\/migrations\/\d{4}_[^/]*\.sql$/.test(f)).sort().map((f) => [f, read(f)]);
   const UUID = /[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/g;
   const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
   const word = (n) => WORDS[n] ?? String(n);
 
   const seeded = new Set();
   const granted = new Set();
-  for (const file of migrations) {
-    const sql = read(file);
+  for (const [, sql] of migrations) {
     for (const m of sql.matchAll(/INSERT\s+INTO\s+auth\.users\s*\(\s*id\s*\)\s*VALUES\s*\(\s*'([0-9a-f-]{36})'\s*\)/gi)) seeded.add(m[1]);
     for (const m of sql.matchAll(/^INSERT INTO public\.principal_permissions\b[^;]*;/gm)) {
       for (const [id] of m[0].matchAll(UUID)) granted.add(id);
@@ -28,9 +28,8 @@ export default function check() {
   // The last statement of a table's comment: adjacent literals, with '' for a quote, up to the semicolon.
   const commentOn = (table) => {
     const needle = `COMMENT ON TABLE public.${table} IS`;
-    const file = migrations.findLast((f) => read(f).includes(needle));
+    const [file, sql] = migrations.findLast(([, text]) => text.includes(needle)) ?? [];
     if (!file) return null;
-    const sql = read(file);
     let at = sql.lastIndexOf(needle) + needle.length;
     let text = '';
     while (at < sql.length && sql[at] !== ';') {

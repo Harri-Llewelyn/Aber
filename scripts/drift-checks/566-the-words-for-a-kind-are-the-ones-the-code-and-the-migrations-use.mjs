@@ -10,7 +10,9 @@ import { allFiles, fail, pass, read } from './lib.mjs';
 // -------------------------------------------------------------------------------------------------
 export default function check() {
   const problems566 = [];
-  const migrations = allFiles.filter((f) => /^supabase\/migrations\/\d{4}_[^/]*\.sql$/.test(f)).sort();
+  // [file, text] of each migration, in the order they apply.
+  const migrations = allFiles.filter((f) => /^supabase\/migrations\/\d{4}_[^/]*\.sql$/.test(f)).sort().map((f) => [f, read(f)]);
+  const lastWith = (needle) => migrations.findLast(([, text]) => text.includes(needle)) ?? [];
   const sorted = (words) => [...new Set(words)].sort();
 
   const doc = read('docs/architecture.md');
@@ -46,15 +48,14 @@ export default function check() {
   compare('AUDIT_TRAIL_ENTITY_TYPES in frontend/src/constants.js', documented, offered);
 
   const needle = 'CREATE OR REPLACE FUNCTION public.audit_trail_action_kinds(';
-  const kindsFile = migrations.findLast((f) => read(f).includes(needle));
-  const sql = kindsFile ? read(kindsFile) : '';
+  const [kindsFile, sql = ''] = lastWith(needle);
   const bodyAt = sql.lastIndexOf(needle);
   const body = bodyAt < 0 ? '' : sql.slice(bodyAt, sql.indexOf('\n$$;', bodyAt));
   const written = sorted([...body.matchAll(/\('[A-Z_]+',\s*ARRAY\[([^\]]*)\]/g)].flatMap((m) => [...m[1].matchAll(/'([a-z_]+)'/g)].map((w) => w[1])));
   compare(`audit_trail_action_kinds() (${kindsFile ?? 'no migration'})`, documented, written);
 
   // Each word's table, or a row that says there is none of that name.
-  const tables = new Set(migrations.flatMap((f) => [...read(f).matchAll(/^CREATE TABLE IF NOT EXISTS public\.(\w+)/gm)].map((m) => m[1])));
+  const tables = new Set(migrations.flatMap(([, text]) => [...text.matchAll(/^CREATE TABLE IF NOT EXISTS public\.(\w+)/gm)].map((m) => m[1])));
   for (const [first, about = ''] of trail) {
     const without = codes(first).filter((w) => !tables.has(w));
     if (without.length && !/\btable\b|\bNot a row\b/i.test(about)) {
@@ -74,9 +75,8 @@ export default function check() {
   };
   const admitted = (name) => {
     const head = `CONSTRAINT ${name} CHECK `;
-    const file = migrations.findLast((f) => read(f).includes(head));
-    if (!file) return [];
-    const text = read(file);
+    const [, text] = lastWith(head);
+    if (!text) return [];
     const at = text.lastIndexOf(head);
     return sorted([...text.slice(at, text.indexOf('\n', at)).matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]));
   };
