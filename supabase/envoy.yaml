@@ -1132,8 +1132,9 @@ static_resources:
                   # 4. THE PLACEMENT. Gitea auto-registers a login and stops; forge-membership puts the person in the
                   # team their user_roles row warrants, or takes them out and answers 403 if the role has gone since
                   # the token was signed. After RBAC. failure_mode_allow: a 5xx lets the request through, since the
-                  # role in the token was already admitted; 403 and 302 (a dead session, to /oauth2/signout) are
-                  # honoured. Only the Authorization header travels, and nothing the function answers reaches Gitea.
+                  # role in the token was already admitted; 403 and 302 (a dead session, to /oauth2/signout, or a
+                  # first visit, to /user/login) are honoured. The method, the path and the three headers below
+                  # travel, and nothing the function answers reaches Gitea.
                   - name: envoy.filters.http.ext_authz
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
@@ -1143,6 +1144,9 @@ static_resources:
                       allowed_headers:
                         patterns:
                           - exact: authorization
+                          # These two tell a page load, the one request a first visit bounces (check 538).
+                          - exact: accept
+                          - exact: sec-fetch-mode
                       http_service:
                         server_uri:
                           uri: http://supabase-functions:9000
@@ -1154,7 +1158,7 @@ static_resources:
                           allowed_client_headers:
                             patterns:
                               - exact: content-type
-                              # A dead session is a 302 to /oauth2/signout; Location must reach the browser.
+                              # A dead session and a first visit are 302s; Location must reach the browser.
                               - exact: location
                   - name: envoy.filters.http.router
                     typed_config:

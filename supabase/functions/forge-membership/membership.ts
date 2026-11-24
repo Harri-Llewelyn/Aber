@@ -9,15 +9,17 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  * the machine account. Revocation is immediate: a token whose role has been removed is refused on
  * its next request.
  *
- * The first request finds no user, since Gitea creates it while serving that request; the page then
- * fetches `/repo/search` and `/user/events`, which come through here with the user present, so
- * placement happens before the repository list is answered.
+ * Gitea registers a login while it serves that login's first request, so a first visit finds nobody
+ * to place. A page load is then bounced once through Gitea's sign-in path (firstVisit.ts), and comes
+ * back to the page it asked for as a login that is placed before Gitea answers. An unregistered
+ * login's other requests, and a page load already bounced, are let through unplaced.
  *
  * Answers: 200, the caller holds an admitted role and is in its team (or is not yet registered);
- * 302, the token verified but GoTrue no longer has its session, so the browser is sent to the
- * door's sign-out path; 403, the caller's role does not open the forge, with the login removed from
- * both teams first; 5xx, this could not do its job, and the listener's `failure_mode_allow` lets
- * the request through on the role the token carries, losing only placement.
+ * 302, either the token verified but GoTrue no longer has its session, and the browser is sent to
+ * the door's sign-out path, or this is a first visit's bounce; 403, the caller's role does not open
+ * the forge, with the login removed from both teams first; 5xx, this could not do its job, and the
+ * listener's `failure_mode_allow` lets the request through on the role the token carries, losing
+ * only placement.
  *
  * The machine account is the only Gitea credential here, and the identity acted on is always the
  * verified token's `sub`, never a parameter. A person who never returns is unseated by
@@ -28,6 +30,7 @@ import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { serverError } from "../_shared/failure.ts";
+import { firstVisitBounce, REGISTERING_PATH } from "./firstVisit.ts";
 import {
   ensureOrganisation,
   ensurePlatformOrganisation,
@@ -61,6 +64,14 @@ function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+/** A 302 the browser follows: Envoy forwards a denied answer's status and its `location` header. */
+function sendOn(location: string, why: Record<string, unknown>): Response {
+  return new Response(JSON.stringify({ ...why, next: location }), {
+    status: 302,
+    headers: { ...corsHeaders, "Content-Type": "application/json", Location: location },
   });
 }
 
@@ -143,13 +154,9 @@ export async function handler(req: Request): Promise<Response> {
     // A dead session is sent back through the door, not refused: the listener accepted this token,
     // and only GoTrue knows the session behind it is gone. A 401 would leave the browser stuck on a
     // cookie the door still honours, so the answer is a redirect to the door's own sign-out path,
-    // which clears every cookie and starts a fresh login. Envoy forwards a denied response's status
-    // and its `location` header.
+    // which clears every cookie and starts a fresh login.
     console.log(`forge-membership: ${userError?.message ?? "no user"}; sending the browser back through the door`);
-    return new Response(
-      JSON.stringify({ error: "Session ended", details: userError?.message, next: "/oauth2/signout" }),
-      { status: 302, headers: { ...corsHeaders, "Content-Type": "application/json", Location: "/oauth2/signout" } },
-    );
+    return sendOn("/oauth2/signout", { error: "Session ended", details: userError?.message });
   }
 
   // Authorisation: user_roles, read with the service key -- a lookup, not a decision made by the
@@ -188,6 +195,11 @@ export async function handler(req: Request): Promise<Response> {
       placed.delete(username);
       if (!admitted) {
         return json({ error: `Role '${role ?? "none"}' does not open the forge` }, 403);
+      }
+      const bounce = firstVisitBounce(req, username);
+      if (bounce) {
+        console.log(`forge-membership: ${user.email} (${username}) is new to the forge; sending the browser through ${REGISTERING_PATH}`);
+        return sendOn(bounce, { sub: username, role, placed: false, reason: "not yet registered" });
       }
       return json({ sub: username, role, team: FORGE_TEAMS[role], placed: false, reason: "not yet registered" }, 200);
     }
