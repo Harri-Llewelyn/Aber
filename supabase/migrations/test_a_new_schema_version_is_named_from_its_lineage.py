@@ -24,7 +24,7 @@ document applied, and fork_schema() of the same version.
   * A file written before 0316 names a lineage by a version's name. It finds the lineage when its version
     in force has another name, and is refused where two lineages have that name.
   * fork_schema()'s gate, second factor and refusals, and the shape and grants of the three functions.
-  * The file's self-check leaves nothing behind, on a database that holds lineages.
+  * The file's self-check passes on a site where nobody may version a schema, and leaves nothing behind.
 
 test_schema_versioning.py and test_a_device_schema_is_applied_from_a_document.py hold the rest of what
 the two functions do.
@@ -340,12 +340,16 @@ class NamedFromTheLineage(unittest.TestCase):
         self.assertEqual(canon["lineage"], ARM)
         self.assertNotIn("stem", canon)
 
-    def test_the_files_self_check_passes_over_lineages_and_leaves_nothing_behind(self):
-        head, _ = self.make_next(self.plant(ARM))
+    def test_the_files_self_check_passes_where_nobody_may_version_a_schema_and_leaves_nothing_behind(self):
+        self.make_next(self.plant(ARM))
         self.plant(f"{PUMP}_v7")
-        counts = ("SELECT (SELECT count(*) FROM public.schemas), (SELECT count(*) FROM auth.users),"
-                  " (SELECT count(*) FROM public.user_roles), (SELECT count(*) FROM public.metric_catalog),"
-                  " (SELECT count(*) FROM public.audit_trail);")
+        # db-init runs it on every site's boot: it needs no role, no person and no second factor.
+        self.cur.execute("DELETE FROM public.role_permissions rp USING public.permissions p"
+                         " WHERE p.id = rp.permission_id AND p.name = 'schema:manage';")
+        self.assertGreater(self.cur.rowcount, 0)
+        self.cur.execute("DELETE FROM public.user_roles WHERE user_id IN (%s, %s);", (ADMIN_ID, OPERATOR_ID))
+        self.set_switch(True)
+        counts = "SELECT (SELECT count(*) FROM public.schemas), (SELECT count(*) FROM public.audit_trail);"
         self.cur.execute(counts)
         before = self.cur.fetchone()
         with open(MIGRATION, "r", encoding="utf-8") as handle:
@@ -354,9 +358,6 @@ class NamedFromTheLineage(unittest.TestCase):
             self.cur.execute(sql)
         self.cur.execute(counts)
         self.assertEqual(self.cur.fetchone(), before)
-        self.cur.execute("SELECT coalesce(current_setting('request.jwt.claims', true), '');")
-        self.assertEqual(self.cur.fetchone()[0], "")
-        self.assertEqual(self.next_name(head, ARM), f"{ARM}_v3")
 
 
 if __name__ == "__main__":

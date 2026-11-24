@@ -640,14 +640,13 @@ COMMENT ON FUNCTION public.device_schemas_parse(jsonb) IS
 -- -------------------------------------------------------------------------------------------------
 DO $check$
 DECLARE
-  c_person CONSTANT uuid := '00000000-0000-4000-8000-000000031800';
-  c_root   CONSTANT uuid := '00000000-0000-4000-8000-000000031801';
-  c_head   CONSTANT uuid := '00000000-0000-4000-8000-000000031802';
+  c_first  CONSTANT uuid := '00000000-0000-4000-8000-000000031801';
+  c_second CONSTANT uuid := '00000000-0000-4000-8000-000000031802';
+  c_third  CONSTANT uuid := '00000000-0000-4000-8000-000000031803';
   c_name   CONSTANT text := 'Aber_0318_Self_Check';
+  c_empty  CONSTANT jsonb := '{"type": "object", "properties": {}}';
   v_fn     text;
   v_src    text;
-  v_said   text;
-  v_made   jsonb;
   v_out    jsonb;
 BEGIN
   -- Both writers are still SECURITY DEFINER with a pinned path, ask for schema:manage and then for the
@@ -678,33 +677,39 @@ BEGIN
     RAISE EXCEPTION '0318: device_schemas_parse() is a browser-facing role''s, SECURITY DEFINER or not pinned';
   END IF;
 
-  -- A lineage X whose version in force was numbered further, X_v2_2, on rows a subtransaction takes
-  -- back, with the Administrator who versions it: a document and fork_schema() both name the next
-  -- version X_v3, and with X_v3 in force a file that names X_v2_2 still finds the lineage.
+  -- What each writer names a version from, in its code and not its comments: the lineage's name, and no
+  -- name with a trailing _v<n> taken off. Nothing is called, so no role, person or second factor is needed.
+  SELECT regexp_replace(p.prosrc, '--[^\n]*', '', 'g') INTO v_src
+    FROM pg_proc p WHERE p.oid = 'public.fork_schema(uuid, text)'::regprocedure;
+  IF position('v_base := parent.lineage_name;' IN v_src) = 0
+     OR position('v_name := v_base || ''_v'' || v_next;' IN v_src) = 0
+     OR position('schema_version_base_name(' IN v_src) > 0 THEN
+    RAISE EXCEPTION '0318: fork_schema() does not name a version from its parent''s lineage_name';
+  END IF;
+  SELECT regexp_replace(p.prosrc, '--[^\n]*', '', 'g') INTO v_src
+    FROM pg_proc p WHERE p.oid = 'public.apply_device_schemas(jsonb, boolean)'::regprocedure;
+  IF position('v_name := (v_canon ->> ''lineage'') || ''_v'' || v_version;' IN v_src) = 0
+     OR position('v_canon ->> ''stem''' IN v_src) > 0
+     OR position('schema_version_base_name(' IN v_src) > 0 THEN
+    RAISE EXCEPTION '0318: apply_device_schemas() does not name a draft from the checked schema''s lineage';
+  END IF;
+
+  -- A lineage X, X_v2_2, X_v3 with X_v3 in force, on rows a subtransaction takes back. A file naming
+  -- X_v2_2, as one written before 0316 does, finds it: no reason to refuse the name, and X beside it is
+  -- the same schema twice.
   BEGIN
-    INSERT INTO auth.users (id, email) VALUES (c_person, 'aber-0318-self-check@example.invalid');
-    INSERT INTO public.user_roles (user_id, role_id)
-    SELECT c_person, r.id FROM public.roles r WHERE r.name = 'Administrator';
-    INSERT INTO public.metric_catalog (name, datatype) VALUES ('Aber_0318/Self_Check', 10);
     INSERT INTO public.schemas (id, schema_name, schema_definition, status)
-    VALUES (c_root, c_name, '{"type": "object", "properties": {}}'::jsonb, 'archived');
+    VALUES (c_first, c_name, c_empty, 'archived');
     INSERT INTO public.schemas (id, schema_name, schema_definition, status, version, parent_schema_id)
-    VALUES (c_head, c_name || '_v2_2', '{"type": "object", "properties": {}}'::jsonb, 'active', 2, c_root);
-    PERFORM set_config('request.jwt.claims',
-      jsonb_build_object('sub', c_person, 'role', 'authenticated', 'aal', 'aal2')::text, true);
+    VALUES (c_second, c_name || '_v2_2', c_empty, 'archived', 2, c_first);
+    INSERT INTO public.schemas (id, schema_name, schema_definition, status, version, parent_schema_id)
+    VALUES (c_third, c_name || '_v3', c_empty, 'active', 3, c_second);
 
-    v_said := public.apply_device_schemas(jsonb_build_array(jsonb_build_object(
-      'name', c_name, 'metrics', '[{"name": "Aber_0318/Self_Check"}]'::jsonb)), true) -> 0 ->> 'schema_name';
-    v_made := public.fork_schema(c_head, 'self-check');
-    IF v_said IS DISTINCT FROM c_name || '_v3' OR v_made ->> 'schema_name' IS DISTINCT FROM c_name || '_v3' THEN
-      RAISE EXCEPTION '0318: the version after X_v2_2 is named % by a document and % by fork_schema(), not X_v3',
-        v_said, v_made ->> 'schema_name';
-    END IF;
-
-    UPDATE public.schemas SET status = 'archived' WHERE id = c_head;
-    UPDATE public.schemas SET status = 'active' WHERE id = (v_made ->> 'id')::uuid;
-    v_out := public.device_schemas_parse(jsonb_build_array(jsonb_build_object('name', c_name || '_v2_2', 'metrics', '[]'::jsonb)));
-    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_out -> 0 -> 'reasons') r WHERE r ->> 'path' = '$[0].name') THEN
+    v_out := public.device_schemas_parse(
+      '[{"name": "Aber_0318_Self_Check_v2_2", "metrics": []}, {"name": "Aber_0318_Self_Check", "metrics": []}]'::jsonb);
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_out -> 0 -> 'reasons') r WHERE r ->> 'path' = '$[0].name')
+       OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_out -> 1 -> 'reasons') r
+                       WHERE r ->> 'path' = '$[1].name' AND r ->> 'message' LIKE '%already the name of the schema at $[0]%') THEN
       RAISE EXCEPTION '0318: with X_v3 in force, a file written before 0316 no longer finds its lineage by the name X_v2_2';
     END IF;
     RAISE EXCEPTION 'the self-check rolls back' USING ERRCODE = 'AB318';
