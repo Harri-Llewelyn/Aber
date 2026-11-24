@@ -4035,6 +4035,7 @@ a.chip { text-decoration: none; }
   color: var(--text-primary);
 }
 .context-warning > div { min-width: 0; overflow-wrap: anywhere; }
+.context-warning .mono { font-size: inherit; }
 .context-warning-icon { flex-shrink: 0; margin-top: 1px; color: var(--warning-text); }
 .context-warning-danger {
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
@@ -5590,6 +5591,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     max-height: none;
     z-index: 90;
   }
+  /* The overlay is as tall as the window, so its actions are at its foot however short the rest is. */
+  .context-panel-body:has(> .context-panel-actions) { display: flex; flex-direction: column; }
+  .context-panel-body:has(> .context-panel-actions) > * { flex: none; }
+  .context-panel-body > :has(+ .context-panel-actions) { margin-bottom: 16px; }
+  .context-panel-body > .context-panel-actions { margin-top: auto; }
   /* Over the page, the help drawer keeps the shadow, as the rail does when it opens over the page. */
   .context-panel-app .context-panel-inner { box-shadow: var(--shadow); }
   .context-panel-inner {

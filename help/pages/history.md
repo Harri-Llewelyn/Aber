@@ -80,7 +80,7 @@ The newest few minutes are counted a little after they arrive, so the right-hand
 
 To list the replay lanes, tick **Show replay lanes**: in **Filters** on the list, or in the toolbar's list of devices. The tick box appears once a replay lane exists. Open a replay lane's charts from a link, such as a lane's name on Overview, and the tick box is ticked for you. The address keeps it, so a link you share shows the same list.
 
-You can also start from a device. On the Devices page, open the device and select **View History**.
+You can also start from a device. On the Devices page, open the device and select **View in History**.
 
 The time window works as it does on the Audit Trail: see [Moving through time](audit-trail.md#moving-through-time). Choose **Day**, **Week**, **Month** or **Year** to see a whole span, and **‹** or **›** to step back or forward. Select the words between the arrows to jump to a day, or to pick a rolling or custom range. There is no **All time**, because a chart must fit a size you can read. To look closer, zoom in: see [Zooming in on a stretch](#zooming-in-on-a-stretch).
 
@@ -304,7 +304,7 @@ Each page has its own scale, and says so: **One scale for every device on this p
 The Cell tab shows one metric across every machine in a cell. Use it to find the machine that behaves differently from the rest.
 
 1. Select the **Cell** tab under the page's name. It lists the cells.
-2. Select a cell's name. Or open the cell on the Cells page and select **View History**.
+2. Select a cell's name. Or open the cell on the Cells page and select **View in History**.
 3. Choose the **metric** in the toolbar. It starts on the metric most of the cell's machines report. The list says how many machines report each metric.
 4. Choose the period in the **time window**. **Zoom in**, **Zoom out** and a drag across a chart work as on the Device tab.
 5. To compare another cell, select its name in the toolbar. It keeps the window, and the metric where the other cell reports it.
@@ -343,7 +343,7 @@ In a time zone that is offset by part of an hour, such as India's, each hourly s
 The Area tab shows one metric across the cells in an area. It is the Cell tab one level up: a chart for each cell, not for each machine. Use it to see which cell runs harder or hotter than the others.
 
 1. Select the **Area** tab under the page's name. It lists the areas.
-2. Select an area's name. Or open the area on the Areas page and select **View History**.
+2. Select an area's name. Or open the area on the Areas page and select **View in History**.
 3. Choose the **metric** in the toolbar. It starts on the metric most of the area's machines report.
 4. Choose how each cell is drawn with **Mean** or **Total**, beside the metric. It starts on **Mean**.
 5. Choose the period in the **time window**. **Zoom in**, **Zoom out** and a drag across a chart work as on the Device tab.

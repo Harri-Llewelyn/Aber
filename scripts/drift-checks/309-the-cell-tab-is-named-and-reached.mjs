@@ -7,7 +7,7 @@ import { fail, pass, read } from './lib.mjs';
 // page names it. A drawer that says another word for the same act is two names for one thing.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
-  const action = (file) => read(file).match(/label: '(View History)', icon: <(\w+) size=\{13\} \/>,\s*to: (\w+)\(/);
+  const action = (file) => read(file).match(/label: '(View in History)', icon: <(\w+) size=\{13\} \/>,\s*to: (\w+)\(/);
   const devices = action('frontend/src/components/tabs/DevicesTab.jsx');
   const cells = action('frontend/src/components/tabs/CellsTab.jsx');
   const routes = read('frontend/src/routes.js');
@@ -15,8 +15,8 @@ export default function check() {
   const tabs = read('frontend/src/navigation.jsx').match(/export const HISTORY_TABS = \[([\s\S]*?)\n\]/)?.[1] ?? '';
   const ids = [...tabs.matchAll(/\{ id: '([a-z]+)', label: '([^']+)', description: ["'`]([^"'`]+)/g)];
   const problems309 = [];
-  if (!devices) problems309.push('could not read the Devices drawer\'s View History action out of DevicesTab.jsx');
-  if (!cells) problems309.push('the Cells drawer has no View History action like the Devices drawer\'s in CellsTab.jsx (label, icon, to)');
+  if (!devices) problems309.push('could not read the Devices drawer\'s View in History action out of DevicesTab.jsx');
+  if (!cells) problems309.push('the Cells drawer has no View in History action like the Devices drawer\'s in CellsTab.jsx (label, icon, to)');
   if (devices && cells) {
     if (devices[2] !== cells[2]) problems309.push(`the Cells drawer's History action draws ${cells[2]}, the Devices drawer's ${devices[2]}`);
     if (devices[3] !== 'deviceHistoryUrl' || cells[3] !== 'cellHistoryUrl') problems309.push(`the drawers' History actions go to ${devices[3]} and ${cells[3]}, not deviceHistoryUrl and cellHistoryUrl`);
@@ -32,10 +32,10 @@ export default function check() {
   if (!read('frontend/src/searchIndex.js').includes("...tabCard('history', 'cell')")) problems309.push('frontend/src/searchIndex.js has no card for the Cell tab');
   const help = read('help/pages/history.md');
   if (!help.includes('\n## The Cell tab: comparing the machines in a cell\n')) problems309.push('help/pages/history.md has no "The Cell tab" section');
-  if (!help.includes('open the cell on the Cells page and select **View History**')) problems309.push('help/pages/history.md does not say View History opens a cell from the Cells page');
+  if (!help.includes('open the cell on the Cells page and select **View in History**')) problems309.push('help/pages/history.md does not say View in History opens a cell from the Cells page');
   if (problems309.length) {
     fail('The Cell tab is named or reached otherwise than the Device tab is:\n' + problems309.map((p) => `        ${p}`).join('\n'));
   } else {
-    pass('the Cells drawer says View History as the Devices drawer does, to /history/cell, and History lists, searches and documents the Cell tab after Device');
+    pass('the Cells drawer says View in History as the Devices drawer does, to /history/cell, and History lists, searches and documents the Cell tab after Device');
   }
 }

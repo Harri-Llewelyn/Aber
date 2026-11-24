@@ -93,7 +93,7 @@ Select a name in the list. The page shows:
 - **The editor**, with the automation as YAML. A comment beside each device id names the device and where it is.
 - **Disable** or **Enable**, **Export**, **Delete** and **Save**. **Delete** asks you to type the automation's name. Deleting an automation resolves the alerts it raised.
 - **Recent firings**: the latest times it raised an alert, newest first. Each row shows the device, the metric, how long it fired, and the labels and values it carried.
-- **View Audit Trail**, for anyone who may open it. It shows who created, changed, enabled, disabled or deleted this automation, and when.
+- **View in Audit Trail**, for anyone who may open it. It shows who created, changed, enabled, disabled or deleted this automation, and when.
 
 For an Operator or an Auditor, the editor is read-only. You can read and copy the text.
 

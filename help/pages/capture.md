@@ -26,7 +26,7 @@ A capture holds only the window it ran for. It does not reach back before it was
 
 If the ingestion service restarts during a recording, it stores what was recorded, as **Stop** does. The details panel then says a restart cut the recording short. If storing a recording fails, the service tries up to three more times before the recording fails. A restart leaves time for one try only, and a failure then says the service restarted.
 
-A capture with no birth certificate cannot be played back. A playback starts the way a gateway's own session does, with its birth certificate, so it refuses a capture without one. **NO BIRTH** marks such a capture in warning colour. Record it again to replace it: recording asks the gateway to send its birth certificate. A playback also leaves out anything recorded before that birth certificate, and a device's messages before its own.
+A capture with no birth certificate cannot be played back. A playback starts the way a gateway's own session does, with its birth certificate, so it refuses a capture without one. **NO BIRTH** marks such a capture in warning colour, and the top of its panel says so too. Record it again to replace it: recording asks the gateway to send its birth certificate. A playback also leaves out anything recorded before that birth certificate, and a device's messages before its own.
 
 Some older captures were stored without a list of the devices they hold. The playback dialog cannot map their devices, so it says so and offers no playback. Opening the dialog does not download the file. To play such a capture, **Download** it, then play the file with **Play a file…**. That stores it again with its list of devices.
 

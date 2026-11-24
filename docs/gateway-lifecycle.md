@@ -43,8 +43,8 @@ Each table covers one group of steps. A row is one step for one type, from the s
 - **Broker** is the account in the broker's Dynamic Security plugin, which the Access Control page lists.
   A revocation **disables** the account. It does not delete it, and issuing again re-enables it.
 - **Forge** is the gateway's repository and its deploy key.
-- **Drawer** lists the actions the step changes. The drawer always offers View Audit Trail and Attached
-  Links to a reader who may use them. One action is primary.
+- **Drawer** lists the actions the step changes. The drawer always offers View in Audit Trail and
+  Attached Links to a reader who may use them. One action is primary.
 - **Audit and toast** is what the Audit Trail records and what the person sees. A person-made action ends
   with a success toast, which also files a bell notification.
 

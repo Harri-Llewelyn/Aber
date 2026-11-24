@@ -15,7 +15,7 @@ export default function check() {
   const labels = [
     ['New Automation', PAGE], ['Upload', PAGE], ['Export', PAGE],
     ['Automation', PAGE], ['Watches', PAGE], ['Enabled', PAGE], ['Firing now', PAGE], ['Last fired', PAGE], ['Applies because', PAGE],
-    ['Save', DETAIL], ['Delete', DETAIL], ['Disable', DETAIL], ['Enable', DETAIL], ['Recent firings', DETAIL], ['View Audit Trail', DETAIL],
+    ['Save', DETAIL], ['Delete', DETAIL], ['Disable', DETAIL], ['Enable', DETAIL], ['Recent firings', DETAIL], ['View in Audit Trail', DETAIL],
     ['View in Automations', DEVICES],
   ];
   for (const [label, file] of labels) {
