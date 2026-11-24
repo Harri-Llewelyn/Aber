@@ -1166,16 +1166,24 @@ export async function platformTagExists(cfg: ForgeConfig, tag: string): Promise<
   throw await refused(`could not read tag ${tag} on '${PLATFORM_REPOSITORY}'`, found);
 }
 
-/** A repository's `platform.yml` at a branch, byte for byte, or why it cannot be read. */
+/** The commit a branch points at, or null when there is no such branch. */
+async function branchCommit(cfg: ForgeConfig, name: string, branch: string): Promise<string | null> {
+  const found = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/branches/${branch}`);
+  if (found.status === 404) return null;
+  if (!found.ok) throw await refused(`could not read '${branch}' on '${name}'`, found);
+  return ((await found.json()) as { commit: { id: string } }).commit.id;
+}
+
+/** A gateway repository's `platform.yml` at a commit, byte for byte, or why it cannot be read. */
 async function pointerAt(
   cfg: ForgeConfig,
   name: string,
-  branch: string,
+  commit: string,
 ): Promise<{ sha: string; text: string } | { reason: string }> {
   const read = await forgeApi(
     cfg,
     "GET",
-    `/repos/${FORGE_ORGANISATION}/${name}/contents/${PLATFORM_POINTER_PATH}?ref=${encodeURIComponent(branch)}`,
+    `/repos/${FORGE_ORGANISATION}/${name}/contents/${PLATFORM_POINTER_PATH}?ref=${commit}`,
   );
   if (read.status === 404) return { reason: "it is not there" };
   if (!read.ok) throw await refused(`could not read '${PLATFORM_POINTER_PATH}' on '${name}'`, read);
@@ -1215,21 +1223,62 @@ async function bumpPulls(cfg: ForgeConfig, name: string): Promise<BumpPull[]> {
 }
 
 /**
- * Whether a branch found without a pull request is what a pass that died between the two calls
- * left: one commit past `main`, touching `platform.yml` alone and leaving it as wanted. Anything
- * else on it is not proposed as Aber's.
+ * Whether a commit is the bump and nothing more: one past `base`, touching `platform.yml` alone and
+ * leaving it as wanted.
  */
-async function holdsOnlyTheBump(cfg: ForgeConfig, name: string, branch: string, wanted: string): Promise<boolean> {
-  const compared = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/compare/main...${branch}`);
-  if (!compared.ok) throw await refused(`could not compare '${branch}' on '${name}' with main`, compared);
+async function isOnlyTheBump(cfg: ForgeConfig, name: string, base: string, commit: string, wanted: string): Promise<boolean> {
+  const compared = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}/compare/${base}...${commit}`);
+  if (!compared.ok) throw await refused(`could not compare ${commit} on '${name}' with main`, compared);
   const { total_commits, commits } = await compared.json() as {
     total_commits: number;
-    commits?: { files?: { filename: string }[] }[];
+    commits?: { sha: string; parents?: unknown[]; files?: { filename: string }[] }[];
   };
-  const files = (commits?.[0]?.files ?? []).map((f) => f.filename);
-  if (total_commits !== 1 || files.length !== 1 || files[0] !== PLATFORM_POINTER_PATH) return false;
-  const pointer = await pointerAt(cfg, name, branch);
+  const last = commits?.[0];
+  if (total_commits !== 1 || last?.sha !== commit || last.parents?.length !== 1) return false;
+  if (last.files?.length !== 1 || last.files[0].filename !== PLATFORM_POINTER_PATH) return false;
+  const pointer = await pointerAt(cfg, name, commit);
   return "text" in pointer && pointer.text === wanted;
+}
+
+/**
+ * The branch a bump is proposed from, made at `base` and given its one commit. Returns why it cannot
+ * be used, or null. One found without a pull request is what a pass that died part-way left, and is
+ * used when it is still at `base` or holds only the bump; anything else on it is not proposed as
+ * Aber's.
+ */
+async function makeBumpBranch(
+  cfg: ForgeConfig,
+  name: string,
+  branch: string,
+  base: string,
+  pointer: { sha: string },
+  wanted: string,
+  message: string,
+): Promise<string | null> {
+  const path = `/repos/${FORGE_ORGANISATION}/${name}`;
+  const found = await branchCommit(cfg, name, branch);
+  if (found !== null && found !== base) {
+    return await isOnlyTheBump(cfg, name, base, found, wanted)
+      ? null
+      : `the branch ${branch} is already there and holds something else`;
+  }
+  if (found === null) {
+    const created = await forgeApi(cfg, "POST", `${path}/branches`, { new_branch_name: branch, old_ref_name: base });
+    if (created.status === 409) return `the name ${branch} is taken, so the forge will not make the branch`;
+    if (!created.ok) throw await refused(`could not create '${branch}' on '${name}'`, created);
+  }
+  const committed = await forgeApi(cfg, "PUT", `${path}/contents/${PLATFORM_POINTER_PATH}`, {
+    content: base64(wanted),
+    sha: pointer.sha,
+    branch,
+    message,
+  });
+  if (!committed.ok) throw await refused(`could not commit the bump to '${branch}' on '${name}'`, committed);
+  const { commit } = await committed.json() as { commit: { sha: string; parents?: { sha: string }[] } };
+  const ours = commit.parents?.length === 1 && commit.parents[0].sha === base &&
+    (await branchCommit(cfg, name, branch)) === commit.sha &&
+    await isOnlyTheBump(cfg, name, base, commit.sha, wanted);
+  return ours ? null : `the branch ${branch} did not come out as one commit on main`;
 }
 
 /** What one call did about a gateway's platform tag. */
@@ -1256,7 +1305,10 @@ export async function proposePlatformBump(cfg: ForgeConfig, name: string, tag: s
   const bump: PlatformBump = { opened: null, closed: [], declined: null };
   const decline = (reason: string) => ({ ...bump, declined: `no bump to ${tag} is proposed: ${reason}` });
 
-  const pointer = await pointerAt(cfg, name, "main");
+  // Every read below is pinned to this one commit, so that they describe one state.
+  const base = await branchCommit(cfg, name, "main");
+  if (base === null) return decline("there is no branch main");
+  const pointer = await pointerAt(cfg, name, base);
   if ("reason" in pointer) return decline(`${PLATFORM_POINTER_PATH} on main cannot be used, ${pointer.reason}`);
   const found = findPlatformTag(pointer.text);
   if ("reason" in found) return decline(`${PLATFORM_POINTER_PATH} on main cannot be used, ${found.reason}`);
@@ -1265,22 +1317,16 @@ export async function proposePlatformBump(cfg: ForgeConfig, name: string, tag: s
   const { existing, supersedes } = decideBump(await bumpPulls(cfg, name), tag);
   if (existing === null) {
     const branch = bumpBranch(tag);
-    const wanted = withPlatformTag(pointer.text, found, tag);
-    const present = await forgeApi(cfg, "GET", `${path}/branches/${branch}`);
-    if (present.status === 404) {
-      const committed = await forgeApi(cfg, "PUT", `${path}/contents/${PLATFORM_POINTER_PATH}`, {
-        content: base64(wanted),
-        sha: pointer.sha,
-        branch: "main",
-        new_branch: branch,
-        message: bumpTitle(tag),
-      });
-      if (!committed.ok) throw await refused(`could not commit the bump to '${branch}' on '${name}'`, committed);
-    } else if (!present.ok) {
-      throw await refused(`could not read '${branch}' on '${name}'`, present);
-    } else if (!(await holdsOnlyTheBump(cfg, name, branch, wanted))) {
-      return decline(`the branch ${branch} is already there and holds something else`);
-    }
+    const unusable = await makeBumpBranch(
+      cfg,
+      name,
+      branch,
+      base,
+      pointer,
+      withPlatformTag(pointer.text, found, tag),
+      bumpTitle(tag),
+    );
+    if (unusable) return decline(unusable);
 
     // `/:root/` is the forge's own address in a pull request's text, where a plain `/` is the
     // repository's (measured). Not the API's html_url: it names whatever host the call was made to.

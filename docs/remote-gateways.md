@@ -491,8 +491,9 @@ gateway's `main` is seeded with the tag current at that moment. Changing it is a
 gateway's own repository. After an upgrade the sweep opens it, one for each Remote gateway in service
 on an older release, and an Administrator approves it. So a fleet upgrade is one pull request per
 gateway, and a canary is the one you merge first. The design is in
-[`supabase/README.md`](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep). Nothing tracks `main` of the platform repository. Only Aber's machine account
-can push to `main` there: the playbook is changed in Aber's own repository and reviewed there.
+[`supabase/README.md`](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep).
+Nothing tracks `main` of the platform repository. Only Aber's machine account can push to `main`
+there: the playbook is changed in Aber's own repository and reviewed there.
 
 **`ansible-pull`, not Ansible.** The appliance applies the playbook to itself; nothing pushes to
 it. It runs `aber-gateway-converge` hourly and after boot, which:

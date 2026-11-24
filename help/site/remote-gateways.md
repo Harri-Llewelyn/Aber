@@ -536,7 +536,8 @@ repository of each Remote gateway in service that is on an older release. It mov
 account, `aber_platform`, so your one Administrator can approve it:
 
 1. In the gateway's drawer, choose **Open in the forge**, then **Pull Requests**. Look for *Converge to
-   the platform at* and the release. It appears within about fifteen minutes of the upgrade.
+   the platform at* and the release. It appears within about fifteen minutes of the upgrade. A site
+   with more than ten such gateways gets ten every fifteen minutes.
 2. Read what changes, and approve it. The text links what is different between the two releases.
 3. Merge it. The appliance fetches the change within five minutes and converges within the hour. The
    drawer's **Platform** row then shows the new release.

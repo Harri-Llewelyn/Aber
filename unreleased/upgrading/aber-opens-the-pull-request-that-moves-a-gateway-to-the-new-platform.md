@@ -6,7 +6,8 @@ needs one Administrator's approval, and the forge never lets an author approve t
 
 From 1.10.0 Aber opens it. Nothing needs doing before you upgrade. Within about fifteen minutes
 afterwards, the repository of each Remote gateway in service that is on an older release holds one
-pull request, *Converge to the platform at* `v1.10.0`, from Aber's own account. It changes that one line.
+pull request, *Converge to the platform at* `v1.10.0`, from Aber's own account. It changes that one
+line. A site with more than ten such gateways gets ten every fifteen minutes.
 
 1. Start with one gateway. Open its repository from its drawer (**Open in the forge**), then **Pull
    Requests**.

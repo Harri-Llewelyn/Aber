@@ -11726,8 +11726,9 @@ request of their own into Aber's branch (200), and could then have approved as A
 written; with it, 405, forced or not. The rule has an explicit priority because Gitea puts one
 created without it last, where `**` would decide first. The branch's name holds no slash because a
 rule is addressed by name in the API's path, and the `forge-api` listener refuses an escaped slash.
-A branch of the name found without a pull request, which is what a pass that died between the two
-calls leaves, is proposed only when it is one commit that does nothing but the bump.
+Every read is pinned to `main`'s commit, so that they describe one state, and the branch is made at
+that commit. It is proposed only once it points at one commit on top that changes `platform.yml` alone.
+One found without a pull request, which is what a pass that died part-way leaves, is held to the same.
 
 **Measured against `gitea/gitea:28.3.0`.** An appliance's read-write key is refused a push, a new
 branch, a deletion and a force-push there. The hook delivers the machine account's push like anyone's,
