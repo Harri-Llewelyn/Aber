@@ -39,7 +39,7 @@ worth adopting:
 | i3X concept | Already exists here as |
 | :--- | :--- |
 | ObjectType (a JSON Schema) | `schemas.schema_definition` — **the same thing**, except that a property naming a catalog metric refers to that metric's type; a metric's is its `metric_catalog` row |
-| `elementId` (unique, persistent) | `sparkplug_id`; a metric's is `<sparkplug_id>/<metric name>`, the key of `telemetry` |
+| `elementId` (unique, persistent) | `sparkplug_id`; a metric's is `<sparkplug_id>/<metric name>`, the key of `telemetry`; the rest are in [Element ids](#element-ids) |
 | `displayName` (human-readable when practical) | `name` |
 | `isExtended` (publishes beyond its type) | Unmodelled, derived by `deviceTags.js` |
 | `sourceTypeId` | `schemas.semantic_id`, else the schema's lineage name, so every version of a schema names one source type; a metric type's catalog `semantic_id` |
@@ -381,6 +381,44 @@ behind its edge node (an unbound device's behind any node), then its UUID. A dev
 unique only behind its node, hence the scope. Values, births, deaths and pushes are kept under the
 result. An id the rows do not hold is kept as it arrived, so the first read after a restart, which
 records the rows, is what starts the mapping; until then the historian fill above covers the read.
+
+### Element ids
+
+Every Object, ObjectType and RelationshipType has an `elementId`, and a client may keep one. Three
+schemes make them, all in `address_space.py`:
+
+| Element | `elementId` | Scheme |
+| :--- | :--- | :--- |
+| A gateway, a device | Its `sparkplug_id` | The id on the wire |
+| A device's metric | `<sparkplug_id>/<metric name>` | The id on the wire |
+| An area, a cell | Its uuid | The row's key |
+| A schema's type | The version's uuid | The row's key |
+| The site, Unassigned, a lane | `i3x:site`, `i3x:unassigned`, `i3x:lane:simulated`, `i3x:lane:shadow` | Synthetic |
+| The types of those, of an area, a cell and a gateway, and of a device with no schema | `i3x:type:site` and its siblings | Synthetic |
+| The type of a device with several schemas | `i3x:type:schemas:<uuids, sorted, joined by +>` | Synthetic |
+| A catalog metric's type | `i3x:type:metric:<name>` | Synthetic |
+| The type of a metric the catalog lacks | `i3x:type:sparkplug:<datatype>`, `i3x:type:unknown` | Synthetic |
+
+A RelationshipType's `elementId` is its name, such as `HasParent`.
+
+- **A thing with an identity on the wire uses it.** MQTT and the historian carry the `sparkplug_id`, so a
+  message or a stored sample reaches its element with no lookup.
+- **A row with none uses its uuid.** An area or a cell is not addressed on the wire, and its name can
+  change. No element is named by a name a person can edit.
+- **A schema's type is one version's.** A version is a contract of its own, and a draft can be in use
+  beside the version in force. What the versions of a schema share is `sourceTypeId`: the semantic id,
+  else the lineage's name.
+- **A metric's type uses the metric's name, not its row's uuid.** The name is unique, it never changes,
+  and devices publish it. The uuid is on no wire.
+- **A thing with no row of its own is synthetic.** Its id starts `i3x:`, so it is never a uuid or a
+  `sparkplug_id`.
+- **A new kind takes the first of the three that fits it,** in that order.
+
+**An Object's id does not change; its type can.** Publishing a schema version moves each device to that
+version's type. Attaching a second schema moves a device to the type of the two.
+
+[How Aber identifies things](../docs/architecture.md#how-aber-identifies-things) has the ids the rest of
+Aber uses.
 
 ## Endpoints
 
