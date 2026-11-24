@@ -4077,7 +4077,7 @@ playback acts ask through `may_manage_captures()`, and every People act through
 | `is_own_avatar_object()` | `0213` | no | A person's own picture, in any role. |
 | `is_unclaimed_capture_object()` | `0190` | no | A storage predicate; the write policies call require_mfa() in the arm beside it. |
 | `issue_capture_download()` | `0195` | no | A read: downloading a stored capture, which an Auditor may do too. |
-| `issue_gateway_enrollment_token()` | `0309` | yes | Mints a gateway enrolment token |
+| `issue_gateway_enrollment_token()` | `0312` | yes | Mints a gateway enrolment token |
 | `issue_notification_signing_key()` | `0248` | yes | Issues or rotates the webhook's signing key |
 | `keep_gateway_credential()` | `0196` | yes | Keeps a gateway's password |
 | `list_apps()` | `0217` | no | A read: the Apps tab. |

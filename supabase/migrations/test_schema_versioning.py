@@ -620,10 +620,10 @@ class TestFork(SchemaVersioningTestCase):
             message_contains="only an active schema can be versioned",
         )
 
-    def test_fork_names_around_a_discarded_draft(self):
-        """A discarded draft leaves its name behind; forking must not deadlock on that."""
+    def test_fork_names_around_a_name_that_is_taken(self):
+        """The next version's name may be another schema's; forking must name around it."""
         parent_id, _, _, _ = self._seed_schema("TESTVER_Name_Clash")
-        # Squat the obvious name with an unrelated schema, as a discarded draft would.
+        # Squat the obvious name with an unrelated schema.
         self._seed_schema("TESTVER_Name_Clash_v2", status="archived")
         self._act_as(ADMIN_USER_ID, "Administrator")
 

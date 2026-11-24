@@ -112,8 +112,8 @@ describe('schemaVersion — lineageOf', () => {
   })
 
   it('excludes unrelated schemas even when their names look similar', () => {
-    // Walks parent_schema_id, not the name -- a discarded draft can push a version onto a
-    // disambiguated name, so the name is a convenience and the edge is the constraint.
+    // Walks parent_schema_id, not the name -- another schema can hold the obvious name and push a
+    // version onto a disambiguated one, so the name is a convenience and the edge is the constraint.
     const lookalike = schema({ schema_uuid: 'y', schema_name: 'S_v9' })
     expect(lineageOf([v1, v2, v3, lookalike], v3).map(s => s.schema_uuid)).toEqual(['a', 'b', 'c'])
   })
