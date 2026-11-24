@@ -482,7 +482,8 @@ of each. A submodel that names the template's id claims to hold them. Built as m
   so `concept_definitions` has no arm for it and no export reads it.
 - **`AddressInformation` has nothing inside it.** It is mandatory in the Nameplate, and the template takes its
   elements from IDTA's drop-in of that name, which is in Contact Information (IDTA 02002). That template is
-  not seeded.
+  not seeded. The specification makes four of the drop-in's elements mandatory here (`Street`, `Zipcode`,
+  `CityTown` and `NationalCode`), in its text only, so no file says so.
 - **Its ids are never minted here.** IDTA, IEC CDD, ECLASS and W3C issue them, and each is taken as the file
   writes it. 6 elements have none, and 12 of Asset Interfaces Description's elements have no cardinality.
 - **The Templates tab reads it and nothing else does.** It lists every template, each element under its
