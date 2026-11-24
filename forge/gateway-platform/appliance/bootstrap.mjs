@@ -327,7 +327,8 @@ if (resetPasswordOnly) {
 if (existsSync(MARKER) && !force) {
   const enrolled = JSON.parse(readFileSync(MARKER, 'utf8'));
   log(`already enrolled as ${enrolled.sparkplug_id} on ${enrolled.enrolled_at}; nothing to do.`);
-  log('The enrolment token in .env was consumed at that point and cannot be reused.');
+  // Every later start of the project lands here too, so it says what to do only for a new bundle.
+  log('This run used no token. To set this machine up again, clear this enrolment first: see "Starting over" in README.md.');
   process.exit(0);
 }
 
