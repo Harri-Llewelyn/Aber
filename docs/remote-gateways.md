@@ -196,7 +196,9 @@ the key at once ([*An appliance that is lost, stolen or scrapped*](#an-appliance
 ### A rebuilt appliance is a re-issue, and keeps its repository
 
 For a dead SD card, a replaced box or a destroyed volume: re-issue, install, and the gateway carries
-on under the same identity. **Nothing about the repository changes and there is no cleanup step.**
+on under the same identity. **Nothing about the repository changes, and there is nothing to clean up in
+the forge.** A machine that kept its disk also kept its old enrolment, which is cleared first
+([*Commands on the appliance*](../help/site/remote-gateways.md#clear-an-old-enrolment)).
 
 * **The repository is the same one.** Enrolment adopts the repository that already exists under the
   gateway's name, rather than creating a second. The flow, `platform.yml`, the incident template and
@@ -466,11 +468,8 @@ difference from Aber's own Node-RED:
   is when somebody is standing in front of the box wanting to look at it.
 
 The trade-off is that the password is per appliance and cannot be revoked centrally. So it is
-**generated** (never defaulted), shown once, and re-issued rather than recovered. To re-issue it:
-
-```bash
-docker compose run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password
-```
+**generated** (never defaulted), shown once, and re-issued rather than recovered
+([*Reset the editor password*](../help/site/remote-gateways.md#reset-the-editor-password)).
 
 The **data path is unaffected.** Editor login is for people. Telemetry authenticates to Mosquitto
 with the enrolled `sparkplug_id` over MQTTS. The two kinds of authentication are independent, which is

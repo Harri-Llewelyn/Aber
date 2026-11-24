@@ -5,7 +5,8 @@
  */
 
 import { certExpiryDays, CERT_EXPIRY_WARN_DAYS, formatBytes, holdsOlderRoot } from './gatewayStatus';
-import { flowDriftState, isFlowDrift } from './flowDrift';
+import { enrolmentStands, hadEnrolled } from './credentialState';
+import { FLOW_DRIFT_GRACE_MS, flowDriftState, isFlowDrift } from './flowDrift';
 
 export const TONE_DANGER = 'danger';
 export const TONE_WARNING = 'warning';
@@ -68,6 +69,21 @@ export function gatewayHealthProblems(gateway, { rootNotAfter = null, now = Date
 
 /** The tone one row carries, or undefined. */
 export const rowTone = (problems, label) => problems.find(p => p.row === label)?.tone;
+
+/**
+ * Whether a Remote gateway's appliance should have reported to its forge branch by now and never
+ * has: it enrolled, with a repository, two of flow-sync's passes ago or more. flow-sync makes that
+ * report, and its log says why there is none. The health figures come on the heartbeat instead, so
+ * having none of those is not this.
+ *
+ * @param {object} gateway The gateways row, with the forge's columns.
+ * @param {number} [now] The clock, for the two passes.
+ */
+export function applianceReportMissing(gateway, now = Date.now()) {
+  return hadEnrolled(gateway) && enrolmentStands(gateway) && !gateway.is_archived
+    && present(gateway.forge_repository_at) && !present(gateway.forge_appliance_sha)
+    && now - new Date(gateway.enrolled_at).getTime() >= FLOW_DRIFT_GRACE_MS;
+}
 
 /**
  * The Health block's summary line and its tone, from the rows the block holds: the worst state

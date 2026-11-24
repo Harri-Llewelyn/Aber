@@ -760,7 +760,8 @@ height is not known, and above the actions it could push Edit Details off the dr
   - **Third-party** loses every one of them, and says so in a Not Provided row.
   - **Remote** loses none. Where it has not reported a figure the row says *Not set*. Its three
     forge rows show only once they hold a value: as *Not set* on a new appliance they would add
-    three rows to its drawer.
+    three rows to its drawer. One whose appliance should have reported, and has not, has the closed
+    group **Reported** in that row's place (below).
 - **A group of rows a reader seldom needs opens on request, and says its worst state while it is
   closed.** A Remote gateway's drawer reached Launch UI 1,301px down, where a 1920×917 page leaves
   760px. Its seven appliance rows (CA Expires, Disk Free, Memory Available, Load (1m), Flow,
@@ -801,6 +802,25 @@ height is not known, and above the actions it could push Edit Details off the dr
   - **Not for an archived gateway or the Playback gateway,** which are not read either. The group
     shows once the first read of the gateway has settled, so another gateway's figures never sit
     under this one's name.
+- **A command to run on the appliance is one block, read from one module.** `utils/applianceCommands.js`
+  holds each command, and `common/ApplianceCommand.jsx` draws it in the setup dialog and in the drawer,
+  so each looks and copies the same way. Drift check 546 holds the help page's *Commands on the
+  appliance*, the appliance README and the installer's refusal to the same text. No component spells a
+  command of its own. Two lines that each need `sudo` are joined with `&&`, because a password prompt
+  would read the second pasted line as the password.
+  - **In the drawer it stands where its state is said.** Platform's and Flow's are under those rows while
+    they are red, inside the closed Health block. In a drawer its copy button is a `context-action`, as
+    a section's buttons are.
+  - **Reported is a group in place of its row** when the appliance enrolled with a repository two of
+    flow-sync's passes ago or more and has pushed nothing (`applianceReportMissing()`). Its summary
+    says *No report from the appliance yet*, with no tone, since what was never reported is not known
+    to be wrong. The health figures are not flow-sync's, so *No figures reported yet* does not offer
+    its log.
+  - **Editor Password is a group after the actions** (`FieldGroup`, in `children`): above them it would
+    move Launch UI and Archive Gateway down. It shows for any Remote gateway that has enrolled, archived
+    or not, as Launch UI does.
+  - **The setup dialog shows the clean-up when the gateway has ever enrolled** (`enrolled_at`), not when
+    it holds a credential: a restored gateway's was revoked, and that is the case that needs it most.
 - **A missing repository is one line.** `GatewayRepositoryPanel` draws the drawer's field shape:
   the label *Repository* with a help tip, then one muted line such as *None: edit it in Node-RED*.
   The reason is in the tip, in about 35 words. Every case without a repository does the same:

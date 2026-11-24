@@ -43,6 +43,14 @@ export function enrolmentStands(gateway) {
 }
 
 /**
+ * Whether a Remote gateway has ever enrolled, whatever its credential is now: an archive and a
+ * re-issued setup both leave `enrolled_at`. The machine it enrolled on may still hold that enrolment.
+ */
+export function hadEnrolled(gateway) {
+  return gateway?.deployment === 'remote' && !!gateway.enrolled_at;
+}
+
+/**
  * `issuedAt` is the latest CREDENTIAL_ISSUED row for this gateway, or null.
  */
 export function credentialState(gateway, issuedAt = null) {

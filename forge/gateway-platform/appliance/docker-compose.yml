@@ -143,6 +143,7 @@ services:
 volumes:
   # The appliance's state, and the thing to back up: the flow, the encrypted credentials, the CA
   # and settings.js. `docker compose down -v` destroys the enrolment with it, and the token is
-  # already spent. The flow's copy lives in this gateway's own repository in the forge;
+  # already spent; where the platform playbook binds it to a host folder, that folder outlives it
+  # (README.md, "Starting over"). The flow's copy lives in this gateway's own repository in the forge;
   # flows_cred.json is never committed, because it is encrypted with a secret in this .env.
   nodered_data:

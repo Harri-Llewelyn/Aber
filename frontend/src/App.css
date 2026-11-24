@@ -7977,6 +7977,24 @@ pre.gateway-code {
 
 pre.gateway-code-wrap { white-space: pre-wrap; }
 
+/* A command to run on an appliance, in a drawer (ApplianceCommand). Under a row's value or as it; the
+   row's tone stays on its value. A drawer is too narrow for a line of one, so it wraps between words,
+   and inside one only where a word is longer than the block. */
+.appliance-command { color: var(--text-primary); }
+.appliance-command > .context-field-label { margin-top: 8px; }
+.appliance-command > pre.gateway-code {
+  margin: 4px 0 6px;
+  padding: 8px;
+  font-size: 11px;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.appliance-command-help { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
+.appliance-command-help:hover,
+.appliance-command-help:focus-visible { text-decoration: underline; }
+/* A group after the actions: the tools' own gap spaces it. */
+.context-panel-extras > .context-field-group { margin-top: 0; }
+
 /* The Issue Token dialog's Connect section, set off from the token it is built from. */
 .token-connect {
   margin-top: 18px;

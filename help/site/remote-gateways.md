@@ -57,6 +57,9 @@ gateway's command or bundle to a machine. So the modal
 **asks first and makes you type the gateway's name** before it mints anything. See
 [`docs/remote-gateways.md`, *Re-issuing, and what it invalidates*](../../docs/remote-gateways.md#6-re-issuing-and-what-it-invalidates).
 
+**Setting the same machine up again?** [Clear its old enrolment](#clear-an-old-enrolment) first. For a
+gateway that has enrolled before, the modal shows how.
+
 ### On the appliance: the command
 
 You need a fresh **Ubuntu** or **Ubuntu Server** machine (amd64 or arm64), a user who can `sudo`,
@@ -434,7 +437,7 @@ which proposals are still open, read the repository's **Pull Requests** page.
 
 The appliance's running flow lives on a Docker volume, on hardware in a plant. After each pass,
 `flow-sync` pushes a copy of it to the repository's `appliance` branch, and the approved flow is on
-`main`. So `docker compose down -v` or a failed SD card loses only what changed since the last pass.
+`main`. So a failed SD card, or clearing the appliance, loses only what changed since the last pass.
 
 **Watching it land.** The drawer's **Committed** row shows the head of `main` as soon as the forge
 reports the push. Its **Flow** row shows the hash of the flow the appliance last deployed, reported
@@ -443,7 +446,7 @@ on every heartbeat from `/data/gitops/deployed.json`. Then:
 * *main moved, deploying* means the appliance has not checked since the merge;
 * *matches main* means it has;
 * *differs from main*, more than ten minutes after a merge, means the appliance refused the commit or
-  cannot reach the forge. `docker compose logs flow-sync` on the appliance says which.
+  cannot reach the forge. [Its log](#read-why-nothing-is-reported) on the appliance says which.
 
 An edit made in the appliance's editor is in neither hash, and the next approved deploy overwrites
 it.
@@ -589,6 +592,88 @@ the two copies of the check together, by running the same files through both.
 
 **If a check is missing on an older repository**, the fifteen-minute sweep adds the requirement to
 `main`, and leaves anything else required beside it.
+
+---
+
+## Commands on the appliance
+
+Run these on the appliance itself. The dashboard shows each one where you need it: in the setup modal,
+or in the gateway's drawer.
+
+Some depend on how the appliance was set up:
+
+* **With the install command.** Its files are in `/opt/aber-gateway`, and its enrolment is in
+  `/var/lib/aber-gateway/data`. A bundle's appliance is this kind too, once the platform playbook has
+  run on it.
+* **With a bundle.** Its files are in the bundle's folder, and its enrolment is in a Docker volume.
+
+### Clear an old enrolment
+
+Do this before you set up the **same machine** again: after a restore, a Re-issue Setup, or a rebuild
+that kept the disk. A fresh machine does not need it. It deletes the old enrolment, and anything the
+appliance has not reported.
+
+On an appliance set up with the install command:
+
+```bash
+sudo docker compose -p aber-gateway down -v &&
+sudo rm -rf /var/lib/aber-gateway/data /opt/aber-gateway
+```
+
+On one set up with a bundle, in the old bundle's folder:
+
+```bash
+docker compose down -v
+```
+
+Then paste the new command, or start the new bundle. If you skip this:
+
+* **The install command refuses to run.** It says the appliance is already enrolled. Its token is not
+  spent, so clear the old enrolment and paste the command again.
+* **A new bundle started over the old one does nothing.** Its log says *already enrolled*. The old
+  credential no longer works, so the gateway does not come online.
+* **A new bundle started in another folder stops.** The old one's containers still hold their names.
+
+**Run both lines of the first command.** Removing the folders while the old containers run makes the
+next install stop with `error mounting`. If that happens, run both lines, then paste the install command
+again.
+
+### Read why the platform failed
+
+Do this when the drawer's **Health** block says **Platform failed** or **Platform refused**. The journal of
+the last convergence says why, such as a forge it could not reach:
+
+```bash
+sudo journalctl -u aber-gateway-converge -n 30 --no-pager
+```
+
+### Read why nothing is reported
+
+Do this when the drawer says **No report from the appliance yet**, or its **Flow** row says *differs from
+main*. The `flow-sync` service sends the report and deploys the flow, and its log says what stopped it:
+
+```bash
+sudo docker logs --tail 20 aber-gateway-flow-sync
+```
+
+### Reset the editor password
+
+Do this when the password of the appliance's Node-RED editor is lost. **Launch UI** opens that editor. A
+new password is printed **once**, and the enrolment and the flow are kept.
+
+On an appliance set up with the install command:
+
+```bash
+sudo docker compose --project-directory /opt/aber-gateway run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password &&
+sudo docker compose --project-directory /opt/aber-gateway restart node-red
+```
+
+On one set up with a bundle, in the bundle's folder:
+
+```bash
+docker compose run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password
+docker compose restart node-red
+```
 
 ---
 

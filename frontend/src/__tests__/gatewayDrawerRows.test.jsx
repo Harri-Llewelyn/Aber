@@ -91,8 +91,10 @@ const show = async (row, { userRole = 'Shopfloor_Manager' } = {}) => {
   return within(document.querySelector('.context-panel'))
 }
 
-/** The drawer's field labels, top to bottom. */
-const rows = () => [...document.querySelectorAll('.context-panel dt.context-field-label')].map(dt => dt.textContent.trim())
+/** The drawer's field labels, top to bottom: not the tools' after the actions. */
+const rows = () => [...document.querySelectorAll('.context-panel dt.context-field-label')]
+  .filter(dt => !dt.closest('.context-panel-extras'))
+  .map(dt => dt.textContent.trim())
 /** The value shown under one field's label. */
 const valueOf = (label) => {
   const dt = [...document.querySelectorAll('.context-panel dt.context-field-label')].find(d => d.textContent.trim() === label)
