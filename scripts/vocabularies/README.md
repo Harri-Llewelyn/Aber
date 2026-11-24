@@ -93,6 +93,47 @@ SHA-256 is what says which release they are.
    point the generator at it rather than rewriting a released one.
 5. Update `docs/vocabularies.md` and `NOTICE.md`.
 
+## `idta-*.json`: the IDTA submodel templates
+
+`scripts/generate-idta-template.mjs` builds the `idta_template_elements` seed, in migration `0320`, from
+these files. The generator refuses any other file: it checks the SHA-256 of each first, then that the file
+is one submodel template and carries no IEC CDD or ECLASS text.
+
+| | Digital Nameplate | Asset Interfaces Description |
+| :--- | :--- | :--- |
+| What | IDTA 02006-3-0-3, [`idta-02006-3-0-3-digital-nameplate.json`](idta-02006-3-0-3-digital-nameplate.json) | IDTA 02017-1-0-1, [`idta-02017-1-0-1-asset-interfaces-description.json`](idta-02017-1-0-1-asset-interfaces-description.json) |
+| Publisher | Industrial Digital Twin Association (IDTA) | The same |
+| Licence | CC BY 4.0, the repository's `LICENSE.txt`, kept byte for byte in [`LICENSE-idta-CC-BY-4.0.txt`](LICENSE-idta-CC-BY-4.0.txt) | The same |
+| From | [`admin-shell-io/submodel-templates`](https://github.com/admin-shell-io/submodel-templates) at commit `5285185b1ef9425fe45068bcbda8faaf74f3eb89` (2026-10-29), `published/Digital nameplate/3/0/3/IDTA 02006-3-0-3_Template_Digital Nameplate.json` | The same commit, `published/Asset Interfaces Description/1/0/1/IDTA 02017-1-0-1_Template_Asset Interfaces Description.json` |
+| SHA-256 upstream | `79dd7e957964411925e5a3119def8c08fed775b6d942133c664b77304e50a217` (83,244 bytes) | `f1fdfe4c253512a8a5169b5acd2774c52890b614a3e24c697934937e5915e0dc` (501,384 bytes) |
+| SHA-256 here | `25ff717b34183f9fc572eae8d42ac05e3533fe4e9dd9d87560188a7e8c383c1f` (55,352 bytes) | `f1fdfe4c253512a8a5169b5acd2774c52890b614a3e24c697934937e5915e0dc` (501,384 bytes) |
+| Changes | 27 ConceptDescriptions are taken out, and nothing else | None. The file is byte for byte what the commit holds |
+
+**Why 27 are taken out.** IDTA publishes the file under CC BY 4.0. These ConceptDescriptions carry the
+definitions IEC CDD and ECLASS issued for the concepts the template cites, and those texts are under
+the dictionaries' own terms. The ids stay in the elements, because an id is only a value. The three that
+are left are IDTA's own.
+
+**Each file is the newest bug-fix release of its version,** which is what the repository's README says to
+use. IDTA never changes a released file, and publishes a correction as a new folder.
+
+**Adding a template.**
+
+1. Download its JSON from the repository at a commit you record here, and read the repository's licence
+   at that commit.
+2. Read its ConceptDescriptions. If one carries another body's text (VDI, ISO, DIN), stop and settle
+   the licence first: `--vendor` only knows IEC CDD and ECLASS.
+3. Write the copy to keep: `node scripts/generate-idta-template.mjs --vendor <downloaded.json> scripts/vocabularies/idta-<number>-<name>.json`.
+   It prints both SHA-256s.
+4. Add its line to `TEMPLATES` in `scripts/lib/idta-template.mjs`. If the last block there is released, add
+   a block for the migration that seeds the template, and the marker pair in it.
+5. Run `node scripts/generate-idta-template.mjs` and review the rows. A model type, a cardinality or an id
+   the reader does not know stops it.
+6. Add its column above, and update `docs/vocabularies.md` and `NOTICE.md`.
+
+**Moving to a newer release of a template already seeded** is not built: the generator refuses two lines
+for one template, because each would rewrite the other's rows on every boot.
+
 ## `MTConnectDevices_2.7.xsd`: the MTConnect Devices schema
 
 `scripts/generate-mtconnect-vocabulary.mjs` reads `DataItemEnumEnum` in this file for the text that
