@@ -508,14 +508,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
      the first. */
   const proposeMode = !canManage && canPropose
 
-  // Said on the change to Enforce, not on the state: what Enforce discards cannot be fetched back.
-  const enforcing = form.conformance_policy === 'enforce'
+  // The change to Enforce, not the state: what Enforce discards cannot be fetched back.
+  const startsEnforcing = form.conformance_policy === 'enforce'
     && editing?.conformance_policy !== 'enforce'
     && formSchemas.length > 0
-    ? "From the next message, a value contradicting this device's schema will not be written to the historian "
-      + 'and cannot be recovered. The violation is still recorded in the Audit Trail. Schema changes take up '
-      + 'to five minutes to take effect.'
-    : null
 
   /**
    * The note under a field a proposal may not name. Disabled with the reason printed, rather than
@@ -1470,7 +1466,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   value={form.conformance_policy || 'audit'}
                   onChange={e => setForm(f => ({ ...f, conformance_policy: e.target.value }))}
                   // A choice that can be saved, so not aria-invalid.
-                  aria-describedby={enforcing ? 'device-conformance-error' : undefined}
+                  aria-describedby={startsEnforcing ? 'device-conformance-error' : undefined}
                 >
                   <option value="audit">Audit — record the violation, keep the reading</option>
                   <option value="enforce">Enforce — record it and DROP the reading</option>
@@ -1490,7 +1486,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   </div>
                 )}
 
-                <FieldError id="device-conformance-error" error={enforcing} />
+                <FieldError
+                  id="device-conformance-error"
+                  error={startsEnforcing
+                    ? "From the next message, a value contradicting this device's schema will not be written "
+                      + 'to the historian and cannot be recovered. The violation is still recorded in the '
+                      + 'Audit Trail. Schema changes take up to five minutes to take effect.'
+                    : null}
+                />
               </div>
             )}
 
