@@ -5374,8 +5374,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
    inside, so theirs keep their width. */
 .context-panel-app.context-panel-expanded { --context-panel-width: var(--context-panel-width-expanded); }
 
-/* No rule above the prose. `.context-panel-extras` is separated from the fields and actions it
-   normally follows; in this panel it is the only thing in the body, and a border at the very top
+/* No rule above the prose. `.context-panel-extras` is separated from the fields it normally
+   follows; in this panel it is the only thing in the body, and a border at the very top
    of a drawer reads as a heading someone forgot to write. */
 .context-panel-app .context-panel-extras {
   margin-top: 0;

@@ -288,7 +288,7 @@ describe('a backup', () => {
     fireEvent.click(await screen.findByTestId('run-j-1'))
     await opened()
     await waitFor(() => expect(warnings()).toHaveLength(1))
-    expect(warnings()[0]).toMatch(/^Warning: The off-site copy failed, and is retried: tried 3 time\(s\), last .+\. bucket refused$/)
+    expect(warnings()[0]).toMatch(/^Problem: The off-site copy failed, and is retried: tried 3 time\(s\), last .+\. bucket refused$/)
     expect(restOf()).toContain('Failed, retrying')
   })
 })

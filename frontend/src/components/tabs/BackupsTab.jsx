@@ -723,7 +723,7 @@ function PhysicalBackupPanel({ db, row: h, onClose, showToast }) {
       tone: 'warning',
       text: `Stale: no backup has succeeded in over ${BACKUP_STALE_HOURS} hours.`
     },
-    (request?.tone === 'danger' || request?.tone === 'warning') && { id: 'request', tone: request.tone, text: `${request.label}. ${request.title}` }
+    request?.tone === 'warning' && { id: 'request', tone: 'warning', text: `${request.label}. ${request.title}` }
   ] : []
 
   const fields = h ? [
@@ -901,7 +901,7 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
     failed && { id: 'failed', tone: 'danger', text: <><strong>This run failed.</strong> {outcome}</> },
     b && offsiteFailed(b, base) && {
       id: 'offsite',
-      tone: 'warning',
+      tone: 'danger',
       text: `The off-site copy failed, and is retried: tried ${b.offsite_attempts} time(s), last ${formatDateTime(b.offsite_attempted_at)}. ${b.offsite_error || 'The service recorded no reason.'}`
     }
   ]

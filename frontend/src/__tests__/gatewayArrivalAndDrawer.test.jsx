@@ -128,10 +128,10 @@ describe('a gateway publishing under another Sparkplug group', () => {
 
   it('says so in its drawer, with what to change', async () => {
     await show([gateway(elsewhere)])
-    const callout = openPanel().getByText(/Set the edge node to publish under Aber/).closest('.callout')
-    expect(callout).toHaveClass('callout-warning')
-    expect(callout).toHaveTextContent('Publishes under group Plant-B; registered under Aber.')
-    expect(callout).toHaveTextContent("change this gateway’s Sparkplug group to Plant-B")
+    const [warning] = within(openPanel().getByRole('list', { name: 'Warnings' })).getAllByRole('listitem')
+    expect(warning).toHaveTextContent('Publishes under group Plant-B; registered under Aber.')
+    expect(warning).toHaveTextContent('Set the edge node to publish under Aber')
+    expect(warning).toHaveTextContent('change this gateway’s Sparkplug group to Plant-B')
   })
 
   it('says nothing once it publishes under its own group again', async () => {

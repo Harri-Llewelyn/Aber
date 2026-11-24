@@ -818,7 +818,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     selectedDevice.is_quarantined && {
       id: 'quarantined',
       tone: 'warning',
-      text: 'In quarantine: it announced itself under an ID nobody registered. Its readings are dropped until it is approved on the Quarantine tab.'
+      text: 'In quarantine: Aber could not match it to a registered device. Its readings are dropped until it is approved on the Quarantine tab.'
     },
     isProvisioningOverdue(selectedDevice) && {
       id: 'overdue',
