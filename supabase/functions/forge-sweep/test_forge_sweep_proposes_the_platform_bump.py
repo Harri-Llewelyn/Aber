@@ -29,14 +29,12 @@ import sys
 import tempfile
 import time
 import unittest
-import urllib.error
 import urllib.parse
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_forge_sweep import (  # noqa: E402
     FLOW_SHAPE_CONTEXT, FORGE_URL, MACHINE_USER, ORGANISATION, PLATFORM_ORGANISATION, PLATFORM_REPOSITORY,
-    ForgeSweepBase, as_forge_admin, forge, rest, stack_exec, sweep,
+    ForgeSweepBase, as_forge_admin, forge, request, rest, stack_exec, sweep,
 )
 
 # The forge's SSH address from this host, as test_forge_events.py reads it.
@@ -128,16 +126,9 @@ class TestThePlatformBump(ForgeSweepBase):
     @classmethod
     def as_approver(cls, path, method="GET", body=None):
         """The forge's API as the person, as `forge()` is it as the machine account."""
-        req = urllib.request.Request(
-            f"{FORGE_URL}/api/v1{path}", method=method, data=json.dumps(body).encode() if body is not None else None,
-            headers={"Authorization": f"token {cls.approver_token}", "Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=15) as response:
-                text = response.read().decode()
-                return response.status, (json.loads(text) if text.strip() else None)
-        except urllib.error.HTTPError as err:
-            text = err.read().decode()
-            return err.code, (json.loads(text) if text.strip() else None)
+        status, _, text = request(f"{FORGE_URL}/api/v1{path}", method=method, body=body,
+                                  headers={"Authorization": f"token {cls.approver_token}"})
+        return status, (json.loads(text) if text.strip() else None)
 
     def make_repository(self, pointer=POINTER):
         """A gateway's repository made before its gateway enrolled, holding `pointer` as its platform.yml."""
