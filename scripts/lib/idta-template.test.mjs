@@ -292,10 +292,11 @@ test('the Asset Interfaces Description has an interface template for HTTP, Modbu
   assert.ok(rows.every(({ definition }) => !/EMPTY|Current counter value/.test(definition ?? '')));
 });
 
-test('every seeded id is typed as the dashboard types one, and every value is one the table\'s CHECKs list', () => {
+test('every seeded id is an IRI or an IRDI by the dashboard\'s rule, and every value is one the table\'s CHECKs list', () => {
   for (const { name } of TEMPLATES) {
     for (const row of rowsOfTemplate(name).rows) {
-      for (const id of [row.semantic_id, ...row.supplemental_semantic_ids].filter(Boolean)) assert.equal(inferSemanticIdType(id), semanticIdType(id), id);
+      if (row.semantic_id !== null) assert.equal(inferSemanticIdType(row.semantic_id), row.semantic_id_type, row.path);
+      for (const id of row.supplemental_semantic_ids) assert.ok(['IRI', 'IRDI'].includes(inferSemanticIdType(id)), id);
       assert.ok(MODEL_TYPES.includes(row.model_type));
       assert.ok(row.cardinality === null || CARDINALITIES.includes(row.cardinality));
       assert.deepEqual(Object.keys(row), COLUMNS);

@@ -18,6 +18,7 @@
  * has one is refused. The identifiers stay, because an identifier is only a value.
  */
 import { DIGEST_ANCHOR, digestOf, sqlString } from './opcua-seed-blocks.mjs';
+import { inferSemanticIdType } from '../../frontend/src/utils/standards.js';
 
 /**
  * The templates, in the order their rows are written. `name` and `number` are IDTA's, `version` the
@@ -74,10 +75,6 @@ const isDictionaryId = (id) => id.split('/').some((part, at, parts) => part.star
 
 const ID_SHORT = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
-/** An ISO/IEC 11179-6 IRDI, as frontend/src/utils/standards.js reads one, or several joined by `/`. */
-const IRDI = String.raw`\d{4}(?:[-/][A-Za-z0-9_]*)*#[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*#\d+`;
-const IRDI_PATH = new RegExp(`^${IRDI}(?:/${IRDI})*$`);
-
 /** Whitespace collapsed: a row is one line of SQL, which the digest and every diff rely on. */
 const collapse = (value) => String(value).replace(/\s+/g, ' ').trim();
 
@@ -90,11 +87,11 @@ export function englishText(strings) {
   return parts.length ? parts.join(' ') : null;
 }
 
-/** An IRI or an IRDI by its shape. Anything else stops the build, so a new kind is decided on. */
+/** An IRI or an IRDI, by the dashboard's rule. Anything else stops the build, so a new kind is decided on. */
 export function semanticIdType(id) {
-  if (/^https?:\/\//.test(id) || /^urn:/.test(id)) return 'IRI';
-  if (IRDI_PATH.test(id)) return 'IRDI';
-  throw new Error(`${id} is neither an IRI nor an IRDI`);
+  const type = inferSemanticIdType(id);
+  if (type !== 'IRI' && type !== 'IRDI') throw new Error(`${id} is neither an IRI nor an IRDI`);
+  return type;
 }
 
 /** The one value of a reference. Null for no reference; a reference this does not read stops the build. */

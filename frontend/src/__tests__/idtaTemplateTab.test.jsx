@@ -206,7 +206,8 @@ describe('the Templates tab of the Vocabulary page', () => {
     const rule = (selector) => APP_CSS.slice(APP_CSS.indexOf(`\n${selector} {`)).split('}')[0]
     expect(rule('.template-element-name')).toMatch(/overflow-wrap:\s*anywhere/)
     expect(rule('.template-element-name')).toMatch(/min-width:\s*0/)
-    expect(rule('.template-element')).toMatch(/grid-template-columns:(\s*minmax\(0, [^)]+\)|\s*92px)+;/)
+    const columns = rule('.template-element').match(/grid-template-columns: ([^;]+);/)[1]
+    expect(columns).toBe('minmax(0, 1fr) minmax(0, 190px) 92px minmax(0, 340px)')
   })
 
   it('has its own section of the help, which says a template is only looked up', () => {

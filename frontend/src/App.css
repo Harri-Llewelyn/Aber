@@ -8398,7 +8398,7 @@ ol.gateway-steps {
 
 .template-element {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 190px) 92px minmax(0, 270px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 190px) 92px minmax(0, 340px);
   gap: 2px 16px;
   align-items: baseline;
   padding: 6px 0;
@@ -8415,6 +8415,7 @@ ol.gateway-steps {
   overflow-wrap: anywhere;
 }
 .template-element-name p { margin: 2px 0 0; color: var(--text-muted); }
+.template-element-name p .mono { font-size: inherit; color: inherit; }
 
 .template-element-id {
   display: flex;
@@ -8425,6 +8426,7 @@ ol.gateway-steps {
 }
 .template-element-id .copyable-id { margin: 0; }
 .template-element-further { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.template-element-further .cell-meta { flex-shrink: 0; overflow-wrap: normal; }
 .template-element-further .copyable-id { min-width: 0; }
 
 @media (max-width: 800px) {
