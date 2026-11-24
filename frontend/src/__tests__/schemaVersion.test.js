@@ -63,7 +63,7 @@ describe('schemaVersion — name derivation (mirrors public.schema_version_base_
     expect(baseSchemaName(null)).toBe('')
   })
 
-  it('derives the next version name from the base, not from the current name', () => {
+  it('derives the next version name from the base of a row that has no lineage_name', () => {
     expect(nextVersionName(schema())).toBe('Robot_Arm_Schema_v2')
     expect(nextVersionName(schema({ schema_name: 'Robot_Arm_Schema_v2', version: 2 })))
       .toBe('Robot_Arm_Schema_v3')
@@ -112,8 +112,8 @@ describe('schemaVersion — lineageOf', () => {
   })
 
   it('excludes unrelated schemas even when their names look similar', () => {
-    // Walks parent_schema_id, not the name -- a discarded draft can push a version onto a
-    // disambiguated name, so the name is a convenience and the edge is the constraint.
+    // Walks parent_schema_id, not the name -- another schema can hold the obvious name and push a
+    // version onto a disambiguated one, so the name is a convenience and the edge is the constraint.
     const lookalike = schema({ schema_uuid: 'y', schema_name: 'S_v9' })
     expect(lineageOf([v1, v2, v3, lookalike], v3).map(s => s.schema_uuid)).toEqual(['a', 'b', 'c'])
   })

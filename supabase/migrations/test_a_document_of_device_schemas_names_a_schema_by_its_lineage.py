@@ -19,7 +19,7 @@ X_v2, so the next version is numbered further as X_v2_2, and that version publis
   * The export names it X: device_schemas_document() for every schema, for the id of the version in
     force and for the id of the archived first version.
   * A file naming X finds it: unchanged when it says what the version in force says, and a new draft
-    otherwise, named X_v2_2_v3 as fork_schema() names the next version of X_v2_2.
+    otherwise, named X_v3 as fork_schema() names the next version of X_v2_2 (0318).
   * A file written before 0316 named it X_v2_2. That file still finds it, unchanged or as a draft.
   * X and X_v2_2 in one file are one schema twice, refused at the second.
   * An export applied back reports the lineage unchanged.
@@ -152,7 +152,7 @@ class LineageNamesTheDocument(unittest.TestCase):
                          ("unchanged", head, 2, f"{NAME}_v2_2", []))
         changed = self.apply([schema(metrics=(SPINDLE, MODE, BEARING))], dry_run=True)[0]
         self.assertEqual((changed["status"], changed["version"], changed["schema_name"], changed["metrics"]["added"]),
-                         ("changed", 3, f"{NAME}_v2_2_v3", [BEARING]))
+                         ("changed", 3, f"{NAME}_v3", [BEARING]))
         # The name fork_schema() gives the next version of the same head.
         forked = self.as_admin("SELECT public.fork_schema(%s::uuid, 'why');", (head,))
         self.assertEqual((forked["schema_name"], forked["version"]), (changed["schema_name"], changed["version"]))
@@ -163,7 +163,7 @@ class LineageNamesTheDocument(unittest.TestCase):
         same = self.apply([schema(old, metrics=(SPINDLE, MODE))], dry_run=True)[0]
         self.assertEqual((same["name"], same["status"], same["id"], same["reasons"]), (old, "unchanged", head, []))
         made = self.apply([schema(old, metrics=(MODE,))])[0]
-        self.assertEqual((made["status"], made["version"], made["schema_name"]), ("changed", 3, f"{NAME}_v2_2_v3"))
+        self.assertEqual((made["status"], made["version"], made["schema_name"]), ("changed", 3, f"{NAME}_v3"))
         self.cur.execute("SELECT parent_schema_id, status, lineage_name FROM public.schemas WHERE id = %s;", (made["id"],))
         self.assertEqual(self.cur.fetchone(), (head, "draft", NAME))
 

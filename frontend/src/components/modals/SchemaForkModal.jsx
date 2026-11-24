@@ -57,8 +57,8 @@ export function SchemaForkModal({ schema, deviceCount = 0, archivedCount = 0, re
       <div className="callout callout-info">
         <IconInfo size={13} className="callout-icon" />
         <div>
-          {/* Naming is the server's call: fork_schema() disambiguates against a name a discarded
-              draft left behind, so this predicts and must not promise. */}
+          {/* Naming is the server's call: fork_schema() numbers the draft further while the name is
+              taken, so this predicts and must not promise. */}
           The draft will be named <span className="mono">{nextVersionName(schema)}</span>. A schema
           name is unique, so each version carries its own; the lineage is the link between them.
         </div>

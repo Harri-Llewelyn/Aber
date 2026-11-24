@@ -76,16 +76,19 @@ A file is a list of schemas. Each is a set of these keys.
 Things to know:
 
 - **A schema is found by its lineage's name.** A schema's versions are called `Robot_Arm_Schema`,
-  `Robot_Arm_Schema_v2`, `Robot_Arm_Schema_v3`. Aber adds the suffix when it versions the schema. When a
-  version's name is already taken, Aber numbers it further, as `Robot_Arm_Schema_v2_2`. Every version
-  carries the name of the first, `Robot_Arm_Schema`: the lineage's name. An export writes it, and Aber
-  finds the schema by it on any site, whatever its versions are called.
+  `Robot_Arm_Schema_v2`, `Robot_Arm_Schema_v3`. Every version carries the name of the first,
+  `Robot_Arm_Schema`: the lineage's name. An export writes it, and Aber finds the schema by it on any
+  site, whatever its versions are called.
+- **A new version is named from its lineage.** Its name is the lineage's name, `_v` and the version's
+  number. When that name is already taken, Aber numbers it further, as `Robot_Arm_Schema_v2_2`. The
+  version after that one is `Robot_Arm_Schema_v3`. A version made before Aber 1.10 keeps the name it
+  has, which may be `Robot_Arm_Schema_v2_2_v3`.
 - **A name no lineage has is found by its versions' names.** Aber takes one trailing `_v<n>` off the
-  name and off each version's name, and finds the versions where the two agree. A file exported before
-  Aber 1.10 named a schema that way, such as `Robot_Arm_Schema_v2_2` for the lineage above, and still
-  applies. Where the name is a lineage's, and other versions' names without their `_v<n>` match it too,
-  the lineage whose name it is wins. Two schemas in one file that find one lineage are refused, as a
-  name used twice.
+  name and off each version's name, and finds the lineage of a version where the two agree. A file
+  exported before Aber 1.10 named a schema that way, such as `Robot_Arm_Schema_v2_2` for the lineage
+  above. It still applies, whatever the version in force is called now. Where the name is a lineage's,
+  and other versions' names without their `_v<n>` match it too, the lineage whose name it is wins. Two
+  schemas in one file that find one lineage are refused, as a name used twice.
 - **A metric is named by its catalogue name.** Its type, its description and its permitted values come
   from the catalogue, as the schema builder writes them. The file does not repeat them.
 - **A metric the catalogue lacks is refused by name.** So is a derived metric: nothing publishes one,
@@ -116,7 +119,8 @@ it twice: once with `p_dry_run` true for the preview, once with it false when th
 - **A published version is never edited.** The version in force is what the file is compared with:
   - A schema that does not exist is made as version 1 and in force, as the schema builder makes one.
   - A changed schema becomes a new **draft** version, named, numbered and linked to its parent as
-    **Create Version** does, with the file's `change_description`. Publishing is a step of its own.
+    **Create Version** does it, from its lineage, with the file's `change_description`. Publishing is a
+    step of its own.
   - An unchanged schema is reported unchanged, and writes nothing.
   - A schema that has a draft already refuses a different change, since a schema holds one draft at a
     time. A file that says what the draft already says is unchanged.

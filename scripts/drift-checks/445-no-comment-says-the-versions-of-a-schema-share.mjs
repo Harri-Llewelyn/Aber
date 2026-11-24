@@ -2,9 +2,9 @@ import { fail, pass, read } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
 // 445. No comment or description says the versions of a schema share a name, or that a name's version
-// suffix never stacks. Each version has a name of its own (`X`, `X_v2`), and a name fork_schema() had
-// to suffix (`X_v2_2`) is versioned again as `X_v2_2_v3`. What the versions share is the lineage's name,
-// `lineage_name`. The Audit Trail's snapshotIdentity() and the API reference said otherwise.
+// suffix never stacks. Each version has a name of its own (`X`, `X_v2`, or `X_v2_2` when `X_v2` is
+// taken), and one made before 0318 may keep a stacked one (`X_v2_2_v3`). What the versions share is the
+// lineage's name, `lineage_name`. The Audit Trail's snapshotIdentity() and the API reference said otherwise.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
   const problems445 = [];

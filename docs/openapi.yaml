@@ -2805,9 +2805,10 @@ paths:
         alone.
 
         A schema is found by its lineage's name (`lineage_name`). A name no lineage has, as in a file
-        written before 1.10, is matched by a version's name without a trailing `_v2`. A schema that does
-        not exist is made as version 1 and in force. A changed one becomes a new draft version, named and
-        linked as `fork_schema` does, and a published version is never edited. A lineage that has a draft refuses a different change.
+        written before 1.10, is matched by a version's name without a trailing `_v2`, and finds that
+        version's lineage. A schema that does not exist is made as version 1 and in force. A changed one
+        becomes a new draft version, named from its lineage and linked as `fork_schema` does, and a
+        published version is never edited. A lineage that has a draft refuses a different change.
         Each schema written is one `INSERT` row in the Audit Trail, by the `schemas` table's trigger; an
         unchanged schema writes none.
 
@@ -3311,6 +3312,10 @@ paths:
       description: |
         `version` is computed from the parent — **there is no manual version input, by
         design.** At most one open draft per parent, enforced by a partial unique index.
+
+        The draft's name is computed too: its lineage's name and its number,
+        `<lineage_name>_v<version>`. While that name is taken it is numbered further, `Foo_v2_2`;
+        the version after it is `Foo_v3`.
       requestBody:
         required: true
         content:
@@ -8798,7 +8803,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        schema_name: { type: string, example: Simulated_CNC_01_Schema_v2, description: 'UNIQUE. Each version gets a name of its own — `Foo` → `Foo_v2`, or `Foo_v2_2` when `Foo_v2` is taken — so a name `fork_schema()` had to suffix is not stripped back when it is versioned again (`Foo_v2_2_v3`). The lineage is `lineage_name`.' }
+        schema_name: { type: string, example: Simulated_CNC_01_Schema_v2, description: 'UNIQUE. Each version gets a name of its own from its lineage: `Foo` → `Foo_v2`, or `Foo_v2_2` when `Foo_v2` is taken, then `Foo_v3`. A version made before 1.10 keeps its name, which may be `Foo_v2_2_v3`. The lineage is `lineage_name`.' }
         lineage_name: { type: string, readOnly: true, example: Simulated_CNC_01_Schema, description: 'The `schema_name` of the lineage''s first version, the same on every version. An AAS Submodel''s id is made from it, so a publish leaves the id where it was. Set by the database.' }
         lineage_root_id: { type: string, format: uuid, readOnly: true, description: 'The first version of the lineage: this row for a first version. Set by the database.' }
         description: { type: string, nullable: true }

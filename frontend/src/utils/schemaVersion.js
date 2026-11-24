@@ -1,8 +1,8 @@
 /**
  * Schema version lineage: labels, lifecycle predicates and the name derivation. All derived from
  * the row; `fork_schema()` and `publish_schema_version()` are what move a schema through its
- * lifecycle, and these exist so the UI can say what will happen first. `baseSchemaName()` mirrors
- * `public.schema_version_base_name()`.
+ * lifecycle, and these exist so the UI can say what will happen first. `nextVersionName()` mirrors
+ * the name `fork_schema()` gives, and `baseSchemaName()` mirrors `public.schema_version_base_name()`.
  */
 
 export const SCHEMA_STATUS = {
@@ -58,11 +58,13 @@ export const lineageVersionLabel = (schema) => `${lineageName(schema)} v${schema
 export const nextVersion = (schema) => schemaVersion(schema) + 1
 
 /**
- * What the next version will most likely be called. `fork_schema()` disambiguates against names a
- * discarded draft left behind, so this is for the button's title and never an input to the call.
+ * What the next version will most likely be called: its lineage's name and its number, as
+ * `fork_schema()` names it. `fork_schema()` numbers it further while that name is taken, so this is a
+ * prediction and never an input to the call. A row without `lineage_name` (from before 0298) takes
+ * the stem of its own name, as its database did; the schema list gives every row one.
  */
 export const nextVersionName = (schema) =>
-  `${baseSchemaName(schema?.schema_name)}_v${nextVersion(schema)}`
+  `${schema?.lineage_name || baseSchemaName(schema?.schema_name)}_v${nextVersion(schema)}`
 
 /** Only a draft is editable. This is the single predicate every read-only affordance reads. */
 export const isSchemaEditable = (schema) => schemaStatus(schema) === SCHEMA_STATUS.DRAFT

@@ -233,9 +233,9 @@ jobs:
           [ "$fail" -eq 0 ] && echo "Metric group separator is '/' in every mirrored definition."
           exit $fail
 
-      # The schema version base name is derived in SQL (schema_version_base_name) and in the
-      # frontend (baseSchemaName). A divergence makes the Create Version button promise a name the
-      # server will not choose.
+      # A version's name without its trailing _v<n>, in SQL (schema_version_base_name, which finds a
+      # schema a file from before 0316 names) and in the frontend (baseSchemaName, for a row with no
+      # lineage_name). What a new version is named is mirror check 142's: it comes from the lineage.
       - name: Verify Schema Version Name Derivation Sync
         run: |
           fail=0
