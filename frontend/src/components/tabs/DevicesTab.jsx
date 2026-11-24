@@ -1535,6 +1535,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             '? This deletes the device and the readings held for it, and cannot be undone. If the' +
             ' device publishes again, it comes back to Quarantine.'
           }
+          requireTyped={rejectTarget.asset_name}
+          requireTypedLabel="device name"
           confirmLabel="Reject Device"
           pendingLabel="Rejecting…"
           onConfirm={() => rejectQuarantine(rejectTarget)}

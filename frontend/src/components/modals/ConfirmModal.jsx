@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { TypedGate, useTypedGate } from '../common/TypedGate'
 
 /**
  * A question with two answers, in a `<Modal>`. Opened over another dialog, it is drawn above it.
@@ -30,10 +31,21 @@ import { Modal } from '../common/Modal'
  *
  * @param {string} pendingLabel What that button says while the action runs.
  *
- * @param {string} [requireTyped] When set, the operator must type this exact text before the
- * confirming button becomes usable.
+ * @param {string} [requireTyped] When set, the operator must type this exact text, the record's own
+ * name as the dialog shows it, before the confirming button becomes usable.
  *
- * @param {string} [requireTypedLabel] What the typed value is, for the field's label.
+ * Typed text guards removing a person's access, whoever they are, and every act that cannot be
+ * undone. An act cannot be undone when it destroys something the site holds that nobody can make
+ * again from the dashboard: a record with its history or readings, a draft's work, a stored file or a
+ * backup. It does not guard:
+ * - a security response that must stay quick and can be repeated or replaced: ending a token, a
+ *   credential, an app's approval, a session or a second factor;
+ * - what a person can simply make again, such as a link, a suppression window, a picture, or an area
+ *   plan, 3D model or vocabulary uploaded from a file;
+ * - an archive, which Restore undoes;
+ * - a deletion that is not a person's click, such as a timer's.
+ *
+ * @param {string} [requireTypedLabel] What the typed value is ("schema name"), for the field's label.
  *
  * @param {string} [confirmClassName] Button class for the confirming action. Defaults to `btn
  * btn-danger`; a dialog guarding a constructive act (restoring an archived entity) must override
@@ -54,7 +66,7 @@ export function ConfirmModal({
   confirmClassName = 'btn btn-danger'
 }) {
   const [pending, runConfirm] = usePendingAction()
-  const [typed, setTyped] = useState('')
+  const gate = useTypedGate(requireTyped, requireTypedLabel)
   const [error, setError] = useState(null)
 
   const confirm = () => runConfirm(async () => {
@@ -65,14 +77,6 @@ export function ConfirmModal({
       setError(err.message)
     }
   })
-
-  /**
-   * Opt-in, not the default: most callers guard something reversible, and friction only buys
-   * attention while it is rare. Trimmed before comparing (a copy-paste brings trailing whitespace)
-   * but otherwise exact, case included.
-   */
-  const gated = typeof requireTyped === 'string' && requireTyped.length > 0
-  const satisfied = !gated || typed.trim() === requireTyped
 
   // While the action runs, Escape, the × and Cancel are no-ops rather than the layer sitting out:
   // leaving the Escape stack would hand the keypress to the dialog underneath while its mutation
@@ -94,10 +98,10 @@ export function ConfirmModal({
             className={confirmClassName}
             pending={pending}
             pendingLabel={pendingLabel}
-            disabled={!satisfied}
+            disabled={!gate.open}
             // Stated rather than left to be inferred from a greyed-out button, which explains
             // nothing about WHY it is greyed out.
-            title={satisfied ? undefined : `Type the ${requireTypedLabel} above to enable this`}
+            title={gate.reason}
             onClick={confirm}
           >
             {confirmLabel}
@@ -107,40 +111,7 @@ export function ConfirmModal({
     >
       {children}
 
-      {gated && (
-        <div className="form-group" style={{ marginBottom: '20px' }}>
-          <label className="form-label" htmlFor="confirm-typed">
-            Type the {requireTypedLabel} to confirm
-          </label>
-          {/* The value is shown, so the operator looks at which asset they are about to destroy.
-              `mono` because these are ids and underscored names, where l/1 and O/0 matter. */}
-          <p className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 6px' }}>
-            {requireTyped}
-          </p>
-          <input
-            id="confirm-typed"
-            className="form-control mono"
-            value={typed}
-            onChange={e => setTyped(e.target.value)}
-            disabled={pending}
-            autoComplete="off"
-            spellCheck={false}
-            // Not the dialog's initialFocus: focusing the field would move a screen reader's cursor
-            // off the message that explains what is about to happen.
-            placeholder={requireTyped}
-            aria-describedby="confirm-typed-hint"
-          />
-          <p
-            id="confirm-typed-hint"
-            style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '6px 0 0' }}
-            aria-live="polite"
-          >
-            {satisfied
-              ? 'Matches — the action below is now enabled.'
-              : 'The action below stays disabled until this matches exactly.'}
-          </p>
-        </div>
-      )}
+      <TypedGate gate={gate} disabled={pending} />
     </Modal>
   )
 }

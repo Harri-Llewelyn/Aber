@@ -169,7 +169,9 @@ describe('the People tab', () => {
     expect(api.removePersonAccess).not.toHaveBeenCalled()
 
     fireEvent.click(drawer.getByRole('button', { name: 'Remove Access' }))
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove Access' }))
+    const again = within(await screen.findByRole('dialog'))
+    fireEvent.change(again.getByLabelText('Type the email address to confirm'), { target: { value: 'operator@site.test' } })
+    fireEvent.click(again.getByRole('button', { name: 'Remove Access' }))
     await waitFor(() => expect(api.removePersonAccess).toHaveBeenCalledWith(OPERATOR))
     await waitFor(() => expect(toast).toHaveBeenCalledWith('operator@site.test can no longer sign in', 'success',
       { to: personUrl(OPERATOR, true) }))

@@ -634,6 +634,9 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
               history stay, and Restore Access gives the role back.
             </>
           )}
+          // The email address is unique, and a display name may not be. An account can have none.
+          requireTyped={confirming.person.email || personLabel(confirming.person)}
+          requireTypedLabel={confirming.person.email ? 'email address' : 'name'}
           confirmLabel="Remove Access"
           pendingLabel="Removing…"
           onConfirm={confirmAct}

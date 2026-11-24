@@ -235,6 +235,7 @@ describe('the Quarantine tab', () => {
       api.post.mockResolvedValue({})
       const dialog = await openReject()
 
+      fireEvent.change(within(dialog).getByLabelText('Type the device name to confirm'), { target: { value: 'Unknown_Robot' } })
       fireEvent.click(within(dialog).getByRole('button', { name: 'Reject Device' }))
 
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
