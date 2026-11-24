@@ -15,8 +15,20 @@ const CFG: ForgeConfig = {
 };
 const REPO = "gateway-gwy000000000000000000001";
 
+// The patterns as literals, so what the tests match with is the text Gitea was measured with: a literal's
+// own spelling is the pattern, slashes included.
+const NAMED = /^(?:[Mm][Aa][Ii][Nn]|[Aa][Pp][Pp][Ll][Ii][Aa][Nn][Cc][Ee])$/;
+const OTHERS =
+  /^(?:[^MmAa].*|[Mm](?:[^Aa].*|[Aa](?:[^Ii].*|[Ii](?:[^Nn].*|[Nn](?:.+))?)?)?|[Aa](?:[^Pp].*|[Pp](?:[^Pp].*|[Pp](?:[^Ll].*|[Ll](?:[^Ii].*|[Ii](?:[^Aa].*|[Aa](?:[^Nn].*|[Nn](?:[^Cc].*|[Cc](?:[^Ee].*|[Ee](?:.+))?)?)?)?)?)?)?)?)?$/;
+const PREFIXED = /^(?:[Aa][Bb]|[Aa][Bb][Cc])$/;
+const NOT_PREFIXED = /^(?:[^Aa].*|[Aa](?:[^Bb].*|[Bb](?:[^Cc].*|[Cc](?:.+)))?)?$/;
+
 /** Whether a tag rule matches a name, as Gitea reads a pattern between slashes. */
-const matches = (pattern: string, name: string) => new RegExp(pattern.slice(1, -1), "s").test(name);
+function matches(pattern: string, name: string): boolean {
+  const known = [NAMED, OTHERS, PREFIXED, NOT_PREFIXED].find((literal) => String(literal) === pattern);
+  if (!known) throw new Error(`a pattern the test has no literal for: ${pattern}`);
+  return known.test(name);
+}
 
 Deno.test("the two patterns are exact complements over names near and far from a branch's", () => {
   const { named, others } = tagPatterns(["main", "appliance"]);
@@ -67,7 +79,11 @@ async function withForge<T>(
       rules.push({ id: 100 + rules.length, ...sent });
       return json({}, 201);
     }
-    if (rule && init.method === "PATCH") return json(Object.assign(rule, sent));
+    if (rule && init.method === "PATCH") {
+      rule.whitelist_usernames = sent.whitelist_usernames;
+      rule.whitelist_teams = sent.whitelist_teams;
+      return json(rule);
+    }
     if (rule) {
       rules.splice(rules.indexOf(rule), 1);
       return Promise.resolve(new Response(null, { status: 204 }));
