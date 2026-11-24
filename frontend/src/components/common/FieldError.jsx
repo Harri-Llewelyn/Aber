@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { IconAlertTriangle } from './Icons'
 
 /** How long a message that changes while it is shown must stand still before it is announced. */
@@ -26,7 +26,8 @@ export const fieldErrorProps = (error, errorId, hintId) => ({
  * Each error is announced once, as it appears (`role="alert"`). A message that quotes what is typed
  * changes with each key, so a changed one is drawn at once and announced when it has stood still:
  * the live region is off until then, and a new `key` then inserts it again. An `error` that is not
- * a string is taken not to change while it is shown.
+ * a string is taken not to change while it is shown. One that appears while its control has the
+ * focus, below what the dialog shows, is scrolled into view.
  *
  * @param {string} [id] The id the control names, in `fieldErrorProps`. Left out only where nothing
  * a person fills in or presses is there to be described.
@@ -35,6 +36,8 @@ export const fieldErrorProps = (error, errorId, hintId) => ({
  */
 export function FieldError({ id, error, className }) {
   const text = !error ? null : typeof error === 'string' ? error : true
+  const shown = text !== null
+  const line = useRef(null)
   const [said, setSaid] = useState({ text, live: true, turn: 0 })
   // Set while rendering, so the region is never live in the commit that changes its text.
   if (said.text !== text) setSaid({ ...said, text, live: said.text === null })
@@ -45,10 +48,16 @@ export function FieldError({ id, error, className }) {
     return () => clearTimeout(timer)
   }, [said])
 
-  if (!error) return null
+  useEffect(() => {
+    const named = document.activeElement?.getAttribute('aria-describedby')?.split(' ') ?? []
+    if (shown && id && named.includes(id)) line.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [shown, id])
+
+  if (!shown) return null
   return (
     <div
       key={said.turn}
+      ref={line}
       id={id}
       className={`form-hint hint-danger${className ? ` ${className}` : ''}`}
       role="alert"

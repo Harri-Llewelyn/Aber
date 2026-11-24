@@ -110,6 +110,28 @@ describe('what ties it to its control', () => {
   })
 })
 
+describe('where it is', () => {
+  const asBuilt = Element.prototype.scrollIntoView
+  beforeEach(() => { Element.prototype.scrollIntoView = vi.fn() })
+  afterEach(() => { Element.prototype.scrollIntoView = asBuilt })
+
+  it('is scrolled into view as it appears under the field being typed into, and not on each key', () => {
+    render(<Quoting />)
+    screen.getByLabelText('Value').focus()
+    typed('b')
+    typed('ba')
+    expect(Element.prototype.scrollIntoView.mock.contexts).toEqual([screen.getByRole('alert')])
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+  })
+
+  it('is left where it is when the focus is elsewhere, as on a save attempt', () => {
+    render(<Quoting />)
+    typed('b')
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled()
+  })
+})
+
 describe('what is announced', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
