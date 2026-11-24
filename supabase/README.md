@@ -11462,10 +11462,12 @@ refuses an escaped slash, so `rulePath()` leaves a slash as it is, which Gitea's
 backslash, an empty segment or a dot segment has no path: the listener merges slashes, and `fetch` and the
 listener both resolve dots, so removing a rule named `..` would have been `DELETE` on the repository.
 `forgeApi()` asks no path with a dot segment. A rule with no path stays, so `takeFromAppliance()` removes the
-repository's deploy keys, and the pass and the enrolment are errors. A mirror is answered the same way. Such a
-rule is removed from inside the forge's pod, which is past the listener:
+repository's deploy keys, and the pass and the enrolment are errors. A mirror is answered the same way. A
+rule of that kind is removed from inside the forge's pod, which is past the listener. The same call without
+`/branch_protections/…` removes the repository:
 
 ```bash
+TOKEN=$(kubectl -n aber get secret aber-forge-token -o jsonpath='{.data.token}' | base64 -d)
 kubectl -n aber exec deploy/gitea -- curl --path-as-is -X DELETE -H "Authorization: token $TOKEN" \
   "http://127.0.0.1:3000/api/v1/repos/gateways/<repository>/branch_protections/<the name, percent-encoded, its dots as %2E>"
 ```

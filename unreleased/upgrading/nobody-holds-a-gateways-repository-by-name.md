@@ -62,10 +62,10 @@ No line means that every repository was as enrolment makes it. For each reposito
 2. If the line says it was renamed (*was … and is again*), set the gateway up again, so that its appliance
    has the repository's own address.
 3. If the line says its deploy keys are removed, it is a mirror, or it has a branch rule that cannot be
-   removed. The appliance goes on running what it has. Move the repository aside, or delete it, and set the
-   gateway up again. A rule can also be removed as
+   removed. The appliance goes on running what it has. Remove the rule as
    [`supabase/README.md`](../../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-archived-migration-0104)
-   says.
+   says, or keep a clone of the repository and delete it. A new name is not enough: it would have its name
+   back. Then set the gateway up again.
 4. If the line says the default branch was another one, the appliance may have enrolled on it. Put what it
    should run on `main`, and set the gateway up again. Until then, an appliance on this release's platform
    says *REFUSING TO SYNC* and goes on running what it has. One on an earlier platform follows that
