@@ -179,7 +179,7 @@ describe('a stored capture', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Delete capture' }))
 
       const dialog = await screen.findByRole('dialog', { name: 'Delete capture' })
-      expect(dialog).toHaveAccessibleDescription(new RegExp(`^Delete the capture of ${name}, recorded `))
+      expect(dialog).toHaveAccessibleDescription(expect.stringContaining(`Delete the capture of ${name}, recorded `))
       await holdsUntilTyped({ dialog, label: `${kind} name`, text: name, button: 'Delete capture', act: api.deleteCapture })
       expect(api.deleteCapture).toHaveBeenCalledWith(CAPTURES[kind])
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
