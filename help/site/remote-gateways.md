@@ -427,6 +427,11 @@ Once somebody approves and merges it, the appliance's own `flow-sync` service pu
 minutes by default, and reloads Node-RED. The appliance is what reaches out. Aber never opens a
 connection to a gateway; the same rule keeps `node_exporter` unscraped.
 
+**A proposal's branch stays in the forge**, whether its pull request was merged or closed. The forge
+does not delete a branch that a rule covers, and a `**` rule covers every proposal, to keep the
+appliance's key out ([*What the appliance reports back*](#what-the-appliance-reports-back)). To see
+which proposals are still open, read the repository's **Pull Requests** page.
+
 The appliance's running flow lives on a Docker volume, on hardware in a plant. After each pass,
 `flow-sync` pushes a copy of it to the repository's `appliance` branch, and the approved flow is on
 `main`. So `docker compose down -v` or a failed SD card loses only what changed since the last pass.

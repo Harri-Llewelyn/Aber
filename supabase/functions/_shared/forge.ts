@@ -16,7 +16,7 @@
  * A writable key on a repository whose `main` admits no deploy key lets an appliance REPORT and
  * never DEPLOY: `main` is protected with pushes disabled and deploy keys not whitelisted, the
  * `appliance` branch admits deploy keys alone and blocks force-push, and a `**` rule closes every
- * other branch to them. Measured against gitea/gitea:1.27.3: the key can also push to the wiki,
+ * other branch to them. Measured against gitea/gitea:28.3.0: the key can also push to the wiki,
  * which no rule covers; docs/security-model.md records that under accepted risks.
  *
  * Failure here is non-fatal: by the time this runs the token is spent and the broker credential
@@ -130,8 +130,10 @@ export const APPLIANCE_BRANCH = "appliance";
 
 /**
  * The rule that closes every branch but the two named ones to deploy keys. `**` and not `*`:
- * Gitea matches rules with a glob whose `*` stops at a slash, so `*` left `feature/x` open
- * (measured).
+ * Gitea matches rules with a glob whose `*` stops at a slash, so `*` left `feature/x` open.
+ * Gitea deletes no branch a rule matches, whoever asks, so a proposal's branch stays after its
+ * merge. A branch no rule matches can be deleted, and the key can write it. Measured against
+ * gitea/gitea:28.3.0.
  */
 const CATCH_ALL_RULE = "**";
 
@@ -143,7 +145,7 @@ const CATCH_ALL_RULE = "**";
  *
  * `*`, NOT `**`, and this glob is not the branch rules'. A webhook filter's `*` matches across a
  * slash, so `feature/x` is delivered; a branch rule's does not, which is why CATCH_ALL_RULE above
- * has to be `**`. Both measured against gitea/gitea:1.27.3.
+ * has to be `**`. Both measured against gitea/gitea:28.3.0.
  */
 const WEBHOOK_BRANCH_FILTER = "*";
 
@@ -532,10 +534,11 @@ export async function postCommitStatus(
 /**
  * The two rules beside `main` on a gateway's repository. `appliance`: pushes admitted from deploy
  * keys and from nobody else, force-push blocked, so the branch is append-only and written only by
- * the appliance (the machine account's contents API answers 403 on it; measured). `**`: every
- * other branch closed to deploy keys and open to both teams, which is what an appliance holding a
- * writable key must never widen. Both may be created before the branch exists. A found rule that
- * disagrees on the fields that matter is patched. Returns whether anything was changed.
+ * the appliance (the machine account's contents API answers 403 on it). `**`: every other branch
+ * closed to deploy keys and open to both teams, which is what an appliance holding a writable key
+ * must never widen. Both may be created before the branch exists. Measured against
+ * gitea/gitea:28.3.0. A found rule that disagrees on the fields that matter is patched. Returns
+ * whether anything was changed.
  */
 export async function ensureApplianceProtection(cfg: ForgeConfig, name: string): Promise<boolean> {
   const rules = [
@@ -1153,8 +1156,8 @@ async function ensureWikiHome(
  * Register the push webhook on the repository, once. One hook per repository rather than one on the
  * organisation, because only a gateway's repository has a gateway row to record on. Found again by
  * URL on re-enrolment and by the sweep. The secret is the one forge-events verifies with. The
- * branch filter admits `main` and `appliance`, so a push to a proposal branch is not delivered; a
- * found hook with another filter (one registered before the appliance branch existed) is patched.
+ * branch filter admits every branch, so a push to a proposal branch is delivered and its shape
+ * checked; a found hook with another filter is patched.
  * A second hook of ours, left by two registrations racing, is deleted so each push arrives once;
  * the oldest with the right filter is kept. Returns whether anything was changed.
  */
