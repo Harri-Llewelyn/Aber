@@ -19,14 +19,17 @@ import {
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone, credentialIssuedHere,
   gatewayTypeChange, gatewayTypeChangeHint, gatewayShowsRow,
 } from '../../utils/gatewayType'
-import { enrolmentStands } from '../../utils/credentialState'
+import { enrolmentStands, hadEnrolled } from '../../utils/credentialState'
+import { CONVERGE_JOURNAL, FLOW_SYNC_LOG, RESET_BUNDLE_EDITOR_PASSWORD, RESET_EDITOR_PASSWORD } from '../../utils/applianceCommands'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags } from '../../utils/deviceStatus'
 import { inServiceDevices } from '../../utils/inService'
 import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { isShadowGateway } from '../../utils/fleetCounts'
 import { flowDriftState, flowDriftLabel, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
-import { gatewayHealthProblems, rowTone, foldHealthRows, TONE_DANGER, TONE_WARNING } from '../../utils/gatewayHealth'
+import {
+  applianceReportMissing, gatewayHealthProblems, rowTone, foldHealthRows, TONE_DANGER, TONE_WARNING
+} from '../../utils/gatewayHealth'
 import {
   ARRIVAL_HELP, NOT_OBSERVED, arrivalFigures, arrivalSummary, deviceLastReading, hasCount, lastReadings
 } from '../../utils/gatewayArrivals'
@@ -47,8 +50,9 @@ import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { ActionButton } from '../common/ActionButton'
+import { ApplianceCommand, ApplianceCommandsHelp } from '../common/ApplianceCommand'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
-import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { ContextPanel, FieldGroup, rowSelectHandler } from '../common/ContextPanel'
 import { SuppressionWindows } from '../common/SuppressionWindows'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { ArchiveModal } from '../modals/ArchiveModal'
@@ -129,6 +133,52 @@ const arrivalGroup = (gatewayId, figures) => {
     ],
   }
 }
+
+/** A row's value, with the command for its state under it while there is one. */
+const withCommand = (text, command) => (command ? <>{text}{command}</> : text)
+
+/**
+ * The drawer's group for an appliance that should have reported to its forge branch and never has: one
+ * line until it is opened, then the command whose output says why.
+ */
+const missingReportGroup = (gatewayId, showToast) => ({
+  group: 'Reported',
+  id: `gateway-report-${gatewayId}`,
+  summary: 'No report from the appliance yet',
+  fields: [{
+    label: 'On the appliance',
+    value: (
+      <ApplianceCommand drawer label={null} command={FLOW_SYNC_LOG} showToast={showToast}>
+        The report is flow-sync&rsquo;s, and its log says what stops it. See <ApplianceCommandsHelp />.
+      </ApplianceCommand>
+    ),
+  }],
+})
+
+/**
+ * The drawer's group for a lost editor password, under the actions Launch UI is one of, and closed, so
+ * it moves none of them. Which of the two set the appliance up is not recorded, so both are shown.
+ */
+const editorPasswordGroup = (gatewayId, showToast) => ({
+  group: 'Editor Password',
+  id: `gateway-editor-password-${gatewayId}`,
+  summary: 'Reset it on the appliance',
+  fields: [
+    {
+      label: 'Set up with the install command',
+      value: <ApplianceCommand drawer label={null} command={RESET_EDITOR_PASSWORD} copyLabel="Copy Commands" showToast={showToast} />,
+    },
+    {
+      label: 'Set up with a bundle, in its folder',
+      value: (
+        <ApplianceCommand drawer label={null} command={RESET_BUNDLE_EDITOR_PASSWORD} copyLabel="Copy Commands" showToast={showToast}>
+          Either prints a new password for the Node-RED editor <strong>once</strong>. The enrolment and
+          the flow are kept. See <ApplianceCommandsHelp />.
+        </ApplianceCommand>
+      ),
+    },
+  ],
+})
 
 export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
@@ -967,6 +1017,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           type="gateway" name={restoreTarget.gateway_name}
           credentialRevoked={Boolean(restoreTarget.credential_revoked_at)}
           forgeArchived={Boolean(restoreTarget.forge_archived_at)}
+          enrolled={hadEnrolled(restoreTarget)}
           onConfirm={() => restoreGateway(restoreTarget.gateway_id, restoreTarget.gateway_name)}
           onCancel={() => setRestoreTarget(null)}
         />
@@ -1094,6 +1145,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 + 'between the two branches. Shown once the appliance has pushed to its branch.'
             },
           ].filter(f => f.value !== null),
+          // In place of the Reported row above, which holds nothing to show.
+          ...(applianceReportMissing(selected) ? [missingReportGroup(selected.gateway_id, showToast)] : []),
           // What the appliance reports about itself, once `health_reported_at` is set: a gateway that
           // never reported would show a dozen rows of dashes. Current values only; the trend is in
           // Grafana's Gateway Fleet Health dashboard.
@@ -1166,7 +1219,14 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               label: 'Flow',
               health: true,
               value: selected.flow_hash
-                ? [selected.flow_hash.slice(0, 12), flowDriftLabel(flowDriftState(selected))].filter(Boolean).join(' · ')
+                ? withCommand(
+                  [selected.flow_hash.slice(0, 12), flowDriftLabel(flowDriftState(selected))].filter(Boolean).join(' · '),
+                  rowTone(healthProblems, 'Flow') === TONE_DANGER && (
+                    <ApplianceCommand drawer command={FLOW_SYNC_LOG} showToast={showToast}>
+                      flow-sync&rsquo;s log says whether it refused the commit, and why. See <ApplianceCommandsHelp />.
+                    </ApplianceCommand>
+                  )
+                )
                 : null,
               danger: rowTone(healthProblems, 'Flow') === TONE_DANGER,
               help: 'First 12 characters of the SHA-256 of the flow this appliance last deployed, '
@@ -1182,19 +1242,27 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             {
               label: 'Platform',
               health: true,
-              value: selected.forge_appliance_platform_tag
-                ? [
-                  selected.forge_appliance_platform_tag,
-                  selected.forge_appliance_platform_outcome === 'converged'
-                    ? `converged ${formatHeartbeat(selected.forge_appliance_converged_at)}`
-                    : selected.forge_appliance_platform_outcome,
-                ].filter(Boolean).join(' · ')
+              // A refused run names no tag, so its outcome stands alone.
+              value: selected.forge_appliance_platform_tag || rowTone(healthProblems, 'Platform') === TONE_DANGER
+                ? withCommand(
+                  [
+                    selected.forge_appliance_platform_tag,
+                    selected.forge_appliance_platform_outcome === 'converged'
+                      ? `converged ${formatHeartbeat(selected.forge_appliance_converged_at)}`
+                      : selected.forge_appliance_platform_outcome,
+                  ].filter(Boolean).join(' · '),
+                  rowTone(healthProblems, 'Platform') === TONE_DANGER && (
+                    <ApplianceCommand drawer command={CONVERGE_JOURNAL} showToast={showToast}>
+                      The last run&rsquo;s journal says why. See <ApplianceCommandsHelp />.
+                    </ApplianceCommand>
+                  )
+                )
                 : null,
               danger: rowTone(healthProblems, 'Platform') === TONE_DANGER,
               help: 'The platform playbook tag this appliance last converged to, and how that run '
                 + 'ended. It converges hourly and after boot. "failed" means ansible-pull did not '
-                + 'complete and the timer will try again; the appliance\'s own journal '
-                + '(journalctl -u aber-gateway-converge) says why. The tag is changed by a pull '
+                + 'complete and the timer will try again; the command under it, run on the '
+                + 'appliance, says why. The tag is changed by a pull '
                 + 'request on platform.yml in this gateway\'s repository, so a fleet mid-rollout '
                 + 'shows different tags here. Empty on an appliance that runs the bundle alone.'
             },
@@ -1269,6 +1337,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               gateway_name: selected.gateway_name,
               sparkplug_id: selected.sparkplug_id,
               status: selected.status,
+              enrolled_at: selected.enrolled_at,
               revokesCredential: reissuesSetup,
               confirmFirst: true
             }),
@@ -1446,6 +1515,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           </div>
         )}
       >
+        {/* What Launch UI's editor asks for. Under the actions and closed, so it moves none of them. */}
+        {hadEnrolled(selected) && (
+          <FieldGroup key={selected.gateway_id} group={editorPasswordGroup(selected.gateway_id, showToast)} onCopy={showToast} />
+        )}
         {/* A tool of unknown height, so after the actions: the gateway's own alerts, not its devices'. */}
         {selected && (
           <SuppressionWindows

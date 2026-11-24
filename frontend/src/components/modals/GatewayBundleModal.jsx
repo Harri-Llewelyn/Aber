@@ -2,16 +2,15 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { gatewayUrl } from '../../routes'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
+import { ApplianceCommand, ApplianceCommandsHelp } from '../common/ApplianceCommand'
 import { Modal } from '../common/Modal'
 import { formatCountdown, tokenTimeRemaining } from '../../utils/gatewayStatus'
 import { typedNameMatches } from '../../utils/gatewayType'
+import { CLEAR_BUNDLE_ENROLMENT, CLEAR_INSTALLED_ENROLMENT, startBundle } from '../../utils/applianceCommands'
 import { Tooltip } from '../common/Tooltip'
 import {
-  IconCheck, IconCopy, IconDownload, IconRefreshCw, IconShieldAlert
+  IconCopy, IconDownload, IconRefreshCw, IconShieldAlert
 } from '../common/Icons'
-
-const COPY_FEEDBACK_MS = 1600
 
 /**
  * The setup step for a remote gateway: issues a single-use token and shows it as an install
@@ -20,6 +19,11 @@ const COPY_FEEDBACK_MS = 1600
  * first; straight after creating the gateway there is nothing to replace and it issues on open,
  * once per mount. The command is offered when `installer.available`; switching between command and
  * bundle is a re-issue and asks first.
+ *
+ * A gateway that has ever enrolled (`enrolled_at`, whatever its credential is now) may be going back
+ * on the machine that holds its old enrolment, so the dialog shows how to clear it above the command.
+ * As the gateway was when the dialog opened: the enrolment this dialog's own command makes is not an
+ * old one to clear.
  *
  * Escape and the close button back out of the confirm step when a token is on screen behind it,
  * and close the dialog otherwise.
@@ -32,13 +36,10 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
   const [mode, setMode] = useState(installer?.available ? 'command' : 'bundle')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(!confirmFirst)
-  const [copied, setCopied] = useState(null)
   // Re-rendered every second only while a live token is on screen.
   const [now, setNow] = useState(() => Date.now())
 
   const requested = useRef(false)
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const remaining = bundle ? tokenTimeRemaining(bundle.expiresAt, now) : null
   const expired = remaining !== null && remaining <= 0
@@ -102,23 +103,10 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
     ? bundle.filename.replace(/\.zip$/, '')
     : `aber-gateway-${sparkplugId || 'bundle'}`
   const isCommand = bundle?.kind === 'command'
+  const enrolledBefore = Boolean(gateway.enrolled_at)
 
-  // One source for the block and the copy button. The install command is the server's text verbatim.
-  const commands = isCommand
-    ? bundle.command
-    : [
-      `cd ${folder}`,
-      'docker compose up -d --build',
-      'docker compose logs bootstrap',
-    ].join('\n')
-
-  const copyCommands = useCallback(async () => {
-    const ok = await copyText(commands)
-    setCopied(ok ? 'copied' : 'failed')
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.('Could not reach the clipboard — select the commands and copy them.', 'error')
-  }, [commands, showToast])
+  // The install command is the server's text verbatim.
+  const commands = isCommand ? bundle.command : startBundle(folder)
 
   const askToReissue = useCallback(() => { setTyped(''); setError(null); setStep('confirm') }, [])
   // The other shape of the issue. It spends the token the shown one carries, so it asks first.
@@ -292,37 +280,40 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                 )}
               </div>
 
-              <div className="form-group">
-                <div className="gateway-block-head">
-                  <div className="form-label">
-                    {isCommand ? 'Paste on the appliance, as a user with sudo' : 'On the appliance'}
-                  </div>
-                  <Tooltip text={isCommand ? null : 'Copy all three commands'}>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={copyCommands}
-                    >
-                      {copied === 'copied'
-                        ? <><IconCheck size={12} /> Copied</>
-                        : copied === 'failed'
-                          ? <><IconShieldAlert size={12} /> Copy failed</>
-                          : <><IconCopy size={12} /> {isCommand ? 'Copy Command' : 'Copy Commands'}</>}
-                    </button>
-                  </Tooltip>
-                </div>
-                <pre className={`mono gateway-code${isCommand ? ' gateway-code-wrap' : ''}`}>{commands}</pre>
-                <div className="form-hint">
-                  {isCommand
-                    ? <>
-                      On a fresh Ubuntu machine with a route to the platform. It {bundle.caPin
-                        ? <>fetches the platform's root certificate, checks it against the pin <span className="mono">{bundle.caPin.slice(0, 12)}…</span> and installs it, then </>
-                        : 'is served over plain HTTP, which only a development deployment allows; it then '}
-                      installs Docker and the platform playbook, enrols, and prints the Node-RED editor
-                      password <strong>once</strong>. Safe to run again until it has enrolled.
-                    </>
-                    : <>The last command prints the Node-RED editor password. It is shown <strong>once</strong>.</>}
-                </div>
-              </div>
+              {/* Open, as the command below is, and not a warning: a re-install on a fresh machine,
+                  the usual one, has nothing to clear. */}
+              {enrolledBefore && (
+                <ApplianceCommand
+                  label="Setting up the same machine again? Clear its old enrolment first"
+                  command={isCommand ? CLEAR_INSTALLED_ENROLMENT : CLEAR_BUNDLE_ENROLMENT}
+                  copyLabel="Copy Clean-up"
+                  showToast={showToast}
+                >
+                  {!isCommand && 'Run it in the old bundle’s folder. '}
+                  This deletes the old enrolment and anything the appliance has not reported; a fresh
+                  machine does not need it. For a machine set up with{' '}
+                  {isCommand ? 'a bundle' : 'the install command'}, see <ApplianceCommandsHelp />.
+                </ApplianceCommand>
+              )}
+
+              <ApplianceCommand
+                label={isCommand ? 'Paste on the appliance, as a user with sudo' : 'On the appliance'}
+                command={commands}
+                copyLabel={isCommand ? 'Copy Command' : 'Copy Commands'}
+                copyTip={isCommand ? null : 'Copy all three commands'}
+                wrap={isCommand}
+                showToast={showToast}
+              >
+                {isCommand
+                  ? <>
+                    On {enrolledBefore ? 'an' : 'a fresh'} Ubuntu machine with a route to the platform. It {bundle.caPin
+                      ? <>fetches the platform's root certificate, checks it against the pin <span className="mono">{bundle.caPin.slice(0, 12)}…</span> and installs it, then </>
+                      : 'is served over plain HTTP, which only a development deployment allows; it then '}
+                    installs Docker and the platform playbook, enrols, and prints the Node-RED editor
+                    password <strong>once</strong>. Safe to run again until it has enrolled.
+                  </>
+                  : <>The last command prints the Node-RED editor password. It is shown <strong>once</strong>.</>}
+              </ApplianceCommand>
 
               <p className="form-hint">
                 Publishes as <span className="mono">{sparkplugId}</span>. Devices it announces arrive

@@ -337,9 +337,10 @@ function fieldRuns(fields) {
  * A group of fields under a heading that opens and closes, closed to start with. The panel is
  * always mounted, so the open state lives here and is dropped with the group: the key is the group's
  * `id`, one for each entity, and a drawer that shows another entity starts closed. The rows stay in
- * the page and are hidden while it is closed, as History's groups do.
+ * the page and are hidden while it is closed, as History's groups do. A page that draws one after the
+ * actions (`children`) keys it on that id.
  */
-function FieldGroup({ group, onCopy }) {
+export function FieldGroup({ group, onCopy }) {
   const [open, setOpen] = useState(false)
   const rowsId = `${group.id}-fields`
   const Icon = group.tone === 'danger' ? IconAlertCircle : group.tone === 'warning' ? IconAlertTriangle : null

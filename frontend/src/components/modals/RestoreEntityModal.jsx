@@ -11,9 +11,10 @@ const TYPE_WORD = { area: 'Area', cell: 'Cell', gateway: 'Gateway', device: 'Dev
  * recoverable. It names what does not come back: the timer is cleared, not paused, and a gateway's
  * broker credential and deploy key stay withdrawn. Restore returns the row, not the credentials
  * archiving withdrew. `credentialRevoked` and `forgeArchived` are a gateway's
- * `credential_revoked_at` and `forge_archived_at`, as facts rather than guesses from the type.
+ * `credential_revoked_at` and `forge_archived_at`, as facts rather than guesses from the type, and
+ * `enrolled` is whether it is a Remote gateway whose appliance had enrolled (`hadEnrolled()`).
  */
-export function RestoreEntityModal({ type, name, credentialRevoked = false, forgeArchived = false, onConfirm, onCancel }) {
+export function RestoreEntityModal({ type, name, credentialRevoked = false, forgeArchived = false, enrolled = false, onConfirm, onCancel }) {
   return (
     <ConfirmModal
       title={`Restore ${type}`}
@@ -33,6 +34,10 @@ export function RestoreEntityModal({ type, name, credentialRevoked = false, forg
           ? ' Its repository comes back out of the forge’s archive within a few seconds. The' +
             ' appliance’s deploy key does not come back with it — re-enrol the appliance before' +
             ' it can pull its flow again.'
+          : '') +
+        (type === 'gateway' && enrolled
+          ? ' Setting it up on the same machine needs the old enrolment there cleared first:' +
+            ' Set Up Gateway in its drawer shows the command.'
           : '') +
         (type === 'device'
           ? ' Any replay lane recorded from it comes back with it.'

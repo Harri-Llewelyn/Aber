@@ -648,6 +648,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                                   gateway_name: g.name,
                                   sparkplug_id: g.sparkplug_id,
                                   status: g.status,
+                                  enrolled_at: g.enrolled_at,
                                   confirmFirst: true
                                 })}
                               >

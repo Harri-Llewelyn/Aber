@@ -24,6 +24,7 @@ import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconE
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
+import { hadEnrolled } from '../../utils/credentialState'
 import { formatDate, formatDateTime, plural } from '../../utils/format'
 
 /** The page's singular row type -> the Audit Trail page's handover type. */
@@ -334,6 +335,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
           name={confirmRestore.name}
           credentialRevoked={Boolean(confirmRestore.credential_revoked_at)}
           forgeArchived={Boolean(confirmRestore.forge_archived_at)}
+          enrolled={hadEnrolled(confirmRestore)}
           onConfirm={() => restore(confirmRestore)}
           onCancel={() => setConfirmRestore(null)}
         />

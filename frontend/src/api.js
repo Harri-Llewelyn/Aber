@@ -3331,6 +3331,10 @@ const apiMethods = {
         // repository, so restoring has something to reverse — and the deploy key it removed on
         // the way in is not something restoring can give back.
         forge_archived_at: g.forge_archived_at,
+        // Whether an appliance of its own had enrolled (hadEnrolled()): the restore dialog says the
+        // same machine's old enrolment is cleared before it is set up again.
+        deployment: g.deployment,
+        enrolled_at: g.enrolled_at,
         // How many playbacks name it: the purge never deletes it while any do.
         playbacks: playbacksOf.get(g.id) || 0
       }));
