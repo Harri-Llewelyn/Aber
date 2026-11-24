@@ -110,6 +110,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // The subject whose drawer is open, in the address as `?subject=`.
   const [selectedId, setSelectedId] = useUrlState('subject')
   const [startFor, setStartFor] = useState(null)
+  // { capture, subject } while Delete capture's dialog is open: a capture is named by its subject.
   const [deleteFor, setDeleteFor] = useState(null)
   const [playFor, setPlayFor] = useState(null)
   const [uploadFile, setUploadFile] = useState(null)
@@ -383,7 +384,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // Run from Delete capture's dialog, which shows a refusal and stays open. Read again either way.
   const onDelete = async () => {
     try {
-      await api.deleteCapture(deleteFor)
+      await api.deleteCapture(deleteFor.capture)
       setDeleteFor(null)
       showToast('Capture deleted.', 'success')
     } finally {
@@ -884,7 +885,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             danger: true,
             disabled: !canManage,
             title: !canManage ? DENIED_TITLE : 'Remove this capture and its file',
-            onClick: () => setDeleteFor(capture)
+            onClick: () => setDeleteFor({ capture, subject: selected })
           }
         ].filter(Boolean) : []}
       >
@@ -980,7 +981,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         <ConfirmModal
           title="Delete capture"
           icon={<IconTrash size={18} />}
-          message={`Delete the capture recorded ${formatDateTime(deleteFor.recorded_at)}${deleteFor.note ? ` — ${deleteFor.note}` : ''}? The file is removed from storage and cannot be recovered.`}
+          message={`Delete the capture of ${deleteFor.subject.name}, recorded ${formatDateTime(deleteFor.capture.recorded_at)}${deleteFor.capture.note ? ` — ${deleteFor.capture.note}` : ''}? The file is removed from storage and cannot be recovered.`}
+          requireTyped={deleteFor.subject.name}
+          requireTypedLabel={`${deleteFor.subject.kind} name`}
           confirmLabel="Delete capture"
           pendingLabel="Deleting…"
           onCancel={() => setDeleteFor(null)}

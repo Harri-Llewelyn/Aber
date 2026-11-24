@@ -2727,11 +2727,31 @@ main:focus { outline: none; }
   color: var(--text-muted);
 }
 
+/* What a dialog says names a record, and a name may hold no space to break at: a long one wraps
+   anywhere, so the body never scrolls sideways for it. */
+.modal-lead,
+.modal-body > .form-hint,
+.modal-body > .callout { overflow-wrap: anywhere; }
+
 .modal-error-icon { flex-shrink: 0; margin-top: 2px; color: var(--danger); }
 
 .form-group {
   margin-bottom: 16px;
 }
+
+/* A typed gate (TypedGate). The text to type is shown whole and as it must be typed: a long name
+   wraps anywhere, and a name's own spaces are kept. */
+.typed-gate { margin-bottom: 20px; }
+
+.typed-gate-text {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.typed-gate-hint { margin: 6px 0 0; }
 
 .form-label {
   display: block;

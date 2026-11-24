@@ -350,6 +350,9 @@ describe('Save', () => {
 })
 
 describe('Delete', () => {
+  const typeName = () => fireEvent.change(dialog().getByLabelText('Type the automation name to confirm'),
+    { target: { value: 'Lathe 3 spindle bearing hot' } })
+
   it('asks first, naming the automation, and the confirm repeats the act', async () => {
     await show()
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
@@ -357,6 +360,7 @@ describe('Delete', () => {
     expect(d.getByText('Lathe 3 spindle bearing hot', { selector: 'strong' })).toBeInTheDocument()
     expect(d.getByText(/open alerts resolve/)).toBeInTheDocument()
     expect(api.deleteAutomation).not.toHaveBeenCalled()
+    typeName()
     await act(async () => { fireEvent.click(d.getByRole('button', { name: 'Delete Automation' })) })
     expect(api.deleteAutomation).toHaveBeenCalledWith('lathe-3-spindle-hot')
   })
@@ -364,6 +368,7 @@ describe('Delete', () => {
   it('ends with a toast and the list, where the automation is no longer', async () => {
     const toast = await show()
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    typeName()
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Delete Automation' })) })
     expect(toast).toHaveBeenCalledWith("Automation 'Lathe 3 spindle bearing hot' deleted", 'success', { to: '/automations' })
     expect(window.location.pathname).toBe('/automations')
@@ -373,6 +378,7 @@ describe('Delete', () => {
     api.deleteAutomation.mockRejectedValue(new Error('Only a Shopfloor Manager or an Administrator may delete an automation.'))
     await show()
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    typeName()
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Delete Automation' })) })
     expect(document.querySelector('.modal-error')).toHaveTextContent('Only a Shopfloor Manager or an Administrator may delete an automation.')
     expect(window.location.pathname).toBe('/automations/lathe-3-spindle-hot')

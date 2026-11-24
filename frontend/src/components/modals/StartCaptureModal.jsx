@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { TypedGate, useTypedGate } from '../common/TypedGate'
 import { IconRecord, IconShieldAlert } from '../common/Icons'
 import { formatDateTime } from '../../utils/format'
 
@@ -21,7 +22,8 @@ const DURATIONS = [
 /**
  * Start a capture, and when one is already stored, confirm destroying it in the same dialog, so
  * what is about to be lost and what is about to be recorded are read together. The note field
- * exists so the existing capture can be named ("pre-trip bearing vibration baseline").
+ * exists so the existing capture can be named ("pre-trip bearing vibration baseline"). Replacing
+ * takes the subject's name typed back, as deleting the capture does.
  * `start_capture_job()` refuses when a capture of the subject exists unless `p_replace` is true, so
  * the confirmation is a precondition in the database.
  */
@@ -30,6 +32,7 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
   const [seconds, setSeconds] = useState(120)
   const [error, setError] = useState(null)
   const [pending, run] = usePendingAction()
+  const gate = useTypedGate(existing ? subject.name : null, `${subject.kind} name`)
 
   const submit = () => run(async () => {
     setError(null)
@@ -55,6 +58,8 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
             className={existing ? 'btn btn-danger' : 'btn btn-primary'}
             pending={pending}
             pendingLabel="Starting…"
+            disabled={!gate.open}
+            title={gate.reason}
             onClick={submit}
           >
             {existing ? 'Replace and record' : 'Start recording'}
@@ -75,6 +80,8 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
           </div>
         </div>
       )}
+
+      <TypedGate gate={gate} disabled={pending} />
 
       <div className="form-group">
         <label className="form-label" htmlFor="capture-note">Note (optional)</label>

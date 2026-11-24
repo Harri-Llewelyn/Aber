@@ -4,6 +4,7 @@ import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
+import { TypedGate, useTypedGate } from '../common/TypedGate'
 import { IconShieldAlert, IconUpload } from '../common/Icons'
 import { plural } from '../../utils/format'
 import { deviceIdKey } from '../../utils/sparkplugId'
@@ -12,8 +13,9 @@ import { deviceIdKey } from '../../utils/sparkplugId'
  * Take a capture file and file it against a subject. A capture is stored per subject, so the dialog
  * asks which one; that also makes a page-level drop zone possible. It validates the file before
  * asking with the rules playback applies (`captureFileProblem`), though `uploadCapture()` checks
- * again on the way out since it is reachable from elsewhere. The replace warning guards the same
- * decision StartCaptureModal does, and the server makes it again before anything is written.
+ * again on the way out since it is reachable from elsewhere. The replace warning and its typed gate
+ * guard the same decision StartCaptureModal's do, and the server makes it again before anything is
+ * written.
  *
  * `forPlayback` is the "Play a file…" path: the file is stored to be played back at once, so a
  * file naming a device this site does not have (`knownDeviceIds`) is refused here, before it can
@@ -58,6 +60,7 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
     ? manifest.device_ids.filter(id => !knownDeviceIds.has(deviceIdKey(id)))
     : []
   const ready = !!parsed && !!subject && unknownDevices.length === 0
+  const gate = useTypedGate(ready && subject.capture ? subject.name : null, `${subject?.kind} name`)
   // A file that is not a capture, or records devices this site lacks, is said in a callout.
   const problem = parsed && unknownDevices.length === 0 && !subject ? 'Choose a gateway or device to file it against' : null
 
@@ -84,8 +87,8 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
             className={subject?.capture ? 'btn btn-danger' : 'btn btn-primary'}
             pending={pending}
             pendingLabel="Uploading…"
-            disabled={!ready}
-            title={ready ? undefined : (
+            disabled={!ready || !gate.open}
+            title={ready ? gate.reason : (
               readError ? 'This file is not a capture'
                 : unknownDevices.length > 0 ? 'This file records devices this site does not have'
                   : 'Choose a subject'
@@ -156,7 +159,7 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
             id="upload-subject"
             className="form-control"
             value={subjectKey}
-            onChange={e => setSubjectKey(e.target.value)}
+            onChange={e => { setSubjectKey(e.target.value); gate.setTyped('') }}
             disabled={pending}
             aria-required="true"
           >
@@ -195,6 +198,8 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
           </div>
         </div>
       )}
+
+      <TypedGate gate={gate} disabled={pending} />
     </Modal>
   )
 }

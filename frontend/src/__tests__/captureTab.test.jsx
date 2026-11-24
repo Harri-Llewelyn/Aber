@@ -377,7 +377,8 @@ describe('starting a capture', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Record/))
-    fireEvent.click(await screen.findByRole('button', { name: /Replace and record/ }))
+    fireEvent.change(await screen.findByLabelText('Type the gateway name to confirm'), { target: { value: 'Line 1 Gateway' } })
+    fireEvent.click(screen.getByRole('button', { name: /Replace and record/ }))
 
     await waitFor(() => expect(api.startCapture).toHaveBeenCalledWith(
       expect.objectContaining({ replace: true })
@@ -548,7 +549,7 @@ describe('deleting and downloading', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Delete capture/))
-    const message = await screen.findByText(/Delete the capture recorded/)
+    const message = await screen.findByText(/Delete the capture of Line 1 Gateway, recorded/)
     expect(message).toHaveTextContent('pre-trip bearing vibration baseline')
   })
 
@@ -560,6 +561,7 @@ describe('deleting and downloading', () => {
     selectRow(row); fireEvent.click(panelAction(/Delete capture/))
     // Scoped to the dialog: the panel's action and the confirmation's button carry the same name.
     const dialog = document.querySelector('.modal')
+    fireEvent.change(within(dialog).getByLabelText('Type the gateway name to confirm'), { target: { value: 'Line 1 Gateway' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /Delete capture/ }))
     await waitFor(() => expect(api.deleteCapture).toHaveBeenCalledWith(CAPTURE))
   })

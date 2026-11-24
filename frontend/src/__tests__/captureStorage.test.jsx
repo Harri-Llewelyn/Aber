@@ -301,6 +301,7 @@ describe('the upload dialog and the stored captures', () => {
     const subject = await screen.findByLabelText('File it against')
     await waitFor(() => expect(subject.value).toBe('gateway:gw-1'))
     const calls = api.listCaptures.mock.calls.length
+    fireEvent.change(screen.getByLabelText('Type the gateway name to confirm'), { target: { value: 'Line 1 Gateway' } })
     fireEvent.click(screen.getByRole('button', { name: /Replace and upload/ }))
     expect(await screen.findByText(/stored after this upload began/)).toBeInTheDocument()
     expect(api.uploadCapture).toHaveBeenCalledWith(expect.objectContaining({
