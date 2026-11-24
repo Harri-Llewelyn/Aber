@@ -644,12 +644,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                               <button
                                 className="btn btn-ghost btn-sm"
                                 onClick={() => setBundleForGw({
-                                  gateway_id: g.id,
-                                  gateway_name: g.name,
-                                  sparkplug_id: g.sparkplug_id,
-                                  status: g.status,
-                                  enrolled_at: g.enrolled_at,
-                                  confirmFirst: true
+                                  ...g, gateway_id: g.id, gateway_name: g.name, confirmFirst: true
                                 })}
                               >
                                 <IconDownload size={13} /> Bundle

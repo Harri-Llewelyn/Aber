@@ -121,7 +121,7 @@ describe('gateway row actions', () => {
   })
 
   it('keeps setup the one primary on a pending gateway with a console', async () => {
-    await show([gateway({ deployment: 'remote', status: 'AWAITING_BIRTH' })])
+    await show([gateway({ deployment: 'remote', status: 'AWAITING_BIRTH', enrolled_at: '2026-11-01T09:00:00Z' })])
     const panel = openPanel()
 
     expect(primaries()).toHaveLength(1)

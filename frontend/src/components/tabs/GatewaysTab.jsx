@@ -19,7 +19,7 @@ import {
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone, credentialIssuedHere,
   gatewayTypeChange, gatewayTypeChangeHint, gatewayShowsRow,
 } from '../../utils/gatewayType'
-import { enrolmentStands, hadEnrolled } from '../../utils/credentialState'
+import { enrolmentStands, hadEnrolled, setupRevokesCredential } from '../../utils/credentialState'
 import { CONVERGE_JOURNAL, FLOW_SYNC_LOG, RESET_BUNDLE_EDITOR_PASSWORD, RESET_EDITOR_PASSWORD } from '../../utils/applianceCommands'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotStyle, deviceColumnTags } from '../../utils/deviceStatus'
 import { inServiceDevices } from '../../utils/inService'
@@ -544,7 +544,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // Re-issue for an enrolled appliance that is not online, as for a rebuilt one: it revokes the old
   // credential at once, so it is never the primary there, and never offered while the gateway is online.
   const awaitsSetup = !!selected && (selectedPending || !enrolmentStands(selected))
-  const reissuesSetup = !!selected && (selected.status === 'AWAITING_BIRTH' || enrolmentStands(selected))
+  const reissuesSetup = !!selected && setupRevokesCredential(selected)
   const offersSetup = !!selected && !selected.is_archived && selected.deployment === 'remote' && canManage
     && (selectedPending || !isGatewayOnline(selected))
   const offersCredential = !!selected && !selected.is_archived && credentialIssuedHere(selected) && canManage
@@ -1332,18 +1332,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             primary: primaryAction === 'setup',
             // Withheld, not hidden, while the deployment cannot issue setup: the banner says why.
             disabled: enrolmentBlocked,
-            onClick: () => setBundleForGw({
-              gateway_id: selected.gateway_id,
-              gateway_name: selected.gateway_name,
-              sparkplug_id: selected.sparkplug_id,
-              status: selected.status,
-              enrolled_at: selected.enrolled_at,
-              revokesCredential: reissuesSetup,
-              confirmFirst: true
-            }),
+            onClick: () => setBundleForGw({ ...selected, confirmFirst: true }),
             title: enrolmentBlocked
               ? 'Remote gateways cannot be enrolled on this deployment yet'
-              : selected.status === 'AWAITING_BIRTH'
+              : reissuesSetup && selected.status === 'AWAITING_BIRTH'
                 ? 'This appliance enrolled but has not published. Re-issuing revokes its broker credential at once.'
                 : reissuesSetup
                   ? 'For an appliance that was replaced or rebuilt. Re-issuing revokes the broker credential the old one holds, at once.'
