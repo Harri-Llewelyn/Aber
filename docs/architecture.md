@@ -243,7 +243,7 @@ Aber and people who connect another system to it.
 | Metric group | `metric_groups.id`: uuid. Its name is unique, whatever its case | Its name: what is before the first `/` of a metric's name | The generated column `metric_catalog.metric_group` | In metric names | No |
 | A standard's entry | The standard's own name or id for it, in that vocabulary's table | Its semantic id | The generators, `scripts/generate-*-vocabulary.mjs`, into the seed. [Vocabularies](vocabularies.md) | Exported shells, i3X clients | No |
 | Imported vocabulary | `site_vocabularies.id`: uuid. The file's SHA-256 is unique | Each concept's semantic id, as the file gives it | `import_site_vocabulary()` | Wherever the file came from | No |
-| Submodel template's element | `template_id` and `id_short` | The template's IRI and the element's semantic id, as IDTA publishes them | The seed | Exported shells | No |
+| Submodel template's element | `template_id` and `path`, its idShortPath in the template. `template_id` and `id_short` in `idta_submodel_templates` | The template's IRI and the element's semantic id, as IDTA publishes them | The seed | Exported shells | No |
 
 ### People, machine identities and access
 
