@@ -585,22 +585,24 @@ class TestTheApplianceItself(ForgeEventsBase):
         self.assertEqual(status, 200, payload)
         self.assertIsNotNone(payload.get("repository"), payload)
 
-        # What enrolment put on the repository: the key, read-write, and the three rules.
+        # What enrolment put on the repository: the key, read-write, and the four rules.
         status, keys = forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{self.repo}/keys")
         self.assertEqual(status, 200, keys)
         self.assertEqual([k["read_only"] for k in keys], [False], keys)
         status, rules = forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{self.repo}/branch_protections")
         self.assertEqual(status, 200, rules)
         by_name = {r["rule_name"]: r for r in rules}
-        self.assertEqual(set(by_name), {"main", "appliance", "**"}, by_name.keys())
+        self.assertEqual(set(by_name), {"main", "appliance", "**", "aber-platform-*"}, by_name.keys())
         self.assertFalse(by_name["main"]["enable_push"])
         self.assertFalse(by_name["main"]["push_whitelist_deploy_keys"])
         self.assertTrue(by_name["appliance"]["push_whitelist_deploy_keys"])
         self.assertFalse(by_name["appliance"]["enable_force_push"])
         self.assertFalse(by_name["**"]["push_whitelist_deploy_keys"])
+        self.assertFalse(by_name["aber-platform-*"]["push_whitelist_deploy_keys"])
         self.assertLess(by_name["appliance"]["priority"], by_name["**"]["priority"], "the catch-all must come after the named rule")
         # A PROPOSAL IS A PERSON'S ACT. The catch-all admits the two dashboard teams and nobody
-        # else, so neither a deploy key nor the machine account can push a proposal branch.
+        # else, so neither a deploy key nor the machine account can push a proposal branch. The one
+        # the machine account makes, a platform bump, has branches and a rule of its own.
         self.assertEqual(sorted(by_name["**"]["push_whitelist_teams"]),
                          ["administrators", "managers"], by_name["**"])
         # And main requires the shape check forge-events posts, so a flows.json the appliance
