@@ -512,12 +512,40 @@ refused while it cannot. `dialogSaysWhy.test.jsx` holds the pattern for the dial
 
 Three kinds of dialog explain themselves another way:
 
-- **A typed gate** says what to type in its label: ConfirmModal's `requireTyped`, and a gateway's
-  credential and setup dialogs.
+- **A typed gate** says what to type in its label: ConfirmModal's `requireTyped`, the same
+  `TypedGate` in a form, and a gateway's credential and setup dialogs.
 - **The schema builder** keeps Save pressable. Pressing it reveals what is missing beside each
   field, because its problems are spread across a long form.
 - **A role that may not act** sees `permitted={false}`, with the roles that may in the tooltip
   ([Permission gating](#permission-gating)).
+
+### Typed text guards removing access and what cannot be undone
+
+Typed text guards removing a person's access, whoever they are, and every act that cannot be
+undone. An act cannot be undone when it destroys something the site holds that nobody can make
+again from the dashboard: a record with its history or readings, a draft's work, a stored file or a
+backup. It does not guard:
+
+- a security response that must stay quick and can be repeated or replaced: ending a token, a
+  credential, an app's approval, a session or a second factor;
+- what a person can simply make again, such as a link, a suppression window, a picture, or an area
+  plan, 3D model or vocabulary uploaded from a file;
+- an archive, which Restore undoes;
+- a deletion that is not a person's click, such as a timer's.
+
+Those words are ConfirmModal's `requireTyped` too (drift check 545). Removing access can be undone
+with Restore Access; it is guarded because a slip blocks a person's sign-in at once.
+
+- **The text to type is the record's own name,** as the dialog shows it: a person's email address,
+  because a display name may not be unique, and a capture's gateway or device. The label says which
+  ("Type the device name to confirm"), through `requireTypedLabel`.
+- **A dialog with fields of its own** holds the same field, `TypedGate`, with `useTypedGate()`. It is
+  the last thing in the body, and its button takes the gate's `open` and `reason`. Recording again
+  and uploading over a stored capture do this, because each destroys that capture.
+- **A dialog that says its act cannot be undone has a gate,** or is in drift check 544's list with
+  the reason it has none. The check also names every gated dialog.
+- **A gateway's credential and setup dialogs ask for its name too,** before they cut off whatever
+  uses the credential or command the gateway already has.
 
 ### A value nobody can change is a label
 
@@ -1521,7 +1549,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example. The page's second tab, **Built-in**, is `BuiltInAlerts` and its drawer `BuiltInAlertDrawer`: the alerts Aber raises about itself, read-only ([The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)) |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
-| `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
+| `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (behind a [typed gate](#typed-text-guards-removing-access-and-what-cannot-be-undone)) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
 
