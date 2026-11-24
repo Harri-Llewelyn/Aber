@@ -1156,8 +1156,8 @@ async function ensureWikiHome(
  * Register the push webhook on the repository, once. One hook per repository rather than one on the
  * organisation, because only a gateway's repository has a gateway row to record on. Found again by
  * URL on re-enrolment and by the sweep. The secret is the one forge-events verifies with. The
- * branch filter admits `main` and `appliance`, so a push to a proposal branch is not delivered; a
- * found hook with another filter (one registered before the appliance branch existed) is patched.
+ * branch filter admits every branch, so a push to a proposal branch is delivered and its shape
+ * checked; a found hook with another filter is patched.
  * A second hook of ours, left by two registrations racing, is deleted so each push arrives once;
  * the oldest with the right filter is kept. Returns whether anything was changed.
  */
