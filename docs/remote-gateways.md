@@ -576,7 +576,7 @@ that already exists, and sets it up the same way as an empty one.
 Enrolment removes them, and anybody they added, before it does anything else, and every pass of the
 sweep does the same. From then on they have what their team has. Enrolment also replaces the branch
 rules and the tag rules they set, dismisses the approvals given under them, and makes `main` the default
-branch. An appliance is always told `main`.
+branch. An appliance is always told `main`. A repository that mirrors another one is refused.
 
 **Read `main` before you set the appliance up.** What it holds when the gateway enrols is deployed as it
 is, `custom.yml` included, and nobody approved it. Every change after that needs an Administrator's

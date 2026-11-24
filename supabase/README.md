@@ -11430,31 +11430,55 @@ repositories, and enrolment adopts one that carries a gateway's name, which is h
 seeded from the template. Gitea makes the person who creates a repository a collaborator with `admin`,
 and nothing took that away. So enrolment and every sweep, in this order (drift check 554):
 
-1. **`ensureHeldByTeams()` removes every collaborator**, from an archived gateway's repository too, which one
+1. **`findRepository()` knows the repository by its own name.** Gitea finds one by a name it had before, and in
+   any case. So does an appliance's clone, over SSH, while the sweep and `forge-events` do not. One that a person
+   renamed has its name back. One that now carries another gateway's name is that gateway's.
+2. **`refuseMirror()` refuses a mirror**, whose `main` the forge fetches from elsewhere under no rule.
+3. **`ensureHeldByTeams()` removes every collaborator**, from an archived gateway's repository too, which one
    could take out of the archive. One the forge keeps is an error on every pass, and enrolment refuses the
    repository.
-2. The tags, as above.
-3. **`ensureBranchProtection()` and `ensureApplianceProtection()` put each of our three rules right in
+4. **`ensureProposals()` turns proposals on.** While they are off the forge answers 404 for those that are open,
+   and an approval on one could not be dismissed. Then the tags, as above.
+5. **`ensureBranchProtection()` and `ensureApplianceProtection()` put each of our three rules right in
    place.** A rule on `main` that is looser than an Administrator's approval has those fields patched, and
    what only tightens it is kept. One that is missing is made open to the machine account alone, which
    seeds the repository under it, so `main` never stands without a rule of ours.
-4. **`finishBranchRules()` removes any other rule**, seeds and closes a `main` just made. A rule on one
+6. **`finishBranchRules()` removes any other rule**, seeds and closes a `main` just made. A rule on one
    other branch that asks what `main`'s asks can loosen nothing, and stays.
-5. **`ensureDefaultBranch()` makes `main` the default again**, having given the branch it was the rule `main`
+7. **`ensureDefaultBranch()` makes `main` the default again**, having given the branch it was the rule `main`
    has. Enrolment used to tell the appliance the default branch, and an appliance told another follows it
    until it is set up again. A branch no rule can close, `appliance` among them, costs the old key.
-6. The sweep removes a deploy key that is not titled as the gateway's, which every key of Aber's has been
-   since 1.0.0.
+8. The sweep removes a deploy key that is not titled as the gateway's, which every key of Aber's has been
+   since 1.0.0, and a key titled as a gateway's on a repository that is no gateway's.
+
+Each step of a pass is tried by itself, so one that fails leaves the others done. A pass that a person's
+leavings could stop would leave the rest of them in place.
+
+**A rule's name is whatever a person made it, and the API takes it in a path.** The `forge-api` listener
+refuses an escaped slash, so `rulePath()` leaves a slash as it is, which Gitea's route takes. A name with a
+backslash, an empty segment or a dot segment has no path: the listener merges slashes, and `fetch` and the
+listener both resolve dots, so removing a rule named `..` would have been `DELETE` on the repository.
+`forgeApi()` asks no path with a dot segment. A rule with no path stays, so `takeFromAppliance()` removes the
+repository's deploy keys, and the pass and the enrolment are errors. A mirror is answered the same way. Such a
+rule is removed from inside the forge's pod, which is past the listener:
+
+```bash
+kubectl -n aber exec deploy/gitea -- curl --path-as-is -X DELETE -H "Authorization: token $TOKEN" \
+  "http://127.0.0.1:3000/api/v1/repos/gateways/<repository>/branch_protections/<the name, percent-encoded, its dots as %2E>"
+```
 
 What each step is for, measured against `gitea/gitea:28.3.0`:
 
 | Question | Answer |
 | :--- | :--- |
 | Does a maker stay an administrator? | Yes, after enrolment and after they leave the team: their own API token still changes the rules |
+| What can an administrator of one do with the rules as they are? | Force-merge: past the approval and the shape check, leaving no trace in the rules |
 | Which branch rule decides? | The first that matches, by ascending priority, a plain name before a glob. A plain name matches without case, so `MAIN` is a rule on `main` |
 | Does `enable_push: false` close a branch? | Not by itself. `unprotected_file_patterns` admits a push of those files from anybody with write, a deploy key included |
 | Does a closed rule keep its approval? | Not by itself. A bypass list merges past it, and with no approvals list anybody with write approves |
 | When does an approval count? | By the rule when it was given. One given under a looser rule goes on counting after the rule is put back, so those are dismissed |
+| Does a fork's **Sync fork** pass the rule on `main`? | No: it is refused, fast-forward or not |
+| Does a mirror's sync? | Yes: no rule is asked. Gitea refuses to take a mirror out of the archive, so enrolment refused one before 1.9.1 too |
 
 **A gateway's repository is read by object id** (`fileAtCommit()`, drift check 553). With a tag named
 `main`, Gitea's contents call reads the tag for `ref=main` and for no ref, and its trees and commits

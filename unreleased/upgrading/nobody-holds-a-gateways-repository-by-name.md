@@ -2,10 +2,10 @@
 
 Enrolment makes a gateway's repository. A person can also make it in the forge first, for example with
 **Use this template** for a custom gateway. The forge made that person its administrator, and nothing
-took that away. So a Shopfloor Manager who had made one could change the rule that asks for an
-Administrator's approval on `main`. A person whose role had been removed still could, with a token of
-their own. They could also move the repository's default branch, which enrolment told the appliance to
-follow. The advisory is
+took that away. So a Shopfloor Manager who had made one could merge past the Administrator's approval on
+`main`, or change the rule that asks for it. A person whose role had been removed still could, with a
+token of their own. They could also move the repository's default branch, which enrolment told the
+appliance to follow. The advisory is
 [GHSA-84xw-m29x-9r4r](https://github.com/Harri-Llewelyn/Aber/security/advisories/GHSA-84xw-m29x-9r4r),
 as for [the tags](a-tag-cannot-stand-in-for-a-gateways-branch.md).
 
@@ -33,7 +33,8 @@ is registered.
 - **It removes any other branch rule.** One on a single other branch, which asks what `main`'s asks,
   stays.
 - **It makes `main` the default branch again.** The branch it was asks for the approval too, from then on.
-- **It removes a deploy key that is not the gateway's own.**
+- **It removes a deploy key that is not the gateway's own**, and a gateway's key from any other repository.
+- **It gives a renamed repository its name back**, and turns proposals on where they were off.
 
 #### What you do
 
@@ -46,15 +47,23 @@ The log names each repository where one of these was needed:
 
 ```bash
 kubectl -n aber logs deploy/supabase-functions --since=24h \
-  | grep -E 'was held by|put back|admitted pushes|removed the branch rule|the default branch of|dismissed an approval'
+  | grep -E 'was held by|put back|admitted pushes|removed the branch rule|the default branch of|dismissed an approval|and is again|took no proposals|deploy keys are removed'
 ```
 
 No line means that every repository was as enrolment makes it. For each repository named:
 
-1. Read its commits on `main` in the forge. A change merged while the rule was looser is still there. To
-   undo one, revert it by pull request. If you do not know it and it changed `custom.yml` or
-   `platform.yml`, rebuild the machine: the appliance ran that as root.
-2. If the line says the default branch was another one, the appliance may have enrolled on it. Put what it
+1. Read its commits on `main` in the forge. A change merged past the approval is still there, and where
+   somebody held the repository it need not have left a looser rule. To undo one, revert it by pull
+   request. If you do not know it and it changed `custom.yml` or `platform.yml`, rebuild the machine: the
+   appliance ran that as root.
+2. If the line says it was renamed (*was … and is again*), set the gateway up again, so that its appliance
+   has the repository's own address.
+3. If the line says its deploy keys are removed, it is a mirror, or it has a branch rule that cannot be
+   removed. The appliance goes on running what it has. Move the repository aside, or delete it, and set the
+   gateway up again. A rule can also be removed as
+   [`supabase/README.md`](../../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-archived-migration-0104)
+   says.
+4. If the line says the default branch was another one, the appliance may have enrolled on it. Put what it
    should run on `main`, and set the gateway up again. Until then, an appliance on this release's platform
    says *REFUSING TO SYNC* and goes on running what it has. One on an earlier platform follows that
    branch, which now needs the approval.
