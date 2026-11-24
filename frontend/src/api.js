@@ -4,7 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId, sparkplugGroupProblem } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
 import { inServiceDevices } from './utils/inService';
-import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES, PLAN_ROTATIONS } from './utils/areaPlans';
+import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanFileName, areaPlanPath, AREA_PLAN_MAX_BYTES, PLAN_ROTATIONS } from './utils/areaPlans';
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { authServerRefusesSession, isSessionRefusal } from './utils/sessionError';
 import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
@@ -4774,6 +4774,18 @@ const apiMethods = {
       await supabase.storage.from(AREA_PLAN_BUCKET).remove([previous]).catch(() => {});
     }
     return { ...data[0], area_id: data[0].id };
+  },
+
+  /**
+   * An area's plan as a download: `?download=` makes storage send it as an attachment, as a 3D
+   * model's URL does, named after the area. The bucket is private, so the URL is signed, for one
+   * object and sixty seconds. Every signed-in role may read the bucket, as the Site Map does.
+   */
+  areaPlanDownloadUrl: async (area) => {
+    const { data, error } = await supabase.storage
+      .from(AREA_PLAN_BUCKET).createSignedUrl(area.plan_path, 60, { download: areaPlanFileName(area) });
+    if (error) throw new Error(error.message || 'Could not create a download link');
+    return withApiKey(data.signedUrl);
   },
 
   /**

@@ -193,7 +193,7 @@ describe('Turn left and Turn right', () => {
     expect(actions().compareDocumentPosition(document.querySelector('.plan-card')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Away from the turns, so a missed Turn right cannot open a file dialog.
     const fileButtons = document.querySelector('.area-plan-panel-buttons')
-    expect(within(fileButtons).getAllByRole('button').map(b => b.textContent.trim())).toEqual(['Replace plan', 'Remove plan'])
+    expect(within(fileButtons).getAllByRole('button').map(b => b.textContent.trim())).toEqual(['Download plan', 'Replace plan', 'Remove plan'])
     expect(document.querySelector('.plan-card').compareDocumentPosition(fileButtons) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(tooltipOf(screen.getByRole('button', { name: 'Turn left' }))).toMatch(/anticlockwise/)
     expect(tooltipOf(screen.getByRole('button', { name: 'Turn right' }))).toMatch(/clockwise/)

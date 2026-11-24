@@ -14,6 +14,7 @@ import { Modal } from './Modal'
 import { Tooltip } from './Tooltip'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { deviceUrl } from '../../routes'
+import { STORED_FILE_DELETED, STORED_FILE_REPLACED } from '../../utils/storedFile'
 
 /** Where an attached model is kept, and so who can read it. */
 export const MODEL_STORAGE_NOTE =
@@ -51,6 +52,8 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
   const [error, setError] = useState(null)
   const [size, setSize] = useState(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  // The file chosen in place of the attached one, until Replace's dialog is answered.
+  const [replacement, setReplacement] = useState(null)
   const inputRef = useRef(null)
 
   const path = (modelOf || device)?.model_3d_path || null
@@ -82,6 +85,21 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
     return () => { cancelled = true }
   }, [path])
 
+  // Uploads a checked file and attaches it. A refusal is thrown, for whoever asked to show.
+  const attach = useCallback(async (file) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const { path: uploaded } = await api.uploadDeviceModel(deviceId, file)
+      setReplacement(null)
+      setSize(file.size)
+      showToast?.(`3D model attached${deviceName ? ` to '${deviceName}'` : ''}: ${modelFileName(uploaded)}`, 'success', { to: deviceUrl(deviceId) })
+      onChange?.(uploaded)
+    } finally {
+      setBusy(false)
+    }
+  }, [deviceId, deviceName, onChange, showToast])
+
   const handleFile = useCallback(async (file) => {
     if (!file) return
     setError(null)
@@ -99,22 +117,15 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
       return
     }
 
-    setBusy(true)
+    // Asked once the file has passed its checks, so a person who cancels the picker is asked nothing.
+    if (path) { setReplacement(file); return }
     try {
-      const { path: uploaded } = await api.uploadDeviceModel(deviceId, file)
-      setSize(file.size)
-      showToast?.(`3D model attached${deviceName ? ` to '${deviceName}'` : ''}: ${modelFileName(uploaded)}`, 'success', { to: deviceUrl(deviceId) })
-      onChange?.(uploaded)
+      await attach(file)
     } catch (err) {
       setError(err.message)
       showToast?.(err.message, 'error')
-    } finally {
-      setBusy(false)
-      // Cleared so re-picking the SAME file fires a change event again -- otherwise a failed
-      // upload cannot be retried from the picker without choosing something else first.
-      if (inputRef.current) inputRef.current.value = ''
     }
-  }, [deviceId, deviceName, onChange, showToast])
+  }, [attach, path, showToast])
 
   // Run from the Remove dialog, which shows a refusal and stays open. The dialog closes once the
   // model is gone, so the success toast, which a dialog would hide, is where the person is looking.
@@ -277,16 +288,32 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
             type="file"
             accept={MODEL_3D_EXTENSIONS.join(',')}
             style={{ display: 'none' }}
-            onChange={(e) => handleFile(e.target.files?.[0])}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              // Cleared so re-picking the SAME file fires a change event again, after a failure or a Cancel.
+              e.target.value = ''
+              handleFile(file)
+            }}
             data-testid="model-3d-input"
           />
         )}
       </Modal>
+      {path && replacement && (
+        <ConfirmModal
+          title="Replace 3D model"
+          icon={<IconUpload size={18} />}
+          message={`Replace the 3D model of ${modelName || 'this device'} with "${replacement.name}"? ${STORED_FILE_REPLACED}`}
+          confirmLabel="Replace Model"
+          pendingLabel="Replacing…"
+          onConfirm={() => attach(replacement)}
+          onCancel={() => setReplacement(null)}
+        />
+      )}
       {path && confirmRemove && (
         <ConfirmModal
           title="Remove 3D model"
           icon={<IconTrash size={18} />}
-          message={`Remove the 3D model from ${modelName || 'this device'}? The device keeps its other details, and the file is deleted.`}
+          message={`Remove the 3D model from ${modelName || 'this device'}? The device keeps its other details. ${STORED_FILE_DELETED}`}
           confirmLabel="Remove Model"
           pendingLabel="Removing…"
           onConfirm={handleRemove}
