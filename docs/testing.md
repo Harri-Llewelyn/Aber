@@ -299,9 +299,9 @@ skip is taken in `setUpClass`, which removes the whole class, and a run of nothi
 hid a stale assertion that was red on `main` for days (#207). `REQUIRE_SEEDED_ACCOUNTS`,
 `REQUIRE_LOG_PIPELINE` and `REQUIRE_PLAYBACK_REPLAY` are the same flag on the suites they cover.
 
-**A suite that skips leaves the stack as it found it**: it signs in before it makes anything, and
-undoes the rest with `addClassCleanup`, because Python leaves `tearDownClass` out when `setUpClass`
-raises, and a skip raises.
+**A suite that skips leaves the stack as it found it**, apart from those drift check 575 lists. It signs
+in before it makes anything, and undoes the rest with `addClassCleanup`: Python leaves `tearDownClass`
+out when `setUpClass` raises, and a skip raises.
 
 **Every suite signs in from one address.** Through a port-forward each request reaches the gateway
 from loopback, so the lane shares one sign-in budget: GoTrue's burst of 30 per address, refilled
