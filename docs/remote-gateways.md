@@ -488,8 +488,10 @@ platform version.
 
 **The fleet tracks a tag, and the pointer is per gateway.** At enrolment, `platform.yml` on the
 gateway's `main` is seeded with the tag current at that moment. Changing it is a pull request in the
-gateway's own repository. So a fleet upgrade is one pull request per gateway or a scripted batch, and
-a canary is one gateway. Nothing tracks `main` of the platform repository. Only Aber's machine account
+gateway's own repository. After an upgrade the sweep opens it, one for each Remote gateway in service
+on an older release, and an Administrator approves it. So a fleet upgrade is one pull request per
+gateway, and a canary is the one you merge first. The design is in
+[`supabase/README.md`](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep). Nothing tracks `main` of the platform repository. Only Aber's machine account
 can push to `main` there: the playbook is changed in Aber's own repository and reviewed there.
 
 **`ansible-pull`, not Ansible.** The appliance applies the playbook to itself; nothing pushes to

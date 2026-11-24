@@ -335,7 +335,7 @@ is put together and what each part needs.
 | :--- | :--- |
 | Binary Sparkplug B encoding | Install `node-red-contrib-sparkplug-b` |
 | Broker passwords for gateways | Issued by the dashboard for a Host gateway (step 4), and by enrolment for a Remote one. `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` only to reissue one by hand, for example when the credential service is down ([`mosquitto/README.md`](../../mosquitto/README.md#broker-topic-authorisation)) |
-| Remote gateways' operating systems | They follow the platform playbook at the tag each gateway's `platform.yml` names. Move the tag by pull request in the gateway's repository, one gateway first |
+| Remote gateways' operating systems | They follow the platform playbook at the tag each gateway's `platform.yml` names. After an upgrade Aber opens a pull request in each gateway's repository that moves the tag. An Administrator approves it; merge one gateway first |
 | Node-RED sign-in | Set up by default, through the dashboard's sign-in. Set `global.publicBaseDomain`, or `publicUrls.nodered`, to the address browsers actually use, or `/oauth/authorize` answers `invalid redirect_uri` |
 | Platform broker passwords | Rotate the `secrets.mqtt*Password` values. Ingestion refuses to start without `secrets.mqttIngestionPassword` |
 | Real OPC UA or Modbus devices | Use `node-red-contrib-opcua` or `node-red-contrib-modbus` in place of Function nodes |
