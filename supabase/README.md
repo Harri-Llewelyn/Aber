@@ -11436,10 +11436,11 @@ and nothing took that away. So enrolment and every sweep, in this order (drift c
 1. **`findRepository()` knows the repository by its own name.** Gitea finds one by a name it had before, and in
    any case. So does an appliance's clone, over SSH, while the sweep and `forge-events` do not. One that a person
    renamed has its name back. One that now carries another gateway's name is that gateway's.
-2. **`refuseMirror()` refuses a mirror**, whose `main` the forge fetches from elsewhere under no rule.
-3. **`ensureHeldByTeams()` removes every collaborator**, from an archived gateway's repository too, which one
+2. **`ensureHeldByTeams()` removes every collaborator**, from an archived gateway's repository too, which one
    could take out of the archive. One the forge keeps is an error on every pass, and enrolment refuses the
    repository.
+3. **`refuseMirror()` refuses a mirror**, whose `main` the forge fetches from elsewhere under no rule. Enrolment
+   asks this first, because Gitea takes no mirror out of the archive.
 4. **`ensureProposals()` turns proposals on.** While they are off the forge answers 404 for those that are open,
    and an approval on one could not be dismissed. Then the tags, as above.
 5. **`ensureBranchProtection()` and `ensureApplianceProtection()` put each of our three rules right in
