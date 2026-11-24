@@ -190,7 +190,7 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
 
     def state(self, alert_id, event):
         return psql(f"SELECT state FROM public.notification_deliveries WHERE alert_id = {literal(alert_id)}"
-                    f" AND event = {literal(event)} ORDER BY created_at DESC LIMIT 1")
+                    f" AND channel = 'webhook' AND event = {literal(event)} ORDER BY created_at DESC LIMIT 1")
 
     def wait_for_state(self, alert_id, event, wanted):
         deadline = time.time() + WAIT_SECONDS
@@ -264,7 +264,9 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
             deadline = time.time() + WAIT_SECONDS
             error = ""
             while time.time() < deadline and not error:
-                error = psql(f"SELECT coalesce(last_error, '') FROM public.notification_deliveries WHERE alert_id = {literal(alert_id)}")
+                # The webhook's: a site that emails alerts has a second delivery for this one.
+                error = psql("SELECT coalesce(last_error, '') FROM public.notification_deliveries"
+                             f" WHERE channel = 'webhook' AND alert_id = {literal(alert_id)}")
                 time.sleep(2)
             self.assertEqual(error, "The webhook's host is not on its allowed hosts, so the message was refused.")
             self.assertEqual(self.received(alert_id), [], "nothing was posted")
