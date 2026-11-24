@@ -11309,7 +11309,10 @@ below. Repositories that are not a gateway's, deleted branches and unknown gatew
 Gitea's outbound calls are `[security] EGRESS_MODE = strict` with `ALLOWED_HOST_LIST = private:9000`,
 which admits this one target; the deprecated `[webhook] ALLOWED_HOST_LIST` is set blank, because
 Gitea reads it first and an upgraded `app.ini` still holds a portless `private` that would refuse
-port 9000. `0095` ends with `ensure_gateway_status_view()`, and the baseline's
+port 9000. What the forge fetches and pushes by itself is a second policy, `[migrations] EGRESS_MODE`, which is
+lax by default, so any public host. It is strict with no host from 1.9.1: no migration, no pull mirror and
+no push mirror reaches anywhere, one that already stands included (measured). `0095` ends with
+`ensure_gateway_status_view()`, and the baseline's
 dumped copy of that view became a call to the same function, because `CREATE OR REPLACE VIEW`
 cannot narrow a view the function has just widened and every boot after the first was failing in
 `0001`.

@@ -36,6 +36,9 @@ is registered.
 - **It removes a deploy key that is not the gateway's own**, and a gateway's key from any other repository.
 - **It gives a renamed repository its name back**, and turns proposals on where they were off.
 
+The forge no longer fetches from another host or pushes to one. A migration, a pull mirror and a push mirror
+are refused, in every repository of the forge, one that already stands included.
+
 #### What you do
 
 Nothing, unless you gave somebody a gateway's repository by name. Give that person a role on

@@ -7,13 +7,15 @@ import { allFiles, fail, pass, read } from './lib.mjs';
 // remove any other (finishBranchRules): a rule created on a gateway's repository and missing from
 // GATEWAY_BRANCH_RULES would be removed by every pass. A rule's name is whatever a person made it, so it
 // goes into a path through rulePath() alone: the forge-api listener refuses an escaped slash, and fetch
-// resolves a dot segment, which would make removing a rule named `..` removing the repository. The
-// branch an approval covers is `main`, so nothing hands out, records or deploys the repository's
-// default branch.
+// resolves a dot segment, which would make removing a rule named `..` removing the repository. No rule
+// covers what a mirror brings, and a push mirror copies a repository out, so the chart lets the forge
+// fetch from and push to nowhere. The branch an approval covers is `main`, so nothing hands out, records
+// or deploys the repository's default branch.
 // -------------------------------------------------------------------------------------------------
 const FORGE = 'supabase/functions/_shared/forge.ts';
 const SWEEP = 'supabase/functions/forge-sweep/index.ts';
 const FLOW_SYNC = 'forge/gateway-platform/appliance/flow-sync.mjs';
+const CHART = 'deploy/helm/aber/templates/apps/gitea.yaml';
 
 /** The text of a function, from its declaration to the next line that closes one. */
 function body(source, declaration) {
@@ -57,6 +59,11 @@ export default function check() {
   for (const named of ['finishBranchRules', 'ensureDefaultBranch']) {
     const text = body(forge, `export async function ${named}(`);
     if (!text.includes('rulePath(') || /encodeURIComponent\(/.test(text)) problems554.push(`${FORGE}: ${named}() does not take a rule's name into a path through rulePath()`);
+  }
+  for (const [key, value] of [['EGRESS_MODE', 'strict'], ['ALLOWED_HOST_LIST', '""']]) {
+    if (!read(CHART).replace(/\r\n/g, '\n').includes(`- name: GITEA__migrations__${key}\n  value: ${value}\n`)) {
+      problems554.push(`${CHART} does not set GITEA__migrations__${key} to ${value}`);
+    }
   }
   if (!forge.includes('export const MAIN_BRANCH = "main";')) problems554.push(`${FORGE} does not name main as MAIN_BRANCH`);
   if (!read(FLOW_SYNC).includes("const TRACKED_BRANCH = 'main';")) problems554.push(`${FLOW_SYNC} does not track MAIN_BRANCH as TRACKED_BRANCH`);
