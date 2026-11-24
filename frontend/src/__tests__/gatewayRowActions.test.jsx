@@ -61,7 +61,7 @@ const openPanel = (name = 'Host_Gateway_NodeRED') => {
 const inRow = () => within(document.querySelector('.page-main'))
 /** The panel's highlighted actions; the rule is exactly one, listed first. */
 const primaries = () => [...document.querySelectorAll('.context-panel .context-action.btn-primary')]
-const firstAction = () => document.querySelector('.context-panel .context-action')
+const firstAction = () => document.querySelector('.context-panel-actions .context-action')
 
 beforeEach(() => vi.clearAllMocks())
 
