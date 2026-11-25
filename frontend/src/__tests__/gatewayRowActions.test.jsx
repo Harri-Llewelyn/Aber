@@ -61,7 +61,7 @@ const openPanel = (name = 'Host_Gateway_NodeRED') => {
 const inRow = () => within(document.querySelector('.page-main'))
 /** The panel's highlighted actions; the rule is exactly one, listed first. */
 const primaries = () => [...document.querySelectorAll('.context-panel .context-action.btn-primary')]
-const firstAction = () => document.querySelector('.context-panel .context-action')
+const firstAction = () => document.querySelector('.context-panel-actions .context-action')
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -187,7 +187,7 @@ describe('gateway row actions', () => {
     await show([gateway()])
     const panel = openPanel()
 
-    expect(panel.getByText(/View Audit Trail/i)).toBeTruthy()
+    expect(panel.getByText(/View in Audit Trail/i)).toBeTruthy()
     expect(panel.getByText(/Attached Links/i)).toBeTruthy()
     // Exact, matching the other assertions about this action in this file: a loose regex broke when
     // another component in the drawer mentioned the control by name.
@@ -263,7 +263,7 @@ describe('gateway row actions', () => {
     // The hint names the roles that can, from the same table the grants come from.
     expect(tooltipOf(panel.getByText(/Archive Gateway/i).closest('button'))).toBe('Requires Administrator or Shopfloor Manager')
     // The audit trace is withdrawn, not disabled: the nav hides its page from this reader.
-    expect(panel.queryByText(/View Audit Trail/i)).toBeNull()
+    expect(panel.queryByText(/View in Audit Trail/i)).toBeNull()
   })
 
   it('reaches documents through the panel action, not an accordion', async () => {

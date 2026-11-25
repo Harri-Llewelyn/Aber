@@ -102,7 +102,7 @@ const NONE = Object.freeze([])
  * still needs Remove Access again. The filters are in the address.
  *
  * `drawerHost` is the element the drawer is drawn into, beside the page's card, where every page's
- * drawer sits; without one it is drawn in place. `canReadTrail` offers View Their Changes, the
+ * drawer sits; without one it is drawn in place. `canReadTrail` offers View in Audit Trail, the
  * Audit Trail filtered to what the person changed.
  */
 export function PeopleSection({ showToast, currentUserId, drawerHost = null, canReadTrail = false }) {
@@ -306,6 +306,10 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
         title={p ? nameOf(p) : ''}
         icon={<IconUser size={16} />}
         subtitle={isSelf && <Badge size="sm" className="badge-follow" title="The account you are signed in with">YOU</Badge>}
+        warnings={p ? [
+          status.key === 'sign-in-open' && { id: 'sign-in-open', tone: 'warning', text: status.title },
+          list?.error && { id: 'sessions', tone: 'danger', text: `Their sessions could not be read: ${list.error}` },
+        ] : []}
         fields={p ? [
           { label: 'Email', value: p.email, full: true },
           { label: 'Display name', value: p.display_name || '' },
@@ -361,10 +365,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
         beforeActions={list && (
           <section id={sessionListId} aria-label={`${nameOf(p)}'s sessions`}>
             {list.error ? (
-              <div className="callout callout-danger" role="status">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>{list.error}</div>
-              </div>
+              <div className="context-field-empty" role="status">Not read</div>
             ) : list.rows === undefined ? (
               <div className="context-field-empty" role="status">Reading their sessions…</div>
             ) : list.rows.length === 0 ? (
@@ -401,7 +402,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
           },
           // Your own password is changed on Profile, so your drawer links there instead.
           isSelf ? {
-            label: 'Open Profile', icon: <IconUser size={13} />,
+            label: 'View in Profile', icon: <IconUser size={13} />,
             to: tabUrl('profile'),
             title: 'Your own password, theme and sidebar layout are on your Profile page',
           } : {
@@ -425,9 +426,9 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
               ? "You cannot reset your own MFA here. Remove your authenticators on your Profile page's MFA tab."
               : 'Remove their MFA, for someone who has lost their authenticator. Their password alone signs them in until they set it up again.',
           },
-          // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+          // Withheld from a reader who may not open the Audit Trail, as every drawer's View in Audit Trail is.
           canReadTrail && {
-            label: 'View Their Changes', icon: <IconHistory size={13} />,
+            label: 'View in Audit Trail', icon: <IconHistory size={13} />,
             to: changesByUrl(p.user_id),
             title: 'Open the Audit Trail filtered to the changes they made, under any address they had',
           },

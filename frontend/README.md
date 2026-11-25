@@ -638,7 +638,7 @@ its drawer ([A device's 3D model opens on request](#a-devices-3d-model-opens-on-
 
 ### A device's 3D model opens on request
 
-The device drawer shows no model. One action after View History opens it in a full-window dialog
+The device drawer shows no model. One action after View in History opens it in a full-window dialog
 (`Model3DUploader`, which is that dialog): **View 3D Model** when a model is attached, **Add 3D
 Model…** when none is. Both open the same dialog. With a model it holds the viewer, the file's name
 and size, a **Public** marker, **Download** (every role), and **Replace** and **Remove** (permission
@@ -720,11 +720,49 @@ the same component four times over, each conditional branch reachable from exact
 
 ### What sits where in a drawer
 
-Top to bottom: the alert, the fields, the facts (`beforeActions`, such as a gateway's devices), the
-actions, and last the tools (`children`, such as Capture's drop zone). A tool is last because its
-height is not known, and above the actions it could push Edit Details off the drawer.
+Top to bottom: the title, what is wrong (`alert`, then `warnings`), the record's id (`recordId`), its
+description (`description`), the other fields, the facts (`beforeActions`, such as a gateway's devices, or
+the plan of an area or of a cell's place in one), the tools (`children`, such as Capture's drop zone), and the actions, pinned at the foot. `ContextPanel`
+draws that order, so no page chooses its own.
 
-- **Suppression windows are a tool, after the actions.** The device, gateway and cell drawers pass
+- **A drawer about a record starts with the record's id, then its description, then the rest.** The id
+  is `recordId={{ label, value }}`, labelled `<Kind> UUID` for a uuid and `<Kind> ID` otherwise (App ID,
+  Mutation ID), monospace, and copied on a click. The description comes next wherever the record has
+  one, and reads *Not set* while it is empty. A drawer that is not about a record passes no id: a broker
+  role, a database's own backup, a backup run, a Site Map lane and a built-in rule, which keeps its Rule
+  UID among its fields. A person's drawer starts with their email, which is how every page finds them.
+  `drawerOrder.test.jsx` fails a drawer that passes none and is not on that list.
+- **Everything wrong is at the top, in full.** `alert` is drawn first, because it alone has a deadline,
+  then `warnings`, `[{ id, tone, text }]`, `danger` before `warning`. Each is a sentence that says what
+  is wrong and what to do. A row it explains may keep a short mark (a badge, a tone, a group's summary),
+  and never the sentence. So a field with `danger` or `warning` has its sentence in `warnings`, and no
+  callout stands among the fields or in a section. A failed read is one too: the section it was for says
+  *Not read*. A tone is an icon of its own shape and a word for a screen reader (*Problem*, *Warning*),
+  never a colour alone. A cell's warnings and an area's are `utils/drawerWarnings.js`, because the Site
+  Map's drawers say what the Cells and Areas pages' do.
+- **The actions stay at the foot while the rest scrolls.** The band is `position: sticky` at the bottom
+  of the drawer's one scroll box, on a surface of its own with a rule above it. At 1920×917 a Remote
+  gateway with a full health report opens with Launch UI at 739px and Archive Gateway ending at 884px,
+  above the drawer's foot at 896px. With the actions after the fields they were at 1,038px and 1,183px,
+  and 1,331px with six devices. The band takes 194px of the drawer's 833px there.
+  - **It is unpinned where it would crowd the fields out:** in a window under 701px high
+    (`@media (min-height: 701px)` in `App.css`), and where the actions would take more than 40% of the
+    drawer (`PIN_MAX_SHARE`, measured by `useActionsPin()`). At both limits together about six fields
+    stay in view beside a pinned band. A one-column drawer with ten actions takes half of a 1440×900
+    window's, so there its actions scroll with the rest.
+  - **A focused field is never behind it.** What takes focus in the drawer has a `scroll-margin-bottom`
+    of the band's height. Not `scroll-padding` on the scroll box: the band's own actions are inside that
+    padding, so focusing one scrolled the fields away under it, by 339px for the first and to the end by
+    the fourth. Tab still reaches the fields, then the tools, then the actions.
+  - **Below 800px the drawer is an overlay as tall as the window**, and its actions are at its foot
+    however short the rest is.
+- **An action that opens a page of the dashboard is named `View in <page>`**, with the page's own name in
+  the rail: View in Audit Trail, View in History, View in Site Map, View in Devices. A count of what it
+  would show goes in brackets after it ("View in Automations (2)"), and `title` says the rest. An action
+  that does something, and a link that leaves the dashboard (Grafana, the forge, Node-RED), keeps its own
+  words. So does Add to this proposal, which opens the subject's page to extend the request. Drift check
+  562 holds the names, the pages they open and the help that quotes them.
+- **Suppression windows are a tool.** The device, gateway and cell drawers pass
   `common/SuppressionWindows.jsx` as `children`, since its list has no fixed height. It lists the
   current and upcoming windows with `context-panel-section-label`, as a gateway's Devices are, each
   with a NOW or UPCOMING badge beside its reason, its times by `formatDateTime()` and who scheduled
@@ -761,8 +799,7 @@ height is not known, and above the actions it could push Edit Details off the dr
   principal id), for a viewer the rail shows Access Control to (`tabIsVisible`). For anyone else
   the name is text. The id's `CopyableId` chip sits beside the name, since a link and a copy cannot
   share one click.
-- **An entity's own page is one action away**, named for the page: "View in Devices" (`entityUrl`).
-  The Audit Trail offers it for a device, gateway, cell, area or schema its lookups still hold, so a
+- **An entity's own page is one action away** (`entityUrl`). The Audit Trail offers it for a device, gateway, cell, area or schema its lookups still hold, so a
   deleted entity gets none.
 - **A drawer section's buttons use the Actions grid.** Each is a `context-action` in a
   `context-buttons` grid, the rule the Actions section uses. A section's only button spans the
@@ -772,9 +809,8 @@ height is not known, and above the actions it could push Edit Details off the dr
   own spacing, never a grid of its own.
 - **A row the item's kind can never fill is not shown. A row it could fill, but has not yet, says
   *Not set*.** A Host gateway has no appliance, so a CA expiry, a disk, memory, load, a flow hash, a
-  platform tag and a custom playbook can never be reported for it. Its drawer drew all seven, each
-  reading *Not set* for good, and its first action started at 1,073px, where a 1920×1080 screen
-  leaves 865px. The Gateways drawer keeps the rule in one table, `NEVER_FILLED_ROWS` in
+  platform tag and a custom playbook can never be reported for it: seven rows that would read *Not set*
+  for good. The Gateways drawer keeps the rule in one table, `NEVER_FILLED_ROWS` in
   `utils/gatewayType.js`, keyed on the gateway's kind and read by `gatewayShowsRow()`, so a row is
   hidden by listing its label there, not by a condition beside the row.
   - **Host and Simulated** keep Health Reported and Runtime Uptime, which a heartbeat fills, and
@@ -786,10 +822,12 @@ height is not known, and above the actions it could push Edit Details off the dr
     three rows to its drawer. One whose appliance should have reported, and has not, has the closed
     group **Reported** in that row's place (below).
 - **A group of rows a reader seldom needs opens on request, and says its worst state while it is
-  closed.** A Remote gateway's drawer reached Launch UI 1,301px down, where a 1920×917 page leaves
-  760px. Its seven appliance rows (CA Expires, Disk Free, Memory Available, Load (1m), Flow,
-  Platform and Custom) are one group, **Health**, closed when the drawer opens. Health Reported and
-  Runtime Uptime, which a heartbeat fills, stay outside it.
+  closed.** A Remote gateway's seven appliance rows (CA Expires, Disk Free, Memory Available, Load (1m),
+  Flow, Platform and Custom) are one group, **Health**, closed when the drawer opens. Health Reported
+  and Runtime Uptime, which a heartbeat fills, stay outside it.
+  - **Its open rows are a sub-tree.** `.context-subtree` indents them under the heading's label, with a
+    guide line down the left from its chevron to the last of them, so it is plain which rows the heading
+    opened. Anything else in a drawer that belongs to what is above it takes the same class.
   - **`ContextPanel` takes a group as a field**: `{ group, id, summary, tone, fields }`. Its heading
     is a `GroupHeading`, a button with `aria-expanded` that a keyboard reaches. The rows stay in the
     page and are `hidden` while it is closed, as History's groups are. `id` is distinct for each
@@ -802,16 +840,15 @@ height is not known, and above the actions it could push Edit Details off the dr
   - **The summary is the worst state in words, never a colour alone.** "Disk 3.0 GiB free" or "CA
     expires in 12d", with "and 2 more" when others need attention, or "Nothing needs attention".
     The tone adds a circle (danger) or a triangle (warning) and the tone's text colour.
-    `gatewayHealthProblems()` is the one answer that the rows' colours and the summary both read.
+    `gatewayHealthProblems()` is the one answer that the rows' colours, the summary and the drawer's
+    warnings (`healthWarnings()`) all read.
     Disk follows the Gateway Fleet Health dashboard, amber under 5 GiB and red under 1 GiB; memory
     and load have no threshold anywhere, so the summary never names them.
-  - **The block alone does not bring both actions into view at 1920×917.** On the fixture gateway
-    Launch UI starts at 1,018px and Archive Gateway ends at 1,163px, against 760px of drawer. What
-    is left is the Repository paragraph, the three forge rows and the identifiers.
 - **What arrives from a gateway is a group of its own, read on its own.** **Arriving** holds
   Messages Per Second (5m), Sequence Gaps (1h) and Messages Missed (1h), and is closed when the
   drawer opens, as Health is. Its summary says the rate and whether a gap was counted ("12.5
-  messages/s · no gaps"), and a gap adds the warning triangle and the amber text. Each device in
+  messages/s · no gaps"), and a gap adds the warning triangle and the amber text, and its sentence to
+  the drawer's warnings (`arrivalWarning()`). Each device in
   the list has the time of its last reading beside it, or *No reading yet*.
   - **The two come from two reads.** The figures are `gateway_arrivals` (Prometheus, once a
     minute) and the times are `gateway_devices_last_reading()` (the historian, as the drawer
@@ -839,9 +876,8 @@ height is not known, and above the actions it could push Edit Details off the dr
     says *No report from the appliance yet*, with no tone, since what was never reported is not known
     to be wrong. The health figures are not flow-sync's, so *No figures reported yet* does not offer
     its log.
-  - **Editor Password is a group after the actions** (`FieldGroup`, in `children`): above them it would
-    move Launch UI and Archive Gateway down. It shows for any Remote gateway that has enrolled, archived
-    or not, as Launch UI does.
+  - **Editor Password is a group among the tools** (`FieldGroup`, in `children`). It shows for any
+    Remote gateway that has enrolled, archived or not, as Launch UI does.
   - **The setup dialog shows the clean-up when the gateway has ever enrolled** (`enrolled_at`), not when
     it holds a credential: a restored gateway's was revoked, and that is the case that needs it most.
 - **A missing repository is one line.** `GatewayRepositoryPanel` draws the drawer's field shape:
@@ -851,14 +887,13 @@ height is not known, and above the actions it could push Edit Details off the dr
 
 - **The actions are two to a row** in a drawer wide enough for two 200px columns, about 440px and
   up, and one to a row below that. The first primary action, a danger action and a lone action take
-  the whole row. Eight actions one to a row took 331px of a 1080 screen's drawer; two to a row they
-  take 220px.
+  the whole row. Eight actions take 230px of the drawer two to a row, and 339px one to a row.
 - **A drawer holds no tool that loads or draws as it opens.** The device's 3D model was the
   example: it sat as a section between the fields and the actions, then loaded its file and turned
   for as long as the drawer was open. It is one action now
   ([A device's 3D model opens on request](#a-devices-3d-model-opens-on-request)), and the drawer
-  is the fields, then the actions. A section of fixed height can still sit above the actions, in
-  `beforeActions`, when it is a fact about the entity.
+  is the fields, the tools and the actions. A section that is a fact about the entity goes with the
+  fields, in `beforeActions`.
 
 ### What the modelled-metrics fixture caught, twice
 
@@ -979,9 +1014,9 @@ status and last sign-in; a click or Enter opens the person's drawer, in the addr
 `?person=<user id>`, which holds every action. `personUrl()` writes the id and no search: People
 checks `person` against everyone it lists, filtered or not, and the id survives a change of address.
 A link from before, `?person=<email>`, opens whoever has that address now, matched without case,
-and the address is rewritten to the id with replace. The drawer's View Their Changes is the Audit
+and the address is rewritten to the id with replace. The drawer's View in Audit Trail is the Audit
 Trail with `?changed_by=<user id>` (`changesByUrl()`), offered when `App.jsx`'s `hasPermission`
-grants `audit_trail:read`, as the other drawers' View Audit Trail is. The drawer
+grants `audit_trail:read`, as the other drawers' is. The drawer
 is drawn into an element `AccessControlTab` renders beside its card, where the broker-role drawer
 sits, so it pushes the table as every page's drawer does. A role changes only through the drawer's
 Change Role (`ChangeRoleModal`), which starts on the person's role and says what the chosen one lets
@@ -1992,7 +2027,7 @@ Its arithmetic is `utils/history.js`, and `__tests__/history.test.js` holds each
   (`HistoryTab`'s `openedLane`), and the lane charts either way: unticking it later removes the
   other lanes from the lists and leaves this one.
 - **The address** is `/history/device/<id>` with the window's keys, `metric`, `bucket` (the groups' choices, above) and `replay`;
-  `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View History links to `deviceHistoryUrl()`
+  `/history` is the picker. `pickedAddress()` builds both, and the device drawer's View in History links to `deviceHistoryUrl()`
   (`routes.js`). Choosing a device adds a history entry.
 
 **Overview is History's first tab and its default** (`tabs/HistoryOverview.jsx`): where readings
@@ -2176,7 +2211,7 @@ Metric tabs reuse: `common/SmallMultiples.jsx`, `common/HourHeatmap.jsx`, `commo
 
 - **The cell** is picked from a table at `/history/cell` (`CellPicker`, searchable and sortable
   as the device picker is), by the toolbar's cell name (a `ToolbarPopover` of the others, keeping the window and the
-  metric), or from the Cells drawer's **View History** (`cellHistoryUrl()`, worded and drawn as the
+  metric), or from the Cells drawer's **View in History** (`cellHistoryUrl()`, worded and drawn as the
   Devices drawer's). Its machines are its devices in service (`historyCells()`, from
   `groupDevicesByCell()` and `inServiceDevices()`, as the Site Map and Overview place them). An archived cell is listed, with a badge, so the
   action is never a dead end; it has no machine in service. The tab lists no device status: that is the Cells page.
@@ -2228,7 +2263,7 @@ where the lathes sit in several areas. Its arithmetic is `utils/history.js` and 
 - **The metric** is picked from a table at `/history/metric` (`MetricChooser` in `HistoryTab.jsx`: the
   metric, its unit and how many devices report it, searchable and sortable as the other pickers are), or by
   the toolbar's metric name (a `ToolbarPopover`, keeping the window and the filters), from **Chart** in
-  Overview's selection box, or from any Metrics drawer's **View History** (`metricHistoryUrl()`, ungated like
+  Overview's selection box, or from any Metrics drawer's **View in History** (`metricHistoryUrl()`, ungated like
   the other drawers'). The metrics offered are those some device in service reports (`historyMetrics()`:
   `cellMetrics()` over every device, a last birth's or a schema's), with the catalog's unit and kind where it
   has them. A metric the catalog does not know is offered all the same, with no unit: it is reported, and the
@@ -2272,7 +2307,7 @@ for each cell where the Cell tab has one for each machine. `__tests__/historyMet
 arithmetic and `historyAreaPage.test.jsx` the page.
 
 - **The area** is picked from a table at `/history/area` (`AreaPicker`: its cells and machines, searchable
-  and sortable), by the toolbar's area name, or from the Areas drawer's **View History** (`areaHistoryUrl()`,
+  and sortable), by the toolbar's area name, or from the Areas drawer's **View in History** (`areaHistoryUrl()`,
   worded and drawn as the Cells and Devices drawers'; drift check 326 holds the four alike). Its cells are the
   cells in it in service (`historyAreas()`), archived ones left out. A device that is Area-Wide in it belongs
   to no cell, so is in no chart, and the status line says how many.

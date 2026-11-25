@@ -465,7 +465,7 @@ describe('setting a new password', () => {
     // Your own drawer links to Profile, where your own password is changed, instead of a dead button.
     const mine = await openDrawer('me@site.test')
     expect(mine.queryByRole('button', { name: 'Set New Password' })).toBeNull()
-    expect(mine.getByRole('link', { name: /Open Profile/ })).toHaveAttribute('href', '/profile')
+    expect(mine.getByRole('link', { name: /View in Profile/ })).toHaveAttribute('href', '/profile')
     await showRemoved()
     const removed = (await openDrawer('removed@site.test')).getByRole('button', { name: 'Set New Password' })
     expect(removed).toBeDisabled()
@@ -584,19 +584,19 @@ describe('a person\'s drawer', () => {
   it('links to the changes they made, for a reader of the Audit Trail', async () => {
     render(<AccessControlTab showToast={vi.fn()} userRole="Administrator" currentUserId={ME} hasPermission={() => true} />)
     const drawer = await openDrawer('operator@site.test')
-    const link = drawer.getByRole('link', { name: /View Their Changes/ })
+    const link = drawer.getByRole('link', { name: /View in Audit Trail/ })
     expect(link).toHaveAttribute('href', `/audit-trail?changed_by=${OPERATOR}`)
     expect(link).toHaveClass('context-action')
     // Your own drawer has it too.
     fireEvent.click(await row('me@site.test'))
     expect(await within(await screen.findByRole('complementary', { name: 'me@site.test person' }))
-      .findByRole('link', { name: /View Their Changes/ })).toHaveAttribute('href', `/audit-trail?changed_by=${ME}`)
+      .findByRole('link', { name: /View in Audit Trail/ })).toHaveAttribute('href', `/audit-trail?changed_by=${ME}`)
   })
 
   it('does not link to the Audit Trail for a reader who may not open it', async () => {
     render(<AccessControlTab showToast={vi.fn()} userRole="Administrator" currentUserId={ME} hasPermission={() => false} />)
     const drawer = await openDrawer('operator@site.test')
-    expect(drawer.queryByRole('link', { name: /View Their Changes/ })).toBeNull()
+    expect(drawer.queryByRole('link', { name: /View in Audit Trail/ })).toBeNull()
   })
 
   it('offers every action, two to a row, with Remove Access last and on its own', async () => {
@@ -628,7 +628,7 @@ describe('a person\'s drawer', () => {
     expect(end).toHaveAccessibleDescription(
       'You cannot end your own sessions here. Use Sign Out of All Other Sessions on your Profile page\'s Sessions tab.')
     expect(mine.getByRole('button', { name: 'Remove Access' })).toBeDisabled()
-    expect(mine.getByRole('link', { name: /Open Profile/ })).toHaveAttribute('href', '/profile')
+    expect(mine.getByRole('link', { name: /View in Profile/ })).toHaveAttribute('href', '/profile')
   })
 
   it('for a removed person, offers Restore Access and End Sessions, and no new address', async () => {
@@ -792,7 +792,10 @@ describe('a person\'s sessions, listed in their drawer', () => {
 
     api.personSessions.mockRejectedValueOnce(new Error('insufficient privileges to list a person\'s sessions'))
     const { list } = await openList('second@site.test')
-    expect(await within(list).findByText('insufficient privileges to list a person\'s sessions')).toBeInTheDocument()
+    // Why is at the drawer's top, as everything wrong is; the list says only that it was not read.
+    expect(await within(list).findByText('Not read')).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Warnings' }))
+      .toHaveTextContent('Their sessions could not be read: insufficient privileges to list a person\'s sessions')
     expect(within(list).queryByRole('table')).toBeNull()
   })
 

@@ -28,10 +28,10 @@ import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from
 import { isShadowGateway } from '../../utils/fleetCounts'
 import { flowDriftState, flowDriftLabel, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
 import {
-  applianceReportMissing, gatewayHealthProblems, rowTone, foldHealthRows, TONE_DANGER, TONE_WARNING
+  applianceReportMissing, gatewayHealthProblems, healthWarnings, rowTone, foldHealthRows, TONE_DANGER, TONE_WARNING
 } from '../../utils/gatewayHealth'
 import {
-  ARRIVAL_HELP, NOT_OBSERVED, arrivalFigures, arrivalSummary, deviceLastReading, hasCount, lastReadings
+  ARRIVAL_HELP, NOT_OBSERVED, arrivalFigures, arrivalSummary, arrivalWarning, deviceLastReading, hasCount, lastReadings
 } from '../../utils/gatewayArrivals'
 import { formatCount, formatRate } from '../../utils/systemFigures'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
@@ -157,8 +157,8 @@ const missingReportGroup = (gatewayId, showToast) => ({
 })
 
 /**
- * The drawer's group for a lost editor password, under the actions Launch UI is one of, and closed, so
- * it moves none of them. Which of the two set the appliance up is not recorded, so both are shown.
+ * The drawer's group for a lost editor password, among its tools and closed until it is needed. Which
+ * of the two set the appliance up is not recorded, so both are shown.
  */
 const editorPasswordGroup = (gatewayId, showToast) => ({
   group: 'Editor Password',
@@ -530,6 +530,31 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const arrivalsRead = useGatewayArrivals(selected?.gateway_id, arrivalsApply)
   const arrivals = arrivalsRead ? arrivalFigures(arrivalsRead.arrivals) : null
   const deviceReadings = arrivalsRead ? lastReadings(arrivalsRead.readings) : undefined
+  // What is wrong with it, at the drawer's top. A row or a group it explains keeps its own short mark.
+  const selectedWarnings = selected ? [
+    // Ingestion accepts the traffic by sparkplug_id; this is where the difference shows.
+    selectedGroupMismatch && {
+      id: 'group-mismatch',
+      tone: TONE_WARNING,
+      text: (
+        <>
+          <strong>
+            Publishes under group <span className="mono">{selectedGroupMismatch.observed}</span>;
+            registered under <span className="mono">{selectedGroupMismatch.registered}</span>.
+          </strong>{' '}
+          Set the edge node to publish under {selectedGroupMismatch.registered}, or change
+          this gateway&rsquo;s Sparkplug group to {selectedGroupMismatch.observed} in Edit Details.
+        </>
+      ),
+    },
+    ...(selected.health_reported_at ? healthWarnings(healthProblems, row => gatewayShowsRow(selected, row)) : []),
+    flowEditedOnAppliance(selected) && gatewayShowsRow(selected, 'Reported') && {
+      id: 'flow-edited',
+      tone: TONE_DANGER,
+      text: 'Edited on the appliance: its running flow differs from the one last deployed. The next approved deploy overwrites the edit.',
+    },
+    arrivals && arrivalsApply && arrivalWarning(arrivals),
+  ] : []
 
   // "None yet" only when the stack holds no gateway of its own; anything else is a filter's doing.
   // The seeded Playback gateway does not count, so a new install still prompts under its row.
@@ -1045,8 +1070,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             {selected.is_archived && <ArchivedBadge title="Archived: out of service. Restore it below." />}
           </>
         )}
+        warnings={selectedWarnings}
+        recordId={selected && { label: 'Gateway UUID', value: selected.gateway_id }}
+        description={selected && {
+          value: selected.description,
+          help: "Operator note. Shown here, and served by i3X as the gateway's description; nothing acts on it."
+        }}
         fields={selected ? foldHealthRows([
-          { label: 'Gateway UUID', value: selected.gateway_id, mono: true, copyable: true },
           // The id it publishes under: what a Sparkplug trace or an MQTT subscription is keyed on.
           { label: 'Sparkplug Edge Node ID', value: selected.sparkplug_id || gatewaySparkplugId(selected.gateway_id), mono: true, copyable: true },
           {
@@ -1289,12 +1319,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 + 'repository carries no playbook of its own.'
             },
           ] : []),
-          {
-            label: 'Description',
-            value: selected.description || null,
-            full: true,
-            help: "Operator note. Shown here, and served by i3X as the gateway's description; nothing acts on it."
-          },
           // A row this kind of gateway can never fill is not shown (NEVER_FILLED_ROWS): a Host
           // gateway has no appliance to report a disk, and a Third-party node reports no health.
         ].filter(f => gatewayShowsRow(selected, f.label)), healthProblems, `gateway-health-${selected.gateway_id}`) : []}
@@ -1407,7 +1431,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           },
           // Withheld from a reader who may not open the Audit Trail page.
           canReadTrail && {
-            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            label: 'View in Audit Trail', icon: <IconHistory size={13} />,
             to: trailUrl(selected.gateway_id, 'GATEWAY'),
             onClick: () => onViewTrail?.(selected),
             title: 'Open the immutable audit trace for this gateway'
@@ -1429,23 +1453,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               : 'Archive this gateway: its broker account is disabled and any unused setup token is burned'
           },
         ].filter(Boolean) : []}
-        // With the metadata, above the actions.
+        // With the metadata.
         beforeActions={selected && (
           <div>
-            {/* Ingestion accepts the traffic by sparkplug_id; this is where the difference shows. */}
-            {selectedGroupMismatch && (
-              <div className="callout callout-warning gateway-group-callout">
-                <IconAlertTriangle size={14} className="callout-icon" />
-                <div>
-                  <strong>
-                    Publishes under group <span className="mono">{selectedGroupMismatch.observed}</span>;
-                    registered under <span className="mono">{selectedGroupMismatch.registered}</span>.
-                  </strong>{' '}
-                  Set the edge node to publish under {selectedGroupMismatch.registered}, or change
-                  this gateway&rsquo;s Sparkplug group to {selectedGroupMismatch.observed} in Edit Details.
-                </div>
-              </div>
-            )}
             {/* The count leaves archived devices out, as the row's summary does; they are listed, flagged. */}
             <div className="context-panel-section-label">
               Devices ({selectedCounted.length})
@@ -1508,11 +1518,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           </div>
         )}
       >
-        {/* What Launch UI's editor asks for. Under the actions and closed, so it moves none of them. */}
+        {/* What Launch UI's editor asks for, closed. */}
         {hadEnrolled(selected) && (
           <FieldGroup key={selected.gateway_id} group={editorPasswordGroup(selected.gateway_id, showToast)} onCopy={showToast} />
         )}
-        {/* A tool of unknown height, so after the actions: the gateway's own alerts, not its devices'. */}
+        {/* The gateway's own alerts, not its devices'. */}
         {selected && (
           <SuppressionWindows
             kind="gateway"

@@ -694,6 +694,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               : 'No capture stored'}
           </>
         )}
+        warnings={captureWarnings(capture)}
+        recordId={selected && { label: selected.kind === 'device' ? 'Device UUID' : 'Gateway UUID', value: selected.id }}
         fields={selected ? [
           { label: 'Sparkplug ID', value: selected.sparkplugId, mono: true, copyable: true,
             help: 'The ID Aber issued. A capture is filed under this prefix.' },
@@ -1336,6 +1338,20 @@ const STOP_REASONS = {
     title: 'The ingestion service restarted before the length asked for was up. It stored what it had recorded, so the rest of that window is not in it.',
     cutShort: true
   }
+}
+
+/** What the drawer's top says is wrong with a stored capture: no birth, or a recording cut short. */
+const captureWarnings = (capture) => {
+  if (!capture) return []
+  const stopped = STOP_REASONS[capture.manifest?.stop_reason]
+  return [
+    capture.manifest?.birth_captured === false && {
+      id: 'no-birth',
+      tone: 'danger',
+      text: 'No birth certificate, so a playback refuses this capture. Record it again; the recorder asks the edge node for one.'
+    },
+    stopped?.cutShort && { id: 'cut-short', tone: 'danger', text: `${stopped.label}. ${stopped.title}` },
+  ]
 }
 
 /** What a device row's Gateway column says when the device is bound to no gateway. */

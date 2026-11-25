@@ -264,12 +264,12 @@ describe('proposing a change from a device', () => {
 describe('what is already waiting on a device', () => {
   it('says so, and only when something is', async () => {
     await show(asManager, [device()], [proposal()])
-    expect(panelLabels()).toContain('1 change awaiting decision')
+    expect(panelLabels()).toContain('View in Approvals (1)')
   })
 
   it('stays quiet when nothing is open', async () => {
     await show(asManager, [device()], [])
-    expect(panelLabels()).not.toContain('awaiting decision')
+    expect(panelLabels()).not.toContain('View in Approvals')
   })
 
   it('counts both device lanes, because both are about this machine', async () => {
@@ -279,23 +279,23 @@ describe('what is already waiting on a device', () => {
       proposal({ id: 'p-1' }),
       proposal({ id: 'p-2', entity_type: 'device_nameplate' })
     ])
-    expect(panelLabels()).toContain('2 changes awaiting decision')
+    expect(panelLabels()).toContain('View in Approvals (2)')
   })
 
   it('ignores a proposal about a different asset', async () => {
     await show(asManager, [device()], [proposal({ entity_id: 'some-other-device' })])
-    expect(panelLabels()).not.toContain('awaiting decision')
+    expect(panelLabels()).not.toContain('View in Approvals')
   })
 
   it('ignores one that has already been decided', async () => {
     await show(asManager, [device()], [proposal({ status: 'applied' })])
-    expect(panelLabels()).not.toContain('awaiting decision')
+    expect(panelLabels()).not.toContain('View in Approvals')
   })
 
   it('hands the device over so the queue arrives filtered to it', async () => {
     const { onViewApprovals } = await show(asManager, [device()], [proposal()])
     openPanel()
-    clickAction('1 change awaiting decision')
+    clickAction('View in Approvals (1)')
     expect(onViewApprovals).toHaveBeenCalledWith(expect.objectContaining({ asset_id: DEVICE_ID }))
   })
 
@@ -308,6 +308,6 @@ describe('what is already waiting on a device', () => {
     })
     render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={asManager} />)
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-    expect(panelLabels()).not.toContain('awaiting decision')
+    expect(panelLabels()).not.toContain('View in Approvals')
   })
 })

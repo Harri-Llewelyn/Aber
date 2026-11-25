@@ -80,13 +80,13 @@ describe("the Devices drawer's View in Automations", () => {
     expect(await panel.findByRole('link', { name: /^View in Automations/ })).toBeInTheDocument()
   })
 
-  it('follows its page\'s "View in" wording, after View History', async () => {
+  it('follows its page\'s "View in" wording, after View in History', async () => {
     api.automationsForEntity.mockResolvedValue([])
     const panel = await open([device()])
     await panel.findByRole('link', { name: /^View in Automations/ })
     const labels = [...document.querySelectorAll('.context-panel-actions .context-action')].map(b => b.textContent.trim())
     // Only the 3D model action sits between them.
-    const history = labels.indexOf('View History')
+    const history = labels.indexOf('View in History')
     expect(labels.slice(history + 1, labels.indexOf('View in Automations (0)'))).toEqual(['Add 3D Model…'])
   })
 

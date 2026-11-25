@@ -781,6 +781,12 @@ export function ApprovalsTab({
             <ProposalStatus status={selected.status} />
           </>
         )}
+        warnings={selected?.target_missing && selected.status === 'open' ? [{
+          id: 'missing',
+          tone: 'warning',
+          text: 'The target of this proposal no longer exists, so approving it will fail rather than recreate anything.'
+        }] : []}
+        recordId={selected && { label: 'Proposal UUID', value: selected.id }}
         fields={selected ? [
           {
             label: 'Proposed by',
@@ -825,7 +831,6 @@ export function ApprovalsTab({
           ...(selected.rationale
             ? [{ label: 'Why it was asked for', value: selected.rationale, full: true }]
             : []),
-          { label: 'Proposal UUID', value: selected.id, mono: true, copyable: true },
           ...(selected.applied_trail_id ? [{
             label: 'Audit Trail row',
             value: String(selected.applied_trail_id),

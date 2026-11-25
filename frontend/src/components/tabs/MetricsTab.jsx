@@ -979,13 +979,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       },
     {
       // Ungated, as the History page is: this metric across every device that reports it, on one scale.
-      label: 'View History', icon: <IconChartLine size={13} />,
+      label: 'View in History', icon: <IconChartLine size={13} />,
       to: metricHistoryUrl(m.name),
       title: 'Compare this metric across the devices that report it on the History page'
     },
-    // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+    // Withheld from a reader who may not open the Audit Trail, as every drawer's View in Audit Trail is.
     canReadTrail && {
-      label: 'View Audit Trail', icon: <IconHistory size={13} />,
+      label: 'View in Audit Trail', icon: <IconHistory size={13} />,
       to: trailUrl(m.metric_uuid, 'METRIC'),
       title: 'Open the Audit Trail filtered to this metric'
     }
@@ -1478,9 +1478,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         title={selected?.name || ''}
         icon={<IconTag size={16} />}
         subtitle={selected?.deprecated && <Badge tone="warning" size="sm">Deprecated</Badge>}
+        recordId={selected && { label: 'Metric UUID', value: selected.metric_uuid }}
+        description={selected && { value: selected.description }}
         fields={selected ? [
           { label: 'Name', value: selected.name, mono: true, copyable: true },
-          { label: 'Metric UUID', value: selected.metric_uuid, mono: true, copyable: true },
           // A derived metric is a local extension that no device publishes: what it is, and how its
           // value is made, take the place of the standard, the semantic id and the permitted values.
           isDerived(selected) && { label: 'Kind', value: kindLabel(selected.derivation.kind) },
@@ -1491,7 +1492,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             help: 'How Aber computes it from other metrics. It cannot be changed: a different definition is a new derived metric.'
           },
           // The devices in service that report every input: the ones the Metric tab compares it across.
-          // The help names the inputs once; View History compares the devices on one scale.
+          // The help names the inputs once; View in History compares the devices on one scale.
           isDerived(selected) && devices && {
             label: 'Applies To',
             value: <AppliesTo devices={metricDevices(devices, schemas, selected.name, { catalog })} derivation={selected.derivation} />,
@@ -1514,7 +1515,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             full: true,
             help: "Other published ids of the same concept. The AAS export carries them beside the metric's own id."
           },
-          { label: 'Description', value: selected.description || null, full: true },
           !isDerived(selected) && {
             label: 'Permitted Values',
             value: permittedValuesText(selected.permitted_values) || null,

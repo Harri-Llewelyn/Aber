@@ -318,7 +318,7 @@ export function AutomationDetail({ automationKey, showToast, canWrite, hasPermis
         {!isNew && canReadTrail && base.row && (
           <p className="automation-trail">
             <RouteLink to={trailUrl(base.row.id, 'AUTOMATION')} className="count-link" title="Open the Audit Trail on this automation's own history">
-              <IconHistory size={13} aria-hidden="true" /> View Audit Trail
+              <IconHistory size={13} aria-hidden="true" /> View in Audit Trail
             </RouteLink>
           </p>
         )}

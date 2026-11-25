@@ -123,9 +123,9 @@ describe("a derived metric's Applies To", () => {
     expect(field(drawer).querySelector('.context-field-value').textContent).toBe('No device yet: none reports Controller/EXECUTION')
   })
 
-  it('keeps View History, which compares the devices on one scale', async () => {
+  it('keeps View in History, which compares the devices on one scale', async () => {
     devices = [press(1), press(2)]
     const drawer = await openDrawer('Controller/PARTS_PER_HOUR')
-    expect(within(drawer).getByRole('link', { name: /View History/ }).getAttribute('href')).toBe(metricHistoryUrl('Controller/PARTS_PER_HOUR'))
+    expect(within(drawer).getByRole('link', { name: /View in History/ }).getAttribute('href')).toBe(metricHistoryUrl('Controller/PARTS_PER_HOUR'))
   })
 })

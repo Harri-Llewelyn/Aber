@@ -88,6 +88,20 @@ export function arrivalSummary({ perSecond, gaps }) {
 }
 
 /**
+ * The drawer's warning while messages are going missing, or null: the sentence behind the gap rows'
+ * tone and the Arriving block's triangle.
+ */
+export function arrivalWarning({ gaps, missed }) {
+  if (!hasCount(gaps)) return null
+  const lost = hasCount(missed) ? `, skipping over ${formatCount(missed)} ${Math.round(missed) === 1 ? 'message' : 'messages'}` : ''
+  return {
+    id: 'arrival-gaps',
+    tone: 'warning',
+    text: `Messages from this gateway are going missing: ${formatCount(gaps)} ${Math.round(gaps) === 1 ? 'gap' : 'gaps'} in its sequence in the last hour${lost}.`,
+  }
+}
+
+/**
  * The devices' last readings of one settled read of gateway_devices_last_reading(), as a Map of
  * device id to the time (an ISO string, or null for a device with no reading). Null when the read
  * failed: the historian could not be reached, which is not the same as no reading.

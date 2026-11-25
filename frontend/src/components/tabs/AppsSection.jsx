@@ -48,7 +48,7 @@ const personOf = (r) => r.display_name || r.email || r.user_id
  * outside app (`register_app()`, RegisterAppModal), which signs people in and reaches nothing else.
  *
  * `drawerHost` is the element the drawer is drawn into, beside the page's card. `canReadTrail` offers
- * View Audit Trail, the app's own lane.
+ * View in Audit Trail, the app's own lane.
  */
 export function AppsSection({ showToast, drawerHost = null, canReadTrail = false }) {
   // True while the Register App dialog is open.
@@ -136,6 +136,8 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
         title={a ? appLabel(a.client_name) : ''}
         icon={<IconGlobe size={16} />}
         subtitle={a?.part_of_stack && <Badge size="sm" tone="info" title={registration.detail}>PART OF ABER</Badge>}
+        warnings={list?.error ? [{ id: 'people', tone: 'danger', text: `Who allows it could not be read: ${list.error}` }] : []}
+        recordId={a && { label: 'App ID', value: a.id }}
         fields={a ? [
           { label: 'Registered as', value: a.client_name || 'No name', full: true },
           {
@@ -161,16 +163,12 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
             full: true,
             help: 'The addresses the sign-in service may return a person to after they sign in. Any other is refused.',
           },
-          { label: 'App ID', value: a.id, copyable: true, mono: true, full: true },
         ] : []}
         beforeActions={a && (
           <section aria-label={`People who allow ${appLabel(a.client_name)}`}>
             <div className="context-panel-section-label">People who allow it</div>
             {list?.error ? (
-              <div className="callout callout-danger" role="status">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>{list.error}</div>
-              </div>
+              <div className="context-field-empty" role="status">Not read</div>
             ) : !list || list.rows === undefined ? (
               <div className="context-field-empty" role="status">Reading who allows it…</div>
             ) : list.rows.length === 0 ? (
@@ -202,9 +200,9 @@ export function AppsSection({ showToast, drawerHost = null, canReadTrail = false
               ? 'Aber registers this app each time it starts, so it cannot be removed.'
               : 'Stop it signing anyone in. Every approval of it, and every session it holds, ends.',
           },
-          // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+          // Withheld from a reader who may not open the Audit Trail, as every drawer's View in Audit Trail is.
           canReadTrail && {
-            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            label: 'View in Audit Trail', icon: <IconHistory size={13} />,
             to: trailUrl(a.id, 'APP'),
             title: 'Open the Audit Trail filtered to this app: its registration and removal. A person allowing it is in their own history.',
           },

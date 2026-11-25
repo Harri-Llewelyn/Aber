@@ -67,6 +67,28 @@ export function gatewayHealthProblems(gateway, { rootNotAfter = null, now = Date
   return found.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === TONE_DANGER ? -1 : 1));
 }
 
+/** What each health row's problem means for the gateway, after the problem itself. */
+const PROBLEM_MEANS = {
+  'CA Expires': 'It is the broker root this appliance trusts. The platform publishes the current one, and the appliance installs it at its next hourly convergence.',
+  'Disk Free': 'An appliance that fills its disk stops publishing and reports nothing about why.',
+  Flow: 'The appliance refused the commit, or cannot reach the forge. Open Health for the command that says which.',
+  Platform: 'Its last convergence did not complete. Open Health for the command that says why.',
+  Custom: 'The gateway’s own playbook did not complete, so what it sets up may not be running. The rest still publishes.',
+}
+
+/**
+ * The drawer's warnings for the health rows that need attention, the sentences behind the rows' tones
+ * and the Health block's summary. `shows` says whether the drawer draws a row for this gateway.
+ *
+ * @param {Array} problems gatewayHealthProblems()'s answer.
+ * @param {function(string): boolean} shows Whether a row is drawn, by its label.
+ */
+export function healthWarnings(problems, shows) {
+  return problems
+    .filter(p => shows(p.row))
+    .map(p => ({ id: `health-${p.row}`, tone: p.tone, text: `${p.text}. ${PROBLEM_MEANS[p.row]}` }))
+}
+
 /** The tone one row carries, or undefined. */
 export const rowTone = (problems, label) => problems.find(p => p.row === label)?.tone;
 

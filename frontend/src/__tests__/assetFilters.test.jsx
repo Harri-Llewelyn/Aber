@@ -148,7 +148,7 @@ describe('DevicesTab filters', () => {
   })
 
   it('lists every device in a cell, archived ones included, when handed one from the Cells page', async () => {
-    // Show Its Devices links here: an archived device still holds its cell, and the Active
+    // View in Devices links here: an archived device still holds its cell, and the Active
     // default would hide it.
     const inCell = (d, cellId) => ({ ...d, effective_cell_id: cellId })
     api.get.mockImplementation(routeGet({

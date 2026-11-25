@@ -696,7 +696,7 @@ function PhysicalBackupCard({ db, row: h, selected, onOpen }) {
 
 const pad2 = (n) => String(n).padStart(2, '0')
 
-/** A database's panel: its last success and any newer failure in full, the schedule, the repository. */
+/** A database's panel: any failure newer than its last success in full, that success, the schedule, the repository. */
 function PhysicalBackupPanel({ db, row: h, onClose, showToast }) {
   const state = h ? physicalBackupState(h) : null
   const next = h ? nextHistorianBackup(h) : null
@@ -707,11 +707,26 @@ function PhysicalBackupPanel({ db, row: h, onClose, showToast }) {
         : h.last_success_at ? <Badge tone="success" size="sm">Current</Badge>
           : <Badge tone="neutral" size="sm">No backup yet</Badge>
 
+  const warnings = h ? [
+    h.last_failure_at && {
+      id: 'failed',
+      tone: 'danger',
+      text: (
+        <>
+          <strong>Failed {formatDateTime(h.last_failure_at)}, {kindWord(h.last_failure_kind)}.</strong>{' '}
+          {h.last_failure_detail || 'pgBackRest recorded no reason.'}
+        </>
+      )
+    },
+    state?.kind === 'stale' && {
+      id: 'stale',
+      tone: 'warning',
+      text: `Stale: no backup has succeeded in over ${BACKUP_STALE_HOURS} hours.`
+    },
+    request?.tone === 'warning' && { id: 'request', tone: 'warning', text: `${request.label}. ${request.title}` }
+  ] : []
+
   const fields = h ? [
-    ...(h.last_failure_at ? [
-      { label: 'Reason', value: h.last_failure_detail || 'pgBackRest recorded no reason.', full: true },
-      { label: 'Failed', value: `${formatDateTime(h.last_failure_at)}, ${kindWord(h.last_failure_kind)}` }
-    ] : []),
     { label: 'Last backup', value: h.last_success_at ? `${formatDateTime(h.last_success_at)}, ${kindWord(h.last_success_kind)}` : 'None yet' },
     ...(h.last_success_label ? [{ label: 'Label', value: h.last_success_label, mono: true, copyable: true }] : []),
     { label: 'Next backup', value: !next ? 'Not known until the backup sidecar starts' : next.due ? 'Due now' : `${formatDateTime(next.at)}, ${kindWord(next.kind)}` },
@@ -731,6 +746,7 @@ function PhysicalBackupPanel({ db, row: h, onClose, showToast }) {
       title={db.name}
       icon={<IconDatabase size={16} />}
       subtitle={badge}
+      warnings={warnings}
       fields={fields}
       onCopy={showToast}
       onClose={onClose}
@@ -872,7 +888,7 @@ function retentionText(backup, kept, retentionDays) {
 }
 
 /**
- * One run's details: the whole of a failure, the queued, started and finished times, and the files
+ * One run's details: the whole of a failure at the top, the queued, started and finished times, and the files
  * a backup holds. Release is its one action, on a pinned backup.
  */
 function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, onRelease, onClose, showToast, canReadTrail }) {
@@ -880,8 +896,18 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
   const badge = run ? (STATUS_BADGES[run.status] || { tone: 'neutral', label: run.status }) : null
   const outcome = run ? runOutcome(run) : null
 
+  const failed = run?.status === 'FAILED'
+  const warnings = [
+    failed && { id: 'failed', tone: 'danger', text: <><strong>This run failed.</strong> {outcome}</> },
+    b && offsiteFailed(b, base) && {
+      id: 'offsite',
+      tone: 'danger',
+      text: `The off-site copy failed, and is retried: tried ${b.offsite_attempts} time(s), last ${formatDateTime(b.offsite_attempted_at)}. ${b.offsite_error || 'The service recorded no reason.'}`
+    }
+  ]
+
   const fields = run ? [
-    ...(outcome ? [{ label: run.status === 'FAILED' ? 'Reason' : 'Outcome', value: outcome, full: true }] : []),
+    ...(outcome && !failed ? [{ label: 'Outcome', value: outcome, full: true }] : []),
     { label: 'Origin', value: run.origin === 'requested' ? 'On request' : 'Scheduled' },
     { label: 'Note', value: run.note },
     { label: 'Queued', value: formatDateTime(run.created_at) },
@@ -905,11 +931,11 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
       onClick: () => onRelease(b),
       title: 'Let the retention window apply to this backup'
     },
-    // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+    // Withheld from a reader who may not open the Audit Trail, as every drawer's View in Audit Trail is.
     // Searched by the request's id, with no kind: the search finds the backup it took as well, so
     // the request's lane and the backup's show together.
     canReadTrail && {
-      label: 'View Audit Trail', icon: <IconHistory size={13} />,
+      label: 'View in Audit Trail', icon: <IconHistory size={13} />,
       to: trailUrl(run.id),
       title: 'Open the Audit Trail on this run: its request, and the backup it took, released or pruned'
     },
@@ -922,6 +948,7 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
       title={run ? formatDateTime(runWhen(run)) : ''}
       icon={<IconHardDrive size={16} />}
       subtitle={badge && <Badge tone={badge.tone} size="sm">{badge.label}</Badge>}
+      warnings={warnings}
       fields={fields}
       actions={actions}
       onCopy={showToast}
@@ -945,6 +972,9 @@ function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, o
   )
 }
 
+/** Whether the copy to the destination in force failed, which the panel's top gives in full. */
+const offsiteFailed = (backup, base) => Boolean(base) && backup.offsite_state === 'FAILED'
+
 /** The off-site copy of one backup, as panel fields. */
 function offsiteFields(backup, base) {
   if (backup.offsite_state === 'COPIED' && (!base || backup.offsite_location?.startsWith(base))) {
@@ -954,13 +984,7 @@ function offsiteFields(backup, base) {
     ]
   }
   if (!base) return [{ label: 'Off site', value: 'No destination is set' }]
-  if (backup.offsite_state === 'FAILED') {
-    return [{
-      label: 'Off site',
-      value: `Failed, retrying (tried ${backup.offsite_attempts} time(s), last ${formatDateTime(backup.offsite_attempted_at)}): ${backup.offsite_error || 'the service recorded no reason.'}`,
-      full: true
-    }]
-  }
+  if (offsiteFailed(backup, base)) return [{ label: 'Off site', value: 'Failed, retrying', danger: true }]
   return [{ label: 'Off site', value: 'Waiting for the service to copy it' }]
 }
 

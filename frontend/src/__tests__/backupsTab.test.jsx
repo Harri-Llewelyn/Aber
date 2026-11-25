@@ -320,23 +320,23 @@ describe('a run\'s panel', () => {
     const hasPermission = vi.fn((p) => p === PERMISSION_UUIDS.AUDIT_TRAIL_READ)
     render(<BackupsTab showToast={vi.fn()} hasPermission={hasPermission} />)
     fireEvent.click(within(await screen.findByTestId('run-j-1')).getAllByRole('cell')[0])
-    const link = within(panel()).getByRole('link', { name: /View Audit Trail/ })
+    const link = within(panel()).getByRole('link', { name: /View in Audit Trail/ })
     const href = new URL(link.getAttribute('href'), 'http://x')
     expect(href.pathname).toBe('/audit-trail')
     expect(href.searchParams.get('search')).toBe('j-1')
     expect(href.searchParams.has('type')).toBe(false)
     expect([...panel().querySelectorAll('.context-action')].map(a => a.textContent.trim()))
-      .toEqual(['Release', 'View Audit Trail'])
+      .toEqual(['Release', 'View in Audit Trail'])
 
     // A failed run took no backup, and its own lane is still there to read.
     fireEvent.click(within(screen.getByTestId('run-j-3')).getAllByRole('cell')[0])
-    expect(within(panel()).getByRole('link', { name: /View Audit Trail/ })).toBeTruthy()
+    expect(within(panel()).getByRole('link', { name: /View in Audit Trail/ })).toBeTruthy()
   })
 
-  it('offers no View Audit Trail to a reader who may not open it', async () => {
+  it('offers no View in Audit Trail to a reader who may not open it', async () => {
     render(<BackupsTab showToast={vi.fn()} hasPermission={() => false} />)
     fireEvent.click(within(await screen.findByTestId('run-j-1')).getAllByRole('cell')[0])
-    expect(within(panel()).queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
+    expect(within(panel()).queryByRole('link', { name: /View in Audit Trail/ })).toBeNull()
   })
 })
 

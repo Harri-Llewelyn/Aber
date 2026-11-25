@@ -91,7 +91,7 @@ const show = async (row, { userRole = 'Shopfloor_Manager' } = {}) => {
   return within(document.querySelector('.context-panel'))
 }
 
-/** The drawer's field labels, top to bottom: not the tools' after the actions. */
+/** The drawer's field labels, top to bottom: not the tools' under them. */
 const rows = () => [...document.querySelectorAll('.context-panel dt.context-field-label')]
   .filter(dt => !dt.closest('.context-panel-extras'))
   .map(dt => dt.textContent.trim())
@@ -107,13 +107,13 @@ beforeEach(() => {
 })
 afterEach(() => { delete globalThis.__ABER_CONFIG__ })
 
-const FIXED = ['Gateway UUID', 'Sparkplug Edge Node ID', 'Sparkplug Topic Path', 'Location', 'Last Heartbeat']
+const FIXED = ['Gateway UUID', 'Description', 'Sparkplug Edge Node ID', 'Sparkplug Topic Path', 'Location', 'Last Heartbeat']
 
 describe('a Host gateway\'s drawer', () => {
   it('hides the seven appliance rows it can never fill, and keeps the two its heartbeat fills', async () => {
     await show(KINDS.host(HEARTBEAT))
 
-    expect(rows()).toEqual([...FIXED, 'Health Reported', 'Runtime Uptime', 'Description'])
+    expect(rows()).toEqual([...FIXED, 'Health Reported', 'Runtime Uptime'])
     for (const label of ['CA Expires', 'Disk Free', 'Memory Available', 'Load (1m)', 'Flow', 'Platform', 'Custom']) {
       expect(rows(), label).not.toContain(label)
     }
@@ -123,13 +123,13 @@ describe('a Host gateway\'s drawer', () => {
   it('hides them whatever the row holds: a row edited to Host keeps its appliance columns', async () => {
     await show(KINDS.host(APPLIANCE))
 
-    expect(rows()).toEqual([...FIXED, 'Health Reported', 'Runtime Uptime', 'Description'])
+    expect(rows()).toEqual([...FIXED, 'Health Reported', 'Runtime Uptime'])
   })
 
   it('shows no health row before it has reported any', async () => {
     await show(KINDS.host({}))
 
-    expect(rows()).toEqual([...FIXED, 'Description'])
+    expect(rows()).toEqual(FIXED)
   })
 
   it('shows Launch UI and Archive Gateway after 8 rows, not 15', async () => {
@@ -161,19 +161,19 @@ describe('the other kinds\' drawers', () => {
   it('shows a Simulated gateway the Host\'s rows', async () => {
     await show(KINDS.simulated(HEARTBEAT))
 
-    expect(rows()).toEqual([...FIXED, 'Health Reported', 'Runtime Uptime', 'Description'])
+    expect(rows()).toEqual([...FIXED, 'Health Reported', 'Runtime Uptime'])
   })
 
   it('shows the Playback gateway no health row, since the daemon records none for it', async () => {
     await show(KINDS.playback({ ...HEARTBEAT, ...APPLIANCE }))
 
-    expect(rows()).toEqual([...FIXED, 'Description'])
+    expect(rows()).toEqual(FIXED)
   })
 
   it('shows a Third-party gateway what it does not get, and no row it never fills', async () => {
     await show(KINDS.thirdParty({ ...APPLIANCE }))
 
-    expect(rows()).toEqual([...FIXED, 'Not Provided', 'Description'])
+    expect(rows()).toEqual([...FIXED, 'Not Provided'])
   })
 
   it('shows a Remote gateway every row, and reads Not set where it has not reported', async () => {
@@ -186,8 +186,7 @@ describe('the other kinds\' drawers', () => {
     expect(rows()).toEqual([
       ...FIXED, 'Bundle', 'Committed', 'Reported',
       'Health Reported', 'Runtime Uptime',
-      'CA Expires', 'Disk Free', 'Memory Available', 'Load (1m)', 'Flow', 'Platform', 'Custom',
-      'Description'
+      'CA Expires', 'Disk Free', 'Memory Available', 'Load (1m)', 'Flow', 'Platform', 'Custom'
     ])
     for (const label of ['CA Expires', 'Disk Free', 'Memory Available', 'Load (1m)', 'Flow', 'Platform', 'Custom']) {
       expect(valueOf(label), label).toBe('Not set')
@@ -228,7 +227,7 @@ describe('the rule, in one table', () => {
 
   it('never hides a row a kind fills in every drawer: the identifiers, the location, the heartbeat', () => {
     for (const labels of Object.values(NEVER_FILLED_ROWS)) {
-      for (const label of [...FIXED, 'Description']) expect(labels).not.toContain(label)
+      for (const label of FIXED) expect(labels).not.toContain(label)
     }
   })
 })

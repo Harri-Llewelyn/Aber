@@ -10,7 +10,8 @@ import { trackRequest } from '../../lib/apiActivity'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
-import { formatDateTime, formatRelative } from '../../utils/format'
+import { formatDateTime, formatRelative, plural } from '../../utils/format'
+import { namesListed } from '../../utils/drawerWarnings'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
 import { describeAuthFailure } from '../../utils/sessionError'
@@ -562,6 +563,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     [schemas, latestBySparkplugId, catalog]
   )
 
+  /** What a finding says of `listed`, its metrics: all of them, or the first few. */
+  const findingText = (finding, listed) => (finding.tag === UNMODELLED_TAG
+    ? `Declared at its last birth but not in the device's schemas: ${listed}`
+    : `Last value outside the permitted values: ${listed}`)
+  const findingMetrics = (finding) =>
+    finding.metrics.map(m => (finding.tag === UNMODELLED_TAG ? m.name : `${m.name} = ${m.value}`))
+  const findingLinks = (a, finding) => finding.tag !== UNMODELLED_TAG && rejectedIds.has(a.asset_id)
+
   /**
    * A finding as a warning badge, in the roster's Status cell and the drawer's subtitle. Its hover
    * text lists the metrics; Unmodelled shows their count. Out of vocabulary links to the device's
@@ -569,12 +578,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
    */
   const findingBadge = (a, finding) => {
     const unmodelled = finding.tag === UNMODELLED_TAG
-    const linked = !unmodelled && rejectedIds.has(a.asset_id)
-    const listed = finding.metrics.map(m => (unmodelled ? m.name : `${m.name} = ${m.value}`)).join(', ')
-    const title = unmodelled
-      ? `Declared at its last birth but not in the device's schemas: ${listed}`
-      : `Last value outside the permitted values: ${listed}.` +
-        (linked ? " Opens this device's schema rejections in the Audit Trail." : '')
+    const linked = findingLinks(a, finding)
+    const title = findingText(finding, findingMetrics(finding).join(', ')) + (unmodelled ? '' : '.')
+      + (linked ? " Opens this device's schema rejections in the Audit Trail." : '')
     return (
       <Badge key={finding.tag} tone="warning" size="sm" icon={<IconAlertTriangle size={10} />} title={title}>
         {unmodelled
@@ -816,6 +822,50 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // rather than reading `cell_id` directly -- an inherited device has none of its own. The cells
   // resolve the area above a cell.
   const selectedLocation = selectedDevice ? resolveDeviceLocation(selectedDevice, selectedGateway, cellById) : null
+  // Versions their lineage has moved past: a migration to finish.
+  const archivedVersions = selectedDevice
+    ? schemasForDevice(selectedDevice, schemas).filter(s => !isAssignableSchema(s))
+    : []
+  // What is wrong with it, at the drawer's top: each of the roster's findings as a sentence.
+  const selectedWarnings = selectedDevice ? [
+    selectedDevice.is_quarantined && {
+      id: 'quarantined',
+      tone: 'warning',
+      text: 'In quarantine: Aber could not match it to a registered device. Its readings are dropped until it is approved on the Quarantine tab.'
+    },
+    isProvisioningOverdue(selectedDevice) && {
+      id: 'overdue',
+      tone: 'warning',
+      text: 'Awaiting first birth: provisioned more than 24h ago, and it has never sent a DBIRTH. Check that it is powered, reachable and publishing under its Sparkplug Device ID.'
+    },
+    ...findingsFor(selectedDevice).map(finding => ({
+      id: finding.tag,
+      tone: 'warning',
+      text: (
+        <>
+          <strong>{finding.tag}.</strong> {findingText(finding, namesListed(findingMetrics(finding)))}.
+          {findingLinks(selectedDevice, finding) && (
+            <> <RouteLink to={schemaRejectionsUrl(selectedDevice.asset_id)}>View in Audit Trail</RouteLink></>
+          )}
+        </>
+      )
+    })),
+    !selectedDevice.is_archived && selectedLocation?.location_source === SOURCE_UNASSIGNED && {
+      id: 'unassigned',
+      tone: 'warning',
+      text: `Unassigned. ${unassignedHint(selectedDevice, selectedGateway) || 'It resolves to no cell.'}`
+    },
+    !selectedDevice.is_archived && selectedDevice.cell_mismatch && {
+      id: 'gateway-elsewhere',
+      tone: 'warning',
+      text: `Gateway elsewhere: its gateway serves ${cellById.get(selectedDevice.gateway_cell_id)?.cell_name || 'another cell'}.`
+    },
+    !selectedDevice.is_archived && archivedVersions.length > 0 && {
+      id: 'archived-version',
+      tone: 'warning',
+      text: `On an archived schema version: ${namesListed(archivedVersions.map(s => s.schema_name))}. Move it forward by publishing from the Schemas page.`
+    },
+  ] : []
   const selectedUns = selectedDevice && unsTopicField({
     index: unsPaths,
     device: selectedDevice,
@@ -1616,8 +1666,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             {findingsFor(selectedDevice).map(finding => findingBadge(selectedDevice, finding))}
           </>
         )}
+        warnings={selectedWarnings}
+        recordId={selectedDevice && { label: 'Device UUID', value: selectedDevice.asset_id }}
+        description={selectedDevice && {
+          value: selectedDevice.description,
+          help: "Operator note. Shown here, and served by i3X as the device's description; nothing acts on it."
+        }}
         fields={selectedDevice ? [
-          { label: 'Device UUID', value: selectedDevice.asset_id, mono: true, copyable: true },
           // Always the issued id, whatever the device publishes under: readings, exports, the AAS
           // shell and i3X are keyed on it.
           { label: 'Sparkplug Device ID', value: selectedIds.issued, mono: true, copyable: true },
@@ -1756,12 +1811,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           },
           // Each derived metric its inputs make possible, with its current value and its window.
           ...[derivedValuesField({ device: selectedDevice, schemas, catalog })].filter(Boolean),
-          {
-            label: 'Description',
-            value: selectedDevice.description || null,
-            full: true,
-            help: "Operator note. Shown here, and served by i3X as the device's description; nothing acts on it."
-          },
         ] : []}
         actions={selectedDevice ? [
           selectedDevice.is_archived ? {
@@ -1796,18 +1845,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           /* What is already waiting on this machine, only when something is. The count comes from
              RLS, so it is what this person may see. */
           openForSelected.length > 0 && {
-            label: openForSelected.length === 1
-              ? '1 change awaiting decision'
-              : `${openForSelected.length} changes awaiting decision`,
+            label: `View in Approvals (${openForSelected.length})`,
             icon: <IconInbox size={13} />,
             to: approvalsForUrl(selectedDevice.asset_id),
             onClick: () => onViewApprovals?.(selectedDevice),
-            title: 'Open the approvals queue, filtered to this device'
+            title: `${plural(openForSelected.length, 'change')} to this device awaiting a decision. Opens the approvals queue, filtered to it`
           },
           {
             // The device's readings over time, a chart a metric with its latest reading, and their
             // CSV export.
-            label: 'View History', icon: <IconChartLine size={13} />,
+            label: 'View in History', icon: <IconChartLine size={13} />,
             to: deviceHistoryUrl(selectedDevice.asset_id),
             title: "Chart this device's readings over time on the History page, and export them"
           },
@@ -1873,7 +1920,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           /* Withheld from a reader who may not open the page: the nav hides Audit Trail without
              `audit_trail:read`. `.filter(Boolean)` drops it. */
           canReadTrail && {
-            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            label: 'View in Audit Trail', icon: <IconHistory size={13} />,
             to: trailUrl(selectedDevice.asset_id, 'DEVICE'),
             onClick: () => onViewTrail?.(selectedDevice),
             title: 'Open the Audit Trail filtered to this device'
@@ -1889,7 +1936,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           },
         ].filter(Boolean) : []}
       >
-        {/* A tool of unknown height, so after the actions. The device's own windows, and its cell's. */}
+        {/* The device's own windows, and its cell's. */}
         {selectedDevice && (
           <SuppressionWindows
             kind="device"

@@ -597,8 +597,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             <span className="badge badge-sm badge-neutral badge-follow">{schemaVersionLabel(selectedSchema)}</span>
           </>
         )}
+        recordId={selectedSchema && { label: 'Schema UUID', value: selectedSchema.schema_uuid }}
         fields={selectedSchema ? [
-          { label: 'Schema UUID', value: selectedSchema.schema_uuid, mono: true, copyable: true },
           { label: 'Version', value: schemaVersionLabel(selectedSchema) },
           {
             label: 'Lifecycle',
@@ -668,7 +668,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 : `Create Version v${nextVersion(selectedSchema)}: an editable Draft v${nextVersion(selectedSchema)}, carrying every metric this version models`
           },
           {
-            label: `View ${plural(deviceCountFor(selectedSchema.schema_uuid), 'Device')}`,
+            label: `View in Devices (${deviceCountFor(selectedSchema.schema_uuid)})`,
             icon: <IconCpu size={13} />,
             to: devicesForSchemaUrl(selectedSchema.schema_uuid),
             onClick: () => onSelectSchema?.(selectedSchema.schema_uuid),
@@ -691,9 +691,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             onClick: () => exportSchemas([selectedSchema.schema_uuid]),
             title: `Save this schema, as it is in force, as ${DEVICE_SCHEMAS_FILE_NAME}. Upload it on another site, or change it and upload it here`
           },
-          // Withheld from a reader who may not open the Audit Trail, as every drawer's View Audit Trail is.
+          // Withheld from a reader who may not open the Audit Trail, as every drawer's View in Audit Trail is.
           canReadTrail && {
-            label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            label: 'View in Audit Trail', icon: <IconHistory size={13} />,
             to: trailUrl(selectedSchema.schema_uuid, 'SCHEMA'),
             title: 'Open the Audit Trail filtered to this schema version'
           },

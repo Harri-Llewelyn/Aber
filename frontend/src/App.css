@@ -4019,13 +4019,43 @@ a.chip { text-decoration: none; }
   outline-offset: 1px;
 }
 
+/* What is wrong with a drawer's entity, above its fields: the alert, then the warnings, as one
+   stack. */
+.context-panel-warnings { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.context-warnings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+/* One warning: an icon of its tone's own shape and the whole sentence, on a tint fainter than the
+   alert banner's, because only the alert has a deadline. */
+.context-warning {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+.context-warning > div { min-width: 0; overflow-wrap: anywhere; }
+.context-warning .mono { font-size: inherit; }
+.context-warning-icon { flex-shrink: 0; margin-top: 1px; color: var(--warning-text); }
+.context-warning-danger {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+.context-warning-danger .context-warning-icon { color: var(--danger-text); }
+.context-warning a { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
+.context-warning a:hover,
+.context-warning a:focus-visible { text-decoration: underline; }
+
 /* The active-alert banner at the top of a context drawer.
-   Above the metadata because it is the only item in that panel with a deadline on it -- see the note
+   First of all because it is the only item in that panel with a deadline on it -- see the note
    in ContextPanel.jsx. */
 .context-alert {
   border-radius: var(--radius-xs);
   padding: 10px 12px;
-  margin-bottom: 14px;
   border: 1px solid var(--warning);
   background: color-mix(in srgb, var(--warning) 12%, transparent);
 }
@@ -5043,13 +5073,15 @@ a.chip { text-decoration: none; }
 .context-panel-expand:hover { color: var(--accent-text); border-color: var(--accent); }
 .context-panel-expand:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* Scrolls independently of the page. A device with twenty metadata rows must not make the panel
-   taller than the viewport, or the actions at its foot become unreachable. */
+/* Scrolls independently of the page, so a device with twenty metadata rows does not make the panel
+   taller than the viewport. With actions, their band is the foot and carries the bottom padding: a
+   pinned band would otherwise stop short of the edge at the end of the scroll. */
 .context-panel-body {
   padding: 10px var(--inset-tight) 12px;
   overflow-y: auto;
   flex: 1;
 }
+.context-panel-body:has(> .context-panel-actions) { padding-bottom: 0; }
 
 .context-panel-fields { display: flex; flex-direction: column; gap: 9px; }
 
@@ -5106,18 +5138,26 @@ a.chip { text-decoration: none; }
 /* A drawer's group of fields that opens on request (ContextPanel `group`): a GroupHeading at the
    drawer's inset with its rows under it, as the other fields are. While it is closed the heading's
    summary names the worst state in words; its tone adds an icon of its own shape and the tone's
-   colour to them. */
+   colour to them. Open, its rows are a sub-tree. */
 .context-field-group { margin-top: 9px; }
 .context-field-group + .context-panel-fields { margin-top: 9px; }
 .context-field-group-heading { padding: 4px 6px; margin: 0 -6px; width: calc(100% + 12px); gap: 6px; border-radius: var(--radius-sm); }
 .context-field-group-heading:hover { background: var(--bg-glass); }
 .context-field-group-heading:focus-visible { outline-offset: 0; }
-.context-field-group-fields { padding-top: 7px; }
-.context-field-group-fields[hidden] { display: none; }
 .context-field-group-danger .group-heading-icon,
 .context-field-group-danger .group-heading-detail { color: var(--danger-text); }
 .context-field-group-warning .group-heading-icon,
 .context-field-group-warning .group-heading-detail { color: var(--warning-text); }
+
+/* Rows that belong to what is above them in a drawer: indented under its name, with a guide line
+   down the left from it to the last of them. The line falls from the middle of a GroupHeading's
+   chevron, and the rows line up with its label. */
+.context-subtree {
+  margin-left: 5px;
+  padding: 7px 0 2px 12px;
+  border-left: 1px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
+}
+.context-subtree[hidden] { display: none; }
 
 /* Every drawer section's buttons, the Actions section's among them: two to a row in a drawer wide
    enough for two 200px columns, one in a narrower one. Each is a `.context-action`. The label, the
@@ -5136,11 +5176,22 @@ a.chip { text-decoration: none; }
 /* SaveDiscard's pair joins the grid as two buttons of its own. */
 .context-buttons > .setting-actions { display: contents; }
 
-/* The Actions section, ruled off from the fields and the facts above it. */
+/* The Actions section: a band across the drawer's foot, on the header's surface laid over the card's
+   so a row scrolling under it does not show through. */
 .context-panel-actions {
-  margin-top: 16px;
-  padding-top: 12px;
+  margin: 16px calc(-1 * var(--inset-tight)) 0;
+  padding: 10px var(--inset-tight) 12px;
   border-top: 1px solid var(--border);
+  background: linear-gradient(var(--bg-glass), var(--bg-glass)), var(--bg-card);
+}
+/* Pinned: the actions stay at the foot while the rest scrolls, and what takes focus above them is
+   scrolled clear of them. Only in a window tall enough to show fields beside them; useActionsPin in
+   ContextPanel.jsx takes the class off where they would crowd the fields out. */
+@media (min-height: 701px) {
+  .context-panel-actions-pinned { position: sticky; bottom: 0; z-index: 1; }
+  .context-panel-body:has(> .context-panel-actions-pinned) > :not(.context-panel-actions) :is(a, button, input, select, textarea, [tabindex]) {
+    scroll-margin-bottom: calc(var(--context-actions-height, 0px) + 8px);
+  }
 }
 /* A gateway's Repository links, under the paragraph that says what the repository is for. */
 .gateway-repository-links { margin-top: 8px; }
@@ -5202,14 +5253,13 @@ a.chip { text-decoration: none; }
   border-color: var(--danger);
 }
 
-/* Page-supplied FACTS, sitting with the metadata rather than after the actions -- a gateway's
-   device list is another thing the panel says, not another thing it does. Spaced from the fields
-   above but not ruled off from them: a rule would read as a change of subject. */
+/* Page-supplied FACTS, sitting with the metadata: a gateway's device list is another thing the panel
+   says, not another thing it does. Spaced from the fields above but not ruled off from them: a rule
+   would read as a change of subject. */
 .context-panel-facts { margin-top: 12px; }
 
-/* Page-supplied TOOLS. After the actions, so a section of unknown height cannot push the action
-   list off the bottom of the drawer. A section of fixed height can go above the actions instead
-   (`beforeActions`). */
+/* Page-supplied TOOLS, ruled off from what the drawer says and above the actions, which stay in view
+   however tall a tool is. */
 .context-panel-extras {
   margin-top: 14px;
   padding-top: 12px;
@@ -5328,8 +5378,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
    inside, so theirs keep their width. */
 .context-panel-app.context-panel-expanded { --context-panel-width: var(--context-panel-width-expanded); }
 
-/* No rule above the prose. `.context-panel-extras` is separated from the fields and actions it
-   normally follows; in this panel it is the only thing in the body, and a border at the very top
+/* No rule above the prose. `.context-panel-extras` is separated from the fields it normally
+   follows; in this panel it is the only thing in the body, and a border at the very top
    of a drawer reads as a heading someone forgot to write. */
 .context-panel-app .context-panel-extras {
   margin-top: 0;
@@ -5545,6 +5595,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     max-height: none;
     z-index: 90;
   }
+  /* The overlay is as tall as the window, so its actions are at its foot however short the rest is. */
+  .context-panel-body:has(> .context-panel-actions) { display: flex; flex-direction: column; }
+  .context-panel-body:has(> .context-panel-actions) > * { flex: none; }
+  .context-panel-body > :has(+ .context-panel-actions) { margin-bottom: 16px; }
+  .context-panel-body > .context-panel-actions { margin-top: auto; }
   /* Over the page, the help drawer keeps the shadow, as the rail does when it opens over the page. */
   .context-panel-app .context-panel-inner { box-shadow: var(--shadow); }
   .context-panel-inner {
@@ -8067,7 +8122,7 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 .appliance-command-help { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
 .appliance-command-help:hover,
 .appliance-command-help:focus-visible { text-decoration: underline; }
-/* A group after the actions: the tools' own gap spaces it. */
+/* A group among the tools: their own gap spaces it. */
 .context-panel-extras > .context-field-group { margin-top: 0; }
 
 /* The Issue Token dialog's Connect section, set off from the token it is built from. */
@@ -8103,8 +8158,6 @@ ol.gateway-steps {
 /* GATEWAYS: the list page. */
 .gateway-name-badge { margin-left: 8px; }
 .gateway-cell-warning { color: var(--warning-text); }
-/* The group-mismatch warning at the top of a gateway's drawer, where the drawer already insets it. */
-.gateway-group-callout { margin: 0 0 14px; }
 /* The Edit dialog's offer of the group a gateway was last seen publishing under, below the field. */
 .gateway-group-offer { margin-top: 6px; }
 .gateway-cell-italic { font-style: italic; }

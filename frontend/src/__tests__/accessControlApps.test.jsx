@@ -170,14 +170,14 @@ describe("an app's drawer", () => {
   it('opens the Audit Trail filtered to the app, for a reader who may open it (#1349)', async () => {
     renderApps(vi.fn(), () => true)
     const drawer = await openDrawer('Grafana')
-    expect(drawer.getByRole('link', { name: /View Audit Trail/ }))
+    expect(drawer.getByRole('link', { name: /View in Audit Trail/ }))
       .toHaveAttribute('href', `/audit-trail?search=${GRAFANA}&type=APP`)
   })
 
-  it('offers no View Audit Trail without the permission', async () => {
+  it('offers no View in Audit Trail without the permission', async () => {
     renderApps(vi.fn(), () => false)
     const drawer = await openDrawer('Grafana')
-    expect(drawer.queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
+    expect(drawer.queryByRole('link', { name: /View in Audit Trail/ })).toBeNull()
   })
 
   it("refuses to remove Aber's own, and says why", async () => {

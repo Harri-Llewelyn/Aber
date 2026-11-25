@@ -185,7 +185,7 @@ describe('what a schema’s device count counts', () => {
     expect(names()).toEqual(['Lathe_Schema', 'Press_Schema'])
   })
 
-  it('lists the same devices under Devices in the drawer, and names the action View N Devices', async () => {
+  it('lists the same devices under Devices in the drawer, and names the action View in Devices with the count', async () => {
     await renderCounts()
     fireEvent.click(screen.getByText('Lathe_Schema'))
     const panel = within(document.querySelector('.context-panel'))
@@ -194,14 +194,14 @@ describe('what a schema’s device count counts', () => {
     expect(panel.getByText('Devices')).toBeTruthy()
     expect(panel.getByRole('link', { name: 'Lathe_01' })).toBeTruthy()
     for (const name of ['Lathe_Old', 'Lathe_01_Replay', 'Lathe_Unknown']) expect(panel.queryByText(name)).toBeNull()
-    expect(panel.getByRole('link', { name: /View 1 Device$/ })).toHaveAttribute('href', `/devices?schema=${S1.schema_uuid}`)
+    expect(panel.getByRole('link', { name: /View in Devices \(1\)$/ })).toHaveAttribute('href', `/devices?schema=${S1.schema_uuid}`)
   })
 
   it('opens the Audit Trail filtered to the version, for a reader who may open it (#1349)', async () => {
     await renderCounts()
     fireEvent.click(screen.getByText('Lathe_Schema'))
     const panel = within(document.querySelector('.context-panel'))
-    expect(panel.getByRole('link', { name: /View Audit Trail/ }))
+    expect(panel.getByRole('link', { name: /View in Audit Trail/ }))
       .toHaveAttribute('href', `/audit-trail?search=${S1.schema_uuid}&type=SCHEMA`)
   })
 

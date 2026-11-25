@@ -339,14 +339,14 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
 
     // The Simulated lane holds nothing, so neither page is offered.
     fireEvent.click(screen.getByRole('button', { name: /Simulated/ }))
-    expect(within(panel()).queryByRole('link', { name: /Open Devices page/ })).toBeNull()
-    expect(within(panel()).queryByRole('link', { name: /Open Gateways page/ })).toBeNull()
+    expect(within(panel()).queryByRole('link', { name: /View in Devices/ })).toBeNull()
+    expect(within(panel()).queryByRole('link', { name: /View in Gateways/ })).toBeNull()
     expect(within(panel()).getByText('No simulated assets.')).toBeInTheDocument()
 
     // The queue holds one of each, so both are offered, the first as the one primary.
     fireEvent.click(screen.getByRole('button', { name: /Unassigned/ }))
-    expect(within(panel()).getByRole('link', { name: /Open Devices page/ })).toHaveClass('btn-primary')
-    expect(within(panel()).getByRole('link', { name: /Open Gateways page/ })).not.toHaveClass('btn-primary')
+    expect(within(panel()).getByRole('link', { name: /View in Devices/ })).toHaveClass('btn-primary')
+    expect(within(panel()).getByRole('link', { name: /View in Gateways/ })).not.toHaveClass('btn-primary')
     // The panel's title carries the lane's own icon.
     expect(panel().querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
     expect(getByTooltip('File these 1 device(s) on the Devices page', panel())).toBeInTheDocument()
@@ -361,8 +361,8 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await renderSiteMap()
     fireEvent.click(screen.getByRole('button', { name: /Site-Wide/ }))
     expect(within(panel()).getByText('Weather_Station')).toBeInTheDocument()
-    expect(within(panel()).getByRole('link', { name: /Open Devices page/ })).toBeInTheDocument()
-    expect(within(panel()).queryByRole('link', { name: /Open Gateways page/ })).toBeNull()
+    expect(within(panel()).getByRole('link', { name: /View in Devices/ })).toBeInTheDocument()
+    expect(within(panel()).queryByRole('link', { name: /View in Gateways/ })).toBeNull()
   })
 
   it('gives the panel to whichever of a lane, an area or a pin was clicked last', async () => {
@@ -397,7 +397,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(panel()).queryByText('NOT PLACED')).toBeNull()
     // The area's own icon on the title; its one primary is the page that edits it.
     expect(panel().querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
-    expect(panel().querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('Open on Areas page')
+    expect(panel().querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('View in Areas')
 
     // A cell chip opens that cell's panel.
     fireEvent.click(within(panel()).getByRole('button', { name: /^Bay 1/ }))
@@ -544,7 +544,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     // The cell's own icon on the title, and the Cells page as the one primary: a cell's dashboard
     // is one of its Attached Links.
     expect(panel.querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
-    expect(panel.querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('Open on Cells page')
+    expect(panel.querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('View in Cells')
     expect(within(panel).queryByText('Open Dashboard')).toBeNull()
     expect(within(panel).queryByText('Dashboard URL')).toBeNull()
     expect(within(panel).getByText('Line_Gateway')).toBeInTheDocument()

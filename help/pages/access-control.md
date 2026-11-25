@@ -31,8 +31,8 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Operator** reads the shopfloor and its live readings, and can propose changes and acknowledge an alert.
 - **Auditor** reads the Audit Trail, including who was given access.
 - **Click a person's row**, or press Enter on it, to open their drawer. Click the row again, or press Escape, to close it.
-- Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, **Reset MFA**, **View Their Changes**, and **Remove Access** or **Restore Access**.
-- **View Their Changes** opens the Audit Trail with **Changed by** set to that person. It lists every change they made, under any email address they had.
+- Every action for that person is in the drawer: **Change Name**, **Change Email**, **Change Role**, **Set New Password**, **End Sessions**, **Reset MFA**, **View in Audit Trail**, and **Remove Access** or **Restore Access**.
+- **View in Audit Trail** opens the Audit Trail with **Changed by** set to that person. It lists every change they made, under any email address they had.
 - The drawer shows their email address, display name, role, status and last sign-in.
 - **Sessions**, in the drawer, counts their sign-ins: the dashboard in each browser, and each service such as Grafana. It says when one was last used.
 - Select **Show sessions**, under the count, to list them. Each row says where the session is: a browser and system, a program, or a service. It says when the session started and when it was last active. No address is shown.
@@ -60,7 +60,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Which address shows where.** A page shows the address the account has now, unless it says it shows the one they had at the time. Approvals and Archived Entities say so: they keep the address the person had when they acted.
 - **A link to a person still works after you change their address.** A link in a notification or a bookmark names the account, not the address.
 - **Grafana** takes the new address at their next sign-in there. **The forge** does not. A person's forge profile keeps the address it was made with. Someone who first opens the forge on Aber 1.7.0 or later has a placeholder address there instead. Either way, they sign in to the forge as before.
-- **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Those actions in your drawer are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**. Its **Sessions** tab lists your own sessions and ends them, so your drawer has no list.
+- **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Those actions in your drawer are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **View in Profile**. Your **Profile** page is where you change your own password, with **Change Password**. Its **Sessions** tab lists your own sessions and ends them, so your drawer has no list.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
 - Each act here is recorded in the Audit Trail. That covers adding a person, a new role, name or address, removing or restoring access, a new password and ended sessions. The record names the person and who made the change. A new address is recorded with the old one. It never holds a password.
 - A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.
@@ -102,7 +102,7 @@ An app such as Grafana can sign a person in with their Aber account. The first t
 - The app's sessions for that person end at once. The API refuses them straight away. Studio and the forge refuse their next request. Node-RED signs them out within a minute, and Grafana within an hour.
 - The app asks them to allow it again the next time it signs them in. Their role and their other sessions do not change.
 - A person can revoke their own approval on their **Profile** page, on the **Allowed Apps** tab.
-- **View Audit Trail**, in the app's drawer, opens the Audit Trail on the app's own history: when it was registered, removed or restored. A person allowing an app, or that approval being revoked, is in that person's history instead.
+- **View in Audit Trail**, in the app's drawer, opens the Audit Trail on the app's own history: when it was registered, removed or restored. A person allowing an app, or that approval being revoked, is in that person's history instead.
 - **Remove App** stops an app signing anyone in. A dialog says how many people allow it. Select **Remove App** to do it. Every approval of it ends, and so does every session it holds.
 - **Aber's own apps cannot be removed.** Aber registers them again each time it starts, so their **Remove App** is greyed out.
 - Each act is recorded in the Audit Trail, with who did it. That covers an app registered or removed, and an approval given or revoked. An approval given or revoked is in the person's lane. Registering and removing an app are in the app's own lane, **Apps**.

@@ -2482,18 +2482,18 @@ describe('a metric\'s id', () => {
     renderTab()
     await waitForCatalog()
     selectMetric(catalogTable(), 'Controller/EXECUTION')
-    expect(within(drawer()).getByRole('link', { name: /View Audit Trail/ }))
+    expect(within(drawer()).getByRole('link', { name: /View in Audit Trail/ }))
       .toHaveAttribute('href', '/audit-trail?search=m2&type=METRIC')
     selectMetric(cardTable('Deprecated Metrics'), 'temperature')
-    expect(within(drawer()).getByRole('link', { name: /View Audit Trail/ }))
+    expect(within(drawer()).getByRole('link', { name: /View in Audit Trail/ }))
       .toHaveAttribute('href', '/audit-trail?search=m9&type=METRIC')
   })
 
-  it('offers no View Audit Trail to a reader who may not open the Audit Trail', async () => {
+  it('offers no View in Audit Trail to a reader who may not open the Audit Trail', async () => {
     renderTab({ hasPermission: (p) => p !== PERMISSION_UUIDS.AUDIT_TRAIL_READ })
     await waitForCatalog()
     selectMetric(catalogTable(), 'Controller/EXECUTION')
-    expect(within(drawer()).queryByRole('link', { name: /View Audit Trail/ })).toBeNull()
+    expect(within(drawer()).queryByRole('link', { name: /View in Audit Trail/ })).toBeNull()
   })
 
   it('finds a metric by its UUID in the catalog\'s search', async () => {

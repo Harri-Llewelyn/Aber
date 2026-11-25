@@ -25,7 +25,7 @@ export default function check() {
   if (!grid || !grid[1].includes(COLUMNS)) offences.push(`${CSS} does not declare the drawer's grid of buttons as .context-buttons`);
   const copies = css.split(COLUMNS).length - 1;
   if (copies > 1) offences.push(`${CSS} declares the drawer's button columns ${copies} times: a section uses .context-buttons, not a grid of its own`);
-  if (!read(PANEL).includes('className="context-panel-actions context-buttons"')) offences.push(`${PANEL}'s Actions section is not a .context-buttons grid`);
+  if (!read(PANEL).includes('context-panel-actions context-buttons')) offences.push(`${PANEL}'s Actions section is not a .context-buttons grid`);
 
   // Each source read: its name, its text, and the line its text starts on.
   const sources = allFiles

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
+import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { IconX, IconAlertTriangle, IconAlertCircle, IconCheck, IconBellOff } from './Icons'
 import CopyableId from './CopyableId'
 import { GroupHeading } from './GroupHeading'
@@ -48,11 +48,26 @@ export const HelpDrawerContext = createContext(null)
  * buttons: drawn at the drawer's full width under the header, above the fields, and kept in view
  * while the body scrolls.
  *
- * @param {Array} fields [{ label, value, display?, mono?, copyable?, help?, full?, danger?, warning? }].
- * `copyable` renders a CopyableId (`display` is shown in place of the copied value); `danger` and
- * `warning` colour the value only; `help` puts a HelpTip beside the label, for a field whose name
- * does not say what it is for, or whose value needs a sentence: a tooltip a keyboard and a touch
- * screen reach.
+ * @param {object} alert The firing alert that decides the entity's state, drawn first of all: its
+ * name, severity and summary, whether it is firing, acknowledged or suppressed, as the alert counter
+ * says it, and since when. It names nothing that raised it: more than one thing writes alerts.
+ *
+ * @param {Array} warnings [{ id, tone, text }], everything wrong with the entity, drawn together
+ * under the alert and above the fields, `danger` before `warning`. `text` is the whole sentence; a
+ * row it explains may keep a short mark of its own. A falsy entry is left out.
+ *
+ * @param {object} recordId { label, value, help? }: the record's own id, the first field, monospace and
+ * copied on a click. Labelled `<Kind> UUID` for a uuid and `<Kind> ID` otherwise. Every drawer about
+ * a record passes one (drawerOrder.test.jsx lists those that are not about a record).
+ *
+ * @param {object} description { value, help? }: the record's description, the second field, Not set
+ * while it is empty. Passed wherever the record has one.
+ *
+ * @param {Array} fields [{ label, value, display?, mono?, copyable?, help?, full?, danger?, warning? }],
+ * the fields after those two. `copyable` renders a CopyableId (`display` is shown in place of the
+ * copied value); `danger` and `warning` colour the value only, and their sentence is one of
+ * `warnings`; `help` puts a HelpTip beside the label, for a field whose name does not say what it is
+ * for, or whose value needs a sentence: a tooltip a keyboard and a touch screen reach.
  *
  * An entry `{ group, id, summary?, tone?, fields }` is a group of fields that opens and closes under
  * a heading (`GroupHeading`), closed until the reader opens it. `summary` is what the heading says
@@ -60,22 +75,22 @@ export const HelpDrawerContext = createContext(null)
  * (`danger` or `warning`) adds an icon of its own shape and the tone's colour to the words. `id` is
  * distinct for each entity the drawer shows, so a drawer that moves to another starts closed.
  *
+ * @param {node} beforeActions Sections that are facts about the entity, under the fields.
+ *
+ * @param {node} children Sections that are tools, under the facts. A section's buttons, in this slot
+ * or `beforeActions`, are laid out as the actions are: each a `context-action`, in a
+ * `context-buttons` grid.
+ *
  * @param {Array} actions [{ label, icon, onClick, to?, href?, disabled?, title?, primary?, pending?,
- * pendingLabel? }]. `title` is the action's tooltip, the shared one, for what its label does not
- * say, such as why it is disabled. `to` is an address in this app: the action is a link to it,
- * and a plain click runs `onClick` (or goes to `to`) in place. `href` is another site's, opened in a new tab.
- * `pending` puts that one action into the in-flight state. The first action marked
- * `primary` is drawn highlighted at the top of the list; a later one marked `primary` is drawn as
- * a plain action in its own position.
+ * pendingLabel? }], pinned at the drawer's foot while the rest scrolls (useActionsPin). `title` is the
+ * action's tooltip, the shared one, for what its label does not say, such as why it is disabled. `to`
+ * is an address in this app: the action is a link to it, and a plain click runs `onClick` (or goes to
+ * `to`) in place. One that opens a page is named `View in <page>`. `href` is another site's, opened in
+ * a new tab. `pending` puts that one action into the in-flight state. The first action marked
+ * `primary` is drawn highlighted at the top of the list; a later one marked `primary` is drawn as a
+ * plain action in its own position.
  *
  * @param {Function} onCopy Toast callback handed to CopyableId.
- *
- * @param {node} beforeActions Sections that are facts about the entity, rendered with the metadata
- * above the actions, and a section of fixed height.
- *
- * @param {node} children Sections that are tools, rendered after the actions so an unknown height
- * cannot push them off the drawer. A section's buttons, in this slot or `beforeActions`, are laid
- * out as the actions are: each a `context-action`, in a `context-buttons` grid.
  *
  * @param {Function} onClose Called by the X, by Escape, and by anything else that clears selection.
  *
@@ -86,13 +101,10 @@ export const HelpDrawerContext = createContext(null)
  * different row (`.context-panel-app`).
  *
  * @param {node} headerActions Controls drawn in the header before the X: the help drawer's Expand.
- *
- * @param {object} alert The firing alert that decides the entity's state, drawn above the fields: its
- * name, severity and summary, whether it is firing, acknowledged or suppressed, as the alert counter
- * says it, and since when. It names nothing that raised it: more than one thing writes alerts.
  */
-export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null, subject = 'details', className = '', headerActions = null }) {
+export function ContextPanel({ open, type, title, icon, subtitle, nav = null, alert = null, warnings = [], recordId = null, description = null, fields = [], beforeActions, children, actions = [], onCopy, onClose, subject = 'details', className = '', headerActions = null }) {
   const closeRef = useRef(null)
+  const { actionsRef, pinned, height: actionsHeight } = useActionsPin()
 
   // Escape closes, caught at the document because the panel does not take focus. Through the shared
   // stack, so Escape out of a modal opened from this panel closes the modal and not the panel
@@ -109,6 +121,14 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fi
   useEffect(() => {
     if (open && closeHelp && (helpExpanded.current || window.matchMedia?.(ONE_DRAWER_QUERY)?.matches)) closeHelp()
   }, [open, type, title, closeHelp])
+
+  const shownWarnings = warnings.filter(Boolean)
+  // The record's id, then its description, then the rest: one order for every drawer.
+  const orderedFields = [
+    ...(recordId ? [{ ...recordId, mono: true, copyable: true }] : []),
+    ...(description ? [{ ...description, label: 'Description', full: true }] : []),
+    ...fields,
+  ]
 
   const firstPrimary = actions.findIndex(a => a.primary)
   const orderedActions = actions.map((a, i) => ({ ...a, primary: i === firstPrimary }))
@@ -156,12 +176,18 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fi
 
         {nav && <div className="context-panel-nav">{nav}</div>}
 
-        <div className="context-panel-body">
-          {/* The alert goes above the metadata: it is the one item with a deadline. Rendered from a
-              prop, because this panel knows nothing about entities. */}
-          {alert && <AlertBanner alert={alert} open={open} />}
+        <div className="context-panel-body" style={{ '--context-actions-height': `${actionsHeight}px` }}>
+          {/* What is wrong goes above everything else the drawer says: the alert, which has a
+              deadline, then the warnings. Rendered from props, because this panel knows nothing
+              about entities. */}
+          {(alert || shownWarnings.length > 0) && (
+            <div className="context-panel-warnings">
+              {alert && <AlertBanner alert={alert} open={open} />}
+              {shownWarnings.length > 0 && <Warnings warnings={shownWarnings} />}
+            </div>
+          )}
 
-          {fieldRuns(fields).map((run, i) => (
+          {fieldRuns(orderedFields).map((run, i) => (
             Array.isArray(run)
               ? (
                 <dl key={i} className="context-panel-fields">
@@ -171,11 +197,14 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fi
               : <FieldGroup key={run.id} group={run} onCopy={onCopy} />
           ))}
 
-          {/* Facts, with the metadata they belong to, and sections of fixed height. */}
+          {/* Facts, with the metadata they belong to. */}
           {beforeActions && <div className="context-panel-facts">{beforeActions}</div>}
 
+          {/* Tools, under what the drawer says and above what it does. */}
+          {children && <div className="context-panel-extras">{children}</div>}
+
           {actions.length > 0 && (
-            <div className="context-panel-actions context-buttons">
+            <div ref={actionsRef} className={`context-panel-actions context-buttons${pinned ? ' context-panel-actions-pinned' : ''}`}>
               <div className="context-panel-section-label">Actions</div>
               {orderedActions.map((a, i) => {
                 const cls = `btn btn-sm ${a.primary ? 'btn-primary' : 'btn-ghost'} context-action${a.danger ? ' context-action-danger' : ''}`
@@ -226,13 +255,62 @@ export function ContextPanel({ open, type, title, icon, subtitle, nav = null, fi
               })}
             </div>
           )}
-
-          {/* Extra sections supplied by the page, below the actions so a tall section cannot push
-              Edit Details off the panel. */}
-          {children && <div className="context-panel-extras">{children}</div>}
         </div>
       </div>
     </aside>
+  )
+}
+
+/** The most of the drawer its pinned actions may take. */
+const PIN_MAX_SHARE = 0.4
+
+/**
+ * Whether the actions stay at the drawer's foot while the rest scrolls, and how tall they are. They
+ * are measured against the drawer: past PIN_MAX_SHARE they would crowd out the fields, so they scroll
+ * with them. A short window unpins them too, in App.css. Where nothing can be measured they are
+ * pinned, as they usually are.
+ */
+function useActionsPin() {
+  const [actions, setActions] = useState(null)
+  const [fit, setFit] = useState({ pinned: true, height: 0 })
+  useLayoutEffect(() => {
+    const drawer = actions?.closest('.context-panel-inner')
+    if (!drawer || typeof ResizeObserver !== 'function') return undefined
+    const measure = () => {
+      const height = actions.offsetHeight
+      const pinned = height <= drawer.clientHeight * PIN_MAX_SHARE
+      setFit(f => (f.pinned === pinned && f.height === height ? f : { pinned, height }))
+    }
+    measure()
+    const watcher = new ResizeObserver(measure)
+    watcher.observe(actions)
+    watcher.observe(drawer)
+    return () => watcher.disconnect()
+  }, [actions])
+  return { actionsRef: setActions, ...fit }
+}
+
+/**
+ * What is wrong with the entity, one line each, the problems before the warnings. A problem is a
+ * circle and a warning a triangle, and a screen reader hears the word, so neither is colour alone.
+ */
+function Warnings({ warnings }) {
+  const isDanger = (w) => w.tone === 'danger'
+  return (
+    <ul className="context-warnings" aria-label="Warnings">
+      {[...warnings.filter(isDanger), ...warnings.filter(w => !isDanger(w))].map(w => {
+        const Icon = isDanger(w) ? IconAlertCircle : IconAlertTriangle
+        return (
+          <li key={w.id} className={`context-warning context-warning-${isDanger(w) ? 'danger' : 'warning'}`}>
+            <Icon size={14} className="context-warning-icon" aria-hidden="true" />
+            <div>
+              <span className="sr-only">{isDanger(w) ? 'Problem: ' : 'Warning: '}</span>
+              {w.text}
+            </div>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -337,8 +415,9 @@ function fieldRuns(fields) {
  * A group of fields under a heading that opens and closes, closed to start with. The panel is
  * always mounted, so the open state lives here and is dropped with the group: the key is the group's
  * `id`, one for each entity, and a drawer that shows another entity starts closed. The rows stay in
- * the page and are hidden while it is closed, as History's groups do. A page that draws one after the
- * actions (`children`) keys it on that id.
+ * the page and are hidden while it is closed, as History's groups do. Open, they are the heading's
+ * sub-tree: indented, with a guide line from it to the last of them. A page that draws one among its
+ * tools (`children`) keys it on that id.
  */
 export function FieldGroup({ group, onCopy }) {
   const [open, setOpen] = useState(false)
@@ -355,7 +434,7 @@ export function FieldGroup({ group, onCopy }) {
         controls={rowsId}
         className="context-field-group-heading"
       />
-      <dl id={rowsId} className="context-panel-fields context-field-group-fields" hidden={!open}>
+      <dl id={rowsId} className="context-panel-fields context-subtree" hidden={!open}>
         {group.fields.map((f, i) => <Field key={i} f={f} onCopy={onCopy} />)}
       </dl>
     </section>
