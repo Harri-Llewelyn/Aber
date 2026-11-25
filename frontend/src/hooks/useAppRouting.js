@@ -15,7 +15,7 @@ export const MOVED_PAGES = new Map([
  * Tabs whose address changed within their page, `page/tab` to `page/tab`, for the same reason.
  * A tab split in several opens the one listed first: Profile's Security tab became Sessions, MFA
  * and Allowed Apps. A page's bare address is its first tab's, so one that was renamed and given a new
- * first tab is listed here as well: Archived Entities opened on Archived, and Entities opens on Active.
+ * first tab is listed here as well: `/archives` opened on Archived, and Entities opens on Active.
  */
 export const MOVED_TABS = new Map([
   ['profile/security', 'profile/sessions'],

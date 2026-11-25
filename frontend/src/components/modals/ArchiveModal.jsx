@@ -19,7 +19,7 @@ export function ArchiveModal({ entityId, displayName, onArchive, onCancel }) {
       message={<>
         Archiving <strong>{displayName}</strong> <span className="mono">[{entityId}]</span> takes
         it out of service and off the asset pages. Its record, its audit trail and its identifiers
-        are kept, and Restore on the Archived Entities page brings it back. Archiving a gateway
+        are kept, and Restore on the Entities page brings it back. Archiving a gateway
         also revokes its broker credential and archives its forge repository. Raw readings are
         not held back: they still age out of the historian on its raw window.
       </>}

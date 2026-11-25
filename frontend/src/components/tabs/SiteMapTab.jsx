@@ -185,7 +185,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   })
 
   // Only equipment in service is counted or listed (utils/inService.js), as on the Cells and Areas
-  // pages. The Archived Entities page holds the archived rest.
+  // pages. The Entities page holds the archived rest.
   const liveGateways = useMemo(() => inServiceGateways(gwList), [gwList])
   const liveAssets = useMemo(() => inServiceDevices(assets), [assets])
 

@@ -43,6 +43,6 @@ The line under the page's description says how long the historian keeps raw tele
 
 ## What this page is not
 
-**It is not Archived Entities**, which sits two places below it in the sidebar, past Backups. That page holds archived **entities**: areas, cells, gateways and devices, with a Restore button and an auto-purge timer. This page holds **readings**, and has neither.
+**It is not Entities**, which sits two places below it in the sidebar, past Backups. That page lists **entities**: areas, cells, gateways, devices and the rest. Its **Archived** tab has a Restore button and an auto-purge timer. This page holds **readings**, and has neither.
 
 **There is no restore button, and that is deliberate.** Retrieving an archived range is something you do on purpose, outside the dashboard, not with a click.

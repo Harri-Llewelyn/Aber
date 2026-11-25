@@ -669,7 +669,7 @@ describe('AreasTab files cells into areas', () => {
   })
 
   /* An area archives the way a cell does: the same dialog, the same timer, and the row leaves the
-     table for the Archived Entities page, which is the only place it can be deleted from. */
+     table for the Entities page, which is the only place it can be deleted from. */
   it('archives an area through the shared dialog rather than deleting it from here', async () => {
     api.post.mockResolvedValue({})
     await renderAreas()
@@ -696,7 +696,7 @@ describe('AreasTab files cells into areas', () => {
     // Archived, Restore is the one primary and comes first.
     expect(document.querySelectorAll('.context-panel-actions .btn-primary')).toHaveLength(1)
     expect(document.querySelector('.context-panel-actions .context-action')).toHaveTextContent('Restore Area')
-    // It asks first, in the dialog Archived Entities' Restore uses.
+    // It asks first, in the dialog Entities' Restore uses.
     fireEvent.click(screen.getByRole('button', { name: /Restore Area/ }))
     expect(api.post).not.toHaveBeenCalled()
     const dialog = screen.getByRole('dialog', { name: 'Restore area' })

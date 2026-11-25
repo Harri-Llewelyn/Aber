@@ -187,7 +187,7 @@ describe('a page that moved', () => {
 })
 
 /**
- * Entities was Archived Entities, at `/archives`, until 1.10. Its bare address opened on Archived, which
+ * Entities was at `/archives`, with two tabs, until 1.10. Its bare address opened on Archived, which
  * is the second tab now, so each old address still lands on the tab it named.
  */
 describe('a page that moved and was given a new first tab', () => {

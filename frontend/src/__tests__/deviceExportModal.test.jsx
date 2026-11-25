@@ -15,7 +15,7 @@ vi.mock('../utils/downloadBlob', () => ({ downloadBlob: vi.fn() }))
 
 /**
  * The export dialog on its own, as both of its callers use it: the Devices panel (a live device,
- * JSON chosen) and Archived Entities (an archived device by its entity id, Bundle chosen). It runs
+ * JSON chosen) and Entities (an archived device by its entity id, Bundle chosen). It runs
  * the export itself and closes on success; a failure stays in it.
  */
 

@@ -784,7 +784,7 @@ describe('playing a capture back', () => {
     expect(missing.textContent).toMatch(/played\s+back only there/)
     expect(missing.textContent).toMatch(/upgrade the release/)
     expect(missing.textContent).not.toMatch(/simulated/i)
-    expect(document.body.textContent).not.toMatch(/Archived Entities/)
+    expect(document.body.textContent).not.toMatch(/Entities/)
     expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
   })
 

@@ -366,7 +366,7 @@ describe('the row and its drawer', () => {
     expect(within(panel()).queryByText('Retention')).toBeNull()
   })
 
-  /** Restore asks first, in the dialog Archived Entities' Restore uses. */
+  /** Restore asks first, in the dialog Entities' Restore uses. */
   describe('Restore Cell asks first', () => {
     const openRestore = async () => {
       renderCells({}, { cells: [{ ...CELL, is_archived: true, auto_delete_at: null }] })

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 /**
- * Archived Entities reads whether a gateway's appliance had enrolled, which its Restore dialog names:
+ * Entities' Archived tab reads whether a gateway's appliance had enrolled, which its Restore dialog names:
  * the same machine's old enrolment is cleared before it is set up again.
  */
 

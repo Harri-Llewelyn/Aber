@@ -41,7 +41,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Restore Access** lets them sign in again, with the role they had.
 - **Remove Access also deletes the picture the person put on their account.** Nobody else could see it, and nobody needs it now. Restore Access brings them back with no picture. If the picture cannot be deleted, a message says so, and their sign-in is not blocked yet. Select **Remove Access** again to finish.
 - **Change Name** sets or changes a person's display name. Empty the box and select **Save** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
-- A new name shows everywhere at once, even beside things the person did before. Approvals and Archived Entities still show the email address the person had at the time.
+- A new name shows everywhere at once, even beside things the person did before. Approvals and Entities still show the email address the person had at the time.
 - **Change Role** lists the roles, starting on theirs. Choose another, and the dialog says what it lets them do. Nothing changes until you select **Change Role** in the dialog.
 - The new role applies from their next request. Node-RED follows within a minute, and Grafana when they next sign in to it. Their own dashboard catches up when it next reloads. A person whose access is removed needs **Restore Access** first.
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
@@ -57,7 +57,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - Changing the address ends all their sessions, so they sign in again with the new one. Their role, name and history stay.
 - An address another account already has is refused. A person whose access is removed needs **Restore Access** first.
 - An invitation or a password-reset link sent to the old address stops working. If they have not set a password yet, give them one with **Set New Password**.
-- **Which address shows where.** A page shows the address the account has now, unless it says it shows the one they had at the time. Approvals and Archived Entities say so: they keep the address the person had when they acted.
+- **Which address shows where.** A page shows the address the account has now, unless it says it shows the one they had at the time. Approvals and Entities say so: they keep the address the person had when they acted.
 - **A link to a person still works after you change their address.** A link in a notification or a bookmark names the account, not the address.
 - **Grafana** takes the new address at their next sign-in there. **The forge** does not. A person's forge profile keeps the address it was made with. Someone who first opens the forge on Aber 1.7.0 or later has a placeholder address there instead. Either way, they sign in to the forge as before.
 - **You cannot change your own role, email address or access here, set your own password or end your own sessions.** Ask another Administrator. Your own row is marked **YOU**. Those actions in your drawer are greyed out: hover over one to see why. In place of **Set New Password**, your drawer has **View in Profile**. Your **Profile** page is where you change your own password, with **Change Password**. Its **Sessions** tab lists your own sessions and ends them, so your drawer has no list.

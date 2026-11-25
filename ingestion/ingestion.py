@@ -1273,7 +1273,7 @@ def resolve_device(wire_id: str, use_cache: bool = True, include_archived: bool 
     drop(
         "device_archived",
         "Dropping traffic for device '%s' (%s): the device is ARCHIVED. Restore it on the "
-        "Archived Entities page to accept its readings again.",
+        "Entities page to accept its readings again.",
         wire_id, row.get("name"),
         emit_log=_throttled(_archived_device_warned, wire_id, ARCHIVED_DEVICE_WARN_INTERVAL_SECONDS),
         device=wire_id,
@@ -1887,7 +1887,7 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                 "device_archived",
                 "Dropping DBIRTH for ARCHIVED device '%s' (%s) on edge node '%s'. It is NOT "
                 "quarantined -- the device is known and was retired deliberately. Restore it on "
-                "the Archived Entities page to accept it again.",
+                "the Entities page to accept it again.",
                 wire_id, device.get("name"), gateway_wire_id,
                 emit_log=_throttled(
                     _archived_device_warned, wire_id, ARCHIVED_DEVICE_WARN_INTERVAL_SECONDS),
@@ -3310,7 +3310,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         drop(
             "device_archived",
             "Dropping DDATA for ARCHIVED device '%s' (%s) on edge node '%s'. Restore it on the "
-            "Archived Entities page to record its readings again.",
+            "Entities page to record its readings again.",
             wire_id, device.get("name"), gateway_wire_id,
             emit_log=_throttled(
                 _archived_device_warned, wire_id, ARCHIVED_DEVICE_WARN_INTERVAL_SECONDS),

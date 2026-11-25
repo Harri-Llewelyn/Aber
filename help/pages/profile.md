@@ -65,7 +65,7 @@ A change you make then applies in this browser only. The next time you sign in, 
 Your display name is shown first wherever you appear. Your email address stays the way you sign in.
 
 - **On the Audit Trail, Approvals and People, your email address is always shown beside the name.** Two people can have the same name, and anyone can type any name. The email address tells them apart.
-- **In the account menu and on Archived Entities, the email address is shown when you point at the name.**
+- **In the account menu and on the Entities page's Retired tab, the email address is shown when you point at the name.**
 - **Without a display name,** you are shown by your email address alone.
 - **It can be up to 80 characters.** Spaces at either end are removed. A line break, a tab or another control character is refused.
 - **An Administrator can also set it,** with **Change Name** on the **People** tab of **Access Control**.
@@ -73,7 +73,7 @@ Your display name is shown first wherever you appear. Your email address stays t
 
 **A new name shows everywhere at once.** Pages read the name when they open. So a person who changes their name is shown under the new one, even beside things they did before.
 
-**The email address beside it is the one the account has now, unless the page says it is the one they had at the time.** Approvals and Archived Entities say so. They keep the address the person had when they proposed, decided or deleted something. A decision made before Aber 1.8.0 kept no address. Approvals shows an Administrator the address the decider has now instead.
+**The email address beside it is the one the account has now, unless the page says it is the one they had at the time.** Approvals and Entities say so. They keep the address the person had when they proposed, decided or deleted something. A decision made before Aber 1.8.0 kept no address. Approvals shows an Administrator the address the decider has now instead.
 
 ## Your picture
 

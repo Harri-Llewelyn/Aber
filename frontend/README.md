@@ -1527,6 +1527,8 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 - **A renamed page keeps its old address.** `MOVED_PAGES` in `hooks/useAppRouting.js` maps the old
   first path segment to the new one, and the router replaces the address with the new page's, tab
   and query string kept: `/directory/ingestion?sort=name` becomes `/system/ingestion?sort=name`.
+  `MOVED_TABS` maps a tab, or a bare address whose page has a new first tab: `/archives` opened on
+  Archived, so it becomes `/entities/archived`.
   `tabFromUrl` reads the old address as the new page, so nothing else mounts first. An entry stays
   for as long as a bookmark or an old link may name it.
 - **Tests start at `/`** (`src/test/setup.js`). A test that needs a view sets the address before it
@@ -1547,11 +1549,36 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
-| Archives | `retired` | `sort` |
+| Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, `sort`; `entity`, on Active |
 | System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)) |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
 | Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
+
+### The Entities page lists every kind, and finds any id
+
+`EntitiesTab` reads `entity_directory` (0321) for what is in service. The view runs as its reader, so the
+database decides the rows and the page gates nothing. `utils/entities.js` holds the kinds, what sets a row
+apart within its kind, and what each kind's further ids are called.
+
+- **Two things are beside the view's rows,** for an Administrator and an Auditor alone: people, and the
+  identities a migration pinned. No table holds either. People come from `list_people()` for an
+  Administrator, who sees whose access was removed, and from `list_user_accounts()` for an Auditor. The
+  pinned identities are `KNOWN_PRINCIPALS`. Nobody else asks for either.
+- **The search is `find_entities()`,** asked once typing rests. Each tab lists what it found and nothing
+  else, so a tab and the search cannot disagree. `findRank()` applies the same rule to the rows the
+  browser holds, and mirror check `159` holds the two to it.
+- **`?find=` is the search, and the three tabs share it.** It is the address of a "what is this?" link:
+  `/entities?find=<id>`. A whole id that names one row opens that row: an Active row's drawer, or the tab
+  that lists another. It opens once, as an arrival by id does (`useArrivalSelection`), so a drawer that is
+  closed stays closed.
+- **The Active table is the whole list, sorted in the browser,** and draws `ACTIVE_PAGE` rows at a time.
+- **`EntityDrawer` is the same for every kind.** It reads the row and nothing more, except how many
+  automations apply to a device. `entityUrl()` in `routes.js` knows each kind's own page, and
+  `tabIsVisible()` decides whether this reader may open it: an Auditor reads an identity here, and Access
+  Control is an Administrator's.
+- **A retired row is for `archive:manage` or `audit_trail:read`.** A reader with neither is told so, rather
+  than that nothing has been retired.
 
 ### The Captures and Playbacks tabs: a search, and one job
 
@@ -1620,15 +1647,15 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
 | `HistoryTab` | The History page (tab id `history`), ungated: a device's readings over a window ([History and its chart](#history-and-its-chart)). Overview, its first tab and default, draws where readings arrived, a lane per device (`HistoryOverview`). Device lists the devices to pick from, then charts one device's metrics (`HistoryDevice`), one `TimeSeriesChart` each, stacked under one time axis (`ChartTimeline`), each head showing its latest reading. Export CSV, on the Device, Overview, Metric, Cell and Area tabs, is the readings export ([History's Export](#historys-export)). Cell compares one metric across a cell's machines on one scale, with an hour-of-day heatmap (`HistoryCell`, [History's Cell tab](#historys-cell-tab)) |
-| `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
+| `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Entities' Archived tab. Its panel shows the Unified Namespace filter for everything beneath the area, and Edit Details says how many devices' topics a rename moves, while the bridge is on (`common/UnsPlace.jsx`) |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin. Its panel shows the Unified Namespace filter beneath the cell, and Edit Details what a rename moves, as the Areas page does |
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
-| `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
+| `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Entities opens too. The panel's **Unified Namespace Topic** is the device's row in `device_uns_paths` (0214) under the chart's root, or the reason it has none in words (`utils/unsPath.js`); while the bridge is off (`VITE_UNS_MQTT_ENABLED`) it says so, and no page reads the view |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the form for a schema, and Upload the file** ([Schemas read and write YAML](#schemas-read-and-write-yaml)); changing one is versioning, not editing |
 | `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example. The page's second tab, **Built-in**, is `BuiltInAlerts` and its drawer `BuiltInAlertDrawer`: the alerts Aber raises about itself, read-only ([The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)) |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
-| `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (behind a [typed gate](#typed-text-guards-removing-access-and-what-cannot-be-undone)) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
+| `EntitiesTab` | The Entities page (tab id `entities`), ungated: one card, a tab for each state of one lifecycle, and one search over the three ([The Entities page](#the-entities-page-lists-every-kind-and-finds-any-id)). **Active**: everything in service this reader may see, of every kind, with `EntityDrawer` for the open row. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (behind a [typed gate](#typed-text-guards-removing-access-and-what-cannot-be-undone)) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
 
@@ -2782,7 +2809,7 @@ them. Nothing checks this list, because a word that is allowed cannot be policed
 | A machine identity taken out of use | Withdraw / Reinstate, WITHDRAWN | Revoke(d) |
 | A token or broker credential taken back | Revoke, REVOKED | Withdraw |
 | Out of commission | Archived | Decommissioned, Out of Commission, Inaccessible |
-| Archived Entities' two tabs | Archived, Retired | |
+| Entities' three tabs | Active, Archived, Retired | |
 | The alert flag | WARNING | WARN |
 | The shadow target for playback | Playback gateway | simulated gateway, replay lane, Shadow, Shadow lane |
 | A shadow device | replay lane | SHADOW |
@@ -2833,7 +2860,7 @@ in "building management system".
   markers each carry an icon, a shape or a number as well (WCAG 2.2 SC 1.4.1).
 - **The sidebar** colours an icon only when the viewer can act on what it flags, and shows how many.
 - **Archived things are hidden by default**, in every list and on the Site Map. A list opens on
-  Active, archived rows are one filter away, and Archived Entities lists them all.
+  Active, archived rows are one filter away, and Entities' Archived tab lists them all.
 - **Sizes** use binary units labelled KiB and MiB. There is one relative-time style and one absolute
   date-time format (`utils/format.js`).
 - **Help pages** state nothing wrong and name the page's main controls; they are not full manuals.
@@ -2868,7 +2895,8 @@ A help page uses the words in [Words and rules](#words-and-rules), as the page i
 [`help/pages/<tab id>.md`](../help/pages) at the top of the repository. `src/help/index.js`
 bundles every Markdown file in `help/` with one eager `import.meta.glob` of `**/*.md` there,
 and keys each by its path under `help/` without `.md`: `pages/devices`, `guides/tutorial`,
-`site/install`, and `README` for the contents. The page for a tab is `pages/<tab id>`. There is no
+`site/install`, and `README` for the contents. The page for a tab is `pages/<tab id>`, or the file its entry
+in `navigation.jsx` names with `help`: Entities keeps `pages/archives`, the path code and docs cite. There is no
 manifest: a second list is the one that goes stale. `scripts/check-docs-drift.mjs` (check 16)
 asserts the correspondence **in both directions** — every page in `navigation.jsx` has a file, and
 every file names a page that exists. The second direction is the one that rots silently: a help

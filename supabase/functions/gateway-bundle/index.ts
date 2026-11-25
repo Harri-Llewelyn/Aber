@@ -363,7 +363,7 @@ export default async function handler(req: Request): Promise<Response> {
       return json(400, {
         error: "That gateway is archived",
         details:
-          "Restore it from Archived Entities or its drawer, then set it up. No enrolment token was minted.",
+          "Restore it from Entities or its drawer, then set it up. No enrolment token was minted.",
       });
     }
 

@@ -131,7 +131,7 @@ describe('device row actions', () => {
     expect(panelLabels()).not.toMatch(/Archive Device/i)
   })
 
-  /** Restore asks first, in the dialog Archived Entities' Restore uses, replay lanes and all. */
+  /** Restore asks first, in the dialog Entities' Restore uses, replay lanes and all. */
   describe('Restore Device asks first', () => {
     const openRestore = async () => {
       await show([device({ is_archived: true })])

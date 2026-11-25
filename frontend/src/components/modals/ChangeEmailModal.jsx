@@ -86,7 +86,7 @@ export function ChangeEmailModal({ person, onClose, onChanged, showToast }) {
           {...fieldErrorProps(problem, 'change-email-error', 'change-email-hint')}
         />
         <div id="change-email-hint" className="form-hint">
-          Their role, name and history stay. Approvals and Archived Entities keep the address they had when they acted.
+          Their role, name and history stay. Approvals and Entities keep the address they had when they acted.
         </div>
         <FieldError id="change-email-error" error={problem} />
       </div>

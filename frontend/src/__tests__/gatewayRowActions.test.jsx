@@ -210,7 +210,7 @@ describe('gateway row actions', () => {
     expect(panel.queryByText(/Archive Gateway/i)).not.toBeInTheDocument()
   })
 
-  /** Restore asks first, in the dialog Archived Entities' Restore uses, with the same facts. */
+  /** Restore asks first, in the dialog Entities' Restore uses, with the same facts. */
   describe('Restore Gateway asks first', () => {
     const openRestore = async (overrides = {}) => {
       await show([gateway({ is_archived: true, ...overrides })])

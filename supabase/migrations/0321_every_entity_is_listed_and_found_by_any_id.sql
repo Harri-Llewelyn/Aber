@@ -2,7 +2,7 @@
 --
 -- Nothing answered "what is this id?". The Audit Trail's search matches an entity id, and finds only
 -- what has audit rows; entityUrl() in the dashboard knows five kinds. Nothing listed what is in service
--- either: the Archived Entities page held only what was taken out.
+-- either: the one page that lists entities of several kinds held only what was taken out.
 --
 --   * entity_directory: one row for each thing a page of the dashboard lists by its id. Areas, cells,
 --     gateways, devices, schema versions, metrics, captures, backups, automations and the machine
@@ -14,7 +14,7 @@
 --     any part of a name, a whole id first. It runs as its caller too, and reads the view.
 --   * A replay lane is a recording of a device, so a live one is not listed. An archived one is, because the
 --     Archived tab lists it. People are not listed: nothing but a SECURITY DEFINER function reads them.
---   * Archived Entities is now Entities, so the two comments that name the page say so.
+--   * That page is now Entities, so the two comments that name it say so.
 --
 -- Reasoning: supabase/README.md, "Every entity is listed and found by any id (0321)".
 -- Idempotent.
