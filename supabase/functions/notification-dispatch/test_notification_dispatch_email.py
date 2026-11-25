@@ -159,6 +159,9 @@ class AnAlertIsEmailed(unittest.TestCase):
         # What the stack held, to put back.
         cls.saved = {k: psql(f"SELECT value::text FROM public.system_settings WHERE key = {literal(k)}") for k in SETTING_KEYS}
 
+        # Class clean-ups, last first, which Python also runs when setUpClass raises: each is registered
+        # just before what it undoes.
+        cls.addClassCleanup(stack_exec.remove_probe, RECEIVER)
         started = stack_exec.run_probe(
             RECEIVER, stack_exec.default_probe_image(),
             "python -c \"import base64; exec(base64.b64decode('" + base64.b64encode(RECEIVER_PY.encode()).decode() + "'))\"",
@@ -168,6 +171,7 @@ class AnAlertIsEmailed(unittest.TestCase):
         kubectl("wait", "--for=condition=Ready", f"pod/{RECEIVER}", "--timeout=120s")
         # A Service of its own, selecting this pod alone: the pod carries the ingestion component's
         # labels, which the real ingestion pod shares.
+        cls.addClassCleanup(kubectl, "delete", "service", RELAY_SERVICE, "--ignore-not-found", check=False)
         kubectl("label", f"pod/{RECEIVER}", "aber.io/test-smtp=relay", "--overwrite")
         kubectl("apply", "-f", "-", input=json.dumps({
             "apiVersion": "v1", "kind": "Service", "metadata": {"name": RELAY_SERVICE},
@@ -175,23 +179,20 @@ class AnAlertIsEmailed(unittest.TestCase):
                      "ports": [{"port": cls.relay_port, "targetPort": RECEIVER_PORT}]},
         }))
 
+        cls.addClassCleanup(cls.put_back)
         psql("UPDATE public.system_settings SET value = '\"warning\"' WHERE key = 'notifications.email_min_severity'")
         psql("UPDATE public.system_settings SET value = '12' WHERE key = 'notifications.reminder_hours'")
         cls.tell("Shopfloor_Manager")
 
     @classmethod
-    def tearDownClass(cls):
-        try:
-            psql(f"DELETE FROM public.platform_alerts WHERE fingerprint LIKE {literal(FINGERPRINT + '%')}")
-            psql("DELETE FROM public.notification_deliveries WHERE event = 'test' AND channel = 'email'"
-                 " AND requested_by IS NOT NULL AND created_at > now() - interval '1 hour'")
-            for key, value in cls.saved.items():
-                if value:
-                    psql(f"UPDATE public.system_settings SET value = {literal(value)}::jsonb WHERE key = {literal(key)}"
-                         f" AND value IS DISTINCT FROM {literal(value)}::jsonb")
-        finally:
-            kubectl("delete", "service", RELAY_SERVICE, "--ignore-not-found", check=False)
-            stack_exec.remove_probe(RECEIVER)
+    def put_back(cls):
+        psql(f"DELETE FROM public.platform_alerts WHERE fingerprint LIKE {literal(FINGERPRINT + '%')}")
+        psql("DELETE FROM public.notification_deliveries WHERE event = 'test' AND channel = 'email'"
+             " AND requested_by IS NOT NULL AND created_at > now() - interval '1 hour'")
+        for key, value in cls.saved.items():
+            if value:
+                psql(f"UPDATE public.system_settings SET value = {literal(value)}::jsonb WHERE key = {literal(key)}"
+                     f" AND value IS DISTINCT FROM {literal(value)}::jsonb")
 
     @classmethod
     def tell(cls, *roles):

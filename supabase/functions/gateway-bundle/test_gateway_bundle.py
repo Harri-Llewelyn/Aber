@@ -132,9 +132,20 @@ class BundleBase(unittest.TestCase):
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"PostgREST is unreachable at {SUPABASE_URL}: {err}")
 
-        for gid in (REMOTE_GW, HOST_GW, THIRD_PARTY_GW):
-            rest(f"/gateways?id=eq.{gid}", method="DELETE")
+        # Every sign-in comes before the first row is deleted or made: a class that skips changes nothing.
+        cls.tokens = {}
+        for role, email in ACCOUNTS.items():
+            try:
+                cls.tokens[role] = sign_in(email)
+            except stack_sign_in.RateLimited:
+                raise
+            except Exception as err:  # noqa: BLE001
+                raise unittest.SkipTest(f"could not sign in as {email}: {err}")
 
+        # Python runs a class clean-up when setUpClass raises, and tearDownClass only when it returns.
+        cls.addClassCleanup(cls.delete_gateways)
+        # What a run that was killed left behind.
+        cls.delete_gateways()
         _, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body=[
@@ -148,17 +159,8 @@ class BundleBase(unittest.TestCase):
         )
         cls.sparkplug_id = next(r["sparkplug_id"] for r in rows if r["id"] == REMOTE_GW)
 
-        cls.tokens = {}
-        for role, email in ACCOUNTS.items():
-            try:
-                cls.tokens[role] = sign_in(email)
-            except stack_sign_in.RateLimited:
-                raise
-            except Exception as err:  # noqa: BLE001
-                raise unittest.SkipTest(f"could not sign in as {email}: {err}")
-
     @classmethod
-    def tearDownClass(cls):
+    def delete_gateways(cls):
         for gid in (REMOTE_GW, HOST_GW, THIRD_PARTY_GW):
             rest(f"/gateways?id=eq.{gid}", method="DELETE")
 

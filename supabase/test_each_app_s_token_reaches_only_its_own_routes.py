@@ -223,20 +223,21 @@ class AnAppsToken:
                 raise AssertionError(f"{missing}, and REQUIRE_SEEDED_ACCOUNTS is set")
             raise unittest.SkipTest(f"{missing}: {cls.APP}'s routes cannot be probed here")
         cls.app = app
+        cls.token = None
+        # Python also runs a class clean-up when setUpClass raises, and the sign-in may then be approved.
+        cls.addClassCleanup(cls.clean_up)
         body = AppSignIn(app, secret, Stack.person_token, Stack.registered[app["id"]]["redirect_uris"][0]).tokens()
         cls.token = body["access_token"]
         cls.id_token = body.get("id_token")
 
     @classmethod
-    def tearDownClass(cls):
+    def clean_up(cls):
         """The app's token ends its own session, as forge-signout ends the door's; then the approval
         this made goes."""
-        token = getattr(cls, "token", None)
-        if not token:
-            return
         try:
-            status, _, text = sign_out(token)
-            assert status == 204, f"/auth/v1/logout refused {cls.APP}'s token ({status}): {text[:200]}"
+            if cls.token:
+                status, _, text = sign_out(cls.token)
+                assert status == 204, f"/auth/v1/logout refused {cls.APP}'s token ({status}): {text[:200]}"
         finally:
             if cls.app["id"] not in Stack.in_force:
                 request(f"/auth/v1/user/oauth/grants?client_id={cls.app['id']}", method="DELETE",

@@ -40,21 +40,19 @@ class AnArchivedGatewayIsRefusedABundle(unittest.TestCase):
             rest("/gateways?limit=1")
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"PostgREST is unreachable at {SUPABASE_URL}: {err}")
-        rest(f"/gateways?id=eq.{ARCHIVED_GW}", method="DELETE")
-        rest("/gateways", method="POST", body=[{
-            "id": ARCHIVED_GW, "name": "Test Archived Bundle Gateway", "status": "OFFLINE", "deployment": "remote",
-        }])
-        rest(f"/gateways?id=eq.{ARCHIVED_GW}", method="PATCH", body={"is_archived": True})
+        # Signed in before the row is deleted or made: a class that skips changes nothing.
         try:
             cls.manager = sign_in("manager@aber.local")
         except stack_sign_in.RateLimited:
             raise
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"could not sign in as manager@aber.local: {err}")
-
-    @classmethod
-    def tearDownClass(cls):
+        cls.addClassCleanup(rest, f"/gateways?id=eq.{ARCHIVED_GW}", method="DELETE")
         rest(f"/gateways?id=eq.{ARCHIVED_GW}", method="DELETE")
+        rest("/gateways", method="POST", body=[{
+            "id": ARCHIVED_GW, "name": "Test Archived Bundle Gateway", "status": "OFFLINE", "deployment": "remote",
+        }])
+        rest(f"/gateways?id=eq.{ARCHIVED_GW}", method="PATCH", body={"is_archived": True})
 
     def tokens(self):
         _, rows = rest(f"/gateway_enrollment_tokens?gateway_id=eq.{ARCHIVED_GW}&select=id")

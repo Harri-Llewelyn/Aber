@@ -112,6 +112,9 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
         cls.saved_vault = {n: psql(f"SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = {literal(n)}") or None
                            for n in VAULT_NAMES}
 
+        # Class clean-ups, last first, which Python also runs when setUpClass raises: each is registered
+        # just before what it undoes.
+        cls.addClassCleanup(stack_exec.remove_probe, RECEIVER)
         started = stack_exec.run_probe(
             RECEIVER, stack_exec.default_probe_image(),
             "python -c \"import base64; exec(base64.b64decode('" + base64.b64encode(RECEIVER_PY.encode()).decode() + "'))\"",
@@ -125,6 +128,7 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
         # host allowed. Written as the owner, so through the vault's own functions.
         cls.key = "whsec_" + base64.b64encode(secrets.token_bytes(32)).decode()
         cls.url = f"http://{cls.receiver_ip}:{PORT}/hook/{uuid.uuid4().hex}"
+        cls.addClassCleanup(cls.put_back)
         cls.set_vault({"notification_webhook_url": cls.url, "notification_webhook_signing_key": cls.key})
         psql("UPDATE public.system_settings SET value = '\"warning\"' WHERE key = 'notifications.webhook_min_severity'")
         psql("UPDATE public.system_settings SET value = '12' WHERE key = 'notifications.reminder_hours'")
@@ -132,16 +136,13 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
              + "::jsonb WHERE key = 'notifications.webhook_allowed_hosts'")
 
     @classmethod
-    def tearDownClass(cls):
-        try:
-            psql(f"DELETE FROM public.platform_alerts WHERE fingerprint LIKE {literal(FINGERPRINT + '%')}")
-            for key, value in cls.saved_settings.items():
-                if value:
-                    psql(f"UPDATE public.system_settings SET value = {literal(value)}::jsonb WHERE key = {literal(key)}"
-                         f" AND value IS DISTINCT FROM {literal(value)}::jsonb")
-            cls.set_vault(cls.saved_vault)
-        finally:
-            stack_exec.remove_probe(RECEIVER)
+    def put_back(cls):
+        psql(f"DELETE FROM public.platform_alerts WHERE fingerprint LIKE {literal(FINGERPRINT + '%')}")
+        for key, value in cls.saved_settings.items():
+            if value:
+                psql(f"UPDATE public.system_settings SET value = {literal(value)}::jsonb WHERE key = {literal(key)}"
+                     f" AND value IS DISTINCT FROM {literal(value)}::jsonb")
+        cls.set_vault(cls.saved_vault)
 
     @classmethod
     def set_vault(cls, values):
@@ -189,7 +190,7 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
 
     def state(self, alert_id, event):
         return psql(f"SELECT state FROM public.notification_deliveries WHERE alert_id = {literal(alert_id)}"
-                    f" AND event = {literal(event)} ORDER BY created_at DESC LIMIT 1")
+                    f" AND channel = 'webhook' AND event = {literal(event)} ORDER BY created_at DESC LIMIT 1")
 
     def wait_for_state(self, alert_id, event, wanted):
         deadline = time.time() + WAIT_SECONDS
@@ -263,7 +264,9 @@ class AnAlertReachesTheWebhook(unittest.TestCase):
             deadline = time.time() + WAIT_SECONDS
             error = ""
             while time.time() < deadline and not error:
-                error = psql(f"SELECT coalesce(last_error, '') FROM public.notification_deliveries WHERE alert_id = {literal(alert_id)}")
+                # The webhook's: a site that emails alerts has a second delivery for this one.
+                error = psql("SELECT coalesce(last_error, '') FROM public.notification_deliveries"
+                             f" WHERE channel = 'webhook' AND alert_id = {literal(alert_id)}")
                 time.sleep(2)
             self.assertEqual(error, "The webhook's host is not on its allowed hosts, so the message was refused.")
             self.assertEqual(self.received(alert_id), [], "nothing was posted")

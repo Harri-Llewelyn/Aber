@@ -32,6 +32,8 @@ import urllib.request
 # suite can never be mistaken for -- or collide with -- the other's.
 GATEWAY_UUID = "1a000000-0000-4000-8000-000000000001"
 DEVICE_UUID = "2a000000-0000-4000-8000-000000000001"
+# The device's sparkplug_id, as the database generates it: the key of its asset_config rows.
+SPARKPLUG_ID = "dev" + DEVICE_UUID.replace("-", "")[:21]
 
 GATEWAY_NAME = "AAS_Conformance_Gateway"
 DEVICE_NAME = "AAS_Conformance_Device"
@@ -105,8 +107,18 @@ def _upsert(base, token, anon, table, payload, on_conflict=None):
 
 def ensure(base, token, anon):
     """
-    Provision the subject and return its row. Idempotent.
+    Provision the subject and return its row. Idempotent. A subject that cannot be finished is removed
+    before the error is raised: its suite then skips, and a suite that skips leaves nothing behind.
+    """
+    try:
+        return _provision(base, token, anon)
+    except Exception:
+        teardown(base, token, anon)
+        raise
 
+
+def _provision(base, token, anon):
+    """
     ORDER IS A DEPENDENCY, the same one 0020 records: the schema must be attached before anything
     reads the device, and `asset_config` is keyed by the TEXT `sparkplug_id`, which does not exist
     until the device row does.
@@ -178,7 +190,7 @@ def teardown(base, token, anon):
     APPEND to it. See 0020: "the purge is itself recorded".
     """
     for path in (
-        f"/asset_config?asset_id=like.dev*&metric_name=in.({','.join(BIRTH_VALUES)})",
+        f"/asset_config?asset_id=eq.{SPARKPLUG_ID}",
         f"/device_submodels?device_id=eq.{DEVICE_UUID}",
         f"/device_nameplate?device_id=eq.{DEVICE_UUID}",
         f"/devices?id=eq.{DEVICE_UUID}",
@@ -188,5 +200,5 @@ def teardown(base, token, anon):
     ):
         try:
             _request(base, token, anon, "DELETE", path)
-        except FixtureError:
+        except (FixtureError, OSError):
             pass

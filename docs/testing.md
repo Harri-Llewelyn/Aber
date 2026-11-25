@@ -299,6 +299,10 @@ skip is taken in `setUpClass`, which removes the whole class, and a run of nothi
 hid a stale assertion that was red on `main` for days (#207). `REQUIRE_SEEDED_ACCOUNTS`,
 `REQUIRE_LOG_PIPELINE` and `REQUIRE_PLAYBACK_REPLAY` are the same flag on the suites they cover.
 
+**A suite that skips leaves the stack as it found it**, apart from those drift check 575 lists. It signs
+in before it makes anything, and undoes the rest with `addClassCleanup`: Python leaves `tearDownClass`
+out when `setUpClass` raises, and a skip raises.
+
 **Every suite signs in from one address.** Through a port-forward each request reaches the gateway
 from loopback, so the lane shares one sign-in budget: GoTrue's burst of 30 per address, refilled
 about once every two seconds, behind the gateway's total of 120 a minute. Whether a suite meets a
@@ -339,6 +343,9 @@ recording as tried: `0001` creates `pg_cron`, which refuses outside the single d
 cluster's `cron.database_name`, and `IF NOT EXISTS` does not save it because the refusal is raised
 from inside pg_cron's own install script. The chain aborts on its first file. A throwaway *cluster*
 has its own `postgres` database and its own GUC pointing at it, so the same line succeeds untouched.
+
+**pg_cron runs on it too**, so a suite that calls a function pg_cron calls every minute holds what that
+run waits for until it rolls back: the evaluator's lock, or the probe a collector reads first.
 
 **This is a paved road, not a fence.** `SUPABASE_DB_PORT` still defaults to `54322`, because the
 dev loop forwards it there, `validate.py` derives from it and both backup scripts read it — changing

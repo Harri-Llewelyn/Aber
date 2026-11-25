@@ -229,12 +229,9 @@ def definition_of(cd):
 class TestTheRoutesServeWhatTheExportCarries(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.addClassCleanup(clean_up)
         clean_up()
         cls.skip_reason = provision()
-
-    @classmethod
-    def tearDownClass(cls):
-        clean_up()
 
     def setUp(self):
         if self.skip_reason:

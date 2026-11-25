@@ -107,6 +107,12 @@ class FiguresBase(unittest.TestCase):
         self.cur.execute("SELECT to_regclass('public.directory_figures') IS NOT NULL;")
         if not self.cur.fetchone()[0]:
             self.skipTest("0223 is not applied to this database")
+        # pg_cron runs both collectors on this database every minute, and each reads its probe first.
+        # Held until the rollback, the tables keep those runs out: a test writes the probe before the
+        # figures, a run the figures before the probe, and the two would deadlock.
+        self.cur.execute("SET LOCAL lock_timeout = '30s';"
+                         "LOCK TABLE public.directory_figures_probe, public.directory_liveness_probe IN ACCESS EXCLUSIVE MODE;"
+                         "SET LOCAL lock_timeout = 0;")
         self.next_id = 9_223_000_000
 
     def tearDown(self):

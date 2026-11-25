@@ -203,16 +203,13 @@ class TestAnExportReadsTheSiteVocabulary(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        cls.addClassCleanup(clean_up)
         cls.skip_reason = provision()
         if cls.skip_reason is None:
             cls.group = import_vocabulary("group", "site_own", [concept(GROUP_ID, "Group KPI", LICENSED_TEXT)], name=GROUP_FILE)
             # The metric the id's definition is read for must be on the device before it is exported.
             call("POST", "/rest/v1/device_submodels", TOKEN, {"device_id": DEVICE["id"], "schema_id": Vocabularies.schema_id})
             Vocabularies.attached = True
-
-    @classmethod
-    def tearDownClass(cls):
-        clean_up()
 
     def setUp(self):
         if self.skip_reason:

@@ -112,13 +112,14 @@ class BackupServiceTests(unittest.TestCase):
         cls.admin = sign_in()
         if not stack_exec.running("backup-service"):
             raise unittest.SkipTest(f"{stack_exec.describe('backup-service')} is not running")
+        cls.addClassCleanup(cls.clean_up)
         # A clean slate: a job left over from an earlier run would make the single-flight refusal
         # fire on the wrong test.
         psql("UPDATE public.backup_jobs SET status = 'CANCELLED', finished_at = now() WHERE status = 'PENDING'")
         cls.wait_for_idle()
 
     @classmethod
-    def tearDownClass(cls):
+    def clean_up(cls):
         if not stack_exec.running("backup-service"):
             stack_exec.start("backup-service")
         # The backups this file took: files first, then the row, the way the service prunes.

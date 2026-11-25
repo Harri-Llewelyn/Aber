@@ -90,6 +90,8 @@ class InstallerBase(unittest.TestCase):
             raise
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"could not sign in as the seeded administrator ({err})")
+        # A class clean-up, which Python also runs when setUpClass raises: a 503 below skips the class.
+        cls.addClassCleanup(delete_gateway_and_wait_for_revoke, TEST_GW_ID, sparkplug_id_of(TEST_GW_ID))
         # A row a crashed run left behind is deleted like any other, so its revoke is answered before
         # this class enrols under the same id.
         delete_gateway_and_wait_for_revoke(TEST_GW_ID, sparkplug_id_of(TEST_GW_ID))
@@ -106,10 +108,6 @@ class InstallerBase(unittest.TestCase):
             raise unittest.SkipTest(f"this deployment cannot mint the install command: {minted}")
         assert status == 200, minted
         cls.minted = minted
-
-    @classmethod
-    def tearDownClass(cls):
-        delete_gateway_and_wait_for_revoke(TEST_GW_ID, cls.sparkplug_id)
 
 
 class TestTheCommand(InstallerBase):

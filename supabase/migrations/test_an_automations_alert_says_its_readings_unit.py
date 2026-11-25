@@ -16,7 +16,8 @@ An automation's alert says its reading's unit (0292).
 
 Requires a migrated Supabase database (54322 by default; `npm run test:db` starts a throwaway one).
 The db lane has no historian, so a local table stands in for the foreign telemetry_latest inside the
-transaction, as the suite for 0270 and 0271 does. Every test rolls back.
+transaction, as the suite for 0270 and 0271 does. Every test rolls back. As there, each holds the lock
+of pg_cron's own run of evaluate_automations() until it does.
 
 What is held here:
 
@@ -97,6 +98,11 @@ class UnitWordsBase(unittest.TestCase):
         self.cur.execute("SELECT to_regprocedure('public.unit_symbol(text)') IS NOT NULL;")
         if not self.cur.fetchone()[0]:
             self.skipTest("0292 is not applied to this database")
+        # evaluate_automations()'s lock, before any write: a run that finds it taken does nothing, and
+        # pg_cron's takes it every minute. Waits for one under way, and fails after 30 s.
+        self.cur.execute("SET LOCAL lock_timeout = '30s';"
+                         "SELECT pg_advisory_xact_lock(hashtextextended('evaluate_automations', 0));"
+                         "SET LOCAL lock_timeout = 0;")
         self.cur.execute("SELECT id FROM public.roles WHERE name = 'Shopfloor_Manager';")
         role = self.cur.fetchone()[0]
         self.cur.execute("INSERT INTO auth.users (id, email, encrypted_password, created_at)"
