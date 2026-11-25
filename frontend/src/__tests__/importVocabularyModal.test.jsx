@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ImportVocabularyModal } from '../components/modals/ImportVocabularyModal'
 import { api } from '../api'
 import { jsonConcept, jsonEnvironment, xmlConcept, xmlEnvironment, fileOf } from './aasFixtures'
+import { pressHeld, wrongIn } from '../test/dialogs'
 
 /**
  * Import vocabulary: the file is read in the browser, what it holds is shown before anything is
@@ -32,12 +33,12 @@ const renderModal = (props = {}) => {
   return { onImported, onClose }
 }
 
-const dialog = () => screen.getByRole('dialog', { name: 'Import vocabulary' })
+const dialog = () => screen.getByRole('dialog', { name: 'Import Vocabulary' })
 const fileInput = () => within(dialog()).getByLabelText(/^File/)
-const confirmButton = () => within(dialog()).getByRole('button', { name: 'Import vocabulary' })
+const confirmButton = () => within(dialog()).getByRole('button', { name: 'Import Vocabulary' })
 const choose = async (file) => {
   fireEvent.change(fileInput(), { target: { files: [file] } })
-  await screen.findByRole('group', { name: 'What the file holds' }).catch(() => null)
+  await screen.findByRole('group', { name: 'What the File Holds' }).catch(() => null)
 }
 const facts = () => Object.fromEntries([...document.querySelectorAll('.site-import-facts dt')].map(dt => [dt.textContent, dt.nextElementSibling.textContent]))
 const problem = () => (document.querySelector('.modal-problem')?.textContent ?? '').trim()
@@ -48,13 +49,17 @@ beforeEach(() => {
 })
 
 describe('Import vocabulary, before a file is chosen', () => {
-  it('asks for a file and holds the confirm without scolding on open', () => {
+  it('says nothing on open, and asks for a file when it is pressed', () => {
     renderModal()
 
     expect(within(dialog()).getByText(/Nothing is written until you import/)).toBeTruthy()
-    expect(confirmButton()).toBeDisabled()
-    expect(confirmButton()).toHaveClass('btn-primary', 'btn-disabled')
+    expect(confirmButton()).toHaveClass('btn-primary')
     expect(problem()).toBe('')
+    pressHeld(dialog(), 'Import Vocabulary', 'Choose a file to import.')
+    expect(fileInput()).toHaveAccessibleDescription(/Choose a file to import\.$/)
+    expect(fileInput()).toHaveFocus()
+    expect(within(dialog()).getByLabelText(/^Name/)).toHaveAccessibleDescription(/Give the vocabulary a name\.$/)
+    expect(api.importSiteVocabulary).not.toHaveBeenCalled()
   })
 
   it('says the licence is the site\'s responsibility and that the definitions start unshared', () => {
@@ -128,47 +133,48 @@ describe('the preview', () => {
     await waitFor(() => expect(facts().Format).toBe('AAS XML environment'))
   })
 
-  it('shows a refused file\'s reason under the file, and holds the import', async () => {
+  it('shows a refused file\'s reason under the file, and imports nothing', async () => {
     renderModal()
     await choose(fileOf(xmlEnvironment([], { prolog: '<!DOCTYPE environment [<!ENTITY x "y">]>' }), 'bomb.xml'))
 
     const hint = await screen.findByRole('alert')
     expect(hint.textContent).toMatch(/document type/)
-    expect(confirmButton()).toBeDisabled()
-    expect(problem()).toBe('Choose a file the reader can open.')
-    expect(within(dialog()).queryByRole('group', { name: 'What the file holds' })).toBeNull()
+    expect(problem()).toBe('')
+    pressHeld(dialog(), 'Import Vocabulary', /document type/)
+    expect(api.importSiteVocabulary).not.toHaveBeenCalled()
+    expect(within(dialog()).queryByRole('group', { name: 'What the File Holds' })).toBeNull()
   })
 })
 
 describe('why it cannot go ahead', () => {
-  it('says, above the buttons, that every concept is already defined when none is left to import', async () => {
+  it('says under the file that every concept is already defined when none is left to import', async () => {
     api.siteVocabularyHolders.mockResolvedValue(new Map([[OEE, 'ISO 22400']]))
     renderModal()
     await choose(jsonFile([jsonConcept(OEE, 'OEE', 'Definition.')]))
 
-    await waitFor(() => expect(problem()).toMatch(/Every concept in the file is already defined/))
-    expect(confirmButton()).toBeDisabled()
+    await waitFor(() => expect(fileInput()).toHaveAccessibleDescription(/Every concept in the file is already defined/))
+    pressHeld(dialog(), 'Import Vocabulary', 'Every concept in the file is already defined')
+    expect(api.importSiteVocabulary).not.toHaveBeenCalled()
   })
 
   it('asks for the standard, its edition and its publisher when the file is a published one, and for a name', async () => {
     renderModal()
     await choose(jsonFile(THREE))
-    await waitFor(() => expect(confirmButton()).not.toBeDisabled())
 
     fireEvent.click(within(dialog()).getByRole('radio', { name: /A published standard/ }))
-    await waitFor(() => expect(problem()).toBe('Name the standard, its edition and its publisher.'))
-    expect(confirmButton()).toBeDisabled()
+    pressHeld(dialog(), 'Import Vocabulary', 'Name the standard.')
+    expect(wrongIn(dialog())).toEqual(['Name the standard.', 'Give its edition.', 'Name its publisher.', 'Name the standard.'])
+    expect(within(dialog()).getByLabelText(/^Standard/)).toHaveFocus()
     fireEvent.change(within(dialog()).getByLabelText(/^Standard/), { target: { value: 'ISO 22400-2' } })
     fireEvent.change(within(dialog()).getByLabelText(/^Edition/), { target: { value: '2014' } })
-    expect(confirmButton()).toBeDisabled()
+    pressHeld(dialog(), 'Import Vocabulary', 'Name its publisher.')
     fireEvent.change(within(dialog()).getByLabelText(/^Publisher/), { target: { value: 'ISO' } })
     expect(problem()).toBe('')
     expect(within(dialog()).getByText('ISO 22400-2:2014')).toBeTruthy()
-    expect(confirmButton()).not.toBeDisabled()
 
     fireEvent.change(within(dialog()).getByLabelText(/^Name/), { target: { value: '  ' } })
-    expect(problem()).toBe('Give the vocabulary a name.')
-    expect(confirmButton()).toBeDisabled()
+    pressHeld(dialog(), 'Import Vocabulary', 'Give the vocabulary a name.')
+    expect(api.importSiteVocabulary).not.toHaveBeenCalled()
   })
 })
 
@@ -183,7 +189,7 @@ describe('importing', () => {
     fireEvent.change(within(dialog()).getByLabelText(/^Standard/), { target: { value: 'ISO 22400-2' } })
     fireEvent.change(within(dialog()).getByLabelText(/^Edition/), { target: { value: '2014' } })
     fireEvent.change(within(dialog()).getByLabelText(/^Publisher/), { target: { value: 'ISO' } })
-    fireEvent.change(within(dialog()).getByLabelText(/^Licence note/), { target: { value: 'Single-site licence.' } })
+    fireEvent.change(within(dialog()).getByLabelText(/^Licence Note/), { target: { value: 'Single-site licence.' } })
     fireEvent.click(confirmButton())
 
     await waitFor(() => expect(onImported).toHaveBeenCalledWith({ id: 'new-id', concepts: 3, skipped: [], name: 'iso' }))

@@ -13,9 +13,10 @@
  * goes in a new migration's block, with a BLOCKS entry and a marker pair of its own.
  *
  * NO DICTIONARY TEXT. A template cites IEC CDD and ECLASS for most of its concepts, and its file
- * carries their definitions as ConceptDescriptions. Those texts are the dictionaries', not IDTA's, so
- * a vendored file holds none of them: `withoutDictionaryText()` takes them out, and a file that still
- * has one is refused. The identifiers stay, because an identifier is only a value.
+ * carries their definitions as ConceptDescriptions. An element's description can quote one too. Those
+ * texts are the dictionaries', not IDTA's, so a vendored file holds none of them:
+ * `withoutDictionaryText()` takes them out, and a file that still has one is refused. The identifiers
+ * stay, because an identifier is only a value.
  */
 import { DIGEST_ANCHOR, digestOf, sqlString } from './opcua-seed-blocks.mjs';
 import { inferSemanticIdType } from '../../frontend/src/utils/standards.js';
@@ -28,10 +29,12 @@ import { inferSemanticIdType } from '../../frontend/src/utils/standards.js';
 export const TEMPLATES = [
   { file: 'scripts/vocabularies/idta-02006-3-0-3-digital-nameplate.json', sha256: '25ff717b34183f9fc572eae8d42ac05e3533fe4e9dd9d87560188a7e8c383c1f', name: 'Digital Nameplate', number: 'IDTA 02006', version: '3.0.3', since: '0320' },
   { file: 'scripts/vocabularies/idta-02017-1-0-1-asset-interfaces-description.json', sha256: 'f1fdfe4c253512a8a5169b5acd2774c52890b614a3e24c697934937e5915e0dc', name: 'Asset Interfaces Description', number: 'IDTA 02017', version: '1.0.1', since: '0320', samples: ['Current counter value'] },
+  { file: 'scripts/vocabularies/idta-02002-1-0-4-contact-information.json', sha256: 'ffe399d712636a0d40fd6b73fab6bf281e4815351451f35c4cfedf305e525d4c', name: 'Contact Information', number: 'IDTA 02002', version: '1.0.4', since: '0324' },
 ];
 
 export const BLOCKS = [
   { since: '0320', file: 'supabase/migrations/0320_an_idta_template_is_seeded_with_its_nested_elements.sql' },
+  { since: '0324', file: 'supabase/migrations/0324_a_nameplate_holds_the_manufacturer_s_address_and_order_code.sql' },
 ];
 
 /** The marked region of a block's file. The pair appears once in it. */
@@ -111,10 +114,40 @@ export function dictionaryConcepts(environment) {
     (concept.isCaseOf ?? []).some((reference) => (reference.keys ?? []).some(({ value }) => isDictionaryId(value ?? ''))));
 }
 
-/** The template without those ConceptDescriptions; everything else as it was. */
+/** A sentence in which an element's description quotes a dictionary's definition of its concept. */
+const QUOTED_DEFINITION = /(?:Note: )?as per (?:ECLASS|IEC CDD) definition\b[^.]*\.?/gi;
+
+/** The elements' texts that quote one. */
+export function quotedDefinitions(environment) {
+  const found = [];
+  const visit = (value) => {
+    if (Array.isArray(value)) value.forEach(visit);
+    else if (value && typeof value === 'object') {
+      if (typeof value.text === 'string') found.push(...(value.text.match(QUOTED_DEFINITION) ?? []));
+      Object.values(value).forEach(visit);
+    }
+  };
+  visit(environment.submodels ?? []);
+  return found;
+}
+
+/** `value` with those sentences taken out of its texts, and everything else as it was. */
+function withoutQuotes(value) {
+  if (Array.isArray(value)) return value.map(withoutQuotes);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, held]) =>
+    [key, key === 'text' && typeof held === 'string' && held.match(QUOTED_DEFINITION)
+      ? held.replace(QUOTED_DEFINITION, '').trim() : withoutQuotes(held)]));
+}
+
+/** The template without those ConceptDescriptions and those sentences; everything else as it was. */
 export function withoutDictionaryText(environment) {
   const issued = new Set(dictionaryConcepts(environment));
-  return { ...environment, conceptDescriptions: (environment.conceptDescriptions ?? []).filter((concept) => !issued.has(concept)) };
+  return {
+    ...environment,
+    ...(environment.submodels ? { submodels: withoutQuotes(environment.submodels) } : {}),
+    conceptDescriptions: (environment.conceptDescriptions ?? []).filter((concept) => !issued.has(concept)),
+  };
 }
 
 /** JSON with two spaces, which is how IDTA's newer files are written. */
@@ -123,11 +156,11 @@ const written = (environment) => JSON.stringify(environment, null, 2);
 /**
  * The text to vendor for a template's downloaded one. A file with no dictionary text is kept byte for
  * byte. Otherwise it is written again without it. `reformatted` says that upstream's layout is not this
- * one, so the copy's diff against upstream is more than the ConceptDescriptions that were taken out.
+ * one, so the copy's diff against upstream is more than the texts that were taken out.
  */
 export function vendoredText(text) {
   const environment = JSON.parse(text);
-  if (dictionaryConcepts(environment).length === 0) return { text, reformatted: false };
+  if (dictionaryConcepts(environment).length === 0 && quotedDefinitions(environment).length === 0) return { text, reformatted: false };
   return { text: written(withoutDictionaryText(environment)), reformatted: written(environment) !== text };
 }
 
@@ -230,6 +263,10 @@ export function templateRows(environment, { samples = [] } = {}) {
     throw new Error(
       `the file carries the text of ${issued.length} IEC CDD or ECLASS concept(s), such as ${issued[0].id}. Vendor it with --vendor, which leaves them out`
     );
+  }
+  const quoted = quotedDefinitions(environment);
+  if (quoted.length) {
+    throw new Error(`the file quotes ${quoted.length} IEC CDD or ECLASS definition(s) in its elements' texts. Vendor it with --vendor, which leaves them out`);
   }
   const templateId = globalReference(submodels[0].semanticId, 'the submodel');
   if (!templateId) throw new Error('the submodel has no semanticId, which is the template id');

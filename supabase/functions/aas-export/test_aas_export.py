@@ -714,7 +714,8 @@ class TestConceptDescriptions(unittest.TestCase):
 
 @unittest.skipUnless(node_strips_types(), "Node 22.6 or later is needed to run shell.ts")
 class TestNameplatePlatformProperties(unittest.TestCase):
-    """The nameplate's own properties say what is lasting about the asset, and no more."""
+    """The platform's own properties say what is lasting about the asset, and no more. They are in a
+    submodel of their own: a validator reads one in the nameplate as an unknown element."""
 
     def test_the_device_row_s_connection_method_and_status_are_not_exported(self):
         # A live state frozen into a file is out of date once it is saved, and the connection
@@ -724,11 +725,13 @@ class TestNameplatePlatformProperties(unittest.TestCase):
                              "status": "ONLINE"},
                   "gateway": {"name": "Line A", "sparkplug_id": "gwy1"}}
         built = run_build_environment(record)
-        nameplate = next(s for s in built["environment"]["submodels"]
-                         if s["idShort"] == "DigitalNameplate")
-        elements = {e["idShort"] for e in nameplate["submodelElements"]}
-        self.assertTrue({"AssetSparkplugId", "EdgeGatewayName", "EdgeGatewaySparkplugId"} <= elements)
-        self.assertEqual(elements & {"ConnectionMethod", "Status"}, set())
+        submodels = {s["idShort"]: {e["idShort"] for e in s["submodelElements"]}
+                     for s in built["environment"]["submodels"]}
+        platform = {"AssetSparkplugId", "EdgeGatewayName", "EdgeGatewaySparkplugId"}
+        self.assertEqual(submodels["PlatformConnection"], platform)
+        self.assertEqual(submodels["DigitalNameplate"] & platform, set())
+        for elements in submodels.values():
+            self.assertEqual(elements & {"ConnectionMethod", "Status"}, set())
 
 
 class TestAasExportAuthorization(unittest.TestCase):
@@ -878,13 +881,16 @@ class TestAasExportLive(unittest.TestCase):
 
     def test_composes_the_three_expected_submodels(self):
         self.assertIn("DigitalNameplate", self.submodels)
+        self.assertIn("PlatformConnection", self.submodels)
         for role in ("OperationalTelemetry", "KeyPerformanceIndicators"):
             self.assertTrue(self.by_role(role), f"no submodel plays the {role} role")
 
     def test_nameplate_carries_identity(self):
         elements = {e["idShort"] for e in self.submodels["DigitalNameplate"]["submodelElements"]}
-        for expected in ("SerialNumber", "FirmwareVersion", "AssetSparkplugId"):
+        for expected in ("SerialNumber", "FirmwareVersion"):
             self.assertIn(expected, elements)
+        platform = {e["idShort"]: e for e in self.submodels["PlatformConnection"]["submodelElements"]}
+        self.assertEqual(platform["AssetSparkplugId"]["value"], self.body["device"]["sparkplug_id"])
 
     def test_nameplate_elements_carry_published_idta_identifiers(self):
         """
@@ -910,31 +916,30 @@ class TestAasExportLive(unittest.TestCase):
             self.assertEqual(keys[0]["value"], irdi, f"{id_short} carries the wrong identifier")
             self.assertEqual(element["semanticId"]["type"], "ExternalReference")
 
-    def test_nameplate_does_not_claim_the_idta_template(self):
+    def test_an_incomplete_nameplate_does_not_claim_the_idta_template(self):
         """
-        The submodel carries NO semanticId, and that is a deliberate refusal.
-
-        Naming https://admin-shell.io/idta/nameplate/3/0/Nameplate would assert conformance to a
-        template whose mandatory elements include AddressInformation, which this platform does not
-        model. A consumer trusting the id would validate the shell against the template and fail.
-        Element-level identifiers say what each property means without making that claim.
+        The fixture's nameplate has no product URI, order code or address, so its submodel carries NO
+        semanticId. Naming https://admin-shell.io/idta/nameplate/3/0/Nameplate asserts the template's
+        mandatory elements, and a consumer trusting the id validates the shell against the template and
+        fails. test_a_nameplate_claims_its_template_on_the_stack.py holds a complete one.
         """
         nameplate = self.submodels["DigitalNameplate"]
         self.assertNotIn(
             "semanticId", nameplate,
-            "the Nameplate submodel must not claim an IDTA template it cannot fully populate",
+            "the Nameplate submodel must not claim an IDTA template it does not fully populate",
         )
+        self.assertEqual(self.body["stats"]["claimed_templates"], 0)
+        self.assertGreater(self.body["stats"]["nameplate_missing_elements"], 0)
 
-    def test_aber_nameplate_properties_are_not_given_invented_identifiers(self):
+    def test_aber_platform_properties_are_not_given_invented_identifiers(self):
         """AssetSparkplugId and friends are ours; IDTA defines nothing for them, so they carry
         nothing. An id minted under admin-shell.io for a local concept would be a forgery."""
-        elements = {e["idShort"]: e for e in self.submodels["DigitalNameplate"]["submodelElements"]}
+        platform = self.submodels["PlatformConnection"]
+        self.assertNotIn("semanticId", platform)
+        elements = {e["idShort"]: e for e in platform["submodelElements"]}
         for id_short in ("AssetSparkplugId", "EdgeGatewayName", "EdgeGatewaySparkplugId"):
-            element = elements.get(id_short)
-            if element is None:
-                continue
             self.assertNotIn(
-                "semanticId", element,
+                "semanticId", elements[id_short],
                 f"{id_short} is a concept of this platform and must not carry a standard identifier",
             )
 

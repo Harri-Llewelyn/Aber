@@ -251,10 +251,26 @@ class EnrollGatewayBase(unittest.TestCase):
             rest("/gateways?limit=1")
         except Exception as err:  # noqa: BLE001 -- any failure here means "no stack"
             raise unittest.SkipTest(f"PostgREST is unreachable at {SUPABASE_URL}: {err}")
+        # Before the first row is deleted or made: a class that skips changes nothing.
+        try:
+            cls.admin_token = sign_in()
+        except stack_sign_in.RateLimited:
+            raise
+        except Exception as err:  # noqa: BLE001
+            raise unittest.SkipTest(
+                f"could not sign in as {ADMIN_EMAIL} -- apply supabase/seed.sql first ({err})"
+            )
 
+        # Class clean-ups, which Python also runs when setUpClass raises. In reverse: the row, whose
+        # delete waits for the revoke it queues, then the broker account, which outlives the row (the
+        # plugin knows nothing about gateways). Never the other way round: the next class enrols under
+        # the same name, and a revoke still on its way would disable that account.
+        sparkplug_id = sparkplug_id_of(TEST_GW_ID)
+        cls.addClassCleanup(delete_broker_account, sparkplug_id)
+        cls.addClassCleanup(delete_gateway_and_wait_for_revoke, TEST_GW_ID, sparkplug_id)
         # A row a crashed run left behind is deleted like any other, so its revoke lands before this
         # class enrols under the same id.
-        delete_gateway_and_wait_for_revoke(TEST_GW_ID, sparkplug_id_of(TEST_GW_ID))
+        delete_gateway_and_wait_for_revoke(TEST_GW_ID, sparkplug_id)
         status, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body={
@@ -271,27 +287,6 @@ class EnrollGatewayBase(unittest.TestCase):
             raise unittest.SkipTest(f"could not create the test gateway: {rows}")
         cls.sparkplug_id = rows[0]["sparkplug_id"]
         check_sparkplug_id(TEST_GW_ID, cls.sparkplug_id)
-
-        try:
-            cls.admin_token = sign_in()
-        except stack_sign_in.RateLimited:
-            raise
-        except Exception as err:  # noqa: BLE001
-            raise unittest.SkipTest(
-                f"could not sign in as {ADMIN_EMAIL} -- apply supabase/seed.sql first ({err})"
-            )
-
-    @classmethod
-    def tearDownClass(cls):
-        # The account is deleted after the revoke is answered, never before: the next class
-        # enrols under the same name, and a revoke still on its way would disable that account.
-        try:
-            delete_gateway_and_wait_for_revoke(TEST_GW_ID, cls.sparkplug_id)
-        finally:
-            # The broker account outlives the row (the plugin knows nothing about gateways), so it is
-            # removed explicitly or it accumulates across runs. Deleted through the service container's
-            # own admin credential, the one place a delete is spoken; the service itself never does.
-            delete_broker_account(cls.sparkplug_id)
 
     def issue_token(self, ttl_minutes=30):
         """Mint a token exactly as the dashboard does: anon key, Administrator's access token."""
@@ -612,7 +607,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass()
+        # The forge first, then the gateway: a class that skips makes none.
         cls.forge_url = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
         cls.machine_user = os.getenv("GITEA_MACHINE_USER", "aber_platform")
         # The forge mints the bot's token into the <release>-forge-token Secret; it has no password.
@@ -626,6 +621,8 @@ class TestForgeProvisioning(EnrollGatewayBase):
             cls.forge("/api/v1/version")
         except Exception as err:  # noqa: BLE001 -- any failure here means "no forge"
             skip_or_fail(f"no forge reachable at {cls.forge_url}: {err}")
+        super().setUpClass()
+        cls.addClassCleanup(cls.delete_repo)
 
     @classmethod
     def forge(cls, path, method="GET", body=None):
@@ -653,11 +650,6 @@ class TestForgeProvisioning(EnrollGatewayBase):
             cls.forge(f"/api/v1/repos/{cls.organisation}/{cls.repo_name()}", method="DELETE")
         except urllib.error.HTTPError:
             pass  # Never created, which is the ordinary state before the first test.
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.delete_repo()
-        super().tearDownClass()
 
     def setUp(self):
         super().setUp()

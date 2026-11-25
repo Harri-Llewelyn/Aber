@@ -48,7 +48,8 @@ vi.mock('../hooks/useRealtimeTable', () => ({ useRealtimeTable: vi.fn() }))
 import { api } from '../api'
 import { useRealtimeTable } from '../hooks/useRealtimeTable'
 import { dropdownButton, openDropdown, pick } from '../test/listFilters'
-import { getByTooltip, helpTipText, tooltipOf } from '../test/tooltips'
+import { getByTooltip, helpTipText } from '../test/tooltips'
+import { pressHeld } from '../test/dialogs'
 
 const GATEWAY = {
   id: 'gw-1', name: 'Line 1 Gateway', sparkplug_id: 'gwy120000000000400080000',
@@ -259,7 +260,7 @@ describe('the playback lane', () => {
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
     dropOnCard(new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' }))
-    const values = [...(await screen.findByLabelText('File it against')).options].map(o => o.value)
+    const values = [...(await screen.findByLabelText('File It Against')).options].map(o => o.value)
     expect(values).toContain('gateway:gw-1')
     expect(values).not.toContain('gateway:gw-shadow')
     expect(values).not.toContain('device:dev-shadow')
@@ -337,8 +338,8 @@ describe('starting a capture', () => {
     selectRow(row); fireEvent.click(panelAction(/Record/))
 
     fireEvent.change(await screen.findByLabelText(/Note/), { target: { value: 'night shift' } })
-    fireEvent.change(screen.getByLabelText(/Record for/), { target: { value: '600' } })
-    fireEvent.click(screen.getByRole('button', { name: /Start recording/ }))
+    fireEvent.change(screen.getByLabelText(/Record For/), { target: { value: '600' } })
+    fireEvent.click(screen.getByRole('button', { name: /Start Recording/ }))
 
     await waitFor(() => expect(api.startCapture).toHaveBeenCalledWith({
       subjectKind: 'gateway', subjectId: 'gw-1', note: 'night shift', seconds: 600, replace: false
@@ -368,7 +369,7 @@ describe('starting a capture', () => {
     const dialog = await screen.findByText(/This replaces the capture recorded/)
     expect(dialog).toHaveTextContent('pre-trip bearing vibration baseline')
     expect(dialog).toHaveTextContent(/27 Aug 2026/)
-    expect(screen.getByRole('button', { name: /Replace and record/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Replace and Record/ })).toBeInTheDocument()
   })
 
   it('sends replace only when a capture is actually being replaced', async () => {
@@ -378,7 +379,7 @@ describe('starting a capture', () => {
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Record/))
     fireEvent.change(await screen.findByLabelText('Type the gateway name to confirm'), { target: { value: 'Line 1 Gateway' } })
-    fireEvent.click(screen.getByRole('button', { name: /Replace and record/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Replace and Record/ }))
 
     await waitFor(() => expect(api.startCapture).toHaveBeenCalledWith(
       expect.objectContaining({ replace: true })
@@ -394,7 +395,7 @@ describe('starting a capture', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Record/))
-    fireEvent.click(await screen.findByRole('button', { name: /Start recording/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Start Recording/ }))
 
     expect(await screen.findByText(/already recording/)).toBeInTheDocument()
   })
@@ -548,7 +549,7 @@ describe('deleting and downloading', () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Delete capture/))
+    selectRow(row); fireEvent.click(panelAction(/Delete Capture/))
     const message = await screen.findByText(/Delete the capture of Line 1 Gateway, recorded/)
     expect(message).toHaveTextContent('pre-trip bearing vibration baseline')
   })
@@ -558,11 +559,11 @@ describe('deleting and downloading', () => {
     api.deleteCapture.mockResolvedValue()
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Delete capture/))
+    selectRow(row); fireEvent.click(panelAction(/Delete Capture/))
     // Scoped to the dialog: the panel's action and the confirmation's button carry the same name.
     const dialog = document.querySelector('.modal')
     fireEvent.change(within(dialog).getByLabelText('Type the gateway name to confirm'), { target: { value: 'Line 1 Gateway' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: /Delete capture/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /Delete Capture/ }))
     await waitFor(() => expect(api.deleteCapture).toHaveBeenCalledWith(CAPTURE))
   })
 
@@ -603,7 +604,7 @@ describe('deleting and downloading', () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Play back/))
+    selectRow(row); fireEvent.click(panelAction(/Play Back/))
     await screen.findByText(/Plays back as/)
     expect(screen.getByText(/stored without the list of devices it holds/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -623,7 +624,7 @@ describe('the read-only role', () => {
     renderTab({ userRole: 'Auditor' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); expect(panelAction(/Download/)).not.toBeDisabled()
-    for (const name of [/Record/, /Play back/, /Delete capture/]) {
+    for (const name of [/Record/, /Play Back/, /Delete Capture/]) {
       expect(panelAction(name)).toBeDisabled()
       expect(panelAction(name)).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
     }
@@ -658,7 +659,7 @@ describe('the read-only role', () => {
     renderTab({ userRole: 'Shopfloor_Manager' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); expect(panelAction(/Record/)).toBeInTheDocument()
-    expect(panelAction(/Delete capture/)).toBeInTheDocument()
+    expect(panelAction(/Delete Capture/)).toBeInTheDocument()
   })
 })
 
@@ -757,7 +758,7 @@ describe('playing a capture back', () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     const rendered = renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Play back/))
+    selectRow(row); fireEvent.click(panelAction(/Play Back/))
     await screen.findByText(/Plays back as|Choose the Playback gateway/)
     return rendered
   }
@@ -768,7 +769,7 @@ describe('playing a capture back', () => {
     const line = screen.getByText(/Plays back as/)
     expect(line.textContent).toMatch(/Playback Target/)
     expect(line.textContent).not.toMatch(/Line 1 Gateway/)
-    expect(screen.queryByLabelText('Playback gateway')).toBeNull()
+    expect(screen.queryByLabelText('Playback Gateway')).toBeNull()
     await waitFor(() => expect(api.playbackTargets).toHaveBeenCalled())
   })
 
@@ -779,13 +780,14 @@ describe('playing a capture back', () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Play back/))
+    selectRow(row); fireEvent.click(panelAction(/Play Back/))
     const missing = await screen.findByText(/could not be found/)
     expect(missing.textContent).toMatch(/played\s+back only there/)
     expect(missing.textContent).toMatch(/upgrade the release/)
     expect(missing.textContent).not.toMatch(/simulated/i)
     expect(document.body.textContent).not.toMatch(/Entities/)
-    expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Play Back', 'The Playback gateway could not be found')
+    expect(api.startPlayback).not.toHaveBeenCalled()
   })
 
   /** The credential check, shown before the click rather than arriving as a refusal after it. */
@@ -793,7 +795,8 @@ describe('playing a capture back', () => {
     api.playbackTargets.mockResolvedValue([{ ...TARGET, gateway_has_broker_credential: false }])
     await open()
     expect(await screen.findByText(/holds no broker credential/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Play Back', 'The Playback gateway holds no broker credential')
+    expect(api.startPlayback).not.toHaveBeenCalled()
   })
 
   /**
@@ -821,13 +824,13 @@ describe('playing a capture back', () => {
     // The second resolve matters: the dropdown renders `target.devices`, read before the lane
     // existed, so without the reload the map holds an id the select cannot display.
     api.playbackTargets.mockResolvedValue([{ ...TARGET, devices: [...TARGET.devices, LANE] }])
-    fireEvent.click(screen.getByRole('button', { name: /Prepare replay lanes/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Prepare Replay Lanes/ }))
 
     await waitFor(() => expect(api.ensureShadowLanes).toHaveBeenCalledWith('cap-1'))
     await waitFor(() => expect(
       screen.getByLabelText('Target device for dev270000000000400080000')
     ).toHaveValue('dev990000000000400080000'))
-    expect(screen.getByRole('button', { name: 'Play back' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Play Back' })).toBeEnabled()
     // A lane is a device row with an Audit Trail row of its own: the toast names what was recorded
     // and opens the lanes on the Devices page, which hides them by default.
     expect(props.showToast).toHaveBeenCalledWith('1 replay lane ready for Line 1 Gateway.', 'success',
@@ -845,10 +848,11 @@ describe('playing a capture back', () => {
 
   it('will not start while a captured device is unmapped', async () => {
     await open()
-    await screen.findByLabelText('Target device for dev270000000000400080000')
-    const publish = screen.getByRole('button', { name: 'Play back' })
-    expect(publish).toBeDisabled()
-    expect(publish).toHaveAccessibleDescription(expect.stringContaining('to map'))
+    const select = await screen.findByLabelText('Target device for dev270000000000400080000')
+    pressHeld(screen.getByRole('dialog'), 'Play Back', '1 device still to map')
+    expect(select).toHaveAttribute('aria-invalid', 'true')
+    expect(select).toHaveAccessibleDescription('1 device still to map')
+    expect(api.startPlayback).not.toHaveBeenCalled()
   })
 
   it('passes the target, the map and the speed to the gate', async () => {
@@ -857,7 +861,7 @@ describe('playing a capture back', () => {
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
     fireEvent.change(screen.getByLabelText('Speed'), { target: { value: '4' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Play back' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Play Back' }))
 
     await waitFor(() => expect(api.startPlayback).toHaveBeenCalledWith({
       captureId: 'cap-1',
@@ -881,12 +885,12 @@ describe('playing a capture back', () => {
       { ...TARGET, id: 'gw-sim2', name: 'Other Target', sparkplug_id: 'gwy140000000000400080000' }
     ])
     await open()
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
+    fireEvent.change(screen.getByLabelText('Playback Gateway'), { target: { value: 'gw-sim' } })
     const mapSelect = await screen.findByLabelText('Target device for dev270000000000400080000')
     fireEvent.change(mapSelect, { target: { value: 'dev310000000000400080000' } })
     expect(mapSelect.value).toBe('dev310000000000400080000')
 
-    fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim2' } })
+    fireEvent.change(screen.getByLabelText('Playback Gateway'), { target: { value: 'gw-sim2' } })
     const after = await screen.findByLabelText('Target device for dev270000000000400080000')
     expect(after.value).toBe('')
   })
@@ -898,7 +902,7 @@ describe('playing a capture back', () => {
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Play back/))
+    selectRow(row); fireEvent.click(panelAction(/Play Back/))
     await screen.findByText(/Plays back as/)
     expect(screen.getByText(/so a playback\s+refuses it/)).toBeInTheDocument()
     expect(screen.queryByText(/will play back normally|dropped on ingest/)).toBeNull()
@@ -909,7 +913,7 @@ describe('playing a capture back', () => {
     await open()
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Play back' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Play Back' }))
     expect(await screen.findByText(/not marked simulated/)).toBeInTheDocument()
   })
 
@@ -920,10 +924,10 @@ describe('playing a capture back', () => {
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Play back/))
+    selectRow(row); fireEvent.click(panelAction(/Play Back/))
     await screen.findByText(/Plays back as/)
     expect(await screen.findByText(/publishes no device-level traffic/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play Back' })).not.toBeDisabled()
   })
 
   /**
@@ -938,7 +942,8 @@ describe('playing a capture back', () => {
 
     expect(await screen.findByText(/was not given/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
     expect(screen.getByText(/secrets\.mqttPlaybackCredentials/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Play Back', 'The playback worker was not given this gateway’s password')
+    expect(api.startPlayback).not.toHaveBeenCalled()
   })
 
   /**
@@ -955,7 +960,8 @@ describe('playing a capture back', () => {
     await open()
 
     expect(await screen.findByText(/was re-issued after the playback/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Play Back', 'This credential was re-issued after the worker last picked one up')
+    expect(api.startPlayback).not.toHaveBeenCalled()
   })
 
   /** Nothing for the operator to do, so the message must not read like the missing-password one. */
@@ -991,7 +997,7 @@ describe('playing a capture back', () => {
       { target: { value: 'dev310000000000400080000' } })
 
     expect(screen.queryByText(/was re-issued after the playback/)).toBeNull()
-    expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play Back' })).not.toBeDisabled()
   })
 
   /**
@@ -1008,7 +1014,7 @@ describe('playing a capture back', () => {
     // A warning, so the button is still reachable once the mapping is done.
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
-    expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play Back' })).not.toBeDisabled()
   })
 
   it('says nothing about live traffic for a quiet target', async () => {
@@ -1058,9 +1064,8 @@ describe('playing a capture back', () => {
 
       fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
         { target: { value: 'dev310000000000400080000' } })
-      const start = screen.getByRole('button', { name: 'Play back' })
-      expect(start).toBeDisabled()
-      expect(tooltipOf(start)).toMatch(/not deployed.*playback\.enabled/)
+      pressHeld(screen.getByRole('dialog'), 'Play Back', /not deployed.*playback\.enabled/)
+      expect(api.startPlayback).not.toHaveBeenCalled()
     })
 
     it('tells a queued playback it will not start, and how to fix that', async () => {
@@ -1083,7 +1088,7 @@ describe('playing a capture back', () => {
       fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
         { target: { value: 'dev310000000000400080000' } })
       expect(screen.queryByText(/Turn on the playback worker first/)).toBeNull()
-      expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Play Back' })).not.toBeDisabled()
     } finally {
       delete globalThis.__ABER_CONFIG__
     }
@@ -1098,15 +1103,15 @@ describe('playing a capture back', () => {
     await open()
     fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
       { target: { value: 'dev310000000000400080000' } })
-    expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Play Back' })).not.toBeDisabled()
   })
 
   it('does not let an Auditor play back, and says who can', async () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     renderTab({ userRole: 'Auditor' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); expect(panelAction(/Play back/)).toBeDisabled()
-    expect(panelAction(/Play back/)).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
+    selectRow(row); expect(panelAction(/Play Back/)).toBeDisabled()
+    expect(panelAction(/Play Back/)).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
   })
 })
 
@@ -1176,7 +1181,7 @@ describe('the playback strip', () => {
     api.activePlaybackJob.mockResolvedValue(JOB)
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); expect(panelAction(/Play back/)).toBeDisabled()
+    selectRow(row); expect(panelAction(/Play Back/)).toBeDisabled()
   })
 
   it('asks the gate to stop rather than stopping anything itself', async () => {
@@ -1409,7 +1414,7 @@ describe('the details panel', () => {
     expect(panel.querySelector('.context-panel-title-row .context-panel-icon svg')).not.toBeNull()
     const primaries = panel.querySelectorAll('.context-action.btn-primary')
     expect(primaries).toHaveLength(1)
-    expect(primaries[0]).toHaveTextContent('Record again')
+    expect(primaries[0]).toHaveTextContent('Record Again')
     expect(panel.querySelector('.context-action')).toBe(primaries[0])
   })
 
@@ -1426,10 +1431,10 @@ describe('the details panel', () => {
   it('offers no capture-specific action when nothing is stored', async () => {
     renderTab()
     selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
-    expect(panelAction(/Record capture/)).toBeInTheDocument()
-    expect(panelAction(/Play back/)).toBeNull()
+    expect(panelAction(/Record Capture/)).toBeInTheDocument()
+    expect(panelAction(/Play Back/)).toBeNull()
     expect(panelAction(/Download/)).toBeNull()
-    expect(panelAction(/Delete capture/)).toBeNull()
+    expect(panelAction(/Delete Capture/)).toBeNull()
   })
 
   /** The drop zone knows its subject, which is why it lives here rather than on the page. */
@@ -1468,7 +1473,7 @@ describe('playing a file', () => {
   }
   const editedFile = () => new File([JSON.stringify(EDITED)], 'edited.json', { type: 'application/json' })
 
-  it('offers "Play a file…" at the end of the toolbar on both tabs, which opens the file chooser', async () => {
+  it('offers "Play a File…" at the end of the toolbar on both tabs, which opens the file chooser', async () => {
     const clicked = []
     const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function () { clicked.push(this) })
     renderTab()
@@ -1476,13 +1481,13 @@ describe('playing a file', () => {
     const inToolbar = () => document.querySelector('.card > .tab-strip + .filter-bar > .filter-bar-actions')
       ?.querySelector(':scope > button:last-child')
     expect(document.querySelector('.card-heading button')).toBeNull()
-    expect(inToolbar()).toHaveTextContent('Play a file…')
+    expect(inToolbar()).toHaveTextContent('Play a File…')
     // Filled, as a toolbar's action is on every page, on both tabs (#971).
     expect(inToolbar()).toHaveClass('btn-primary')
     fireEvent.click(tabLink(/Devices/))
-    expect(inToolbar()).toHaveTextContent('Play a file…')
+    expect(inToolbar()).toHaveTextContent('Play a File…')
     expect(inToolbar()).toHaveClass('btn-primary')
-    const button = screen.getByRole('button', { name: /Play a file…/ })
+    const button = screen.getByRole('button', { name: /Play a File…/ })
     fireEvent.click(button)
     click.mockRestore()
 
@@ -1490,14 +1495,14 @@ describe('playing a file', () => {
     expect(clicked).toHaveLength(1)
     expect(clicked[0]).toHaveAttribute('type', 'file')
     fireEvent.change(clicked[0], { target: { files: [editedFile()] } })
-    const subject = await screen.findByLabelText('File it against')
+    const subject = await screen.findByLabelText('File It Against')
     await waitFor(() => expect(subject.value).toBe('gateway:gw-1'))
   })
 
-  it('disables "Play a file…" for an Auditor, says who can, and ignores a drop', async () => {
+  it('disables "Play a File…" for an Auditor, says who can, and ignores a drop', async () => {
     renderTab({ userRole: 'Auditor' })
     await screen.findByText('Line 1 Gateway')
-    const button = screen.getByRole('button', { name: /Play a file…/ })
+    const button = screen.getByRole('button', { name: /Play a File…/ })
     expect(button).toBeDisabled()
     expect(button).toHaveClass('btn-primary', 'btn-disabled')
     expect(button).toHaveAccessibleDescription('Requires Administrator or Shopfloor Manager')
@@ -1507,7 +1512,7 @@ describe('playing a file', () => {
     const read = vi.spyOn(file, 'text')
     dropOnCard(file)
     expect(read).not.toHaveBeenCalled()
-    expect(screen.queryByLabelText('File it against')).toBeNull()
+    expect(screen.queryByLabelText('File It Against')).toBeNull()
   })
 
   /** The drop target is the whole card, so it has to say so while a file is over it. */
@@ -1550,10 +1555,10 @@ describe('playing a file', () => {
     expect(document.querySelector('.capture-card').className).not.toContain('capture-card-drop')
 
     // The upload dialog opens with the subject the file names already chosen.
-    const subject = await screen.findByLabelText('File it against')
+    const subject = await screen.findByLabelText('File It Against')
     await waitFor(() => expect(subject.value).toBe('gateway:gw-1'))
 
-    fireEvent.click(screen.getByRole('button', { name: /^Upload$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Upload Capture' }))
     await waitFor(() => expect(api.uploadCapture).toHaveBeenCalledWith(
       expect.objectContaining({ subjectKind: 'gateway', subjectId: 'gw-1' })
     ))
@@ -1571,7 +1576,7 @@ describe('playing a file', () => {
       identities: { edge_nodes: ['gwy999999999999999999999'], devices: [] }
     }
     dropOnCard(new File([JSON.stringify(doc)], 'foreign.json', { type: 'application/json' }))
-    const subject = await screen.findByLabelText('File it against')
+    const subject = await screen.findByLabelText('File It Against')
     expect(subject.value).toBe('')
   })
 })
@@ -2219,7 +2224,7 @@ describe('every tab of the page', () => {
     window.history.replaceState(null, '', url)
     renderTab()
     const bar = document.querySelector('.card.card-fill > .tab-strip + .filter-bar')
-    expect(within(bar).getByRole('button', { name: /Play a file/ })).toBeInTheDocument()
+    expect(within(bar).getByRole('button', { name: /Play a File/ })).toBeInTheDocument()
     await waitFor(() => expect(api.listCaptures).toHaveBeenCalled())
   })
 

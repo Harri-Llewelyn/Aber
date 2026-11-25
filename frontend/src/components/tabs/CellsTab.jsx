@@ -11,6 +11,8 @@ import { groupDevicesByCell, NON_CELL_SOURCES } from '../../utils/cellResolution
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
+import { sameForm, useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { SuppressionWindows } from '../common/SuppressionWindows'
@@ -79,6 +81,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   // api.js turns each into NULL.
   const blank = { cell_name: '', description: '', icon: DEFAULT_CELL_ICON, area_id: '', plan_x: '', plan_y: '' }
   const [formVal, setFormVal]   = useState(blank)
+  // What the form opened with.
+  const [formOpened, setFormOpened] = useState(blank)
   // The spacing the database enforces between two cells on one plan; the picker refuses earlier.
   const minSpacingSetting = useSetting(MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING)
   const minSpacing = Number.isFinite(Number(minSpacingSetting)) ? Number(minSpacingSetting) : DEFAULT_MIN_PIN_SPACING
@@ -165,12 +169,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     } catch (e) { setFormError(e.message) }
   }
 
-  const openForm = (cell, seed) => {
-    setEditing(cell); setFormVal(seed); setFormError(null); setShowForm(true)
-  }
   const closeForm = () => { setShowForm(false); setEditingProposal(null) }
-  // Why the form's save is off; the database refuses the same names.
-  const formProblem = placeNameProblem(formVal.cell_name, 'cell')
 
   const archiveCell = async (days) => {
     await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
@@ -209,6 +208,22 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const proposeMode = !canManage && canPropose
   const [editingProposal, setEditingProposal] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
+
+  // The database refuses the same names. A proposal of nothing is refused too, so one not filed yet is
+  // held to what it would change.
+  const nameProblem = placeNameProblem(formVal.cell_name, 'cell')
+  const nameGiven = (formVal.cell_name || '').trim() !== ''
+  const formCheck = useFormCheck({
+    name: { id: 'cell-name', missing: !nameGiven && nameProblem, wrong: nameGiven && nameProblem },
+  }, {
+    unchanged: !!editing && (proposeMode && !editingProposal
+      ? Object.keys(patchFromForm('cell', editing, formVal)).length === 0
+      : sameForm(formOpened, formVal)),
+  })
+
+  const openForm = (cell, seed) => {
+    setEditing(cell); setFormVal(seed); setFormOpened(seed); setFormError(null); formCheck.reset(); setShowForm(true)
+  }
 
   // Devices that resolve to no cell, surfaced only when that is an unanswered question. Site-Wide
   // and Area-Wide are deliberate answers, and Simulated and Shadow devices cannot be given a cell.
@@ -497,36 +512,33 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         <Modal
           title={editing ? 'Edit Cell' : 'New Cell'}
           size="md"
+          busy={saving}
           onClose={closeForm}
-          problem={formProblem}
+          problem={formCheck.problem}
           error={formError}
+          dismiss="Cancel"
           footer={
-            <>
-              <button className="btn btn-ghost" onClick={closeForm} disabled={saving}>Cancel</button>
-              <ActionButton
-                pending={saving}
-                // Named for the act, not for the button: creating a cell and editing one are
-                // different waits and the operator knows which they asked for.
-                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
-                onClick={() => runSave(save)}
-                disabled={formProblem !== null}
-                title={formProblem ?? (proposeMode
-                  ? 'Ask for these changes — an approver applies them, or says why not'
-                  : undefined)}
-              >
-                {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
-              </ActionButton>
-            </>
+            <ActionButton
+              pending={saving}
+              // Named for the act, not for the button: creating a cell and editing one are
+              // different waits and the operator knows which they asked for.
+              pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
+              onClick={() => formCheck.press(() => runSave(save))}
+              title={proposeMode ? 'Ask for these changes — an approver applies them, or says why not' : undefined}
+            >
+              {proposeMode ? (editingProposal ? 'Update Your Proposal' : 'Propose a Change') : 'Save Cell'}
+            </ActionButton>
           }
         >
           <div className="form-group">
             <label className="form-label" htmlFor="cell-name">Cell Name <RequiredMark /></label>
-            <input id="cell-name" className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" aria-required="true" />
+            <input id="cell-name" className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" aria-required="true" {...fieldErrorProps(formCheck.errors.name, 'cell-name-error')} />
             <UnsRenameNote
               index={unsPaths}
               renamed={!!editing && (formVal.cell_name || '').trim() !== editing.cell_name}
               cellId={editing?.cell_id}
             />
+            <FieldError id="cell-name-error" error={formCheck.errors.name} />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="cell-description">Description (Optional)</label>
@@ -574,7 +586,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           </div>
           {formArea && (
             <div className="form-group">
-              <label className="form-label">Place on the plan</label>
+              <div className="form-label">Place on the Plan</div>
               <CellPlacementPicker
                 area={formArea}
                 cells={cells}

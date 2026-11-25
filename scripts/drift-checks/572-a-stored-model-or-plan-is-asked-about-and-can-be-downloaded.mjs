@@ -13,15 +13,15 @@ import { dialogsIn, propAt, propText } from '../lib/jsx-dialogs.mjs';
 const SUBJECTS = [
   {
     file: 'frontend/src/components/common/Model3DUploader.jsx',
-    replace: 'Replace 3D model', remove: 'Remove 3D model',
+    replace: 'Replace 3D Model', remove: 'Remove 3D Model',
     order: ['<IconDownload size={12} /> Download', '{canManage && (', '<IconUpload size={12} /> Replace', '<IconTrash size={12} /> Remove'],
     help: 'help/pages/devices.md', says: ['**Download** saves it, and every role can use it', 'Both ask first, so download the file before them'],
   },
   {
     file: 'frontend/src/components/common/AreaPlanPanel.jsx',
-    replace: 'Replace area plan', remove: 'Remove area plan',
-    order: ['<IconDownload size={13} /> Download plan', '{turnable && (', '<IconUpload size={13} /> Replace plan', '<IconTrash size={13} /> Remove plan'],
-    help: 'help/pages/areas.md', says: ['**Download plan** saves the file as it was uploaded, and every role can use it', '**Replace plan** and **Remove plan** ask first, so download the plan before them'],
+    replace: 'Replace Area Plan', remove: 'Remove Area Plan',
+    order: ['<IconDownload size={13} /> Download Plan', '{turnable && (', '<IconUpload size={13} /> Replace Plan', '<IconTrash size={13} /> Remove Plan'],
+    help: 'help/pages/areas.md', says: ['**Download Plan** saves the file as it was uploaded, and every role can use it', '**Replace Plan** and **Remove Plan** ask first, so download the plan before them'],
   },
 ];
 

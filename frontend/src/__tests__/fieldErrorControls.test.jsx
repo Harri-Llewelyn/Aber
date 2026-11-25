@@ -51,8 +51,8 @@ vi.mock('../lib/supabaseClient', () => ({
 vi.mock('../components/common/CopyableId', () => ({
   __esModule: true,
   default: () => null,
-  copyText: vi.fn().mockResolvedValue(false),
 }))
+vi.mock('../utils/copyText', () => ({ copyText: vi.fn().mockResolvedValue(false) }))
 
 const PERSON = { user_id: 'u-1', email: 'operator@site.test', display_name: 'Owain' }
 const TOO_LONG = 'N'.repeat(81)
@@ -109,7 +109,7 @@ const saysNothing = (control) => {
 describe('a person’s fields', () => {
   it('Add Person, the display name', () => {
     render(<AddPersonModal onClose={vi.fn()} />)
-    const name = screen.getByLabelText(/^Display name/)
+    const name = screen.getByLabelText(/^Display Name/)
     saysNothing(name)
     type(name, TOO_LONG)
     saysWhy(name, 'A display name is 80 characters at most.', { hint: 'They can change it on their Profile page.' })
@@ -119,7 +119,7 @@ describe('a person’s fields', () => {
 
   it('Change Name', () => {
     render(<DisplayNameModal person={PERSON} onClose={vi.fn()} />)
-    const name = screen.getByLabelText('Display name')
+    const name = screen.getByLabelText('Display Name')
     saysNothing(name)
     type(name, TOO_LONG)
     saysWhy(name, 'A display name is 80 characters at most.', { hint: 'Leave it empty to show their email address alone.' })
@@ -127,7 +127,7 @@ describe('a person’s fields', () => {
 
   it('Change Email', () => {
     render(<ChangeEmailModal person={PERSON} onClose={vi.fn()} />)
-    const email = screen.getByLabelText(/^New email address/)
+    const email = screen.getByLabelText(/^New Email Address/)
     saysNothing(email)
     type(email, 'not-an-address')
     saysWhy(email, 'That is not an email address.', { hint: 'Their role, name and history stay.' })
@@ -185,13 +185,14 @@ describe('Register App', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Register App/ })) })
 
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy client secret' })) })
-    saysWhy(screen.getByLabelText('Client secret'), COPY_REFUSED, { invalid: false })
+    saysWhy(screen.getByLabelText('Client Secret'), COPY_REFUSED, { invalid: false })
     saysNothing(screen.getByLabelText('Client ID'))
     expect(screen.getAllByRole('alert')).toHaveLength(1)
 
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy client id' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy client ID' })) })
     saysWhy(screen.getByLabelText('Client ID'), COPY_REFUSED, { invalid: false })
-    saysNothing(screen.getByLabelText('Client secret'))
+    // Each refusal is its own field's, and stays until that field is copied.
+    saysWhy(screen.getByLabelText('Client Secret'), COPY_REFUSED, { invalid: false })
   })
 })
 
@@ -278,12 +279,12 @@ describe('a device’s and a gateway’s fields', () => {
   it('Digital Nameplate, the year and the address, each under its own field', async () => {
     api.get.mockResolvedValue({ stored: null, template: [], published: {} })
     render(<DeviceNameplateModal asset={{ asset_id: 'd-1', asset_name: 'CNC_01' }} canManage onClose={vi.fn()} />)
-    const year = await screen.findByLabelText(/^Year of construction/)
+    const year = await screen.findByLabelText(/^Year of Construction/)
     const uri = screen.getByLabelText(/^Product URI/)
     saysNothing(year)
     saysNothing(uri)
     type(year, '24')
-    saysWhy(year, 'Year of construction must be four digits.')
+    saysWhy(year, 'Year of Construction must be four digits.')
     saysNothing(uri)
     type(uri, 'manufacturer.example/p/1')
     saysWhy(uri, 'Product URI must be an absolute IRI, including its scheme — https://…')

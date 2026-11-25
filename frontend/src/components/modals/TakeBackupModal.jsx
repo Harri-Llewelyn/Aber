@@ -28,23 +28,18 @@ export function TakeBackupModal({ holds, onConfirm, onCancel }) {
 
   return (
     <Modal
-      title="Take a backup"
+      title="Take a Backup"
       icon={<IconHardDrive size={18} />}
-      onClose={pending ? () => {} : onCancel}
+      busy={pending}
+      onClose={onCancel}
       lead={<>
         Taken by the backup service onto its own volume: {holds}. A backup taken here
         is <strong>pinned</strong>: the retention window does not apply until you release it.
       </>}
       initialFocus={noteRef}
       error={error}
-      footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
-          <ActionButton pending={pending} pendingLabel="Queuing…" onClick={submit}>
-            Take a backup
-          </ActionButton>
-        </>
-      }
+      dismiss="Cancel"
+      footer={<ActionButton pending={pending} pendingLabel="Queuing…" onClick={submit}>Take a Backup</ActionButton>}
     >
       <div className="form-group">
         <label className="form-label" htmlFor="backup-note">Note (optional)</label>

@@ -85,6 +85,9 @@ and a route to Aber. Paste the command. It runs two stages in one line:
   Every step before enrolment is safe to repeat, so the same command can be pasted again. Only
   enrolment spends the token, and the installer refuses to run on an appliance that has enrolled.
 
+  If the token runs out before the appliance enrols, re-issue the command and paste the new one on the
+  same machine. The installer puts the new token in the `.env` and keeps the rest of it.
+
 The command ends by printing the Node-RED editor password **once**. Within about a minute the
 dashboard shows the gateway **ONLINE**. The installer then runs the appliance's first convergence (a
 run of the platform playbook,
@@ -547,9 +550,11 @@ repository of each Remote gateway in service that is on an older release. It mov
 `platform.yml` to the release your site now runs, and changes nothing else. The author is Aber's own
 account, `aber_platform`, so your one Administrator can approve it:
 
-1. In the gateway's drawer, choose **Open in the forge**, then **Pull Requests**. Look for *Converge to
-   the platform at* and the release. It appears within about fifteen minutes of the upgrade. A site
-   with more than ten such gateways gets ten every fifteen minutes.
+1. Open the gateway's drawer, and its **Health** block. The **Platform** row says which release waits,
+   such as *v1.10.0 waits for approval*. Press those words to open the pull request. It appears within
+   about fifteen minutes of the upgrade. A site with more than ten such gateways gets ten every fifteen
+   minutes. A gateway that has reported no health has no such row: choose **Open in the forge**, then
+   **Pull Requests**.
 2. Read what changes, and approve it. The text links what is different between the two releases.
 3. Merge it. The appliance fetches the change within five minutes and converges within the hour. The
    drawer's **Platform** row then shows the new release.
@@ -559,6 +564,8 @@ merge its own pull request.
 
 * **To keep a gateway where it is**, close its pull request. Aber does not open another for that
   release. It opens one for the next. You can reopen a closed one.
+* **Once it is merged**, the row no longer says that it waits. Once it is closed, that takes up to
+  fifteen minutes.
 * **When a newer release arrives first**, Aber opens the newer pull request and closes its older one.
 * **A tag you chose yourself is left alone**: a branch, a commit, a pre-release such as
   `v1.10.0-rc.1`, or a release newer than your Aber.
@@ -690,7 +697,8 @@ names which. Set it where the deployment is configured (`global.publicBaseDomain
 values), and restart the functions service. The notice clears the next time you open the page.
 
 **`docker compose logs bootstrap` says the token was refused (`401`).**
-The token is unknown, expired or already redeemed. Re-issue from the dashboard.
+The token is unknown, expired or already redeemed. Re-issue from the dashboard. A new install command can
+be pasted on the same machine: the installer replaces the old token.
 
 **`503` with `retryable: true`.**
 The broker credential service was unreachable, and your token was **released**. Start the container

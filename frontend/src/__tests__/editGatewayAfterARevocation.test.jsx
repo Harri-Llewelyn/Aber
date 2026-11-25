@@ -72,10 +72,10 @@ describe('the Type hint for a Remote gateway whose credential was revoked', () =
     expect(typeHint()).toHaveTextContent('Once saved, issue it a broker credential from its drawer.')
     expect(typeHint()).not.toHaveTextContent('Saving ends')
     expect(typeHint().querySelector('.hint-warning')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Gateway' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('button', { name: 'Change type' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Change Type' })).toBeNull()
   })
 
   it('says it ends the credential when the appliance enrolled after the revocation', async () => {

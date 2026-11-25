@@ -182,27 +182,25 @@ export function TelemetryExportModal({ devices, metricNames, catalog = null, fro
 
   return (
     <Modal
-      title={<>Export readings — <span className="mono">{subject}</span></>}
+      title={<>Export Readings — <span className="mono">{subject}</span></>}
       icon={<IconDownload size={18} />}
       size="md"
+      busy={busy}
       onClose={onClose}
       problem={problem}
-      touched
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            pending={busy}
-            pendingLabel="Exporting…"
-            disabled={Boolean(problem)}
-            onClick={runExport}
-            style={{ gap: '6px' }}
-          >
-            <IconDownload size={13} /> Export CSV
-          </ActionButton>
-        </>
+        <ActionButton
+          className="btn btn-primary"
+          pending={busy}
+          pendingLabel="Exporting…"
+          disabled={Boolean(problem)}
+          onClick={runExport}
+          style={{ gap: '6px' }}
+        >
+          <IconDownload size={13} /> Export CSV
+        </ActionButton>
       }
     >
       <p className="telemetry-export-what">{exportWords({ devices, metricNames, windowWords, from, to, scope })}</p>
@@ -268,7 +266,7 @@ export function TelemetryExportModal({ devices, metricNames, catalog = null, fro
             That window starts before {coverage.entry.key === 'raw' ? 'raw telemetry' : coverage.entry.short} {coverage.entry.key === 'raw' ? 'begins' : 'begin'}
             {horizons?.[coverage.entry.relation] ? ` (${horizonLabel(horizons[coverage.entry.relation])})` : ''}.
             {coverage.better
-              ? <> {capitalise(coverage.better.short)} cover the whole window. <button className="btn btn-sm btn-primary" style={{ marginLeft: '4px', padding: '2px 8px' }} onClick={() => { setResolution(coverage.better.key); setError(null) }} disabled={busy}>Switch to {coverage.better.label.toLowerCase()}</button></>
+              ? <> {capitalise(coverage.better.short)} cover the whole window. <button className="btn btn-sm btn-primary" style={{ marginLeft: '4px', padding: '2px 8px' }} onClick={() => { setResolution(coverage.better.key); setError(null) }} disabled={busy}>Switch to {coverage.better.label}</button></>
               : ' No resolution still holds the whole of it, so part of the window will be missing whatever you choose.'}
           </span>
         </div>

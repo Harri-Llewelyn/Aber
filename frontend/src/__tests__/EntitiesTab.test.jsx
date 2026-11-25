@@ -96,7 +96,7 @@ const confirmPurge = async (name = 'Assembly Line 1') => {
   fireEvent.click(purgeButton())
   const field = await screen.findByLabelText(/Type the .* to confirm/i)
   fireEvent.change(field, { target: { value: name } })
-  fireEvent.click(await screen.findByRole('button', { name: /^Confirm$/ }))
+  fireEvent.click(await screen.findByRole('button', { name: /^Permanently Delete / }))
 }
 
 describe('EntitiesTab permanent delete', () => {
@@ -193,7 +193,7 @@ describe('permanent delete asks for the name back', () => {
     await showArchives()
     fireEvent.click(purgeButton())
 
-    const confirm = await screen.findByRole('button', { name: /^Confirm$/ })
+    const confirm = await screen.findByRole('button', { name: /^Permanently Delete / })
     expect(confirm).toBeDisabled()
   })
 
@@ -205,7 +205,7 @@ describe('permanent delete asks for the name back', () => {
     fireEvent.change(await screen.findByLabelText(/Type the .* to confirm/i),
       { target: { value: 'Assembly Line 2' } })
 
-    expect(await screen.findByRole('button', { name: /^Confirm$/ })).toBeDisabled()
+    expect(await screen.findByRole('button', { name: /^Permanently Delete / })).toBeDisabled()
   })
 
   it('stays disabled for the right name in the wrong case', async () => {
@@ -215,7 +215,7 @@ describe('permanent delete asks for the name back', () => {
     fireEvent.change(await screen.findByLabelText(/Type the .* to confirm/i),
       { target: { value: 'assembly line 1' } })
 
-    expect(await screen.findByRole('button', { name: /^Confirm$/ })).toBeDisabled()
+    expect(await screen.findByRole('button', { name: /^Permanently Delete / })).toBeDisabled()
   })
 
   it('accepts the name with stray whitespace, which is what a copy-paste brings', async () => {
@@ -293,7 +293,7 @@ describe('EntitiesTab restore asks first', () => {
     await showArchives(() => true, [ARCHIVED_GATEWAY])
     fireEvent.click(restoreButton())
 
-    const dialog = await screen.findByRole('dialog', { name: 'Restore gateway' })
+    const dialog = await screen.findByRole('dialog', { name: 'Restore Gateway' })
     expect(within(dialog).getByRole('button', { name: 'Restore Gateway' })).toBeInTheDocument()
   })
 

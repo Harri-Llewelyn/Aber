@@ -78,35 +78,28 @@ export function ConfirmModal({
     }
   })
 
-  // While the action runs, Escape, the × and Cancel are no-ops rather than the layer sitting out:
-  // leaving the Escape stack would hand the keypress to the dialog underneath while its mutation
-  // is in flight.
-  const dismiss = pending ? () => {} : onCancel
-
   return (
     <Modal
       title={title}
       icon={icon}
       size={size}
       lead={message}
-      onClose={dismiss}
+      busy={pending}
+      onClose={onCancel}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
-          <ActionButton
-            className={confirmClassName}
-            pending={pending}
-            pendingLabel={pendingLabel}
-            disabled={!gate.open}
-            // Stated rather than left to be inferred from a greyed-out button, which explains
-            // nothing about WHY it is greyed out.
-            title={gate.reason}
-            onClick={confirm}
-          >
-            {confirmLabel}
-          </ActionButton>
-        </>
+        <ActionButton
+          className={confirmClassName}
+          pending={pending}
+          pendingLabel={pendingLabel}
+          // A typed gate holds its button: the one act that waits for what is typed.
+          disabled={!gate.open}
+          title={gate.reason}
+          onClick={confirm}
+        >
+          {confirmLabel}
+        </ActionButton>
       }
     >
       {children}

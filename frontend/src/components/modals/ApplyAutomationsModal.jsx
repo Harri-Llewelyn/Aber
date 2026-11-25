@@ -5,6 +5,7 @@ import { ActionButton } from '../common/ActionButton'
 import { ApplyResults } from '../common/ApplyResults'
 import { IconZap } from '../common/Icons'
 import { describeApply, useApplyPreview } from '../../hooks/useApplyPreview'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { parseAutomationsYaml } from '../../utils/automationYaml'
 import { plural } from '../../utils/format'
 import { automationUrl, automationsUrl } from '../../routes'
@@ -33,7 +34,8 @@ export function ApplyAutomationsModal({ text, source = null, verb = 'Apply', sho
   const [preview, setPreview] = useApplyPreview(parsed, () => api.applyAutomations(parsed.document, true), onChecked)
   const [applyError, setApplyError] = useState(null)
   const [applying, setApplying] = useState(false)
-  const { results, refused, written, unread, problem, held, heldTitle, count } = describeApply(preview, parsed, 'automation')
+  const { results, refused, written, unread, checking, problem, held, unchanged, count } = describeApply(preview, parsed, 'automation')
+  const check = useFormCheck({}, { unchanged })
 
   const confirm = async () => {
     setApplyError(null)
@@ -58,30 +60,27 @@ export function ApplyAutomationsModal({ text, source = null, verb = 'Apply', sho
 
   return (
     <Modal
-      title={`${verb} ${source ? source : 'automations'}`}
+      title={`${verb} ${source ? source : 'Automations'}`}
       icon={<IconZap size={18} />}
       size="lg"
       lead={verb === 'Save'
         ? 'Saves what the editor holds, all of it or none. An automation saved under a new id is a new one: the old one stays as it is.'
         : 'Applies the whole file, all of it or none. It deletes nothing: an automation the file leaves out stays as it is.'}
-      problem={problem}
-      touched
+      problem={problem ?? check.problem}
       error={applyError}
-      onClose={applying ? () => {} : onClose}
+      busy={applying}
+      onClose={onClose}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={applying}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            pending={applying}
-            pendingLabel={`${verb === 'Save' ? 'Saving' : 'Applying'}…`}
-            disabled={held}
-            title={heldTitle}
-            onClick={confirm}
-          >
-            {`${verb} ${plural(written, 'Automation')}`}
-          </ActionButton>
-        </>
+        <ActionButton
+          className="btn btn-primary"
+          pending={applying || checking}
+          pendingLabel={checking ? 'Checking…' : verb === 'Save' ? 'Saving…' : 'Applying…'}
+          disabled={held}
+          onClick={() => check.press(confirm)}
+        >
+          {`${verb} ${plural(written, 'Automation')}`}
+        </ActionButton>
       )}
     >
       {preview.phase === 'checking' && <p className="apply-note" role="status">Checking the file…</p>}

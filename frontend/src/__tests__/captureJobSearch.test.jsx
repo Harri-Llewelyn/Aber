@@ -142,7 +142,7 @@ describe('the search on the Captures tab', () => {
     expect(focusPageSearch()).toBe(true)
     expect(document.activeElement).toBe(search)
     // Play a file… stays the page's, at the end.
-    expect(within(toolbar()).getByRole('button', { name: /Play a file/ })).toBeInTheDocument()
+    expect(within(toolbar()).getByRole('button', { name: /Play a File/ })).toBeInTheDocument()
   })
 
   it.each([

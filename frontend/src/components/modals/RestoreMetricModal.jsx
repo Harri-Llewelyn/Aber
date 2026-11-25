@@ -9,7 +9,7 @@ import { ConfirmModal } from './ConfirmModal'
 export function RestoreMetricModal({ metric, replacement, onConfirm, onCancel }) {
   return (
     <ConfirmModal
-      title={<>Restore metric <span className="mono">{metric.name}</span></>}
+      title={<>Restore Metric <span className="mono">{metric.name}</span></>}
       icon={<IconRefreshCw size={18} />}
       message={<>
         {metric.derivation ? (

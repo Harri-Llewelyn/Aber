@@ -70,8 +70,8 @@ const openEdit = async (row) => {
 
 const choose = (type) => fireEvent.change(document.querySelector('#gateway-type'), { target: { value: type } })
 const typeHint = () => document.querySelector('#gateway-type').closest('.form-group')
-const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-const question = () => screen.queryByRole('button', { name: 'Change type' })
+const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save Gateway' }))
+const question = () => screen.queryByRole('button', { name: 'Change Type' })
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -165,7 +165,7 @@ describe('Save asks first where a credential ends', () => {
 
     expect(question()).toBeNull()
     expect(api.put).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save Gateway' })).toBeInTheDocument()
   })
 
   it('ends a Host gateway’s credential on the way to Remote, and the toast says so', async () => {
@@ -178,7 +178,7 @@ describe('Save asks first where a credential ends', () => {
     await waitFor(() => expect(typeHint()).toHaveTextContent('Saving ends the broker credential this gateway holds, and whatever uses it is cut off.'))
     expect(typeHint()).toHaveTextContent('Once saved, set it up from its drawer')
     save()
-    fireEvent.click(await screen.findByRole('button', { name: 'Change type' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Change Type' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
     expect(api.put.mock.calls[0][1]).toMatchObject({ deployment: 'remote', is_simulated: false })
@@ -224,14 +224,14 @@ describe('Save asks first where a credential ends', () => {
     await openEdit(row)
     choose('host')
     save()
-    fireEvent.click(screen.getByRole('button', { name: 'Change type' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Change Type' }))
 
     const dialog = await waitFor(() => {
       const found = screen.getByText('permission denied for table gateways').closest('.modal')
       expect(found).toBeTruthy()
       return found
     })
-    expect(within(dialog).getByRole('button', { name: 'Change type' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Change Type' })).toBeInTheDocument()
     expect(showToast).not.toHaveBeenCalled()
   })
 })

@@ -10,6 +10,7 @@ import {
   PERSON_ROLES, administratorsWithAccess, passwordSetBlocked, personRoleWithArticle, removalBlocked, roleChangeBlocked,
 } from '../utils/people'
 import { findTabLink, queryTabLink, tabLinks } from '../test/tabBar'
+import { pressHeld } from '../test/dialogs'
 
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -40,8 +41,8 @@ vi.mock('../api', async (importOriginal) => ({
 vi.mock('../components/common/CopyableId', () => ({
   __esModule: true,
   default: () => null,
-  copyText: vi.fn().mockResolvedValue(true),
 }))
+vi.mock('../utils/copyText', () => ({ copyText: vi.fn().mockResolvedValue(true) }))
 
 const ME = 'a0000000-0000-4000-8000-000000000001'
 const OTHER_ADMIN = 'a0000000-0000-4000-8000-000000000002'
@@ -163,7 +164,7 @@ describe('the People tab', () => {
     fireEvent.click(drawer.getByRole('button', { name: 'Remove Access' }))
 
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('Remove access for operator@site.test')
+    expect(dialog).toHaveTextContent('Remove Access for operator@site.test')
     expect(dialog).toHaveTextContent('can no longer sign in')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(api.removePersonAccess).not.toHaveBeenCalled()
@@ -303,13 +304,13 @@ describe('adding a person', () => {
     await waitFor(() => expect(api.addPerson).toHaveBeenCalledWith('new@site.test', 'Operator', null))
     const reveal = await screen.findByRole('dialog')
     expect(reveal).toHaveTextContent('it is not shown again')
-    expect(within(reveal).getByLabelText('Password')).toHaveValue(MINTED)
+    expect(within(reveal).getByLabelText('Password')).toHaveTextContent(MINTED)
     // The list behind the dialog is read again so the person appears.
     await waitFor(() => expect(api.listPeople).toHaveBeenCalledTimes(2))
 
     fireEvent.click(within(reveal).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(screen.queryByDisplayValue(MINTED)).toBeNull()
+    expect(screen.queryByText(MINTED)).toBeNull()
   })
 
   it('with a mail relay, says an invitation was sent and shows no password', async () => {
@@ -337,7 +338,12 @@ describe('adding a person', () => {
     renderPeople()
     fireEvent.click(await screen.findByRole('button', { name: /Add Person/ }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('button', { name: /Add Person/ })).toBeDisabled()
+    pressHeld(dialog, /Add Person/, 'Enter their email address')
+    expect(within(dialog).getByLabelText('Email')).toHaveAccessibleDescription('Enter their email address')
+    expect(within(dialog).getByLabelText('Email')).toHaveFocus()
+    fireEvent.change(within(dialog).getByLabelText('Email'), { target: { value: 'not an address' } })
+    pressHeld(dialog, /Add Person/, 'That is not an email address')
+    expect(api.addPerson).not.toHaveBeenCalled()
   })
 })
 
@@ -370,11 +376,11 @@ describe('display names', () => {
     const toast = renderPeople()
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('Change the name for operator@site.test')
-    const input = within(dialog).getByLabelText('Display name')
+    expect(dialog).toHaveTextContent('Change the Name for operator@site.test')
+    const input = within(dialog).getByLabelText('Display Name')
     expect(input).toHaveValue('Owain Operator')
     fireEvent.change(input, { target: { value: '  Owain ap Rhys ' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Name' }))
     await waitFor(() => expect(api.setDisplayName).toHaveBeenCalledWith(OPERATOR, 'Owain ap Rhys'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(toast).toHaveBeenCalledWith('operator@site.test is now shown as Owain ap Rhys', 'success',
@@ -388,8 +394,8 @@ describe('display names', () => {
     const toast = renderPeople()
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: '   ' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    fireEvent.change(within(dialog).getByLabelText('Display Name'), { target: { value: '   ' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Name' }))
     await waitFor(() => expect(api.setDisplayName).toHaveBeenCalledWith(OPERATOR, null))
     expect(toast).toHaveBeenCalledWith('operator@site.test is now shown by email alone', 'success',
       { to: personUrl(OPERATOR) })
@@ -399,10 +405,10 @@ describe('display names', () => {
     renderPeople()
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
     const dialog = await screen.findByRole('dialog')
-    const input = within(dialog).getByLabelText('Display name')
+    const input = within(dialog).getByLabelText('Display Name')
     fireEvent.change(input, { target: { value: 'N'.repeat(81) } })
-    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(dialog).toHaveTextContent('A display name is 80 characters at most.')
+    pressHeld(dialog, 'Save Name', 'A display name is 80 characters at most.')
     fireEvent.change(input, { target: { value: 'Owain\tOperator' } })
     expect(dialog).toHaveTextContent('cannot contain a control character')
     expect(api.setDisplayName).not.toHaveBeenCalled()
@@ -413,9 +419,18 @@ describe('display names', () => {
     renderPeople()
     fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: 'Owain' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    fireEvent.change(within(dialog).getByLabelText('Display Name'), { target: { value: 'Owain' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Name' }))
     expect(await within(dialog).findByText('A display name is 80 characters at most.')).toBeInTheDocument()
+  })
+
+  it('sends nothing for the name they have, and says nothing has changed', async () => {
+    api.listPeople.mockResolvedValue(NAMED)
+    renderPeople()
+    fireEvent.click((await openDrawer('operator@site.test')).getByRole('button', { name: 'Change Name' }))
+    const dialog = await screen.findByRole('dialog')
+    pressHeld(dialog, 'Save Name', 'Nothing has changed.')
+    expect(api.setDisplayName).not.toHaveBeenCalled()
   })
 
   it('goes with Add Person when one is given, and a bad one stops the add', async () => {
@@ -427,14 +442,15 @@ describe('display names', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Add Person/ }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('Email'), { target: { value: 'new@site.test' } })
-    const name = within(dialog).getByLabelText('Display name (optional)')
+    const name = within(dialog).getByLabelText('Display Name (optional)')
     // A tab: a text box drops a line break by itself.
     fireEvent.change(name, { target: { value: 'Nia\tNewcomer' } })
-    expect(within(dialog).getByRole('button', { name: /Add Person/ })).toBeDisabled()
+    pressHeld(dialog, /Add Person/, 'cannot contain a control character')
+    expect(api.addPerson).not.toHaveBeenCalled()
     fireEvent.change(name, { target: { value: ' Nia Newcomer ' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /Add Person/ }))
     await waitFor(() => expect(api.addPerson).toHaveBeenCalledWith('new@site.test', 'Operator', 'Nia Newcomer'))
-    expect(await screen.findByText('Nia Newcomer (new@site.test) added')).toBeInTheDocument()
+    expect(await screen.findByText('Nia Newcomer (new@site.test) Added')).toBeInTheDocument()
   })
 
   it('says so when the person was added and their name was not set', async () => {
@@ -447,7 +463,7 @@ describe('display names', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Add Person/ }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('Email'), { target: { value: 'new@site.test' } })
-    fireEvent.change(within(dialog).getByLabelText('Display name (optional)'), { target: { value: 'Nia' } })
+    fireEvent.change(within(dialog).getByLabelText('Display Name (optional)'), { target: { value: 'Nia' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /Add Person/ }))
     await waitFor(() => expect(toast).toHaveBeenCalledWith(
       'Their display name was not set. Open their row and select Change Name to set it.', 'warning',
@@ -479,7 +495,7 @@ describe('setting a new password', () => {
     fireEvent.click(drawer.getByRole('button', { name: 'Set New Password' }))
 
     const confirm = await screen.findByRole('dialog')
-    expect(confirm).toHaveTextContent('Set a new password for operator@site.test')
+    expect(confirm).toHaveTextContent('Set a New Password for operator@site.test')
     expect(confirm).toHaveTextContent('current password stops working')
     fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
     expect(api.managePeople).not.toHaveBeenCalled()
@@ -489,18 +505,18 @@ describe('setting a new password', () => {
     await waitFor(() =>
       expect(api.managePeople).toHaveBeenCalledWith({ action: 'set-password', user_id: OPERATOR }))
 
-    const reveal = await screen.findByText('New password for operator@site.test')
+    const reveal = await screen.findByText('New Password for operator@site.test')
     const dialog = reveal.closest('[role="dialog"]')
     expect(dialog).toHaveTextContent('it is not shown again')
-    expect(within(dialog).getByLabelText('Password')).toHaveValue(MINTED)
-    expect(within(dialog).getByLabelText('Email')).toHaveValue('operator@site.test')
+    expect(within(dialog).getByLabelText('Password')).toHaveTextContent(MINTED)
+    expect(within(dialog).getByLabelText('Email')).toHaveTextContent('operator@site.test')
     expect(toast).toHaveBeenCalledWith('operator@site.test has a new password', 'success', { to: personUrl(OPERATOR) })
     // Never in a toast.
     expect(JSON.stringify(toast.mock.calls)).not.toContain(MINTED)
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(screen.queryByDisplayValue(MINTED)).toBeNull()
+    expect(screen.queryByText(MINTED)).toBeNull()
   })
 
   it('shows the refusal, and no password dialog, when none was set', async () => {
@@ -664,7 +680,7 @@ describe('ending a person\'s sessions', () => {
     fireEvent.click(drawer.getByRole('button', { name: 'End Sessions' }))
 
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('End every session for operator@site.test')
+    expect(dialog).toHaveTextContent('End Every Session for operator@site.test')
     expect(dialog).toHaveTextContent('the dashboard in each browser, and Studio, the forge, Node-RED and Grafana')
     expect(dialog).toHaveTextContent('The API refuses their access at once')
     expect(dialog).toHaveTextContent('Grafana within the hour')
@@ -832,7 +848,7 @@ describe('a person\'s sessions, listed in their drawer', () => {
     renderPeople()
     const { list } = await openList('operator@site.test', 'Owain Operator')
     fireEvent.click(within(list).getByRole('button', { name: 'End the session: Chrome on Windows' }))
-    const dialog = await screen.findByRole('dialog', { name: 'End a session for Owain Operator (operator@site.test)' })
+    const dialog = await screen.findByRole('dialog', { name: 'End a Session for Owain Operator (operator@site.test)' })
     expect(dialog).toHaveAccessibleDescription(
       'End Owain Operator\'s session in Chrome on Windows, last active 5 minutes ago? That browser has to sign in again.')
     expect(within(dialog).getByRole('button', { name: 'End Session' })).toBeInTheDocument()
@@ -908,10 +924,10 @@ describe('changing a person\'s email address', () => {
     fireEvent.click(within(queryDrawer()).getByRole('button', { name: 'Change Email' }))
     const dialog = within(await screen.findByRole('dialog'))
     expect(dialog.getByText(/they will have to sign in again/)).toBeInTheDocument()
-    expect(dialog.getByRole('button', { name: 'Change Email' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Change Email', 'Type their new email address')
 
     api.listPeople.mockResolvedValue(PEOPLE.map(p => (p.user_id === OPERATOR ? { ...p, email: 'owain@site.test' } : p)))
-    fireEvent.change(dialog.getByLabelText('New email address'), { target: { value: '  Owain@Site.TEST ' } })
+    fireEvent.change(dialog.getByLabelText('New Email Address'), { target: { value: '  Owain@Site.TEST ' } })
     fireEvent.click(dialog.getByRole('button', { name: 'Change Email' }))
     await waitFor(() => expect(api.changePersonEmail).toHaveBeenCalledWith(OPERATOR, 'owain@site.test'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
@@ -927,13 +943,12 @@ describe('changing a person\'s email address', () => {
   it('refuses before sending an address that is not one, or the one they have', async () => {
     renderPeople()
     const dialog = await openChangeEmail()
-    const input = dialog.getByLabelText('New email address')
+    const input = dialog.getByLabelText('New Email Address')
     fireEvent.change(input, { target: { value: 'not an address' } })
     expect(dialog.getByText('That is not an email address.')).toBeInTheDocument()
-    expect(dialog.getByRole('button', { name: 'Change Email' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Change Email', 'That is not an email address.')
     fireEvent.change(input, { target: { value: 'OPERATOR@site.test' } })
-    expect(dialog.getByText('That is already their email address.')).toBeInTheDocument()
-    expect(dialog.getByRole('button', { name: 'Change Email' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Change Email', 'That is already their email address.')
     expect(api.changePersonEmail).not.toHaveBeenCalled()
   })
 
@@ -941,7 +956,7 @@ describe('changing a person\'s email address', () => {
     api.changePersonEmail.mockRejectedValue(new Error('second@site.test already belongs to another account'))
     renderPeople()
     const dialog = await openChangeEmail()
-    fireEvent.change(dialog.getByLabelText('New email address'), { target: { value: 'second@site.test' } })
+    fireEvent.change(dialog.getByLabelText('New Email Address'), { target: { value: 'second@site.test' } })
     fireEvent.click(dialog.getByRole('button', { name: 'Change Email' }))
     expect(await dialog.findByText('second@site.test already belongs to another account')).toBeInTheDocument()
   })
@@ -959,7 +974,7 @@ describe('changing a person\'s role', () => {
     api.listPeople.mockResolvedValue(NAMED)
     renderPeople()
     const dialog = await openChangeRole()
-    expect(screen.getByRole('dialog')).toHaveAccessibleName('Change the role for Owain Operator (operator@site.test)')
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Change the Role for Owain Operator (operator@site.test)')
     expect(screen.getByRole('dialog')).toHaveAccessibleDescription(/Nothing changes until you select Change Role/)
 
     // The four roles, theirs chosen and focused, with its description under it as Add Person shows.
@@ -969,7 +984,7 @@ describe('changing a person\'s role', () => {
     expect(within(select).getAllByRole('option').map(o => o.textContent))
       .toEqual(['Administrator', 'Shopfloor Manager', 'Operator', 'Auditor'])
     expect(select).toHaveAccessibleDescription(PERSON_ROLES.find(r => r.name === 'Operator').description)
-    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Change Role', 'Nothing has changed.')
     expect(dialog.queryByText(/becomes/)).toBeNull()
 
     fireEvent.change(select, { target: { value: 'Auditor' } })
@@ -978,11 +993,10 @@ describe('changing a person\'s role', () => {
       'Owain Operator becomes an Auditor. They can read the Audit Trail, including who was given access, and '
       + 'change nothing, from their next request. Node-RED follows within a minute, and Grafana when they next '
       + 'sign in to it.')
-    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeEnabled()
 
-    // Back to their own role, Change Role waits again.
+    // Back to their own role, there is nothing to change again.
     fireEvent.change(select, { target: { value: 'Operator' } })
-    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Change Role', 'Nothing has changed.')
     expect(dialog.queryByText(/becomes/)).toBeNull()
 
     fireEvent.change(select, { target: { value: 'Shopfloor_Manager' } })
@@ -1023,10 +1037,11 @@ describe('changing a person\'s role', () => {
     const select = dialog.getByLabelText('Role')
     expect(select).toHaveValue('')
     expect(select).toHaveAccessibleDescription('They hold no role now.')
-    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Change Role', 'Choose a role')
+    expect(select).toHaveAccessibleDescription('They hold no role now. Choose a role')
     fireEvent.change(select, { target: { value: 'Administrator' } })
     expect(screen.getByRole('dialog')).toHaveTextContent('invited@site.test becomes an Administrator. They can do everything')
-    expect(dialog.getByRole('button', { name: 'Change Role' })).toBeEnabled()
+    expect(api.setPersonRole).not.toHaveBeenCalled()
   })
 
   it('is refused for yourself, a removed person and the last Administrator who can sign in, in the select\'s words', async () => {

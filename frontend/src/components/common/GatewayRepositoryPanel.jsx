@@ -22,6 +22,27 @@ export function gatewayCompareUrl(gateway) {
 }
 
 /**
+ * The platform release whose pull request from Aber waits for approval on this gateway's repository
+ * (forge-sweep's record of it), or null. A link to it for a role that may open the forge, and the same
+ * words for the rest. It is news and not a fault, so it keeps the text's own colour in a row of any tone.
+ */
+export function WaitingBump({ gateway, canOpenForge }) {
+  if (!gateway?.forge_bump_tag || !gateway.forge_bump_number) return null
+  const words = `${gateway.forge_bump_tag} waits for approval`
+  if (!canOpenForge) return <span className="waiting-bump">{words}</span>
+  return (
+    <a
+      className="waiting-bump-link"
+      href={`${gatewayRepositoryUrl(gateway)}/pulls/${gateway.forge_bump_number}`}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {words} <IconExternalLink size={10} />
+    </a>
+  )
+}
+
+/**
  * The row a gateway with no repository gets: the drawer's field shape, one line, with the reason in
  * the label's help tip. A person who may open the forge looks here for a link, and one line says
  * there is none.

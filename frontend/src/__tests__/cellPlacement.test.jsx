@@ -173,7 +173,7 @@ describe('CellsTab places a cell on its area plan', () => {
     fireEvent.click(plan, { clientX: 100, clientY: 225 })
     expect(screen.getByText(/Placed 25% across, 75% down/)).toBeInTheDocument()
 
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Cell' })) })
     expect(api.post).toHaveBeenCalledWith('/api/v1/cells', expect.objectContaining({
       cell_name: 'Bay 3', area_id: 'area-1', plan_x: 0.25, plan_y: 0.75
     }))
@@ -186,7 +186,7 @@ describe('CellsTab places a cell on its area plan', () => {
     fireEvent.click(screen.getByRole('button', { name: /New Cell/ }))
     fireEvent.change(screen.getByPlaceholderText(/Assembly Line 1/), { target: { value: 'Bay 3' } })
 
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Cell' })) })
     expect(showToast).toHaveBeenCalledWith("Cell 'Bay 3' created", 'success', { to: cellUrl('cell-new') })
   })
 
@@ -216,7 +216,7 @@ describe('CellsTab places a cell on its area plan', () => {
     fireEvent.change(screen.getByLabelText('Area'), { target: { value: '' } })
     expect(document.querySelector('.modal .area-plan')).toBeNull()
 
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Cell' })) })
     expect(api.put).toHaveBeenCalledWith('/api/v1/cells/cell-1', expect.objectContaining({
       area_id: '', plan_x: '', plan_y: ''
     }))
@@ -226,8 +226,8 @@ describe('CellsTab places a cell on its area plan', () => {
     await renderCells()
     fireEvent.click(screen.getByText('Bay 1'))
     fireEvent.click(screen.getByRole('button', { name: /Edit Details/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Clear place' }))
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Place' }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Cell' })) })
     expect(api.put).toHaveBeenCalledWith('/api/v1/cells/cell-1', expect.objectContaining({
       area_id: 'area-1', plan_x: '', plan_y: ''
     }))

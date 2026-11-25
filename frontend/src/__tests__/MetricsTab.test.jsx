@@ -565,7 +565,7 @@ describe('Edit Metric — correcting a semantic id', () => {
   it('has nothing to save until the pair changes', async () => {
     await setup()
     const modal = openEdit('Controller/EXECUTION')
-    expect(modal.getByRole('button', { name: 'Save Metric' }).disabled).toBe(true)
+    refusesToSave(modal, 'Nothing has changed.')
   })
 
   it('sends only the semantic id and its type, and reloads the catalog', async () => {
@@ -630,7 +630,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     const modal = openEdit('Controller/EXECUTION')
 
     expect(modal.getByText('Suggested')).toBeTruthy()
-    expect(modal.queryByRole('button', { name: 'Use suggested' })).toBeNull()
+    expect(modal.queryByRole('button', { name: 'Use Suggested' })).toBeNull()
   })
 
   it('puts back the id Add Metric would suggest for an unmapped MTConnect metric', async () => {
@@ -640,7 +640,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     const modal = openEdit('Controller/FIRMWARE')
     expect(modal.getByRole('textbox', { name: /Semantic ID/ }).value).toBe('')
 
-    fireEvent.click(modal.getByRole('button', { name: 'Use suggested' }))
+    fireEvent.click(modal.getByRole('button', { name: 'Use Suggested' }))
     expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRI')
     fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
 
@@ -654,7 +654,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     await setup()
     const modal = openEdit('safety_interlock')
 
-    expect(modal.queryByRole('button', { name: 'Use suggested' })).toBeNull()
+    expect(modal.queryByRole('button', { name: 'Use Suggested' })).toBeNull()
     expect(modal.queryByText('Suggested')).toBeNull()
   })
 
@@ -662,7 +662,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     api.put.mockResolvedValue({ id: 'm3' })
     await setup()
     const modal = openEdit('Controller/FIRMWARE')
-    fireEvent.click(modal.getByRole('button', { name: 'Search vocabularies' }))
+    fireEvent.click(modal.getByRole('button', { name: 'Search Vocabularies' }))
     fireEvent.change(modal.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: 'serial' } })
     fireEvent.click(within(modal.getByRole('list', { name: 'Matching concepts' })).getAllByRole('button')[0])
 
@@ -684,7 +684,7 @@ describe('Edit Metric — correcting a semantic id', () => {
     expect(labelRow.contains(modal.getByText('Suggested'))).toBe(false)
 
     fireEvent.change(modal.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: '' } })
-    for (const name of ['Use suggested', 'Search vocabularies']) {
+    for (const name of ['Use Suggested', 'Search Vocabularies']) {
       expect(labelRow.contains(modal.getByRole('button', { name })), `${name} sits in the label row`).toBe(false)
     }
   })
@@ -692,14 +692,14 @@ describe('Edit Metric — correcting a semantic id', () => {
   it('closes only the search on Escape, and the dialog on the next one', async () => {
     await setup()
     const modal = openEdit('Controller/FIRMWARE')
-    fireEvent.click(modal.getByRole('button', { name: 'Search vocabularies' }))
+    fireEvent.click(modal.getByRole('button', { name: 'Search Vocabularies' }))
     fireEvent.change(modal.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: 'serial' } })
     // From a result as much as from the search box: both sit in the panel.
     fireEvent.keyDown(within(modal.getByRole('list', { name: 'Matching concepts' })).getAllByRole('button')[0], { key: 'Escape' })
 
     expect(document.querySelector('.modal')).toBeTruthy()
     expect(modal.queryByRole('textbox', { name: 'Search the vocabularies and templates' })).toBeNull()
-    expect(document.activeElement).toBe(modal.getByRole('button', { name: 'Search vocabularies' }))
+    expect(document.activeElement).toBe(modal.getByRole('button', { name: 'Search Vocabularies' }))
     expect(api.put).not.toHaveBeenCalled()
 
     // The toggle has focus again, so its tooltip shows, and the next Escape closes that first.
@@ -1054,8 +1054,8 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     const modal = within(document.querySelector('.modal'))
 
     expect(modal.getByRole('textbox', { name: /Semantic ID/ }).value).toBe('')
-    expect(modal.getByRole('button', { name: 'Use suggested' })).toBeTruthy()
-    expect(modal.getByRole('button', { name: 'Search vocabularies' })).toBeTruthy()
+    expect(modal.getByRole('button', { name: 'Use Suggested' })).toBeTruthy()
+    expect(modal.getByRole('button', { name: 'Search Vocabularies' })).toBeTruthy()
   })
 })
 
@@ -1146,7 +1146,7 @@ describe('Metric Catalog — Add Metric dialog', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Add Metric' })
     expect(within(dialog).getByText('Data Item Type')).toBeTruthy()
-    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Add Metric' })).toBeTruthy()
   })
 
   it('closes on Cancel and on Escape', async () => {
@@ -1201,7 +1201,7 @@ const openFormForError = async () => {
   await waitForCatalog()
   fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
   fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+  fireEvent.click(addMetricButton())
   await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
 }
 
@@ -1294,12 +1294,29 @@ const standardSelect = () => screen.getByLabelText('Standard')
 // The Add Metric form's SemanticIdField, the only one on the page while no dialog is open.
 const semanticIdInput = () => screen.getByRole('textbox', { name: /Semantic ID/ })
 const referenceTypeSelect = () => screen.getByRole('combobox', { name: 'Reference Type' })
-const useSuggestedButton = () => screen.queryByRole('button', { name: 'Use suggested' })
+const useSuggestedButton = () => screen.queryByRole('button', { name: 'Use Suggested' })
 // The Datatype column header shares the picker's first sentence, so the query names the element kind.
 const datatypeSelect = () =>
   screen.getByLabelText('Sparkplug Datatype')
 const conceptSelect = () => screen.getByLabelText('Concept')
-const addMetricButton = () => screen.getByRole('button', { name: /^Add$/ })
+const addMetricButton = () => within(screen.getByRole('dialog', { name: 'Add Metric' })).getByRole('button', { name: 'Add Metric' })
+/** The press sends nothing, and the line above the buttons says why. */
+const refusesToAdd = (why) => {
+  fireEvent.click(addMetricButton())
+  expect(api.post).not.toHaveBeenCalled()
+  expect(document.querySelector('.modal-problem')).toHaveTextContent(why)
+}
+/** Nothing is in the way: the press sends the metric. */
+const canBeAdded = async () => {
+  fireEvent.click(addMetricButton())
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.anything()))
+}
+/** Save Metric sends nothing, and says why above the buttons. */
+const refusesToSave = (modal, why) => {
+  fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
+  expect(api.put).not.toHaveBeenCalled()
+  expect(document.querySelector('.modal-problem')).toHaveTextContent(why)
+}
 
 // The Units column header has a title of its own, but a query by title text can still match the
 // wrong element kind, so it names the select.
@@ -1431,7 +1448,10 @@ describe('Metric builder — vocabulary prefill', () => {
 
     expect(datatypeSelect().value).toBe('')
     expect(screen.getByText(/Choose a Sparkplug datatype/)).toBeTruthy()
-    expect(addMetricButton().disabled).toBe(true)
+    // The data point went with the group, and it comes first in the form.
+    refusesToAdd('Choose a data point')
+    expect(datatypeSelect()).toHaveAccessibleDescription(/Choose a Sparkplug datatype/)
+    expect(document.activeElement).toBe(screen.getByLabelText('Data Point'))
   })
 })
 
@@ -1554,7 +1574,7 @@ describe('Metric builder — ASHRAE 223P', () => {
     // Nothing chosen, and the control says so rather than reading "Double".
     expect(datatypeSelect().value).toBe('')
     expect(screen.getByText(/Choose a Sparkplug datatype/)).toBeTruthy()
-    expect(addMetricButton().disabled).toBe(true)
+    refusesToAdd('Choose a Sparkplug datatype')
   })
 
   it('becomes addable once a datatype is chosen, and posts that datatype and the id typed', async () => {
@@ -1567,7 +1587,6 @@ describe('Metric builder — ASHRAE 223P', () => {
     fireEvent.change(semanticIdInput(), { target: { value: 'http://qudt.org/vocab/quantitykind/Temperature' } })
 
     expect(screen.queryByText(/Choose a Sparkplug datatype/)).toBeNull()
-    expect(addMetricButton().disabled).toBe(false)
     fireEvent.click(addMetricButton())
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
@@ -1623,7 +1642,7 @@ describe('Metric builder — semantic id', () => {
   it('leaves a metric addable once it has an id', async () => {
     await openForm()
     fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
-    expect(screen.getByRole('button', { name: 'Add' }).disabled).toBe(false)
+    await canBeAdded()
   })
 
   it('offers IRI, IRDI and ExpandedNodeId only', async () => {
@@ -1657,7 +1676,7 @@ describe('Metric builder — semantic id', () => {
     fireEvent.change(semanticIdInput(), { target: { value: '' } })
 
     expect(semanticIdInput().value).toBe('')
-    expect(screen.getByRole('button', { name: 'Add' }).disabled).toBe(false)
+    await canBeAdded()
   })
 })
 
@@ -1698,7 +1717,7 @@ describe('Metric builder — permitted values', () => {
     await fillAngle(10)
     fireEvent.change(valuesInput(), { target: { value: '1.5' } })
     expect(screen.getByRole('alert').textContent).toMatch(/whole numbers\. "1\.5" is not one/)
-    expect(addMetricButton().disabled).toBe(true)
+    refusesToAdd(/whole numbers\. "1\.5" is not one/)
 
     fireEvent.change(valuesInput(), { target: { value: '0, 2.0, 02' } })
     expect(screen.queryByRole('alert')).toBeNull()
@@ -1762,7 +1781,7 @@ describe('Edit Metric — permitted values', () => {
     const modal = openEdit('Controller/EXECUTION')
     const field = modal.getByRole('textbox', { name: 'Permitted Values' })
     expect(field.value).toBe('READY, ACTIVE')
-    expect(modal.getByRole('button', { name: 'Save Metric' }).disabled).toBe(true)
+    refusesToSave(modal, 'Nothing has changed.')
 
     fireEvent.change(field, { target: { value: 'READY, ACTIVE, STOPPED' } })
     fireEvent.click(modal.getByRole('button', { name: 'Save Metric' }))
@@ -1803,7 +1822,7 @@ describe('Edit Metric — permitted values', () => {
   it('never counts an untouched field as an edit, even when a stored value holds a comma', async () => {
     await setup(withValues(['A,B']))
     const modal = openEdit('Controller/EXECUTION')
-    expect(modal.getByRole('button', { name: 'Save Metric' }).disabled).toBe(true)
+    refusesToSave(modal, 'Nothing has changed.')
   })
 
   it('refuses a value the datatype cannot carry', async () => {
@@ -1812,7 +1831,7 @@ describe('Edit Metric — permitted values', () => {
     fireEvent.change(modal.getByRole('textbox', { name: 'Permitted Values' }), { target: { value: 'maybe' } })
 
     expect(modal.getByRole('alert').textContent).toMatch(/"maybe" is neither/)
-    expect(modal.getByRole('button', { name: 'Save Metric' }).disabled).toBe(true)
+    refusesToSave(modal, /"maybe" is neither/)
   })
 })
 
@@ -1906,7 +1925,7 @@ describe('Metric builder — the suggested semantic id', () => {
 
     expect(semanticIdInput().value).toBe(ACCELERATION_ID)
     expect(referenceTypeSelect().value).toBe('IRI')
-    expect(addMetricButton().disabled).toBe(false)
+    await canBeAdded()
   })
 
   it('suggests it after a keystroke in the field that was then deleted', async () => {
@@ -1944,9 +1963,10 @@ describe('Metric builder — the suggested semantic id', () => {
     chooseActuatorAcceleration()
     fireEvent.change(semanticIdInput(), { target: { value: '' } })
 
-    expect(addMetricButton().disabled).toBe(false)
     fireEvent.click(useSuggestedButton())
     expect(semanticIdInput().value).toBe(ACCELERATION_ID)
+    fireEvent.change(semanticIdInput(), { target: { value: '' } })
+    await canBeAdded()
   })
 
   it('keeps a typed id across a change of type, and suggests the new type', async () => {
@@ -2009,7 +2029,7 @@ describe('Metric builder — the suggested semantic id', () => {
  */
 describe('Metric builder — choosing a semantic id from the vocabularies', () => {
   const MANUFACTURER_NAME = '0112/2///61987#ABA565#009'
-  const openSearch = () => fireEvent.click(screen.getByRole('button', { name: 'Search vocabularies' }))
+  const openSearch = () => fireEvent.click(screen.getByRole('button', { name: 'Search Vocabularies' }))
   const search = (text) =>
     fireEvent.change(screen.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: text } })
   const options = () => within(screen.getByRole('list', { name: 'Matching concepts' })).getAllByRole('button')
@@ -2100,7 +2120,7 @@ describe('Metric builder — choosing a semantic id from the vocabularies', () =
   it('keeps free text: an id no source holds is typed as before', async () => {
     await openForm()
     openSearch()
-    fireEvent.click(screen.getByRole('button', { name: 'Close search' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close Search' }))
     fireEvent.change(semanticIdInput(), { target: { value: 'urn:example:torque' } })
 
     expect(semanticIdInput().value).toBe('urn:example:torque')
@@ -2242,10 +2262,10 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
     // Use starts a metric under the 223P group; the class is not adopted as its id.
     expect(semanticIdInput().value).toBe('')
     expect(datatypeSelect().value).toBe('')
-    expect(addMetricButton().disabled).toBe(true)
+    refusesToAdd('Choose a Sparkplug datatype')
 
     fireEvent.change(datatypeSelect(), { target: { value: '12' } })
-    expect(addMetricButton().disabled).toBe(false)
+    await canBeAdded()
   })
 
   it('consumes the handover so returning here later does not reopen the dialog', async () => {
@@ -2337,7 +2357,7 @@ describe('Add Metric — Group picker follows the Standard', () => {
     fireEvent.change(groupSelect(), { target: { value: '__new__' } })
     fireEvent.change(screen.getByPlaceholderText('e.g. Hydraulic'), { target: { value: 'Coolant' } })
     fireEvent.change(screen.getByLabelText('Data Item Type'), { target: { value: 'ANGLE' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+    fireEvent.click(addMetricButton())
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/v1/metric-groups',
@@ -2571,7 +2591,7 @@ describe('Add Metric: Units is a label where the type takes none', () => {
     api.post.mockResolvedValue({ metric_uuid: 'new' })
     await openForm()
     chooseType('EXECUTION')
-    fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+    fireEvent.click(addMetricButton())
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.objectContaining({ category: 'EVENT', units: '' })))
   })
 
@@ -2580,7 +2600,7 @@ describe('Add Metric: Units is a label where the type takes none', () => {
     await openForm()
     chooseType('ANGLE')
     fireEvent.change(screen.getByRole('combobox', { name: 'Units' }), { target: { value: 'MILLIMETER' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+    fireEvent.click(addMetricButton())
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.objectContaining({
       category: 'SAMPLE', units: 'MILLIMETER', standard: 'MTConnect'
     })))
@@ -2596,7 +2616,7 @@ describe('Add Metric: a custom MTConnect type asks for its category', () => {
   }
   const categorySelect = () => screen.getByRole('combobox', { name: 'Category' })
   const categoryOptions = () => [...categorySelect().querySelectorAll('option')].map(o => o.value)
-  const add = () => fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+  const add = () => fireEvent.click(addMetricButton())
 
   it('offers SAMPLE, EVENT and CONDITION in that order, once the custom type is picked, with SAMPLE chosen', async () => {
     await openForm()
@@ -2725,7 +2745,7 @@ describe('Deprecate Metric: the replacement is picked from the schema builder’
     fireEvent.change(within(modal).getByLabelText('Search catalog metrics'), { target: { value: 'safety' } })
     expect(modal.textContent).toContain('Replaced by Controller/EXECUTION')
 
-    fireEvent.click(within(modal).getByRole('button', { name: 'No replacement' }))
+    fireEvent.click(within(modal).getByRole('button', { name: 'No Replacement' }))
     expect(modal.textContent).toContain('No replacement chosen.')
     fireEvent.click(within(modal).getByRole('button', { name: 'Deprecate Metric' }))
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog/m1/deprecate', { superseded_by: null }))

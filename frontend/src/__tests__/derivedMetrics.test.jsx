@@ -8,6 +8,7 @@ import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
 import { metricUrl } from '../routes'
 import { queryTabLink, tabLinks } from '../test/tabBar'
+import { pressHeld, wrongIn } from '../test/dialogs'
 
 /**
  * The Derived tab: derived metrics leave the catalog and have a tab of their own, a deprecated one is
@@ -288,23 +289,29 @@ describe('Add Derived Metric', () => {
   const typeName = (dialog, value) => fireEvent.change(within(dialog).getByLabelText(/Metric Name/), { target: { value } })
   const count = (dialog) => dialog.querySelector('.section-count').textContent
 
-  it('opens held, and says nothing until something is edited', async () => {
-    const { dialog } = await open()
-    expect(confirm(dialog)).toHaveClass('btn-disabled')
-    expect(said(dialog)).toBe('')
-  })
+  /** A press that sends nothing, for the reason given. */
+  const held = (dialog, why) => {
+    pressHeld(dialog, 'Add Derived Metric', why)
+    expect(api.post).not.toHaveBeenCalled()
+  }
 
-  it('says why it cannot go ahead, from the first edit, and the confirm repeats the dialog’s name', async () => {
+  it('says nothing until it is pressed, and then what each field needs', async () => {
     const { dialog } = await open()
+    expect(said(dialog)).toBe('')
     choose(dialog, /Group/, 'Controller')
-    expect(said(dialog)).toBe('Give the metric a name')
+    expect(said(dialog)).toBe('')
+
+    held(dialog, 'Give the metric a name')
+    expect(wrongIn(dialog)).toEqual(['Give the metric a name', 'Choose the counter', 'Give the metric a name'])
+    expect(within(dialog).getByLabelText(/Metric Name/)).toHaveFocus()
     typeName(dialog, 'PARTS_PER_SHIFT')
-    expect(said(dialog)).toBe('Choose the counter')
+    held(dialog, 'Choose the counter')
+    // The picker's search, the first control of its group.
+    expect(dialog.querySelector('#derived-inputs').contains(document.activeElement)).toBe(true)
+    expect(dialog.querySelector('#derived-inputs')).toHaveAccessibleDescription('Choose the counter')
     expect(confirm(dialog).textContent).toBe('Add Derived Metric')
-    expect(confirm(dialog)).toHaveClass('btn-disabled')
     pick(dialog, 'Controller/PART_COUNT')
     expect(said(dialog)).toBe('')
-    expect(confirm(dialog)).not.toHaveClass('btn-disabled')
   })
 
   it('is laid out as the schema builder is: its search, its standard filter and its grouped list', async () => {
@@ -439,11 +446,11 @@ describe('Add Derived Metric', () => {
 
     it('wants two inputs, and refuses unlike units naming both', async () => {
       const { dialog } = await asSum()
-      expect(said(dialog)).toBe('Choose at least two inputs')
+      held(dialog, 'Choose at least two inputs')
       pick(dialog, 'Power/PHASE_A')
-      expect(said(dialog)).toBe('Choose at least two inputs')
+      held(dialog, 'Choose at least two inputs')
       pick(dialog, 'Power/CURRENT')
-      expect(said(dialog)).toBe('The inputs of a sum must share one unit: Power/PHASE_A is in KILOWATT and Power/CURRENT is in AMPERE.')
+      held(dialog, 'The inputs of a sum must share one unit: Power/PHASE_A is in KILOWATT and Power/CURRENT is in AMPERE.')
       pick(dialog, 'Power/CURRENT')
       pick(dialog, 'Power/PHASE_B')
       expect(said(dialog)).toBe('')
@@ -484,7 +491,7 @@ describe('Add Derived Metric', () => {
     })
   })
 
-  it('says a name a device declares cannot be taken, under the name and not above the buttons', async () => {
+  it('says under the name, as it is typed, that a device declares it, and sends nothing', async () => {
     const { dialog } = await open()
     choose(dialog, /Group/, 'Controller')
     typeName(dialog, 'UPTIME_SHIFT')
@@ -492,7 +499,7 @@ describe('Add Derived Metric', () => {
     const hint = within(dialog).getByLabelText(/Metric Name/).closest('.form-group').querySelector('.hint-danger')
     expect(hint.textContent).toMatch(/A device declares Controller\/UPTIME_SHIFT/)
     expect(said(dialog)).toBe(hint.textContent.trim())
-    expect(confirm(dialog)).toHaveClass('btn-disabled')
+    held(dialog, /A device declares Controller\/UPTIME_SHIFT/)
   })
 
   it('refuses a name the catalog holds, and a name the format refuses', async () => {
@@ -502,6 +509,7 @@ describe('Add Derived Metric', () => {
     expect(dialog.textContent).toContain('Controller/PART_COUNT is already in the catalog.')
     typeName(dialog, 'PARTS PER HOUR')
     expect(dialog.textContent).toMatch(/Remove: space/)
+    held(dialog, /Remove: space/)
   })
 
   describe('the facts nobody chooses', () => {
@@ -550,7 +558,8 @@ describe('Add Derived Metric', () => {
     typeName(dialog, 'UPTIME_2')
     choose(dialog, /Kind/, 'time_in_state')
     pick(dialog, 'Controller/EXECUTION')
-    expect(said(dialog)).toBe('Choose at least one state')
+    held(dialog, 'Choose at least one state')
+    expect(within(dialog).getByRole('checkbox', { name: 'ACTIVE' }).closest('[role="group"]')).toHaveAccessibleDescription('Choose at least one state')
     fireEvent.click(within(dialog).getByRole('checkbox', { name: 'ACTIVE' }))
     expect(dialog.textContent).toContain('share of time Controller/EXECUTION is ACTIVE')
     expect(said(dialog)).toBe('')

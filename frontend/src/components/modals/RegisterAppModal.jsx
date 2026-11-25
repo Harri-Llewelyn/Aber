@@ -1,46 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
+import { CopyField } from '../common/CopyField'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { Tooltip } from '../common/Tooltip'
-import { IconCheck, IconCopy, IconGlobe, IconPlus, IconShieldAlert } from '../common/Icons'
+import { IconCheck, IconGlobe, IconPlus, IconShieldAlert } from '../common/Icons'
 import { appUrl } from '../../routes'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import {
   APP_NAME_MAX, APP_REDIRECT_MAX, appNameProblem, clientTypeLabel, parseRedirectAddresses, redirectAddressesProblem,
 } from '../../utils/apps'
-
-const COPY_FEEDBACK_MS = 1600
-/** Said in the dialog when the browser refuses a copy. */
-const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
-
-/** One value the app is given, read-only, with its copy button. `copied` and `refused` are the id last copied or refused. */
-function GivenValue({ id, label, value, hint, copied, refused, onCopy }) {
-  const copyError = refused === id ? COPY_REFUSED : null
-  return (
-    <div className="form-group">
-      <label className="form-label" htmlFor={id}>{label}</label>
-      <div className="gateway-copy-row">
-        <input
-          id={id}
-          className="form-control mono"
-          readOnly
-          value={value}
-          aria-describedby={copyError ? `${id}-copy-error` : undefined}
-        />
-        <Tooltip text={`Copy ${label.toLowerCase()}`}>
-          <button type="button" className="btn btn-ghost btn-icon" onClick={() => onCopy(id, value)} aria-label={`Copy ${label.toLowerCase()}`}>
-            {copied === id ? <IconCheck size={13} /> : <IconCopy size={13} />}
-          </button>
-        </Tooltip>
-      </div>
-      {hint && <div className="form-hint">{hint}</div>}
-      <FieldError id={`${id}-copy-error`} error={copyError} />
-    </div>
-  )
-}
 
 /**
  * Register an app that signs people in with Aber: a name, whether it is public or confidential, and
@@ -60,20 +30,19 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
   const [registered, setRegistered] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(null)
-  const [refused, setRefused] = useState(null)
   const nameRef = useRef(null)
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const uris = parseRedirectAddresses(addresses)
   const nameProblem = appNameProblem(name)
   const addressProblem = redirectAddressesProblem(addresses, siteDomain)
-  // A field's own value is faulted under it; what is missing is said above the buttons.
-  const missing = !name.trim() ? 'Give the app a name'
-    : uris.length === 0 ? 'Give at least one address it may send people back to'
-      : null
-  const valid = !missing && !nameProblem && !addressProblem
+  const check = useFormCheck({
+    name: { id: 'register-app-name', missing: !name.trim() && 'Give the app a name', wrong: nameProblem },
+    addresses: {
+      id: 'register-app-addresses',
+      missing: uris.length === 0 && 'Give at least one address it may send people back to',
+      wrong: addressProblem,
+    },
+  })
 
   const register = useCallback(async () => {
     setBusy(true)
@@ -90,24 +59,15 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
     }
   }, [name, uris, clientType, onRegistered, showToast])
 
-  const copy = useCallback(async (id, value) => {
-    const ok = await copyText(value)
-    setCopied(ok ? id : null)
-    setRefused(ok ? null : id)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.(COPY_REFUSED, 'error')
-  }, [showToast])
-
   if (registered) {
     const issuer = authUrl.replace(/\/+$/, '')
     return (
       <Modal
-        title={`${registered.name} is registered`}
+        title={`${registered.name} Is Registered`}
         icon={<IconGlobe size={18} />}
         size="lg"
         onClose={onClose}
-        footer={<button className="btn btn-primary" onClick={onClose}>Done</button>}
+        dismiss="Done"
       >
         {registered.client_secret ? (
           <div className="callout callout-warning">
@@ -130,27 +90,21 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
           </div>
         )}
 
-        <GivenValue id="registered-client-id" label="Client ID" value={registered.id} copied={copied} refused={refused} onCopy={copy} />
+        <CopyField id="registered-client-id" label="Client ID" value={registered.id} copyLabel="client ID" />
         {registered.client_secret && (
-          <GivenValue
+          <CopyField
             id="registered-client-secret"
-            label="Client secret"
+            label="Client Secret"
             value={registered.client_secret}
             hint="Sent as HTTP Basic credentials at the token endpoint: the client ID, then the secret."
-            copied={copied}
-            refused={refused}
-            onCopy={copy}
           />
         )}
         {issuer && (
-          <GivenValue
+          <CopyField
             id="registered-discovery"
-            label="Discovery address"
+            label="Discovery Address"
             value={`${issuer}/.well-known/openid-configuration`}
             hint="A sign-in library finds the issuer, the endpoints and the keys from this one address."
-            copied={copied}
-            refused={refused}
-            onCopy={copy}
           />
         )}
         <div className="form-hint">
@@ -164,28 +118,20 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
   const type = clientTypeLabel(clientType)
   return (
     <Modal
-      title="Register an app"
+      title="Register an App"
       icon={<IconGlobe size={18} />}
       size="lg"
-      onClose={busy ? () => {} : onClose}
+      busy={busy}
+      onClose={onClose}
       lead="An app signs people in with their Aber account. It learns who they are and reaches nothing else. Each person allows it once."
       initialFocus={nameRef}
-      problem={missing}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Registering…"
-            className="btn btn-primary"
-            onClick={register}
-            disabled={!valid}
-            title={missing || nameProblem || addressProblem || undefined}
-          >
-            <IconPlus size={14} /> Register App
-          </ActionButton>
-        </>
+        <ActionButton pending={busy} pendingLabel="Registering…" className="btn btn-primary" onClick={() => check.press(register)}>
+          <IconPlus size={14} /> Register App
+        </ActionButton>
       )}
     >
       <div className="form-group">
@@ -201,12 +147,12 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
           disabled={busy}
           ref={nameRef}
           aria-required="true"
-          {...fieldErrorProps(nameProblem, 'register-app-name-error', 'register-app-name-hint')}
+          {...fieldErrorProps(check.errors.name, 'register-app-name-error', 'register-app-name-hint')}
         />
         <div id="register-app-name-hint" className="form-hint">
           {`Shown to a person when the app asks to sign them in. Up to ${APP_NAME_MAX} characters.`}
         </div>
-        <FieldError id="register-app-name-error" error={nameProblem} />
+        <FieldError id="register-app-name-error" error={check.errors.name} />
       </div>
 
       <div className="form-group">
@@ -229,7 +175,7 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
       </div>
 
       <div className="form-group">
-        <label className="form-label" htmlFor="register-app-addresses">Addresses it sends people back to <RequiredMark /></label>
+        <label className="form-label" htmlFor="register-app-addresses">Addresses It Sends People Back To <RequiredMark /></label>
         <textarea
           id="register-app-addresses"
           className="form-control mono"
@@ -241,12 +187,12 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
           spellCheck={false}
           disabled={busy}
           aria-required="true"
-          {...fieldErrorProps(addressProblem, 'register-app-addresses-error', 'register-app-addresses-hint')}
+          {...fieldErrorProps(check.errors.addresses, 'register-app-addresses-error', 'register-app-addresses-hint')}
         />
         <div id="register-app-addresses-hint" className="form-hint">
           {`One to a line, up to ${APP_REDIRECT_MAX}. The app must ask for one of them exactly. https goes anywhere; plain http only on this site's own network: localhost, a private address${siteDomain ? `, or a name under ${siteDomain}` : ''}.`}
         </div>
-        <FieldError id="register-app-addresses-error" error={addressProblem} />
+        <FieldError id="register-app-addresses-error" error={check.errors.addresses} />
       </div>
     </Modal>
   )

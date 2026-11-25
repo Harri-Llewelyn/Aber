@@ -97,9 +97,9 @@ describe('GatewayCredentialModal', () => {
     await confirmAndMint()
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue(CREDENTIAL.password)).toBeTruthy()
+      expect(screen.getByText(CREDENTIAL.password)).toBeTruthy()
     })
-    expect(screen.getAllByDisplayValue(CREDENTIAL.mqtt_username).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(CREDENTIAL.mqtt_username).length).toBeGreaterThan(0)
     expect(api.mintGatewayCredential).toHaveBeenCalledWith(GATEWAY.gateway_id)
   })
 
@@ -117,7 +117,7 @@ describe('GatewayCredentialModal', () => {
     expect(screen.getByText('Security')).toBeInTheDocument()
     expect(screen.getByText('mqtt-broker')).toBeInTheDocument()
     expect(screen.getByText('mosquitto')).toBeInTheDocument()
-    expect(screen.queryByText(/Copy block/i)).toBeNull()
+    expect(screen.queryByText(/Copy Block/i)).toBeNull()
     expect(screen.queryAllByText(/aberCredentialsEnv/)).toHaveLength(0)
     expect(screen.queryAllByText(/release Secret/i)).toHaveLength(0)
   })
@@ -133,7 +133,7 @@ describe('GatewayCredentialModal', () => {
     await confirmAndMint()
 
     await waitFor(() => expect(screen.getByText(/For secrets\.mqttPlaybackCredentials/i)).toBeTruthy())
-    fireEvent.click(screen.getByText(/Copy block/i))
+    fireEvent.click(screen.getByText(/Copy Block/i))
 
     await waitFor(() => expect(written.length).toBe(1))
     expect(written[0]).toBe(`{"${CREDENTIAL.mqtt_username}":"${CREDENTIAL.password}"}`)
@@ -240,7 +240,7 @@ describe('GatewayCredentialModal', () => {
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringContaining('archived'), 'error'))
     expect(screen.getByLabelText(`Type ${GATEWAY.gateway_name} to confirm`)).toBeTruthy()
-    expect(screen.queryByText(/Copy block/i)).toBeNull()
+    expect(screen.queryByText(/Copy Block/i)).toBeNull()
   })
 
   /**
@@ -257,7 +257,7 @@ describe('GatewayCredentialModal', () => {
     })
     // And the password is still shown -- the account exists, and withholding it would strand one
     // nobody can ever authenticate as.
-    expect(screen.getByDisplayValue(CREDENTIAL.password)).toBeTruthy()
+    expect(screen.getByText(CREDENTIAL.password)).toBeTruthy()
   })
 })
 

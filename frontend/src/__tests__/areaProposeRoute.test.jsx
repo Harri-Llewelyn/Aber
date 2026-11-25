@@ -123,7 +123,7 @@ describe('proposing a change to an area', () => {
 
     fireEvent.change(screen.getByLabelText('Area Name'), { target: { value: 'Press Hall' } })
     fireEvent.change(screen.getByLabelText('Why (optional)'), { target: { value: 'renamed on site' } })
-    fireEvent.click(footer().getByRole('button', { name: /Propose a change/i }))
+    fireEvent.click(footer().getByRole('button', { name: /Propose a Change/i }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     const [path, body] = api.post.mock.calls[0]
@@ -146,10 +146,10 @@ describe('proposing a change to an area', () => {
 
     // The earlier request is back in the box.
     expect(screen.getByLabelText('Area Name')).toHaveValue('Press Hall')
-    expect(footer().getByRole('button', { name: /Update your proposal/i })).toBeTruthy()
+    expect(footer().getByRole('button', { name: /Update Your Proposal/i })).toBeTruthy()
 
     fireEvent.change(screen.getByLabelText('Description (Optional)'), { target: { value: 'The new wing' } })
-    fireEvent.click(footer().getByRole('button', { name: /Update your proposal/i }))
+    fireEvent.click(footer().getByRole('button', { name: /Update Your Proposal/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][0]).toBe('/api/v1/proposals/p-1')

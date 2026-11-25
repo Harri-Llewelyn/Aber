@@ -152,7 +152,7 @@ describe('proposing a change from a device', () => {
     // `.modal-actions` because the drawer action standing behind the dialog says the same words.
     const footer = within(document.querySelector('.modal-actions'))
     expect(footer.getByRole('button', { name: /propose a change/i })).toBeInTheDocument()
-    expect(footer.queryByRole('button', { name: /save configuration/i })).toBeNull()
+    expect(footer.queryByRole('button', { name: /save device/i })).toBeNull()
   })
 
   it('gives a manager the same dialog, ending in a save', async () => {
@@ -162,7 +162,7 @@ describe('proposing a change from a device', () => {
     await waitFor(() => expect(screen.getByText('Edit Device Configuration')).toBeInTheDocument())
 
     const footer = within(document.querySelector('.modal-actions'))
-    expect(footer.getByRole('button', { name: /save configuration/i })).toBeInTheDocument()
+    expect(footer.getByRole('button', { name: /save device/i })).toBeInTheDocument()
     expect(footer.queryByRole('button', { name: /^propose a change$/i })).toBeNull()
   })
 

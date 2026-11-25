@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { describe, it, expect, vi } from 'vitest'
 import { EditMetricSemanticIdModal } from '../components/modals/EditMetricSemanticIdModal'
 import { FurtherSemanticIdList } from '../components/common/FurtherSemanticIds'
+import { pressHeld } from '../test/dialogs'
 
 const OWN = 'nsu=http://opcfoundation.org/UA/Machinery/;i=6003'
 const ECLASS = '0112/2///61987#ABA951#009'
@@ -44,6 +45,11 @@ const openForm = (modal) => {
 
 const type = (field, text) => fireEvent.change(field.getByRole('textbox', { name: 'Further Semantic ID' }), { target: { value: text } })
 const save = (modal) => modal.getByRole('button', { name: 'Save Metric' })
+/** Save Metric sends nothing, and says why above the buttons. */
+const refuses = (modal, onConfirm, why) => {
+  pressHeld(screen.getByRole('dialog'), 'Save Metric', why)
+  expect(onConfirm).not.toHaveBeenCalled()
+}
 
 describe('Edit Metric: the further semantic ids', () => {
   it('lists the ids a metric carries as text, with each type and source, and a Remove on each', () => {
@@ -72,8 +78,11 @@ describe('Edit Metric: the further semantic ids', () => {
     const { modal, onConfirm } = open()
     const field = openForm(modal)
 
-    expect(field.getByRole('button', { name: 'Add' }).disabled).toBe(true)
+    fireEvent.click(field.getByRole('button', { name: 'Add' }))
+    expect(field.getByText('Type or search for an id first.')).toBeTruthy()
+    expect(field.getByRole('textbox', { name: 'Further Semantic ID' })).toHaveFocus()
     type(field, ECLASS)
+    expect(field.queryByText('Type or search for an id first.')).toBeNull()
     expect(field.getByRole('combobox', { name: 'Further Reference Type' }).value).toBe('IRDI')
     fireEvent.change(field.getByRole('textbox', { name: /^Source/ }), { target: { value: '  ECLASS 14.0  ' } })
     fireEvent.click(field.getByRole('button', { name: 'Add' }))
@@ -94,7 +103,7 @@ describe('Edit Metric: the further semantic ids', () => {
     const { modal } = open(METRIC, { candidates: CANDIDATES })
     const field = openForm(modal)
 
-    fireEvent.click(field.getByRole('button', { name: 'Search vocabularies' }))
+    fireEvent.click(field.getByRole('button', { name: 'Search Vocabularies' }))
     // It says what choosing does, and that nothing replaces the metric's own id.
     expect(field.getByText(/Press Add to keep it/)).toBeTruthy()
     expect(field.queryByText(/replaces/)).toBeNull()
@@ -116,16 +125,15 @@ describe('Edit Metric: the further semantic ids', () => {
   })
 
   it('has nothing to save when an id is taken out and put back', () => {
-    const { modal } = open(withFurther([ECLASS, 'IRDI', 'ECLASS 14.0']))
+    const { modal, onConfirm } = open(withFurther([ECLASS, 'IRDI', 'ECLASS 14.0']))
     fireEvent.click(modal.getByRole('button', { name: `Remove further semantic id ${ECLASS}` }))
-    expect(save(modal).disabled).toBe(false)
 
     const field = openForm(modal)
     type(field, ECLASS)
     fireEvent.change(field.getByRole('textbox', { name: /^Source/ }), { target: { value: 'ECLASS 14.0' } })
     fireEvent.click(field.getByRole('button', { name: 'Add' }))
 
-    expect(save(modal).disabled).toBe(true)
+    refuses(modal, onConfirm, 'Nothing has changed.')
   })
 
   it('sends the id change and the further ids together, so one save is one act', async () => {
@@ -139,21 +147,24 @@ describe('Edit Metric: the further semantic ids', () => {
     }))
   })
 
-  it('says under the field why an id cannot be added, and greys Add', () => {
+  it('says under the field, as it is typed, why an id cannot be added, and adds nothing', () => {
     const { modal } = open(withFurther([ECLASS]))
     const field = openForm(modal)
 
     type(field, OWN)
     expect(field.getByText(/metric’s own semantic id/)).toBeTruthy()
-    expect(field.getByRole('button', { name: 'Add' }).disabled).toBe(true)
+    fireEvent.click(field.getByRole('button', { name: 'Add' }))
+    expect(section(modal).getByText('(1 of 10)')).toBeTruthy()
 
     type(field, ECLASS)
     expect(field.getByText(/already in the list/)).toBeTruthy()
-    expect(field.getByRole('button', { name: 'Add' }).disabled).toBe(true)
+    fireEvent.click(field.getByRole('button', { name: 'Add' }))
+    expect(section(modal).getByText('(1 of 10)')).toBeTruthy()
 
     type(field, CDD)
     expect(field.queryByText(/already in the list/)).toBeNull()
-    expect(field.getByRole('button', { name: 'Add' }).disabled).toBe(false)
+    fireEvent.click(field.getByRole('button', { name: 'Add' }))
+    expect(section(modal).getByText('(2 of 10)')).toBeTruthy()
   })
 
   it('asks for an id of the metric’s own before a further one', () => {
@@ -161,7 +172,8 @@ describe('Edit Metric: the further semantic ids', () => {
     const field = openForm(modal)
     type(field, ECLASS)
     expect(field.getByText(/Give the metric a semantic id of its own first/)).toBeTruthy()
-    expect(field.getByRole('button', { name: 'Add' }).disabled).toBe(true)
+    fireEvent.click(field.getByRole('button', { name: 'Add' }))
+    expect(section(modal).getByText('None')).toBeTruthy()
   })
 
   it('stops at ten, and says so where the button was', () => {
@@ -174,39 +186,42 @@ describe('Edit Metric: the further semantic ids', () => {
     expect(modal.getByRole('button', { name: 'Add Further ID' })).toBeTruthy()
   })
 
-  it('holds Save while an id is typed and not added, and says why above the buttons', () => {
-    const { modal } = open()
+  it('saves nothing while an id is typed and not added, and says why above the buttons', () => {
+    const { modal, onConfirm } = open()
     const field = openForm(modal)
     type(field, ECLASS)
 
-    expect(save(modal).disabled).toBe(true)
-    expect(modal.getByText('Press Add to keep the further id you typed, or clear it.')).toBeTruthy()
+    refuses(modal, onConfirm, 'Press Add to keep the further id you typed, or clear it.')
+    expect(field.getByRole('textbox', { name: 'Further Semantic ID' })).toHaveFocus()
     fireEvent.click(field.getByRole('button', { name: 'Cancel' }))
 
     expect(modal.queryByText(/Press Add to keep/)).toBeNull()
     expect(modal.queryByRole('textbox', { name: 'Further Semantic ID' })).toBeNull()
-    expect(save(modal).disabled).toBe(true)
+    refuses(modal, onConfirm, 'Nothing has changed.')
   })
 
-  it('holds Save when the metric’s own id is cleared beside further ids, and says what to do', () => {
-    const { modal } = open(withFurther([ECLASS]))
-    fireEvent.change(modal.getByRole('textbox', { name: /^Semantic ID/ }), { target: { value: '' } })
+  it('saves nothing when the metric’s own id is cleared beside further ids, and says what to do under it', async () => {
+    const { modal, onConfirm } = open(withFurther([ECLASS]))
+    const own = modal.getByRole('textbox', { name: /^Semantic ID/ })
+    fireEvent.change(own, { target: { value: '' } })
 
-    expect(save(modal).disabled).toBe(true)
-    expect(modal.getByText(/need an id of the metric’s own beside them/)).toBeTruthy()
+    expect(own).toHaveAccessibleDescription(/need an id of the metric’s own beside them/)
+    refuses(modal, onConfirm, /need an id of the metric’s own beside them/)
+    expect(own).toHaveFocus()
     fireEvent.click(modal.getByRole('button', { name: `Remove further semantic id ${ECLASS}` }))
     expect(modal.queryByText(/need an id of the metric’s own/)).toBeNull()
-    expect(save(modal).disabled).toBe(false)
+    fireEvent.click(save(modal))
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1))
   })
 
-  it('holds Save when the metric’s own id is made one of its further ids', () => {
-    const { modal } = open(withFurther([ECLASS]))
+  it('saves nothing when the metric’s own id is made one of its further ids', async () => {
+    const { modal, onConfirm } = open(withFurther([ECLASS]))
     fireEvent.change(modal.getByRole('textbox', { name: /^Semantic ID/ }), { target: { value: ECLASS } })
 
-    expect(save(modal).disabled).toBe(true)
-    expect(modal.getByText(/also one of its further ids/)).toBeTruthy()
+    refuses(modal, onConfirm, /also one of its further ids/)
     fireEvent.click(modal.getByRole('button', { name: `Remove further semantic id ${ECLASS}` }))
-    expect(save(modal).disabled).toBe(false)
+    fireEvent.click(save(modal))
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1))
   })
 
   it('shows the database’s refusal in the dialog, which stays open with what was typed', async () => {

@@ -94,12 +94,13 @@ To read a template:
 - **Not stated** means the template does not say how many. A dash in place of an id means it gives none.
 - **Under a name** is what the template says of the element, and the example it gives. Many elements have neither. The definitions IEC CDD and ECLASS wrote are left out, because those bodies license them separately.
 
-Two templates are listed:
+Three templates are listed:
 
-- **Digital Nameplate** (IDTA 02006): who made a machine, its serial number and its markings. Its `AddressInformation` has nothing inside it here. Its elements come from another IDTA template, which is not listed.
+- **Digital Nameplate** (IDTA 02006): who made a machine, its serial number and its markings. Its `AddressInformation` has nothing inside it here. Its elements are the ones inside `ContactInformation` in Contact Information, below.
+- **Contact Information** (IDTA 02002): how to reach a manufacturer. A Digital Nameplate takes its address from here. The Nameplate needs `Street`, `Zipcode`, `CityTown` and `NationalCode`, though this template marks them optional.
 - **Asset Interfaces Description** (IDTA 02017): where a machine's data can be read, over HTTP, Modbus or MQTT. It names its elements by the W3C's Web of Things ids.
 
-**A template is for looking up.** Nothing on this tab starts a metric or changes anything, and every role sees the same. Listing a template does not make a device's export conform to it.
+**A template is for looking up.** Nothing on this tab starts a metric or changes anything, and every role sees the same. Listing a template does not make a device's export conform to it. A device's Digital Nameplate says what that takes, on the [Devices page](devices.md).
 
 The elements come from IDTA's own files, which are under CC BY 4.0. The credit is on the tab, and the licence is linked from it.
 
@@ -109,11 +110,11 @@ The Imported tab holds vocabularies your site brought in itself. It can be your 
 
 ## Import a vocabulary
 
-1. Open the **Imported** tab and press **Import vocabulary**.
+1. Open the **Imported** tab and press **Import Vocabulary**.
 2. Choose a file. It can be an `.aasx` package, or an AAS JSON or XML file. Aber reads it in your browser. Nothing is written yet.
 3. Read what the file holds. The preview shows the format, the version the file states, and how many concepts will be imported.
 4. Say what the file is. Choose **A published standard**, or **The site's own vocabulary**. For a standard, give its name, edition and publisher, such as `ISO 22400-2`, `2014` and `ISO`.
-5. Check the name, add a licence note if you want one, and press **Import vocabulary**.
+5. Check the name, add a licence note if you want one, and press **Import Vocabulary**.
 
 - **Only concepts with IEC 61360 content are taken.** The other ConceptDescriptions in the file are counted and skipped.
 - **The preview lists what is already defined.** A term that one of the standards on this page defines, or another imported file, is skipped. The preview says which one.
@@ -133,7 +134,7 @@ Click a concept to start a catalog metric from it, as you do on any other tab. T
 
 ## Share the definitions
 
-Press **Share definitions** and confirm that your licence allows it. Until you do, an AAS export carries each concept's id and preferred name, and says its definition is the vocabulary's. It also leaves out the description of each metric that carries one of those ids, in case it is a copy. Once you do, it carries the definition text and the metrics' descriptions. **Stop sharing** takes it back.
+Press **Share Definitions** and confirm that your licence allows it. Until you do, an AAS export carries each concept's id and preferred name, and says its definition is the vocabulary's. It also leaves out the description of each metric that carries one of those ids, in case it is a copy. Once you do, it carries the definition text and the metrics' descriptions. **Stop Sharing** takes it back.
 
 ## Remove a vocabulary
 

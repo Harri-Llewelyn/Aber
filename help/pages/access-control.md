@@ -40,7 +40,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Remove Access** asks you to type the person's email address. Then it removes the person's role and blocks their sign-in. Their account stays, so the Audit Trail still names them.
 - **Restore Access** lets them sign in again, with the role they had.
 - **Remove Access also deletes the picture the person put on their account.** Nobody else could see it, and nobody needs it now. Restore Access brings them back with no picture. If the picture cannot be deleted, a message says so, and their sign-in is not blocked yet. Select **Remove Access** again to finish.
-- **Change Name** sets or changes a person's display name. Empty the box and select **Save** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
+- **Change Name** sets or changes a person's display name. Empty the box and select **Save Name** to remove it. Their email address does not change. A person can also set their own, on their **Profile** page.
 - A new name shows everywhere at once, even beside things the person did before. Approvals and Entities still show the email address the person had at the time.
 - **Change Role** lists the roles, starting on theirs. Choose another, and the dialog says what it lets them do. Nothing changes until you select **Change Role** in the dialog.
 - The new role applies from their next request. Node-RED follows within a minute, and Grafana when they next sign in to it. Their own dashboard catches up when it next reloads. A person whose access is removed needs **Restore Access** first.
@@ -156,7 +156,7 @@ A system outside Aber that only reads the broker can have an account of its own.
 1. Open **Broker accounts** and select **New Read-Only Account**.
 2. Give the account a name, and say what it is for. Both are needed. The name can be up to 80 characters, and the purpose up to 500.
 3. Select **Create Read-Only Account**.
-4. Copy the settings the dialog shows into the system that will connect. Then select **I have copied it**.
+4. Copy the settings the dialog shows into the system that will connect. Then select **Done**.
 
 - **The password is shown once.** The broker keeps only a hash of it. If it is lost, delete the account and create another.
 - The dialog shows everything the system needs: the broker's address and port, the username, the password, the topics it may read and the root certificate.

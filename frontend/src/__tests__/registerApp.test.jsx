@@ -3,9 +3,9 @@
  * Aber and reaches nothing else (`register_app()`, 0260).
  *
  * The addresses it takes are held to test-harness/fixtures/app-redirect-addresses.json, the file the
- * database's own rule answers too. The dialog says what is wrong before it asks, with its confirm
- * greyed, from the first edit. A confidential app's secret is shown once, in the dialog, and nowhere
- * else; a public app has none. A refusal shows in the dialog, which stays open with what was typed.
+ * database's own rule answers too. The dialog says what is wrong before it asks. A confidential app's
+ * secret is shown once, in the dialog, and nowhere else; a public app has none. A refusal shows in the
+ * dialog, which stays open with what was typed.
  */
 import React from 'react'
 import fs from 'node:fs'
@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 import { appUrl } from '../routes'
+import { pressHeld, wrongIn } from '../test/dialogs'
 import {
   APP_NAME_MAX, APP_REDIRECT_MAX, appNameProblem, appRegistration, redirectAddressProblem, redirectAddressesProblem,
   siteDomainOf,
@@ -42,8 +43,8 @@ vi.mock('../api', async (importOriginal) => ({
 vi.mock('../components/common/CopyableId', () => ({
   __esModule: true,
   default: () => null,
-  copyText: vi.fn().mockResolvedValue(true),
 }))
+vi.mock('../utils/copyText', () => ({ copyText: vi.fn().mockResolvedValue(true) }))
 
 const FIXTURE = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../test-harness/fixtures/app-redirect-addresses.json'), 'utf8'))
 
@@ -128,41 +129,38 @@ describe('an app\'s name', () => {
 async function openDialog(showToast = vi.fn()) {
   render(<AccessControlTab showToast={showToast} userRole="Administrator" currentUserId={ME} />)
   fireEvent.click(await screen.findByRole('button', { name: /Register App/ }))
-  return { showToast, dialog: await screen.findByRole('dialog', { name: 'Register an app' }) }
+  return { showToast, dialog: await screen.findByRole('dialog', { name: 'Register an App' }) }
 }
 
 const type = (label, value) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
-const reasons = (dialog) => [...dialog.querySelectorAll('.hint-danger')].map(el => el.textContent.trim()).join(' ').trim()
 
 describe('the Register App dialog', () => {
-  it('opens from the Apps tab, saying nothing is wrong, with the confirm greyed', async () => {
+  it('opens from the Apps tab, saying nothing is wrong, on its first field', async () => {
     const { dialog } = await openDialog()
-    const confirm = within(dialog).getByRole('button', { name: /Register App/ })
-    expect(confirm).toBeDisabled()
-    expect(confirm).toHaveClass('btn-disabled')
-    expect(reasons(dialog)).toBe('')
+    expect(wrongIn(dialog)).toEqual([])
     expect(within(dialog).getByLabelText(/^Name/)).toHaveFocus()
   })
 
-  it('says what is missing from the first edit, above the buttons', async () => {
+  it('says what is missing on the press, beside each field, and the first above the buttons', async () => {
     const { dialog } = await openDialog()
-    type(/^Addresses/, 'https://reports.example.org/cb')
-    expect(reasons(dialog)).toBe('Give the app a name')
+    pressHeld(dialog, /Register App/, 'Give the app a name')
+    expect(wrongIn(dialog)).toEqual(['Give the app a name', 'Give at least one address it may send people back to', 'Give the app a name'])
     type(/^Name/, 'Shift Reports')
-    type(/^Addresses/, '')
-    expect(reasons(dialog)).toBe('Give at least one address it may send people back to')
+    pressHeld(dialog, /Register App/, 'Give at least one address it may send people back to')
+    expect(within(dialog).getByLabelText(/^Addresses/)).toHaveFocus()
+    expect(api.registerApp).not.toHaveBeenCalled()
   })
 
-  it('says under the field why an address is refused, and keeps the confirm greyed', async () => {
+  it('says under the field why an address is refused, as it is typed, and sends nothing', async () => {
     const { dialog } = await openDialog()
     type(/^Name/, 'Shift Reports')
     type(/^Addresses/, 'https://reports.example.org/cb\nhttp://reports.example.org/cb')
     expect(within(dialog).getByText(/^http:\/\/reports\.example\.org\/cb is plain http/)).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /Register App/ })).toHaveClass('btn-disabled')
     expect(within(dialog).getByLabelText(/^Addresses/)).toHaveAttribute('aria-invalid', 'true')
+    pressHeld(dialog, /Register App/, /^http:\/\/reports\.example\.org\/cb is plain http/)
+    expect(api.registerApp).not.toHaveBeenCalled()
     type(/^Addresses/, 'https://reports.example.org/cb\nhttp://localhost:3000/cb')
-    expect(within(dialog).getByRole('button', { name: /Register App/ })).not.toHaveClass('btn-disabled')
-    expect(within(dialog).getByRole('button', { name: /Register App/ })).toBeEnabled()
+    expect(wrongIn(dialog)).toEqual([])
   })
 
   it('says under the name why a name is refused', async () => {
@@ -170,7 +168,8 @@ describe('the Register App dialog', () => {
     type(/^Name/, 'x'.repeat(APP_NAME_MAX + 1))
     type(/^Addresses/, 'https://reports.example.org/cb')
     expect(within(dialog).getByText(`An app's name is ${APP_NAME_MAX} characters at most.`)).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: /Register App/ })).toHaveClass('btn-disabled')
+    pressHeld(dialog, /Register App/, `An app's name is ${APP_NAME_MAX} characters at most.`)
+    expect(api.registerApp).not.toHaveBeenCalled()
   })
 
   it('registers a confidential app with the name trimmed and one address a line, and shows its secret once', async () => {
@@ -179,24 +178,24 @@ describe('the Register App dialog', () => {
     type(/^Addresses/, ' https://reports.example.org/cb \n\nhttp://10.1.2.3:3000/cb')
     fireEvent.click(within(dialog).getByRole('button', { name: /Register App/ }))
 
-    const done = await screen.findByRole('dialog', { name: 'Shift Reports is registered' })
+    const done = await screen.findByRole('dialog', { name: 'Shift Reports Is Registered' })
     expect(api.registerApp).toHaveBeenCalledWith('Shift Reports', ['https://reports.example.org/cb', 'http://10.1.2.3:3000/cb'], 'confidential')
     expect(within(done).getByText(/Copy the client secret now/)).toBeInTheDocument()
-    expect(within(done).getByLabelText('Client secret')).toHaveValue(SECRET)
-    expect(within(done).getByLabelText('Client ID')).toHaveValue(NEW_ID)
-    expect(within(done).getByLabelText('Discovery address')).toHaveValue('http://127.0.0.1:54321/auth/v1/.well-known/openid-configuration')
+    expect(within(done).getByLabelText('Client Secret')).toHaveTextContent(SECRET)
+    expect(within(done).getByLabelText('Client ID')).toHaveTextContent(NEW_ID)
+    expect(within(done).getByLabelText('Discovery Address')).toHaveTextContent('http://127.0.0.1:54321/auth/v1/.well-known/openid-configuration')
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Shift Reports is registered'), 'success', { to: appUrl(NEW_ID) })
     // The list behind it is read again.
     await waitFor(() => expect(api.listApps).toHaveBeenCalledTimes(2))
 
     // Closing discards it: a new dialog is a blank form, and the secret is in no toast.
     fireEvent.click(within(done).getByRole('button', { name: 'Done' }))
-    expect(screen.queryByDisplayValue(SECRET)).not.toBeInTheDocument()
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument()
     expect(JSON.stringify(showToast.mock.calls)).not.toContain(SECRET)
     fireEvent.click(await screen.findByRole('button', { name: /Register App/ }))
-    const again = await screen.findByRole('dialog', { name: 'Register an app' })
+    const again = await screen.findByRole('dialog', { name: 'Register an App' })
     expect(within(again).getByLabelText(/^Name/)).toHaveValue('')
-    expect(screen.queryByDisplayValue(SECRET)).not.toBeInTheDocument()
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument()
   })
 
   it('registers a public app, which has no secret to show', async () => {
@@ -207,11 +206,11 @@ describe('the Register App dialog', () => {
     type(/^Addresses/, 'http://localhost:5173/cb')
     fireEvent.click(within(dialog).getByRole('button', { name: /Register App/ }))
 
-    const done = await screen.findByRole('dialog', { name: 'Plant Viewer is registered' })
+    const done = await screen.findByRole('dialog', { name: 'Plant Viewer Is Registered' })
     expect(api.registerApp).toHaveBeenCalledWith('Plant Viewer', ['http://localhost:5173/cb'], 'public')
     expect(within(done).getByText(/It is a public app, so it has no secret/)).toBeInTheDocument()
     expect(within(done).queryByLabelText('Client secret')).not.toBeInTheDocument()
-    expect(within(done).getByLabelText('Client ID')).toHaveValue(NEW_ID)
+    expect(within(done).getByLabelText('Client ID')).toHaveTextContent(NEW_ID)
   })
 
   it('shows a refusal in the dialog, which stays open with what was typed', async () => {
@@ -222,7 +221,7 @@ describe('the Register App dialog', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /Register App/ }))
 
     expect(await within(dialog).findByText(/already registered: give this one another name/)).toBeInTheDocument()
-    expect(screen.getByRole('dialog', { name: 'Register an app' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Register an App' })).toBeInTheDocument()
     expect(within(dialog).getByLabelText(/^Name/)).toHaveValue('Shift Reports')
     expect(within(dialog).getByLabelText(/^Addresses/)).toHaveValue('https://reports.example.org/cb')
     expect(showToast).not.toHaveBeenCalled()

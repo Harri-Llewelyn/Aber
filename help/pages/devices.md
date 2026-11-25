@@ -34,6 +34,7 @@ The sidebar flags Devices in two ways, and never adds the two numbers together. 
 - **A replay lane has no 3D model of its own.** Its **View 3D Model** opens the model of the device it was recorded from. The view names that device beside the file's name. It is read-only. It has **Download** and **Reset view**, and no **Replace**, **Remove** or **Public**. A lane is never offered **Add 3D Model…**. If the device has no model, the lane's panel has no 3D model action at all. To add, replace or remove the model, open the device. The lane follows at once.
 - **Suppression windows**, at the foot of the details panel, keep the device's alerts quiet during planned work. See [Suppression windows](#suppression-windows), below.
 - **Export…** opens a dialog to choose the format. **AAS JSON (V3)** is the Asset Administration Shell as JSON. **AASX package** is the same shell packaged with any attached 3D model. **Bundle (with history)** is the AASX plus the device's Audit Trail, the readings still in the live database, and a manifest; a copy is kept beside the cold archive. The first two are open to every role. The bundle is disabled, with the reason, for a role that may not read the Audit Trail (the bundle contains it), and on a replay lane, which is a recording of a device rather than a device. The Entities page's Export Bundle opens the same dialog.
+- **A complete Digital Nameplate names its template in an export.** The dialog marks each field the IDTA template asks for with an asterisk. Above its buttons it lists the ones still empty. Once they all have a value, the exported nameplate says which template it follows, and a viewer that knows the template shows it as one. Nothing has to be complete to be saved. Your device's own name is never used as the manufacturer's designation.
 - **An exported shell names the device by more than its own id.** It also lists the device's serial number, its manufacturer's product URI and its Sparkplug id. Another system can then find the shell from any of them. The serial number and the URI are the ones in the shell's Digital Nameplate. A value that is empty is left out. A replay lane lists none, because it is a recording of a device.
 - **The Quarantine tab** holds devices Aber does not know. A gateway announced a device that is not registered, so its readings were held rather than stored against a guess. **Approve & Onboard** admits it as a new device; if it is a device already registered under another name, the queue offers that match instead. **Accept Match** asks first, naming the device it keeps and the one it deletes, and says what carries over. **Reject** asks you to type the device's name. It deletes the device and the readings held for it, and cannot be undone. If the device publishes again, it comes back to Quarantine. Nothing in the queue counts as plant history until it is approved. Both actions need permission; a disabled button names the roles that have it.
 
@@ -58,12 +59,12 @@ The details panel lists the device's current and upcoming windows under **Suppre
 
 To schedule a window:
 
-1. Open the device's details panel, and select **Schedule window…**.
+1. Open the device's details panel, and select **Schedule Window…**.
 2. Give a reason. Everyone who can see the alerts reads it.
 3. Choose a start and an end, in your local time. A start already past is now. The end can be at most 7 days after the start, unless your site has changed that.
-4. Select **Schedule window**.
+4. Select **Schedule Window**.
 
-**Change…** changes a window's end or its reason, and its start if it has not started. **End now** ends a window early, so its alerts count again. A window that has not started has **Cancel window** instead. Both ask first. When a window ends while an alert is still firing, the alert counts again, as if it had just fired.
+**Change…** changes a window's end or its reason, and its start if it has not started. **End Now** ends a window early, so its alerts count again. A window that has not started has **Cancel Window** instead. Both ask first. When a window ends while an alert is still firing, the alert counts again, as if it had just fired.
 
 Shopfloor Managers and Administrators can schedule, change and end windows. Everyone else can see them. Each is recorded in the Audit Trail, in the device's lane.
 

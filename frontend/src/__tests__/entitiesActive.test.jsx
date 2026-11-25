@@ -288,7 +288,7 @@ describe('the search', () => {
     await waitFor(() => expect(names()).toEqual(['Old bay', 'Old lathe']))
     api.findEntities.mockResolvedValue([row('cells', ARCHIVED_CELL.entity_id, 'Old bay'), ofArchived(ARCHIVED_DEVICE)])
     fireEvent.click(screen.getAllByRole('button', { name: /Restore/ })[0])
-    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Restore cell' })).getByRole('button', { name: 'Restore Cell' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Restore Cell' })).getByRole('button', { name: 'Restore Cell' }))
     await waitFor(() => expect(api.findEntities).toHaveBeenCalledTimes(2))
     expect(await screen.findByText(/Also found:/)).toHaveTextContent('Also found: 1 active.')
   })

@@ -8,6 +8,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BugReportModal } from '../components/modals/BugReportModal'
 import { GITHUB_REPO_URL } from '../constants'
+import { pressHeld } from '../test/dialogs'
 
 const open = vi.fn()
 
@@ -108,17 +109,12 @@ describe('BugReportModal issue composition', () => {
 
   it('refuses an empty title instead of filing a blank issue, and says so in the dialog', () => {
     const { showToast, onClose } = renderModal()
-    const button = screen.getByRole('button', { name: /Submit Issue on GitHub/i })
-    expect(button).toBeDisabled()
-    expect(button).toHaveClass('btn-disabled')
-    submit()
+    setTitle('  ')
+    // In the dialog, not a toast: the toasts are behind an open dialog.
+    pressHeld(screen.getByRole('dialog'), /Submit Issue on GitHub/i, 'Give the issue a title')
+    expect(screen.getByLabelText('Issue Title')).toHaveFocus()
     expect(open).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
-
-    // In the dialog, not a toast: the toasts are behind an open dialog. From the first edit.
-    setTitle('x')
-    setTitle('  ')
-    expect(document.querySelector('.modal-problem')).toHaveTextContent('Give the issue a title')
     expect(showToast).not.toHaveBeenCalled()
   })
 

@@ -1,8 +1,9 @@
 /**
  * Reads the dialogs in a JSX source: each <Modal> and <ConfirmModal>, its opening tag with its props
- * as written, and what it holds. Drift checks 530, 544 and 561 use it. It is not a parser: it walks the
- * source, skipping string and template literals and tracking braces, which is as much as those
- * sources need, and says so where it cannot read one.
+ * as written, and what it holds. Drift checks 530, 544, 561, 572, 573, 577 and 578 use it, and the
+ * dashboard's test of every dialog's footer. It is not a parser: it walks the source, skipping string and
+ * template literals and tracking braces, which is as much as those sources need, and says so where it
+ * cannot read one.
  *
  * node: built-ins only: the drift checks run in CI before any `npm install`.
  */
@@ -118,4 +119,28 @@ export function dialogsIn(src) {
     found.push({ kind, line, start: m.index, end, tag, body });
   }
   return found;
+}
+
+/** The expression that starts at the bracket at `at`, to the one that balances it. */
+function balanced(src, at) {
+  let depth = 0;
+  for (let i = at; i < src.length; i++) {
+    if ('({['.includes(src[i])) depth++;
+    else if (')}]'.includes(src[i]) && --depth === 0) return src.slice(at, i + 1);
+  }
+  return src.slice(at);
+}
+
+/** A source without its JSX and line comments. */
+export const withoutComments = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/(^|\s)\/\/[^\n]*/g, '$1');
+
+/**
+ * What a dialog's footer may hold, without comments: its `footer` prop as written, or, where the prop is
+ * `{footer}`, each expression its source assigns to that name. A footer another component returns is not
+ * read.
+ */
+export function footersOf(src, tag) {
+  const text = withoutComments(propText(tag, 'footer'));
+  if (text !== '{footer}') return [text];
+  return [...src.matchAll(/\bfooter = [^(\n]*\(/g)].map((m) => withoutComments(balanced(src, m.index + m[0].length - 1)));
 }

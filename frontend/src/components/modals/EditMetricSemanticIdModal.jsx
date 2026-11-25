@@ -11,6 +11,7 @@ import {
   parsePermittedValues, permittedValuesApply, permittedValuesText, samePermittedValues
 } from '../../utils/schemaProperty'
 import { Modal } from '../common/Modal'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 
 /**
@@ -28,9 +29,6 @@ export function EditMetricSemanticIdModal({
 }) {
   const [saving, runSave] = usePendingAction()
   const [error, setError] = useState(null)
-
-  // Escape, the close button and Cancel do nothing while the save runs, as in ConfirmModal.
-  const dismiss = saving ? () => {} : onCancel
 
   const stored = storedSemanticIdPair(metric.semantic_id, metric.semantic_id_type)
   const [pair, setPair] = useState(stored)
@@ -66,19 +64,21 @@ export function EditMetricSemanticIdModal({
   }
   const removeFurther = (id) => setFurther(list => list.filter(r => r.semanticId !== id))
 
-  // The first thing keeping the whole dialog from saving, said above the buttons. What is wrong with
-  // the id typed under Further Semantic ID is said under it, so it is not repeated here.
+  // What is wrong with the id typed under Further Semantic ID is said under it, as it is typed.
   const ownIdIsFurther = next.semanticId !== '' && further.some(r => r.semanticId === next.semanticId)
-  const dialogProblem = further.length > 0 && next.semanticId === ''
+  const ownProblem = further.length > 0 && next.semanticId === ''
     ? 'The further ids need an id of the metric’s own beside them. Keep its semantic id, or remove them first.'
-    : ownIdIsFurther
-      ? 'The metric’s own id is also one of its further ids. Remove it from that list first.'
-      : typedDraft && !draftProblem
-        ? 'Press Add to keep the further id you typed, or clear it.'
-        : null
-
-  const changed = pairChanged || valuesChanged || furtherChange !== null
-  const blocked = (takesValues && !!parsed.error) || typedDraft || dialogProblem !== null
+    : ownIdIsFurther ? 'The metric’s own id is also one of its further ids. Remove it from that list first.'
+      : null
+  const check = useFormCheck({
+    ownId: { id: 'metric-edit-semantic-id', wrong: ownProblem },
+    further: {
+      id: 'metric-edit-further-new-semantic-id',
+      missing: typedDraft && !draftProblem && 'Press Add to keep the further id you typed, or clear it.',
+      wrong: typedDraft && draftProblem,
+    },
+    values: { id: 'metric-edit-permitted-values', wrong: takesValues && parsed.error },
+  }, { unchanged: !pairChanged && !valuesChanged && furtherChange === null })
 
   const save = () => runSave(async () => {
     setError(null)
@@ -98,23 +98,15 @@ export function EditMetricSemanticIdModal({
       title={<>Edit Metric <span className="mono">{metric.name}</span></>}
       icon={<IconPencil size={18} />}
       size="md"
-      onClose={dismiss}
-      problem={dialogProblem}
+      busy={saving}
+      onClose={onCancel}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            disabled={!changed || blocked}
-            pending={saving}
-            pendingLabel="Saving…"
-            onClick={save}
-            title={blocked ? (takesValues && parsed.error) || dialogProblem || undefined : changed ? undefined : 'No changes to save'}
-          >
-            Save Metric
-          </ActionButton>
-        </>
+        <ActionButton className="btn btn-primary" pending={saving} pendingLabel="Saving…" onClick={() => check.press(save)}>
+          Save Metric
+        </ActionButton>
       }
     >
       <div className="form-group metric-edit-facts">
@@ -137,6 +129,7 @@ export function EditMetricSemanticIdModal({
         candidates={candidates}
         ownStandard={metric.standard || ''}
         onChange={setPair}
+        error={check.errors.ownId}
       />
 
       <FurtherSemanticIdsEditor
@@ -159,7 +152,7 @@ export function EditMetricSemanticIdModal({
           datatype={metric.datatype}
           value={valuesText}
           onChange={setValuesText}
-          error={parsed.error}
+          error={check.errors.values}
         />
       )}
 

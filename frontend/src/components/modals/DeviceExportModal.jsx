@@ -115,24 +115,20 @@ export function DeviceExportModal({ device, initialFormat = 'json', bundleDisabl
     }
   }
 
-  // Closing is refused while the export runs: the download and its toast would land after the
-  // dialog had gone.
-  const close = pending ? () => {} : onClose
-
   return (
     <Modal
       title={`Export ${name}`}
       icon={<IconDownload size={18} />}
       size="md"
-      onClose={close}
+      // The download and its toast would land after the dialog had gone.
+      busy={pending}
+      onClose={onClose}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={close} disabled={pending}>Cancel</button>
-          <ActionButton pending={pending} pendingLabel="Exporting…" onClick={run}>
-            <IconDownload size={13} /> Export
-          </ActionButton>
-        </>
+        <ActionButton pending={pending} pendingLabel="Exporting…" onClick={run}>
+          <IconDownload size={13} /> Export
+        </ActionButton>
       }
     >
       <div className="form-group">

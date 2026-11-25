@@ -37,9 +37,9 @@ email, which goes to the people in the roles you choose.
 
 1. Select **Set up the webhook** at the right of the toolbar.
 2. Type the address the receiver gave you. It is stored in the vault and never shown again.
-3. Under **Allowed hosts**, list the address's host, such as `hooks.example.net`. The dialog offers
+3. Under **Allowed Hosts**, list the address's host, such as `hooks.example.net`. The dialog offers
    to add it for you.
-4. Select **Save**.
+4. Select **Save Webhook**.
 5. Select **Issue signing key**, then **Issue Key**. Copy the key into the receiver: it is shown
    once.
 6. Select **Send a test**. A toast says how it went, and the delivery log gets a row.
@@ -50,7 +50,7 @@ email, which goes to the people in the roles you choose.
    relay. The person who runs Aber sets one in the deployment, the same one that sends password
    resets.
 2. Select **Set up email** at the right of the toolbar.
-3. Tick the roles to tell, then select **Save**. Nobody is emailed until you tick one.
+3. Tick the roles to tell, then select **Save Email**. Nobody is emailed until you tick one.
 4. Select **Email a test**. It sends one message to your own address, and a toast says how it went.
 
 Everyone with a ticked role who has an email address on their account is emailed. The lowest severity

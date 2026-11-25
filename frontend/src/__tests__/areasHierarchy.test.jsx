@@ -13,6 +13,7 @@ import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton, pageToolbar } from '../test/cardHeading'
 import { dropdownButton, openDropdown, pick } from '../test/listFilters'
 import { getByTooltip, tooltipOf } from '../test/tooltips'
+import { pressHeld } from '../test/dialogs'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -699,7 +700,7 @@ describe('AreasTab files cells into areas', () => {
     // It asks first, in the dialog Entities' Restore uses.
     fireEvent.click(screen.getByRole('button', { name: /Restore Area/ }))
     expect(api.post).not.toHaveBeenCalled()
-    const dialog = screen.getByRole('dialog', { name: 'Restore area' })
+    const dialog = screen.getByRole('dialog', { name: 'Restore Area' })
     expect(within(dialog).getByText(/Restore the area 'Press Hall' to active service\?/)).toBeInTheDocument()
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Restore Area' })) })
     expect(api.post).toHaveBeenCalledTimes(1)
@@ -713,7 +714,7 @@ describe('AreasTab files cells into areas', () => {
     pick('Lifecycle', 'archived')
     fireEvent.click(screen.getByText('Press Hall'))
     fireEvent.click(screen.getByRole('button', { name: /Restore Area/ }))
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Restore area' })).getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Restore Area' })).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(api.post).not.toHaveBeenCalled()
   })
@@ -744,7 +745,7 @@ describe('AreasTab files cells into areas', () => {
     expect(screen.getByRole('radiogroup', { name: 'Area icon' })).toHaveAccessibleDescription(/^A picture to tell this area apart/)
     expect(screen.getByRole('radio', { name: 'Office block' })).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(screen.getByRole('radio', { name: 'Warehouse' }))
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Area' })) })
     expect(api.post.mock.calls[0][1]).toMatchObject({ area_name: 'Stores', icon: 'Warehouse' })
   })
 
@@ -872,9 +873,15 @@ describe('AreasTab files cells into areas', () => {
     await renderAreas()
     fireEvent.click(screen.getByRole('button', { name: /New Area/ }))
     fireEvent.change(screen.getByLabelText('Area Name'), { target: { value: 'Block/2' } })
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    // Said under the name as it is typed, and a press sends nothing.
+    expect(screen.getByLabelText('Area Name')).toHaveAccessibleDescription(/The name cannot contain \/ \+ or #$/)
+    pressHeld(screen.getByRole('dialog'), 'Save Area', 'The name cannot contain / + or #')
+    expect(api.post).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('Area Name'), { target: { value: '' } })
+    pressHeld(screen.getByRole('dialog'), 'Save Area', 'Give the area a name')
     fireEvent.change(screen.getByLabelText('Area Name'), { target: { value: 'Block 2' } })
-    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Area' })) })
+    expect(api.post).toHaveBeenCalledTimes(1)
   })
 
   it('withholds the drag and the actions from somebody who may not manage cells', async () => {
@@ -1008,12 +1015,12 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(within(planRow()).getByText(/Drop an SVG plan here/)).toBeInTheDocument()
     expect(within(planRow()).getByText(/Default outline · 0 cells placed on it/)).toBeInTheDocument()
     expect(planPanel().querySelector('.area-plan-preview')).toBeNull()
-    expect(screen.queryByRole('button', { name: /Remove plan/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Remove Plan/ })).toBeNull()
 
     cleanup()
     await openArea('North Shop')
-    expect(within(planPanel()).getByRole('button', { name: /Replace plan/ })).toBeInTheDocument()
-    expect(within(planPanel()).getByRole('button', { name: /Remove plan/ })).toBeInTheDocument()
+    expect(within(planPanel()).getByRole('button', { name: /Replace Plan/ })).toBeInTheDocument()
+    expect(within(planPanel()).getByRole('button', { name: /Remove Plan/ })).toBeInTheDocument()
   })
 
   it('takes a plan dropped onto the zone, not only one browsed for', async () => {
@@ -1050,10 +1057,10 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
   it('removes a plan once the dialog is confirmed', async () => {
     api.removeAreaPlan.mockResolvedValue({})
     await openArea()
-    fireEvent.click(within(planPanel()).getByRole('button', { name: /Remove plan/ }))
+    fireEvent.click(within(planPanel()).getByRole('button', { name: /Remove Plan/ }))
     const dialog = document.querySelector('.modal')
     expect(within(dialog).getByText(/Remove the plan from North Shop\?/)).toBeInTheDocument()
-    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Remove plan' })) })
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Plan' })) })
     expect(api.removeAreaPlan).toHaveBeenCalledWith(expect.objectContaining({ area_id: 'area-a' }))
   })
 
@@ -1074,7 +1081,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
     fireEvent.click(screen.getByText('North Shop'))
     expect(planPanel().querySelector('.area-plan-preview [data-plan="uploaded"]')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Upload plan|Replace plan|Remove plan/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Upload plan|Replace Plan|Remove Plan/ })).toBeNull()
 
     // With no plan, the reader sees the default outline rather than a drop zone they cannot use.
     fireEvent.click(screen.getByText('Press Hall'))

@@ -80,13 +80,14 @@ A metric is one value a device sends, such as a temperature. The device in this 
 2. Leave **Standard** on **MTConnect**.
 3. Set **Group** to **Systems** and **Data Item Type** to **TEMPERATURE**.
 4. Set **Units** to **CELSIUS**. Leave **Sparkplug Datatype** on **Double**.
-5. Check that the dialog says devices will publish it as `Systems/TEMPERATURE`, then choose **Add**.
+5. Check that the dialog says devices will publish it as `Systems/TEMPERATURE`, then choose
+   **Add Metric**.
 
 Only an `Administrator` can add a metric. On a development stack (`npm run dev:up`) the catalog
 already lists `Systems/TEMPERATURE` among its example metrics, so you can skip this step there.
 
 **A metric's name and datatype cannot be changed after you add it.** Check both before you choose
-**Add**: devices are set up against them.
+**Add Metric**: devices are set up against them.
 
 ### 6. Create a schema
 
@@ -98,7 +99,7 @@ Create the schema before the device. Without one:
 
 - Aber cannot tell you when the device sends something its model does not include.
 - An [AAS](glossary.md#asset-administration-shell-aas) export of the device carries its
-  nameplate and nothing else.
+  nameplate and how it is connected, and no readings.
 - The device's **Configuration Parameters** panel has nothing to show.
 
 Add `Systems/TEMPERATURE` from step 5. Pick metric names from the catalog rather than inventing them.

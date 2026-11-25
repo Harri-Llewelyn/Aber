@@ -1,10 +1,13 @@
 import React, { useRef, useState } from 'react'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { useSetting } from '../../hooks/useSettings'
 import { ActionButton } from '../common/ActionButton'
-import { FormProblem } from '../common/FormProblem'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
+import { RequiredMark } from '../common/RequiredMark'
 import { IconBellOff } from '../common/Icons'
+import { ConfirmModal } from './ConfirmModal'
 import { localMinute, parseLocal } from '../../utils/timeWindow'
 import { formatDateTime } from '../../utils/format'
 import {
@@ -40,8 +43,6 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
   const [end, setEnd] = useState(() => (window ? localMinute(new Date(window.ends_at)) : ''))
   const [reason, setReason] = useState(window?.reason ?? '')
   const [error, setError] = useState(null)
-  // Set by the first edit, so a dialog that has just opened is not already scolding.
-  const [touched, setTouched] = useState(false)
   const [pending, run] = usePendingAction()
   const reasonRef = useRef(null)
 
@@ -61,14 +62,17 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
     : startAt ? new Date(Math.max(startAt.getTime(), Date.now())) : null
   const latestEnd = measuredFrom ? new Date(measuredFrom.getTime() + maxDays * DAY_MS) : null
 
-  const problem = !startAt && !started ? 'Choose a start'
-    : !endAt ? 'Choose an end'
-      : endAt.getTime() <= Date.now() ? 'The end must be in the future'
-        : endAt <= (started ? new Date(window.starts_at) : startAt) ? 'The end must come after the start'
-          : (startChanged || endChanged) && latestEnd && endAt > latestEnd ? `A window can last at most ${dayWords(maxDays)}`
-            : trimmed === '' ? 'Give a reason'
-              : changing && !startChanged && !endChanged && !reasonChanged ? 'Nothing has changed'
-                : null
+  const check = useFormCheck({
+    reason: { id: 'suppression-reason', missing: trimmed === '' && 'Give a reason' },
+    start: { id: 'suppression-start', missing: !startAt && !started && 'Choose a start' },
+    end: {
+      id: 'suppression-end',
+      missing: !endAt && 'Choose an end',
+      wrong: endAt && (endAt.getTime() <= Date.now() ? 'The end must be in the future'
+        : (startAt || started) && endAt <= (started ? new Date(window.starts_at) : startAt) ? 'The end must come after the start'
+          : (startChanged || endChanged) && latestEnd && endAt > latestEnd && `A window can last at most ${dayWords(maxDays)}`),
+    },
+  }, { unchanged: changing && !startChanged && !endChanged && !reasonChanged })
 
   const submit = () => run(async () => {
     setError(null)
@@ -85,77 +89,83 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
     }
   })
 
-  const action = changing ? 'Change window' : 'Schedule window'
+  const action = changing ? 'Change Window' : 'Schedule Window'
   return (
     <Modal
       title={action}
       icon={<IconBellOff size={18} />}
-      onClose={pending ? () => {} : onCancel}
+      busy={pending}
+      onClose={onCancel}
       lead={<>
         {covers(kind, subjectName)} are recorded, but not counted, coloured or sent, from the start to
         the end. One still firing at the end counts again then.
       </>}
       initialFocus={reasonRef}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
-          <ActionButton
-            className={`btn btn-primary${problem ? ' btn-disabled' : ''}`}
-            pending={pending}
-            pendingLabel={changing ? 'Changing…' : 'Scheduling…'}
-            disabled={problem !== null}
-            title={problem ?? undefined}
-            onClick={submit}
-          >
-            {action}
-          </ActionButton>
-        </>
+        <ActionButton
+          className="btn btn-primary"
+          pending={pending}
+          pendingLabel={changing ? 'Changing…' : 'Scheduling…'}
+          onClick={() => check.press(submit)}
+        >
+          {action}
+        </ActionButton>
       }
     >
       <div className="form-group">
-        <label className="form-label" htmlFor="suppression-reason">Reason</label>
+        <label className="form-label" htmlFor="suppression-reason">Reason <RequiredMark /></label>
         <textarea
           id="suppression-reason"
           className="form-control"
           rows={2}
           value={reason}
-          onChange={e => { setReason(e.target.value); setTouched(true) }}
+          onChange={e => setReason(e.target.value)}
           disabled={pending}
           maxLength={SUPPRESSION_REASON_MAX}
           placeholder="Belt change on the feeder"
           ref={reasonRef}
+          aria-required="true"
+          {...fieldErrorProps(check.errors.reason, 'suppression-reason-error', 'suppression-reason-hint')}
         />
-        <p className="form-hint">Everyone who can see the alerts reads it beside them.</p>
+        <p id="suppression-reason-hint" className="form-hint">Everyone who can see the alerts reads it beside them.</p>
+        <FieldError id="suppression-reason-error" error={check.errors.reason} />
       </div>
       <div className="suppression-window-times">
         <div className="form-group">
-          <label className="form-label" htmlFor="suppression-start">Start</label>
+          <label className="form-label" htmlFor="suppression-start">Start <RequiredMark /></label>
           <input
             id="suppression-start"
             type="datetime-local"
             className="form-control"
             value={start}
-            onChange={e => { setStart(e.target.value); setTouched(true) }}
+            onChange={e => setStart(e.target.value)}
             disabled={pending || started}
+            aria-required="true"
+            {...fieldErrorProps(check.errors.start, 'suppression-start-error')}
           />
+          <FieldError id="suppression-start-error" error={check.errors.start} />
         </div>
         <div className="form-group">
-          <label className="form-label" htmlFor="suppression-end">End</label>
+          <label className="form-label" htmlFor="suppression-end">End <RequiredMark /></label>
           <input
             id="suppression-end"
             type="datetime-local"
             className="form-control"
             value={end}
-            onChange={e => { setEnd(e.target.value); setTouched(true) }}
+            onChange={e => setEnd(e.target.value)}
             disabled={pending}
             // Down to the minute, so the picker never offers a minute the database refuses.
             max={latestEnd ? localMinute(new Date(Math.floor(latestEnd.getTime() / MINUTE_MS) * MINUTE_MS)) : undefined}
-            aria-describedby="suppression-end-limit"
+            aria-required="true"
+            {...fieldErrorProps(check.errors.end, 'suppression-end-error', 'suppression-end-limit')}
           />
           <p className="form-hint" id="suppression-end-limit">
             At most {dayWords(maxDays)}, set on {SUPPRESSION_MAX_DAYS_PLACE}.
           </p>
+          <FieldError id="suppression-end-error" error={check.errors.end} />
         </div>
       </div>
       <p className="form-hint">
@@ -163,8 +173,6 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
           ? `In local time. It started at ${formatDateTime(window.starts_at)}, so its start stays.`
           : 'In local time. A start already past is now.'}
       </p>
-      {/* Why the confirm is off, said where the person is looking, not only in its hover tip. */}
-      <FormProblem problem={touched && problem !== 'Nothing has changed' ? problem : null} />
     </Modal>
   )
 }
@@ -175,42 +183,19 @@ export function SuppressionWindowModal({ kind, subjectName, window = null, onCon
  * in the dialog as the database worded it.
  */
 export function EndSuppressionWindowModal({ kind, subjectName, window, onConfirm, onCancel }) {
-  const [error, setError] = useState(null)
-  const [pending, run] = usePendingAction()
   const upcoming = windowState(window) === 'upcoming'
-
-  const submit = () => run(async () => {
-    setError(null)
-    try {
-      await onConfirm()
-    } catch (err) {
-      setError(err.message)
-    }
-  })
-
   return (
-    <Modal
-      title={upcoming ? 'Cancel window' : 'End window'}
+    <ConfirmModal
+      title={upcoming ? 'Cancel Window' : 'End Window'}
       icon={<IconBellOff size={18} />}
-      size="sm"
-      onClose={pending ? () => {} : onCancel}
-      lead={upcoming
+      message={upcoming
         ? <>The window from {formatDateTime(window.starts_at)} has not started, so it is cancelled. {covers(kind, subjectName)} are not kept quiet by it.</>
         : <>{covers(kind, subjectName)} count again now. One still firing is sent, as if it had just fired.</>}
-      error={error}
-      footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Keep window</button>
-          <ActionButton
-            className={upcoming ? 'btn btn-danger' : 'btn btn-primary'}
-            pending={pending}
-            pendingLabel={upcoming ? 'Cancelling…' : 'Ending…'}
-            onClick={submit}
-          >
-            {upcoming ? 'Cancel window' : 'End now'}
-          </ActionButton>
-        </>
-      }
+      confirmLabel={upcoming ? 'Cancel Window' : 'End Now'}
+      pendingLabel={upcoming ? 'Cancelling…' : 'Ending…'}
+      confirmClassName={upcoming ? 'btn btn-danger' : 'btn btn-primary'}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
     />
   )
 }

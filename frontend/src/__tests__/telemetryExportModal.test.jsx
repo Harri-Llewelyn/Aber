@@ -110,7 +110,7 @@ describe('telemetry CSV export dialog', () => {
   it('names several devices by how many, and lists them', async () => {
     await open({ devices: [LATHE, PRESS] })
     expect(exportWords({ devices: [LATHE, PRESS], metricNames: ['a'], ...windowProps() })).toMatch(/^2 devices · 1 metric · /)
-    expect(screen.getByRole('dialog', { name: /Export readings — 2 devices/ })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: /Export Readings — 2 devices/ })).toBeInTheDocument()
     expect(screen.getByText('Devices (2)')).toBeInTheDocument()
     expect(screen.getByText('Press_02')).toBeInTheDocument()
   })

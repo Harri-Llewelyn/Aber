@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { IconAlertTriangle, IconLock } from './Icons'
+import { FieldError, fieldErrorProps } from './FieldError'
+import { IconLock } from './Icons'
+import { ConfirmModal } from '../modals/ConfirmModal'
 
 /**
  * The state of one foreign credential's field, and the write its dialog's save makes. `write` is
@@ -53,11 +55,13 @@ export function useCredential({ stored = false, write, label }) {
  * @param {string} [label] The field's label.
  * @param {string} consequence What fails first if a replacement is wrong, as a sentence.
  * @param {boolean} [disabled] While the dialog saves.
+ * @param {string} [error] What is wrong with the field, under it.
  */
-export function CredentialField({ id, credential, label = 'Secret access key', consequence, disabled = false }) {
+export function CredentialField({ id, credential, label = 'Secret Access Key', consequence, disabled = false, error = null }) {
   const { stored, mode, value, editing, setValue, ask, replace, keep } = credential
   const input = useRef(null)
   const hintId = `${id}-hint`
+  const errorId = `${id}-error`
 
   // The field the question led to takes the focus, so the key goes where the person is looking.
   useEffect(() => {
@@ -79,37 +83,17 @@ export function CredentialField({ id, credential, label = 'Secret access key', c
           placeholder={stored ? 'The new key' : 'Not set'}
           autoComplete="off"
           spellCheck={false}
-          aria-describedby={hintId}
+          {...fieldErrorProps(error, errorId, hintId)}
         />
         <p id={hintId} className="form-hint">
           {stored ? 'Overwrites the stored key when you save.' : 'Written to the vault when you save, and never shown again.'}
         </p>
+        <FieldError id={errorId} error={error} />
         {stored && (
           <button type="button" className="btn btn-ghost btn-sm credential-keep" onClick={keep} disabled={disabled}>
             Keep the Stored Key
           </button>
         )}
-      </div>
-    )
-  }
-
-  if (mode === 'confirming') {
-    return (
-      <div className="form-group" role="group" aria-labelledby={`${id}-label`}>
-        <span className="form-label" id={`${id}-label`}>{label}</span>
-        {/* What is lost, not "are you sure": there is no way back and no way to check afterwards. */}
-        <div className="callout callout-warning" data-testid={`${id}-replace`}>
-          <IconAlertTriangle size={14} className="callout-icon" />
-          <div>
-            <strong>A key is already stored.</strong> A new one overwrites it in the vault, and
-            nothing can read either back. {consequence} The old key cannot be recovered from this
-            stack.
-            <div className="credential-actions">
-              <button type="button" className="btn btn-ghost btn-sm" onClick={keep}>Keep It</button>
-              <button type="button" className="btn btn-danger btn-sm" onClick={replace}>Replace It</button>
-            </div>
-          </div>
-        </div>
       </div>
     )
   }
@@ -124,6 +108,21 @@ export function CredentialField({ id, credential, label = 'Secret access key', c
         </button>
       </div>
       <p className="form-hint">Never shown again: only whether one is stored can be read.</p>
+      {/* What is lost, not "are you sure": there is no way back and no way to check afterwards. */}
+      {mode === 'confirming' && (
+        <ConfirmModal
+          title={`Replace the ${label}`}
+          icon={<IconLock size={18} />}
+          message={<>
+            <strong>A key is already stored.</strong> A new one overwrites it in the vault, and
+            nothing can read either back. {consequence} The old key cannot be recovered from this
+            stack.
+          </>}
+          confirmLabel="Replace Key"
+          onConfirm={async () => replace()}
+          onCancel={keep}
+        />
+      )}
     </div>
   )
 }

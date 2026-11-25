@@ -49,8 +49,8 @@ export default function check() {
   const deleted = /DELETE FROM public\.devices WHERE id = v_quarantined\.id;/.test(merge);
 
   const src = lf(MODAL);
-  const dialog = dialogsIn(src).find((d) => !d.problem && d.kind === 'ConfirmModal' && propText(d.tag, 'title') === 'Accept match');
-  if (!dialog) problems573.push(`${MODAL} holds no ConfirmModal titled "Accept match"`);
+  const dialog = dialogsIn(src).find((d) => !d.problem && d.kind === 'ConfirmModal' && propText(d.tag, 'title') === 'Accept Match');
+  if (!dialog) problems573.push(`${MODAL} holds no ConfirmModal titled "Accept Match"`);
   const said = (dialog ? `${dialog.tag} ${dialog.body}` : '').replace(/\s+/g, ' ');
 
   for (const column of written) {

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BrokerSubscriberModal } from '../components/modals/BrokerSubscriberModal'
 import { api } from '../api'
 import { BROKER_DIRECTORY_ID } from '../utils/edgeNodeSettings'
+import { pressHeld } from '../test/dialogs'
 
 /**
  * New Read-Only Account asks what the account is for, makes it through broker-subscriber, then
@@ -51,15 +52,15 @@ function open(props = {}) {
 }
 
 const nameBox = () => screen.getByLabelText('Name')
-const purposeBox = () => screen.getByLabelText('What it is for')
+const purposeBox = () => screen.getByLabelText('What It Is For')
 const createButton = () => screen.getByRole('button', { name: /Create Read-Only Account/ })
 
 async function create(handlers) {
   fireEvent.change(nameBox(), { target: { value: `  ${ACCOUNT.name} ` } })
   fireEvent.change(purposeBox(), { target: { value: ACCOUNT.description } })
   await act(async () => { fireEvent.click(createButton()) })
-  await waitFor(() => expect(screen.getByDisplayValue(ACCOUNT.password)).toBeInTheDocument())
-  await waitFor(() => expect(screen.getByLabelText('Broker address').value).toBe('mqtt.plant.example'))
+  await waitFor(() => expect(screen.getByText(ACCOUNT.password)).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByLabelText('Broker Address').textContent).toBe('mqtt.plant.example'))
   return handlers
 }
 
@@ -75,13 +76,14 @@ describe('New Read-Only Account', () => {
 
   it('needs a name and what it is for before it creates anything', () => {
     open()
-    expect(createButton()).toBeDisabled()
+    const dialog = screen.getByRole('dialog')
+    pressHeld(dialog, 'Create Read-Only Account', 'Give the account a name')
+    expect(purposeBox()).toHaveAccessibleDescription(/Say what the account is for$/)
     fireEvent.change(nameBox(), { target: { value: ACCOUNT.name } })
-    expect(createButton()).toBeDisabled()
     fireEvent.change(purposeBox(), { target: { value: '   ' } })
-    expect(createButton()).toBeDisabled()
-    fireEvent.change(purposeBox(), { target: { value: ACCOUNT.description } })
-    expect(createButton()).not.toBeDisabled()
+    pressHeld(dialog, 'Create Read-Only Account', 'Say what the account is for')
+    expect(purposeBox()).toHaveFocus()
+    expect(api.createBrokerSubscriber).not.toHaveBeenCalled()
     expect(nameBox()).toHaveAttribute('maxLength', '80')
     expect(purposeBox()).toHaveAttribute('maxLength', '500')
   })
@@ -100,13 +102,13 @@ describe('New Read-Only Account', () => {
       'Read-only account “Line 4 OEE board” created', 'success', { to: '/access-control/accounts' }
     )
 
-    const value = (label) => screen.getByLabelText(label).value
-    expect(value('Broker address')).toBe('mqtt.plant.example')
-    expect(value('TLS port')).toBe('8883')
+    const value = (label) => screen.getByLabelText(label).textContent
+    expect(value('Broker Address')).toBe('mqtt.plant.example')
+    expect(value('TLS Port')).toBe('8883')
     expect(value('Username')).toBe(ACCOUNT.mqtt_username)
     expect(value('Password')).toBe(ACCOUNT.password)
-    expect(value('Root certificate')).toMatch(/\/\.well-known\/aber\/ca\.pem$/)
-    const topics = screen.getByRole('list', { name: 'Topics it may read' })
+    expect(value('Root Certificate')).toMatch(/\/\.well-known\/aber\/ca\.pem$/)
+    const topics = screen.getByRole('list', { name: 'Topics It May Read' })
     expect(within(topics).getAllByRole('listitem').map(li => li.textContent)).toEqual(TOPICS)
     expect(screen.getByText(/not a Sparkplug Host Application/)).toBeTruthy()
     expect(screen.getByText(/it is not shown again/)).toBeTruthy()
@@ -115,13 +117,13 @@ describe('New Read-Only Account', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy password' }))
     await waitFor(() => expect(written).toEqual([ACCOUNT.password]))
-    fireEvent.click(screen.getByRole('button', { name: 'I have copied it' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(handlers.onClose).toHaveBeenCalled()
   })
 
   it('says when the broker did not report what it may read', async () => {
     await create(open({ topics: null }))
-    expect(screen.queryByRole('list', { name: 'Topics it may read' })).toBeNull()
+    expect(screen.queryByRole('list', { name: 'Topics It May Read' })).toBeNull()
     expect(screen.getByText(/did not report the subscriber role’s rules/)).toBeTruthy()
   })
 
@@ -132,7 +134,7 @@ describe('New Read-Only Account', () => {
     fireEvent.change(purposeBox(), { target: { value: ACCOUNT.description } })
     await act(async () => { fireEvent.click(createButton()) })
     await waitFor(() => expect(screen.getByText(/The broker address could not be read, so it is not shown. The System page lists it./)).toBeTruthy())
-    expect(screen.getByLabelText('Broker address').value).toBe('')
+    expect(screen.getByLabelText('Broker Address').textContent).toBe('—')
   })
 
   it('keeps the form as typed when the account could not be created', async () => {

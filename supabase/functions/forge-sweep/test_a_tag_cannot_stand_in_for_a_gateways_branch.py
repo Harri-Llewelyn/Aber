@@ -31,7 +31,9 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_forge_sweep as sweeping  # noqa: E402  -- not `from`, which would collect its test classes
-from test_enroll_gateway import delete_broker_account, enroll, rest, sign_in  # noqa: E402
+from test_enroll_gateway import (  # noqa: E402
+    check_sparkplug_id, delete_broker_account, delete_gateway_and_wait_for_revoke, enroll, rest, sign_in, sparkplug_id_of,
+)
 from test_forge_membership import MACHINE_USER, ORGANISATION, request, skip_or_fail  # noqa: E402
 import stack_exec  # noqa: E402
 import stack_sign_in  # noqa: E402
@@ -71,21 +73,24 @@ class GatewayRepository(sweeping.ForgeSweepBase):
             skip_or_fail(f"could not sign in as the seeded administrator ({err})")
         cls.work = tempfile.mkdtemp(prefix="aber-forge-")
         cls.addClassCleanup(shutil.rmtree, cls.work, ignore_errors=True)
-        rest(f"/gateways?id=eq.{cls.GATEWAY_ID}", method="DELETE")
+        cls.sparkplug_id = sparkplug_id_of(cls.GATEWAY_ID)
+        cls.repo = f"gateway-{cls.sparkplug_id}"
+        cls.path = f"/repos/{ORGANISATION}/{cls.repo}"
+        # Before the row is made. Run in reverse: the repository, the row, whose delete waits for the
+        # revoke it queues, then the broker account that outlives it.
+        cls.addClassCleanup(delete_broker_account, cls.sparkplug_id)
+        cls.addClassCleanup(delete_gateway_and_wait_for_revoke, cls.GATEWAY_ID, cls.sparkplug_id)
+        cls.addClassCleanup(sweeping.forge, cls.path, method="DELETE")
+        # What a run that was killed left behind.
+        sweeping.forge(cls.path, method="DELETE")
+        delete_gateway_and_wait_for_revoke(cls.GATEWAY_ID, cls.sparkplug_id)
         status, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body={"id": cls.GATEWAY_ID, "name": cls.GATEWAY_NAME, "status": "OFFLINE", "deployment": "remote"},
         )
         if status >= 300:
             raise unittest.SkipTest(f"could not create the test gateway: {rows}")
-        cls.sparkplug_id = rows[0]["sparkplug_id"]
-        cls.repo = f"gateway-{cls.sparkplug_id}"
-        cls.path = f"/repos/{ORGANISATION}/{cls.repo}"
-        # Run in reverse: the repository, the row, then the broker account that outlives it.
-        cls.addClassCleanup(delete_broker_account, cls.sparkplug_id)
-        cls.addClassCleanup(rest, f"/gateways?id=eq.{cls.GATEWAY_ID}", method="DELETE")
-        cls.addClassCleanup(sweeping.forge, cls.path, method="DELETE")
-        sweeping.forge(cls.path, method="DELETE")
+        check_sparkplug_id(cls.GATEWAY_ID, rows[0]["sparkplug_id"])
 
         # "box" is the appliance, by its deploy key.
         cls.public = {who: cls.make_key(who) for who in ("box", *cls.PEOPLE)}

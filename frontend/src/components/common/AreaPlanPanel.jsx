@@ -154,10 +154,10 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
     <div className="area-plan-panel">
       {replacement && (
         <ConfirmModal
-          title="Replace area plan"
+          title="Replace Area Plan"
           icon={<IconUpload size={18} />}
           message={`Replace the plan of ${area.area_name} with "${replacement.file.name}"? ${STORED_FILE_REPLACED}`}
-          confirmLabel="Replace plan"
+          confirmLabel="Replace Plan"
           pendingLabel="Replacing…"
           onConfirm={() => attach(replacement.file)}
           onCancel={() => setReplacement(null)}
@@ -165,10 +165,10 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
       )}
       {confirm && (
         <ConfirmModal
-          title="Remove area plan"
+          title="Remove Area Plan"
           icon={<IconTrash size={18} />}
           message={`Remove the plan from ${area.area_name}? Cells keep their places on the default outline. ${STORED_FILE_DELETED}`}
-          confirmLabel="Remove plan"
+          confirmLabel="Remove Plan"
           pendingLabel="Removing…"
           onConfirm={removePlan}
           onCancel={() => setConfirm(false)}
@@ -191,12 +191,12 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
         <div className="context-buttons area-plan-panel-actions">
           <Tooltip text="A quarter turn anticlockwise. The cells turn with the plan, and the file is left as it is.">
             <button className="btn btn-ghost btn-sm context-action" disabled={busy} onClick={() => turnPlan(-1)}>
-              <IconRotateCcw size={12} /> Turn left
+              <IconRotateCcw size={12} /> Turn Left
             </button>
           </Tooltip>
           <Tooltip text="A quarter turn clockwise. The cells turn with the plan, and the file is left as it is.">
             <button className="btn btn-ghost btn-sm context-action" disabled={busy} onClick={() => turnPlan(1)}>
-              <IconRotateCw size={12} /> Turn right
+              <IconRotateCw size={12} /> Turn Right
             </button>
           </Tooltip>
           <SaveDiscard dirty={turnUnsaved} disabled={busy} saveLabel="Save Turn" buttonClassName="context-action"
@@ -214,7 +214,7 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
               {/* For every role, as a 3D model's Download is: reading is not a write. */}
               <Tooltip text={`Save ${areaPlanFileName(area)} to this computer`}>
                 <button className="btn btn-ghost btn-sm context-action" onClick={downloadPlan}>
-                  <IconDownload size={13} /> Download plan
+                  <IconDownload size={13} /> Download Plan
                 </button>
               </Tooltip>
               {turnable && (
@@ -223,12 +223,12 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
                   {/* Held while a turn is unsaved, so a replacement is never taken with a turn nobody saved. */}
                   <Tooltip text={turnUnsaved ? TURN_UNSAVED : null}>
                     <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={openPicker}>
-                      <IconUpload size={13} /> Replace plan
+                      <IconUpload size={13} /> Replace Plan
                     </button>
                   </Tooltip>
                   <Tooltip text={turnUnsaved ? TURN_UNSAVED : 'The area keeps the default outline'}>
                     <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={() => setConfirm(true)}>
-                      <IconTrash size={13} /> Remove plan
+                      <IconTrash size={13} /> Remove Plan
                     </button>
                   </Tooltip>
                 </>

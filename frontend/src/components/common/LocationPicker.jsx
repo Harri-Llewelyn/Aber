@@ -1,11 +1,12 @@
 import React from 'react'
+import { FieldError, fieldErrorProps } from './FieldError'
 import { Tooltip } from './Tooltip'
 import { SCOPE_GATEWAY, SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, normaliseScope } from '../../utils/cellResolution'
 
 /**
  * True while the form's location cannot be written: Area-Wide with no area named, or, where
  * `cellRequired`, In a cell with no cell. `*_area_wide_names_its_area` and
- * `devices_cell_scope_names_a_cell` would refuse the row, so the Save button reads this. A gateway
+ * `devices_cell_scope_names_a_cell` would refuse the row, so the form's check reads this. A gateway
  * may be in no cell, so its form leaves `cellRequired` off.
  */
 export function locationIncomplete(form, { cellRequired = false } = {}) {
@@ -40,11 +41,12 @@ function locationFieldsFor(scope, form, areas = []) {
  *
  * `disabled` withholds the whole control and shows its first choice, which is how a synthetic
  * gateway's stored scope reads everywhere else (`device_locations` resolves `simulated` ahead of
- * it). The caller's hint beneath says why.
+ * it). The caller's hint beneath says why. `error` is what is missing of the place chosen, said under
+ * the dropdown that asks for it.
  */
 export function LocationPicker({
   idPrefix, form, onChange, cells = [], areas: allAreas = [], disabled = false,
-  followGateway = false, cellEmptyLabel = '— No cell assigned —'
+  followGateway = false, cellEmptyLabel = '— No cell assigned —', error = null
 }) {
   // The database refuses making anything Area-Wide in an archived area.
   const areas = allAreas.filter(a => !a.is_archived)
@@ -97,6 +99,7 @@ export function LocationPicker({
           disabled={disabled}
           onChange={e => onChange({ location_scope: SCOPE_CELL, cell_id: e.target.value, area_id: '' })}
           aria-label="Cell"
+          {...fieldErrorProps(error, `${idPrefix}-location-error`)}
         >
           <option value="">{cellEmptyLabel}</option>
           {cells.filter(c => !c.is_archived).map(c => (
@@ -118,6 +121,7 @@ export function LocationPicker({
             value={form.area_id || ''}
             onChange={e => onChange({ location_scope: SCOPE_AREA_WIDE, cell_id: '', area_id: e.target.value })}
             aria-label="Area"
+            {...fieldErrorProps(error, `${idPrefix}-location-error`)}
           >
             <option value="">— Choose an area —</option>
             {areas.map(ar => <option key={ar.area_id} value={ar.area_id}>{ar.area_name}</option>)}
@@ -129,6 +133,7 @@ export function LocationPicker({
           </Tooltip>
         )
       )}
+      <FieldError id={`${idPrefix}-location-error`} error={error} />
     </div>
   )
 }

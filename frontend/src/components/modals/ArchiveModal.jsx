@@ -13,7 +13,7 @@ export function ArchiveModal({ entityId, displayName, onArchive, onCancel }) {
 
   return (
     <ConfirmModal
-      title="Archive entity"
+      title="Archive Entity"
       size="default"
       icon={<IconArchive size={18} />}
       message={<>
@@ -29,7 +29,7 @@ export function ArchiveModal({ entityId, displayName, onArchive, onCancel }) {
       onCancel={onCancel}
     >
       <div className="form-group">
-        <label className="form-label" htmlFor="archive-retention">Auto-purge</label>
+        <label className="form-label" htmlFor="archive-retention">Auto-Purge</label>
         <Tooltip text="How long the archived record is kept before it is deleted for good">
           <select
             id="archive-retention"

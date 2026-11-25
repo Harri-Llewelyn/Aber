@@ -81,7 +81,7 @@ export function ShortcutsModal({ onClose, singleKeyShortcuts = true }) {
   return (
     // Closes on a click outside it: this dialog holds no input, so a stray click discards nothing.
     <Modal
-      title="Keyboard shortcuts"
+      title="Keyboard Shortcuts"
       icon={<IconKeyboard size={18} />}
       size="wide"
       closeOnOverlay

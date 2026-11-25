@@ -71,7 +71,7 @@ const picker = () => screen.getByRole('group', { name: /^Schemas \(optional\)/ }
 const box = (name) => within(picker()).queryByRole('checkbox', { name })
 const names = () => within(picker()).queryAllByRole('checkbox').map(cb => cb.getAttribute('aria-label'))
 const type = (value) => fireEvent.change(within(picker()).getByLabelText('Search name, description or metric'), { target: { value } })
-const save = () => fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+const save = () => fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 const schemaWrites = () => api.put.mock.calls.filter(([path]) => path.endsWith('/schemas'))
 
 beforeEach(() => {
@@ -132,6 +132,7 @@ describe('Edit Device Configuration', () => {
     openEdit()
     type('spindle')
     expect(names()).toEqual(['Schema_41'])
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'CNC_01A' } })
     save()
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(schemaWrites()).toHaveLength(0)

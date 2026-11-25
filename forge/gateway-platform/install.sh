@@ -37,6 +37,10 @@ aber_install() {
     curl -fsSL -H "apikey: $PUBLISHABLE_KEY" -H "X-Enrolment-Token: $TOKEN" \
       "$PLATFORM_URL/functions/v1/gateway-install$1" -o "$2"
   }
+  # The token an .env holds, or nothing.
+  token_in() {
+    sed -n 's/^ABER_ENROLLMENT_TOKEN=//p' "$1" | tail -n 1
+  }
   # The pin of a PEM, as stage 0 computes it.
   pin_of() {
     openssl x509 -in "$1" -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64
@@ -73,13 +77,28 @@ Then paste the command again, or a newly issued one if it has expired. This run 
   python3 -m zipfile -e "$WORK_DIR/platform.zip" "$WORK_DIR/platform"
   [ -f "$WORK_DIR/platform/site.yml" ] || die "the platform playbook did not unpack"
 
+  # A second run keeps the .env, because the credential secret in it is what will encrypt the broker
+  # password. The token in it becomes this run's, which the platform has just accepted: a re-issued
+  # command's predecessor is dead. Before the playbook, which starts the project, and so enrolment,
+  # when it finds an .env and nothing running.
+  if [ -f "$COMPOSE_DIR/.env" ] && [ "$(token_in "$COMPOSE_DIR/.env")" != "$TOKEN" ]; then
+    # Copied first, so that the new file has the old one's mode and owner.
+    cp -p "$COMPOSE_DIR/.env" "$COMPOSE_DIR/.env.tmp"
+    ABER_TOKEN_LINE="ABER_ENROLLMENT_TOKEN=$TOKEN" awk '
+      /^ABER_ENROLLMENT_TOKEN=/ { $0 = ENVIRON["ABER_TOKEN_LINE"]; held = 1 }
+      { print }
+      END { if (!held) print ENVIRON["ABER_TOKEN_LINE"] }
+    ' "$COMPOSE_DIR/.env" > "$COMPOSE_DIR/.env.tmp"
+    mv "$COMPOSE_DIR/.env.tmp" "$COMPOSE_DIR/.env"
+    say "$COMPOSE_DIR/.env now holds this command's token; the rest of it is kept"
+  fi
+
   # 3. Converge the host: packages, upgrades, chrony, Docker, the compose project and the timer.
-  #    No .env yet, so the project is laid down and not started.
+  #    On a first run there is no .env yet, so the project is laid down and not started.
   say "3/5 the platform playbook (this takes a few minutes the first time)"
   ( cd "$WORK_DIR/platform" && ANSIBLE_LOCALHOST_WARNING=false ansible-playbook -i localhost, site.yml )
 
-  # 4. The appliance's .env: written once. A second run keeps the one it has, because the
-  #    credential secret in it is what will encrypt the broker password.
+  # 4. The appliance's .env: written once, and kept by a second run, but for its token (above).
   say "4/5 the appliance's .env and the platform's root"
   if [ ! -f "$COMPOSE_DIR/.env" ]; then
     fetch "?file=env" "$COMPOSE_DIR/.env.tmp"

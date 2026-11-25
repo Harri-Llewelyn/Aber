@@ -96,7 +96,7 @@ const opened = (asked: Asked[]) => asked.filter((a) => a.method === "POST" && a.
 
 Deno.test("every read is of one commit, and the branch is made at it", async () => {
   const { bump, asked } = await propose({});
-  assert.equal(bump, { opened: 7, closed: [], declined: null });
+  assert.equal(bump, { opened: 7, waiting: { tag: TAG, number: 7 }, closed: [], declined: null });
   assert.equal(asked[0].path, "/branches/main");
 
   const reads = asked.filter((a) => a.method === "GET" && /^\/(contents|raw|git)\//.test(a.path));
@@ -155,7 +155,7 @@ Deno.test("with a pull request for the tag already there, only an older one is t
       { number: 3, state: "closed", label: bumpBranch("v1.8.0") },
     ],
   });
-  assert.equal(bump, { opened: null, closed: [4], declined: null });
+  assert.equal(bump, { opened: null, waiting: null, closed: [4], declined: null });
   assert.equal(
     asked.filter((a) => a.method !== "GET").map((a) => `${a.method} ${a.path}`),
     ["PATCH /pulls/4", "POST /issues/4/comments"],

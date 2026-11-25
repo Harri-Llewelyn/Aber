@@ -207,7 +207,7 @@ describe('Add Metric from an imported concept', () => {
     api.post.mockResolvedValue({ metric_uuid: 'new', name: 'OverallEquipmentEffectiveness' })
     renderFrom(ISO_FILE)
     await waitForCatalog()
-    fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Add Metric' })).getByRole('button', { name: 'Add Metric' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.objectContaining({
       name: 'OverallEquipmentEffectiveness',

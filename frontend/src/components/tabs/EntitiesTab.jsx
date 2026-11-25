@@ -659,7 +659,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
       )}
       {confirmPurge && (
         <ConfirmModal
-          title={`Permanently delete ${confirmPurge.entity_type}`}
+          title={`Permanently Delete ${confirmPurge.entity_type[0].toUpperCase()}${confirmPurge.entity_type.slice(1)}`}
           icon={<IconTrash size={18} />}
           message={
             `Permanently delete the ${confirmPurge.entity_type} '${confirmPurge.name}'? ` +
@@ -681,6 +681,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
                 ' its record and readings are to leave with it.'
               : '')
           }
+          confirmLabel={`Permanently Delete ${confirmPurge.entity_type[0].toUpperCase()}${confirmPurge.entity_type.slice(1)}`}
           pendingLabel="Deleting…"
           requireTyped={confirmPurge.name}
           requireTypedLabel={`${confirmPurge.entity_type} name`}

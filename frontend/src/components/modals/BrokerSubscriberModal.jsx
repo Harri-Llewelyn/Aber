@@ -1,18 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
+import { CopyField } from '../common/CopyField'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { IconShieldAlert } from '../common/Icons'
-import { Setting, useDirectoryBroker } from './EdgeNodeSettings'
+import { useDirectoryBroker } from './EdgeNodeSettings'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { ROOT_CERTIFICATE_PATH } from '../../utils/edgeNodeSettings'
 import { tabUrl } from '../../routes'
 import { SUBSCRIBER_DESCRIPTION_MAX, SUBSCRIBER_NAME_MAX } from '../../utils/serviceIdentities'
-
-const COPY_FEEDBACK_MS = 1600
-/** Said in the dialog and in a toast when the browser refuses a copy. */
-const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /** One line, as broker-subscriber accepts it: a line break typed in the box becomes a space. */
 const oneLine = (value) => value.replace(/[\r\n\t]+/g, ' ')
@@ -36,20 +34,13 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
   const [account, setAccount] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
-  const [copied, setCopied] = useState(null)
-  const [copyFailed, setCopyFailed] = useState(false)
   const nameRef = useRef(null)
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
-  const nameLength = characters(name)
-  const descriptionLength = characters(description)
-  const canCreate = !busy && nameLength > 0 && nameLength <= SUBSCRIBER_NAME_MAX
-    && descriptionLength > 0 && descriptionLength <= SUBSCRIBER_DESCRIPTION_MAX
   // The fields' maxLength holds the upper bounds; what is left to say is what is missing.
-  const problem = nameLength === 0 ? 'Give the account a name'
-    : descriptionLength === 0 ? 'Say what the account is for'
-      : null
+  const check = useFormCheck({
+    name: { id: 'subscriber-name', missing: characters(name) === 0 && 'Give the account a name' },
+    description: { id: 'subscriber-description', missing: characters(description) === 0 && 'Say what the account is for' },
+  })
 
   const create = useCallback(async () => {
     setBusy(true)
@@ -72,21 +63,13 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
     }
   }, [name, description, onCreated, showToast])
 
-  const copy = useCallback(async (label, value) => {
-    const ok = await copyText(value)
-    setCopied(ok ? label : null)
-    setCopyFailed(!ok)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.(COPY_REFUSED, 'error')
-  }, [showToast])
-
   const auditMissing = account?.audit_recorded === false
 
   return (
     <Modal
-      title={account ? <>Read-only account “{account.name}”</> : 'New read-only broker account'}
+      title={account ? <>Read-Only Account “{account.name}”</> : 'New Read-Only Broker Account'}
       size="lg"
+      busy={busy}
       onClose={onClose}
       lead={account ? null : (<>
         An account for something outside Aber that only <strong>reads</strong> the broker: a SCADA
@@ -95,30 +78,23 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
         whole site, and <strong>publishes nothing</strong>.
       </>)}
       initialFocus={account ? undefined : nameRef}
-      problem={account ? undefined : problem}
+      problem={account ? undefined : check.problem}
       error={!account
         ? error
-        : copyFailed
-          ? COPY_REFUSED
-          : auditMissing
-            ? 'The account was created, but the Audit Trail entry could not be written. The account exists; the record of it does not.'
-            : null}
-      footer={account ? (
-        <button className="btn btn-primary" onClick={onClose}>I have copied it</button>
-      ) : (
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Creating…"
-            className="btn btn-primary"
-            disabled={!canCreate}
-            onClick={create}
-            title={problem ?? 'Create the account and show its password once'}
-          >
-            Create Read-Only Account
-          </ActionButton>
-        </>
+        : auditMissing
+          ? 'The account was created, but the Audit Trail entry could not be written. The account exists; the record of it does not.'
+          : null}
+      dismiss={account ? 'Done' : 'Cancel'}
+      footer={account ? null : (
+        <ActionButton
+          pending={busy}
+          pendingLabel="Creating…"
+          className="btn btn-primary"
+          onClick={() => check.press(create)}
+          title="Create the account and show its password once"
+        >
+          Create Read-Only Account
+        </ActionButton>
       )}
     >
       {!account && (<>
@@ -134,12 +110,14 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
             value={name}
             onChange={(e) => setName(oneLine(e.target.value))}
             aria-required="true"
+            {...fieldErrorProps(check.errors.name, 'subscriber-name-error', 'subscriber-name-hint')}
           />
-          <div className="form-hint">What Broker accounts lists it as.</div>
+          <div id="subscriber-name-hint" className="form-hint">What Broker accounts lists it as.</div>
+          <FieldError id="subscriber-name-error" error={check.errors.name} />
         </div>
 
         <div className="form-group">
-          <label className="form-label" htmlFor="subscriber-description">What it is for <RequiredMark /></label>
+          <label className="form-label" htmlFor="subscriber-description">What It Is For <RequiredMark /></label>
           <textarea
             id="subscriber-description"
             className="form-control"
@@ -150,11 +128,13 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
             onChange={(e) => setDescription(oneLine(e.target.value))}
             style={{ resize: 'vertical' }}
             aria-required="true"
+            {...fieldErrorProps(check.errors.description, 'subscriber-description-error', 'subscriber-description-hint')}
           />
-          <div className="form-hint">
+          <div id="subscriber-description-hint" className="form-hint">
             Shown beside the name. It is what tells the next Administrator whether the account is
             safe to delete.
           </div>
+          <FieldError id="subscriber-description-error" error={check.errors.description} />
         </div>
       </>)}
 
@@ -169,7 +149,7 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
             </div>
           </div>
         </div>
-        <SubscriberSettings account={account} topics={topics} copy={copy} copied={copied} />
+        <SubscriberSettings account={account} topics={topics} />
       </>)}
     </Modal>
   )
@@ -179,51 +159,43 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
  * What the consumer is configured with, in the order a client's own settings ask for it. The
  * broker comes from its `directory_services` row, as a Third-party gateway's does.
  */
-function SubscriberSettings({ account, topics, copy, copied }) {
+function SubscriberSettings({ account, topics }) {
   const broker = useDirectoryBroker()
   const rootUrl = `${window.location.origin}${ROOT_CERTIFICATE_PATH}`
   return (
     <div className="gateway-settings">
-      <Setting
+      <CopyField
         id="subscriber-broker-host"
-        label="Broker address"
+        label="Broker Address"
         value={broker?.host}
         copyLabel="broker address"
-        copy={copy}
-        copied={copied}
         warning={broker === null
           ? 'The broker address could not be read, so it is not shown. The System page lists it.'
           : broker?.problem}
       />
-      <Setting
+      <CopyField
         id="subscriber-broker-port"
-        label={broker && !broker.tls ? 'Port' : 'TLS port'}
+        label={broker && !broker.tls ? 'Port' : 'TLS Port'}
         value={broker?.port}
         copyLabel="port"
-        copy={copy}
-        copied={copied}
         hint={broker && !broker.tls
           ? 'This broker is published without TLS, so the client connects in plain MQTT.'
           : 'MQTT over TLS.'}
       />
-      <Setting
+      <CopyField
         id="subscriber-username"
         label="Username"
         value={account.mqtt_username}
         copyLabel="username"
-        copy={copy}
-        copied={copied}
       />
-      <Setting
+      <CopyField
         id="subscriber-password"
         label="Password"
         value={account.password}
         copyLabel="password"
-        copy={copy}
-        copied={copied}
       />
       <div className="form-group">
-        <div className="form-label" id="subscriber-topics-label">Topics it may read</div>
+        <div className="form-label" id="subscriber-topics-label">Topics It May Read</div>
         {topics && topics.length > 0 ? (
           <ul
             className="mono"
@@ -244,13 +216,11 @@ function SubscriberSettings({ account, topics, copy, copied }) {
           an edge node to rebirth.
         </div>
       </div>
-      <Setting
+      <CopyField
         id="subscriber-root"
-        label="Root certificate"
+        label="Root Certificate"
         value={rootUrl}
         copyLabel="the root certificate’s address"
-        copy={copy}
-        copied={copied}
         hint="The client trusts this root to check the broker’s certificate. It is public."
       />
     </div>

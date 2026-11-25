@@ -7,6 +7,7 @@ import { AutomationsTab } from '../components/tabs/AutomationsTab'
 import { AUTOMATION_EXAMPLE, AUTOMATION_WRITE_TITLE } from '../utils/automations'
 import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
+import { pressHeld } from '../test/dialogs'
 import { tooltipOf } from '../test/tooltips'
 
 /**
@@ -317,15 +318,16 @@ describe('Save', () => {
     expect(document.querySelector('dialog[open]')).not.toBeNull()
   })
 
-  it('says nothing would change when every automation is as it was, and holds the confirm without a red note', async () => {
+  it('says nothing would change when every automation is as it was, and a press sends nothing', async () => {
     api.applyAutomations.mockResolvedValue([{ index: 0, key: stored.id, status: 'unchanged', changes: [], reasons: [] }])
     await show()
     type(`${rendered}\n`)
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save/ })) })
     const d = dialog()
     expect(d.getByText(/Nothing would change/)).toBeInTheDocument()
-    expect(d.getByRole('button', { name: 'Save 0 Automations' })).toBeDisabled()
     expect(document.querySelector('.modal-problem')).toHaveTextContent('')
+    pressHeld(screen.getByRole('dialog'), 'Save 0 Automations', 'Nothing has changed.')
+    expect(api.applyAutomations).toHaveBeenCalledTimes(1)
   })
 
   it('moves to the automation saved under a new id, which is a new one, and leaves the old one as it was', async () => {

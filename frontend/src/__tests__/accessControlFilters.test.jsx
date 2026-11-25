@@ -29,8 +29,8 @@ vi.mock('../api', async (importOriginal) => ({
 vi.mock('../components/common/CopyableId', () => ({
   __esModule: true,
   default: ({ value }) => <span>{value}</span>,
-  copyText: vi.fn().mockResolvedValue(true),
 }))
+vi.mock('../utils/copyText', () => ({ copyText: vi.fn().mockResolvedValue(true) }))
 
 const ME = 'a0000000-0000-4000-8000-000000000001'
 

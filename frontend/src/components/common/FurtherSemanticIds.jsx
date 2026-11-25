@@ -4,6 +4,7 @@ import { Badge } from './Badge'
 import { FormProblem } from './FormProblem'
 import { HelpTip } from './HelpTip'
 import { SemanticIdField } from './SemanticIdField'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import {
   FURTHER_SOURCE_MAX_LENGTH, MAX_FURTHER_SEMANTIC_IDS, furtherIdProblem
 } from '../../utils/furtherSemanticIds'
@@ -72,7 +73,10 @@ export function FurtherSemanticIdsEditor({
 
   useEffect(() => { if (adding) document.getElementById(fieldId)?.focus() }, [adding, fieldId])
 
-  const close = () => { setAdding(false); onDraft(NO_DRAFT); onSource('') }
+  // Said above Add, which is this form's own, as it is typed once there is an id.
+  const check = useFormCheck({ id: { id: fieldId, missing: !typed && 'Type or search for an id first.', wrong: typed && problem } })
+
+  const close = () => { setAdding(false); check.reset(); onDraft(NO_DRAFT); onSource('') }
   const add = () => { onAdd(); setAdding(false) }
 
   return (
@@ -122,15 +126,10 @@ export function FurtherSemanticIdsEditor({
               Where the equivalence comes from. Up to {FURTHER_SOURCE_MAX_LENGTH} characters.
             </div>
           </div>
-          <FormProblem problem={problem} />
+          <FormProblem problem={check.errors.id} />
           <div className="further-ids-form-actions">
             <button type="button" className="btn btn-ghost btn-sm" onClick={close}>Cancel</button>
-            <ActionButton
-              className="btn btn-primary btn-sm"
-              disabled={!typed || Boolean(problem)}
-              onClick={add}
-              title={typed ? undefined : 'Type or search for an id first'}
-            >
+            <ActionButton className="btn btn-primary btn-sm" onClick={() => check.press(add)}>
               Add
             </ActionButton>
           </div>

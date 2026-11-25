@@ -70,7 +70,7 @@ export function CellPlacementPicker({ area, cells, cellId, cellIcon, value, onCh
         {value && !disabled && (
           <Tooltip text="Take the cell off the plan; it stays in the area">
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setRefusal(null); onChange?.(null) }}>
-              Clear place
+              Clear Place
             </button>
           </Tooltip>
         )}

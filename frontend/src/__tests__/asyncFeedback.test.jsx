@@ -340,7 +340,7 @@ describe('CellsTab save button', () => {
     fireEvent.click(screen.getByRole('button', { name: /New Cell|Add Cell|Create/i }))
     fireEvent.change(screen.getByLabelText('Cell Name'), { target: { value: 'Assembly Line 2' } })
 
-    const save = screen.getByRole('button', { name: /^Save$/ })
+    const save = screen.getByRole('button', { name: 'Save Cell' })
     fireEvent.click(save)
     fireEvent.click(save)
 

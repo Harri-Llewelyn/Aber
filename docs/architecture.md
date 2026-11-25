@@ -212,8 +212,11 @@ address space, in a file or in a repository's name. This section gives both for 
 says which code makes each id, and which ids a site holds outside Aber. It is for people who change
 Aber and people who connect another system to it.
 
-- **Nothing in Aber changes a key.** Renaming, moving, archiving and restoring a thing leave its key
-  alone, and every id made from the key. A deleted thing's key is not used again.
+- **A key never changes.** Renaming, moving, archiving and restoring a thing leave its key alone, and
+  every id made from the key. A deleted thing's key is not used again. The database refuses an `UPDATE` that
+  changes the `id` of a row of `areas`, `automations`, `cells`, `change_proposals`, `devices`,
+  `directory_services`, `gateways`, `links`, `metric_catalog`, `metric_groups` or `schemas`, whoever sends
+  it (`refuse_key_change()`).
 - **A uuid key is its column's default**, `gen_random_uuid()`, unless a table below says otherwise. So
   each site has uuids of its own. A row a migration seeds with a fixed uuid has the same one on every
   site.
@@ -308,7 +311,7 @@ and for `aas-api` alike.
 | :--- | :--- |
 | `globalAssetId` | `<base IRI><sparkplug_id>` |
 | The shell | `<globalAssetId>/shell` |
-| A Submodel | `<globalAssetId>/submodel/` and `Nameplate`, `DerivedMetrics`, `VisualRepresentation`, `<key>/OperationalTelemetry` or `<key>/KeyPerformanceIndicators` |
+| A Submodel | `<globalAssetId>/submodel/` and `Nameplate`, `PlatformConnection`, `DerivedMetrics`, `VisualRepresentation`, `<key>/OperationalTelemetry` or `<key>/KeyPerformanceIndicators` |
 | A concept | The semantic id itself, with no base IRI |
 
 - **The base IRI is the site's**, `supabaseFunctions.aas.baseIri`. The default, under `aber.local`, belongs

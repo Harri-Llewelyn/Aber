@@ -59,7 +59,7 @@ const openDrawer = async (row) => {
 
 const dialogText = () => {
   render(<RestoreEntityModal type="gateway" name="Production_Flow" credentialRevoked onConfirm={vi.fn()} onCancel={vi.fn()} />)
-  return screen.getByRole('dialog', { name: 'Restore gateway' }).textContent
+  return screen.getByRole('dialog', { name: 'Restore Gateway' }).textContent
 }
 
 beforeEach(() => vi.clearAllMocks())
@@ -96,6 +96,6 @@ describe('the Restore dialog for a gateway whose credential was revoked', () => 
 
   it('says nothing of a credential for a gateway that never had one revoked', () => {
     render(<RestoreEntityModal type="gateway" name="Production_Flow" onConfirm={vi.fn()} onCancel={vi.fn()} />)
-    expect(screen.getByRole('dialog', { name: 'Restore gateway' }).textContent).not.toMatch(/broker credential/)
+    expect(screen.getByRole('dialog', { name: 'Restore Gateway' }).textContent).not.toMatch(/broker credential/)
   })
 })

@@ -169,7 +169,7 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
   return (
     <>
       <Modal
-        title={modelName || '3D model'}
+        title={modelName || '3D Model'}
         icon={<IconCube size={18} />}
         size="full"
         fill
@@ -300,7 +300,7 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
       </Modal>
       {path && replacement && (
         <ConfirmModal
-          title="Replace 3D model"
+          title="Replace 3D Model"
           icon={<IconUpload size={18} />}
           message={`Replace the 3D model of ${modelName || 'this device'} with "${replacement.name}"? ${STORED_FILE_REPLACED}`}
           confirmLabel="Replace Model"
@@ -311,7 +311,7 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
       )}
       {path && confirmRemove && (
         <ConfirmModal
-          title="Remove 3D model"
+          title="Remove 3D Model"
           icon={<IconTrash size={18} />}
           message={`Remove the 3D model from ${modelName || 'this device'}? The device keeps its other details. ${STORED_FILE_DELETED}`}
           confirmLabel="Remove Model"

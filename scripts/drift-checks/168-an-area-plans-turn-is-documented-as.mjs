@@ -3,8 +3,8 @@ import { fail, pass, read } from './lib.mjs';
 // -------------------------------------------------------------------------------------------------
 // 168. An area plan's turn is documented as the code holds it. The API reference gives
 // areas.plan_rotation the turns and the default 0221 states, on Area and on AreaWrite. The Areas
-// help names Turn left and Turn right as the panel labels them, and says Replace plan keeps the
-// turn and Remove plan removes it, which holds while uploadAreaPlan() writes no plan_rotation and
+// help names Turn Left and Turn Right as the panel labels them, and says Replace Plan keeps the
+// turn and Remove Plan removes it, which holds while uploadAreaPlan() writes no plan_rotation and
 // removeAreaPlan() writes 0.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
@@ -35,12 +35,12 @@ export default function check() {
 
   const panel = read(PANEL);
   const help = read(HELP);
-  for (const label of ['Turn left', 'Turn right']) {
+  for (const label of ['Turn Left', 'Turn Right']) {
     if (!panel.includes(`/> ${label}\n`)) offences.push(`${PANEL} has no button labelled ${label}`);
     if (!help.includes(`**${label}**`)) offences.push(`${HELP} does not name **${label}**`);
   }
-  if (!help.includes('**Replace plan** keeps the turn') || !help.includes('**Remove plan** removes the turn')) {
-    offences.push(`${HELP} no longer says Replace plan keeps the turn and Remove plan removes it`);
+  if (!help.includes('**Replace Plan** keeps the turn') || !help.includes('**Remove Plan** removes the turn')) {
+    offences.push(`${HELP} no longer says Replace Plan keeps the turn and Remove Plan removes it`);
   }
   const api = read('frontend/src/api.js');
   const upload = /uploadAreaPlan: async[\s\S]*?\.update\(([^)]*)\)/.exec(api);

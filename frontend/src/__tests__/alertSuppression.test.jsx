@@ -12,6 +12,7 @@ import { formatDateTime } from '../utils/format'
 import { localMinute } from '../utils/timeWindow'
 import { tooltipOf } from '../test/tooltips'
 import { cellUrl, deviceUrl, gatewayUrl } from '../routes'
+import { pressHeld, wrongIn } from '../test/dialogs'
 
 /**
  * Suppression windows (0240) in the dashboard. What is pinned: a suppressed alert colours nothing
@@ -329,43 +330,44 @@ describe('a drawer\'s Suppression windows section', () => {
   it.each(SUPPRESSION_WINDOW_ROLES)('offers %s Schedule window…, and Change… and End now on each own window', async (role) => {
     expect(maySuppress(role)).toBe(true)
     await show(role)
-    expect(screen.getByRole('button', { name: /Schedule window…/ })).toBeTruthy()
-    expect(within(item('Belt change on the feeder')).getByRole('button', { name: 'End now' })).toBeTruthy()
-    expect(within(item('Gearbox swap')).getByRole('button', { name: 'Cancel window' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Schedule Window…/ })).toBeTruthy()
+    expect(within(item('Belt change on the feeder')).getByRole('button', { name: 'End Now' })).toBeTruthy()
+    expect(within(item('Gearbox swap')).getByRole('button', { name: 'Cancel Window' })).toBeTruthy()
     expect(within(item('Gearbox swap')).getByRole('button', { name: 'Change…' })).toBeTruthy()
     // A cell's window is changed from the cell's drawer.
     expect(within(item('Line shutdown')).queryAllByRole('button')).toEqual([])
   })
 
-  it('says in the dialog why it cannot schedule, once the person has changed a field', async () => {
+  it('says what it needs when it is pressed, and what is wrong with an end as it is typed', async () => {
     await show('Shopfloor_Manager')
-    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
-    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
-    const confirm = within(dialog).getByRole('button', { name: 'Schedule window' })
-    // Just opened: off, greyed, and not yet scolding.
-    expect(confirm).toBeDisabled()
-    expect(confirm).toHaveClass('btn-disabled')
-    expect(within(dialog).queryByText(/must be in the future/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Schedule Window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule Window' })
+    // Just opened: pressable, and not yet scolding.
+    expect(wrongIn(dialog)).toEqual([])
+    pressHeld(dialog, 'Schedule Window', 'Give a reason')
+    // Every field at once, and the focus on the first.
+    expect(wrongIn(dialog)).toEqual(['Give a reason', 'Choose an end', 'Give a reason'])
+    expect(within(dialog).getByLabelText('Reason')).toHaveFocus()
+    expect(within(dialog).getByLabelText('End')).toHaveAccessibleDescription(/Choose an end$/)
 
     const past = new Date(now - HOUR)
     const pad = (n) => String(n).padStart(2, '0')
     const local = `${past.getFullYear()}-${pad(past.getMonth() + 1)}-${pad(past.getDate())}T${pad(past.getHours())}:${pad(past.getMinutes())}`
     fireEvent.change(within(dialog).getByLabelText('End'), { target: { value: local } })
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Belt change' } })
-    expect(within(dialog).getByText(/The end must be in the future/)).toBeTruthy()
-    expect(confirm).toBeDisabled()
-    expect(confirm).toHaveClass('btn-disabled')
+    expect(within(dialog).getByLabelText('End')).toHaveAccessibleDescription(/The end must be in the future$/)
+    pressHeld(dialog, 'Schedule Window', 'The end must be in the future')
+    expect(api.scheduleSuppressionWindow).not.toHaveBeenCalled()
   })
 
   it('schedules from a dialog whose confirm says Schedule window, and toasts a link to the subject', async () => {
     const refreshed = vi.fn()
     window.addEventListener(ALERTS_REFRESH_EVENT, refreshed)
     await show('Shopfloor_Manager')
-    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
-    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
-    const confirm = within(dialog).getByRole('button', { name: 'Schedule window' })
+    fireEvent.click(screen.getByRole('button', { name: /Schedule Window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule Window' })
+    const confirm = within(dialog).getByRole('button', { name: 'Schedule Window' })
     expect(confirm).toHaveClass('btn-primary')
-    expect(confirm).toBeDisabled()
 
     const end = new Date(now + 2 * HOUR)
     end.setSeconds(0, 0)
@@ -373,7 +375,6 @@ describe('a drawer\'s Suppression windows section', () => {
     const local = `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}T${pad(end.getHours())}:${pad(end.getMinutes())}`
     fireEvent.change(within(dialog).getByLabelText('End'), { target: { value: local } })
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: '  Belt change  ' } })
-    expect(confirm).not.toBeDisabled()
     fireEvent.click(confirm)
 
     await waitFor(() => expect(api.scheduleSuppressionWindow).toHaveBeenCalledWith(
@@ -388,11 +389,11 @@ describe('a drawer\'s Suppression windows section', () => {
     const refusal = 'A window can last at most 1 day, set on Settings › Retention.'
     api.scheduleSuppressionWindow.mockRejectedValue(new Error(refusal))
     await show('Administrator')
-    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
-    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
+    fireEvent.click(screen.getByRole('button', { name: /Schedule Window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule Window' })
     fireEvent.change(within(dialog).getByLabelText('End'), { target: { value: minute(now + 2 * DAY) } })
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'x' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule window' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Window' }))
     expect(await within(dialog).findByText(refusal)).toBeTruthy()
     expect(showToast).not.toHaveBeenCalled()
   })
@@ -400,8 +401,8 @@ describe('a drawer\'s Suppression windows section', () => {
   it('bounds the end at the start plus the site\'s longest window, and names it under the end field', async () => {
     api.get.mockResolvedValue([{ key: SUPPRESSION_MAX_DAYS_KEY, value: 3 }])
     await show('Shopfloor_Manager')
-    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
-    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
+    fireEvent.click(screen.getByRole('button', { name: /Schedule Window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule Window' })
     const hint = await within(dialog).findByText('At most 3 days, set on Settings › Retention.')
     const endField = within(dialog).getByLabelText('End')
     expect(endField).toHaveAttribute('aria-describedby', hint.id)
@@ -412,22 +413,20 @@ describe('a drawer\'s Suppression windows section', () => {
     expect(endField).toHaveAttribute('max', minute(start + 3 * DAY))
   })
 
-  it('refuses an end past the limit, saying so under the times from the first edit', async () => {
+  it('refuses an end past the limit, saying so under the end as it is typed', async () => {
     api.get.mockResolvedValue([{ key: SUPPRESSION_MAX_DAYS_KEY, value: 3 }])
     await show('Shopfloor_Manager')
-    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
-    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
+    fireEvent.click(screen.getByRole('button', { name: /Schedule Window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule Window' })
     await within(dialog).findByText('At most 3 days, set on Settings › Retention.')
-    const confirm = within(dialog).getByRole('button', { name: 'Schedule window' })
+    const confirm = within(dialog).getByRole('button', { name: 'Schedule Window' })
     const start = now + DAY
     fireEvent.change(within(dialog).getByLabelText('Start'), { target: { value: minute(start) } })
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Shutdown week' } })
 
     fireEvent.change(within(dialog).getByLabelText('End'), { target: { value: minute(start + 3 * DAY + MINUTE) } })
     expect(within(dialog).getByText(/A window can last at most 3 days/).closest('.hint-danger')).toBeTruthy()
-    expect(confirm).toBeDisabled()
-    expect(confirm).toHaveClass('btn-disabled')
-    fireEvent.click(confirm)
+    pressHeld(dialog, 'Schedule Window', 'A window can last at most 3 days')
     expect(api.scheduleSuppressionWindow).not.toHaveBeenCalled()
 
     // Exactly the limit is accepted, as the database accepts it.
@@ -446,8 +445,8 @@ describe('a drawer\'s Suppression windows section', () => {
     for (const stored of [0, 91, '30', null, undefined]) expect(suppressionMaxDays(stored)).toBe(SUPPRESSION_MAX_DAYS)
     api.get.mockRejectedValue(new Error('offline'))
     await show('Shopfloor_Manager')
-    fireEvent.click(screen.getByRole('button', { name: /Schedule window…/ }))
-    const dialog = await screen.findByRole('dialog', { name: 'Schedule window' })
+    fireEvent.click(screen.getByRole('button', { name: /Schedule Window…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Schedule Window' })
     expect(within(dialog).getByText(`At most ${SUPPRESSION_MAX_DAYS} days, set on Settings › Retention.`)).toBeTruthy()
   })
 
@@ -455,14 +454,15 @@ describe('a drawer\'s Suppression windows section', () => {
     api.get.mockResolvedValue([{ key: SUPPRESSION_MAX_DAYS_KEY, value: 1 }])
     await show('Shopfloor_Manager')
     fireEvent.click(within(item('Belt change on the feeder')).getByRole('button', { name: 'Change…' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Change window' })
+    const dialog = await screen.findByRole('dialog', { name: 'Change Window' })
     await within(dialog).findByText('At most 1 day, set on Settings › Retention.')
     const started = Date.parse(current.starts_at)
     const endField = within(dialog).getByLabelText('End')
     expect(endField).toHaveAttribute('max', minute(started + DAY))
     fireEvent.change(endField, { target: { value: minute(started + DAY + MINUTE) } })
     expect(within(dialog).getByText(/A window can last at most 1 day/)).toBeTruthy()
-    expect(within(dialog).getByRole('button', { name: 'Change window' })).toBeDisabled()
+    pressHeld(dialog, 'Change Window', 'A window can last at most 1 day')
+    expect(api.changeSuppressionWindow).not.toHaveBeenCalled()
   })
 
   it('lets a window longer than a since-lowered limit change its reason alone', async () => {
@@ -473,11 +473,11 @@ describe('a drawer\'s Suppression windows section', () => {
       userRole="Shopfloor_Manager" showToast={showToast} />)
     fireEvent.click(within((await screen.findByText('Shutdown fortnight')).closest('.suppression-window'))
       .getByRole('button', { name: 'Change…' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Change window' })
+    const dialog = await screen.findByRole('dialog', { name: 'Change Window' })
     await within(dialog).findByText('At most 1 day, set on Settings › Retention.')
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Shutdown fortnight, phase 2' } })
     expect(within(dialog).queryByText(/A window can last at most/)).toBeNull()
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Change window' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Change Window' }))
     await waitFor(() => expect(api.changeSuppressionWindow).toHaveBeenCalledWith(
       'w-long', { startsAt: null, endsAt: null, reason: 'Shutdown fortnight, phase 2' }))
   })
@@ -485,11 +485,11 @@ describe('a drawer\'s Suppression windows section', () => {
   it('changes a started window\'s end or reason, keeping its start', async () => {
     await show('Shopfloor_Manager')
     fireEvent.click(within(item('Belt change on the feeder')).getByRole('button', { name: 'Change…' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Change window' })
+    const dialog = await screen.findByRole('dialog', { name: 'Change Window' })
     expect(within(dialog).getByLabelText('Start')).toBeDisabled()
-    const confirm = within(dialog).getByRole('button', { name: 'Change window' })
+    const confirm = pressHeld(dialog, 'Change Window', 'Nothing has changed.')
     expect(confirm).toHaveClass('btn-primary')
-    expect(confirm).toBeDisabled()
+    expect(api.changeSuppressionWindow).not.toHaveBeenCalled()
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Belt and roller change' } })
     fireEvent.click(confirm)
     await waitFor(() => expect(api.changeSuppressionWindow).toHaveBeenCalledWith(
@@ -500,9 +500,9 @@ describe('a drawer\'s Suppression windows section', () => {
 
   it('ends a current window now, after asking', async () => {
     await show('Administrator')
-    fireEvent.click(within(item('Belt change on the feeder')).getByRole('button', { name: 'End now' }))
-    const dialog = await screen.findByRole('dialog', { name: 'End window' })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'End now' }))
+    fireEvent.click(within(item('Belt change on the feeder')).getByRole('button', { name: 'End Now' }))
+    const dialog = await screen.findByRole('dialog', { name: 'End Window' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'End Now' }))
     await waitFor(() => expect(api.endSuppressionWindow).toHaveBeenCalledWith('w-now'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
       'Suppression window ended: Press_04', 'success', { to: deviceUrl(DEVICE_ID) }))
@@ -510,10 +510,10 @@ describe('a drawer\'s Suppression windows section', () => {
 
   it('cancels an upcoming window, after asking', async () => {
     await show('Shopfloor_Manager')
-    fireEvent.click(within(item('Gearbox swap')).getByRole('button', { name: 'Cancel window' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Cancel window' })
-    expect(within(dialog).getByRole('button', { name: 'Keep window' })).toBeTruthy()
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel window' }))
+    fireEvent.click(within(item('Gearbox swap')).getByRole('button', { name: 'Cancel Window' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel Window' })
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel Window' }))
     await waitFor(() => expect(api.endSuppressionWindow).toHaveBeenCalledWith('w-later'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
       'Suppression window cancelled: Press_04', 'success', { to: deviceUrl(DEVICE_ID) }))
@@ -527,8 +527,8 @@ describe('a drawer\'s Suppression windows section', () => {
     render(<SuppressionWindows kind={kind} subjectId="gw-0240" subjectName="Line_A" userRole="Administrator" showToast={showToast} />)
     await screen.findByText('Belt change on the feeder')
     expect(api.listSuppressionWindows).toHaveBeenCalledWith(kind, 'gw-0240', { cellId: null })
-    fireEvent.click(screen.getByRole('button', { name: 'End now' }))
-    fireEvent.click(within(await screen.findByRole('dialog', { name: 'End window' })).getByRole('button', { name: 'End now' }))
+    fireEvent.click(screen.getByRole('button', { name: 'End Now' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'End Window' })).getByRole('button', { name: 'End Now' }))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('Suppression window ended: Line_A', 'success', { to }))
   })
 
