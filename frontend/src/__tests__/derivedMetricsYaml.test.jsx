@@ -75,8 +75,14 @@ const topDialog = () => within(topElement())
 const toolbar = () => document.querySelector('.filter-bar-actions')
 
 const file = (text, name = 'derived-metrics.yaml') => new File([text], name, { type: 'application/yaml' })
+// The editor's dialog is loaded when first opened, so its zone is waited for.
+const openUpload = async () => {
+  fireEvent.click(screen.getByRole('button', { name: /Upload/ }))
+  return screen.findByTestId('derived-metrics-file', undefined, { timeout: 20000 })
+}
 const choose = async (f) => {
-  await act(async () => { fireEvent.change(screen.getByTestId('derived-metrics-file'), { target: { files: [f] } }) })
+  const input = screen.queryByTestId('derived-metrics-file') ?? await openUpload()
+  await act(async () => { fireEvent.change(input, { target: { files: [f] } }) })
 }
 // The editor is loaded when first opened, so the dialog is waited for, not assumed.
 const editorOpen = (name) => screen.findByRole('heading', { name }, { timeout: 20000 })
@@ -430,16 +436,17 @@ describe('Upload', () => {
     const big = file('x', 'big.yaml')
     Object.defineProperty(big, 'size', { value: 9 * 1024 * 1024 })
     await choose(big)
-    expect(showToast).toHaveBeenCalledWith('big.yaml is larger than 8 MiB, more than a file of derived metrics holds', 'error')
-    expect(document.querySelector('dialog')).toBeNull()
+    expect(topDialog().getByRole('alert')).toHaveTextContent('big.yaml is larger than 8 MiB, more than a file of derived metrics holds')
+    expect(document.querySelector('.automation-editor')).toBeNull()
   })
 
-  it('offers Upload through the toolbar button, which opens the file chooser for YAML', async () => {
+  it('offers Upload through the toolbar button, whose dialog asks for a YAML file first', async () => {
     await openDerived()
-    const input = screen.getByTestId('derived-metrics-file')
+    const input = await openUpload()
+    expect(topDialog().getByRole('heading', { name: 'Upload Derived Metrics' })).toBeInTheDocument()
     const click = vi.spyOn(input, 'click')
-    fireEvent.click(screen.getByRole('button', { name: /Upload/ }))
-    expect(click).toHaveBeenCalled()
+    fireEvent.click(topDialog().getByRole('button', { name: /^File/ }))
+    expect(click).toHaveBeenCalledTimes(1)
     expect(input).toHaveAttribute('accept', expect.stringContaining('.yaml'))
   })
 

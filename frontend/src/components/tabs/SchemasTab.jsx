@@ -12,7 +12,7 @@ import { ApplySchemasModal } from '../modals/ApplySchemasModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { downloadBlob } from '../../utils/downloadBlob'
 import { renderDeviceSchemasYaml } from '../../utils/deviceSchemaYaml'
-import { DEVICE_SCHEMAS_FILE_MAX_BYTES, DEVICE_SCHEMAS_FILE_NAME } from '../../utils/deviceSchemas'
+import { DEVICE_SCHEMAS_FILE_NAME } from '../../utils/deviceSchemas'
 import {
   schemaVersionLabel, schemaStatus, statusBadgeClass, statusLabel, isSchemaEditable,
   canForkSchema, nextVersion, schemaVersion, lineageName, lineageVersionLabel, SCHEMA_STATUS
@@ -97,10 +97,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   })
   const [schemaSearch, setSchemaSearch] = useUrlState('search')
   // The versions ticked for the toolbar's Export, which exports the schemas they belong to, or every
-  // schema in force with none ticked. A file chosen to upload, as text, is checked and shown before it applies.
+  // schema in force with none ticked.
   const [ticked, setTicked] = useState(() => new Set())
-  const [upload, setUpload] = useState(null)
-  const fileRef = useRef(null)
+  const [uploading, setUploading] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -225,25 +224,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
     }
   }
 
-  const onFile = async (e) => {
-    const file = e.target.files?.[0]
-    // The same file chosen twice must raise the change again.
-    e.target.value = ''
-    if (!file) return
-    if (file.size > DEVICE_SCHEMAS_FILE_MAX_BYTES) {
-      showToast(`${file.name} is larger than ${DEVICE_SCHEMAS_FILE_MAX_BYTES / (1024 * 1024)} MiB, more than a file of schemas holds`, 'error')
-      return
-    }
-    try {
-      setUpload({ name: file.name, text: await file.text() })
-    } catch {
-      showToast(`${file.name} could not be read`, 'error')
-    }
-  }
-
   /** Every new schema and new draft is a row of the list, which the upload has just changed. */
   const applied = () => {
-    setUpload(null)
+    setUploading(false)
     load()
   }
 
@@ -370,7 +353,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 permitted={canManageSchema}
                 deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
                 title="Choose a device-schemas.yaml file. It is checked and shown to you before anything changes"
-                onClick={() => fileRef.current?.click()}
+                onClick={() => setUploading(true)}
               >
                 <IconUpload size={13} aria-hidden="true" /> Upload
               </ActionButton>
@@ -562,25 +545,13 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           onClose={() => setShowValidateModal(false)}
         />
       )}
-      {upload && (
+      {uploading && (
         <ApplySchemasModal
-          text={upload.text}
-          source={upload.name}
           showToast={showToast}
           onApplied={applied}
-          onClose={() => setUpload(null)}
+          onClose={() => setUploading(false)}
         />
       )}
-      <input
-        ref={fileRef}
-        type="file"
-        className="sr-only"
-        accept=".yaml,.yml,text/yaml,application/yaml,application/x-yaml"
-        tabIndex={-1}
-        aria-hidden="true"
-        data-testid="schemas-file"
-        onChange={onFile}
-      />
       {showBuilderModal && <SchemaBuilderModal catalog={catalog} onSubmit={handleBuilderSubmit} onCancel={() => setShowBuilderModal(false)} />}
       </div>
 

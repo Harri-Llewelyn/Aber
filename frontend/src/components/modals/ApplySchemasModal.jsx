@@ -1,41 +1,47 @@
-import React, { useMemo, useState } from 'react'
+import React, { useId, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { ApplyResults } from '../common/ApplyResults'
+import { DropZone } from '../common/DropZone'
 import { IconClipboardList } from '../common/Icons'
+import { RequiredMark } from '../common/RequiredMark'
 import { describeApply, useApplyPreview } from '../../hooks/useApplyPreview'
 import { useFormCheck } from '../../hooks/useFormCheck'
+import { useYamlFile } from '../../hooks/useYamlFile'
 import { parseAutomationsYaml } from '../../utils/automationYaml'
 import { plural } from '../../utils/format'
 import { schemaUrl, tabUrl } from '../../routes'
 import { refusedCount } from '../../utils/automations'
 import {
-  appliedSchemaWords, schemaResultName, schemaResultNote, writtenSchemas,
+  DEVICE_SCHEMAS_FILE_MAX_BYTES, appliedSchemaWords, schemaResultName, schemaResultNote, writtenSchemas,
 } from '../../utils/deviceSchemas'
 
 /**
- * What a file of schemas would do, before it does anything: each schema as new, changed (a new draft
- * version), unchanged or refused, with every reason and the line it is on. The text is parsed here, and
- * a syntax error is shown with its line without asking the database. Otherwise the check is
+ * Uploads a file of schemas. Its first step is the file, in a drop zone. Then it shows what the file would
+ * do, before it does anything: each schema as new, changed (a new draft version), unchanged or refused,
+ * with every reason and the line it is on. The text is parsed here, and a syntax error is shown with its
+ * line without asking the database. Otherwise the check is
  * `apply_device_schemas(doc, true)`, and confirming is the same call with `false`: all of it applies or
  * none of it does. It deletes nothing and never edits a published version. A refusal from the second
  * call, such as the second-factor switch's, is shown in the dialog as it was worded. The preview and its
- * list are the ones the Automations page's dialog draws (useApplyPreview, ApplyResults).
+ * list are the ones the Automations page's dialog draws (useApplyPreview, ApplyResults). Another file
+ * chosen in the zone is checked in place of the one before.
  *
- * @param {string} text The YAML to check and apply.
- * @param {string} [source] Where it came from, "device-schemas.yaml", for the title.
  * @param {Function} showToast Says the act once it is applied: an applied file writes Audit Trail rows, so it ends in a success toast that links to what it made.
  * @param {Function} onApplied Called with the results once everything is applied; the caller closes the dialog.
  * @param {Function} onClose
  */
-export function ApplySchemasModal({ text, source = null, showToast, onApplied, onClose }) {
-  const parsed = useMemo(() => parseAutomationsYaml(text), [text])
+export function ApplySchemasModal({ showToast, onApplied, onClose }) {
+  const uid = useId()
+  const upload = useYamlFile({ maxBytes: DEVICE_SCHEMAS_FILE_MAX_BYTES, holds: 'a file of schemas' })
+  const source = upload.file?.name ?? null
+  const parsed = useMemo(() => upload.file && parseAutomationsYaml(upload.file.text), [upload.file])
   const [preview, setPreview] = useApplyPreview(parsed, () => api.applyDeviceSchemas(parsed.document, true))
   const [applyError, setApplyError] = useState(null)
   const [applying, setApplying] = useState(false)
   const { results, refused, written, unread, checking, problem, held, unchanged, count } = describeApply(preview, parsed, 'schema')
-  const check = useFormCheck({}, { unchanged })
+  const check = useFormCheck({ file: { id: `${uid}-file`, missing: upload.missing } }, { unchanged })
 
   const confirm = async () => {
     setApplyError(null)
@@ -59,7 +65,7 @@ export function ApplySchemasModal({ text, source = null, showToast, onApplied, o
 
   return (
     <Modal
-      title={`Apply ${source ? source : 'Schemas'}`}
+      title={source ? `Apply ${source}` : 'Upload Schemas'}
       icon={<IconClipboardList size={18} />}
       size="lg"
       lead="Applies the whole file, all of it or none. A schema that exists is never edited: a changed one becomes a new draft version to publish when you are ready. It deletes nothing."
@@ -76,10 +82,24 @@ export function ApplySchemasModal({ text, source = null, showToast, onApplied, o
           disabled={held}
           onClick={() => check.press(confirm)}
         >
-          {`Apply ${plural(written, 'Schema')}`}
+          {parsed ? `Apply ${plural(written, 'Schema')}` : 'Apply Schemas'}
         </ActionButton>
       )}
     >
+      <div className="form-group">
+        <label className="form-label" id={`${uid}-file-label`} htmlFor={`${uid}-file`}>File <RequiredMark /></label>
+        <DropZone
+          id={`${uid}-file`}
+          labelledBy={`${uid}-file-label`}
+          required
+          prompt="Drop a file of schemas here, or click to choose one"
+          {...upload.zone}
+          error={check.errors.file}
+          disabled={applying}
+          testId="schemas-file"
+        />
+      </div>
+
       {preview.phase === 'checking' && <p className="apply-note" role="status">Checking the file…</p>}
       {preview.phase === 'failed' && <p className="apply-note apply-note-problem" role="alert">{preview.error}</p>}
 

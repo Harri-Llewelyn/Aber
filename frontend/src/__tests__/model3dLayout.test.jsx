@@ -109,8 +109,8 @@ describe('the empty drop zone', () => {
   it('takes the dialog\'s body, as the viewer does, rather than keeping a preview\'s shape', () => {
     expect(screen.queryByRole('button', { name: /Upload a 3D model/i })).toBeNull()
     render(<Model3DUploader device={EMPTY} canManage showToast={vi.fn()} />)
-    expect(screen.getByRole('button', { name: /Upload a 3D model/i })).toHaveClass('modal-fill')
-    expect(declaration(APP_CSS, '.model-drop', 'aspect-ratio')).toBeNull()
+    expect(screen.getByRole('button', { name: /Upload a 3D model/i }).parentElement).toHaveClass('modal-fill')
+    expect(prop('.drop-zone-field.modal-fill > .drop-zone', 'flex')).toBe('1 1 auto')
   })
 })
 

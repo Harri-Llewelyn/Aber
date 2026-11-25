@@ -19,9 +19,10 @@ import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import { JobHistory } from './CaptureHistory'
 import {
   IconClipboardList, IconCpu, IconDownload, IconInfo, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash,
-  IconUpload, IconX
+  IconX
 } from '../common/Icons'
 import { OverflowText } from '../common/OverflowText'
+import { DropZone } from '../common/DropZone'
 import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
 import { Badge } from '../common/Badge'
@@ -37,6 +38,7 @@ import { Tooltip } from '../common/Tooltip'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
+import { CAPTURE_FILE, CAPTURE_FILE_LIMIT } from '../../utils/captureFile'
 import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils/format'
 
 // Role checks, as the RLS makes them (`has_role`), not a permission; the title names the same list.
@@ -113,8 +115,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // { capture, subject } while Delete Capture's dialog is open: a capture is named by its subject.
   const [deleteFor, setDeleteFor] = useState(null)
   const [playFor, setPlayFor] = useState(null)
-  const [uploadFile, setUploadFile] = useState(null)
-  const [dragging, setDragging] = useState(false)
+  // The upload dialog while it is open, `{ file, subject, plays }`: the file once it has one, the drawer's
+  // subject when it came from there, and whether the file is played back once it is stored. What opened
+  // the dialog sets `plays`, and another file chosen in it keeps it, so a file somebody meant only to
+  // store is never played back.
+  const [upload, setUpload] = useState(null)
   const [busyId, setBusyId] = useState(null)
 
   const [storedFilter, setStoredFilter] = useUrlList('stored', NONE, { allowed: ['with', 'without'], aliases: STORED_ALIASES })
@@ -125,18 +130,12 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const [jobId, setJobId] = useUrlState('job')
   const onSearch = (text) => { setSearch(text); if (jobId) setJobId('') }
   const [draggingPlay, setDraggingPlay] = useState(false)
-  // Set when a file comes in through "Play a File…" or a drop on the card: once it has been stored,
-  // the playback dialog opens on the capture it produced rather than sending the operator back to
-  // the table to find it.
-  const [playAfterUpload, setPlayAfterUpload] = useState(false)
   const [schemas, setSchemas] = useState([])
   // Every id a device this site has answers to, as deviceIdKey() keys it, replay lanes left out:
   // what a playback can stand in for. Archived and unbound devices count, as
   // ensure_shadow_devices() counts them.
   const [knownDeviceIds, setKnownDeviceIds] = useState(() => new Set())
 
-  const fileRef = useRef(null)
-  const playFileRef = useRef(null)
   // A depth, not a flag: dragenter and dragleave fire for every child the pointer crosses.
   const dragDepth = useRef(0)
   const [stopPending, runStop] = usePendingAction()
@@ -215,11 +214,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     return () => clearInterval(timer)
   }, [activeJob, activePlayback, refreshAll])
 
-  // The upload dialog shows what it replaces, so it opens on the list as it is now.
-  const uploading = !!uploadFile
+  // The upload dialog shows what it replaces, so it opens, and takes a file, on the list as it is now.
   useEffect(() => {
-    if (uploading) loadCaptures().catch(() => {})
-  }, [uploading, loadCaptures])
+    if (upload) loadCaptures().catch(() => {})
+  }, [upload, loadCaptures])
 
   // Refetch the stored captures when a capture job finishes: the row that replaces the old capture
   // is written by the daemon at finalise, and the job's own change payload does not carry it.
@@ -392,45 +390,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }
   }
 
-  const onFilePicked = (event) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (file && selected) {
-      setPlayAfterUpload(false)
-      setUploadFile({ file, preset: { kind: selected.kind, id: selected.id } })
-    }
-  }
+  /** A file given to the drawer's zone: filed against the drawer's subject, and stored only. */
+  const storeFile = (file) => setUpload({ file, subject: { kind: selected.kind, id: selected.id }, plays: false })
 
   /**
-   * A file from "Play a File…" or dropped on the card: store it, then play it back. The subject is
-   * inferred from the file's `identities` and offered, not assumed. The file is read twice on purpose:
-   * UploadCaptureModal does the validation, so this guess is not a second definition of a valid
-   * capture.
+   * "Play a File…", with no file yet, or a file dropped on the card: store it, then play it back. The
+   * dialog offers the subject the file names, and assumes none.
    */
-  const onPlayFileChosen = async (file) => {
-    let preset = null
-    try {
-      const doc = JSON.parse(await file.text())
-      const ids = [
-        ...(doc?.identities?.devices || []),
-        ...(doc?.identities?.edge_nodes || [])
-      ]
-      for (const id of ids) {
-        const match = allSubjects.find(s => s.sparkplugId === id)
-        if (match) { preset = { kind: match.kind, id: match.id }; break }
-      }
-    } catch {
-      // Not readable as a capture. Left for UploadCaptureModal to explain properly.
-    }
-    setPlayAfterUpload(true)
-    setUploadFile({ file, preset })
-  }
-
-  const onPlayFilePicked = (event) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (file) onPlayFileChosen(file)
-  }
+  const playFile = (file = null) => setUpload({ file, subject: null, plays: true })
 
   const onUpload = async ({ subject, replace, expectedCaptureId }) => {
     let stored
@@ -438,8 +405,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       stored = await api.uploadCapture({
         subjectKind: subject.kind,
         subjectId: subject.id,
-        file: uploadFile.file,
-        note: uploadFile.file.name,
+        file: upload.file,
+        note: upload.file.name,
         replace,
         expectedCaptureId
       })
@@ -449,20 +416,18 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       throw err
     }
     const { id, path, messages, manifest } = stored
-    const chain = playAfterUpload
-    setUploadFile(null)
-    setPlayAfterUpload(false)
+    setUpload(null)
     showToast(`Uploaded ${plural(messages, 'message')} for ${subject.name}.`, 'success', { to: captureSubjectUrl(subject.kind, subject.id) })
     await refreshAll()
 
     // Straight into the playback dialog when the file came in to be played, built from what the
     // upload returned rather than found in the refreshed list.
-    if (chain) {
+    if (upload.plays) {
       setPlayFor({
         id,
         subject_sparkplug_id: subject.sparkplugId,
         message_count: messages,
-        note: uploadFile.file.name,
+        note: upload.file.name,
         storage_path: path,
         manifest
       })
@@ -496,7 +461,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       dragDepth.current = 0
       setDraggingPlay(false)
       const dropped = e.dataTransfer?.files?.[0]
-      if (dropped) onPlayFileChosen(dropped)
+      if (dropped) playFile(dropped)
     },
   } : {}
 
@@ -571,8 +536,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 className="btn btn-primary btn-sm"
                 permitted={canManage}
                 deniedTitle={DENIED_TITLE}
-                onClick={() => playFileRef.current?.click()}
-                title="Store a capture file and play it straight back. Every device the file recorded must exist on this site. Dropping it on this card does the same."
+                onClick={() => playFile()}
+                title="Store a capture file and play it straight back. Dropping it on this card does the same."
               >
                 <IconPlay size={13} /> Play a File…
               </ActionButton>
@@ -663,7 +628,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
           {draggingPlay && (
             <div className="capture-drop-overlay">
-              <IconPlay size={16} /> Drop the file to store it and play it back
+              <IconPlay size={20} />
+              <span className="drop-zone-line">Drop the file to store it and play it back</span>
             </div>
           )}
         </div>
@@ -899,27 +865,15 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               {capture ? 'Replace by upload' : 'Upload a capture'}
             </div>
             {canManage ? (
-              <Tooltip text="Upload a capture recorded elsewhere. To play it back, every device it recorded must exist on this site.">
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Upload a capture for ${selected.name}`}
-                  onClick={() => fileRef.current?.click()}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
-                  onDragOver={e => { e.preventDefault(); setDragging(true) }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={e => {
-                    e.preventDefault()
-                    setDragging(false)
-                    const dropped = e.dataTransfer?.files?.[0]
-                    if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
-                  }}
-                  className={`capture-drop${dragging ? ' capture-drop-active' : ''}`}
-                >
-                  <IconUpload size={14} className="capture-drop-icon" />
-                  Drop a capture file here, or click to choose one
-                </div>
-              </Tooltip>
+              <DropZone
+                key={selected.id}
+                {...CAPTURE_FILE}
+                label={`Upload a capture for ${selected.name}`}
+                hint={`A .json file recorded elsewhere, up to ${CAPTURE_FILE_LIMIT}`}
+                note="To play it back, every device it recorded must exist on this site."
+                onFile={storeFile}
+                testId="capture-file"
+              />
             ) : (
               <p className="form-hint">{DENIED_TITLE}.</p>
             )}
@@ -927,35 +881,18 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         )}
       </ContextPanel>
 
-      {/* Two inputs, because the panel's drop zone and "Play a File…" do different things with a
-          file: one stores it, the other stores it and plays it back. A shared input could play back
-          a file somebody meant only to store. */}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".json,application/json"
-        style={{ display: 'none' }}
-        onChange={onFilePicked}
-      />
-      <input
-        ref={playFileRef}
-        type="file"
-        accept=".json,application/json"
-        style={{ display: 'none' }}
-        onChange={onPlayFilePicked}
-      />
-
-      {uploadFile && (
+      {upload && (
         <UploadCaptureModal
-          file={uploadFile.file}
+          file={upload.file}
           subjects={allSubjects}
-          presetSubject={uploadFile.preset
-            ? allSubjects.find(s => s.kind === uploadFile.preset.kind && s.id === uploadFile.preset.id)
+          presetSubject={upload.subject
+            ? allSubjects.find(s => s.kind === upload.subject.kind && s.id === upload.subject.id)
             : null}
-          forPlayback={playAfterUpload}
+          forPlayback={upload.plays}
           knownDeviceIds={knownDeviceIds}
+          onFile={file => setUpload(open => ({ ...open, file }))}
           onConfirm={onUpload}
-          onCancel={() => { setUploadFile(null); setPlayAfterUpload(false) }}
+          onCancel={() => setUpload(null)}
         />
       )}
 

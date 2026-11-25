@@ -3,24 +3,23 @@ import { api } from '../api'
 import { downloadBlob } from '../utils/downloadBlob'
 import { plural } from '../utils/format'
 import { renderDerivedMetricsYaml } from '../utils/derivedMetricYaml'
-import { DERIVED_METRICS_FILE_MAX_BYTES, DERIVED_METRICS_FILE_NAME } from '../utils/derivedMetricsFile'
+import { DERIVED_METRICS_FILE_NAME } from '../utils/derivedMetricsFile'
 import { tabUrl } from '../routes'
 
 /**
  * What the Derived tab does with a file of derived metrics, apart from drawing it: the rows ticked for
- * Export, the export itself, the file chosen for Upload, and the editor that holds a file or a new one.
+ * Export, the export itself, and the editor that Upload opens on a file and New in YAML opens empty.
  * `listed` is every derived metric the tab lists (what Export holds with none ticked), `shown` what the
  * search leaves of them (what the heading's box ticks), `reload` reads the catalog again after metrics
  * are added or changed.
  *
  * Returns the tick state (`ticked`, `pickedIds`, `allShown`, `headBox`, `toggle`, `toggleAllShown`), the
- * actions (`exportYaml`, `chooseFile`, `newFile`, `onFile`) and the editor's state (`editing`: the text
- * and the file's name, or null; `closeEditor`, `applied`). `fileRef` is for the page's hidden file input.
+ * actions (`exportYaml`, `uploadFile`, `newFile`) and the editor's state (`editing`: whether it asks for
+ * a file, or null while it is closed; `closeEditor`, `applied`).
  */
 export function useDerivedMetricsYaml({ listed, shown, showToast, reload }) {
   const [ticked, setTicked] = useState(() => new Set())
   const [editing, setEditing] = useState(null)
-  const fileRef = useRef(null)
   const headBox = useRef(null)
 
   // Only what is still listed: a metric deprecated leaves the ticks.
@@ -59,22 +58,6 @@ export function useDerivedMetricsYaml({ listed, shown, showToast, reload }) {
     }
   }
 
-  const onFile = async (e) => {
-    const file = e.target.files?.[0]
-    // The same file chosen twice must raise the change again.
-    e.target.value = ''
-    if (!file) return
-    if (file.size > DERIVED_METRICS_FILE_MAX_BYTES) {
-      showToast(`${file.name} is larger than ${DERIVED_METRICS_FILE_MAX_BYTES / (1024 * 1024)} MiB, more than a file of derived metrics holds`, 'error')
-      return
-    }
-    try {
-      setEditing({ name: file.name, text: await file.text() })
-    } catch {
-      showToast(`${file.name} could not be read`, 'error')
-    }
-  }
-
   /** The metrics are applied: close the editor and read the catalog again. */
   const applied = () => {
     setEditing(null)
@@ -83,9 +66,9 @@ export function useDerivedMetricsYaml({ listed, shown, showToast, reload }) {
 
   return {
     ticked, pickedIds, allShown, headBox, toggle, toggleAllShown,
-    exportYaml, onFile, fileRef,
-    chooseFile: () => fileRef.current?.click(),
-    newFile: () => setEditing({ name: null, text: '' }),
+    exportYaml,
+    uploadFile: () => setEditing({ uploads: true }),
+    newFile: () => setEditing({ uploads: false }),
     editing, closeEditor: () => setEditing(null), applied,
   }
 }

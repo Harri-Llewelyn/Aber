@@ -17,6 +17,7 @@ import { SaveDiscard } from '../common/SaveDiscard'
 import { SessionsSection } from './SessionsSection'
 import { SecondFactorSection } from './SecondFactorSection'
 import { AccountAvatar } from '../common/AccountAvatar'
+import { useFilePicker } from '../common/DropZone'
 import { IconUpload, IconTrash } from '../common/Icons'
 import { PICTURE_TYPES, pictureFileProblem, shrinkPicture } from '../../utils/picture'
 import { AllowedAppsSection } from './AllowedAppsSection'
@@ -226,19 +227,17 @@ function DisplayNameRow({ displayName, onSave, isPerson, showToast }) {
  * The person's own picture (0213): on their account control and here, and seen by nobody else.
  * Choose Picture shrinks the file to the 256x256 square that will be uploaded and shows it; Save
  * uploads it and Discard drops it. Remove deletes the saved one. `pictureUrl` is the saved one's
- * blob URL, or null. A machine identity has none.
+ * blob URL, or null. A machine identity has none. A drop zone here would make the row taller than the
+ * others, so the picker is a button's.
  */
 function PictureRow({ pictureUrl, displayName, onSave, onRemove, isPerson }) {
   // The shrunk picture and its preview URL until Save or Discard, or null.
   const [draft, setDraft] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
-  const fileInput = useRef(null)
   useEffect(() => () => { if (draft) URL.revokeObjectURL(draft.url) }, [draft])
 
   const choose = async (file) => {
-    if (fileInput.current) fileInput.current.value = ''
-    if (!file) return
     const problem = pictureFileProblem(file)
     setError(problem)
     if (problem) return
@@ -252,6 +251,8 @@ function PictureRow({ pictureUrl, displayName, onSave, onRemove, isPerson }) {
       setBusy(false)
     }
   }
+
+  const { picker, open } = useFilePicker({ id: 'profile-picture', accept: PICTURE_TYPES.join(','), onFile: choose })
 
   const act = async (work, failure) => {
     setBusy(true)
@@ -287,15 +288,7 @@ function PictureRow({ pictureUrl, displayName, onSave, onRemove, isPerson }) {
           <div id="profile-picture-detail" className="setting-bounds profile-detail">
             {draft ? 'Not saved yet: this is how it will look.' : 'PNG, JPEG or WebP, up to 10 MB.'}
           </div>
-          <input
-            id="profile-picture"
-            ref={fileInput}
-            type="file"
-            accept={PICTURE_TYPES.join(',')}
-            style={{ display: 'none' }}
-            onChange={e => choose(e.target.files?.[0])}
-            aria-label="Picture file"
-          />
+          {picker}
         </div>
       )}
       actions={(<>
@@ -306,7 +299,7 @@ function PictureRow({ pictureUrl, displayName, onSave, onRemove, isPerson }) {
         ) : (
           <div className="setting-actions">
             <button type="button" className="btn btn-ghost btn-sm" disabled={busy}
-              onClick={() => fileInput.current?.click()} aria-describedby="profile-picture-detail">
+              onClick={open} aria-describedby="profile-picture-detail">
               <IconUpload size={13} /> Choose Picture
             </button>
             {pictureUrl && (

@@ -111,7 +111,7 @@ The Imported tab holds vocabularies your site brought in itself. It can be your 
 ## Import a vocabulary
 
 1. Open the **Imported** tab and press **Import Vocabulary**.
-2. Choose a file. It can be an `.aasx` package, or an AAS JSON or XML file. Aber reads it in your browser. Nothing is written yet.
+2. Drop a file on the zone, or click the zone to choose one. It can be an `.aasx` package, or an AAS JSON or XML file. Aber reads it in your browser. Nothing is written yet. **Choose Another** takes a different file.
 3. Read what the file holds. The preview shows the format, the version the file states, and how many concepts will be imported.
 4. Say what the file is. Choose **A published standard**, or **The site's own vocabulary**. For a standard, give its name, edition and publisher, such as `ISO 22400-2`, `2014` and `ISO`.
 5. Check the name, add a licence note if you want one, and press **Import Vocabulary**.

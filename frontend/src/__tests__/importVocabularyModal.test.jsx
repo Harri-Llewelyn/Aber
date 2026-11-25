@@ -35,9 +35,10 @@ const renderModal = (props = {}) => {
 
 const dialog = () => screen.getByRole('dialog', { name: 'Import Vocabulary' })
 const fileInput = () => within(dialog()).getByLabelText(/^File/)
+const picker = () => within(dialog()).getByTestId('vocabulary-file')
 const confirmButton = () => within(dialog()).getByRole('button', { name: 'Import Vocabulary' })
 const choose = async (file) => {
-  fireEvent.change(fileInput(), { target: { files: [file] } })
+  fireEvent.change(picker(), { target: { files: [file] } })
   await screen.findByRole('group', { name: 'What the File Holds' }).catch(() => null)
 }
 const facts = () => Object.fromEntries([...document.querySelectorAll('.site-import-facts dt')].map(dt => [dt.textContent, dt.nextElementSibling.textContent]))

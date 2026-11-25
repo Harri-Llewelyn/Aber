@@ -2983,6 +2983,61 @@ main:focus { outline: none; }
   opacity: 1; /* Firefox dims placeholders by default, compounding the contrast problem. */
 }
 
+/* Where a file is dropped or chosen (common/DropZone.jsx). The zone is the button: a column of its icon,
+   what to drop and the kinds it takes, or, with a file in it, a row of the file's name and Choose Another
+   over the kinds. A file over it makes the dashed border solid, and its line says what a drop does. */
+.drop-zone-field { position: relative; min-width: 0; }
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 18px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: var(--font-display);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.drop-zone > svg { flex: none; }
+.drop-zone:hover { border-color: var(--accent); }
+/* Inside the border: a dialog's body and a drawer's clip what is drawn past their edges. */
+.drop-zone:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.drop-zone[aria-invalid="true"] { border-color: var(--danger); }
+.drop-zone[data-dragging="yes"] { border: 1px solid var(--accent); }
+.drop-zone[data-dragging="yes"],
+.capture-drop-overlay { background: var(--bg-surface); }
+.drop-zone-line { min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.drop-zone-line > .spinner { margin-right: 4px; vertical-align: -2px; }
+.drop-zone-hint { min-width: 0; font-size: 11px; overflow-wrap: anywhere; }
+.drop-zone-note { display: block; margin-top: 4px; }
+
+.drop-zone[data-file="yes"] {
+  flex-flow: row wrap;
+  justify-content: flex-start;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  text-align: left;
+}
+/* As tall as Choose Another, which goes while a file is read or held over it. */
+.drop-zone[data-file="yes"] > .drop-zone-line { display: flex; flex: 1 1 180px; align-items: center; min-height: 30px; }
+.drop-zone[data-file="yes"] > .drop-zone-hint { flex: 1 1 100%; }
+
+.drop-zone:disabled { cursor: not-allowed; opacity: 0.6; }
+.drop-zone:disabled:hover { border-color: var(--border); }
+.drop-zone[aria-disabled="true"] { cursor: progress; }
+
+/* The zone that is a dialog's whole body. */
+.drop-zone-field.modal-fill { display: flex; flex-direction: column; }
+.drop-zone-field.modal-fill > .drop-zone { flex: 1 1 auto; }
+
 .form-control option { background: var(--bg-surface); color: var(--text-primary); }
 
 /* The id and its reference type, side by side while there is room. Each label has its tip beside it. */
@@ -4097,39 +4152,7 @@ span.area-plan-pin { cursor: inherit; }
   flex-wrap: wrap;
 }
 
-/* The drop zone's box. */
-.area-plan-panel-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-glass);
-  font-size: 12px;
-}
-
 .area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
-
-/* An area with no plan gets the target rather than a button: the file is usually already in a
-   folder somebody is dragging from. */
-.area-plan-panel-drop {
-  flex-direction: column;
-  gap: 6px;
-  padding: 18px 12px;
-  border-style: dashed;
-  background: transparent;
-  text-align: center;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: border-color 120ms, background 120ms;
-}
-
-.area-plan-panel-drop:hover { border-color: var(--accent); }
-.area-plan-panel-drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.area-plan-panel-drop[data-dragging='yes'] { border-color: var(--accent); background: var(--bg-surface); }
-.area-plan-panel-drop-line { font-size: 12px; color: var(--text-primary); }
 
 .zone-name {
   overflow: hidden;
@@ -4946,24 +4969,6 @@ a.chip { text-decoration: none; }
   color: var(--text-primary);
 }
 .model-file-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-
-/* No model yet: the drop zone, which takes the dialog's whole body, as the viewer does. The border's
-   colour, the ground and the cursor change with dragging and permission, inline. */
-.model-drop {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 12px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  text-align: center;
-  transition: border-color 120ms, background 120ms;
-}
-.model-drop-prompt { margin-top: 2px; font-size: 13px; line-height: 1.4; }
-.model-drop-limits { font-size: 11px; color: var(--text-muted); }
-.model-drop-note { margin-top: 4px; font-size: 11px; line-height: 1.4; color: var(--text-muted); }
 
 /* The plan viewer: the viewport clips, the stage inside it is laid out at the zoomed width and
    placed by left and top. No frame round the drawing here. Pins keep the one-column size. */
@@ -8878,7 +8883,7 @@ ol.gateway-steps {
   border-bottom: 1px solid var(--border);
 }
 .capture-strips:empty { display: none; }
-/* A file dragged over the card: an accent frame and a line saying what a drop does. */
+/* A file dragged over the card: the look of a drop zone with a file over it, and a line saying what a drop does. */
 .capture-card-drop { border-color: var(--accent); }
 /* A failed job's message on the Captures and Playbacks tabs (CaptureHistory). */
 .capture-history-failure { min-width: 240px; font-size: 12px; color: var(--danger-text); }
@@ -8889,30 +8894,14 @@ ol.gateway-steps {
   inset: 0;
   z-index: 3;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  border: 2px dashed var(--accent);
+  gap: 6px;
   border-radius: inherit;
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 12px;
   pointer-events: none;
 }
-.capture-drop {
-  padding: 12px;
-  text-align: center;
-  cursor: pointer;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.capture-drop-active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-}
-.capture-drop-icon { vertical-align: -2px; margin-right: 6px; }
 .capture-badge-lead { margin-right: 6px; }
 .capture-label-count { margin-left: 6px; }

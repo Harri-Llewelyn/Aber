@@ -75,7 +75,7 @@ Every key and every value is listed in [the format's reference](../../docs/autom
 
 ## Upload and Export
 
-**Upload** takes an `automations.yaml` file. The page reads it in your browser, then shows what applying it would do before it does anything:
+**Upload** takes an `automations.yaml` file. Drop the file on the zone, or click the zone to choose it. **Choose Another** takes a different file. The page reads the file in your browser, then shows what applying it would do before it does anything:
 
 - **New**, **Changed** and **Unchanged** automations, and **Refused** ones with each reason and the line it is on. Refusals are listed first.
 - **Apply 3 Automations**, the button, says how many it will write. It is greyed while anything is refused.

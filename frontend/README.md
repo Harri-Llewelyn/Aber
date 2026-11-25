@@ -671,6 +671,32 @@ for an appliance is an `ApplianceCommand`.
   keyboard was on it, and the dialog has it otherwise.
 - **The step that shows a secret once ends with Done,** its primary and its last button.
 
+### A file is chosen with one drop zone
+
+**One component takes a file.** `DropZone` (`common/DropZone.jsx`) is where a person gives one, dropped on
+it or chosen in the browser's picker: Import Vocabulary, an area's plan, a device's 3D model, Capture's
+drawer, Play a File…, and the uploads of schemas, derived metrics and automations. Drift check 595 refuses
+a file input anywhere else.
+
+- **The zone is the button.** Tab reaches it once, and a click, Enter or Space opens the picker. It is
+  named by its label and described by what to drop, the kinds and the limit, and then by its error.
+- **Each state is in words.** A file held over it, one being read, and the name of the one it holds, with
+  **Choose Another**. A border that turns solid or red only goes with them. Capture's card, which takes a
+  file to play, has the zone's look while one is over it.
+- **A drop is held to what the picker offers.** `accept` filters the picker and checks a drop, and two files
+  at once are refused. The page's own check (`refuse`) runs on a file given either way.
+- **A refusal is a `FieldError` at the zone, which stays.** A file it already held stays too, and is not
+  marked wrong. A plan's and a model's refusals are toasted as well.
+- **An upload's dialog opens first, and asks for the file.** Another file takes the first one's place in the
+  same dialog, and nothing is lost but that file's own checks. `hooks/useYamlFile.js` holds a YAML file's,
+  and `UploadCaptureModal` a capture's. The page takes no drop, but for Capture's card, which opens Play a
+  File…'s dialog with the file in it.
+- **What opened Capture's dialog says whether the file is played.** Play a File… and the card store it and
+  play it back. The drawer's zone only stores it, and so does another file chosen in the dialog it opened.
+- **A button where a zone has no place** uses the same picker, `useFilePicker()`: Replace on a plan and a
+  model, and Choose Picture. A zone that says what a zone says made the Picture row 111 to 148px tall, where
+  the tallest other row is 85px.
+
 ### A plan opens expanded
 
 An area's plan (on a Site Map card, and in the Areas and Cells panels) has an Expand button
@@ -2689,8 +2715,8 @@ page's help is `help/pages/automations.md`.
   `ApplyAutomationsModal`, which parses the text, calls `apply_automations(doc, true)` and lists each
   automation as new, changed, unchanged or refused with every reason and its line. Its confirm repeats
   the act and the count (**Save 1 Automation**, **Apply 3 Automations**) and applies the same document with
-  `false`, all or nothing. An upload is the same dialog on a file's text, and never deletes. The
-  dialog toasts the success itself, because it makes the call.
+  `false`, all or nothing. An upload is the same dialog with the file as its first step, in a drop zone,
+  and never deletes. The dialog toasts the success itself, because it makes the call.
 - **The text is rendered, never kept.** `renderAutomationsYaml()` puts each automation's keys in
   the order a file reads best (the database's jsonb has its own), leaves an empty `description` out, and
   writes a comment beside each device id from the document's `devices`. The page says in one line
@@ -2788,8 +2814,9 @@ drawer: neither the drawer nor the detail dialog offers **Download JSON**. The f
   `"x-completes": "metric"`. What is a threshold's alone (devices, holds, valid ranges) is the automations'
   model's. No page hosts the editor for schemas yet: the YAML is exported and uploaded, not edited in place.
 - **Upload is the Automations upload.** `ApplySchemasModal` is `ApplyAutomationsModal`'s pattern on the
-  same parts: `useApplyPreview()` makes the dry run and holds its phases, `describeApply()` says why a
-  file cannot be applied, and `ApplyResults` draws each result with its reasons placed on their lines. The text is read by
+  same parts: `useYamlFile()` takes the file, `useApplyPreview()` makes the dry run and holds its phases,
+  `describeApply()` says why a file cannot be applied, and `ApplyResults` draws each result with its reasons
+  placed on their lines. The text is read by
   `parseAutomationsYaml()`, which is not about automations. A refusal's path (`$[0].metrics[1].minimum`)
   is placed by `locatePath()`. A changed schema is a **new draft**, and the preview says which metrics it
   adds, removes and changes the range of.
@@ -2806,9 +2833,9 @@ hosts the editor for a file it uploads.** Its toolbar has **Upload**, **Export**
 **Add Derived Metric**, which stays. A row's box ticks it for **Export** (**Export (2)**), which saves them,
 or every derived metric listed with none ticked. The format is `docs/derived-metrics.md`.
 
-- **Upload opens the editor, and checking is a second step.** `DerivedMetricsEditorModal` holds
-  `AutomationEditor` with `public/json-schema/derived-metrics.schema.json` as its schema, and **New in YAML**
-  opens it empty. **Apply Derived Metrics** opens `ApplyDerivedMetricsModal` over it, which is
+- **Upload asks for the file and opens it in the editor, and checking is a step of its own.**
+  `DerivedMetricsEditorModal` holds `AutomationEditor` with `public/json-schema/derived-metrics.schema.json`
+  as its schema, and **New in YAML** opens it empty. **Apply Derived Metrics** opens `ApplyDerivedMetricsModal` over it, which is
   `ApplySchemasModal`'s pattern on the same parts (`useApplyPreview()`, `describeApply()`, `ApplyResults`).
   A refused line is marked in the editor when the preview is closed (`onChecked`), as the Automations page
   marks the lines of its Save. The editor's text is lost with the dialog.
@@ -2823,8 +2850,8 @@ or every derived metric listed with none ticked. The format is `docs/derived-met
   result's head with **Before** and **After** in words, and None for an empty side, so the change reads
   without colour. The Schemas and Automations dialogs do not pass it. The note says how a metric is computed
   and its unit (`derivedResultNote()`); the unit is the database's, from the inputs.
-- **The state is a hook.** `hooks/useDerivedMetricsYaml.js` holds the ticks, the export, the file chosen
-  and the editor's text, so `MetricsTab` only draws them. The dialog toasts the success itself, as the
+- **The state is a hook.** `hooks/useDerivedMetricsYaml.js` holds the ticks, the export and which editor is
+  open, so `MetricsTab` only draws them. The dialog toasts the success itself, as the
   Schemas upload does, counting what was added and what changed: one metric, added or changed, links to
   its row on the Derived tab, several to the tab. Export toasts too, linking to the tab.
 - **The export is rendered, never kept.** `renderDerivedMetricsYaml()` writes the keys in the order a file

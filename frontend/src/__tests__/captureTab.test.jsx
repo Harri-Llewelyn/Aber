@@ -1473,9 +1473,7 @@ describe('playing a file', () => {
   }
   const editedFile = () => new File([JSON.stringify(EDITED)], 'edited.json', { type: 'application/json' })
 
-  it('offers "Play a File…" at the end of the toolbar on both tabs, which opens the file chooser', async () => {
-    const clicked = []
-    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function () { clicked.push(this) })
+  it('offers "Play a File…" at the end of the toolbar on both tabs, whose dialog asks for the file', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     const inToolbar = () => document.querySelector('.card > .tab-strip + .filter-bar > .filter-bar-actions')
@@ -1489,12 +1487,10 @@ describe('playing a file', () => {
     expect(inToolbar()).toHaveClass('btn-primary')
     const button = screen.getByRole('button', { name: /Play a File…/ })
     fireEvent.click(button)
-    click.mockRestore()
 
-    // The chooser it opened is the one that goes on to play the file back.
-    expect(clicked).toHaveLength(1)
-    expect(clicked[0]).toHaveAttribute('type', 'file')
-    fireEvent.change(clicked[0], { target: { files: [editedFile()] } })
+    // The dialog it opened is the one that goes on to play the file back.
+    expect(screen.getByRole('dialog', { name: 'Play a File' })).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId('capture-upload-file'), { target: { files: [editedFile()] } })
     const subject = await screen.findByLabelText('File It Against')
     await waitFor(() => expect(subject.value).toBe('gateway:gw-1'))
   })
