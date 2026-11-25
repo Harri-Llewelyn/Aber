@@ -5,6 +5,7 @@ import { ActionButton } from '../common/ActionButton'
 import { ApplianceCommand, ApplianceCommandsHelp } from '../common/ApplianceCommand'
 import { Modal } from '../common/Modal'
 import { formatCountdown, tokenTimeRemaining } from '../../utils/gatewayStatus'
+import { setupRevokesCredential } from '../../utils/credentialState'
 import { typedNameMatches } from '../../utils/gatewayType'
 import { CLEAR_BUNDLE_ENROLMENT, CLEAR_INSTALLED_ENROLMENT, startBundle } from '../../utils/applianceCommands'
 import { Tooltip } from '../common/Tooltip'
@@ -19,6 +20,9 @@ import {
  * first; straight after creating the gateway there is nothing to replace and it issues on open,
  * once per mount. The command is offered when `installer.available`; switching between command and
  * bundle is a re-issue and asks first.
+ *
+ * `gateway` is the caller's row, whole: whether the setup revokes a credential is read from it here, so
+ * no caller can leave the warning out.
  *
  * A gateway that has ever enrolled (`enrolled_at`, whatever its credential is now) may be going back
  * on the machine that holds its old enrolment, so the dialog shows how to clear it above the command.
@@ -104,6 +108,8 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
     : `aber-gateway-${sparkplugId || 'bundle'}`
   const isCommand = bundle?.kind === 'command'
   const enrolledBefore = Boolean(gateway.enrolled_at)
+  // Once this dialog has issued, the enrolment no longer stands, and nothing more is revoked.
+  const revokesCredential = setupRevokesCredential(gateway) && !bundle
 
   // The install command is the server's text verbatim.
   const commands = isCommand ? bundle.command : startBundle(folder)
@@ -208,8 +214,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                 Only one token works at a time. Issuing this <strong>invalidates any bundle or
                 command already issued</strong> for this gateway — an appliance started with the old one
                 is refused at enrolment, with an error that cannot say why.
-                {/* Once this dialog has issued, the enrolment no longer stands, and nothing more is revoked. */}
-                {(gateway.status === 'AWAITING_BIRTH' || gateway.revokesCredential) && !bundle && (
+                {revokesCredential && (
                   <> This gateway has already enrolled, so this also revokes the broker credential
                     its appliance is holding.</>
                 )}

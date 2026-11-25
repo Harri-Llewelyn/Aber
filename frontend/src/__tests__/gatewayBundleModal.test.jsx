@@ -386,7 +386,7 @@ describe('GatewayBundleModal — confirm before issuing', () => {
    */
   it('names the broker credential when the gateway has already enrolled', () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
-    renderModal({ confirmFirst: true, gateway: { ...GATEWAY, status: 'AWAITING_BIRTH' } })
+    renderModal({ confirmFirst: true, gateway: { ...GATEWAY, status: 'AWAITING_BIRTH', enrolled_at: '2026-11-01T09:00:00Z' } })
 
     expect(screen.getByText(/revokes the broker credential/i)).toBeTruthy()
   })
