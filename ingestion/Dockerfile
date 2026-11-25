@@ -89,11 +89,14 @@ COPY ingestion/cold_archive.py .
 # image, or one it imports, that no COPY line names.
 COPY ingestion/area_plan_sweep.py .
 
+# The device-model sweep, its sibling: `python -m device_model_sweep`, over area_plan_sweep.py's loop.
+COPY ingestion/device_model_sweep.py .
+
 # Compile the Sparkplug B protobuf definition
 RUN protoc --python_out=. sparkplug_b.proto
 
 # NON-ROOT, numeric so the kubelet can verify runAsNonRoot from the image alone. The daemon, the
-# playback worker, the cold archive and the area-plan sweep write only to /tmp and their volumes;
+# playback worker, the cold archive and the two sweeps write only to /tmp and their volumes;
 # /app stays root's.
 RUN groupadd --gid 10001 ingestion \
  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin ingestion

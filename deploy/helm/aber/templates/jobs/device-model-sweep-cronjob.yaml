@@ -1,0 +1,85 @@
+{{- if .Values.deviceModelSweep.enabled }}
+{{- $component := "device-model-sweep" -}}
+{{- $secretName := include "aber.secretName" . -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $gateway := include "aber.supabase.internalUrl" . -}}
+{{/*
+=================================================================================================
+The device-model sweep: delete the 3D models in the asset-3d-models bucket that nothing names
+(ingestion/device_model_sweep.py): one the dashboard failed to delete, one a replacement left before
+1.10.0, and the model of a device deleted without a tombstone.
+
+area-plan-sweep's sibling, with the same image, identity and reach: the ingestion principal, to whom
+ingest_unclaimed_device_model_objects() answers and the bucket's SELECT and DELETE policies admit a
+model nothing names and no other (0329).
+=================================================================================================
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-device-model-sweep" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  schedule: {{ .Values.deviceModelSweep.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # The next hour's run is the retry.
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The ingestion image's user.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          # Under a NetworkPolicy a new pod's first connections are refused for about a second,
+          # until the policy controller admits the pod.
+          initContainers:
+            {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" (include "aber.curlImage" $) "command" (printf "curl -sf -o /dev/null -H \"apikey: $SUPABASE_PUBLISHABLE_KEY\" %s/rest/v1/" $gateway) "describe" "supabase-envoy (the models are listed and deleted through it)" "env" (include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY"))) | nindent 12 }}
+          containers:
+            - name: device-model-sweep
+              image: {{ include "aber.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
+              imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
+              command: ["python", "-m", "device_model_sweep"]
+              env:
+                - name: LOG_FORMAT
+                  value: "json"
+                - name: SUPABASE_URL
+                  value: {{ $gateway | quote }}
+                {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 16 }}
+                {{- include "aber.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 16 }}
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                {{- toYaml .Values.deviceModelSweep.resources | nindent 16 }}
+              volumeMounts:
+                # Python and its HTTP client take TMPDIR when they need one.
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 16Mi
+{{- end }}

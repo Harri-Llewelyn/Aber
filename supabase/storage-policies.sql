@@ -30,14 +30,18 @@ ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 -- back, so it takes the same authority as writing: the geometry is public, the inventory of which
 -- devices have a model is not. A model belongs to a machine, so INSERT and UPDATE refuse an object
 -- under a replay lane's id (public.is_replay_lane_model_path(), 0294). DELETE does not: a machine
--- may hold a model that was stored under its lane's id before then, and removes it as any other.
+-- may hold a model that was stored under its lane's id before then, and removes it as any other. The
+-- device-model sweep, a CronJob running as the ingestion principal, deletes an object nothing names
+-- and nothing else (0329), and reads it by the same arm, which storage-api's delete needs.
 DROP POLICY IF EXISTS "asset_3d_models_public_read" ON storage.objects;
 DROP POLICY IF EXISTS "asset_3d_models_select_privileged" ON storage.objects;
 CREATE POLICY "asset_3d_models_select_privileged" ON storage.objects
   FOR SELECT TO authenticated
   USING (
     bucket_id = 'asset-3d-models'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+         OR (public.is_ingestion_caller()
+             AND public.is_unclaimed_device_model_object(storage.objects.name)))
   );
 
 DROP POLICY IF EXISTS "asset_3d_models_insert_privileged" ON storage.objects;
@@ -68,7 +72,9 @@ CREATE POLICY "asset_3d_models_delete_privileged" ON storage.objects
   FOR DELETE TO authenticated
   USING (
     bucket_id = 'asset-3d-models'
-    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
+    AND ((public.has_role(ARRAY['Administrator', 'Shopfloor_Manager']) AND (SELECT public.require_mfa()))
+         OR (public.is_ingestion_caller()
+             AND public.is_unclaimed_device_model_object(storage.objects.name)))
   );
 
 -- On the PG17 image storage-api creates its tables with no grants to these roles, so each is
@@ -116,7 +122,27 @@ BEGIN
     RAISE EXCEPTION 'asset-3d-models: an INSERT or UPDATE policy admits an object under a replay lane''s id. '
       'A model belongs to a machine, and the lane shows its machine''s (0294).';
   END IF;
-  RAISE NOTICE 'storage policies reconciled (4 asset-3d-models policies on storage.objects).';
+  -- The ingestion principal in SELECT and DELETE alone, and every arm of it confined to an object
+  -- nothing names.
+  IF EXISTS (SELECT 1 FROM pg_policies p
+              WHERE p.schemaname = 'storage' AND p.tablename = 'objects'
+                AND p.policyname IN ('asset_3d_models_select_privileged', 'asset_3d_models_delete_privileged')
+                AND regexp_count(coalesce(p.qual, ''), 'is_ingestion_caller\(\) AND (public\.)?is_unclaimed_device_model_object\(') = 0) THEN
+    RAISE EXCEPTION 'asset-3d-models: the SELECT or DELETE policy does not admit the device-model sweep to a model '
+      'nothing names. A replaced model whose delete failed then stays in the public bucket for ever (0329).';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_policies p
+              WHERE p.schemaname = 'storage' AND p.tablename = 'objects'
+                AND p.policyname LIKE 'asset\_3d\_models\_%'
+                AND (regexp_count(coalesce(p.qual, ''), 'is_ingestion_caller\(') <>
+                     regexp_count(coalesce(p.qual, ''), 'is_ingestion_caller\(\) AND (public\.)?is_unclaimed_device_model_object\(')
+                     OR coalesce(p.with_check, '') LIKE '%is_ingestion_caller%'
+                     OR (p.cmd = 'UPDATE' AND coalesce(p.qual, '') LIKE '%is_ingestion_caller%'))) THEN
+    RAISE EXCEPTION 'asset-3d-models: a policy admits the ingestion principal to a model a device still names. The '
+      'hourly device-model sweep would then delete the model a device shows (0329).';
+  END IF;
+  RAISE NOTICE 'storage policies reconciled (4 asset-3d-models policies on storage.objects; the device-model '
+    'sweep reads and deletes only a model nothing names).';
 END $$;
 
 -- broker-captures: private. Administrator, Shopfloor_Manager and Auditor read a stored capture's

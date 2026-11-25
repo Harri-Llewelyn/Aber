@@ -118,6 +118,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `cold-archive` | `ghcr.io/harri-llewelyn/aber/ingestion` | CronJob: exports, verifies and drops cold chunks |
 | `db-init` | `ghcr.io/harri-llewelyn/aber/db-init` | hook Job: the migration chain, on every install and upgrade |
 | `db-roles-init` | `supabase/postgres:17.6.1.175` | hook Job: the Supabase roles and their passwords |
+| `device-model-sweep` | `ghcr.io/harri-llewelyn/aber/ingestion` | CronJob: hourly, deletes the 3D models no device names |
 | `e2e-aas-export` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): the AAS conformance suite |
 | `e2e-validate` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): `validate.py` in-cluster |
 | `frontend` | `ghcr.io/harri-llewelyn/aber/frontend` | `app.<domain>` |
