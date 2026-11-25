@@ -3130,7 +3130,7 @@ opens itself on that call, so `App.jsx` needs no wiring for it.
 `useLocalEntities()`, read as the bar first opens. It asks from two characters, once typing has rested 180 ms.
 `shortlist()` orders them: a whole id, a whole name, the start of an id, part of a name, and in service
 first among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`), and asks the database for no more of each
-(`p_per_kind`, 0330), so one request answers and four hundred devices leave room for a cell. The browser
+(`p_per_kind`), so one request answers and four hundred devices leave room for a cell. The browser
 orders them again, with people's rows. A row opens `recordUrl()`: its own page while the rail has that page,
 else `/entities?find=<id>`. An id adds *View in Entities* and *Find This ID in the Audit Trail*, whatever it
 names; a text is one by its shape (`isIdShaped()`) or by what it found (`idFoundBy()`). The trail is handed

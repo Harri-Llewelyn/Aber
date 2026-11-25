@@ -4942,7 +4942,7 @@ const apiMethods = {
 
   /**
    * The entities one text names, whatever their state: a whole id of any kind, the start of one, or any
-   * part of a name (find_entities(), 0330). At most `limit` rows, a whole id first; with `perKind`, at
+   * part of a name (find_entities(), 0321). At most `limit` rows, a whole id first; with `perKind`, at
    * most that many of each kind, its best, so one kind cannot fill the answer.
    */
   findEntities: async (text, { limit = ENTITY_FIND_LIMIT, perKind = null } = {}) => {

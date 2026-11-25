@@ -1,7 +1,7 @@
 import { compare, lastDefinition, need, read } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
-// 169. How many of a kind the search bar lists, and which (0330). find_entities() keeps the best of each kind
+// 169. How many of a kind the search bar lists, and which (0321). find_entities() keeps the best of each kind
 // and shortlist() orders them with people's rows, so the two order a kind alike: how the text names a row, then
 // its state, then its name. A kind the database orders otherwise loses rows the bar would have put first. The
 // kinds' limits together fit in one answer, or the total would cut a kind short.

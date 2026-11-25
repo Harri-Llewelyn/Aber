@@ -1,12 +1,13 @@
 # suite:
 #   lanes: db
-#   why: 0330 -- find_entities() answers at most p_per_kind rows of each kind, the best first, and without it
-#     answers row for row what 0321's body does, for every role; one form of it is left whichever file ran
-#     last; and the read policies of retired_entities, captures, backups and machine_principals ask
-#     once for a statement and admit whom they did. Two forms are a search PostgREST cannot route.
+#   why: 0321 and 0330 -- find_entities() answers at most p_per_kind rows of each kind, the best first, and
+#     without it answers row for row what it did before it took one, for every role; a database that holds the
+#     earlier form is left with one; and the read policies of retired_entities, captures, backups and
+#     machine_principals ask once for a statement and admit whom they did. Two forms are a search PostgREST
+#     cannot route.
 
 """
-A search asks about the tombstones once, and can limit each kind (0330).
+A search asks about the tombstones once (0330), and can limit each kind (0321).
 
     python supabase/migrations/test_a_search_asks_about_the_tombstones_once.py
 
@@ -17,10 +18,11 @@ What is held here:
   * find_entities() takes p_per_kind. It answers at most that many rows of each kind: a whole id, a whole
     name, the start of an id, part of a name; what is in service before what was archived and deleted
     among equals; then by name, a shorter one first. A number below 1 is 1. p_limit holds the total.
-  * Without p_per_kind it answers what 0321's body answers, the same rows in the same order, for each
-    role and for a caller with none. That body is read out of 0321 and run beside it.
-  * One form is declared. A database that holds 0321's as well, as each later boot's does until 0330
-    runs, is brought to the one form by 0330. anon and service_role may not call it.
+  * Without p_per_kind it answers what the body from before it answers, the same rows in the same order, for
+    each role and for a caller with none. That body is copied here and run beside it.
+  * One form is declared, by 0321 alone. A database that holds the two-argument form, alone or beside the
+    other, is brought to the one form by 0321 in one transaction, and a later boot recreates nothing.
+    anon and service_role may not call it.
   * Each of the four policies 0330 states is an initplan of its read, and admits the roles it did.
 
 EVERY TEST ROLLS BACK.
@@ -59,20 +61,48 @@ ASKED = {
 
 HERE = Path(__file__).resolve().parent
 OWNER = HERE / "0321_every_entity_is_listed_and_found_by_any_id.sql"
-MIGRATION = HERE / "0330_a_search_asks_about_the_tombstones_once.sql"
+
+# find_entities() as 0321 declared it before p_per_kind.
+TWO_ARGUMENTS = r"""
+CREATE OR REPLACE FUNCTION public.find_entities(p_query text, p_limit integer DEFAULT 200)
+RETURNS SETOF public.entity_directory
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $$
+  SELECT e.*
+    FROM (SELECT lower(btrim(p_query, E' \t\r\n')) AS text) q
+    CROSS JOIN public.entity_directory e
+    CROSS JOIN LATERAL (
+      SELECT lower(E'\n' || e.id || E'\n' || array_to_string(e.second_ids, E'\n') || E'\n') AS ids,
+             lower(e.name) AS name
+      OFFSET 0
+    ) t
+    CROSS JOIN LATERAL (
+      SELECT CASE
+               WHEN strpos(t.ids, E'\n' || q.text || E'\n') > 0 THEN 0
+               WHEN t.name = q.text THEN 1
+               WHEN length(q.text) >= 8 AND strpos(t.ids, E'\n' || q.text) > 0 THEN 2
+               WHEN strpos(t.name, q.text) > 0 THEN 3
+             END AS rank
+      OFFSET 0
+    ) m
+   WHERE q.text <> '' AND m.rank IS NOT NULL
+   ORDER BY m.rank, e.name, e.kind, e.id, e.state
+   LIMIT least(greatest(coalesce(p_limit, 200), 1), 500);
+$$;
+"""
 
 
-def between(path, start, end):
-    """The text of `path` from `start` to the end of the first `end` after it."""
-    text = path.read_text(encoding="utf-8")
+def block(start, end):
+    """0321's text from `start` to the end of the first `end` after it."""
+    text = OWNER.read_text(encoding="utf-8")
     at = text.index(start)
     return text[at:text.index(end, at) + len(end)]
 
 
-# 0321's function with its grants, as each boot declares it, and 0330's drop and declaration without
-# the transaction it runs them in.
-TWO_ARGUMENTS = between(OWNER, "CREATE OR REPLACE FUNCTION public.find_entities(", "TO authenticated;")
-THREE_ARGUMENTS = between(MIGRATION, "DROP FUNCTION IF EXISTS public.find_entities(text, integer);", "TO authenticated;")
+# The drop, the declaration and its grants, in the transaction 0321 runs them in.
+SEARCH = block("BEGIN;\nDO $drop$", "COMMIT;")
+SELF_CHECK = block("DO $check$", "$check$;")
 
 
 def get_connection():
@@ -93,7 +123,7 @@ class Base(unittest.TestCase):
         self.cur = self.conn.cursor()
         self.cur.execute("SELECT to_regprocedure('public.find_entities(text, integer, integer)');")
         if self.cur.fetchone()[0] is None:
-            self.skipTest("0330 is not applied to this database")
+            self.skipTest("this database's find_entities() takes no p_per_kind")
         self.tag = uuid.uuid4().hex[:8]
         for role, user_id in ROLES.items():
             self.make_person(user_id, role)
@@ -258,15 +288,14 @@ class TheLimitOfEachKind(Base):
 
 
 class WithoutIt(Base):
-    """0321's body, read out of that file, answers beside the one this file declares."""
+    """The body from before p_per_kind answers beside the one that takes it."""
 
-    BEFORE = "find_entities_of_0321"
+    BEFORE = "find_entities_of_two"
 
     def setUp(self):
         super().setUp()
-        body = TWO_ARGUMENTS.replace("public.find_entities(", f"public.{self.BEFORE}(")
-        self.assertIn(f"CREATE OR REPLACE FUNCTION public.{self.BEFORE}(p_query text, p_limit integer DEFAULT 200)", body)
-        self.cur.execute(body)
+        self.cur.execute(TWO_ARGUMENTS.replace("public.find_entities(", f"public.{self.BEFORE}("))
+        self.cur.execute("GRANT EXECUTE ON FUNCTION public.find_entities_of_two(text, integer) TO authenticated;")
         t = self.tag
         for i in range(30):
             self.make_device(f"Bay {t} {i % 7}", reported=f"plc-{t}-{i}", archived=i % 5 == 0)
@@ -283,7 +312,7 @@ class WithoutIt(Base):
         return [self.read_as(caller, f"SELECT to_jsonb(e)::text FROM public.{name}(%s, %s) e;", (text, limit))
                 for name in (self.BEFORE, "find_entities")]
 
-    def test_it_answers_row_for_row_what_0321_does(self):
+    def test_it_answers_row_for_row_what_it_did(self):
         t = self.tag
         answered = 0
         for name, caller in [*ROLES.items(), ("no role", NOBODY)]:
@@ -315,15 +344,51 @@ class OneForm(Base):
     def test_one_form_is_declared(self):
         self.assertEqual(self.forms(), [self.THREE])
 
-    def test_a_later_boot_is_brought_back_to_the_one_form(self):
-        # 0321 replays first and declares its own beside it: neither can then be called by name.
-        self.cur.execute(TWO_ARGUMENTS)
-        self.assertEqual(len(self.forms()), 2)
-        with self.assertRaises(psycopg2.errors.AmbiguousFunction):
-            self.find("x", limit=200)
-        self.cur.execute(THREE_ARGUMENTS)
+    def test_0321_alone_declares_it(self):
+        declared = [path.name for path in sorted(HERE.glob("[0-9][0-9][0-9][0-9]_*.sql"))
+                    if "FUNCTION public.find_entities(" in path.read_text(encoding="utf-8")]
+        self.assertEqual(declared, [OWNER.name])
+
+    def test_the_earlier_form_goes_as_the_other_comes(self):
+        # One transaction: the first COMMIT after the BEGIN is past the grants.
+        for statement in ("DROP FUNCTION public.find_entities(text, integer);",
+                          "CREATE OR REPLACE FUNCTION public.find_entities(p_query text, p_limit integer DEFAULT 200, "
+                          "p_per_kind integer DEFAULT NULL)",
+                          "GRANT EXECUTE ON FUNCTION public.find_entities(text, integer, integer) TO authenticated;"):
+            self.assertIn(statement, SEARCH)
+
+    def replay_the_search(self):
+        self.cur.execute(SEARCH[len("BEGIN;"):-len("COMMIT;")])
+
+    def test_a_database_that_holds_the_earlier_form_is_left_with_one(self):
+        drop = "DROP FUNCTION public.find_entities(text, integer, integer);"
+        for held, plant, forms in (("the earlier alone", drop + TWO_ARGUMENTS, 1), ("both", TWO_ARGUMENTS, 2), ("neither", drop, 0)):
+            with self.subTest(held=held):
+                self.cur.execute("SAVEPOINT held;")
+                self.cur.execute(plant)
+                self.assertEqual(len(self.forms()), forms)
+                if forms == 2:
+                    # A call that names no p_per_kind could be either's.
+                    with self.assertRaises(psycopg2.errors.AmbiguousFunction):
+                        self.find("x", limit=200)
+                self.replay_the_search()
+                self.assertEqual(self.forms(), [self.THREE])
+                self.find("x", limit=200)
+                self.cur.execute(SELF_CHECK)
+                self.cur.execute("ROLLBACK TO SAVEPOINT held;")
+
+    def test_a_later_boot_recreates_nothing(self):
+        oid = "SELECT 'public.find_entities(text, integer, integer)'::regprocedure::oid;"
+        before = self.one(oid)
+        self.replay_the_search()
+        self.assertEqual(self.one(oid), before)
         self.assertEqual(self.forms(), [self.THREE])
-        self.find("x", limit=200)
+
+    def test_the_self_check_refuses_two_forms(self):
+        self.cur.execute(TWO_ARGUMENTS)
+        with self.assertRaises(psycopg2.errors.RaiseException) as raised:
+            self.cur.execute(SELF_CHECK)
+        self.assertIn("two-argument find_entities() stands beside", str(raised.exception))
 
     def test_it_runs_as_its_caller_and_only_a_signed_in_one_may(self):
         self.cur.execute(

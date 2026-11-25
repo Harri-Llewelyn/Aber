@@ -5370,8 +5370,8 @@ paths:
         the text are ignored, and `%` and `_` are themselves. A whole id comes first, then a whole name,
         then the rest. Blank text answers no row.
 
-        With `p_per_kind` (`0330`) it answers at most that many rows of each kind, so one kind cannot fill
-        the answer. Among a kind's equals, what is in service comes first, then by name, a shorter one
+        With `p_per_kind` it answers at most that many rows of each kind, so one kind cannot fill the
+        answer. Among a kind's equals, what is in service comes first, then by name, a shorter one
         first.
 
         **Runs as the caller** (`SECURITY INVOKER`): the rows they may read from the view.
