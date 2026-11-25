@@ -89,7 +89,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const [formVal, setFormVal]   = useState(blank)
   // What the form opened with.
   const [formOpened, setFormOpened] = useState(blank)
-  // Archive, never delete, from this page: the delete is the Archived Entities page's. The table
+  // Archive, never delete, from this page: the delete is the Entities page's. The table
   // opens on Active; archived areas are shown, tinted, under the lifecycle filter.
   const [archiveTarget, setArchiveTarget] = useState(null)
   // The archived area whose Restore dialog is open.
@@ -193,7 +193,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   /**
    * Archiving an area moves nothing: its cells stay filed in it and every uns/ topic beneath it
    * keeps its name. It leaves this table, is hidden from the Site Map, and runs its timer on the
-   * Archived Entities page, which is where deleting it lives.
+   * Entities page's Archived tab, which is where deleting it lives.
    */
   const archiveArea = async (days) => {
     await api.post(`/api/v1/areas/${archiveTarget.area_id}/archive`, { auto_delete_days: days })
@@ -701,7 +701,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
             title: 'Attach or edit links for this area — documents, a site plan, any URL'
           },
           // Archive or Restore, never both: the two are mutually exclusive states of the same row.
-          // The delete is the Archived Entities page's, where it is typed back and irreversible.
+          // The delete is the Entities page's, where it is typed back and irreversible.
           selectedArea.is_archived
             ? {
               label: 'Restore Area', icon: <IconRefreshCw size={13} />,
@@ -720,7 +720,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 danger: true,
                 title: !canArchive
                   ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
-                  : refusal || 'Archive this area. Its cells stay filed in it and its topics keep their name; deleting it is done from Archived Entities.'
+                  : refusal || 'Archive this area. Its cells stay filed in it and its topics keep their name; deleting it is done from Entities.'
               }
             })()
         ].filter(Boolean) : []}

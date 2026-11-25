@@ -55,7 +55,7 @@ describe('the playback dialog', () => {
     const callout = await screen.findByText(/could not be found/)
     expect(callout.textContent).toMatch(/open it again/)
     expect(callout.textContent).toMatch(/upgrade the release/)
-    expect(document.body.textContent).not.toMatch(/Archived Entities|Restore/)
+    expect(document.body.textContent).not.toMatch(/Entities|Restore/)
   })
 
   it('says an unmapped device is refused, not that it quarantines anything', async () => {

@@ -47,7 +47,7 @@ The help for each page of the dashboard, in the order the sidebar lists them.
 - [Capture](pages/capture.md): record what the broker carried, and play it back.
 - [Cold Storage](pages/cold-storage.md): old readings, moved out of the live database.
 - [Backups](pages/backups.md): take a backup, and see every backup run.
-- [Archived Entities](pages/archives.md): bring back, or delete, what was taken out of service.
+- [Entities](pages/archives.md): what is in service, what any ID names, and bringing back or deleting what was taken out of service.
 - [System](pages/system.md): every service Aber runs, whether it is up, and how to reach it.
 - [Access Control](pages/access-control.md): who and what may reach Aber.
 - [Settings](pages/settings.md): the settings for the whole site.
@@ -57,4 +57,5 @@ The help for each page of the dashboard, in the order the sidebar lists them.
 
 Everything in this folder is for newcomers, so it follows the rules in
 [Writing documentation](../CONTRIBUTING.md#writing-documentation). A page for a dashboard page goes
-in `pages/`, named by the page's id.
+in `pages/`, named by the page's id. The Entities page is the one exception: its file is `archives.md`,
+from before the page was renamed, because code and other pages cite that path.

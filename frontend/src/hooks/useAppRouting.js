@@ -8,15 +8,18 @@ import { currentUrl, navigate, pageUrl, pathSegments, queryOf, useUrl } from './
  */
 export const MOVED_PAGES = new Map([
   ['directory', 'system'],
+  ['archives', 'entities'],
 ])
 
 /**
  * Tabs whose address changed within their page, `page/tab` to `page/tab`, for the same reason.
  * A tab split in several opens the one listed first: Profile's Security tab became Sessions, MFA
- * and Allowed Apps.
+ * and Allowed Apps. A page's bare address is its first tab's, so one that was renamed and given a new
+ * first tab is listed here as well: `/archives` opened on Archived, and Entities opens on Active.
  */
 export const MOVED_TABS = new Map([
   ['profile/security', 'profile/sessions'],
+  ['archives', 'entities/archived'],
 ])
 
 /**
@@ -27,8 +30,8 @@ export const movedUrl = (url) => {
   const q = url.indexOf('?')
   const search = q < 0 ? '' : url.slice(q)
   const [page, ...rest] = pathSegments(url)
-  const tab = rest.length ? `${page}/${rest[0]}` : null
-  if (tab && MOVED_TABS.has(tab)) return `/${[MOVED_TABS.get(tab), ...rest.slice(1)].join('/')}${search}`
+  const tab = rest.length ? `${page}/${rest[0]}` : page
+  if (MOVED_TABS.has(tab)) return `/${[MOVED_TABS.get(tab), ...rest.slice(1)].join('/')}${search}`
   if (!MOVED_PAGES.has(page)) return null
   return `/${[MOVED_PAGES.get(page), ...rest].join('/')}${search}`
 }

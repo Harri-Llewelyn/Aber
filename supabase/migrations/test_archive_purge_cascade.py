@@ -14,7 +14,7 @@ Run against the migrated Supabase Postgres -- `npm run test:db` gives it a throw
 WHAT WENT WRONG, AND WHERE IT WAS REACHABLE FROM. `gateways_cell_id_fkey` shipped ON DELETE
 CASCADE, alone among the children of `cells`. Nothing in the dashboard deletes an asset from its
 own page -- cells, gateways and devices are archived -- so the DELETE is reached from exactly two
-places, and both were affected: the Archived Entities page's Permanent Delete, and
+places, and both were affected: the Entities page's Permanent Delete, and
 `purge_expired_archives`, which deletes rows whose `auto_delete_at` has passed. A gateway archived
 with Permanent Retention was therefore deleted anyway when its CELL's 30-day timer expired, having
 been given a retention it was not kept on.

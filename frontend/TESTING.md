@@ -6,7 +6,7 @@ This directory contains automated unit and component tests for the React fronten
 
 - `usePermissions.test.js`: Verifies the `usePermissions` hook loading states, permission evaluation, and error fail-safe behavior.
 - `usePolling.test.js`: Verifies the `usePolling` hook's polling interval, immediate halt on 401 error, and backoff behavior.
-- `ArchivesTab.test.jsx`: Verifies table rendering and permission-gated restore controls in `ArchivesTab`.
+- `EntitiesTab.test.jsx`: Verifies table rendering and permission-gated restore controls in `EntitiesTab`.
 
 ## Running Tests
 

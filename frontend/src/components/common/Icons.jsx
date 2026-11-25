@@ -214,7 +214,7 @@ export const IconArchive = ({ size = 14, className = "", style = {}, ...rest }) 
 )
 
 /**
- * Lucide `database`, for the Cold Storage tab. Not IconArchive, which Archived Entities uses: entity
+ * Lucide `database`, for the Cold Storage tab. Not IconArchive, which Entities uses: entity
  * lifecycle and telemetry tiering are different things.
  */
 export const IconDatabase = ({ size = 14, className = "", style = {}, ...rest }) => (

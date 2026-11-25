@@ -39,9 +39,10 @@ export const PAGE_KEYWORDS = {
   'cells':          ['zone', 'work center', 'work centre', 'shopfloor', 'location'],
   'gateways':       ['edge', 'node', 'edge node', 'mqtt', 'sparkplug', 'broker', 'bundle', 'enrolment', 'enrollment'],
   'devices':        ['asset', 'machine', 'equipment', 'work unit', 'sensor', 'robot', 'quarantine', 'nameplate'],
-  // 'archives' is still the page id and the route, so the old name has to stay findable here:
-  // the label moved to "Archived Entities" but nobody's habits did.
-  'archives':       ['archives', 'archived', 'decommissioned', 'restore', 'retired', 'purge', 'out of commission'],
+  // 'archives' is the page's old name, which habits keep. 'uuid' and 'what is this id' are what somebody
+  // types who holds an id and not a name.
+  'entities':       ['archives', 'archived', 'decommissioned', 'restore', 'retired', 'purge', 'out of commission',
+                     'uuid', 'identifier', 'find an id', 'look up an id', 'what is this id', 'in service'],
   'schemas':        ['contract', 'registry', 'model', 'version', 'draft', 'create version', 'fork', 'publish'],
   // Keeps catalog/catalogue: the catalogue was part of the Schemas page and is searched for by
   // that name as often as by its own.
@@ -82,7 +83,9 @@ export const CARDS = [
   { id: 'edge-gateways',        label: 'Gateways',             tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
   { id: 'device-list',          label: 'Devices',              tab: 'devices',        keywords: ['device list', 'assets'] },
   { id: 'quarantine-queue',     ...tabCard('devices', 'quarantine'), keywords: ['quarantine queue', 'onboarding', 'approve device', 'unknown device'] },
-  /* No 'Archived Entities' card: it would add no keyword the page entry does not have. */
+  // What the page was, on the tab that holds it.
+  { id: 'archived-list',        ...tabCard('entities', 'archived'), keywords: ['archived entities', 'restore', 'auto-purge', 'permanent delete'] },
+  { id: 'retired-list',         ...tabCard('entities', 'retired'), keywords: ['retired entities', 'tombstones', 'deleted'] },
 
   { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'create version', 'fork'] },
   /* No "Metric Catalog" card: the catalogue is the Metrics page now, and its page entry answers

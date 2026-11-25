@@ -108,7 +108,7 @@ const MetricsTab       = lazy(() => import('./components/tabs/MetricsTab').then(
 const AutomationsTab   = lazy(() => import('./components/tabs/AutomationsTab').then(m => ({ default: m.AutomationsTab })))
 const VocabularyTab    = lazy(() => import('./components/tabs/VocabularyTab').then(m => ({ default: m.VocabularyTab })))
 const SystemTab        = lazy(() => import('./components/tabs/SystemTab').then(m => ({ default: m.SystemTab })))
-const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
+const EntitiesTab      = lazy(() => import('./components/tabs/EntitiesTab').then(m => ({ default: m.EntitiesTab })))
 const CaptureTab       = lazy(() => import('./components/tabs/CaptureTab').then(m => ({ default: m.CaptureTab })))
 const ColdStorageTab   = lazy(() => import('./components/tabs/ColdStorageTab').then(m => ({ default: m.ColdStorageTab })))
 const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then(m => ({ default: m.SettingsTab })))
@@ -799,14 +799,16 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'approvals'      && <ApprovalsTab showToast={showToast} userRole={userRole} currentUserId={session?.user?.id}
               onOpenSubject={openProposalSubject}
               /* The proposal's subject, not the proposal: the page names its kind and whether it
-                 was deleted, as the Archived Entities page does. */
+                 was deleted, as the Entities page does. */
               onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` is passed on because the page distinguishes read-only Auditor from the
                 roles that can record. */}
             {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
               <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
-            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} unmappedMetricsTo={unmappedMetricsTo} />}
+            {/* Ungated: every role reads its own rows. `userRole` decides whether people are read too and
+                which of the pages an entity is on this reader may open, so it waits for the role. */}
+            {tab === 'entities'       && !loadingPerms && <EntitiesTab showToast={showToast} userRole={userRole} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} unmappedMetricsTo={unmappedMetricsTo} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` lets the page tell "nothing archived" from "not yours to see";
                 cold_storage_rows() gates in its body. */}

@@ -8,7 +8,7 @@ import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanFileName, areaPlanPath,
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { authServerRefusesSession, isSessionRefusal } from './utils/sessionError';
 import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
-import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_CLASSES, ENTITY_TABLE_BY_KIND } from './constants';
+import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_CLASSES, ENTITY_FIND_LIMIT, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
 import { lineageVersionLabel } from './utils/schemaVersion';
@@ -3357,6 +3357,19 @@ const apiMethods = {
       return combined;
     }
 
+    /**
+     * What is in service: entity_directory's active rows (0321), the ones this reader's own policies
+     * admit. People are not in it: `listPeople()` and `listUserAccounts()` are the reads of them.
+     */
+    if (path.startsWith('/api/v1/entities')) {
+      const { data, error } = await supabase
+        .from('entity_directory')
+        .select('*')
+        .eq('state', 'active');
+      if (error) throw error;
+      return data || [];
+    }
+
     if (path.startsWith('/api/v1/areas')) {
       // Cells embedded so the Areas page has membership in one round trip. Devices are not: a
       // device's area is its resolved cell's, which is device_locations' answer, except an
@@ -4921,6 +4934,17 @@ const apiMethods = {
       probe('areas', 'area', 'name'),
       probe('schemas', 'schema', 'schema_name')
     ])).filter(Boolean);
+  },
+
+  /**
+   * The entities one text names, whatever their state: a whole id of any kind, the start of one, or any
+   * part of a name (find_entities(), 0321). At most `limit` rows, a whole id first.
+   */
+  findEntities: async (text, { limit = ENTITY_FIND_LIMIT } = {}) => {
+    if (!String(text || '').trim()) return [];
+    const { data, error } = await supabase.rpc('find_entities', { p_query: text, p_limit: limit });
+    if (error) throw new Error(error.message || 'Could not search the entities');
+    return data || [];
   },
 
   /**

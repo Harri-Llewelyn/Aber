@@ -89,7 +89,7 @@ const NO_LINK = [
   { file: 'components/modals/DeviceExportModal.jsx', piece: 'unmappedWarning,', why: 'given only to a reader who cannot open the Metrics page' },
   { file: 'components/modals/GatewayBundleModal.jsx', piece: 'Bundle downloaded for', why: 'a file, in the downloads' },
   { file: 'components/tabs/SchemasTab.jsx', piece: 'Exported ${', why: 'a file, in the downloads' },
-  { file: 'components/tabs/ArchivesTab.jsx', piece: 'permanently deleted', why: 'the record is gone' },
+  { file: 'components/tabs/EntitiesTab.jsx', piece: 'permanently deleted', why: 'the record is gone' },
   { file: 'components/tabs/CaptureTab.jsx', piece: 'Capture deleted.', why: 'the capture and its record are gone' },
   { file: 'components/tabs/AccessControlTab.jsx', piece: '” deleted`', why: 'the read-only broker account is gone' },
   { file: 'components/tabs/DevicesTab.jsx', piece: "Quarantined device '${item.asset_name}' rejected", why: 'a rejected device is deleted' },
@@ -146,8 +146,20 @@ describe('where a notification links to', () => {
     expect(entityUrl('device', 'd-1')).toBe('/devices?search=d-1')
     expect(entityUrl('gateway', 'g-1')).toBe('/gateways?search=g-1')
     expect(entityUrl('schema', 's-1')).toBe('/schemas?search=s-1')
-    expect(entityUrl('capture', 'x')).toBeNull()
+    // What sets a record apart within its kind decides the tab, or what else the address says.
+    expect(entityUrl('metric', 'm-1')).toBe(metricUrl('m-1'))
+    expect(entityUrl('metric', 'm-1', 'derived')).toBe(metricUrl('m-1', false, true))
+    expect(entityUrl('metric', 'm-1', 'deprecated')).toBe(metricUrl('m-1', true))
+    expect(entityUrl('capture', 'd-1', 'device')).toBe(captureSubjectUrl('device', 'd-1'))
+    expect(entityUrl('capture', 'g-1', 'gateway')).toBe(captureSubjectUrl('gateway', 'g-1'))
+    expect(entityUrl('backup', 'run-1')).toBe(backupUrl('run-1'))
+    expect(entityUrl('automation', 'coolant-low', 'disabled')).toBe('/automations/coolant-low')
+    expect(entityUrl('identity', 'p-1')).toBe(identityUrl('p-1'))
+    expect(entityUrl('identity', 'p-1', 'withdrawn')).toBe(identityUrl('p-1', true))
+    expect(entityUrl('person', 'u-1', 'removed')).toBe(personUrl('u-1', true))
+    expect(entityUrl('vocabulary', 'x')).toBeNull()
     expect(entityUrl('cell', undefined)).toBeNull()
+    expect(entityUrl('backup', null)).toBeNull()
   })
 
   it('puts a proposal, a metric and a capture subject on the tab that holds them', () => {

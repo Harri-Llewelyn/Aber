@@ -41,6 +41,7 @@ export default function check() {
     ['the Digital Thread', /digital[_ -]?thread/i, 'the Audit Trail: audit_trail, audit-trail, AuditTrail, AUDIT_TRAIL'],
     // A class, custom property or fixture id, not the <dt> element, a `dt {` selector or a word such as qudt-all.
     ['.dt-lane', /(?<![\w-])(?:--|\.)?dt-[a-z0-9]/, 'trail-: .trail-lane, --trail-label-width, \'trail-1\''],
+    ['the Archived Entities page', /\bArchived Entities\b/, 'the Entities page, which lists what is in service too'],
     ['applied_thread_id', /\b(?:applied_)?thread_(?:id|rows)\b|MAX_THREAD_ROWS|\b(?:onView|onSelect|load|canRead)Thread\b|\bviewThreadFor\b/,
       'applied_trail_id, trail_id, trail_rows, MAX_TRAIL_ROWS, onViewTrail, loadTrail'],
   ];
@@ -66,6 +67,16 @@ export default function check() {
     ['test-harness/README.md', 'Not the demonstration simulator', 'says what the load generator is not'],
     ['deploy/helm/aber/values.yaml', 'The demonstration simulator was removed', 'history, beside the value it explains'],
     ['docs/gateway.md', "Envoy kept the Kong Service's name", "the gateway's History"],
+    ['supabase/migrations/0001_baseline_schema.sql', ['listed on the Archived Entities page, restorable', 'may read the Archived Entities page'],
+      'released: 0321 states both comments again after it'],
+    [['supabase/migrations/0187_a_gateway_cannot_be_made_a_playback_target.sql',
+      'supabase/migrations/0190_a_stored_capture_is_never_lost_or_orphaned.sql'], 'restore it from Archived Entities', 'released, and 0193 states the function again'],
+    ['supabase/migrations/0193_captures_and_replays_leave_an_audit_trail.sql', 'Archived Entities', 'released'],
+    ['supabase/migrations/0201_a_replay_lane_stands_in_for_every_id_its_device_publishes.sql', 'Archived Entities', 'released'],
+    ['supabase/migrations/0203_a_person_can_have_a_display_name.sql', 'Archived Entities', 'released'],
+    ['supabase/README.md', ['a missing Playback gateway from Archived Entities', 'removed it from the Archived Entities page entirely',
+      'The Archived Entities page gains its second'], 'what a released migration changed'],
+    ['help/site/upgrading.md', 'restore it on the **Archived Entities** page', 'a released upgrade note'],
   ];
 
   const MIGRATION_FILENAME = /\b(?:\d{4}|\d{14})_\w+\.sql\b/g;

@@ -43,7 +43,7 @@ const OBJECT_SORT = {
 }
 
 /**
- * Cold Storage: telemetry tiered out of the hypertable as Parquet objects. Not Archived Entities,
+ * Cold Storage: telemetry tiered out of the hypertable as Parquet objects. Not Entities,
  * which sits two places below it in the rail, past Backups, and has a Restore button and a purge
  * timer; there is no restore here. An Administrator sets the destination and the on/off switch
  * from the toolbar button's dialog. The catalogue leads with the span the manifest covers and what

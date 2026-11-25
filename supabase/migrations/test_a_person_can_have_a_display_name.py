@@ -3,7 +3,7 @@
 #   why: 0203's display names. A person names only themselves and an Administrator anyone; the
 #     CHECKs refuse a long name or a control character; each change is one audit row and the same
 #     name none; display_names_for() answers only for people the caller already sees on Approvals
-#     and Archived Entities; and 0001 and 0166 bring the older list shapes forward.
+#     and Entities; and 0001 and 0166 bring the older list shapes forward.
 
 """
 A person can have a display name; the email stays the identifier (0203).
@@ -17,7 +17,7 @@ CHECKs refuse a name that is too long or holds a control character, with a sente
 whitespace-only name clears it; each change writes exactly one audit row in the person's lane, and
 setting the same name writes none; nobody writes the table but set_display_name(); a person reads
 only their own row; display_names_for() answers only for people the caller can already see on
-Approvals, Archived Entities and the Capture page's History (the person who started a capture or
+Approvals, Entities and the Capture page's History (the person who started a capture or
 playback job, for the roles that read those jobs, 0213); list_people() and list_user_accounts() carry the name, and a
 database holding their older shapes is brought forward by replaying 0001 and 0166.
 

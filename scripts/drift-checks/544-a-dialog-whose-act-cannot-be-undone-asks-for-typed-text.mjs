@@ -20,7 +20,7 @@ const WORDS = /\bcannot be (?:undone|recovered|restored)\b|\bfor good\b|\bperman
 /** The gated dialogs: the file under components/, and text the dialog's title contains. */
 const GATED = [
   ['tabs/PeopleSection.jsx', 'Remove Access for'],
-  ['tabs/ArchivesTab.jsx', 'Permanently delete'],
+  ['tabs/EntitiesTab.jsx', 'Permanently Delete'],
   ['tabs/SchemasTab.jsx', 'Discard Draft'],
   ['tabs/DevicesTab.jsx', 'Reject Device'],
   ['tabs/AutomationDetail.jsx', 'Delete Automation'],

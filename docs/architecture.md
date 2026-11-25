@@ -412,6 +412,10 @@ keeps its style, so a new word there is singular too.
 A trail from an earlier release can also hold `area_floors`, `cell_links`, `gateway_links` and
 `device_links`.
 
+The view `entity_directory` uses these words too, as its `kind`. It has one row for each entity a page of the
+dashboard lists by its id, with every id that entity goes by, and `find_entities()` answers what one id
+names ([Every entity is listed and found by any id](../unreleased/migrations/0321.md)).
+
 The other columns that hold a word for a kind:
 
 | Column | Words | Style |

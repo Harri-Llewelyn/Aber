@@ -21,7 +21,11 @@ function part1() {
   } else if (!existsSync(join(REPO, HELP_DIR))) {
     fail(`${HELP_DIR} is missing, and frontend/src/help/index.js globs it for the help corpus.`);
   } else {
-    const pages = [...tabsBlock[1].matchAll(/\{\s*id:\s*'([a-z-]+)'/g)].map((m) => m[1]);
+    // A page's file is named for it, or as its entry's `help: '<file>'` says: a renamed page whose file
+    // keeps its path, because code and docs cite it. An entry is one line.
+    const entries = [...tabsBlock[1].matchAll(/\{\s*id:\s*'([a-z-]+)'[^\n]*/g)]
+      .map((m) => ({ id: m[1], file: /\bhelp:\s*'([a-z-]+)'/.exec(m[0])?.[1] ?? m[1] }));
+    const pages = entries.map((e) => e.id);
     const helpFiles = readdirSync(join(REPO, HELP_DIR))
       .filter((f) => f.endsWith('.md'))
       .map((f) => f.replace(/\.md$/, ''));
@@ -29,8 +33,8 @@ function part1() {
     // A tab may have a page of help of its own, named by `help: '<file>'` in its entry (the Built-in
     // tab's, one section for each alert): that file names a tab, and is as much a page's as any.
     const tabHelp = [...nav.matchAll(/\bhelp:\s*'([a-z-]+)'/g)].map((m) => m[1]);
-    const unhelped = pages.filter((p) => !helpFiles.includes(p));
-    const orphaned = helpFiles.filter((f) => !pages.includes(f) && !tabHelp.includes(f));
+    const unhelped = entries.filter((e) => !helpFiles.includes(e.file)).map((e) => e.id);
+    const orphaned = helpFiles.filter((f) => !entries.some((e) => e.file === f) && !tabHelp.includes(f));
     const unfiled = tabHelp.filter((f) => !helpFiles.includes(f));
 
     if (unhelped.length) {

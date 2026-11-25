@@ -36,7 +36,6 @@ const TABLES = {
     sortable: 1,
     fixed: ['A proposal\'s changes: its fields in the order its form lists them, beside their values.']
   },
-  'components/tabs/ArchivesTab.jsx': { sortable: 2 },
   'components/tabs/AreasTab.jsx': { sortable: 1 },
   'components/tabs/AuditTrailTab.jsx': {
     sortable: 0,
@@ -60,6 +59,7 @@ const TABLES = {
   'components/tabs/CellsTab.jsx': { sortable: 1 },
   'components/tabs/ColdStorageTab.jsx': { sortable: 1 },
   'components/tabs/DevicesTab.jsx': { sortable: 2 },
+  'components/tabs/EntitiesTab.jsx': { sortable: 3 },
   'components/tabs/GatewaysTab.jsx': { sortable: 1 },
   'components/tabs/HistoryAlerts.jsx': { sortable: 1 },
   'components/tabs/HistoryTab.jsx': { sortable: 4 },

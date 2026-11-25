@@ -2,7 +2,7 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
-import { ArchivesTab } from '../components/tabs/ArchivesTab'
+import { EntitiesTab } from '../components/tabs/EntitiesTab'
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { GatewayBundleModal } from '../components/modals/GatewayBundleModal'
 import { CLEAR_BUNDLE_ENROLMENT, CLEAR_INSTALLED_ENROLMENT } from '../utils/applianceCommands'
@@ -212,7 +212,8 @@ const restoreFromArchives = async (row) => {
     archived_at: REVOKED, auto_delete_at: null, credential_revoked_at: REVOKED, ...row
   }])
   api.displayNamesFor.mockResolvedValue(new Map())
-  render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} />)
+  window.history.replaceState(null, '', '/entities/archived')
+  render(<EntitiesTab showToast={vi.fn()} hasPermission={() => true} />)
   fireEvent.click(await screen.findByRole('button', { name: /Restore/ }))
   return (await screen.findByRole('dialog', { name: 'Restore Gateway' })).textContent
 }
@@ -233,7 +234,7 @@ describe('the Restore dialog', () => {
     expect(text).not.toContain('same machine')
   })
 
-  it('says it from the drawer as from Archived Entities', async () => {
+  it('says it from the drawer as from Entities', async () => {
     window.history.replaceState(null, '', '/gateways?lifecycle=archived')
     const panel = await openDrawer(gateway({ is_archived: true, archived_at: REVOKED }))
     fireEvent.click(panel.getByRole('button', { name: /Restore Gateway/ }))

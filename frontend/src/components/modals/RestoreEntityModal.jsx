@@ -6,7 +6,7 @@ import { ConfirmModal } from './ConfirmModal'
 const TYPE_WORD = { area: 'Area', cell: 'Cell', gateway: 'Gateway', device: 'Device' }
 
 /**
- * The question Restore asks, from a row on Archived Entities or from an entity's drawer, so
+ * The question Restore asks, from a row on Entities' Archived tab or from an entity's drawer, so
  * restoring reads the same wherever it starts. Not gated on typing the name, since it is
  * recoverable. It names what does not come back: the timer is cleared, not paused, and a gateway's
  * broker credential and deploy key stay withdrawn. Restore returns the row, not the credentials

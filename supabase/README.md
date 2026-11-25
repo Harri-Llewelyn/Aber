@@ -1663,7 +1663,7 @@ per person who has a name. **No name is no row. The email stays the identifier.*
   deleted because its account was deleted writes nothing: that is not a rename.
 - **Who reads a name.** Each reader answers only where the caller can already see the person.
   `list_people()` (Administrator) and `list_user_accounts()` (Administrator, Auditor) gain a
-  `display_name` column. `display_names_for(p_ids)` serves Approvals and Archived Entities, which
+  `display_name` column. `display_names_for(p_ids)` serves Approvals and the Entities page, which
   Operators and Shopfloor Managers read too. It answers for the caller's own id, for the proposer
   of a change proposal the caller may read, and for the retirer of a retired entity the caller may
   read. The tests are those tables' SELECT policies: Administrator or Shopfloor_Manager for
@@ -2602,7 +2602,7 @@ one person or machine identity had changed.
 has now, unless it says the address is the one they had at the time.** The pages that say so take
 the old address from a `*_email` column stamped from the signed access token when the person acted,
 and never rewrite it: Approvals (`change_proposals.proposed_by_email` and `decided_by_email`) and
-Archived Entities (`retired_entities.retired_by_email`); `asset_exports.taken_by_email` is stamped
+the Entities page (`retired_entities.retired_by_email`); `asset_exports.taken_by_email` is stamped
 the same way. A stamp that is `NULL`, for a row from before its column, falls back to the current
 address. A new column that records who did something holds the id. If a page must show the address
 the person had then, the column gains a stamped `*_email` beside it, and the page says "at the time".
@@ -6974,7 +6974,7 @@ issue, so a Host gateway that is archived is still told it runs on this host.
 
 `gateway-bundle` reads the gateway before it mints, so that a bad id or a Host gateway costs no token. It
 now reads `is_archived` there too, and answers **400**, *That gateway is archived*, with
-*Restore it from Archived Entities or its drawer, then set it up. No enrolment token was minted.* The
+*Restore it from Entities or its drawer, then set it up. No enrolment token was minted.* The
 function's other refusals, for a Host and a Third-party gateway, are answered the same way. Without this
 the database's refusal reached the caller as *Could not issue an enrolment token*, with its own sentence
 in `details`. `gateway-install` calls no issuer: it reads a token that already exists through
@@ -11716,8 +11716,8 @@ moved. **An archived area moves nothing beneath it**, which was the first questi
 `is_archived`, so the cells stay filed and the topics keep their name, exactly as an archived cell
 behaves. The Site Map keeps drawing its plan, muted, with the archive glyph where the status dot
 was, because a card that vanished would misplace what is still under it. The Areas page offers
-Archive and Restore where it offered Delete; deleting an area is done from Archived Entities, like
-every other type. `validate_change_proposal()` gains the `is_archived` test on its areas arm
+Archive and Restore where it offered Delete; deleting an area is done from the Entities page's
+Archived tab, like every other type. `validate_change_proposal()` gains the `is_archived` test on its areas arm
 that `0123` could not write because the column did not exist.
 
 **A shadow follows its original.** One function, `shadow_follows_its_original()`, attached twice:

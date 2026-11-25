@@ -32,11 +32,6 @@ const NO_FOOTER = {
   'modals/ShortcutsModal.jsx': 'the list of shortcuts',
 }
 
-/** Titles that are not in Title Case: the Archived Entities page's is its own branch's to change. */
-const SENTENCES = {
-  'tabs/ArchivesTab.jsx': ['Permanently delete ${}'],
-}
-
 const files = fs.readdirSync(COMPONENTS, { recursive: true })
   .map(f => String(f).replaceAll('\\', '/'))
   .filter(f => f.endsWith('.jsx') && f !== 'common/Modal.jsx' && f !== 'modals/ConfirmModal.jsx')
@@ -117,8 +112,7 @@ describe('the acts', () => {
   it.each(confirms.map(d => [d.name, d]))('%s confirms with a primary or a danger button, and names its act', (_, d) => {
     const cls = propText(d.tag, 'confirmClassName')
     for (const c of cls.match(/btn btn-\w+/g) ?? ['btn btn-danger']) expect(['btn btn-primary', 'btn btn-danger']).toContain(c)
-    // ArchivesTab's takes ConfirmModal's own word.
-    if (d.file !== 'tabs/ArchivesTab.jsx') expect(propText(d.tag, 'confirmLabel')).not.toBe('')
+    expect(propText(d.tag, 'confirmLabel')).not.toBe('')
   })
 
   it('the same act has one label and one class on every page', () => {
@@ -180,7 +174,7 @@ describe('the words', () => {
       const acts = d.kind === 'ConfirmModal' ? words(d.tag, 'confirmLabel')
         : footersOf(d).flatMap(f => [...f.matchAll(/>\s*([A-Z][^<>{}]*?)\s*(?:\{[^{}]*\})?\s*<\/(?:button|ActionButton)>/g)].map(m => m[1]))
       for (const said of [...words(d.tag, 'title'), ...acts]) {
-        if (!inTitleCase(said) && !(SENTENCES[d.file] ?? []).includes(said)) wrong.push(`${d.name}: ${said}`)
+        if (!inTitleCase(said)) wrong.push(`${d.name}: ${said}`)
       }
     }
     expect(wrong).toEqual([])

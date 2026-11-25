@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { NAV_GROUPS, TABS, tabIsVisible, groupedNav } from '../navigation'
+import { ENTITIES_TABS, NAV_GROUPS, TABS, tabIsVisible, groupedNav } from '../navigation'
 import { VALID_TABS, PERMISSION_UUIDS } from '../constants'
 import { CARDS, PAGE_KEYWORDS } from '../searchIndex'
 
@@ -81,20 +81,31 @@ describe('the groups', () => {
    * The retention group is a subject, not a permission level: each page runs a retention timer
    * over something and offers a way back from it. Asserted as the whole membership, because the
    * group only means that while all three are in it -- drop one and what is left reads as
-   * "the Administrator pages", which is the grouping this replaced.
+   * "the Administrator pages", which is the grouping this replaced. Entities is here for its Archived
+   * tab, where a timer runs and Restore is.
    */
   it('groups the three pages that keep something against a timer', () => {
     const retention = TABS.filter(t => t.group === 'retention').map(t => t.id)
-    expect(retention).toEqual(['cold-storage', 'backups', 'archives'])
+    expect(retention).toEqual(['cold-storage', 'backups', 'entities'])
   })
 
   /**
-   * Archived Entities and Cold Storage are neighbours, and before that they were three groups
-   * apart with a comment explaining that the distance was what told them apart. The label is now
-   * carrying that job, so a rename back to the bare "Archives" would silently undo it.
+   * Entities and Cold Storage are neighbours, and the label is what tells them apart: this page lists
+   * things, that one readings. A rename back to the bare "Archives" would silently undo it.
    */
-  it('keeps Archived Entities named for what it holds, beside Cold Storage', () => {
-    expect(TABS.find(t => t.id === 'archives').label).toBe('Archived Entities')
+  it('names Entities for what it holds, beside Cold Storage', () => {
+    expect(TABS.find(t => t.id === 'entities').label).toBe('Entities')
+    expect(ENTITIES_TABS.map(t => [t.id, t.label])).toEqual([['active', 'Active'], ['archived', 'Archived'], ['retired', 'Retired']])
+  })
+
+  /** Every role opens it: the database decides the rows, and Restore asks for its permission itself. */
+  it('gates Entities for nobody', () => {
+    const page = TABS.find(t => t.id === 'entities')
+    expect(page.permission ?? page.role).toBeUndefined()
+    expect(ENTITIES_TABS.some(t => t.permission || t.role)).toBe(false)
+    for (const role of ['Administrator', 'Shopfloor_Manager', 'Operator', 'Auditor']) {
+      expect(tabIsVisible(page, () => false, role), role).toBe(true)
+    }
   })
 })
 
@@ -116,17 +127,20 @@ describe('groupedNav', () => {
   })
 
   /**
-   * The case the function exists for: an Operator holds none of the three retention pages -- Cold
-   * Storage admits three roles and not theirs, Backups is Administrator, Archived Entities needs
-   * `archive:manage` -- so the whole group goes, and a separator with nothing under it never
-   * renders. `admin` is no longer the example: System is ungated and keeps it alive.
+   * The case the function exists for: a session that may see none of a group's pages gets no separator
+   * with nothing under it. No role is refused a whole group today -- an Operator keeps Entities of the
+   * retention pages, as System keeps `admin` alive -- so the pages are named here.
    */
   it('drops a group whose every page this session is refused', () => {
-    const groups = groupedNav(operator())
+    const groups = groupedNav(operator().filter(t => t.id !== 'entities'))
     expect(groups.map(g => g.id)).not.toContain('retention')
     for (const group of groups) {
       expect(group.tabs.length).toBeGreaterThan(0)
     }
+  })
+
+  it('leaves an Operator Entities alone of the pages that keep something', () => {
+    expect(groupedNav(operator()).find(g => g.id === 'retention').tabs.map(t => t.id)).toEqual(['entities'])
   })
 
   /**

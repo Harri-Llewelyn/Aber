@@ -96,7 +96,7 @@ describe('Merged navigation shell', () => {
     await renderShell()
     // Wait for the permissions, not just the shell: `usePermissions` resolves after the first
     // paint, and until it does every permission-gated page is correctly hidden.
-    await waitFor(() => expect(screen.getByText('Archived Entities')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Backups')).toBeInTheDocument())
 
     const groups = [...document.querySelectorAll('.sidebar-group')]
     const dividers = [...document.querySelectorAll('.sidebar-divider')]

@@ -90,7 +90,12 @@ export const CAPTURE_TABS = [
   { id: 'playbacks', label: 'Playbacks', description: 'Every playback that has finished, newest first, with who started it and why a failed one failed.' },
 ]
 
-export const ARCHIVES_TABS = [
+/**
+ * The Entities page's tabs: the three states of one lifecycle, each tab's id the `state` an
+ * entity_directory row has (0321).
+ */
+export const ENTITIES_TABS = [
+  { id: 'active', label: 'Active', description: 'Every entity in service that your role may see, with its IDs. Open one for its own page.' },
   { id: 'archived', label: 'Archived', description: 'Out of commission but kept, with its history and identifiers. Restore returns one intact, until its auto-purge date.' },
   { id: 'retired', label: 'Retired', description: 'Archived and then deleted. Only a tombstone remains, linking to what survives: the Audit Trail, a forge repository, a bundle.' },
 ]
@@ -261,11 +266,12 @@ export const TABS = [
   // Administrator alone, as request_backup() and the two tables' SELECT policies are: a backup
   // is an act on the whole database, and reading what exists sizes the security lane.
   { id: 'backups',        label: 'Backups',        group: 'retention', icon: <IconHardDrive size={16} />, role: 'Administrator' },
-  /* "Archived Entities", not "Archives": it sits next to Cold Storage, and the label tells them
-     apart. This page lists areas, cells, gateways and devices taken out of commission; that one is
-     telemetry tiered to Parquet. Filed here rather than with the assets because each page in this
-     group runs a retention timer over something and offers a way back from it. */
-  { id: 'archives',       label: 'Archived Entities', group: 'retention', icon: <IconArchive size={16} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE, pageTabs: ARCHIVES_TABS },
+  /* Ungated: the Active tab is entity_directory, which runs as its reader, so the database decides the
+     rows; Restore and Permanent Delete ask for `archive:manage` themselves. Filed here rather than with
+     the assets because each page in this group runs a retention timer over something and offers a way
+     back from it, and this is where an archived entity is restored or deleted. `help` is its page of
+     help's name: code and docs cite `help/pages/archives.md`, so the file kept it (drift check 16). */
+  { id: 'entities',       label: 'Entities',       group: 'retention', icon: <IconArchive size={16} />, pageTabs: ENTITIES_TABS, help: 'archives' },
 
   // What runs, who may touch it, and how it is tuned. System and Settings are ungated and Access
   // Control is Administrator-only, so for anyone else this group is the two. IconServer, not

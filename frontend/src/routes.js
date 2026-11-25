@@ -75,10 +75,24 @@ export const proposalSubjectUrl = (proposal) => {
   return deviceUrl(proposal.entity_id)
 }
 
-/** One record by its kind (`device`, `gateway`, `cell`, `area`, `schema`), or null for any other. */
-export const entityUrl = (type, id) => {
-  const url = { device: deviceUrl, gateway: gatewayUrl, cell: cellUrl, area: areaUrl, schema: schemaUrl }[type]
-  return url && id ? url(id) : null
+/*
+ * The kinds whose address takes more than an id. `variant` is what entity_directory (0321) says sets the
+ * record apart within its kind: a metric's tab, a capture's kind of subject, an identity withdrawn and a
+ * person removed.
+ */
+const metricEntityUrl = (id, variant) => metricUrl(id, variant === 'deprecated', variant === 'derived')
+const captureEntityUrl = (id, variant) => captureSubjectUrl(variant, id)
+const identityEntityUrl = (id, variant) => identityUrl(id, variant === 'withdrawn')
+const personEntityUrl = (id, variant) => personUrl(id, variant === 'removed')
+
+/**
+ * One record by its kind, or null for a kind with no page or a record with no id to open it by. The id is
+ * the one its own page finds it by: a capture's subject, a backup's run and an automation's key.
+ */
+export const entityUrl = (type, id, variant = null) => {
+  const url = { device: deviceUrl, gateway: gatewayUrl, cell: cellUrl, area: areaUrl, schema: schemaUrl, metric: metricEntityUrl,
+    capture: captureEntityUrl, backup: backupUrl, automation: automationUrl, identity: identityEntityUrl, person: personEntityUrl }[type]
+  return url && id ? url(id, variant) : null
 }
 
 /** One proposal with its drawer open, on the queue that holds it: Awaiting a decision or Decided. */
