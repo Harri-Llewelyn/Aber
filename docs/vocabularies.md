@@ -490,9 +490,9 @@ of each. A submodel that names the template's id claims to hold them. Built as m
   them mandatory (`Street`, `Zipcode`, `CityTown` and `NationalCode`), in its text only. No file says so.
 - **Its ids are never minted here.** IDTA, IEC CDD, ECLASS and W3C issue them, and each is taken as the file
   writes it. 6 elements have none, and 12 of Asset Interfaces Description's elements have no cardinality.
-- **The Templates tab, the Nameplate dialog and the AAS export read it.** The tab lists every template, each element under its
-  parent, and starts no metric: a template is not a vocabulary a metric is named from, so it is not a
-  `STANDARDS` entry and registers no metric group. It credits IDTA under CC BY 4.0, as the licence asks.
+- **The Templates tab, the Nameplate dialog and the AAS export read it.** The tab lists every template, each
+  element under its parent, and starts no metric: a template is not a vocabulary a metric is named from, so it
+  is not a `STANDARDS` entry and registers no metric group. It credits IDTA under CC BY 4.0, as the licence asks.
 - **Listing a template claims no conformance to it.**
 
 ## IDTA Digital Nameplate

@@ -10501,15 +10501,16 @@ invites. `buildEnvironment()` in `_shared/aas/shell.ts` decides it, for `aas-exp
   list.
 - **A nested element is asked for only where its parent is.** `MarkingName` is mandatory inside a marking, and
   Aber writes no markings. So only the top of the template, and the address, decide the claim.
-- **A value of spaces is none,** and neither is a text over 1,023 characters, which a multi-language property
-  cannot hold. It is left out, not cut.
+- **A value of spaces is none,** so a device that publishes one answers nothing and the operator's value stands.
+  A text over 1,023 characters is none either, because a multi-language property cannot hold it. It is left out,
+  not cut.
 - **Each element has its template's type and id,** read from the same rows. `ManufacturerName`,
-  `ManufacturerProductDesignation` and the address elements are MultiLanguagePropertys with one text, tagged
-  `en`. `URIOfTheProduct` is an `xs:anyURI` and `DateOfManufacture` an `xs:date`. Without the template's rows,
-  each is an `xs:string` Property and nothing is claimed.
+  `ManufacturerProductDesignation` and the address elements are multi-language, each with one text tagged `en`.
+  `URIOfTheProduct` is an `xs:anyURI` and `DateOfManufacture` an `xs:date`. Without the template's rows, each is
+  an `xs:string` Property and nothing is claimed.
 - **Only the template's elements are in it.** `AssetSparkplugId`, `EdgeGatewayName` and
-  `EdgeGatewaySparkplugId` are in the `PlatformConnection` submodel. A validator read them as unknown
-  elements.
+  `EdgeGatewaySparkplugId` are in the `PlatformConnection` submodel. In the nameplate, a validator reads each as
+  an element the template does not have.
 - **The device's own name never stands in** for `ManufacturerProductDesignation`. It is the site's name for the
   asset, so a nameplate with no designation has none.
 - **A nameplate with no value is left out.** An empty submodel would say the device has one. `aas-api` answers
@@ -10522,7 +10523,7 @@ that comes nearest, at commit `5285185b`:
 
 | Submodel | Nearest template | Why it claims nothing |
 | :--- | :--- | :--- |
-| `VisualRepresentation` | Provision of 3D Models, IDTA 02026 | The template asks for a list of models. Each has a `File` with a `FileId`, and a version with a title, an id, a status, a date, a preview image and a named format and version. Aber holds one file and its name. A status, a date and a preview would be invented |
+| `VisualRepresentation` | Provision of 3D Models, IDTA 02026 | The template asks each model for a `FileId` and a classification. The file itself is in a `FileVersion`, which asks for a title, an id, a status, a date, a preview image and a named format. Aber holds one file and its name, so the rest would be invented |
 | `KeyPerformanceIndicators` | Process Variables for Manufacturing Key Performance Indicators, IDTA 02066 | Those are what a KPI is worked out from, such as `ActualProductionTime` and `GoodPart`, each a collection of a key, a value and a comment. Aber's are the KPIs |
 | `OperationalTelemetry` | Time Series Data, IDTA 02008 | It takes its schema's own semantic id, where it has one, and the `Segments` collection inside it follows 02008's shape. The template is a whole submodel, and asks for `Metadata` with a `Name` and a `Record` that describes each sample. The `Segments` collection is here to say where the history is |
 | `DerivedMetrics` | none | Metrics this deployment computes, which no standard names |
