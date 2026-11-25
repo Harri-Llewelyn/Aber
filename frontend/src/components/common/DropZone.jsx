@@ -7,17 +7,18 @@ import { IconFileText, IconUpload } from './Icons'
 export const DROP_HERE = 'Drop the file to choose it'
 
 /**
- * The browser's file picker for a button that replaces a file the page already shows, or takes one
- * beside a place to drop it. `picker` is the hidden input, rendered once where it disturbs no layout;
- * `open` goes on the button.
+ * The browser's file picker, for a button where a zone has no place: one that replaces a file the page
+ * already shows, or that sits in a row a zone would stretch. `picker` is the hidden input, rendered once
+ * where it disturbs no layout; `open` goes on the button. `id` is for a label that opens it too.
  *
  *   const { picker, open } = useFilePicker({ accept: '.svg', onFile: replace })
  */
-export function useFilePicker({ accept, onFile, testId }) {
+export function useFilePicker({ id, accept, onFile, testId }) {
   const input = useRef(null)
   const picker = (
     <input
       ref={input}
+      id={id}
       type="file"
       accept={accept}
       hidden
@@ -146,9 +147,9 @@ export function DropZone({
         {/* The zone's own press, drawn as the button it is like: not a second stop for Tab. */}
         {shown && !disabled && <span className="btn btn-ghost btn-sm">Choose Another</span>}
         <span className="drop-zone-hint" id={`${zoneId}-hint`}>
-          {required && <span className="sr-only">Required. </span>}
+          {required && <><span className="sr-only">Required.</span>{' '}</>}
           {hint}
-          {note && <span className="drop-zone-note">{note}</span>}
+          {note && <>{' '}<span className="drop-zone-note">{note}</span></>}
         </span>
       </button>
       {/* Beside the button, not in it: a button's own content is not read out as it changes. */}

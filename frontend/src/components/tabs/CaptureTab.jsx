@@ -901,7 +901,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 key={selected.id}
                 label={`Upload a capture for ${selected.name}`}
                 prompt="Drop a capture file here, or click to choose one"
-                hint={`A .json file recorded elsewhere, up to ${formatBytes(CAPTURE_FILE_MAX_BYTES)}`}
+                hint={`A .json file recorded elsewhere, up to ${CAPTURE_FILE_MAX_BYTES / (1024 * 1024)} MiB`}
                 note="To play it back, every device it recorded must exist on this site."
                 accept={CAPTURE_ACCEPT}
                 kinds="a .json file"

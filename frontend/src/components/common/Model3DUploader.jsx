@@ -235,7 +235,7 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
             className="modal-fill"
             label="Upload a 3D model"
             prompt={canManage ? 'Drop a 3D model here, or click to choose one' : 'No 3D model attached'}
-            hint={`${KINDS} · up to ${formatFileSize(MAX_BYTES)}`}
+            hint={`${KINDS} · up to ${MAX_BYTES / (1024 * 1024)} MiB`}
             note={canManage ? `Attached models are exported as an AAS VisualRepresentation submodel. ${MODEL_STORAGE_NOTE}` : null}
             accept={ACCEPT}
             kinds={`one of ${KINDS}`}

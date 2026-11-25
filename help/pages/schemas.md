@@ -35,8 +35,8 @@ You can also **export** schemas as a YAML file and **upload** one. That moves a 
 
 1. Tick the schemas to move, or tick none for all of them. Choose **Export**.
 2. Open `device-schemas.yaml` in an editor. Change what you want to change.
-3. Choose **Upload** on this site or another, and pick the file. Aber checks the whole file and lists each schema.
-4. Read the list. Each schema is **New**, **Changed**, **Unchanged** or **Refused**. A refused schema names the line to fix. Fix it and upload again.
+3. Choose **Upload** on this site or another. Drop the file on the zone, or click the zone to choose it. Aber checks the whole file and lists each schema.
+4. Read the list. Each schema is **New**, **Changed**, **Unchanged** or **Refused**. A refused schema names the line to fix. Fix it, then give the file again with **Choose Another**.
 5. Choose **Apply**. All of the file applies, or none of it. The toast links to what it made.
 
 Things to know:

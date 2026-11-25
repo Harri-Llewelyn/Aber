@@ -4,7 +4,7 @@ import { fail, pass, read } from './lib.mjs';
 // 388. A replay lane's drawer shows its machine's 3D model, read-only, and never its own. DevicesTab
 // reads the model from the lane's machine, withholds the action from a lane whose machine has none,
 // and hands the dialog that machine as modelOf. The dialog then reads the machine's path, is
-// read-only, draws no file input, and names the machine in place of the Public marker. The Devices
+// read-only, draws no file picker, and names the machine in place of the Public marker. The Devices
 // and Capture help say a lane has no model of its own, and the Devices help says what the view lacks.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
@@ -25,7 +25,7 @@ export default function check() {
   if (!/<Model3DUploader[^>]*\bmodelOf=\{laneMachine\}/.test(tab)) problems388.push("DevicesTab.jsx does not hand the model dialog the lane's machine as modelOf");
   if (!dialog.includes('const canManage = mayManage && !modelOf')) problems388.push("Model3DUploader.jsx lets a person change a model that is another device's");
   if (!dialog.includes('const path = (modelOf || device)?.model_3d_path')) problems388.push("Model3DUploader.jsx does not read another device's path when it is given modelOf");
-  if (!/\{!modelOf && \(\s*<input/.test(dialog)) problems388.push("Model3DUploader.jsx draws its file input for another device's model");
+  if (!dialog.includes('{!modelOf && replace.picker}')) problems388.push("Model3DUploader.jsx draws its file picker for another device's model");
   if (!dialog.includes("'s model`")) problems388.push("Model3DUploader.jsx does not say whose model it shows");
   const lane = devices.match(/- \*\*A replay lane has no 3D model of its own\.\*\*[^\n]*/)?.[0] ?? '';
   if (!lane) problems388.push('help/pages/devices.md has no bullet "A replay lane has no 3D model of its own."');

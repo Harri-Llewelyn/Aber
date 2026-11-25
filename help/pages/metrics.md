@@ -67,7 +67,7 @@ This page is the catalog of metrics that every schema is built from. A metric is
 
 1. Tick the derived metrics to move, or tick none for all of them. Choose **Export**.
 2. Open `derived-metrics.yaml` in an editor. Add a metric, or change a description.
-3. Choose **Upload** on this site or another, and pick the file. It opens in the editor. **New in YAML** opens it empty.
+3. Choose **Upload** on this site or another. Drop the file on the zone, or click the zone to choose it. It opens in the editor. **Choose Another** opens a different file in its place, and what you typed is lost. **New in YAML** opens the editor empty.
 4. Choose **Apply Derived Metrics**. Aber checks the whole file and lists each metric.
 5. Read the list. Each metric is **New**, **Changed**, **Unchanged** or **Refused**. A changed metric shows its description **Before** and **After**. A refused metric names the line to fix. Fix it, and choose **Apply Derived Metrics** again.
 6. Choose **Apply 2 Derived Metrics**, with your own count. That accepts what the list shows. All of the file is applied, or none of it. The toast links to what it changed.
