@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { isUuid } from '../../utils/isUuid'
-import { DIRECTORY_KINDS, entityKey, findRank, idFoundBy, inactiveState, isIdShaped, isWholeId, kindLabel, mergeFound, shortlist } from '../../utils/entities'
+import {
+  DIRECTORY_KINDS, entityKey, findRank, idFoundBy, inactiveState, isIdShaped, isWholeId, kindLabel, mergeFound, shortlist,
+} from '../../utils/entities'
 import { KIND_ICONS, recordUrl } from '../../utils/entityPages'
 import { plural } from '../../utils/format'
 import { findEntityUrl, trailUrl } from '../../routes'
@@ -18,11 +20,11 @@ import { IconSearch, IconCornerDownLeft, IconChevronRight, IconArchive, IconHist
 /**
  * One box that answers four questions: where is the page called X (the nav), where is the card or
  * setting called X (`searchIndex.js`), where does the help explain X (`help/searchIndex.js`, the
- * help panel's own index), and which record has this name or this id. The records are
- * find_entities()' (0321), as on the Entities page, with people beside them for the two roles that
- * read them; so a kind added to entity_directory is found here too. An id also offers the Entities page and
- * the Audit Trail, which records kinds the directory does not hold. This finds one thing, and the
- * page's own box works with a set, so each kind has a share of the list.
+ * help panel's own index), and which record has this name or this id. The records come from
+ * find_entities() (0321), as on the Entities page, with people beside them for the two roles that
+ * read them. An id also offers the Entities page, and the Audit Trail, which records kinds the first
+ * does not list. This finds one thing, and the page's own box works with a set, so each kind has a
+ * share of the list.
  */
 
 /** Most help headings the box lists; the help panel's own search lists the rest. */
@@ -123,7 +125,8 @@ export function GlobalSearch({ tabs, currentTab, userRole, onNavigate, onSelectS
   const records = useMemo(() => {
     if (!searchable || found.text === '' || !local.loaded) return []
     const rows = mergeFound(found.rows, local.rows, found.text)
-    return shortlist(found.text === trimmed ? rows : rows.filter(row => findRank(row, trimmed) !== null), trimmed, RECORD_KIND_LIMIT)
+    const still = found.text === trimmed ? rows : rows.filter(row => findRank(row, trimmed) !== null)
+    return shortlist(still, trimmed, RECORD_KIND_LIMIT)
   }, [searchable, found, local, trimmed])
 
   /* Whether the text is an id, known once the answer is in: by its shape, or by a record it is an id of.
