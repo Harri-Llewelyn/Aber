@@ -5727,12 +5727,17 @@ paths:
                 type: object
                 properties:
                   success: { type: boolean, example: true }
-                  data: { type: array, items: { $ref: '#/components/schemas/Device' } }
-        '400': { description: 'Missing or malformed `device_id`.' }
+                  data:
+                    type: object
+                    properties:
+                      merged: { type: boolean, description: Whether the device was merged into `merge_into_device_id`. }
+                      device: { $ref: '#/components/schemas/Device' }
+                      discarded_device_id: { type: string, format: uuid, description: 'The row a merge deleted: the `device_id` of the request. Absent from an approval.' }
+        '400': { description: 'Missing or malformed `device_id`, or a place it does not name: `area_wide` with no area, or `cell` with no cell.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: insufficient privileges. While Settings requires MFA, also an Administrator or Shopfloor_Manager whose session gave no code: `code` is `mfa_required`, and `details` says to add an authenticator on Profile › MFA.' }
         '404': { description: 'No device has that `device_id` or `merge_into_device_id`. The body is `{"error": "Device not found"}`.' }
-        '409': { description: 'The merge is refused, and nothing was changed: `device_id` is not in quarantine or was registered before it was held, or `merge_into_device_id` is archived, in quarantine or has been seen. `error` is a sentence to show.' }
+        '409': { description: 'Refused, and nothing was changed. The gateway, the cell or the area named is archived. Or the merge is refused: `device_id` is not in quarantine or was registered before it was held, or `merge_into_device_id` is archived, in quarantine or has been seen. `error` is a sentence to show.' }
         '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /functions/v1/gateway-bundle:
