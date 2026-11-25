@@ -79,7 +79,7 @@ targets" where a playback job's targets were meant, and a list-counting check wh
 not see a bullet carrying a table. Test a check by breaking the thing it guards, and test that it
 *allows* the nearest legitimate case.
 
-## Two rules worth stating up front
+## Three rules worth stating up front
 
 - **`metric_catalog.name` is immutable.** Changing a metric is deprecate-and-supersede, never a
   rename — a device is configured against that exact string.
@@ -95,6 +95,11 @@ not see a bullet carrying a table. Test a check by breaking the thing it guards,
   precisely because "an edit has to reach a database that already exists". Change the baseline pair
   with the same care as any other migration; the rule that new work arrives as a new numbered file
   is about keeping the chain readable, not about the pair being inert.
+
+- **Look for what exists before you build in the dashboard.** Search `frontend/src/components/common`, `hooks`,
+  `utils`, `App.css` and the sibling pages for something similar. Use it, or extend it for every caller, and do
+  not build a second one. Say in the pull request what you found, and whether you used it, extended it or could
+  not. [*Words and rules*](frontend/README.md#words-and-rules) is what every page follows.
 
 ## Where a new entry goes
 

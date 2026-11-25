@@ -1513,7 +1513,7 @@ def _print_summary(capture):
         print("  for one itself.")
     if capture["identities"]["devices"]:
         print("\n  Playback needs a --map for each device above, onto a replay lane of the")
-        print("  Playback gateway: the Capture page's Prepare replay lanes makes them.")
+        print("  Playback gateway: the Capture page's Prepare Replay Lanes makes them.")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1691,7 +1691,7 @@ def build_parser():
                       help="the Playback gateway's sparkplug_id; must equal MQTT_PLAYBACK_USER")
     play.add_argument("--map", action="append", metavar="dev<captured>=dev<target>",
                       help="map a captured device onto its replay lane, made by the Capture page's "
-                           "Prepare replay lanes; any other id stays in quarantine")
+                           "Prepare Replay Lanes; any other id stays in quarantine")
     play.add_argument("--speed", type=float, default=1.0,
                       help="playback rate multiplier (default 1.0)")
     play.add_argument("--group", help="override the Sparkplug group (default: as captured)")
