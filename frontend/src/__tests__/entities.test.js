@@ -4,6 +4,7 @@ import {
   personRow, secondIdFields, variantBadge,
 } from '../utils/entities'
 import { AUDIT_TRAIL_ENTITY_TYPES, ENTITY_FIND_LIMIT } from '../constants'
+import { HELP_FILES, helpTitle, pageHelpFile } from '../help'
 import { KNOWN_PRINCIPALS } from '../utils/serviceIdentities'
 import { api } from '../api'
 
@@ -132,6 +133,17 @@ describe('what a row says', () => {
 
   it('has a key of its own among every row, a deleted one\'s id included', () => {
     expect(entityKey(row())).not.toBe(entityKey(row({ state: 'retired' })))
+  })
+})
+
+describe("the page's help", () => {
+  it("is the file it always was, under the page's new name", () => {
+    expect(pageHelpFile('entities')).toBe('pages/archives')
+    expect(HELP_FILES['pages/archives']).toBeDefined()
+    expect(helpTitle('pages/archives')).toBe('Entities')
+    // Every other page's is named for it.
+    expect(pageHelpFile('devices')).toBe('pages/devices')
+    expect(helpTitle('pages/devices')).toBe('Devices')
   })
 })
 
