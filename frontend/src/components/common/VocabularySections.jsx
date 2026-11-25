@@ -5,9 +5,10 @@ import { Tooltip } from './Tooltip'
 
 /**
  * A vocabulary's sections as the Vocabulary page draws them: a heading that opens and closes (with its
- * "N in use" count) and, when open, one chip for each entry. `tab` is the tab descriptor
- * VocabularyPanel documents, whose `isUsed`, `isActionable`, `onUse`, `metaFor`, `tooltipFor`,
- * `idFor` and `noteFor` decide what a chip says and does; `isOpen(key)` and `toggle(key)` are the caller's state.
+ * "N in use" count) and, when open, one chip for each entry, or what the tab's `renderItems(section)`
+ * draws instead. `tab` is the tab descriptor VocabularyPanel documents, whose `isUsed`, `isActionable`,
+ * `onUse`, `metaFor`, `tooltipFor`, `idFor` and `noteFor` decide what a chip says and does;
+ * `isOpen(key)` and `toggle(key)` are the caller's state.
  * VocabularyPanel draws the standards' tabs with it, and a tab with a panel of its own (Imported) draws
  * its concepts with it, so a chip looks and acts the same on every tab.
  */
@@ -42,7 +43,10 @@ export function VocabularySections({ sections, tab: active, canAddMetric, isOpen
               )}
             </div>
 
-            {open && (
+            {open && active.renderItems && (
+              <div className="vocab-section-body">{active.renderItems(section)}</div>
+            )}
+            {open && !active.renderItems && (
               <div className="vocab-section-body">
                 <div className="vocab-chips">
                   {section.items.map(item => {

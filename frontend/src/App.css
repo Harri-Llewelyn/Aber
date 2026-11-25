@@ -8380,6 +8380,63 @@ ol.gateway-steps {
 .vocab-notice a:hover,
 .vocab-notice a:focus-visible { text-decoration: underline; }
 
+/* VOCABULARY, Templates: a section's elements, a row each. A name is stepped in by how many elements it is
+   inside, the step History's Overview gives a cell's lanes under its area. Text wraps rather than being cut,
+   so a row is as tall as its name needs; under 800px the type goes under the name and the id on a line
+   of its own. */
+.template-about {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.template-elements { margin: 0; padding: 0; list-style: none; }
+
+.template-element {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 190px) 92px minmax(0, 340px);
+  gap: 2px 16px;
+  align-items: baseline;
+  padding: 6px 0;
+  font-size: 12px;
+}
+.template-element + .template-element { border-top: 1px solid var(--border); }
+.template-element .cell-meta { overflow-wrap: anywhere; }
+
+/* Positioned, so the words for assistive technology in it are placed and clipped inside the scroller. */
+.template-element-name {
+  position: relative;
+  min-width: 0;
+  padding-left: calc(var(--template-depth, 0) * 18px);
+  overflow-wrap: anywhere;
+}
+.template-element-name p { margin: 2px 0 0; color: var(--text-muted); }
+.template-element-name p .mono { font-size: inherit; color: inherit; }
+
+.template-element-id {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.template-element-id .copyable-id { margin: 0; }
+.template-element-further { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.template-element-further .cell-meta { flex-shrink: 0; overflow-wrap: normal; }
+.template-element-further .copyable-id { min-width: 0; }
+
+@media (max-width: 800px) {
+  .template-element { grid-template-columns: minmax(0, 1fr) max-content; }
+  .template-element-name { grid-row: 1; }
+  .template-element-name ~ .cell-meta:nth-child(2) { grid-column: 1; grid-row: 2; padding-left: calc(var(--template-depth, 0) * 18px); }
+  .template-element-name ~ .cell-meta:nth-child(3) { grid-column: 2; grid-row: 1; }
+  .template-element-id { grid-column: 1 / -1; padding-left: calc(var(--template-depth, 0) * 18px); }
+}
+
 /* VOCABULARY, Imported: the files a site imported, in a table above the concepts, and the Import
    dialog's preview. The table scrolls with the concepts, in the card's one scroller. */
 .site-vocabulary-body .num,

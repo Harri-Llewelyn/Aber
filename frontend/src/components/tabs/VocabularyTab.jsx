@@ -12,6 +12,7 @@ import { ashrae223VocabularyTab } from '../common/ASHRAE223VocabularyPanel'
 import { qudtVocabularyTab } from '../common/QUDTVocabularyPanel'
 import { qudtHandover } from '../../utils/qudt'
 import { vda5050VocabularyTab } from '../common/VDA5050VocabularyPanel'
+import { idtaTemplateTab } from '../common/IDTATemplatePanel'
 import { siteVocabularyTab } from '../common/SiteVocabularyPanel'
 
 /**
@@ -19,9 +20,10 @@ import { siteVocabularyTab } from '../common/SiteVocabularyPanel'
  * from the Metrics page's catalog, which is edited. Clicking an entry opens the Add Metric dialog
  * on the Metrics page: `onUseEntry` hands identifiers over, and MetricsTab, which holds the
  * vocabularies for its type picker, resolves the entry itself, so one place knows how a vocabulary
- * row becomes a metric. The Imported tab is the exception to "only read": it loads its own rows, and
- * an Administrator imports, removes and shares them (common/SiteVocabularyPanel.jsx), so this page
- * passes it `showToast`.
+ * row becomes a metric. The Templates tab starts no metric: a submodel template is looked up, not used to
+ * name one (common/IDTATemplatePanel.jsx). The Imported tab is the exception to "only read": it loads its
+ * own rows, and an Administrator imports, removes and shares them (common/SiteVocabularyPanel.jsx), so
+ * this page passes it `showToast`.
  */
 export function VocabularyTab({ onUseEntry, hasPermission, showToast }) {
   const [vocabulary, setVocabulary] = useState([])
@@ -30,6 +32,7 @@ export function VocabularyTab({ onUseEntry, hasPermission, showToast }) {
   const [s223Vocabulary, setS223Vocabulary] = useState([])
   const [qudtKinds, setQudtKinds] = useState([])
   const [vdaVocabulary, setVdaVocabulary] = useState([])
+  const [templateElements, setTemplateElements] = useState([])
   const [catalog, setCatalog] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -42,11 +45,12 @@ export function VocabularyTab({ onUseEntry, hasPermission, showToast }) {
       api.get('/api/v1/ashrae223-vocabulary'),
       api.get('/api/v1/qudt-quantity-kinds'),
       api.get('/api/v1/vda5050-vocabulary'),
+      api.get('/api/v1/idta-template-elements'),
       // The catalog is read only to mark which entries are in use, so a failure there is defaulted
       // rather than blanking the reference.
       api.get('/api/v1/metric-catalog').catch(() => [])
     ])
-      .then(([mt, iso, opcua, s223, qudt, vda, cat]) => {
+      .then(([mt, iso, opcua, s223, qudt, vda, templates, cat]) => {
         if (cancelled) return
         setVocabulary(mt || [])
         setIsoVocabulary(iso || [])
@@ -54,6 +58,7 @@ export function VocabularyTab({ onUseEntry, hasPermission, showToast }) {
         setS223Vocabulary(s223 || [])
         setQudtKinds(qudt || [])
         setVdaVocabulary(vda || [])
+        setTemplateElements(templates || [])
         setCatalog(cat || [])
         setLoading(false)
       })
@@ -128,6 +133,7 @@ export function VocabularyTab({ onUseEntry, hasPermission, showToast }) {
                 ? (field => onUseEntry?.({ standard: STANDARDS.VDA5050, name: field?.name }))
                 : undefined
             }),
+            idtaTemplateTab({ elements: templateElements, onNotify: showToast }),
             siteVocabularyTab({ canManage: canUse, onUseEntry, showToast })
           ]}
         />

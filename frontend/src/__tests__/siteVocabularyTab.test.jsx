@@ -304,12 +304,12 @@ describe('an import', () => {
 })
 
 describe('the sidebar and the tab bar agree on the tab', () => {
-  it('lists Imported after the standards, by the slug the tab is drawn under', async () => {
-    const { TABS, SITE_VOCABULARY_TAB, VOCABULARY_TABS } = await import('../navigation')
+  it('lists Imported last, after the standards and the templates, by the slug the tab is drawn under', async () => {
+    const { TABS, SITE_VOCABULARY_TAB, TEMPLATES_TAB, VOCABULARY_TABS } = await import('../navigation')
     const { siteVocabularyTab } = await import('../components/common/SiteVocabularyPanel')
     const { pathSlug } = await import('../hooks/useUrlState')
     const pageTabs = TABS.find(t => t.id === 'vocabulary').pageTabs
-    expect(pageTabs).toEqual([...VOCABULARY_TABS, SITE_VOCABULARY_TAB])
+    expect(pageTabs).toEqual([...VOCABULARY_TABS, TEMPLATES_TAB, SITE_VOCABULARY_TAB])
     const drawn = siteVocabularyTab({ canManage: true })
     expect(SITE_VOCABULARY_TAB).toEqual({ id: pathSlug(drawn.id), label: drawn.label })
     expect(drawn.panel).toBeTruthy()

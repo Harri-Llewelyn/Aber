@@ -3,6 +3,7 @@ import { PERMISSION_UUIDS } from './constants'
 import { leadKey } from './utils/navSignal'
 import { STANDARDS } from './utils/standards'
 import { QUDT_LABEL } from './utils/qudt'
+import { TEMPLATES_LABEL } from './utils/idtaTemplates'
 import { pathSegments, pathSlug } from './hooks/useUrlState'
 import {
   IconMap,
@@ -72,9 +73,12 @@ export const VOCABULARY_TABS = [
 ]
   .map(label => ({ id: pathSlug(label), label }))
 
+/** The tab after the standards: the IDTA submodel templates. Not a standard, so it is not in VOCABULARY_TABS. */
+export const TEMPLATES_TAB = { id: pathSlug(TEMPLATES_LABEL), label: TEMPLATES_LABEL }
+
 /**
- * The tab after the standards: what the site imported itself (VocabularyPanel's Imported tab, whose
- * panel loads its own rows). Not a standard, so it is not in VOCABULARY_TABS.
+ * The last tab: what the site imported itself (VocabularyPanel's Imported tab, whose panel loads its
+ * own rows). Not a standard either.
  */
 export const SITE_VOCABULARY_TAB = { id: 'imported', label: 'Imported' }
 
@@ -234,7 +238,7 @@ export const TABS = [
   // means live telemetry): this page is the definitions, never the readings.
   { id: 'metrics',        label: 'Metrics',        group: 'model',   icon: <IconTag size={16} />, pageTabs: METRICS_TABS },
   // Reference you read, where the two above are state you edit.
-  { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} />, pageTabs: [...VOCABULARY_TABS, SITE_VOCABULARY_TAB] },
+  { id: 'vocabulary',     label: 'Vocabulary',     group: 'model',   icon: <IconFileCode size={16} />, pageTabs: [...VOCABULARY_TABS, TEMPLATES_TAB, SITE_VOCABULARY_TAB] },
 
   // Ungated, as Settings is: every role reads an automation (RLS), and writing one is for
   // Administrators and Shopfloor Managers, so anyone else sees no write controls. IconZap: when this

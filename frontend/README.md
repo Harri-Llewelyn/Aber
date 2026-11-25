@@ -75,6 +75,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/standards.js` (`VDA5050_GROUP`, `vda5050FieldType()`, `VDA5050_SEMANTIC_NAMESPACE`) | the metric group registered under VDA 5050, the name `metric_catalog_name_format` admits for each seeded field, and the namespace the generator, the table's CHECK and i3X mint and read the ids under (mirror checks 117 and 118) |
 | `utils/standards.js` (`STANDARDS`) | the `standard` each arm of `concept_definitions` carries, and the one a metric group is registered under (mirror check 119) |
 | `utils/qudt.js` (`QUDT_VERSION`, `QUDT_KIND_NAMESPACE`, `QUDT_LABEL`) | the release the generator reads, the namespace the tables' CHECKs, i3X and the exporter name a quantity kind's id under, and the label the view gives QUDT's arm, which `STANDARDS` leaves out because no metric is filed under it (mirror checks 123 and 124) |
+| `utils/idtaTemplates.js` (`CARDINALITY_LABELS`) | the cardinalities `idta_template_elements` admits and the template generator reads (mirror check 153) |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 | `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
@@ -1486,7 +1487,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
 | Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter; `built-in` for the Built-in tab | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new` and `/automations/built-in`, for an automation whose id is `new` or `built-in`. Built-in: `search`, `sort`, `rule` (a built-in alert's uid, which opens its drawer) |
-| Vocabulary | the standard, as a slug (`opc-ua`), or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
+| Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
 | Archives | `retired` | `sort` |
