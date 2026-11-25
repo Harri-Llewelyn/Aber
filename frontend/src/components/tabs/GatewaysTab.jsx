@@ -26,6 +26,7 @@ import { inServiceDevices } from '../../utils/inService'
 import { alertIndex, alertForDevice, alertState } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import { isShadowGateway } from '../../utils/fleetCounts'
+import { PLAYBACK_GATEWAY_LABEL, PLAYBACK_GATEWAY_PARAM, PLAYBACK_GATEWAY_TIP, playbackProblem } from '../../utils/playbackGateway'
 import { flowDriftState, flowDriftLabel, flowEditedOnAppliance, FLOW_DRIFT_GRACE_MS } from '../../utils/flowDrift'
 import {
   applianceReportMissing, gatewayHealthProblems, healthWarnings, rowTone, foldHealthRows, TONE_DANGER, TONE_WARNING
@@ -64,7 +65,7 @@ import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { ShowGatewayCredentialModal } from '../modals/ShowGatewayCredentialModal'
-import { GatewayRepositoryPanel, WaitingBump } from '../common/GatewayRepositoryPanel'
+import { GatewayRepositoryPanel, WaitingBump, releaseWaits } from '../common/GatewayRepositoryPanel'
 import {
   IconRadio,
   IconPlus,
@@ -79,7 +80,9 @@ import {
   IconLayoutDashboard,
   IconDownload,
   IconEye,
-  IconLock
+  IconGitBranch,
+  IconLock,
+  IconPlay
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -101,6 +104,9 @@ const STATUS_OPTIONS = [
   { value: 'OFFLINE', label: 'Offline' },
 ]
 const STATUS_VALUES = STATUS_OPTIONS.map(o => o.value)
+
+/** The Release waiting toggle's one value: it is a facet, so it counts as the list filters do. */
+const WAITING = 'waiting'
 
 /**
  * The devices a gateway's counts count: all it serves but the archived ones. Replay lanes stay in,
@@ -141,7 +147,7 @@ const withCommand = (text, command) => (command ? <>{text}{command}</> : text)
 
 /** What the Platform row says of the last convergence, then the release that waits for approval, if any. */
 const platformValue = (gateway, reported, canOpenForge) => (
-  gateway.forge_bump_tag && gateway.forge_bump_number
+  releaseWaits(gateway)
     ? <>{reported && `${reported} · `}<WaitingBump gateway={gateway} canOpenForge={canOpenForge} /></>
     : reported
 )
@@ -238,12 +244,17 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [liveStatusFilter, setLiveStatusFilter] = useUrlList('status', NONE, { allowed: STATUS_VALUES })
   const [kindFilter, setKindFilter] = useUrlList('type', NONE, { allowed: LISTED_TYPES })
   const [quarantineOnly, setQuarantineOnly] = useUrlState('quarantined', false)
+  const [releaseOnly, setReleaseOnly] = useUrlState('release', false)
+  // Off by default, as Devices' replay lanes are; not a lifecycle, which is the archived axis.
+  const [showPlayback, setShowPlayback] = useUrlState(PLAYBACK_GATEWAY_PARAM, false)
 
   const resetFilters = () => {
     setSearchQuery('')
     setLiveStatusFilter([])
     setKindFilter([])
     setQuarantineOnly(false)
+    setReleaseOnly(false)
+    setShowPlayback(false)
     setLifecycle(LIFECYCLE_DEFAULT)
   }
 
@@ -478,12 +489,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   )
 
   // Each list filter is any of its values, and the filters combine with AND; each value's count is
-  // over what the other filters let through.
-  const { rows: matchingGateways, counts: facetCounts } = applyFacets(gateways, [
+  // over what the other filters let through. The Playback gateway is counted whether or not it shows.
+  const { rows: facetRows, counts: facetCounts } = applyFacets(gateways, [
     { key: 'lifecycle', chosen: lifecycle, values: lifecycleOf },
     { key: 'status', chosen: liveStatusFilter, values: g => [gatewayDisplayStatus(g)] },
     // The derived type, not `deployment`: Simulated and Host share a deployment.
     { key: 'type', chosen: kindFilter, values: g => [gatewayType(g)] },
+    { key: 'release', chosen: releaseOnly ? [WAITING] : NONE, values: g => (releaseWaits(g) ? [WAITING] : NONE) },
   ], (g) => {
     if (searchQuery) {
       // Matches the friendly name, the internal UUID and the Sparkplug edge node id.
@@ -495,6 +507,21 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     if (quarantineOnly && !gatewaysWithQuarantine.has(g.gateway_id)) return false
     return true
   })
+  const releasesWaiting = facetCounts.release.get(WAITING) || 0
+
+  // The Playback gateway is left off the list until its control is on. Something wrong with it, or a
+  // Type filter that names it, shows it whatever the control says.
+  const playbackReason = (g) => {
+    const problem = playbackProblem(g, { activeAlerts, quarantined: gatewaysWithQuarantine })
+    if (problem) return { problem: true, words: problem }
+    return kindFilter.includes(GATEWAY_TYPES.PLAYBACK) ? { words: 'the Type filter names it' } : null
+  }
+  const matchingGateways = facetRows.filter(g => !isShadowGateway(g) || showPlayback || playbackReason(g))
+  const onlyPlaybackMatches = matchingGateways.length === 0 && facetRows.length > 0
+  const playbackGateways = gateways.filter(g => isShadowGateway(g) && !g.is_archived)
+  const playbackReasons = playbackGateways.map(playbackReason).filter(Boolean)
+  // Off, and showing all the same.
+  const playbackShowing = !showPlayback && playbackReasons.length > 0
 
   // Each column sorts on what its cell shows. An archived gateway shows no status and no devices,
   // and a location that does not apply shows none, so those go last.
@@ -520,7 +547,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
 
   const activeFilterCount =
     (searchQuery ? 1 : 0) + (liveStatusFilter.length ? 1 : 0) + (kindFilter.length ? 1 : 0) +
-    (quarantineOnly ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
+    (quarantineOnly ? 1 : 0) + (releaseOnly ? 1 : 0) + (showPlayback ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
 
   // Arriving from a cell's gateway chip or a device's Serving Gateway chip names ONE gateway: open it.
   useArrivalSelection(
@@ -533,6 +560,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       setSelectedId(g.gateway_id)
     }
   )
+  // The Playback gateway's drawer, opened by that link or by `?gateway=`, turns its control on, so the
+  // list shows it too. Once for each opening: the control can be turned off again beside the drawer.
+  useArrivalSelection(selectedId, gateways, (g, id) => g.gateway_id === id && isShadowGateway(g), () => setShowPlayback(true))
 
   // Resolved fresh every render; a gateway that disappears resolves to null and the drawer closes.
   const selected = gateways.find(g => g.gateway_id === selectedId) || null
@@ -711,6 +741,35 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           </button>
         </Tooltip>
 
+        {/* Offered only while a release waits, or while it is on; the count is what it would list. */}
+        {(releasesWaiting > 0 || releaseOnly) && (
+          <Tooltip text="Gateways with a platform release waiting for approval, as a pull request in the gateway's repository.">
+            <button
+              type="button"
+              className={`btn btn-sm ${releaseOnly ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setReleaseOnly(v => !v)}
+              aria-pressed={releaseOnly}
+            >
+              <IconGitBranch size={13} /> Release waiting ({releasesWaiting})
+            </button>
+          </Tooltip>
+        )}
+
+        {/* Off with one showing, it says so, and a triangle says that something is wrong. */}
+        {(playbackGateways.length > 0 || showPlayback) && (
+          <Tooltip text={playbackReasons.length > 0 ? `Shown because ${playbackReasons[0].words}.` : PLAYBACK_GATEWAY_TIP}>
+            <button
+              type="button"
+              className={`btn btn-sm ${showPlayback ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setShowPlayback(v => !v)}
+              aria-pressed={showPlayback}
+            >
+              {playbackReasons.some(r => r.problem) ? <IconAlertTriangle size={13} /> : <IconPlay size={13} />}{' '}
+              {PLAYBACK_GATEWAY_LABEL} ({playbackShowing ? `${playbackReasons.length} showing` : playbackGateways.length})
+            </button>
+          </Tooltip>
+        )}
+
         <div className="filter-bar-actions">
           <ClearFilters count={activeFilterCount} onClear={resetFilters} />
           <ActionButton
@@ -730,8 +789,14 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
              icon={<IconRadio size={36} />}
              filtered={isFiltered}
              message="No gateways yet."
-             filteredMessage="No gateways match these filters."
-           />
+             filteredMessage={onlyPlaybackMatches ? 'Only the Playback gateway matches, and it is hidden.' : 'No gateways match these filters.'}
+           >
+             {isFiltered && onlyPlaybackMatches && (
+               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowPlayback(true)}>
+                 <IconPlay size={13} /> {PLAYBACK_GATEWAY_LABEL}
+               </button>
+             )}
+           </EmptyState>
          ) : (
            <>
            <div className="table-wrap">

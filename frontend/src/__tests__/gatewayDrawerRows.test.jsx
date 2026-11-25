@@ -83,6 +83,8 @@ const routeGet = (rows) => (path) => {
 }
 
 const show = async (row, { userRole = 'Shopfloor_Manager' } = {}) => {
+  // The Playback gateway is left off the list until its control is on.
+  if (row.is_shadow) window.history.replaceState(null, '', '/gateways?playback=1')
   api.get.mockImplementation(routeGet([row]))
   api.enrolmentReadiness.mockResolvedValue({ ready: true, addresses: [] })
   render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} userRole={userRole} />)

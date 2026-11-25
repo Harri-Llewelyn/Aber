@@ -111,6 +111,7 @@ describe('the drawer', () => {
   })
 
   it('tells the credential dialog whether the gateway is the Playback gateway', async () => {
+    window.history.replaceState(null, '', '/gateways?playback=1')
     await show([gateway({ is_shadow: true, is_simulated: true })])
     fireEvent.click(openPanel().getByText('Generate Broker Credential'))
     expect(credentialProps).toHaveBeenCalledWith(expect.objectContaining({ is_shadow: true }))
