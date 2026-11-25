@@ -2732,8 +2732,8 @@ main:focus { outline: none; }
    needs the width; the fields above it do not suffer from having it. */
 .modal-md { max-width: 560px; }
 
-/* Content rather than input: a document list, a schema definition, a config dump, a secret shown
-   once. A dialog with steps takes its widest step's, so a form that shows a secret next is here. */
+/* Content rather than input: a document list, a config dump, a secret shown once. A dialog with steps
+   takes its widest step's, so a form that shows a secret next is here. */
 .modal-lg { max-width: 640px; }
 
 /* Two columns of fields: the nameplate, whose fields read as pairs, and Add Metric and Add Derived
