@@ -120,6 +120,11 @@ class Base(unittest.TestCase):
 
     # -- fixtures, written as the owner ------------------------------------------------------
 
+    def _one(self, statement, args):
+        """The first column of the first row a statement composed by psycopg2.sql returns."""
+        self.cur.execute(statement, args)
+        return self.cur.fetchone()[0]
+
     def _row(self, table, **columns):
         """One row of `table` with `columns`, and its id."""
         statement = sql.SQL("INSERT INTO public.{} ({}) VALUES ({}) RETURNING id;").format(
@@ -127,8 +132,7 @@ class Base(unittest.TestCase):
             sql.SQL(", ").join(map(sql.Identifier, columns)),
             sql.SQL(", ").join(sql.Placeholder() * len(columns)),
         )
-        self.cur.execute(statement, tuple(columns.values()))
-        return str(self.cur.fetchone()[0])
+        return str(self._one(statement, tuple(columns.values())))
 
     def _plant(self, table):
         """One record of `table` that no foreign key points at: its id."""
@@ -193,9 +197,8 @@ class Base(unittest.TestCase):
 
     def _named(self, table, row_id):
         """How the message names the record."""
-        self.cur.execute(sql.SQL("SELECT {}::text FROM public.{} WHERE id = %s;").format(
+        return self._one(sql.SQL("SELECT {}::text FROM public.{} WHERE id = %s;").format(
             sql.Identifier(TABLES[table][1]), sql.Identifier(table)), (row_id,))
-        return self.cur.fetchone()[0]
 
     def _change_id(self, table):
         return sql.SQL("UPDATE public.{} SET id = %s WHERE id = %s;").format(sql.Identifier(table))
@@ -270,11 +273,9 @@ class AnIdIsNotChanged(Base):
             with self.subTest(table=table):
                 row_id = self._plant(table)
                 read = sql.SQL("SELECT sparkplug_id FROM public.{} WHERE id = %s;").format(sql.Identifier(table))
-                self.cur.execute(read, (row_id,))
-                before = self.cur.fetchone()
+                before = self._one(read, (row_id,))
                 self._refused(MANAGER, table, row_id)
-                self.cur.execute(read, (row_id,))
-                self.assertEqual(self.cur.fetchone(), before)
+                self.assertEqual(self._one(read, (row_id,)), before)
 
 
 class EverythingElsePasses(Base):
