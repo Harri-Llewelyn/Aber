@@ -45,6 +45,41 @@ aber_install() {
   pin_of() {
     openssl x509 -in "$1" -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64
   }
+  # When bootstrap last started, or nothing if it never has. The container outlives the run that made
+  # it, so a step is judged by whether this has changed since before it.
+  bootstrap_started() {
+    local id at
+    id="$(cd "$COMPOSE_DIR" 2>/dev/null && docker compose ps -a -q bootstrap 2>/dev/null)" || return 0
+    at="$(docker inspect -f '{{.State.StartedAt}}' "$id" 2>/dev/null)" || return 0
+    # Docker gives one that has not started the zero time.
+    [[ "$at" == 0001-* ]] || echo "$at"
+  }
+  # Ends a run whose enrolment failed. Its log says why; the token is in none of what bootstrap writes,
+  # and is taken out of it all the same.
+  not_enrolled() {
+    local log
+    log="$(cd "$COMPOSE_DIR" && docker compose logs --no-log-prefix bootstrap 2>&1)" || true
+    echo "${log//"$TOKEN"/<the token>}" >&2
+    die "enrolment did not complete; the end of the bootstrap log above says why. If the token was refused, re-issue the command from the dashboard; otherwise fix what it names and run the same command again."
+  }
+  # Ends a run in which a step that starts the project failed. $1 is when bootstrap had started before
+  # the step, $2 what failed. The reason is read from what is there, never from Docker's words:
+  # bootstrap may have enrolled, have failed, or not have started at all.
+  not_started() {
+    # Another service's failure can leave it running.
+    [ "$(bootstrap_started)" = "$1" ] || ( cd "$COMPOSE_DIR" && docker compose wait bootstrap >/dev/null 2>&1 ) || true
+    if [ -f "$DATA_DIR/.enrolled.json" ]; then
+      die "$2, and this appliance has enrolled. What is printed above says why. The command cannot be run again, so fix that and start the project:
+
+  sudo docker compose --project-directory $COMPOSE_DIR up -d --build
+
+The Node-RED editor password is in its bootstrap log: sudo docker compose --project-directory $COMPOSE_DIR logs bootstrap"
+    fi
+    if [ "$(bootstrap_started)" = "$1" ]; then
+      die "$2; what is printed above says why. Fix that and run the same command again. This run has not spent its token."
+    fi
+    not_enrolled
+  }
 
   [ "$(id -u)" -eq 0 ] || die "run as root: the command the dashboard shows ends in 'sudo ... bash'"
   [ -n "$TOKEN" ] || die "ABER_ENROLMENT_TOKEN is not set; paste the whole command the dashboard shows"
@@ -96,7 +131,10 @@ Then paste the command again, or a newly issued one if it has expired. This run 
   # 3. Converge the host: packages, upgrades, chrony, Docker, the compose project and the timer.
   #    On a first run there is no .env yet, so the project is laid down and not started.
   say "3/5 the platform playbook (this takes a few minutes the first time)"
-  ( cd "$WORK_DIR/platform" && ANSIBLE_LOCALHOST_WARNING=false ansible-playbook -i localhost, site.yml )
+  local started
+  started="$(bootstrap_started)"
+  ( cd "$WORK_DIR/platform" && ANSIBLE_LOCALHOST_WARNING=false ansible-playbook -i localhost, site.yml ) \
+    || not_started "$started" "the platform playbook failed"
 
   # 4. The appliance's .env: written once, and kept by a second run, but for its token (above).
   say "4/5 the appliance's .env and the platform's root"
@@ -118,14 +156,13 @@ Then paste the command again, or a newly issued one if it has expired. This run 
   fi
 
   # 5. Enrol: build the appliance image, run bootstrap once (it spends the token and writes the
-  #    broker credential, the deploy key and the forge's host key under /data), start Node-RED.
+  #    broker credential, the deploy key and the forge's host key under /data), start Node-RED. Node-RED
+  #    depends on bootstrap, so `up` waits for it and fails when it does.
   say "5/5 enrolment"
-  ( cd "$COMPOSE_DIR" && docker compose up -d --build )
+  started="$(bootstrap_started)"
+  ( cd "$COMPOSE_DIR" && docker compose up -d --build ) || not_started "$started" "the appliance's containers did not all start"
   ( cd "$COMPOSE_DIR" && docker compose wait bootstrap >/dev/null ) || true
-  if [ ! -f "$DATA_DIR/.enrolled.json" ]; then
-    ( cd "$COMPOSE_DIR" && docker compose logs --no-log-prefix bootstrap ) >&2 || true
-    die "enrolment did not complete; the bootstrap log above says why. If the token was refused, re-issue the command from the dashboard; otherwise fix what it names and run the same command again."
-  fi
+  [ -f "$DATA_DIR/.enrolled.json" ] || not_enrolled
 
   # The root the appliance enrolled with, against the pin the dashboard minted. The broker's root
   # and the API's are allowed to differ, and this one arrived over TLS the pin already verified,

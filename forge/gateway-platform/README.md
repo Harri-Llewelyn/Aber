@@ -57,8 +57,19 @@ step before enrolment can be re-run with the same command, and the token is spen
 enrolment. A re-issued command run where the first one did not enrol puts its own token in the
 `.env` and keeps every other line, the credential secret among them. It does so before the playbook
 runs, because the `appliance` role starts the project, and so enrolment, when it finds an `.env` and
-nothing running. The steps are in `help/site/remote-gateways.md` (*On the appliance: the command*), and
-the design in `docs/remote-gateways.md`.
+nothing running.
+
+When the project does not start, in that role or at the installer's own start of it, the run ends
+non-zero and says which of three things happened. It asks what is there rather than reading Docker's
+words. An appliance that has enrolled (`.enrolled.json`) is told to fix what Docker printed and start
+the project, because the command is refused from then on. One whose bootstrap started during the step
+and did not enrol is shown bootstrap's log and the advice on the token. Otherwise bootstrap never
+started, an image that could not be pulled or built among the reasons, and Docker's own lines above
+are the reason. Its start time is compared with the one before the step, because the container of an
+earlier refused run is still there with that run's exit code and log.
+
+The steps are in `help/site/remote-gateways.md` (*On the appliance: the command*), and the design in
+`docs/remote-gateways.md`.
 
 ## How an appliance runs it
 
