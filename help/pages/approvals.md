@@ -41,7 +41,7 @@ A machine identity can propose too, if an Administrator gave it that permission.
 A proposal is filed as one kind of change, for the kind of entity it changes. It names only the fields that kind lists.
 
 - **Device details**: name, description, and where it sits (cell, area and location scope). Not its type or its 3D model.
-- **Device nameplate**: the Digital Nameplate. That is manufacturer, product designation and type, serial number, year of construction and date of manufacture. It also covers hardware, firmware and software versions, country of origin and product URI.
+- **Device nameplate**: the Digital Nameplate. That is manufacturer, product designation and type, order code, serial number, year of construction and date of manufacture. It also covers the manufacturer's address, hardware, firmware and software versions, country of origin and product URI.
 - **Area details**: name, description and icon. The name is also a segment of every `uns/` topic beneath the area.
 - **Cell details**: name, description, icon, and its area and place on the plan.
 - **Gateway details**: name, description, access URL, and where it sits (cell, area and location scope). Not what it is, such as its deployment, and not what Aber observed about its health.

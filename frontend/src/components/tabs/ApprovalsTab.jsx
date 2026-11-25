@@ -87,6 +87,12 @@ const KEY_LABELS = {
   software_version: 'Software version',
   country_of_origin: 'Country of origin',
   uri_of_the_product: 'Product URI',
+  order_code_of_manufacturer: 'Order code',
+  address_street: 'Manufacturer’s street',
+  address_zipcode: 'Manufacturer’s postal code',
+  address_city_town: 'Manufacturer’s town or city',
+  address_state_county: 'Manufacturer’s state or county',
+  address_national_code: 'Manufacturer’s country code',
   publish: 'Publish this draft'
 }
 

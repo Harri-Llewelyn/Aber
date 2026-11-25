@@ -16,7 +16,7 @@ const asset = { asset_id: 'dev-123', asset_name: 'Simulated_CNC_01' };
 const template = [
   { id_short: 'URIOfTheProduct', semantic_id: '0112/2///61987#ABN590#002', semantic_id_type: 'IRDI', is_mandatory: true, ordinal: 1, description: 'Product URI' },
   { id_short: 'ManufacturerName', semantic_id: '0112/2///61987#ABA565#009', semantic_id_type: 'IRDI', is_mandatory: true, ordinal: 2, description: 'Manufacturer' },
-  { id_short: 'SerialNumber', semantic_id: '0112/2///61987#ABA951#009', semantic_id_type: 'IRDI', is_mandatory: false, ordinal: 10, description: 'Serial number' },
+  { id_short: 'SerialNumber', semantic_id: '0112/2///61987#ABA951#009', semantic_id_type: 'IRDI', is_mandatory: false, ordinal: 10, description: 'Serial Number' },
   { id_short: 'YearOfConstruction', semantic_id: '0112/2///61987#ABP000#002', semantic_id_type: 'IRDI', is_mandatory: true, ordinal: 11, description: 'Year' }
 ];
 
@@ -37,7 +37,7 @@ describe('DeviceNameplateModal', () => {
     respond();
     render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
     // The form, not the header lead: the lead renders while the nameplate is still loading.
-    const serial = await screen.findByLabelText(/^Serial number/);
+    const serial = await screen.findByLabelText(/^Serial Number/);
     // No row is the normal state for a device nobody has filled in, not an error.
     expect(screen.queryByText(/error/i)).not.toBeInTheDocument();
     expect(serial.value).toBe('');
@@ -52,9 +52,9 @@ describe('DeviceNameplateModal', () => {
     // that never reached the shell -- the failure this exists to prevent. A greyed field would
     // still read as one that could be changed.
     expect(screen.queryByDisplayValue('SN-FROM-DBIRTH')).toBeNull();
-    expect(screen.queryByLabelText(/^Serial number/)).toBeNull();
+    expect(screen.queryByLabelText(/^Serial Number/)).toBeNull();
     const cell = screen.getByText('SN-FROM-DBIRTH').parentElement;
-    expect(cell.querySelector('.form-label')).toHaveTextContent('Serial number');
+    expect(cell.querySelector('.form-label')).toHaveTextContent('Serial Number');
     expect(cell.querySelector('.form-label').tagName).not.toBe('LABEL');
     expect(cell.querySelector('input')).toBeNull();
     expect(cell).toHaveTextContent('Published by the device at DBIRTH, so the export uses it.');
@@ -70,7 +70,7 @@ describe('DeviceNameplateModal', () => {
     render(<DeviceNameplateModal asset={asset} canManage onClose={onClose} showToast={vi.fn()} />);
     await waitFor(() => expect(fieldFor('Manufacturer').value).toBe('DMG Mori'));
 
-    fireEvent.change(fieldFor('Serial number'), { target: { value: 'SN-42' } });
+    fireEvent.change(fieldFor('Serial Number'), { target: { value: 'SN-42' } });
     fireEvent.click(screen.getByRole('button', { name: /save/i }));
 
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
@@ -84,12 +84,13 @@ describe('DeviceNameplateModal', () => {
   it('refuses a year that is not four digits', async () => {
     respond();
     render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
-    await waitFor(() => expect(fieldFor('Year of construction')).toBeInTheDocument());
+    await waitFor(() => expect(fieldFor('Year of Construction')).toBeInTheDocument());
 
-    fireEvent.change(fieldFor('Year of construction'), { target: { value: '24' } });
+    fireEvent.change(fieldFor('Year of Construction'), { target: { value: '24' } });
     // Mirrors device_nameplate_year_shape: the guard is in the database, and a form that let this
     // through would surface as an opaque constraint violation on save.
-    expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    expect(api.put).not.toHaveBeenCalled();
     expect(screen.getByText(/must be four digits/)).toBeInTheDocument();
   });
 
@@ -99,7 +100,8 @@ describe('DeviceNameplateModal', () => {
     await waitFor(() => expect(fieldFor('Product URI')).toBeInTheDocument());
 
     fireEvent.change(fieldFor('Product URI'), { target: { value: 'manufacturer.example/p/1' } });
-    expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    expect(api.put).not.toHaveBeenCalled();
     expect(screen.getByText(/must be an absolute IRI/)).toBeInTheDocument();
   });
 
@@ -107,9 +109,9 @@ describe('DeviceNameplateModal', () => {
     respond({ stored: { device_id: 'dev-123', serial_number: 'SN-42' } });
     const showToast = vi.fn();
     render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} showToast={showToast} />);
-    await waitFor(() => expect(fieldFor('Serial number').value).toBe('SN-42'));
+    await waitFor(() => expect(fieldFor('Serial Number').value).toBe('SN-42'));
 
-    fireEvent.change(fieldFor('Serial number'), { target: { value: '' } });
+    fireEvent.change(fieldFor('Serial Number'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: /save/i }));
 
     // api.js deletes the row when every field is empty, because "no nameplate" is modelled as no
@@ -170,7 +172,7 @@ describe('DeviceNameplateModal', () => {
     render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={vi.fn()} />);
     // The form, not the footer button: the button renders while loading, when the strip is hidden
     // for every reader.
-    await screen.findByLabelText(/^Serial number/);
+    await screen.findByLabelText(/^Serial Number/);
 
     expect(screen.queryByText(/you are reading this nameplate/i)).not.toBeInTheDocument();
   });
@@ -183,7 +185,7 @@ describe('DeviceNameplateModal', () => {
     render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={onClose} showToast={vi.fn()} />);
     await waitFor(() => expect(fieldFor('Manufacturer').value).toBe('DMG Mori'));
 
-    fireEvent.change(fieldFor('Serial number'), { target: { value: 'SN-4471' } });
+    fireEvent.change(fieldFor('Serial Number'), { target: { value: 'SN-4471' } });
     fireEvent.click(screen.getByRole('button', { name: /propose a change/i }));
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/proposals', expect.objectContaining({
@@ -201,7 +203,7 @@ describe('DeviceNameplateModal', () => {
     // be disabled and its own Propose button would have nothing to send.
     respond({ stored: { device_id: 'dev-123' } });
     render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={vi.fn()} />);
-    expect(await screen.findByLabelText(/^Serial number/)).not.toBeDisabled();
+    expect(await screen.findByLabelText(/^Serial Number/)).not.toBeDisabled();
   });
 
   it('explains itself when there is no route to offer at all', async () => {
@@ -228,9 +230,9 @@ describe('DeviceNameplateModal', () => {
     it('explains each of the three manufacturer identifiers', async () => {
       respond();
       render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
-      await waitFor(() => expect(fieldFor('Serial number')).toBeInTheDocument());
+      await waitFor(() => expect(fieldFor('Serial Number')).toBeInTheDocument());
 
-      for (const label of ['Product designation', 'Product type', 'Serial number']) {
+      for (const label of ['Product Designation', 'Product Type', 'Serial Number']) {
         expect(tipFor(label)).toBeInTheDocument();
       }
     });
@@ -247,10 +249,10 @@ describe('DeviceNameplateModal', () => {
     it('distinguishes the year from the date, which are the other confusable pair', async () => {
       respond();
       render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
-      await waitFor(() => expect(fieldFor('Year of construction')).toBeInTheDocument());
+      await waitFor(() => expect(fieldFor('Year of Construction')).toBeInTheDocument());
 
-      fireEvent.click(tipFor('Year of construction'));
-      expect(screen.getByRole('tooltip').textContent).toMatch(/Date of manufacture/);
+      fireEvent.click(tipFor('Year of Construction'));
+      expect(screen.getByRole('tooltip').textContent).toMatch(/Date of Manufacture/);
     });
 
     it('leaves a self-evident label alone', async () => {
@@ -260,7 +262,7 @@ describe('DeviceNameplateModal', () => {
       await waitFor(() => expect(fieldFor('Manufacturer')).toBeInTheDocument());
 
       expect(screen.queryByRole('button', { name: /What Manufacturer means/i })).toBeNull();
-      expect(screen.queryByRole('button', { name: /What Hardware version means/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /What Hardware Version means/i })).toBeNull();
     });
 
     it('keeps the field the only thing the label answers to', async () => {

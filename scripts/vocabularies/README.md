@@ -95,24 +95,25 @@ SHA-256 is what says which release they are.
 
 ## `idta-*.json`: the IDTA submodel templates
 
-`scripts/generate-idta-template.mjs` builds the `idta_template_elements` seed, in migration `0320`, from
-these files. The generator refuses any other file: it checks the SHA-256 of each first, then that the file
-is one submodel template and carries no IEC CDD or ECLASS text.
+`scripts/generate-idta-template.mjs` builds the `idta_template_elements` seed, in migrations `0320` and
+`0324`, from these files. The generator refuses any other file: it checks the SHA-256 of each first, then that
+the file is one submodel template and carries no IEC CDD or ECLASS text.
 
-| | Digital Nameplate | Asset Interfaces Description |
-| :--- | :--- | :--- |
-| What | IDTA 02006-3-0-3, [`idta-02006-3-0-3-digital-nameplate.json`](idta-02006-3-0-3-digital-nameplate.json) | IDTA 02017-1-0-1, [`idta-02017-1-0-1-asset-interfaces-description.json`](idta-02017-1-0-1-asset-interfaces-description.json) |
-| Publisher | Industrial Digital Twin Association (IDTA) | The same |
-| Licence | CC BY 4.0, the repository's `LICENSE.txt`, kept byte for byte in [`LICENSE-idta-CC-BY-4.0.txt`](LICENSE-idta-CC-BY-4.0.txt) | The same |
-| From | [`admin-shell-io/submodel-templates`](https://github.com/admin-shell-io/submodel-templates) at commit `5285185b1ef9425fe45068bcbda8faaf74f3eb89` (2026-10-29), `published/Digital nameplate/3/0/3/IDTA 02006-3-0-3_Template_Digital Nameplate.json` | The same commit, `published/Asset Interfaces Description/1/0/1/IDTA 02017-1-0-1_Template_Asset Interfaces Description.json` |
-| SHA-256 upstream | `79dd7e957964411925e5a3119def8c08fed775b6d942133c664b77304e50a217` (83,244 bytes) | `f1fdfe4c253512a8a5169b5acd2774c52890b614a3e24c697934937e5915e0dc` (501,384 bytes) |
-| SHA-256 here | `25ff717b34183f9fc572eae8d42ac05e3533fe4e9dd9d87560188a7e8c383c1f` (55,352 bytes) | `f1fdfe4c253512a8a5169b5acd2774c52890b614a3e24c697934937e5915e0dc` (501,384 bytes) |
-| Changes | 27 ConceptDescriptions are taken out, and nothing else | None. The file is byte for byte what the commit holds |
+| | Digital Nameplate | Asset Interfaces Description | Contact Information |
+| :--- | :--- | :--- | :--- |
+| What | IDTA 02006-3-0-3, [`idta-02006-3-0-3-digital-nameplate.json`](idta-02006-3-0-3-digital-nameplate.json) | IDTA 02017-1-0-1, [`idta-02017-1-0-1-asset-interfaces-description.json`](idta-02017-1-0-1-asset-interfaces-description.json) | IDTA 02002-1-0-4, [`idta-02002-1-0-4-contact-information.json`](idta-02002-1-0-4-contact-information.json) |
+| Publisher | Industrial Digital Twin Association (IDTA) | The same | The same |
+| Licence | CC BY 4.0, the repository's `LICENSE.txt`, kept byte for byte in [`LICENSE-idta-CC-BY-4.0.txt`](LICENSE-idta-CC-BY-4.0.txt) | The same | The same |
+| From | [`admin-shell-io/submodel-templates`](https://github.com/admin-shell-io/submodel-templates) at commit `5285185b1ef9425fe45068bcbda8faaf74f3eb89` (2026-10-29), `published/Digital nameplate/3/0/3/IDTA 02006-3-0-3_Template_Digital Nameplate.json` | The same commit, `published/Asset Interfaces Description/1/0/1/IDTA 02017-1-0-1_Template_Asset Interfaces Description.json` | The same commit, `published/Contact Information/1/0/4/IDTA 02002-1-0-4_Template_ContactInformation.json` |
+| SHA-256 upstream | `79dd7e957964411925e5a3119def8c08fed775b6d942133c664b77304e50a217` (83,244 bytes) | `f1fdfe4c253512a8a5169b5acd2774c52890b614a3e24c697934937e5915e0dc` (501,384 bytes) | `9b5ceca6c1566ea26f71e02a8622fa3ee922e49f958c1a50fd5f9ee7365f5aa9` (69,023 bytes) |
+| SHA-256 here | `25ff717b34183f9fc572eae8d42ac05e3533fe4e9dd9d87560188a7e8c383c1f` (55,352 bytes) | `f1fdfe4c253512a8a5169b5acd2774c52890b614a3e24c697934937e5915e0dc` (501,384 bytes) | `ffe399d712636a0d40fd6b73fab6bf281e4815351451f35c4cfedf305e525d4c` (41,197 bytes) |
+| Changes | 27 ConceptDescriptions are taken out, and nothing else | None. The file is byte for byte what the commit holds | 29 ConceptDescriptions are taken out, and one sentence of `Language`'s description, which quotes ECLASS's definition. The JSON is laid out again |
 
-**Why 27 are taken out.** IDTA publishes the file under CC BY 4.0. These ConceptDescriptions carry the
+**Why they are taken out.** IDTA publishes each file under CC BY 4.0. These ConceptDescriptions carry the
 definitions IEC CDD and ECLASS issued for the concepts the template cites, and those texts are under
-the dictionaries' own terms. The ids stay in the elements, because an id is only a value. The three that
-are left are IDTA's own.
+the dictionaries' own terms. So does the sentence in `Language`'s description. The ids stay in the elements,
+because an id is only a value. The three that are left in the Nameplate's file, and the six in Contact
+Information's, are IDTA's own.
 
 **Each file is the newest bug-fix release of its version,** which is what the repository's README says to
 use. IDTA never changes a released file, and publishes a correction as a new folder.
@@ -121,8 +122,9 @@ use. IDTA never changes a released file, and publishes a correction as a new fol
 
 1. Download its JSON from the repository at a commit you record here, and read the repository's licence
    at that commit.
-2. Read its ConceptDescriptions. If one carries another body's text (VDI, ISO, DIN), stop and settle
-   the licence first: `--vendor` only knows the ids IEC CDD and ECLASS issue.
+2. Read its ConceptDescriptions and its elements' descriptions. If one carries another body's text (VDI,
+   ISO, DIN), stop and settle the licence first. `--vendor` only knows the ids IEC CDD and ECLASS issue, and a
+   sentence that says "as per ECLASS definition" or "as per IEC CDD definition".
 3. Write the copy to keep: `node scripts/generate-idta-template.mjs --vendor <downloaded.json> scripts/vocabularies/idta-<number>-<name>.json`.
    It prints both SHA-256s.
 4. Add its line to `TEMPLATES` in `scripts/lib/idta-template.mjs`. If the last block there is released, add

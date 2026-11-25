@@ -2623,8 +2623,8 @@ main:focus { outline: none; }
    once. A dialog with steps takes its widest step's, so a form that shows a secret next is here. */
 .modal-lg { max-width: 640px; }
 
-/* Two columns of fields: the nameplate, whose sixteen IEC 63278 properties read as pairs, and Add
-   Metric and Add Derived Metric, which build a metric's name from a row of short fields. */
+/* Two columns of fields: the nameplate, whose fields read as pairs, and Add Metric and Add Derived
+   Metric, which build a metric's name from a row of short fields. */
 .modal-xl { max-width: 720px; }
 
 /* A table, or content that needs a table's width: a device's configuration parameters, the token
@@ -2719,6 +2719,28 @@ main:focus { outline: none; }
   flex: none;
   margin: 0;
 }
+
+/* What a Digital Nameplate still lacks, or that it lacks nothing, in the same place from the open. It is
+   no problem with the form, so it takes the hint's look and not the warning's. */
+.form-hint.modal-problem:has(> .nameplate-standing) { color: var(--text-muted); margin-top: 12px; }
+.form-hint.modal-problem:has(> .nameplate-standing) > svg { display: none; }
+.nameplate-standing strong { color: var(--text-primary); font-weight: 600; }
+
+/* A nameplate's fields, two to a row, and the manufacturer's address as a group among them. */
+.nameplate-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+.nameplate-address {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.nameplate-address-head { display: flex; align-items: center; margin-bottom: 8px; }
+.nameplate-published { margin-bottom: 12px; }
 
 /* One paragraph under the header saying what the dialog will do. */
 .modal-lead {

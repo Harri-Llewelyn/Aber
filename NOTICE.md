@@ -575,11 +575,13 @@ into a seed would be a modification, so the definitions come from the schema rep
 
 ### IDTA: the submodel templates and the elements read from them
 
-[`scripts/vocabularies/idta-02006-3-0-3-digital-nameplate.json`](scripts/vocabularies/idta-02006-3-0-3-digital-nameplate.json)
-and
+[`scripts/vocabularies/idta-02006-3-0-3-digital-nameplate.json`](scripts/vocabularies/idta-02006-3-0-3-digital-nameplate.json),
 [`idta-02017-1-0-1-asset-interfaces-description.json`](scripts/vocabularies/idta-02017-1-0-1-asset-interfaces-description.json)
-are the submodel templates *Digital Nameplate for industrial equipment* (IDTA 02006-3-0-3) and *Asset
-Interfaces Description* (IDTA 02017-1-0-1), published by the Industrial Digital Twin Association (IDTA) in
+and
+[`idta-02002-1-0-4-contact-information.json`](scripts/vocabularies/idta-02002-1-0-4-contact-information.json)
+are the submodel templates *Digital Nameplate for industrial equipment* (IDTA 02006-3-0-3), *Asset
+Interfaces Description* (IDTA 02017-1-0-1) and *Contact Information* (IDTA 02002-1-0-4), published by the
+Industrial Digital Twin Association (IDTA) in
 [`github.com/admin-shell-io/submodel-templates`](https://github.com/admin-shell-io/submodel-templates),
 at commit `5285185b1ef9425fe45068bcbda8faaf74f3eb89`. They are licensed under
 [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/),
@@ -589,11 +591,13 @@ not cover them.
 
 **Asset Interfaces Description is unmodified,** byte for byte. **Digital Nameplate is changed in one way:**
 27 of its ConceptDescriptions are taken out, because they carry the text of definitions that IEC CDD and
-ECLASS issued. The template cites the two dictionaries by their identifiers, and the identifiers are kept.
-No text of either dictionary is taken.
+ECLASS issued. **Contact Information is changed the same way:** 29 of its ConceptDescriptions are taken out, and
+one sentence of an element's description, which quotes a definition of ECLASS's. Its JSON is laid out again.
+The templates cite the two dictionaries by their identifiers, and the identifiers are kept. No text of either
+dictionary is taken.
 
-`scripts/generate-idta-template.mjs` builds the `idta_template_elements` rows from them, in migration
-`0320`: each element's name, place, type, identifiers, cardinality and example, and what the template says
+`scripts/generate-idta-template.mjs` builds the `idta_template_elements` rows from them, in migrations
+`0320` and `0324`: each element's name, place, type, identifiers, cardinality and example, and what the template says
 of it in English, with its whitespace collapsed. IDTA's text is in those rows and on the Vocabulary page,
 which credits IDTA under CC BY 4.0. IDTA provides the material as it is, with no warranty, as the licence's
 disclaimer says. Adopting a template is not a claim of conformance to it.

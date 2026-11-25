@@ -23,6 +23,7 @@ import {
   modelStoragePath
 } from './utils/model3d';
 import { PICTURE_BUCKET, picturePath } from './utils/picture';
+import { mandatoryNameplatePaths } from './utils/nameplate';
 
 // A device has two relationships to a cell: `devices.gateway_id -> gateways.cell_id` is the data
 // path, and `devices.cell_id` is the cell the device is in when its `location_scope` is 'cell'
@@ -38,6 +39,9 @@ import { PICTURE_BUCKET, picturePath } from './utils/picture';
  * of the identifier, so the two must move together.
  */
 const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate';
+
+/** Contact Information, which defines the elements of the nameplate's address. Mirrors shell.ts. */
+const CONTACT_INFORMATION_TEMPLATE_ID = 'https://admin-shell.io/zvei/nameplate/1/0/ContactInformations';
 
 /**
  * Which nameplate fields a device can answer for itself, and the OPC 40001 Machinery concept that
@@ -3418,27 +3422,33 @@ const apiMethods = {
     }
 
     /**
-     * Everything the nameplate editor needs, in one round trip: the template's element list, the
-     * stored row, and what the device publishes for itself. The AAS exporter prefers a
-     * device-published value over a stored one, so the form shows which fields the device already
-     * answers. The join is on `semantic_id`, as the exporter does it: a metric carries the concept as
+     * Everything the nameplate editor needs, in one round trip: the template's element list, what the
+     * template asks for, the stored row, and what the device publishes for itself. The AAS exporter
+     * prefers a device-published value over a stored one, so the form shows which fields the device
+     * already answers. The join is on `semantic_id`, as the exporter does it: a metric carries the concept as
      * its own id or as a further one (`metric_semantic_id_crosswalk` answers across both, and its
      * rows come primary first).
      */
     if (path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)) {
       const deviceId = path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)[1];
-      const [{ data: stored }, { data: template, error: templateError }, { data: catalog }] =
+      const [{ data: stored, error: storedError }, { data: template, error: templateError },
+        { data: elements, error: elementsError }, { data: catalog }] =
         await Promise.all([
           supabase.from('device_nameplate').select('*').eq('device_id', deviceId),
           supabase.from('idta_submodel_templates')
             .select('id_short, semantic_id, semantic_id_type, description, is_mandatory, ordinal')
             .eq('template_id', NAMEPLATE_TEMPLATE_ID)
             .order('ordinal', { ascending: true }),
+          supabase.from('idta_template_elements')
+            .select('template_id, path, parent_path, ordinal, id_short, semantic_id, semantic_id_type, cardinality, template_name, template_number')
+            .in('template_id', [NAMEPLATE_TEMPLATE_ID, CONTACT_INFORMATION_TEMPLATE_ID]),
           supabase.from('metric_semantic_id_crosswalk')
             .select('metric_name, semantic_id, held_as')
             .in('semantic_id', [...NAMEPLATE_PUBLISHED_BY.values()])
         ]);
+      if (storedError) throw storedError;
       if (templateError) throw templateError;
+      if (elementsError) throw elementsError;
 
       const bySemanticId = new Map();
       const byOwnIdFirst = [...(catalog || [])]
@@ -3467,7 +3477,16 @@ const apiMethods = {
         );
       }
 
-      return { stored: stored?.[0] || null, template: template || [], published };
+      return {
+        stored: stored?.[0] || null,
+        template: template || [],
+        // What the template asks for, in the template's own words (paths and cardinalities).
+        mandatory: mandatoryNameplatePaths(elements, NAMEPLATE_TEMPLATE_ID),
+        // The address elements, by idShort: Contact Information defines them, and gives them their ids.
+        address: (elements || []).filter(e => e.template_id === CONTACT_INFORMATION_TEMPLATE_ID
+          && e.parent_path === 'ContactInformation'),
+        published
+      };
     }
 
     if (path.match(/\/api\/v1\/devices\/(.+)\/config/)) {
@@ -4697,7 +4716,7 @@ const apiMethods = {
     /**
      * Upsert a device's nameplate. An empty field clears the column rather than being skipped, so
      * a wrong serial number can be blanked. The row is deleted when every field is empty: "no
-     * nameplate data" is modelled as no row, and the exporter omits an empty submodel. Who saved it
+     * nameplate data" is modelled as no row, and the exporter leaves an empty nameplate out. Who saved it
      * and when are not sent: the database stamps both (device_nameplate_stamp).
      */
     if (path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)) {
@@ -4705,7 +4724,9 @@ const apiMethods = {
       const fields = [
         'manufacturer_name', 'manufacturer_product_designation', 'manufacturer_product_type',
         'serial_number', 'year_of_construction', 'date_of_manufacture', 'hardware_version',
-        'firmware_version', 'software_version', 'country_of_origin', 'uri_of_the_product'
+        'firmware_version', 'software_version', 'country_of_origin', 'uri_of_the_product',
+        'order_code_of_manufacturer', 'address_street', 'address_zipcode', 'address_city_town',
+        'address_state_county', 'address_national_code'
       ];
       const patch = Object.fromEntries(fields.map(f => [f, emptyToNull(body[f])]));
 

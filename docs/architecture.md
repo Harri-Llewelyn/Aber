@@ -308,7 +308,7 @@ and for `aas-api` alike.
 | :--- | :--- |
 | `globalAssetId` | `<base IRI><sparkplug_id>` |
 | The shell | `<globalAssetId>/shell` |
-| A Submodel | `<globalAssetId>/submodel/` and `Nameplate`, `DerivedMetrics`, `VisualRepresentation`, `<key>/OperationalTelemetry` or `<key>/KeyPerformanceIndicators` |
+| A Submodel | `<globalAssetId>/submodel/` and `Nameplate`, `PlatformConnection`, `DerivedMetrics`, `VisualRepresentation`, `<key>/OperationalTelemetry` or `<key>/KeyPerformanceIndicators` |
 | A concept | The semantic id itself, with no base IRI |
 
 - **The base IRI is the site's**, `supabaseFunctions.aas.baseIri`. The default, under `aber.local`, belongs
