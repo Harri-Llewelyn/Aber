@@ -76,6 +76,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/standards.js` (`STANDARDS`) | the `standard` each arm of `concept_definitions` carries, and the one a metric group is registered under (mirror check 119) |
 | `utils/qudt.js` (`QUDT_VERSION`, `QUDT_KIND_NAMESPACE`, `QUDT_LABEL`) | the release the generator reads, the namespace the tables' CHECKs, i3X and the exporter name a quantity kind's id under, and the label the view gives QUDT's arm, which `STANDARDS` leaves out because no metric is filed under it (mirror checks 123 and 124) |
 | `utils/idtaTemplates.js` (`CARDINALITY_LABELS`) | the cardinalities `idta_template_elements` admits and the template generator reads (mirror check 153) |
+| `utils/nameplate.js` (`MANDATORY_ADDRESS_ELEMENTS`, `mandatoryNameplatePaths()`) | what a nameplate must hold before the exporter (`functions/_shared/aas/shell.ts`) names its template (mirror check 160) |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 | `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
