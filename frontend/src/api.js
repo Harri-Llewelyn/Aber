@@ -810,8 +810,11 @@ const apiMethods = {
    * Upload a 3D model for a device and record its path on the row.
    *
    * The object goes up first, then `model_3d_path` is set: a row pointing at a missing object
-   * would export a dead `File` URL. If the second write fails the upload is rolled back.
-   * `upsert: true` so replacing a model overwrites rather than no-ops on the same filename.
+   * would export a dead `File` URL. If the second write fails the upload is rolled back, unless it
+   * overwrote the file the row still names. `upsert: true` so replacing a model overwrites rather
+   * than no-ops on the same filename. A file of another name is stored beside the one it replaces,
+   * which is deleted once the row names the new one. A failed delete is not fatal: the hourly
+   * device-model sweep takes it.
    */
   uploadDeviceModel: async (deviceId, file) => {
     if (!isAcceptedModelFile(file?.name)) {
@@ -832,18 +835,30 @@ const apiMethods = {
       throw new Error(uploadError.message || 'Upload failed');
     }
 
+    // What the row names now. Read here, because the page's copy may be old. Unread, nothing is deleted.
+    const { data: before, error: beforeError } = await supabase
+      .from('devices')
+      .select('model_3d_path')
+      .eq('id', deviceId)
+      .maybeSingle();
+    const previous = before?.model_3d_path ?? null;
+
     const { data, error } = await supabase
       .from('devices')
       .update({ model_3d_path: path })
       .eq('id', deviceId)
       .select();
 
-    if (error) {
-      await supabase.storage.from(MODEL_3D_BUCKET).remove([path]);
-      throw new Error(error.message || 'Could not attach the model to the device');
+    if (error || !data?.length) {
+      if (!beforeError && previous !== path) await supabase.storage.from(MODEL_3D_BUCKET).remove([path]);
+      throw new Error(error?.message || 'Could not attach the model to the device');
     }
 
-    return { path, device: data?.[0] ?? null };
+    if (previous && previous !== path) {
+      await supabase.storage.from(MODEL_3D_BUCKET).remove([previous]).catch(() => {});
+    }
+
+    return { path, device: data[0] };
   },
 
   /**
