@@ -374,7 +374,7 @@ describe('the row and its drawer', () => {
       fireEvent.click(within(table()).getByText('Assembly Line 1'))
       await waitFor(() => expect(panel()).toBeTruthy())
       fireEvent.click(within(panel()).getByRole('button', { name: /Restore Cell/ }))
-      return screen.getByRole('dialog', { name: 'Restore cell' })
+      return screen.getByRole('dialog', { name: 'Restore Cell' })
     }
 
     it('names the cell, and says its retention timer is cleared', async () => {

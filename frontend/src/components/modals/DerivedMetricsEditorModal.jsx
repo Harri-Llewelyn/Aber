@@ -6,6 +6,7 @@ import CopyableId from '../common/CopyableId'
 import { Modal } from '../common/Modal'
 import { IconTag } from '../common/Icons'
 import { ApplyDerivedMetricsModal } from './ApplyDerivedMetricsModal'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { buildFacts } from '../../utils/automationEditorHelp'
 import { derivedSchemaComment } from '../../utils/derivedMetricsFile'
 
@@ -31,6 +32,9 @@ export function DerivedMetricsEditorModal({ text: initial, source = null, catalo
   const facts = useMemo(() => buildFacts({ catalog }), [catalog])
   const origin = typeof window === 'undefined' ? '' : window.location.origin
 
+  // The editor draws its text in a shadow root, so the one field is named by the problem line alone.
+  const check = useFormCheck({ text: { missing: text.trim() === '' && 'Write at least one derived metric' } })
+
   const change = (next) => {
     setText(next)
     // Marks of a refusal are for the text it refused; any edit makes them stale.
@@ -45,18 +49,16 @@ export function DerivedMetricsEditorModal({ text: initial, source = null, catalo
         size="wide"
         lead="Write each derived metric under a dash, with its name, kind and inputs. Nothing is applied until you check the file and confirm what it would do. A definition is fixed once saved, so only a description can change."
         onClose={onClose}
+        problem={check.problem}
+        dismiss="Cancel"
         footer={(
-          <>
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <ActionButton
-              className="btn btn-primary"
-              disabled={text.trim() === ''}
-              title={text.trim() === '' ? 'Write at least one derived metric' : 'Check the YAML, and see what applying it would do, before anything is written'}
-              onClick={() => setChecking(true)}
-            >
-              Apply Derived Metrics
-            </ActionButton>
-          </>
+          <ActionButton
+            className="btn btn-primary"
+            title="Check the YAML, and see what applying it would do, before anything is written"
+            onClick={() => check.press(() => setChecking(true))}
+          >
+            Apply Derived Metrics
+          </ActionButton>
         )}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

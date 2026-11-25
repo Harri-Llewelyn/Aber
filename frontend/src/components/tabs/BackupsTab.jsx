@@ -68,7 +68,7 @@ const PHYSICAL = [
     name: 'Historian',
     noun: 'the historian',
     unreachable: 'Its database did not answer: the timescaledb pod is probably down or restarting.',
-    staleHint: ' Take a backup asks for one; if its request is not picked up, the backup sidecar is not running.'
+    staleHint: ' Take a Backup asks for one; if its request is not picked up, the backup sidecar is not running.'
   }
 ]
 const capitalised = (db) => `${db.noun.charAt(0).toUpperCase()}${db.noun.slice(1)}`
@@ -191,7 +191,7 @@ export function BackupsTab({ showToast, hasPermission }) {
     }
   })
 
-  // Run from Release backup's dialog, which shows a refusal and stays open.
+  // Run from Release Backup's dialog, which shows a refusal and stays open.
   const onRelease = async () => {
     const backup = releaseFor
     await runKeyed(backup.id, async () => {
@@ -273,7 +273,7 @@ export function BackupsTab({ showToast, hasPermission }) {
                   disabled={!!activeJob}
                   onClick={() => setAsking(true)}
                 >
-                  <IconHardDrive size={14} /> Take a backup
+                  <IconHardDrive size={14} /> Take a Backup
                 </button>
               </Tooltip>
             </div>
@@ -404,7 +404,7 @@ export function BackupsTab({ showToast, hasPermission }) {
 
       {releaseFor && (
         <ConfirmModal
-          title="Release backup"
+          title="Release Backup"
           icon={<IconHardDrive size={18} />}
           message={`Release the backup from ${formatDateTime(releaseFor.taken_at)}${releaseFor.note ? ` (${releaseFor.note})` : ''}? Nothing is deleted now: the service prunes it once it is older than the retention window and not one of the newest ${floorWord}.`}
           confirmLabel="Release"
@@ -1048,7 +1048,7 @@ function offsiteBase(destination) {
 }
 
 /**
- * The off-site destination as a toolbar button, left of Take a backup. Unset or incomplete is a
+ * The off-site destination as a toolbar button, left of Take a Backup. Unset or incomplete is a
  * warning rather than an error: the backups are good, and they share a disk with the data they
  * protect. The warning is the button's description as well as its tooltip, so a screen reader
  * hears it once. Set, it is filled, as a toolbar's actions are, and its tooltip names where copies go.
@@ -1129,7 +1129,7 @@ function componentSentence(historianOn = false) {
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
 
-/** What Take a backup's dialog says it writes, and that it asks the historian for its own backup. */
+/** What Take a Backup's dialog says it writes, and that it asks the historian for its own backup. */
 function takeBackupHolds(historianOn) {
   if (!historianOn) return componentSentence()
   return `${componentSentence(true)}. The historian's own backup takes a differential at the same time, which this backup does not wait for`

@@ -81,7 +81,7 @@ const openEdit = () => {
   fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
 }
 
-const save = () => fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+const save = () => fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
 /** The calls to the schemas endpoint, as [path, body]. */
 const schemaWrites = () => api.put.mock.calls.filter(([path]) => path.endsWith('/schemas'))
@@ -177,6 +177,7 @@ describe('editing a device', () => {
     api.put.mockResolvedValue({})
     await show([device({ schema_id: SPINDLE, submodel_schema_ids: [SPINDLE] })])
     openEdit()
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'CNC_01A' } })
     save()
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())

@@ -155,7 +155,7 @@ describe('the Imported tab', () => {
     renderTab()
 
     expect(await screen.findByText(/No vocabulary has been imported/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Import vocabulary/ })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /Import Vocabulary/ })).not.toBeDisabled()
   })
 })
 
@@ -166,7 +166,7 @@ describe('who may import, remove and share', () => {
     const requires = requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
 
     const buttons = [
-      screen.getByRole('button', { name: /Import vocabulary/ }),
+      screen.getByRole('button', { name: /Import Vocabulary/ }),
       within(table).getByRole('button', { name: 'Share the definitions of ISO 22400 KPIs' }),
       within(table).getByRole('button', { name: 'Stop sharing the definitions of Group naming standard' }),
       within(table).getByRole('button', { name: 'Remove ISO 22400 KPIs' })
@@ -184,7 +184,7 @@ describe('who may import, remove and share', () => {
     renderTab()
     const table = await filesTable()
 
-    const importButton = screen.getByRole('button', { name: /Import vocabulary/ })
+    const importButton = screen.getByRole('button', { name: /Import Vocabulary/ })
     expect(importButton).toHaveClass('btn-primary')
     expect(importButton.closest('.filter-bar-actions')).toBeTruthy()
     expect(within(table).getByRole('button', { name: 'Remove ISO 22400 KPIs' })).not.toBeDisabled()
@@ -193,9 +193,9 @@ describe('who may import, remove and share', () => {
   it('opens the Import dialog from the toolbar', async () => {
     renderTab()
     await filesTable()
-    fireEvent.click(screen.getByRole('button', { name: /Import vocabulary/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Import Vocabulary/ }))
 
-    expect(screen.getByRole('dialog', { name: 'Import vocabulary' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Import Vocabulary' })).toBeTruthy()
   })
 })
 
@@ -206,15 +206,15 @@ describe('removing a vocabulary', () => {
     const table = await filesTable()
 
     fireEvent.click(within(table).getByRole('button', { name: 'Remove ISO 22400 KPIs' }))
-    const dialog = screen.getByRole('dialog', { name: /Remove vocabulary/ })
+    const dialog = screen.getByRole('dialog', { name: /Remove Vocabulary/ })
     expect(dialog).toHaveTextContent('1 catalog metric use it')
     expect(dialog).toHaveTextContent('They keep their ids')
     expect(api.removeSiteVocabulary).not.toHaveBeenCalled()
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove vocabulary' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Vocabulary' }))
     await waitFor(() => expect(api.removeSiteVocabulary).toHaveBeenCalledWith('v-iso'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith("Vocabulary 'ISO 22400 KPIs' removed", 'success', { to: siteVocabularyUrl() }))
-    expect(screen.queryByRole('dialog', { name: /Remove vocabulary/ })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: /Remove Vocabulary/ })).toBeNull()
   })
 
   it('says no metric uses one that none does', async () => {
@@ -224,7 +224,7 @@ describe('removing a vocabulary', () => {
     const table = await filesTable()
     fireEvent.click(within(table).getByRole('button', { name: 'Remove Group naming standard' }))
 
-    expect(screen.getByRole('dialog', { name: /Remove vocabulary/ })).toHaveTextContent('No catalog metric uses it')
+    expect(screen.getByRole('dialog', { name: /Remove Vocabulary/ })).toHaveTextContent('No catalog metric uses it')
   })
 
   it('keeps the dialog open with the refusal as the database worded it', async () => {
@@ -232,7 +232,7 @@ describe('removing a vocabulary', () => {
     renderTab()
     const table = await filesTable()
     fireEvent.click(within(table).getByRole('button', { name: 'Remove ISO 22400 KPIs' }))
-    fireEvent.click(within(screen.getByRole('dialog', { name: /Remove vocabulary/ })).getByRole('button', { name: 'Remove vocabulary' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Remove Vocabulary/ })).getByRole('button', { name: 'Remove Vocabulary' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('may have been removed already')
   })
@@ -245,10 +245,10 @@ describe('sharing the definitions', () => {
     const table = await filesTable()
 
     fireEvent.click(within(table).getByRole('button', { name: 'Share the definitions of ISO 22400 KPIs' }))
-    const dialog = screen.getByRole('dialog', { name: /Share the definitions/ })
+    const dialog = screen.getByRole('dialog', { name: /Share the Definitions/ })
     expect(dialog).toHaveTextContent("The licence is the site's responsibility")
     expect(api.setSiteVocabularySharing).not.toHaveBeenCalled()
-    const confirm = within(dialog).getByRole('button', { name: 'Share definitions' })
+    const confirm = within(dialog).getByRole('button', { name: 'Share Definitions' })
     expect(confirm).toHaveClass('btn-primary')
 
     fireEvent.click(confirm)
@@ -277,7 +277,7 @@ describe('sharing the definitions', () => {
     renderTab()
     const table = await filesTable()
     fireEvent.click(within(table).getByRole('button', { name: 'Share the definitions of ISO 22400 KPIs' }))
-    fireEvent.click(within(screen.getByRole('dialog', { name: /Share the definitions/ })).getByRole('button', { name: 'Share definitions' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Share the Definitions/ })).getByRole('button', { name: 'Share Definitions' }))
 
     await waitFor(() => expect(cells(rowOf(screen.getByRole('table'), 'ISO 22400 KPIs'))[7]).toBe('Shared'))
   })
@@ -291,12 +291,12 @@ describe('an import', () => {
     // reading of what the function answered is what matters.
     api.importSiteVocabulary.mockResolvedValue({ id: 'v-new', concepts: 3, skipped: [{ semantic_id: 'x', reason: 'already_defined', held_by: 'MTConnect' }] })
     api.siteVocabularyHolders.mockResolvedValue(new Map())
-    fireEvent.click(screen.getByRole('button', { name: /Import vocabulary/ }))
-    const dialog = screen.getByRole('dialog', { name: 'Import vocabulary' })
+    fireEvent.click(screen.getByRole('button', { name: /Import Vocabulary/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Import Vocabulary' })
     const body = JSON.stringify(jsonEnvironment([jsonConcept('https://example.test/new', 'New concept', 'Text.')]))
     fireEvent.change(within(dialog).getByLabelText(/^File/), { target: { files: [new File([body], 'new.json')] } })
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Import vocabulary' })).not.toBeDisabled())
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Import vocabulary' }))
+    await within(dialog).findByRole('group', { name: 'What the File Holds' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import Vocabulary' }))
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
       "Vocabulary 'new' imported: 3 concepts, 1 skipped", 'success', { to: siteVocabularyUrl('v-new') }))

@@ -5,6 +5,7 @@ import { ActionButton } from '../common/ActionButton'
 import { ApplyResults } from '../common/ApplyResults'
 import { IconTag } from '../common/Icons'
 import { describeApply, useApplyPreview } from '../../hooks/useApplyPreview'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { parseAutomationsYaml } from '../../utils/automationYaml'
 import { plural } from '../../utils/format'
 import { metricUrl, tabUrl } from '../../routes'
@@ -36,7 +37,8 @@ export function ApplyDerivedMetricsModal({ text, source = null, showToast, onChe
   const [preview, setPreview] = useApplyPreview(parsed, () => api.applyDerivedMetrics(parsed.document, true), onChecked)
   const [applyError, setApplyError] = useState(null)
   const [applying, setApplying] = useState(false)
-  const { results, refused, written, unread, problem, held, heldTitle, count } = describeApply(preview, parsed, 'derived metric')
+  const { results, refused, written, unread, checking, problem, held, unchanged, count } = describeApply(preview, parsed, 'derived metric')
+  const check = useFormCheck({}, { unchanged })
 
   const confirm = async () => {
     setApplyError(null)
@@ -61,28 +63,25 @@ export function ApplyDerivedMetricsModal({ text, source = null, showToast, onChe
 
   return (
     <Modal
-      title={`Apply ${source ? source : 'derived metrics'}`}
+      title={`Apply ${source ? source : 'Derived Metrics'}`}
       icon={<IconTag size={18} />}
       size="lg"
       lead="Applies the whole file, all of it or none. A definition is fixed once saved, so only a description can change, shown before and after. It deletes nothing."
-      problem={problem}
-      touched
+      problem={problem ?? check.problem}
       error={applyError}
-      onClose={applying ? () => {} : onClose}
+      busy={applying}
+      onClose={onClose}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={applying}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            pending={applying}
-            pendingLabel="Applying…"
-            disabled={held}
-            title={heldTitle}
-            onClick={confirm}
-          >
-            {`Apply ${plural(written, 'Derived Metric')}`}
-          </ActionButton>
-        </>
+        <ActionButton
+          className="btn btn-primary"
+          pending={applying || checking}
+          pendingLabel={checking ? 'Checking…' : 'Applying…'}
+          disabled={held}
+          onClick={() => check.press(confirm)}
+        >
+          {`Apply ${plural(written, 'Derived Metric')}`}
+        </ActionButton>
       )}
     >
       {preview.phase === 'checking' && <p className="apply-note" role="status">Checking the file…</p>}

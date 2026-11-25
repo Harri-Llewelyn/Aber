@@ -5,6 +5,7 @@ import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { IconCheck, IconPlus, IconUser } from '../common/Icons'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { EMAIL, PERSON_ROLES, personRoleLabel } from '../../utils/people'
 import { PasswordShownOnce } from './PasswordShownOnce'
 import { personUrl } from '../../routes'
@@ -28,11 +29,14 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
   const emailRef = useRef(null)
 
   const nameProblem = displayNameProblem(displayName)
-  // The name's problem is said under its field; the address's above the buttons.
-  const emailProblem = !email.trim() ? 'Enter their email address'
-    : !EMAIL.test(email.trim()) ? 'That is not an email address'
-      : null
-  const valid = !emailProblem && !nameProblem
+  const check = useFormCheck({
+    // An address half typed is not an address yet, so it waits for the press.
+    email: {
+      id: 'add-person-email',
+      missing: !email.trim() ? 'Enter their email address' : !EMAIL.test(email.trim()) && 'That is not an email address',
+    },
+    name: { id: 'add-person-name', wrong: nameProblem },
+  })
 
   const add = useCallback(async () => {
     setBusy(true)
@@ -50,16 +54,14 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
     }
   }, [email, role, displayName, onAdded, showToast])
 
-  const close = useCallback(() => onClose(), [onClose])
-
   if (added) {
     return (
       <Modal
-        title={`${personLabel(added)} added`}
+        title={`${personLabel(added)} Added`}
         icon={<IconUser size={18} />}
         size="lg"
-        onClose={close}
-        footer={<button className="btn btn-primary" onClick={close}>Done</button>}
+        onClose={onClose}
+        dismiss="Done"
       >
         {added.invited ? (
           <div className="callout callout-info">
@@ -90,28 +92,20 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
 
   return (
     <Modal
-      title="Add a person"
+      title="Add a Person"
       icon={<IconUser size={18} />}
       size="lg"
-      onClose={busy ? () => {} : close}
+      busy={busy}
+      onClose={onClose}
       lead="They sign in to the dashboard with this email address, and can do what the role allows."
       initialFocus={emailRef}
-      problem={emailProblem}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button className="btn btn-ghost" onClick={close} disabled={busy}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Adding…"
-            className="btn btn-primary"
-            onClick={add}
-            disabled={!valid}
-            title={emailProblem || nameProblem || undefined}
-          >
-            <IconPlus size={14} /> Add Person
-          </ActionButton>
-        </>
+        <ActionButton pending={busy} pendingLabel="Adding…" className="btn btn-primary" onClick={() => check.press(add)}>
+          <IconPlus size={14} /> Add Person
+        </ActionButton>
       )}
     >
       <div className="form-group">
@@ -127,11 +121,13 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
           disabled={busy}
           ref={emailRef}
           aria-required="true"
+          {...fieldErrorProps(check.errors.email, 'add-person-email-error')}
         />
+        <FieldError id="add-person-email-error" error={check.errors.email} />
       </div>
 
       <div className="form-group">
-        <label className="form-label" htmlFor="add-person-name">Display name (optional)</label>
+        <label className="form-label" htmlFor="add-person-name">Display Name (optional)</label>
         <input
           id="add-person-name"
           className="form-control"
@@ -141,12 +137,12 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
           placeholder="Their name, as colleagues know it"
           autoComplete="off"
           disabled={busy}
-          {...fieldErrorProps(nameProblem, 'add-person-name-error', 'add-person-name-hint')}
+          {...fieldErrorProps(check.errors.name, 'add-person-name-error', 'add-person-name-hint')}
         />
         <div id="add-person-name-hint" className="form-hint">
           {`Shown with their email address beside it. Up to ${DISPLAY_NAME_MAX} characters. They can change it on their Profile page.`}
         </div>
-        <FieldError id="add-person-name-error" error={nameProblem} />
+        <FieldError id="add-person-name-error" error={check.errors.name} />
       </div>
 
       <div className="form-group">

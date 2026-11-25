@@ -1,5 +1,6 @@
 import React, { useId, useRef, useState } from 'react'
 import { api } from '../../api'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { readConceptDescriptionsFile, AasFileRefusal } from '../../utils/aasReader'
 import { siteVocabularyUrl } from '../../routes'
@@ -50,7 +51,6 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
   const [pending, runImport] = usePendingAction()
 
   const published = kind === VOCABULARY_KINDS.PUBLISHED
-  const close = pending ? () => {} : onClose
 
   const choose = async (e) => {
     const file = e.target.files?.[0]
@@ -75,15 +75,18 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
   const defined = preview ? preview.concepts.filter(c => holders.has(c.semantic_id)) : []
   const importable = preview ? preview.concepts.length - defined.length : 0
 
-  // The first thing that stops the import, said above the buttons once the person has begun. A field's
-  // own problem is said under it.
-  const standardMissing = published && !(standardName.trim() && edition.trim() && publisher.trim())
-  const problem = fileProblem ? 'Choose a file the reader can open.'
-    : !preview ? (reading ? 'Reading the file…' : 'Choose a file to import.')
-      : importable === 0 ? 'Every concept in the file is already defined, so there is nothing to import.'
-        : standardMissing ? 'Name the standard, its edition and its publisher.'
-          : !name.trim() ? 'Give the vocabulary a name.'
-            : null
+  const check = useFormCheck({
+    file: {
+      id: `${uid}-file`,
+      missing: !preview && (reading ? 'Reading the file…' : 'Choose a file to import.'),
+      wrong: fileProblem
+        || (preview && importable === 0 && 'Every concept in the file is already defined, so there is nothing to import.'),
+    },
+    standard: { id: `${uid}-standard`, missing: published && !standardName.trim() && 'Name the standard.' },
+    edition: { id: `${uid}-edition`, missing: published && !edition.trim() && 'Give its edition.' },
+    publisher: { id: `${uid}-publisher`, missing: published && !publisher.trim() && 'Name its publisher.' },
+    name: { id: `${uid}-name`, missing: !name.trim() && 'Give the vocabulary a name.' },
+  })
 
   const confirm = () => runImport(async () => {
     setError(null)
@@ -113,27 +116,19 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
 
   return (
     <Modal
-      title="Import vocabulary"
+      title="Import Vocabulary"
       icon={<IconUpload size={18} />}
       size="md"
-      onClose={close}
+      busy={pending}
+      onClose={onClose}
       lead="Read an AAS file and keep its concepts as a vocabulary of this site. Nothing is written until you import."
-      problem={problem}
-      touched={Boolean(preview || fileProblem)}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button type="button" className="btn btn-ghost" onClick={close} disabled={pending}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            pending={pending}
-            pendingLabel="Importing…"
-            disabled={Boolean(problem)}
-            onClick={confirm}
-          >
-            Import vocabulary
-          </ActionButton>
-        </>
+        <ActionButton className="btn btn-primary" pending={pending} pendingLabel="Importing…" onClick={() => check.press(confirm)}>
+          Import Vocabulary
+        </ActionButton>
       }
     >
       <div className="form-group">
@@ -145,7 +140,7 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
           className="form-control"
           accept=".aasx,.json,.xml,application/json,text/xml,application/xml"
           aria-required="true"
-          {...fieldErrorProps(fileProblem, `${uid}-file-error`, `${uid}-file-hint`)}
+          {...fieldErrorProps(check.errors.file, `${uid}-file-error`, `${uid}-file-hint`)}
           disabled={pending}
           onChange={choose}
         />
@@ -154,12 +149,12 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
             ? 'Reading the file…'
             : 'An .aasx package, or an AAS JSON or XML environment, up to 25 MB. Only its ConceptDescriptions with IEC 61360 content are taken.'}
         </div>
-        <FieldError id={`${uid}-file-error`} error={fileProblem} />
+        <FieldError id={`${uid}-file-error`} error={check.errors.file} />
       </div>
 
       {preview && (
-        <div className="form-group site-import-preview" role="group" aria-label="What the file holds">
-          <div className="form-label">What the file holds</div>
+        <div className="form-group site-import-preview" role="group" aria-label="What the File Holds">
+          <div className="form-label">What the File Holds</div>
           <dl className="site-import-facts">
             <dt>Format</dt>
             <dd>{SOURCE_FORMAT_LABELS[preview.format] || preview.format}</dd>
@@ -210,7 +205,7 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
       )}
 
       <div className="form-group" role="radiogroup" aria-labelledby={`${uid}-kind`}>
-        <div className="form-label" id={`${uid}-kind`}>What is this file? <RequiredMark /></div>
+        <div className="form-label" id={`${uid}-kind`}>What Is This File? <RequiredMark /></div>
         <div className="device-export-formats">
           {[
             [VOCABULARY_KINDS.PUBLISHED, 'A published standard', 'A standard the site holds a copy of, such as ISO 22400-2:2014. A metric started from it is labelled with the standard and "(site licence)".'],
@@ -243,7 +238,9 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
               id={`${uid}-standard`} className="form-control" value={standardName} maxLength={LIMITS.standardName}
               placeholder="ISO 22400-2" aria-required="true" disabled={pending}
               onChange={e => setStandardName(e.target.value)}
+              {...fieldErrorProps(check.errors.standard, `${uid}-standard-error`)}
             />
+            <FieldError id={`${uid}-standard-error`} error={check.errors.standard} />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor={`${uid}-edition`}>Edition <RequiredMark /></label>
@@ -251,7 +248,9 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
               id={`${uid}-edition`} className="form-control" value={edition} maxLength={LIMITS.standardEdition}
               placeholder="2014" aria-required="true" disabled={pending}
               onChange={e => setEdition(e.target.value)}
+              {...fieldErrorProps(check.errors.edition, `${uid}-edition-error`)}
             />
+            <FieldError id={`${uid}-edition-error`} error={check.errors.edition} />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor={`${uid}-publisher`}>Publisher <RequiredMark /></label>
@@ -259,7 +258,9 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
               id={`${uid}-publisher`} className="form-control" value={publisher} maxLength={LIMITS.standardPublisher}
               placeholder="ISO" aria-required="true" disabled={pending}
               onChange={e => setPublisher(e.target.value)}
+              {...fieldErrorProps(check.errors.publisher, `${uid}-publisher-error`)}
             />
+            <FieldError id={`${uid}-publisher-error`} error={check.errors.publisher} />
           </div>
           <div className="form-hint site-import-citation">
             Cited as <strong>{standardCitation({ standard_name: standardName.trim(), standard_edition: edition.trim() }) || '…'}</strong>.
@@ -273,12 +274,14 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
           id={`${uid}-name`} className="form-control" value={name} maxLength={LIMITS.name}
           aria-required="true" disabled={pending}
           onChange={e => { setName(e.target.value); setNameEdited(true) }}
+          {...fieldErrorProps(check.errors.name, `${uid}-name-error`, `${uid}-name-hint`)}
         />
-        <div className="form-hint">What the Imported tab and the Metrics page call it.</div>
+        <div className="form-hint" id={`${uid}-name-hint`}>What the Imported tab and the Metrics page call it.</div>
+        <FieldError id={`${uid}-name-error`} error={check.errors.name} />
       </div>
 
       <div className="form-group">
-        <label className="form-label" htmlFor={`${uid}-licence`}>Licence note</label>
+        <label className="form-label" htmlFor={`${uid}-licence`}>Licence Note</label>
         <textarea
           id={`${uid}-licence`} className="form-control" rows={2} value={licenceNote} maxLength={LIMITS.licenceNote}
           placeholder="Single-site licence, order 4711…" disabled={pending}

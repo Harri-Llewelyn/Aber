@@ -2,10 +2,12 @@ import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { CopyField } from '../common/CopyField'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { IconShieldAlert } from '../common/Icons'
 import { useDirectoryBroker } from './EdgeNodeSettings'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { ROOT_CERTIFICATE_PATH } from '../../utils/edgeNodeSettings'
 import { tabUrl } from '../../routes'
 import { SUBSCRIBER_DESCRIPTION_MAX, SUBSCRIBER_NAME_MAX } from '../../utils/serviceIdentities'
@@ -34,14 +36,11 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
   const [error, setError] = useState(null)
   const nameRef = useRef(null)
 
-  const nameLength = characters(name)
-  const descriptionLength = characters(description)
-  const canCreate = !busy && nameLength > 0 && nameLength <= SUBSCRIBER_NAME_MAX
-    && descriptionLength > 0 && descriptionLength <= SUBSCRIBER_DESCRIPTION_MAX
   // The fields' maxLength holds the upper bounds; what is left to say is what is missing.
-  const problem = nameLength === 0 ? 'Give the account a name'
-    : descriptionLength === 0 ? 'Say what the account is for'
-      : null
+  const check = useFormCheck({
+    name: { id: 'subscriber-name', missing: characters(name) === 0 && 'Give the account a name' },
+    description: { id: 'subscriber-description', missing: characters(description) === 0 && 'Say what the account is for' },
+  })
 
   const create = useCallback(async () => {
     setBusy(true)
@@ -68,8 +67,9 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
 
   return (
     <Modal
-      title={account ? <>Read-only account “{account.name}”</> : 'New read-only broker account'}
+      title={account ? <>Read-Only Account “{account.name}”</> : 'New Read-Only Broker Account'}
       size="lg"
+      busy={busy}
       onClose={onClose}
       lead={account ? null : (<>
         An account for something outside Aber that only <strong>reads</strong> the broker: a SCADA
@@ -78,28 +78,23 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
         whole site, and <strong>publishes nothing</strong>.
       </>)}
       initialFocus={account ? undefined : nameRef}
-      problem={account ? undefined : problem}
+      problem={account ? undefined : check.problem}
       error={!account
         ? error
         : auditMissing
           ? 'The account was created, but the Audit Trail entry could not be written. The account exists; the record of it does not.'
           : null}
-      footer={account ? (
-        <button className="btn btn-primary" onClick={onClose}>Done</button>
-      ) : (
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Creating…"
-            className="btn btn-primary"
-            disabled={!canCreate}
-            onClick={create}
-            title={problem ?? 'Create the account and show its password once'}
-          >
-            Create Read-Only Account
-          </ActionButton>
-        </>
+      dismiss={account ? 'Done' : 'Cancel'}
+      footer={account ? null : (
+        <ActionButton
+          pending={busy}
+          pendingLabel="Creating…"
+          className="btn btn-primary"
+          onClick={() => check.press(create)}
+          title="Create the account and show its password once"
+        >
+          Create Read-Only Account
+        </ActionButton>
       )}
     >
       {!account && (<>
@@ -115,12 +110,14 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
             value={name}
             onChange={(e) => setName(oneLine(e.target.value))}
             aria-required="true"
+            {...fieldErrorProps(check.errors.name, 'subscriber-name-error', 'subscriber-name-hint')}
           />
-          <div className="form-hint">What Broker accounts lists it as.</div>
+          <div id="subscriber-name-hint" className="form-hint">What Broker accounts lists it as.</div>
+          <FieldError id="subscriber-name-error" error={check.errors.name} />
         </div>
 
         <div className="form-group">
-          <label className="form-label" htmlFor="subscriber-description">What it is for <RequiredMark /></label>
+          <label className="form-label" htmlFor="subscriber-description">What It Is For <RequiredMark /></label>
           <textarea
             id="subscriber-description"
             className="form-control"
@@ -131,11 +128,13 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
             onChange={(e) => setDescription(oneLine(e.target.value))}
             style={{ resize: 'vertical' }}
             aria-required="true"
+            {...fieldErrorProps(check.errors.description, 'subscriber-description-error', 'subscriber-description-hint')}
           />
-          <div className="form-hint">
+          <div id="subscriber-description-hint" className="form-hint">
             Shown beside the name. It is what tells the next Administrator whether the account is
             safe to delete.
           </div>
+          <FieldError id="subscriber-description-error" error={check.errors.description} />
         </div>
       </>)}
 
@@ -196,7 +195,7 @@ function SubscriberSettings({ account, topics }) {
         copyLabel="password"
       />
       <div className="form-group">
-        <div className="form-label" id="subscriber-topics-label">Topics it may read</div>
+        <div className="form-label" id="subscriber-topics-label">Topics It May Read</div>
         {topics && topics.length > 0 ? (
           <ul
             className="mono"

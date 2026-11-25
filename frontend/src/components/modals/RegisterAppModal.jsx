@@ -7,6 +7,7 @@ import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { IconCheck, IconGlobe, IconPlus, IconShieldAlert } from '../common/Icons'
 import { appUrl } from '../../routes'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import {
   APP_NAME_MAX, APP_REDIRECT_MAX, appNameProblem, clientTypeLabel, parseRedirectAddresses, redirectAddressesProblem,
 } from '../../utils/apps'
@@ -34,11 +35,14 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
   const uris = parseRedirectAddresses(addresses)
   const nameProblem = appNameProblem(name)
   const addressProblem = redirectAddressesProblem(addresses, siteDomain)
-  // A field's own value is faulted under it; what is missing is said above the buttons.
-  const missing = !name.trim() ? 'Give the app a name'
-    : uris.length === 0 ? 'Give at least one address it may send people back to'
-      : null
-  const valid = !missing && !nameProblem && !addressProblem
+  const check = useFormCheck({
+    name: { id: 'register-app-name', missing: !name.trim() && 'Give the app a name', wrong: nameProblem },
+    addresses: {
+      id: 'register-app-addresses',
+      missing: uris.length === 0 && 'Give at least one address it may send people back to',
+      wrong: addressProblem,
+    },
+  })
 
   const register = useCallback(async () => {
     setBusy(true)
@@ -59,11 +63,11 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
     const issuer = authUrl.replace(/\/+$/, '')
     return (
       <Modal
-        title={`${registered.name} is registered`}
+        title={`${registered.name} Is Registered`}
         icon={<IconGlobe size={18} />}
         size="lg"
         onClose={onClose}
-        footer={<button className="btn btn-primary" onClick={onClose}>Done</button>}
+        dismiss="Done"
       >
         {registered.client_secret ? (
           <div className="callout callout-warning">
@@ -114,28 +118,20 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
   const type = clientTypeLabel(clientType)
   return (
     <Modal
-      title="Register an app"
+      title="Register an App"
       icon={<IconGlobe size={18} />}
       size="lg"
-      onClose={busy ? () => {} : onClose}
+      busy={busy}
+      onClose={onClose}
       lead="An app signs people in with their Aber account. It learns who they are and reaches nothing else. Each person allows it once."
       initialFocus={nameRef}
-      problem={missing}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Registering…"
-            className="btn btn-primary"
-            onClick={register}
-            disabled={!valid}
-            title={missing || nameProblem || addressProblem || undefined}
-          >
-            <IconPlus size={14} /> Register App
-          </ActionButton>
-        </>
+        <ActionButton pending={busy} pendingLabel="Registering…" className="btn btn-primary" onClick={() => check.press(register)}>
+          <IconPlus size={14} /> Register App
+        </ActionButton>
       )}
     >
       <div className="form-group">
@@ -151,12 +147,12 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
           disabled={busy}
           ref={nameRef}
           aria-required="true"
-          {...fieldErrorProps(nameProblem, 'register-app-name-error', 'register-app-name-hint')}
+          {...fieldErrorProps(check.errors.name, 'register-app-name-error', 'register-app-name-hint')}
         />
         <div id="register-app-name-hint" className="form-hint">
           {`Shown to a person when the app asks to sign them in. Up to ${APP_NAME_MAX} characters.`}
         </div>
-        <FieldError id="register-app-name-error" error={nameProblem} />
+        <FieldError id="register-app-name-error" error={check.errors.name} />
       </div>
 
       <div className="form-group">
@@ -179,7 +175,7 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
       </div>
 
       <div className="form-group">
-        <label className="form-label" htmlFor="register-app-addresses">Addresses it sends people back to <RequiredMark /></label>
+        <label className="form-label" htmlFor="register-app-addresses">Addresses It Sends People Back To <RequiredMark /></label>
         <textarea
           id="register-app-addresses"
           className="form-control mono"
@@ -191,12 +187,12 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
           spellCheck={false}
           disabled={busy}
           aria-required="true"
-          {...fieldErrorProps(addressProblem, 'register-app-addresses-error', 'register-app-addresses-hint')}
+          {...fieldErrorProps(check.errors.addresses, 'register-app-addresses-error', 'register-app-addresses-hint')}
         />
         <div id="register-app-addresses-hint" className="form-hint">
           {`One to a line, up to ${APP_REDIRECT_MAX}. The app must ask for one of them exactly. https goes anywhere; plain http only on this site's own network: localhost, a private address${siteDomain ? `, or a name under ${siteDomain}` : ''}.`}
         </div>
-        <FieldError id="register-app-addresses-error" error={addressProblem} />
+        <FieldError id="register-app-addresses-error" error={check.errors.addresses} />
       </div>
     </Modal>
   )

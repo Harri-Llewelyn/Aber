@@ -136,7 +136,7 @@ describe("a Third-party gateway's credential dialog", () => {
     api.mintGatewayCredential.mockRejectedValueOnce(new Error('The broker credential service is unreachable.'))
     render(<GatewayCredentialModal gateway={GATEWAY} confirmFirst={false} onClose={vi.fn()} showToast={vi.fn()} />)
     await waitFor(() => expect(screen.getAllByText(/credential service is unreachable/).length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: /Try again/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Try Again/ }))
     await waitFor(() => expect(screen.getByText(CREDENTIAL.password)).toBeInTheDocument())
   })
 

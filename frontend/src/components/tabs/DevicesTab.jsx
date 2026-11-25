@@ -18,10 +18,11 @@ import { describeAuthFailure } from '../../utils/sessionError'
 import CopyableId from '../common/CopyableId'
 import { deviceIds, deviceIdentifiers } from '../../utils/sparkplugId'
 import { ActionButton } from '../common/ActionButton'
+import { sameForm, useFormCheck } from '../../hooks/useFormCheck'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
-import { FieldError } from '../common/FieldError'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
@@ -194,6 +195,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [blank]                 = useState({ asset_id: '', asset_name: '', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_GATEWAY })
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
+  // What the form opened with.
+  const [formOpened, setFormOpened] = useState(blank)
   const [lifecycle, setLifecycle] = useUrlList('lifecycle', LIFECYCLE_DEFAULT, { allowed: LIFECYCLE_VALUES, aliases: LIFECYCLE_ALIASES })
   // The card's tab, in the path: `/devices` or `/devices/quarantine`. A tab change drops the
   // query, so the Registered filters and the drawer, which belong to that tab, go with it.
@@ -399,14 +402,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
   const closeForm = () => { setShowForm(false); setEditingProposal(null); setFormError(null) }
 
-  // Why the form's save is off, in the order the fields appear. The database refuses Area-Wide with
-  // no area and a cell scope with no cell; it would take an empty name, which every list would then
-  // show as a blank row.
-  const formProblem = !(form.asset_name || '').trim() ? 'Give the device a name'
-    : locationIncomplete(form, { cellRequired: true })
-      ? (form.location_scope === SCOPE_AREA_WIDE ? 'Choose which area the device serves' : 'Choose which cell the device is in')
-      : null
-
   /** Tick or untick one schema in the form's set. */
   const toggleSchema = (schemaId) => setForm(f => {
     const current = f.schema_ids || []
@@ -531,6 +526,26 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       : null
   )
   const [editingProposal, setEditingProposal] = useState(null)
+
+  // The database refuses Area-Wide with no area and a cell scope with no cell; it would take an empty
+  // name, which every list would then show as a blank row. A proposal of nothing is refused too, so one
+  // not filed yet is held to what it would change.
+  const formCheck = useFormCheck({
+    name: { id: 'device-name', missing: !(form.asset_name || '').trim() && 'Give the device a name' },
+    location: {
+      id: form.location_scope === SCOPE_AREA_WIDE ? 'device-area' : 'device-cell',
+      missing: locationIncomplete(form, { cellRequired: true })
+        && (form.location_scope === SCOPE_AREA_WIDE ? 'Choose which area the device serves' : 'Choose which cell the device is in'),
+    },
+  }, {
+    unchanged: !!editing && (proposeMode && !editingProposal
+      ? Object.keys(patchFromForm('device', editFormFor(editing), form)).length === 0
+      : sameForm(formOpened, form)),
+  })
+  const openForm = (device, seed) => {
+    setEditing(device); setForm(seed); setFormOpened(seed); formCheck.reset(); setShowForm(true)
+  }
+
   const withheldFields = nonProposableFields('device')
   const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
 
@@ -1073,7 +1088,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             className="btn btn-primary btn-sm"
             permitted={canManage}
             deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)}
-            onClick={() => (setEditing(null), setForm(blank), setShowForm(true))}
+            onClick={() => openForm(null, blank)}
           >
             <IconPlus size={14} /> New Device
           </ActionButton>
@@ -1288,34 +1303,28 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         <Modal
           title={editing ? 'Edit Device Configuration' : 'Register New Device'}
           size="md"
+          busy={saving}
           onClose={closeForm}
-          problem={formProblem}
+          problem={formCheck.problem}
           error={formError}
+          dismiss="Cancel"
           footer={
-            <>
-              <button className="btn btn-ghost" onClick={closeForm} disabled={saving}>Cancel</button>
-              <ActionButton
-                pending={saving}
-                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
-                onClick={() => runSave(save)}
-                disabled={formProblem !== null}
-                title={formProblem ?? (proposeMode
-                  ? 'Ask for these changes — an approver applies them, or says why not'
-                  : undefined)}
-              >
-                {proposeMode
-                  ? (editingProposal ? 'Update your proposal' : 'Propose a change')
-                  : 'Save Configuration'}
-              </ActionButton>
-            </>
+            <ActionButton
+              pending={saving}
+              pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
+              onClick={() => formCheck.press(() => runSave(save))}
+              title={proposeMode ? 'Ask for these changes — an approver applies them, or says why not' : undefined}
+            >
+              {proposeMode ? (editingProposal ? 'Update Your Proposal' : 'Propose a Change') : 'Save Device'}
+            </ActionButton>
           }
         >
             {/* Every field here is editable. The identifiers and the topic helper are facts, and
                 live on the drawer where they are copyable. */}
             <div className="form-group">
               <label className="form-label" htmlFor="device-name">Device Name <RequiredMark /></label>
-              <input id="device-name" className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} placeholder="e.g. CNC Mill 01" aria-required="true" />
-              <div className="form-hint">
+              <input id="device-name" className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} placeholder="e.g. CNC Mill 01" aria-required="true" {...fieldErrorProps(formCheck.errors.name, 'device-name-error', 'device-name-hint')} />
+              <div id="device-name-hint" className="form-hint">
                 A display label only — rename it freely. Identity on the wire is the Sparkplug ID, which is generated from the database key and never moves, so renaming never breaks ingestion or detaches telemetry history.
               </div>
               <UnsRenameNote
@@ -1323,6 +1332,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 renamed={!!editing && (form.asset_name || '').trim() !== (editing.asset_name || '')}
                 deviceId={editing?.asset_id}
               />
+              <FieldError id="device-name-error" error={formCheck.errors.name} />
             </div>
 
             <div className="form-group">
@@ -1427,6 +1437,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     followGateway
                     // In a cell requires one: the empty option is a prompt, not an answer.
                     cellEmptyLabel="— Choose a cell —"
+                    error={formCheck.errors.location}
                   />
 
                   <div className={`form-hint${acceptsCell && following && unplaced ? ' hint-warning' : ''}`}>
@@ -1824,13 +1835,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             // Seeded with every attached schema.
             label: proposeMode ? 'Propose a Change' : 'Edit Details',
             onClick: () => {
-              setEditing(selectedDevice)
               // Seeded with the open proposal's patch applied, so adding a second field extends the
               // request rather than replacing it.
               const mine = proposeMode ? openForSelected.find(pr => pr.entity_type === 'devices') : null
               setEditingProposal(mine || null)
-              setForm({ ...editFormFor(selectedDevice), ...formFromPatch('device', mine?.patch) })
-              setShowForm(true)
+              openForm(selectedDevice, { ...editFormFor(selectedDevice), ...formFromPatch('device', mine?.patch) })
             },
             disabled: !canManage && !canPropose,
             primary: true,

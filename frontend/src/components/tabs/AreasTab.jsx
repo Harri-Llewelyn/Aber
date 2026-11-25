@@ -9,6 +9,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
+import { sameForm, useFormCheck } from '../../hooks/useFormCheck'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
 import { FilterDropdown } from '../common/FilterChecklist'
 import {
@@ -28,6 +29,7 @@ import { placeNameProblem, unsBridgeOn, unsPathIndex, unsTopicRoot } from '../..
 import { unsFilterField, UnsRenameNote } from '../common/UnsPlace'
 import { patchFromForm, formFromPatch, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
@@ -85,6 +87,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
   const blank = { area_name: '', description: '', icon: DEFAULT_AREA_ICON }
   const [formVal, setFormVal]   = useState(blank)
+  // What the form opened with.
+  const [formOpened, setFormOpened] = useState(blank)
   // Archive, never delete, from this page: the delete is the Archived Entities page's. The table
   // opens on Active; archived areas are shown, tinted, under the lifecycle filter.
   const [archiveTarget, setArchiveTarget] = useState(null)
@@ -145,11 +149,20 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   // Every control that is off its default: the lifecycle filter opens on Active.
   const activeFilterCount = (searchQuery ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
 
-  // Why the form's save is off; the database refuses the same names.
-  const formProblem = placeNameProblem(formVal.area_name, 'area')
+  // The database refuses the same names. A proposal of nothing is refused too, so one not filed yet is
+  // held to what it would change.
+  const nameProblem = placeNameProblem(formVal.area_name, 'area')
+  const nameGiven = (formVal.area_name || '').trim() !== ''
+  const formCheck = useFormCheck({
+    name: { id: 'area-name', missing: !nameGiven && nameProblem, wrong: nameGiven && nameProblem },
+  }, {
+    unchanged: !!editing && (proposeMode && !editingProposal
+      ? Object.keys(patchFromForm('area', editing, formVal)).length === 0
+      : sameForm(formOpened, formVal)),
+  })
 
   const openForm = (area, seed) => {
-    setEditing(area); setFormVal(seed); setFormError(null); setShowForm(true)
+    setEditing(area); setFormVal(seed); setFormOpened(seed); setFormError(null); formCheck.reset(); setShowForm(true)
   }
 
   const save = async () => {
@@ -477,30 +490,26 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         <Modal
           title={editing ? 'Edit Area' : 'New Area'}
           size="md"
+          busy={saving}
           onClose={() => { setShowForm(false); setEditingProposal(null) }}
-          problem={formProblem}
+          problem={formCheck.problem}
           error={formError}
+          dismiss="Cancel"
           footer={
-            <>
-              <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingProposal(null) }} disabled={saving}>Cancel</button>
-              <ActionButton
-                pending={saving}
-                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
-                onClick={() => runSave(save)}
-                disabled={formProblem !== null}
-                title={formProblem ?? (proposeMode
-                  ? 'File this as a proposal for an approver to decide'
-                  : undefined)}
-              >
-                {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
-              </ActionButton>
-            </>
+            <ActionButton
+              pending={saving}
+              pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
+              onClick={() => formCheck.press(() => runSave(save))}
+              title={proposeMode ? 'File this as a proposal for an approver to decide' : undefined}
+            >
+              {proposeMode ? (editingProposal ? 'Update Your Proposal' : 'Propose a Change') : 'Save Area'}
+            </ActionButton>
           }
         >
           <div className="form-group">
             <label className="form-label" htmlFor="area-name">Area Name <RequiredMark /></label>
-            <input id="area-name" className="form-control" value={formVal.area_name} onChange={e => setFormVal(f => ({ ...f, area_name: e.target.value }))} placeholder="e.g. Machine Shop" aria-required="true" />
-            <div className="form-hint">
+            <input id="area-name" className="form-control" value={formVal.area_name} onChange={e => setFormVal(f => ({ ...f, area_name: e.target.value }))} placeholder="e.g. Machine Shop" aria-required="true" {...fieldErrorProps(formCheck.errors.name, 'area-name-error', 'area-name-hint')} />
+            <div id="area-name-hint" className="form-hint">
               Becomes the <span className="mono">&lt;area&gt;</span> segment of every <span className="mono">{unsTopicRoot()}/</span> topic beneath it, so it cannot contain <span className="mono">/</span>, <span className="mono">+</span> or <span className="mono">#</span>.
             </div>
             <UnsRenameNote
@@ -508,6 +517,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               renamed={!!editing && (formVal.area_name || '').trim() !== editing.area_name}
               areaId={editing?.area_id}
             />
+            <FieldError id="area-name-error" error={formCheck.errors.name} />
           </div>
           <div className="form-group">
             {/* A grid of buttons, as the cell form has: the choice is visual. Each picture's name is its

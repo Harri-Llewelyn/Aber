@@ -104,7 +104,7 @@ describe('registering a Third-party gateway', () => {
     fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'New_Vendor_Node' } })
     fireEvent.change(type, { target: { value: 'third_party' } })
     expect(screen.getByText(/On save you will be given its broker credential and every setting/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Gateway' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     expect(api.post.mock.calls[0][1].deployment).toBe('third_party')

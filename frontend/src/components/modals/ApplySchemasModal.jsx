@@ -5,6 +5,7 @@ import { ActionButton } from '../common/ActionButton'
 import { ApplyResults } from '../common/ApplyResults'
 import { IconClipboardList } from '../common/Icons'
 import { describeApply, useApplyPreview } from '../../hooks/useApplyPreview'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { parseAutomationsYaml } from '../../utils/automationYaml'
 import { plural } from '../../utils/format'
 import { schemaUrl, tabUrl } from '../../routes'
@@ -33,7 +34,8 @@ export function ApplySchemasModal({ text, source = null, showToast, onApplied, o
   const [preview, setPreview] = useApplyPreview(parsed, () => api.applyDeviceSchemas(parsed.document, true))
   const [applyError, setApplyError] = useState(null)
   const [applying, setApplying] = useState(false)
-  const { results, refused, written, unread, problem, held, heldTitle, count } = describeApply(preview, parsed, 'schema')
+  const { results, refused, written, unread, checking, problem, held, unchanged, count } = describeApply(preview, parsed, 'schema')
+  const check = useFormCheck({}, { unchanged })
 
   const confirm = async () => {
     setApplyError(null)
@@ -57,28 +59,25 @@ export function ApplySchemasModal({ text, source = null, showToast, onApplied, o
 
   return (
     <Modal
-      title={`Apply ${source ? source : 'schemas'}`}
+      title={`Apply ${source ? source : 'Schemas'}`}
       icon={<IconClipboardList size={18} />}
       size="lg"
       lead="Applies the whole file, all of it or none. A schema that exists is never edited: a changed one becomes a new draft version to publish when you are ready. It deletes nothing."
-      problem={problem}
-      touched
+      problem={problem ?? check.problem}
       error={applyError}
-      onClose={applying ? () => {} : onClose}
+      busy={applying}
+      onClose={onClose}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={applying}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            pending={applying}
-            pendingLabel="Applying…"
-            disabled={held}
-            title={heldTitle}
-            onClick={confirm}
-          >
-            {`Apply ${plural(written, 'Schema')}`}
-          </ActionButton>
-        </>
+        <ActionButton
+          className="btn btn-primary"
+          pending={applying || checking}
+          pendingLabel={checking ? 'Checking…' : 'Applying…'}
+          disabled={held}
+          onClick={() => check.press(confirm)}
+        >
+          {`Apply ${plural(written, 'Schema')}`}
+        </ActionButton>
       )}
     >
       {preview.phase === 'checking' && <p className="apply-note" role="status">Checking the file…</p>}

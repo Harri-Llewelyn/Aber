@@ -125,39 +125,34 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
   }, [step, bundle, onClose])
 
   let footer = null
+  let dismiss = null
   if (step === 'confirm') {
+    dismiss = 'Cancel'
     footer = (
-      <>
-        <button className="btn btn-ghost" onClick={backOut} disabled={busy}>Cancel</button>
-        <ActionButton
-          pending={busy}
-          pendingLabel="Issuing…"
-          disabled={!confirmed}
-          className="btn btn-primary"
-          onClick={generate}
-          title={confirmed
-            ? (mode === 'command' ? 'Mint a new token and show a fresh install command' : 'Mint a new token and download a fresh bundle')
-            : 'Type the gateway name to enable this'}
-        >
-          {mode === 'command'
-            ? <><IconCopy size={14} /> Issue Command</>
-            : <><IconDownload size={14} /> Issue &amp; Download</>}
-        </ActionButton>
-      </>
+      <ActionButton
+        pending={busy}
+        pendingLabel="Issuing…"
+        disabled={!confirmed}
+        className="btn btn-primary"
+        onClick={generate}
+        title={confirmed
+          ? (mode === 'command' ? 'Mint a new token and show a fresh install command' : 'Mint a new token and download a fresh bundle')
+          : 'Type the gateway name to enable this'}
+      >
+        {mode === 'command'
+          ? <><IconCopy size={14} /> Issue Command</>
+          : <><IconDownload size={14} /> Issue &amp; Download</>}
+      </ActionButton>
     )
   } else if (error && !bundle) {
-    footer = (
-      <>
-        <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
-        {!error.deployment && (
-          <ActionButton pending={busy} pendingLabel="Retrying…" onClick={generate}
-                        title="Try issuing again">
-            <IconRefreshCw size={14} /> Try again
-          </ActionButton>
-        )}
-      </>
+    dismiss = 'Close'
+    footer = !error.deployment && (
+      <ActionButton pending={busy} pendingLabel="Retrying…" onClick={generate} title="Try issuing again">
+        <IconRefreshCw size={14} /> Try Again
+      </ActionButton>
     )
   } else if (bundle) {
+    dismiss = 'Done'
     footer = (
       <>
         {isCommand
@@ -167,7 +162,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                 className="btn btn-ghost"
                 onClick={() => switchTo('bundle')}
               >
-                <IconDownload size={14} /> Download the bundle instead
+                <IconDownload size={14} /> Download the Bundle Instead
               </button>
             </Tooltip>
           )
@@ -177,7 +172,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
                 className="btn btn-ghost"
                 onClick={() => switchTo('command')}
               >
-                <IconCopy size={14} /> Use the install command instead
+                <IconCopy size={14} /> Use the Install Command Instead
               </button>
             </Tooltip>
           )}
@@ -191,17 +186,18 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
             <IconRefreshCw size={14} /> {isCommand ? 'Re-issue Command' : 'Re-issue Bundle'}
           </button>
         </Tooltip>
-        <button className="btn btn-primary" onClick={onClose}>Done</button>
       </>
     )
   }
 
   return (
     <Modal
-      title={<>Set up “{gateway.gateway_name}”</>}
+      title={<>Set Up “{gateway.gateway_name}”</>}
       size="lg"
+      busy={busy}
       onClose={backOut}
       error={error?.message}
+      dismiss={dismiss}
       footer={footer}
     >
       {step === 'confirm' && (

@@ -45,8 +45,10 @@ export function useApplyPreview(parsed, check, onChecked) {
 
 /**
  * What a preview says about the confirm button and the dialog's problem line: how many are refused
- * and written, the sentence that says why Apply is held, and each status with its count. `noun` is
- * what the file holds, singular and lower case: "automation", "schema".
+ * and written, and each status with its count. `held` is a file this dialog cannot make right, whose
+ * reason is in view from the start: `problem`, or the failed check's own sentence. `unchanged` is one
+ * that would write nothing. `noun` is what the file holds, singular and lower case: "automation",
+ * "schema".
  */
 export function describeApply(preview, parsed, noun) {
   const { results } = preview
@@ -56,14 +58,11 @@ export function describeApply(preview, parsed, noun) {
   const problem = unread
     ? (parsed.empty ? `The file is empty. Write at least one ${noun}.` : 'The file is not YAML the page can read. Fix the lines below first.')
     : refused > 0 ? `${plural(refused, noun)} refused. Fix the lines named above, then try again.` : null
-  const held = unread || preview.phase !== 'ready' || refused > 0 || written === 0
-  const heldTitle = unread ? problem
-    : preview.phase === 'checking' ? 'Checking the file…'
-      : preview.phase === 'failed' ? preview.error
-        : refused > 0 ? problem
-          : written === 0 ? `Every ${noun} here is already as the file says, so nothing would change.` : undefined
+  const checking = preview.phase === 'checking'
+  const held = unread || preview.phase === 'failed' || refused > 0
+  const unchanged = preview.phase === 'ready' && refused === 0 && written === 0
   const count = RESULT_STATUSES
     .map(s => ({ ...s, n: results.filter(r => r.status === s.value).length }))
     .filter(s => s.n > 0)
-  return { results, refused, written, unread, problem, held, heldTitle, count }
+  return { results, refused, written, unread, checking, problem, held, unchanged, count }
 }

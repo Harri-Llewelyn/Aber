@@ -179,7 +179,7 @@ describe('Modal', () => {
       const at = css.indexOf(`\n${selector} {`)
       return at < 0 ? '' : css.slice(at, css.indexOf('}', at))
     }
-    const LONG = 'Play back capture — gwya271dfb9f7af449e987b7.capture.json'
+    const LONG = 'Play Back Capture — gwya271dfb9f7af449e987b7.capture.json'
 
     it('draws the title first and the controls, header actions then the close, after it in the row', () => {
       render(<Modal title={LONG} onClose={vi.fn()} headerActions={<button>Export</button>} />)
@@ -303,7 +303,7 @@ describe('a confirm-shaped modal keeps its exported props', () => {
         replacement={null} onConfirm={onConfirm} onCancel={vi.fn()}
       />
     )
-    expect(screen.getByRole('dialog', { name: /Restore metric spindle_temp/ })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: /Restore Metric spindle_temp/ })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore Metric' }))
     expect(onConfirm).toHaveBeenCalledTimes(1)

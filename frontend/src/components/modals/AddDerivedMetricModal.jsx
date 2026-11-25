@@ -6,6 +6,7 @@ import { MetricPicker } from '../common/MetricPicker'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { Tooltip } from '../common/Tooltip'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import {
   canonicaliseGroup, composeMetricName, groupOptionsByStandard, knownGroupNames, metricNameError
@@ -72,10 +73,16 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
   const nameError = form.leaf.trim() !== '' ? metricNameError(name) : null
   const nameHeld = nameError ? null : nameProblem(name, catalog, declared)
   const definitionProblem = derivationProblem({ ...form, states }, catalog)
-  const problem = form.leaf.trim() === '' ? 'Give the metric a name'
-    : form.group === NEW_GROUP && form.newGroup.trim() === '' ? 'Name the new group'
-      : definitionProblem
-  const blocked = !!(problem || nameError || nameHeld)
+  // A state metric's states are a field of their own, once there is one to ask them of.
+  const asksStates = form.kind === 'time_in_state' && form.input !== ''
+  const check = useFormCheck({
+    newGroup: { id: 'derived-new-group', missing: form.group === NEW_GROUP && form.newGroup.trim() === '' && 'Name the new group' },
+    name: { id: 'derived-name', missing: form.leaf.trim() === '' && 'Give the metric a name', wrong: nameHeld },
+    // Said in the callout under the composed name, which is what it is about.
+    composed: { id: 'derived-name', wrong: nameError },
+    inputs: { id: 'derived-inputs', missing: !asksStates && definitionProblem },
+    states: { id: 'derived-states-group', missing: asksStates && definitionProblem },
+  })
 
   const add = () => runAdd(async () => {
     setError(null)
@@ -118,23 +125,15 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
       title="Add Derived Metric"
       icon={<IconPlus size={18} />}
       size="xl"
-      onClose={adding ? () => {} : onCancel}
-      problem={problem}
+      busy={adding}
+      onClose={onCancel}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={adding}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            pending={adding}
-            pendingLabel="Adding…"
-            disabled={blocked}
-            title={problem ?? nameError ?? nameHeld ?? undefined}
-            onClick={add}
-          >
-            Add Derived Metric
-          </ActionButton>
-        </>
+        <ActionButton className="btn btn-primary" pending={adding} pendingLabel="Adding…" onClick={() => check.press(add)}>
+          Add Derived Metric
+        </ActionButton>
       }
     >
       <div className="metric-form">
@@ -169,8 +168,10 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
                 value={form.newGroup}
                 onChange={e => set({ newGroup: e.target.value.replace(/\//g, '') })}
                 placeholder="e.g. Controller"
+                {...fieldErrorProps(check.errors.newGroup, 'derived-new-group-error')}
               />
             </Tooltip>
+            <FieldError id="derived-new-group-error" error={check.errors.newGroup} />
           </div>
         )}
 
@@ -197,10 +198,10 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
               value={form.leaf}
               onChange={e => set({ leaf: e.target.value.replace(/\//g, '') })}
               placeholder="e.g. PARTS_PER_HOUR"
-              {...fieldErrorProps(nameHeld, 'derived-name-error')}
+              {...fieldErrorProps(check.errors.name, 'derived-name-error')}
             />
           </Tooltip>
-          <FieldError id="derived-name-error" error={nameHeld} />
+          <FieldError id="derived-name-error" error={check.errors.name} />
         </div>
 
         <div className="form-group" style={{ flex: '1 1 180px' }}>
@@ -222,12 +223,19 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
       {/* The schema builder's metric list, offering only what this kind can read: measured metrics,
           not derived and not deprecated, of the right datatype. The search and the filter narrow
           what is listed, never what is chosen. */}
-      <div className="form-group" role="group" aria-labelledby="derived-inputs-label">
+      <div
+        id="derived-inputs"
+        className="form-group"
+        role="group"
+        aria-labelledby="derived-inputs-label"
+        aria-describedby={check.errors.inputs ? 'derived-inputs-error' : undefined}
+      >
         <span className="form-label" id="derived-inputs-label">
           {INPUT_LABELS[form.kind]} <RequiredMark />
           <span className="section-count">{chosenNames.length} selected</span>
         </span>
         <p className="form-hint" style={{ marginTop: 0 }}>{INPUT_ASKS[form.kind]}</p>
+        <FieldError id="derived-inputs-error" error={check.errors.inputs} className="field-error-above" />
         <MetricPicker
           key={form.kind}
           metrics={inputOptions}
@@ -243,7 +251,7 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
       </div>
 
       <div className="form-group">
-        <span className="form-label" id="derived-chosen-label">Chosen{isSum ? ', in the order picked' : ''}</span>
+        <span className="form-label" id="derived-chosen-label">Chosen{isSum ? ', in the Order Picked' : ''}</span>
         {chosenNames.length === 0 ? (
           <p className="form-hint" style={{ marginTop: 0 }}>Nothing chosen yet.</p>
         ) : (
@@ -303,11 +311,16 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
         )}
       </div>
 
-      {form.kind === 'time_in_state' && form.input && (
-        <div className="form-group">
+      {asksStates && (
+        <div className="form-group" id="derived-states-group">
           <span className="form-label" id="derived-states-label">States That Count <RequiredMark /></span>
           {options ? (
-            <div role="group" aria-labelledby="derived-states-label" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+            <div
+              role="group"
+              aria-labelledby="derived-states-label"
+              aria-describedby={check.errors.states ? 'derived-states-error' : undefined}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}
+            >
               {options.map(state => (
                 <label key={state} style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px' }}>
                   <input
@@ -331,9 +344,11 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
                 value={form.statesText}
                 onChange={e => set({ statesText: e.target.value })}
                 placeholder="e.g. ACTIVE, READY"
+                {...fieldErrorProps(check.errors.states, 'derived-states-error')}
               />
             </Tooltip>
           )}
+          <FieldError id="derived-states-error" error={check.errors.states} />
         </div>
       )}
 

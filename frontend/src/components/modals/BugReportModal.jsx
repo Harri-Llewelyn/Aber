@@ -1,21 +1,21 @@
 import React, { useState } from 'react'
 import { GITHUB_REPO_URL } from '../../constants'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { IconBug, IconExternalLink } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
+import { useFormCheck } from '../../hooks/useFormCheck'
 
 export function BugReportModal({ onClose, showToast, persona, activeTab }) {
   const [title, setTitle]       = useState('')
   const [category, setCategory] = useState('UI Dashboard')
   const [severity, setSeverity] = useState('Medium')
   const [desc, setDesc]         = useState('')
-  // A blank issue is not filed: Submit is held, and says why, until there is a title.
-  const problem = title.trim() ? null : 'Give the issue a title'
+  // A blank issue is not filed.
+  const check = useFormCheck({ title: { id: 'bug-title', missing: !title.trim() && 'Give the issue a title' } })
 
   const submitToGithub = () => {
-    if (problem) return
-
     const issueTitle = `[${severity.toUpperCase()}] [${category}] ${title}`
     const issueBody = `## 🐛 Bug Report / Issue Summary
 
@@ -45,28 +45,21 @@ ${desc || 'No detailed steps provided.'}
 
   return (
     <Modal
-      title="Report platform bug / create GitHub issue"
+      title="Report Platform Bug / Create GitHub Issue"
       icon={<IconBug size={18} style={{ color: 'var(--danger)' }} />}
       onClose={onClose}
-      problem={problem}
+      problem={check.problem}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            onClick={submitToGithub}
-            disabled={problem !== null}
-            title={problem ?? undefined}
-            style={{ gap: '6px' }}
-          >
-            <IconExternalLink size={13} /> Submit Issue on GitHub ↗
-          </ActionButton>
-        </>
+        <ActionButton className="btn btn-primary" onClick={() => check.press(submitToGithub)} style={{ gap: '6px' }}>
+          <IconExternalLink size={13} /> Submit Issue on GitHub ↗
+        </ActionButton>
       }
     >
       <div className="form-group">
         <label className="form-label" htmlFor="bug-title">Issue Title <RequiredMark /></label>
-        <input id="bug-title" className="form-control" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Telemetry metric display error on devices page" aria-required="true" />
+        <input id="bug-title" className="form-control" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Telemetry metric display error on devices page" aria-required="true" {...fieldErrorProps(check.errors.title, 'bug-title-error')} />
+        <FieldError id="bug-title-error" error={check.errors.title} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>

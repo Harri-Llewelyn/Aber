@@ -147,7 +147,7 @@ describe('the Type control', () => {
     await show([gateway()])
     openEdit()
     fireEvent.change(typeSelect(), { target: { value: 'simulated' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Gateway' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     const [, body] = api.put.mock.calls[0]
@@ -161,9 +161,9 @@ describe('the Type control', () => {
     await show([gateway({ deployment: 'host', is_simulated: true })])
     openEdit()
     fireEvent.change(typeSelect(), { target: { value: 'remote' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Gateway' }))
     // Leaving Simulated for Remote ends any credential it holds, so Save asks first.
-    fireEvent.click(await screen.findByRole('button', { name: 'Change type' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Change Type' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     const [, body] = api.put.mock.calls[0]
@@ -245,7 +245,7 @@ describe('the Location control', () => {
     await show([gateway({ deployment: 'remote', cell_id: 'cell-1' })])
     openEdit()
     fireEvent.change(typeSelect(), { target: { value: 'simulated' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Gateway' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     const [, body] = api.put.mock.calls[0]

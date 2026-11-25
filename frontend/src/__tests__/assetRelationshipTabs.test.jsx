@@ -175,7 +175,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     // Site-Wide is one radio of three, not a checkbox beside the cell picker: you cannot choose
     // Site-Wide and a cell because they are the same question.
     fireEvent.click(screen.getByRole('radio', { name: /Site-Wide/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save Gateway$/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ location_scope: 'site_wide', cell_id: '' })
@@ -195,7 +195,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     // Changing the type must not move the cell: where the connector runs and where its assets are
     // are different questions.
     fireEvent.change(document.querySelector('#gateway-type'), { target: { value: 'host' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save Gateway$/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ location_scope: 'cell', cell_id: 'cell-1' })

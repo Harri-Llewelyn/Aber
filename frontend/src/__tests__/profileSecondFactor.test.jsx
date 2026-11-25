@@ -31,6 +31,7 @@ vi.mock('../api', () => ({
 }))
 
 import { api } from '../api'
+import { pressHeld } from '../test/dialogs'
 
 const PHONE = { id: 'f-phone', friendly_name: 'Work phone', factor_type: 'totp', status: 'verified', created_at: '2026-10-20T09:15:00Z' }
 const TABLET = { id: 'f-tablet', friendly_name: 'Tablet', factor_type: 'totp', status: 'verified', created_at: '2026-10-21T09:15:00Z' }
@@ -140,7 +141,9 @@ describe('adding one', () => {
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Authenticator app')
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'work phone' } })
     expect(dialog).toHaveTextContent('You already have an authenticator with that name.')
-    expect(within(dialog).getByRole('button', { name: 'Continue' })).toBeDisabled()
+    pressHeld(dialog, 'Continue', 'You already have an authenticator with that name.')
+    fireEvent.keyDown(within(dialog).getByLabelText('Name'), { key: 'Enter' })
+    expect(api.startFactorEnrolment).not.toHaveBeenCalled()
   })
 
   it('confirms it with a code, says so, and reads the list again', async () => {
@@ -178,14 +181,12 @@ describe('adding one', () => {
     const dialog = await openAdd()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Continue' }))
     const code = await within(dialog).findByLabelText('Code')
-    const confirm = within(dialog).getByRole('button', { name: 'Add Authenticator' })
-    // The name typed at the first step does not make the code step scold before its own edit.
+    // The press that brought the code step does not make it scold.
     expect(dialog.querySelector('.modal-problem')).toHaveTextContent(/^$/)
-    expect(confirm).toHaveClass('btn-disabled')
     fireEvent.change(code, { target: { value: '12345' } })
-    expect(dialog.querySelector('.modal-problem')).toHaveTextContent('Enter the 6-digit code your app shows')
-    expect(confirm).toBeDisabled()
     fireEvent.keyDown(code, { key: 'Enter' })
+    expect(code).toHaveAccessibleDescription(/Enter the 6-digit code your app shows$/)
+    pressHeld(dialog, 'Add Authenticator', 'Enter the 6-digit code your app shows')
     expect(api.verifyFactorCode).not.toHaveBeenCalled()
   })
 
@@ -227,8 +228,8 @@ describe('removing one', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove the authenticator: Tablet' }))
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('Your other authenticator still works.')
-    const remove = within(dialog).getByRole('button', { name: 'Remove Authenticator' })
-    expect(remove).toBeDisabled()
+    const remove = pressHeld(dialog, 'Remove Authenticator', 'Enter the 6-digit code Tablet shows')
+    expect(api.removeFactor).not.toHaveBeenCalled()
 
     fireEvent.change(within(dialog).getByLabelText('Code from Tablet'), { target: { value: '654321' } })
     fireEvent.click(remove)

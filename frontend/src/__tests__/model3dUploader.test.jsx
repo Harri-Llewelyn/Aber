@@ -136,9 +136,9 @@ describe('Model3DUploader', () => {
       render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} {...props} />)
       await waitFor(() => expect(screen.getByText(/12.4 MiB/)).toBeInTheDocument())
       fireEvent.click(getByTooltip(/Detach this model/i))
-      return screen.getByRole('dialog', { name: 'Remove 3D model' })
+      return screen.getByRole('dialog', { name: 'Remove 3D Model' })
     }
-    const confirmDialog = () => screen.queryByRole('dialog', { name: 'Remove 3D model' })
+    const confirmDialog = () => screen.queryByRole('dialog', { name: 'Remove 3D Model' })
 
     it('asks first, naming the device and saying the file is deleted', async () => {
       const dialog = await openRemove()

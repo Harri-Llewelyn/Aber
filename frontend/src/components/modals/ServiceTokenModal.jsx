@@ -110,8 +110,6 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
     }
   }, [principal, principalName, days, showToast])
 
-  const close = useCallback(() => onClose(), [onClose])
-
   const expiresOn = minted ? formatDate(minted.expires_at) : null
   // Without telemetry:read an identity sees nothing through i3X, so a setup would only mislead.
   const readsTelemetry = (principal.permissions || []).includes('telemetry:read')
@@ -122,24 +120,21 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
     <Modal
       title={`Token for “${principalName}”`}
       size="lg"
-      onClose={close}
+      busy={busy}
+      onClose={onClose}
       error={confirming ? error : null}
+      dismiss={confirming ? 'Cancel' : 'Done'}
       footer={confirming ? (
-        <>
-          <button className="btn btn-ghost" onClick={close}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Issuing…"
-            className="btn btn-primary"
-            onClick={mint}
-            title="Sign a token and show it once"
-          >
-            <IconLock size={14} /> Issue Token
-          </ActionButton>
-        </>
-      ) : (
-        <button className="btn btn-primary" onClick={close}>Done</button>
-      )}
+        <ActionButton
+          pending={busy}
+          pendingLabel="Issuing…"
+          className="btn btn-primary"
+          onClick={mint}
+          title="Sign a token and show it once"
+        >
+          <IconLock size={14} /> Issue Token
+        </ActionButton>
+      ) : null}
     >
       {confirming && (
         <>
@@ -159,7 +154,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="svc-token-ttl">Valid for</label>
+            <label className="form-label" htmlFor="svc-token-ttl">Valid For</label>
             <select
               id="svc-token-ttl"
               className="form-control"

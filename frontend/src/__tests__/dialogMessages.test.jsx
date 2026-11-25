@@ -6,6 +6,7 @@ import { NewPasswordModal } from '../components/modals/NewPasswordModal'
 import { GatewayCredentialModal } from '../components/modals/GatewayCredentialModal'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
+import { wrongIn } from '../test/dialogs'
 
 /**
  * The toasts sit outside every dialog, so while one is open they are drawn beneath it, cannot be
@@ -42,7 +43,7 @@ describe('a copy the browser refuses', () => {
   it('is said beside a password shown once', async () => {
     render(<NewPasswordModal email="operator@aber.local" password="pw-shown-once" onClose={vi.fn()} showToast={vi.fn()} />)
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy password' })) })
-    expect(inDialog(/New password/).getByRole('alert')).toHaveTextContent(CLIPBOARD)
+    expect(inDialog(/New Password/).getByRole('alert')).toHaveTextContent(CLIPBOARD)
   })
 
   it("is said in a broker credential's dialog, and cleared by a copy that works", async () => {
@@ -57,7 +58,7 @@ describe('a copy the browser refuses', () => {
     await screen.findByRole('button', { name: 'Copy password' })
 
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy password' })) })
-    expect(inDialog(/Broker credential/).getByRole('alert')).toHaveTextContent(CLIPBOARD)
+    expect(inDialog(/Broker Credential/).getByRole('alert')).toHaveTextContent(CLIPBOARD)
 
     document.execCommand = vi.fn(() => true)
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy password' })) })
@@ -78,26 +79,39 @@ describe('attached links', () => {
     await waitFor(() => expect(screen.queryByText(/Loading links/)).toBeNull())
   }
 
-  it('holds Save Link until the link has a name and an address, and says why in the dialog', async () => {
+  it('asks for a name and an address on the press, and says what is missing beside each and above the buttons', async () => {
     await show()
     fireEvent.click(screen.getByRole('button', { name: /Add Link/i }))
+    const dialog = screen.getByRole('dialog', { name: /Attached Links/ })
     const save = screen.getByRole('button', { name: 'Save Link' })
-    expect(save).toBeDisabled()
-    expect(save).toHaveClass('btn-disabled')
-    fireEvent.change(screen.getByLabelText(/^Link URL/), { target: { value: 'https://example.com/drawing.pdf' } })
-    expect(inDialog(/Attached Links/).getByText('Give the link a name')).toBeInTheDocument()
+    expect(wrongIn(dialog)).toEqual([])
+    fireEvent.click(save)
+    expect(wrongIn(dialog)).toEqual(['Give the link a name', 'Enter the address it links to', 'Give the link a name'])
+    expect(screen.getByLabelText('Display Name')).toHaveFocus()
     fireEvent.change(screen.getByLabelText('Display Name'), { target: { value: 'Drawing' } })
     fireEvent.change(screen.getByLabelText(/^Link URL/), { target: { value: 'example.com' } })
-    expect(inDialog(/Attached Links/).getByText('The address must start with http:// or https://')).toBeInTheDocument()
+    fireEvent.click(save)
+    expect(screen.getByLabelText(/^Link URL/)).toHaveAccessibleDescription('The address must start with http:// or https://')
     expect(api.post).not.toHaveBeenCalled()
+    // A form opened again does not scold for the last one.
+    fireEvent.click(screen.getByRole('button', { name: /Add Link/i }))
+    expect(wrongIn(dialog)).toEqual([])
+  })
+
+  it('sends nothing for a link that has not changed', async () => {
+    await show()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Operating Manual' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Link' }))
+    expect(wrongIn(screen.getByRole('dialog', { name: /Attached Links/ }))).toEqual(['Nothing has changed.'])
+    expect(api.put).not.toHaveBeenCalled()
   })
 
   it('says in the confirmation that a removal failed, and keeps it open', async () => {
     await show()
     api.delete.mockRejectedValue(new Error('The link could not be removed.'))
     fireEvent.click(screen.getByRole('button', { name: /Remove/i }))
-    const confirm = screen.getByRole('dialog', { name: 'Remove link' })
-    await act(async () => { fireEvent.click(within(confirm).getByRole('button', { name: 'Remove link' })) })
+    const confirm = screen.getByRole('dialog', { name: 'Remove Link' })
+    await act(async () => { fireEvent.click(within(confirm).getByRole('button', { name: 'Remove Link' })) })
 
     expect(within(confirm).getByRole('alert')).toHaveTextContent('The link could not be removed.')
   })

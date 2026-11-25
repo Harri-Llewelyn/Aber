@@ -36,7 +36,7 @@ describe('taking out and bringing back', () => {
   // The scale's rule decides, not the pairing: Archive holds a field, the two Restores hold none.
   it('opens Archive, a form with one select, at the default step', () => {
     render(<ArchiveModal entityId="cell-1" displayName="Assembly Line 1" onArchive={vi.fn()} onCancel={vi.fn()} />)
-    expect(screen.getByRole('combobox', { name: 'Auto-purge' })).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: 'Auto-Purge' })).toBeTruthy()
     expect(box().className).toBe('modal')
   })
 
@@ -56,7 +56,7 @@ describe('taking out and bringing back', () => {
   })
 })
 
-describe('Keyboard shortcuts', () => {
+describe('Keyboard Shortcuts', () => {
   it('opens at the wide step with every group in the one grid that sets them two to a row', () => {
     render(<ShortcutsModal onClose={vi.fn()} />)
     expect(box()).toHaveClass('modal-wide')

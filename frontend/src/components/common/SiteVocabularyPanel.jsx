@@ -187,7 +187,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
             deniedTitle={deniedTitle}
             onClick={() => setImporting(true)}
           >
-            <IconUpload size={14} /> Import vocabulary
+            <IconUpload size={14} /> Import Vocabulary
           </ActionButton>
         </div>
       </div>
@@ -255,7 +255,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
                             onClick={() => stopSharing(file)}
                             aria-label={`Stop sharing the definitions of ${file.name}`}
                           >
-                            Stop sharing
+                            Stop Sharing
                           </ActionButton>
                         ) : (
                           <ActionButton
@@ -265,7 +265,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
                             onClick={() => setSharing(file)}
                             aria-label={`Share the definitions of ${file.name}`}
                           >
-                            Share definitions
+                            Share Definitions
                           </ActionButton>
                         )}
                         <ActionButton
@@ -319,7 +319,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
 
       {removing && (
         <ConfirmModal
-          title={<>Remove vocabulary <span className="mono">{removing.name}</span></>}
+          title={<>Remove Vocabulary <span className="mono">{removing.name}</span></>}
           message={<>
             This removes <strong>{removing.name}</strong> and its {plural(removing.concept_count, 'concept')} from this site.
             {' '}{usedBy(removing) > 0
@@ -327,7 +327,7 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
               : <>No catalog metric uses it.</>}
             {' '}The file can be imported again.
           </>}
-          confirmLabel="Remove vocabulary"
+          confirmLabel="Remove Vocabulary"
           pendingLabel="Removing…"
           onConfirm={remove}
           onCancel={() => setRemoving(null)}
@@ -336,12 +336,12 @@ function SiteVocabularyPanel({ canManage, onUseEntry, showToast }) {
 
       {sharing && (
         <ConfirmModal
-          title={<>Share the definitions of <span className="mono">{sharing.name}</span></>}
+          title={<>Share the Definitions of <span className="mono">{sharing.name}</span></>}
           message={<>
             An export will carry the definition of each of its concepts, and so will the AAS API.
             {' '}<strong>The licence is the site's responsibility.</strong> Confirm only that it lets you share these definitions.
           </>}
-          confirmLabel="Share definitions"
+          confirmLabel="Share Definitions"
           pendingLabel="Sharing…"
           confirmClassName="btn btn-primary"
           onConfirm={() => share(sharing, true)}

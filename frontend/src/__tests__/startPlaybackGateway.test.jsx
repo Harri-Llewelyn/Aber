@@ -25,6 +25,7 @@ vi.mock('../api', async () => {
 })
 
 import { api } from '../api'
+import { pressHeld } from '../test/dialogs'
 
 const GW = 'gwy160000000000400080000'
 const OTHER_GW = 'gwy170000000000400080000'
@@ -45,7 +46,7 @@ const ONE_DEVICE = { ...NODE_ONLY, manifest: { birth_captured: true, device_ids:
 
 const workerHolding = (held) => ({ held_edge_nodes: held, reported_at: new Date().toISOString() })
 const flat = (node) => node.textContent.replace(/\s+/g, ' ').trim()
-const playBack = () => screen.getByRole('button', { name: 'Play back' })
+const playBack = () => screen.getByRole('button', { name: 'Play Back' })
 
 function open(capture = NODE_ONLY, onConfirm = vi.fn()) {
   render(<StartPlaybackModal capture={capture} onConfirm={onConfirm} onCancel={vi.fn()} />)
@@ -69,8 +70,8 @@ describe('a site with one Playback gateway', () => {
     expect(flat(line)).toBe(`Plays back as Playback (${GW})`)
     expect(within(line).getByText('Playback').tagName).toBe('STRONG')
     expect(line.querySelector('.mono')).toHaveTextContent(GW)
-    expect(screen.queryByLabelText('Playback gateway')).toBeNull()
-    expect(screen.queryByRole('combobox', { name: /Playback gateway/ })).toBeNull()
+    expect(screen.queryByLabelText('Playback Gateway')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: /Playback Gateway/ })).toBeNull()
     expect(screen.queryByText(/Choose the Playback gateway/)).toBeNull()
   })
 
@@ -91,9 +92,11 @@ describe('a site with one Playback gateway', () => {
   })
 
   it('offers the capture its devices to map onto at once', async () => {
-    open(ONE_DEVICE)
-    expect(await screen.findByLabelText(`Target device for ${RECORDED}`)).toBeInTheDocument()
-    expect(playBack()).toBeDisabled()
+    const confirm = open(ONE_DEVICE)
+    const select = await screen.findByLabelText(`Target device for ${RECORDED}`)
+    pressHeld(screen.getByRole('dialog'), 'Play Back', '1 device still to map')
+    expect(select).toHaveAccessibleDescription('1 device still to map')
+    expect(confirm).not.toHaveBeenCalled()
   })
 
   it('says nothing against a gateway that holds a credential the worker holds as well', async () => {
@@ -105,7 +108,7 @@ describe('a site with one Playback gateway', () => {
     expect(document.querySelector('.modal-problem')).toBeEmptyDOMElement()
   })
 
-  describe('holds Play back, with its reason, for a gateway that cannot publish', () => {
+  describe('sends nothing, and says why on the press, for a gateway that cannot publish', () => {
     const CASES = [
       {
         name: 'no broker credential',
@@ -129,15 +132,14 @@ describe('a site with one Playback gateway', () => {
 
     it.each(CASES)('$name', async ({ setup, note, reason }) => {
       setup()
-      open()
+      const onConfirm = open()
       const line = await screen.findByText(/Plays back as/)
       await waitFor(() => expect(flat(line)).toBe(`Plays back as Playback (${GW}) — ${note}`))
-      expect(playBack()).toBeDisabled()
-      expect(playBack()).toHaveAccessibleDescription(reason)
-      // The reason is said from the person's first edit, never as the dialog opens.
-      expect(document.querySelector('.modal-problem')).toBeEmptyDOMElement()
+      // Never as the dialog opens, nor on an edit.
       edit()
-      expect(document.querySelector('.modal-problem')).toHaveTextContent(reason)
+      expect(document.querySelector('.modal-problem')).toBeEmptyDOMElement()
+      pressHeld(screen.getByRole('dialog'), 'Play Back', reason)
+      expect(onConfirm).not.toHaveBeenCalled()
     })
   })
 
@@ -164,7 +166,7 @@ describe('a site with two Playback gateways', () => {
 
   it('offers the select, with nothing chosen', async () => {
     open()
-    const select = await screen.findByLabelText('Playback gateway')
+    const select = await screen.findByLabelText('Playback Gateway')
     expect(select).toHaveValue('')
     expect(within(select).getByRole('option', { name: 'Choose the Playback gateway…' })).toBeInTheDocument()
     expect(within(select).getByRole('option', { name: `Playback (${GW})` })).toBeInTheDocument()
@@ -172,18 +174,18 @@ describe('a site with two Playback gateways', () => {
     expect(screen.queryByText(/Plays back as/)).toBeNull()
   })
 
-  it('holds Play back until one is chosen, and says so', async () => {
-    open()
-    await screen.findByLabelText('Playback gateway')
-    expect(playBack()).toBeDisabled()
-    expect(playBack()).toHaveAccessibleDescription('Choose the Playback gateway')
-    edit()
-    expect(document.querySelector('.modal-problem')).toHaveTextContent('Choose the Playback gateway')
+  it('sends nothing until one is chosen, and says so on the press', async () => {
+    const onConfirm = open()
+    const select = await screen.findByLabelText('Playback Gateway')
+    pressHeld(screen.getByRole('dialog'), 'Play Back', 'Choose the Playback gateway')
+    expect(select).toHaveAccessibleDescription(/Choose the Playback gateway$/)
+    expect(select).toHaveFocus()
+    expect(onConfirm).not.toHaveBeenCalled()
   })
 
   it('plays back on the one chosen', async () => {
     const onConfirm = open()
-    fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: 'gw-playback-2' } })
+    fireEvent.change(await screen.findByLabelText('Playback Gateway'), { target: { value: 'gw-playback-2' } })
     await waitFor(() => expect(playBack()).toBeEnabled())
     fireEvent.click(playBack())
     await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ targetGatewayId: 'gw-playback-2', deviceMap: {}, speed: 1 }))
@@ -192,7 +194,7 @@ describe('a site with two Playback gateways', () => {
   it('says a gateway that cannot publish beside its name in the list', async () => {
     api.playbackTargets.mockResolvedValue([TARGET, { ...REPLACEMENT, gateway_has_broker_credential: false }])
     open()
-    const select = await screen.findByLabelText('Playback gateway')
+    const select = await screen.findByLabelText('Playback Gateway')
     expect(within(select).getByRole('option', { name: `Playback 2 (${OTHER_GW}) — no broker credential` })).toBeInTheDocument()
     expect(within(select).getByRole('option', { name: `Playback (${GW})` })).toBeInTheDocument()
   })
@@ -201,14 +203,14 @@ describe('a site with two Playback gateways', () => {
     api.playbackWorkerStatus.mockResolvedValue(workerHolding([GW]))
     api.playbackStaleCredentials.mockResolvedValue([{ sparkplug_id: GW }])
     open()
-    const select = await screen.findByLabelText('Playback gateway')
+    const select = await screen.findByLabelText('Playback Gateway')
     await waitFor(() => expect(within(select).getByRole('option', { name: `Playback (${GW}) — worker still has the old password` })).toBeInTheDocument())
     expect(within(select).getByRole('option', { name: `Playback 2 (${OTHER_GW}) — worker has no password` })).toBeInTheDocument()
   })
 
   it('keeps the mapping sentence whole once one is chosen', async () => {
     open(ONE_DEVICE)
-    fireEvent.change(await screen.findByLabelText('Playback gateway'), { target: { value: 'gw-playback-2' } })
+    fireEvent.change(await screen.findByLabelText('Playback Gateway'), { target: { value: 'gw-playback-2' } })
     const hint = await screen.findByText(/plays back as its replay lane/)
     expect(flat(hint)).toContain('a device of Playback 2 that stands in for it.')
   })
@@ -220,7 +222,7 @@ describe('a site where no Playback gateway can be found', () => {
     open()
     expect(await screen.findByText(/could not be found/)).toBeInTheDocument()
     expect(screen.queryByText(/Plays back as/)).toBeNull()
-    expect(screen.queryByLabelText('Playback gateway')).toBeNull()
-    expect(playBack()).toBeDisabled()
+    expect(screen.queryByLabelText('Playback Gateway')).toBeNull()
+    pressHeld(screen.getByRole('dialog'), 'Play Back', 'The Playback gateway could not be found')
   })
 })

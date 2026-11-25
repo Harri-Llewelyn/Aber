@@ -118,7 +118,7 @@ describe('Suppression windows', () => {
 
   it('puts Change… and End now in one grid under their window, so they share a row', async () => {
     await show()
-    for (const [reason, end] of [['Belt change on the feeder', 'End now'], ['Gearbox swap', 'Cancel window']]) {
+    for (const [reason, end] of [['Belt change on the feeder', 'End Now'], ['Gearbox swap', 'Cancel Window']]) {
       const change = within(item(reason)).getByRole('button', { name: 'Change…' })
       const ending = within(item(reason)).getByRole('button', { name: end })
       expectDrawerButton(change)
@@ -133,7 +133,7 @@ describe('Suppression windows', () => {
 
   it('puts Schedule window… alone in a grid under the list, so it spans the drawer', async () => {
     await show()
-    const schedule = screen.getByRole('button', { name: /Schedule window…/ })
+    const schedule = screen.getByRole('button', { name: /Schedule Window…/ })
     expectDrawerButton(schedule)
     expect(itemsOf(gridOf(schedule))).toEqual([schedule])
     const list = document.querySelector('.suppression-window-list')
@@ -143,7 +143,7 @@ describe('Suppression windows', () => {
 
   it('spans the drawer with Schedule window… when no window is listed', async () => {
     await show([])
-    const schedule = screen.getByRole('button', { name: /Schedule window…/ })
+    const schedule = screen.getByRole('button', { name: /Schedule Window…/ })
     expectDrawerButton(schedule)
     expect(itemsOf(gridOf(schedule))).toEqual([schedule])
   })
@@ -186,8 +186,8 @@ describe('an area plan\'s buttons', () => {
 
   it('puts the turns in a grid, then Save Turn and Discard in the same grid while a turn is unsaved', () => {
     panel()
-    const left = screen.getByRole('button', { name: 'Turn left' })
-    const right = screen.getByRole('button', { name: 'Turn right' })
+    const left = screen.getByRole('button', { name: 'Turn Left' })
+    const right = screen.getByRole('button', { name: 'Turn Right' })
     expectDrawerButton(left)
     expectDrawerButton(right)
     const grid = gridOf(left)
@@ -209,8 +209,8 @@ describe('an area plan\'s buttons', () => {
 
   it('puts Replace plan and Remove plan in a grid under the plan', () => {
     panel()
-    const replace = screen.getByRole('button', { name: 'Replace plan' })
-    const remove = screen.getByRole('button', { name: 'Remove plan' })
+    const replace = screen.getByRole('button', { name: 'Replace Plan' })
+    const remove = screen.getByRole('button', { name: 'Remove Plan' })
     expectDrawerButton(replace)
     expectDrawerButton(remove)
     expect(gridOf(replace)).toBe(gridOf(remove))
@@ -235,7 +235,7 @@ describe('the cell drawer', () => {
     expectDrawerButton(links)
     expect(gridOf(links)).toHaveClass('context-panel-actions')
 
-    const schedule = await within(drawer).findByRole('button', { name: /Schedule window…/ })
+    const schedule = await within(drawer).findByRole('button', { name: /Schedule Window…/ })
     expectDrawerButton(schedule)
     expect(itemsOf(gridOf(schedule))).toEqual([schedule])
   })

@@ -333,7 +333,7 @@ describe('where each dialog starts', () => {
 
   const cases = [
     ['AddPersonModal', <AddPersonModal key="a" onClose={vi.fn()} />, () => screen.getByLabelText('Email')],
-    ['ChangePasswordModal', <ChangePasswordModal key="b" email="admin@aber.local" onClose={vi.fn()} />, () => screen.getByLabelText('Current password')],
+    ['ChangePasswordModal', <ChangePasswordModal key="b" email="admin@aber.local" onClose={vi.fn()} />, () => screen.getByLabelText('Current Password')],
     ['TakeBackupModal', <TakeBackupModal key="c" holds="the platform database" onConfirm={vi.fn()} onCancel={vi.fn()} />, () => screen.getByLabelText('Note (optional)')],
     ['ServicePrincipalCreateModal', <ServicePrincipalCreateModal key="d" onClose={vi.fn()} />, () => screen.getByLabelText('Name')],
     ['ServicePrincipalDescribeModal', <ServicePrincipalDescribeModal key="e" principal={PRINCIPAL} onClose={vi.fn()} />, () => screen.getByLabelText('Name')],

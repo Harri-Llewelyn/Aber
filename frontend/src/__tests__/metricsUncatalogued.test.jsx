@@ -273,7 +273,7 @@ describe('Uncatalogued tab: Catalogue', () => {
     await openTab()
     fireEvent.click(catalogueButton('Hydraulic/PRESSURE'))
     const reads = api.get.mock.calls.filter(([p]) => p === '/api/v1/uncatalogued-metrics').length
-    fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Add Metric' })).getByRole('button', { name: 'Add Metric' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/v1/metric-catalog',

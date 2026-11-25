@@ -57,7 +57,7 @@ describe('the Devices form', () => {
     await showDevices()
     fireEvent.click(screen.getByRole('button', { name: /New Device/i }))
     fireEvent.change(screen.getByPlaceholderText(/CNC Mill 01/), { target: { value: 'Lathe_02' } })
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     expect(api.post.mock.calls[0][1]).toMatchObject({ asset_name: 'Lathe_02' })
@@ -68,10 +68,11 @@ describe('the Devices form', () => {
     await showDevices()
     fireEvent.click(within(document.querySelector('.page-main')).getByText('CNC_01'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.change(screen.getByPlaceholderText(/CNC Mill 01/), { target: { value: 'CNC_01A' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
-    expect(api.put.mock.calls[0][1]).toMatchObject({ asset_name: 'CNC_01' })
+    expect(api.put.mock.calls[0][1]).toMatchObject({ asset_name: 'CNC_01A' })
     expect(api.put.mock.calls[0][1]).not.toHaveProperty('connection_method')
   })
 })

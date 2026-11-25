@@ -74,7 +74,7 @@ describe('the playback dialog', () => {
     render(<StartPlaybackModal capture={CAPTURE} onConfirm={vi.fn()} onCancel={vi.fn()} />)
     await screen.findByText(/Plays back as/)
     // The map starts empty, so the one captured device offers its lane.
-    fireEvent.click(await screen.findByText(/Prepare replay lanes/))
+    fireEvent.click(await screen.findByText(/Prepare Replay Lanes/))
     expect(await screen.findByText(/replay lanes could not be read/)).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/Devices page|bind it/)
   })

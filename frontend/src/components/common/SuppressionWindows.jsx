@@ -18,7 +18,7 @@ const WINDOWS_HELP = 'A planned period, such as maintenance, when alerts here ar
  * A drawer's Suppression windows section: the current and upcoming windows on a device, a gateway
  * or a cell, each with its reason, its start and end in local time, and who scheduled it (their
  * display name with the email as its tooltip, or the email alone). A Shopfloor Manager or an
- * Administrator sees Schedule window…, and Change… and End now (Cancel window, before it starts) on
+ * Administrator sees Schedule Window…, and Change… and End Now (Cancel Window, before it starts) on
  * each; the database refuses everyone else as well.
  *
  * A device's drawer passes `cell`, the cell it is in now, `{ id, name }`: that cell's windows cover
@@ -126,7 +126,7 @@ export function SuppressionWindows({ kind, subjectId, subjectName, cell = null, 
                       Change…
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm context-action" tabIndex={tab} onClick={() => setEnding(w)}>
-                      {current ? 'End now' : 'Cancel window'}
+                      {current ? 'End Now' : 'Cancel Window'}
                     </button>
                   </div>
                 )}
@@ -139,7 +139,7 @@ export function SuppressionWindows({ kind, subjectId, subjectName, cell = null, 
       {canWrite && (
         <div className="context-buttons">
           <button type="button" className="btn btn-ghost btn-sm context-action" tabIndex={tab} onClick={() => setScheduling(true)}>
-            <IconPlus size={12} /> Schedule window…
+            <IconPlus size={12} /> Schedule Window…
           </button>
         </div>
       )}

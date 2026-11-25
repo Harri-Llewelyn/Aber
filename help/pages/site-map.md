@@ -44,7 +44,7 @@ To acknowledge an alert:
 1. Select the counter, then **Acknowledge** under the alert.
 2. Choose a reason: **Investigating**, **Known cause**, **Planned work**, **Sensor or model fault**, **Threshold wrong** or **Other**.
 3. Add a note if it helps. **Other** needs one. Everyone who can see the alert reads it.
-4. Select **Acknowledge alert**.
+4. Select **Acknowledge Alert**.
 
 The alert stays in the list, after the others, with a tick. It says who acknowledged it, when, and why. It names the person by their display name. Point at the name to see their email address. A person with no display name shows as their email address. It leaves the number until it resolves. If it fires again before it resolves, it stays acknowledged. Once it resolves, the next time it fires it counts again.
 

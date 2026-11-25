@@ -109,7 +109,7 @@ const saysNothing = (control) => {
 describe('a person’s fields', () => {
   it('Add Person, the display name', () => {
     render(<AddPersonModal onClose={vi.fn()} />)
-    const name = screen.getByLabelText(/^Display name/)
+    const name = screen.getByLabelText(/^Display Name/)
     saysNothing(name)
     type(name, TOO_LONG)
     saysWhy(name, 'A display name is 80 characters at most.', { hint: 'They can change it on their Profile page.' })
@@ -119,7 +119,7 @@ describe('a person’s fields', () => {
 
   it('Change Name', () => {
     render(<DisplayNameModal person={PERSON} onClose={vi.fn()} />)
-    const name = screen.getByLabelText('Display name')
+    const name = screen.getByLabelText('Display Name')
     saysNothing(name)
     type(name, TOO_LONG)
     saysWhy(name, 'A display name is 80 characters at most.', { hint: 'Leave it empty to show their email address alone.' })
@@ -127,7 +127,7 @@ describe('a person’s fields', () => {
 
   it('Change Email', () => {
     render(<ChangeEmailModal person={PERSON} onClose={vi.fn()} />)
-    const email = screen.getByLabelText(/^New email address/)
+    const email = screen.getByLabelText(/^New Email Address/)
     saysNothing(email)
     type(email, 'not-an-address')
     saysWhy(email, 'That is not an email address.', { hint: 'Their role, name and history stay.' })

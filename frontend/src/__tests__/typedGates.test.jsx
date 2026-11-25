@@ -10,6 +10,7 @@ import { CaptureTab } from '../components/tabs/CaptureTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { PeopleSection } from '../components/tabs/PeopleSection'
 import { tabLink } from '../test/tabBar'
+import { pressHeld } from '../test/dialogs'
 
 /**
  * Typed text guards removing a person's access, whoever they are, and every act that cannot be
@@ -112,7 +113,7 @@ describe('Remove Access', () => {
   it('asks for what the dialog names them by, for an account with no email address', async () => {
     const who = person('a0000000-0000-4000-8000-000000000004', null, 'Operator', { display_name: 'Sam Jones' })
     const dialog = await openRemove(who, 'Sam Jones')
-    expect(dialog).toHaveAccessibleName('Remove access for Sam Jones')
+    expect(dialog).toHaveAccessibleName('Remove Access for Sam Jones')
     await holdsUntilTyped({ dialog, label: 'name', text: 'Sam Jones', button: 'Remove Access', act: api.removePersonAccess })
   })
 
@@ -163,7 +164,7 @@ describe('a stored capture', () => {
     },
   }
 
-  describe('Delete capture', () => {
+  describe('Delete Capture', () => {
     it.each([
       ['gateway', '/capture/gateway', 'Line 1 Gateway'],
       ['device', '/capture/device', 'CNC Spindle'],
@@ -176,24 +177,24 @@ describe('a stored capture', () => {
       api.deleteCapture.mockResolvedValue()
       render(<CaptureTab showToast={vi.fn()} userRole="Administrator" />)
       fireEvent.click((await screen.findByText(name, { selector: 'td, td *' })).closest('tr'))
-      fireEvent.click(await screen.findByRole('button', { name: 'Delete capture' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete Capture' }))
 
-      const dialog = await screen.findByRole('dialog', { name: 'Delete capture' })
+      const dialog = await screen.findByRole('dialog', { name: 'Delete Capture' })
       expect(dialog).toHaveAccessibleDescription(expect.stringContaining(`Delete the capture of ${name}, recorded `))
-      await holdsUntilTyped({ dialog, label: `${kind} name`, text: name, button: 'Delete capture', act: api.deleteCapture })
+      await holdsUntilTyped({ dialog, label: `${kind} name`, text: name, button: 'Delete Capture', act: api.deleteCapture })
       expect(api.deleteCapture).toHaveBeenCalledWith(CAPTURES[kind])
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     })
   })
 
-  describe('Replace and record', () => {
+  describe('Replace and Record', () => {
     const subject = { kind: 'device', id: 'dev-1', name: 'CNC Spindle' }
 
     it('asks for the name of what it was recorded from', async () => {
       const onConfirm = vi.fn().mockResolvedValue()
       render(<StartCaptureModal subject={subject} existing={CAPTURES.device} onConfirm={onConfirm} onCancel={vi.fn()} />)
       await holdsUntilTyped({
-        dialog: screen.getByRole('dialog'), label: 'device name', text: 'CNC Spindle', button: 'Replace and record', act: onConfirm,
+        dialog: screen.getByRole('dialog'), label: 'device name', text: 'CNC Spindle', button: 'Replace and Record', act: onConfirm,
       })
       expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ replace: true }))
     })
@@ -202,12 +203,12 @@ describe('a stored capture', () => {
       const onConfirm = vi.fn().mockResolvedValue()
       render(<StartCaptureModal subject={subject} existing={null} onConfirm={onConfirm} onCancel={vi.fn()} />)
       expect(screen.queryByLabelText(/^Type the /)).toBeNull()
-      fireEvent.click(screen.getByRole('button', { name: 'Start recording' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Start Recording' }))
       await waitFor(() => expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ replace: false })))
     })
   })
 
-  describe('Replace and upload', () => {
+  describe('Replace and Upload', () => {
     const SUBJECTS = [
       { kind: 'gateway', id: 'gw-1', name: 'Line 1 Gateway', sparkplugId: GATEWAY.sparkplug_id, capture: CAPTURES.gateway },
       { kind: 'device', id: 'dev-1', name: 'CNC Spindle', sparkplugId: DEVICE.sparkplug_id, capture: CAPTURES.device },
@@ -221,15 +222,15 @@ describe('a stored capture', () => {
       }
       const file = new File([JSON.stringify(doc)], 'elsewhere.json', { type: 'application/json' })
       render(<UploadCaptureModal file={file} subjects={SUBJECTS} presetSubject={preset} onConfirm={onConfirm} onCancel={vi.fn()} />)
-      await screen.findByLabelText('File it against')
+      await screen.findByLabelText('File It Against')
       return onConfirm
     }
-    const choose = (key) => fireEvent.change(screen.getByLabelText('File it against'), { target: { value: key } })
+    const choose = (key) => fireEvent.change(screen.getByLabelText('File It Against'), { target: { value: key } })
 
     it('asks for the name of what the stored capture was recorded from', async () => {
       const onConfirm = await upload(SUBJECTS[0])
       await holdsUntilTyped({
-        dialog: screen.getByRole('dialog'), label: 'gateway name', text: 'Line 1 Gateway', button: 'Replace and upload', act: onConfirm,
+        dialog: screen.getByRole('dialog'), label: 'gateway name', text: 'Line 1 Gateway', button: 'Replace and Upload', act: onConfirm,
       })
       expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ replace: true, expectedCaptureId: 'cap-1' }))
     })
@@ -239,17 +240,19 @@ describe('a stored capture', () => {
       fireEvent.change(screen.getByLabelText('Type the gateway name to confirm'), { target: { value: 'Line 1 Gateway' } })
       choose('device:dev-1')
       expect(screen.getByLabelText('Type the device name to confirm')).toHaveValue('')
-      expect(screen.getByRole('button', { name: 'Replace and upload' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Replace and Upload' })).toBeDisabled()
       choose('device:dev-2')
       expect(screen.queryByLabelText(/^Type the /)).toBeNull()
-      fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Upload Capture' }))
       await waitFor(() => expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ replace: false })))
     })
 
-    it('holds the button for the subject first, and asks for no name before one is chosen', async () => {
-      await upload(null)
+    it('asks for the subject first, on the press, and for no name before one is chosen', async () => {
+      const onConfirm = await upload(null)
       expect(screen.queryByLabelText(/^Type the /)).toBeNull()
-      expect(screen.getByRole('button', { name: 'Upload' })).toHaveAccessibleDescription('Choose a subject')
+      pressHeld(screen.getByRole('dialog'), 'Upload Capture', 'Choose a gateway or device to file it against')
+      expect(screen.getByLabelText('File It Against')).toHaveFocus()
+      expect(onConfirm).not.toHaveBeenCalled()
     })
   })
 })
@@ -271,7 +274,7 @@ describe('Delete Automation', () => {
     await screen.findByRole('heading', { name: stored.alias })
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     await holdsUntilTyped({
-      dialog: screen.getByRole('dialog', { name: 'Delete automation' }),
+      dialog: screen.getByRole('dialog', { name: 'Delete Automation' }),
       label: 'automation name', text: stored.alias, button: 'Delete Automation', act: api.deleteAutomation,
     })
     expect(api.deleteAutomation).toHaveBeenCalledWith(stored.id)

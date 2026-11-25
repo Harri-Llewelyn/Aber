@@ -31,24 +31,19 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
     }
   }, [gateway, showToast])
 
-  const footer = credential
-    ? <button className="btn btn-primary" onClick={onClose}>Done</button>
-    : (
-      <>
-        <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+  return (
+    <Modal
+      title={<>Broker Credential for “{gateway.gateway_name}”</>}
+      size="lg"
+      busy={busy}
+      onClose={onClose}
+      error={error}
+      dismiss={credential ? 'Done' : 'Cancel'}
+      footer={credential ? null : (
         <ActionButton pending={busy} pendingLabel="Showing…" className="btn btn-primary" onClick={show}>
           <IconEye size={14} /> Show Credential
         </ActionButton>
-      </>
-    )
-
-  return (
-    <Modal
-      title={<>Broker credential for “{gateway.gateway_name}”</>}
-      size="lg"
-      onClose={onClose}
-      error={error}
-      footer={footer}
+      )}
     >
       {!credential ? (
         <div className="callout callout-info">

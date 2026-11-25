@@ -1,9 +1,11 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { identityUrl } from '../../routes'
+import { useFormCheck } from '../../hooks/useFormCheck'
 
 const NAME_MAX = 80
 const PURPOSE_MAX = 500
@@ -23,12 +25,11 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
   const [error, setError] = useState(null)
   const nameRef = useRef(null)
 
-  const close = useCallback(() => onClose(), [onClose])
-
   const trimmedName = name.trim()
-  const unchanged = trimmedName === (principal.name || '') && purpose.trim() === (principal.purpose || '')
-  const canSubmit = trimmedName.length > 0 && trimmedName.length <= NAME_MAX
-    && purpose.length <= PURPOSE_MAX && !unchanged && !busy
+  const check = useFormCheck(
+    { name: { id: 'principal-describe-name', missing: !trimmedName && 'Give the identity a name' } },
+    { unchanged: trimmedName === (principal.name || '') && purpose.trim() === (principal.purpose || '') },
+  )
 
   const submit = useCallback(async () => {
     setBusy(true)
@@ -51,25 +52,17 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
   return (
     <Modal
       title={`Describe “${principal.name}”`}
-      onClose={close}
+      busy={busy}
+      onClose={onClose}
       lead="The name and purpose only. What the identity holds is fixed at creation: a wider grant would reach every token already issued for it, so that is a new machine identity."
       initialFocus={nameRef}
-      problem={trimmedName ? null : 'Give the identity a name'}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={close}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Saving…"
-            className="btn btn-primary"
-            disabled={!canSubmit}
-            onClick={submit}
-            title={!trimmedName ? 'Give the identity a name' : unchanged ? 'Nothing has changed' : undefined}
-          >
-            Save
-          </ActionButton>
-        </>
+        <ActionButton pending={busy} pendingLabel="Saving…" className="btn btn-primary" onClick={() => check.press(submit)}>
+          Save Identity
+        </ActionButton>
       }
     >
       <div className="form-group">
@@ -83,7 +76,9 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
           value={name}
           onChange={(e) => setName(e.target.value)}
           aria-required="true"
+          {...fieldErrorProps(check.errors.name, 'principal-describe-name-error')}
         />
+        <FieldError id="principal-describe-name-error" error={check.errors.name} />
       </div>
 
       <div className="form-group">

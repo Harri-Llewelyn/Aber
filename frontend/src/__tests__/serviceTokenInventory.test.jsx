@@ -202,14 +202,14 @@ describe('ServiceTokenInventoryModal', () => {
     const onClose = vi.fn()
     openWith([mint('one', 10)], new Set(), { onChanged, onClose })
 
-    screen.getByRole('button', { name: /Done/i }).click()
+    screen.getByText('Close').click()
     expect(onChanged).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalled()
 
     revokeConfirmed('one')
     await waitFor(() => expect(api.revokeServiceToken).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Revoke Token' })).toBeNull())
-    screen.getByRole('button', { name: /Done/i }).click()
+    screen.getByText('Close').click()
     expect(onChanged).toHaveBeenCalled()
   })
 

@@ -1,9 +1,11 @@
 import React, { useId, useState } from 'react'
 import { api } from '../../api'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import CopyableId from '../common/CopyableId'
 import { CredentialField, useCredential } from '../common/CredentialField'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { IconAlertTriangle, IconDatabase } from '../common/Icons'
 import {
@@ -58,9 +60,16 @@ export function ColdStorageDestinationModal({ values = {}, siteKey = '', credent
   const missing = missingDestination({ values: draft, credentialSet: credential.stored || credential.typed, siteKey })
   const on = draft[ENABLED]
   const changed = COLD_STORAGE_DIALOG_KEYS.filter(k => normalise(k, draft[k]) !== normalise(k, values[k]))
-  const nothingToSave = changed.length === 0 && !credential.typed
   // On with half a destination is the state this dialog exists to prevent.
-  const blocked = on && missing.length > 0
+  const check = useFormCheck({
+    ...Object.fromEntries(DESTINATION_FIELDS.map(f => [f.key, {
+      id: `cold-${f.key}`,
+      missing: on && !String(draft[f.key] ?? '').trim() && `Give the ${f.label}, or switch archiving off`,
+    }])),
+    secret: { id: 'cold-secret', missing: on && !credential.stored && !credential.typed && 'Give the secret access key, or switch archiving off' },
+    // No field here sets the site key.
+    siteKey: { missing: on && !String(siteKey ?? '').trim() && 'Switch archiving off: this install has no site key' },
+  }, { unchanged: changed.length === 0 && !credential.typed })
   const summary = destinationSummary({ endpoint: draft['archive.endpoint'], bucket: draft['archive.bucket'], siteKey })
 
   const save = () => run(async () => {
@@ -80,25 +89,18 @@ export function ColdStorageDestinationModal({ values = {}, siteKey = '', credent
 
   return (
     <Modal
-      title="Cold storage destination"
+      title="Cold Storage Destination"
       icon={<IconDatabase size={18} />}
-      onClose={pending ? () => {} : onClose}
+      busy={pending}
+      onClose={onClose}
       lead="Telemetry past the threshold is exported to Parquet in this S3 bucket, verified there, then dropped from the historian. Each object is then the only copy of its span, outside this cluster and its backups."
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={pending}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            pending={pending}
-            pendingLabel="Saving…"
-            disabled={nothingToSave || blocked}
-            title={blocked ? 'Complete the destination, or switch archiving off, to save' : nothingToSave ? 'Nothing has changed' : undefined}
-            onClick={save}
-          >
-            Save
-          </ActionButton>
-        </>
+        <ActionButton className="btn btn-primary" pending={pending} pendingLabel="Saving…" onClick={() => check.press(save)}>
+          Save Destination
+        </ActionButton>
       )}
     >
       <div className="cold-destination-fields">
@@ -114,19 +116,22 @@ export function ColdStorageDestinationModal({ values = {}, siteKey = '', credent
               placeholder={PLACEHOLDERS[f.key]}
               autoComplete="off"
               spellCheck={false}
+              {...fieldErrorProps(check.errors[f.key], `cold-${f.key}-error`)}
             />
+            <FieldError id={`cold-${f.key}-error`} error={check.errors[f.key]} />
           </div>
         ))}
         <CredentialField
           id="cold-secret"
           credential={credential}
           disabled={pending}
+          error={check.errors.secret}
           consequence="If the new one is wrong, the first sign is the nightly export failing to authenticate."
         />
         {/* Text, not a field: no one can change it here. */}
         <div className="form-group metric-edit-facts">
           <div style={{ minWidth: 0 }}>
-            <div className="form-label">Site key</div>
+            <div className="form-label">Site Key</div>
             <div className="mono" style={{ overflowWrap: 'anywhere' }}>
               {siteKey || <span style={{ color: 'var(--text-muted)' }}>Not set</span>}
             </div>

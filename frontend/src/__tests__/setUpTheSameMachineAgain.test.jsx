@@ -214,7 +214,7 @@ const restoreFromArchives = async (row) => {
   api.displayNamesFor.mockResolvedValue(new Map())
   render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} />)
   fireEvent.click(await screen.findByRole('button', { name: /Restore/ }))
-  return (await screen.findByRole('dialog', { name: 'Restore gateway' })).textContent
+  return (await screen.findByRole('dialog', { name: 'Restore Gateway' })).textContent
 }
 
 describe('the Restore dialog', () => {
@@ -237,7 +237,7 @@ describe('the Restore dialog', () => {
     window.history.replaceState(null, '', '/gateways?lifecycle=archived')
     const panel = await openDrawer(gateway({ is_archived: true, archived_at: REVOKED }))
     fireEvent.click(panel.getByRole('button', { name: /Restore Gateway/ }))
-    expect((await screen.findByRole('dialog', { name: 'Restore gateway' })).textContent).toContain(SENTENCE)
+    expect((await screen.findByRole('dialog', { name: 'Restore Gateway' })).textContent).toContain(SENTENCE)
   })
 })
 

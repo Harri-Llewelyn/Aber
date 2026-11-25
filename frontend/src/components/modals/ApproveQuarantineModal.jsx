@@ -6,6 +6,7 @@ import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { ConfirmModal } from './ConfirmModal'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { gatewayAcceptsDevices } from '../../utils/gatewayType'
 import {
@@ -47,10 +48,14 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
   const willBeUnassigned = scope === SCOPE_GATEWAY &&
     resolveDeviceLocation({ location_scope: SCOPE_GATEWAY }, selectedGateway).location_source === SOURCE_UNASSIGNED
 
-  // Area-Wide with no area named and In a cell with no cell would be refused by the database; held here.
-  const problem = !isGateway && locationIncomplete(location, { cellRequired: true })
-    ? (scope === SCOPE_AREA_WIDE ? 'Choose which area the device serves' : 'Choose which cell the device is in')
-    : null
+  // Area-Wide with no area named and In a cell with no cell would be refused by the database.
+  const check = useFormCheck({
+    location: {
+      id: scope === SCOPE_AREA_WIDE ? 'approve-area' : 'approve-cell',
+      missing: !isGateway && locationIncomplete(location, { cellRequired: true })
+        && (scope === SCOPE_AREA_WIDE ? 'Choose which area the device serves' : 'Choose which cell the device is in'),
+    },
+  })
 
   const handleSave = () => runBusy(async () => {
     setError(null)
@@ -68,27 +73,19 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
   })
 
   return (
-    // Escape, the close button and Cancel do nothing while an approval is in flight.
     <Modal
       title={<>Approve Discovered {isGateway ? 'Gateway' : 'Device'} <span className="mono">[{item.asset_name}]</span></>}
       icon={<IconShieldAlert size={18} />}
       size="md"
-      onClose={busy ? () => {} : onCancel}
-      problem={problem}
+      busy={busy}
+      onClose={onCancel}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Approving…"
-            disabled={problem !== null}
-            onClick={handleSave}
-            title={problem ?? undefined}
-          >
-            Approve &amp; Onboard
-          </ActionButton>
-        </>
+        <ActionButton pending={busy} pendingLabel="Approving…" onClick={() => check.press(handleSave)}>
+          Approve &amp; Onboard
+        </ActionButton>
       }
     >
       {/* What the device put on the wire, and why it was held. For a malformed identifier this is
@@ -126,7 +123,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
           is what approve_quarantined_device() writes on the device that is kept (drift check 573). */}
       {accepting && (
         <ConfirmModal
-          title="Accept match"
+          title="Accept Match"
           icon={<IconShieldAlert size={18} />}
           message={
             `Merge the quarantined device '${item.asset_name}'` +
@@ -187,6 +184,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, areas = [], sugg
               areas={areas}
               followGateway
               cellEmptyLabel="— Choose a cell —"
+              error={check.errors.location}
             />
 
             {willBeUnassigned ? (

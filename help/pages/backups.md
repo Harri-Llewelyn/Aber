@@ -4,7 +4,7 @@ Use this page to take a backup of the whole of Aber without a shell. It also sho
 
 A backup holds both databases and the key their Vault secrets are encrypted under. (The Vault is where Aber keeps its secrets.) It also holds the stored files: 3D models, area plans, broker captures and export bundles. Then come the forge, the broker's accounts, Grafana's saved dashboards and, where Aber issues its own certificates, the internal CA. The backup service writes all of it onto its own volume.
 
-This page does not make backups itself. **Take a backup** queues a request, and the backup service does the work. So a backup shows as queued, then running, then as a run in the list that either completed or failed.
+This page does not make backups itself. **Take a Backup** queues a request, and the backup service does the work. So a backup shows as queued, then running, then as a run in the list that either completed or failed.
 
 **The historian in a backup holds raw telemetry for the raw window (14 days unless the site changed it) and the 1-minute, 5-minute and 1-hour rollups.** The historian is the database that stores readings, and rollups are its summaries. Raw readings older than the window are only on cold storage, which no backup includes.
 
@@ -12,15 +12,15 @@ This page does not make backups itself. **Take a backup** queues a request, and 
 
 ## What the controls do
 
-- **Take a backup** queues one now. The note you add is kept with the backup. It is what you read when choosing a backup to restore from, so say why you took it.
-- Where the historian has its own backup, **Take a backup** also asks it for a differential. That is a backup of what changed since its last full one. So one press satisfies both stale-backup alerts.
+- **Take a Backup** queues one now. The note you add is kept with the backup. It is what you read when choosing a backup to restore from, so say why you took it.
+- Where the historian has its own backup, **Take a Backup** also asks it for a differential. That is a backup of what changed since its last full one. So one press satisfies both stale-backup alerts.
 - **Cancel** withdraws a request the service has not yet picked up. A running backup cannot be cancelled: it finishes or fails.
 - **Release** lets the retention window apply to a backup taken on request. Nothing is deleted at that moment. The service prunes it on its next pass, but only once it is older than the window and not one of the newest three.
-- **Set a destination**, beside **Take a backup**, opens the off-site destination dialog. It holds the S3 endpoint, region, bucket, key prefix, access key ID and secret key. It also holds the age public key that every file is encrypted to (age is an encryption tool).
+- **Set a destination**, beside **Take a Backup**, opens the off-site destination dialog. It holds the S3 endpoint, region, bucket, key prefix, access key ID and secret key. It also holds the age public key that every file is encrypted to (age is an encryption tool).
 - **The secret key** is stored in the Vault and never shown again. Once one is stored, the dialog says so instead of showing a field.
 - **Replace Key** asks before it overwrites the stored key, because the old one cannot be recovered. A wrong key shows only when the next off-site copy fails.
 - **Address the bucket by path** is for MinIO and most self-hosted stores. Leave it off for AWS, R2 and B2.
-- **Remove the destination** stops the copies and deletes the secret key. Copies already made stay in the bucket.
+- **Remove Destination** stops the copies and deletes the secret key. Copies already made stay in the bucket.
 - **The status filter**, at the left of the toolbar, shows every run, or only the runs that ended in the ways you tick: **Completed**, **Failed** or **Cancelled**.
 - **The columns cannot be sorted.** The list loads 30 runs at a time, newest first, and a sort would cover only the runs loaded. Use the filter to narrow it, or load older runs from the foot of the list.
 - The list shows the newest 30 runs that match the filter. The foot says how many are loaded, such as `30 of 57`, beside **Show 27 more**. That adds older runs, up to 30 at a time. At the end it says **All 57 shown.**
@@ -86,7 +86,7 @@ The card's last line says **Up to date** while the backup works. It uses the sam
 - **None in 36 hours**, in amber. Before the first success, the hours count from when its backup was switched on.
 - **Cannot be read**, in amber, when the historian's database does not answer. The page then cannot tell whether its backup works, and says so rather than showing nothing. The card has no panel to open until the database answers.
 
-**Take a backup** does not wait for the historian. The main backup completes on its own, and the Historian card shows the request and then its result. The Grafana alert **Historian Backup Stale** fires on the same 36 hours. Restoring the historian is done from a shell, following the runbook.
+**Take a Backup** does not wait for the historian. The main backup completes on its own, and the Historian card shows the request and then its result. The Grafana alert **Historian Backup Stale** fires on the same 36 hours. Restoring the historian is done from a shell, following the runbook.
 
 Without its own backup, the historian has no card, and the row holds three cards.
 
@@ -95,7 +95,7 @@ Without its own backup, the historian has no card, and the row holds three cards
 Where the platform database has its own physical backup too, a **Platform database** card sits before the Historian card. The platform database holds everything but the readings: the assets, the accounts, the settings and the audit trail.
 
 - The card shows the same things as the Historian card: the last backup, when the next is due, and how much the repository holds.
-- It has no request badge. **Take a backup** already includes the platform database, so it asks this backup for nothing.
+- It has no request badge. **Take a Backup** already includes the platform database, so it asks this backup for nothing.
 - Its warnings are the historian's: **Failed**, **None in 36 hours** and **Cannot be read**. The Grafana alert **Platform Database Backup Stale** fires on the same 36 hours.
 
 With this backup the platform database can be restored to any moment, not just to the last backup. Restoring it is done from a shell, following the runbook.
@@ -128,7 +128,7 @@ The backup volume is usually on the same disk as both databases. So on its own, 
 
 Each file is encrypted with age before it leaves the service, to the public key you entered. So neither the bucket's credential nor the service can read a copy. Only the matching identity (the private key) can decrypt it.
 
-- **The destination button**, in the toolbar beside **Take a backup**, says whether copies are made. While there is no off-site copy it reads **Set a destination**. While the destination is missing a field it reads **Complete the destination**. Both are amber with a warning icon, and say what is missing. Once copies can be made it reads **Change destination**, and its tooltip names where they go.
+- **The destination button**, in the toolbar beside **Take a Backup**, says whether copies are made. While there is no off-site copy it reads **Set a destination**. While the destination is missing a field it reads **Complete the destination**. Both are amber with a warning icon, and say what is missing. Once copies can be made it reads **Change destination**, and its tooltip names where they go.
 - **The Off site column** says, for each backup, **Copied**, **Waiting** or **Failed, retrying**. Hover over **Copied** for where and when. **Waiting** means the service has not reached it yet; it copies newest first, one at a time. **Failed, retrying** has the store's reason in the tooltip.
 - **Copied** stays on a backup after the destination is removed. A backup copied to a destination that was since replaced goes back to **Waiting**, and the service copies it again. **—** means no destination is set and no copy was made.
 - A failed copy never fails the backup. The local backup is still good, and the service tries the copy again a few minutes later.

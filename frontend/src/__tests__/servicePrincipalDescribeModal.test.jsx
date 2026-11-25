@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { ServicePrincipalDescribeModal } from '../components/modals/ServicePrincipalDescribeModal'
 import { api } from '../api'
+import { pressHeld } from '../test/dialogs'
 
 vi.mock('../api', () => ({ api: { describeServicePrincipal: vi.fn() } }))
 
@@ -24,11 +25,12 @@ describe('ServicePrincipalDescribeModal', () => {
     return props
   }
 
-  it('opens with the current name and purpose, and Save inert until something changes', () => {
+  it('opens with the current name and purpose, and says nothing has changed when it is saved so', () => {
     open()
     expect(screen.getByLabelText('Name').value).toBe('Line 4 OEE report')
     expect(screen.getByLabelText(/Purpose/).value).toBe('Reads the hourly rollup.')
-    expect(screen.getByRole('button', { name: /Save/ }).disabled).toBe(true)
+    pressHeld(screen.getByRole('dialog'), 'Save Identity', 'Nothing has changed.')
+    expect(api.describeServicePrincipal).not.toHaveBeenCalled()
     // No permission controls: what a principal holds is fixed at creation.
     expect(screen.queryAllByRole('checkbox').length).toBe(0)
     expect(screen.getByText(/fixed at creation/)).toBeTruthy()
@@ -50,7 +52,9 @@ describe('ServicePrincipalDescribeModal', () => {
   it('cannot save a blank name', () => {
     open()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: '  ' } })
-    expect(screen.getByRole('button', { name: /Save/ }).disabled).toBe(true)
+    pressHeld(screen.getByRole('dialog'), 'Save Identity', 'Give the identity a name')
+    expect(screen.getByLabelText('Name')).toHaveAccessibleDescription('Give the identity a name')
+    expect(api.describeServicePrincipal).not.toHaveBeenCalled()
   })
 
   it('stays open with the message when the database refuses', async () => {

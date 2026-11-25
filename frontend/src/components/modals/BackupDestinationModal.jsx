@@ -1,16 +1,18 @@
 import React, { useState } from 'react'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { CredentialField, useCredential } from '../common/CredentialField'
 import { Modal } from '../common/Modal'
-import { IconAlertTriangle, IconHardDrive } from '../common/Icons'
+import { IconAlertTriangle, IconHardDrive, IconTrash } from '../common/Icons'
+import { ConfirmModal } from './ConfirmModal'
 
 const FIELDS = [
-  { id: 'endpoint', label: 'S3 endpoint', placeholder: 'https://s3.eu-west-2.amazonaws.com', mono: true },
+  { id: 'endpoint', label: 'S3 Endpoint', placeholder: 'https://s3.eu-west-2.amazonaws.com', mono: true },
   { id: 'region', label: 'Region', placeholder: 'eu-west-2', mono: true },
   { id: 'bucket', label: 'Bucket', placeholder: 'aber-backups', mono: true },
-  { id: 'prefix', label: 'Key prefix', placeholder: 'site-name/backups', mono: true, hint: 'Each backup is written under <prefix>/<stamp>/. One prefix per site.' },
-  { id: 'access_key_id', label: 'Access key ID', placeholder: 'AKIA…', mono: true }
+  { id: 'prefix', label: 'Key Prefix', placeholder: 'site-name/backups', mono: true, hint: 'Each backup is written under <prefix>/<stamp>/. One prefix per site.' },
+  { id: 'access_key_id', label: 'Access Key ID', placeholder: 'AKIA…', mono: true }
 ]
 
 /**
@@ -21,7 +23,7 @@ const FIELDS = [
  * every backup, so a restore after losing the site starts without it.
  */
 export function BackupDestinationModal({ destination, credentialSet, onSave, writeCredential, onSaved, onRemove, onClose }) {
-  const [values, setValues] = useState(() => ({
+  const [opened] = useState(() => ({
     endpoint: destination?.endpoint || '',
     region: destination?.region || '',
     bucket: destination?.bucket || '',
@@ -30,6 +32,7 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, wri
     recipient: destination?.recipient || '',
     path_style: !!destination?.path_style
   }))
+  const [values, setValues] = useState(opened)
   const credential = useCredential({ stored: credentialSet, write: writeCredential, label: 'the secret access key' })
   const [error, setError] = useState(null)
   const [removing, setRemoving] = useState(false)
@@ -37,6 +40,8 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, wri
 
   const set = (id) => (e) => setValues(v => ({ ...v, [id]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
   const configured = Object.entries(values).some(([k, v]) => k !== 'path_style' && String(v).trim()) || credential.stored
+
+  const check = useFormCheck({}, { unchanged: !credential.typed && Object.keys(opened).every(k => values[k] === opened[k]) })
 
   const save = () => run(async () => {
     setError(null)
@@ -49,47 +54,28 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, wri
     }
   })
 
-  const remove = () => run(async () => {
-    setError(null)
-    try {
-      await onRemove()
-    } catch (err) {
-      setError(err.message)
-    }
-  })
-
-  const footer = removing ? (
-    <>
-      <span className="form-hint" style={{ marginRight: 'auto' }}>
-        Stop copying, and delete the secret key? Copies already made stay in the bucket.
-      </span>
-      <button className="btn btn-ghost" onClick={() => setRemoving(false)} disabled={pending}>Keep it</button>
-      <ActionButton className="btn btn-danger" pending={pending} pendingLabel="Removing…" onClick={remove}>
-        Remove
-      </ActionButton>
-    </>
-  ) : (
-    <>
-      <button className="btn btn-ghost" onClick={onClose} disabled={pending}>Cancel</button>
-      <ActionButton className="btn btn-primary" pending={pending} pendingLabel="Saving…" onClick={save}>
-        Save
-      </ActionButton>
-      {configured && (
-        <button className="btn btn-danger" onClick={() => setRemoving(true)} disabled={pending}>
-          Remove the destination
-        </button>
-      )}
-    </>
-  )
-
   return (
     <Modal
-      title="Off-site destination"
+      title="Off-Site Destination"
       icon={<IconHardDrive size={18} />}
-      onClose={pending ? () => {} : onClose}
+      busy={pending}
+      onClose={onClose}
       lead="The backup service copies every backup to this S3 bucket, each file encrypted with age to the recipient below before it leaves the pod. The copy on the backup volume stays; this is the one that survives losing the disk, the node or the site."
+      problem={check.problem}
       error={error}
-      footer={footer}
+      dismiss="Cancel"
+      footer={(
+        <>
+          <ActionButton className="btn btn-primary" pending={pending} pendingLabel="Saving…" onClick={() => check.press(save)}>
+            Save Destination
+          </ActionButton>
+          {configured && (
+            <ActionButton className="btn btn-danger" disabled={pending} onClick={() => setRemoving(true)}>
+              Remove Destination
+            </ActionButton>
+          )}
+        </>
+      )}
     >
       <div className="callout callout-warning" data-testid="offsite-circularity">
         <IconAlertTriangle size={14} className="callout-icon" />
@@ -127,7 +113,7 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, wri
       </div>
 
       <div className="form-group">
-        <label className="form-label" htmlFor="offsite-recipient">Encryption recipient</label>
+        <label className="form-label" htmlFor="offsite-recipient">Encryption Recipient</label>
         <input
           id="offsite-recipient"
           className="form-control mono"
@@ -148,6 +134,19 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, wri
         <input type="checkbox" checked={values.path_style} onChange={set('path_style')} disabled={pending} />
         Address the bucket by path (MinIO and most self-hosted stores; not AWS, R2 or B2)
       </label>
+
+      {/* Inside this dialog, so it opens over it and Escape closes it first. */}
+      {removing && (
+        <ConfirmModal
+          title="Remove Destination"
+          icon={<IconTrash size={18} />}
+          message="Stop copying, and delete the secret key? Copies already made stay in the bucket."
+          confirmLabel="Remove Destination"
+          pendingLabel="Removing…"
+          onConfirm={onRemove}
+          onCancel={() => setRemoving(false)}
+        />
+      )}
     </Modal>
   )
 }

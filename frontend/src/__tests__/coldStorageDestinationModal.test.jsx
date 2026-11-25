@@ -4,10 +4,11 @@
  * same call the Settings page uses, so each write is one audited row.
  */
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ColdStorageDestinationModal } from '../components/modals/ColdStorageDestinationModal'
 import { api } from '../api'
+import { pressHeld } from '../test/dialogs'
 
 vi.mock('../api', () => ({
   api: { patchSetting: vi.fn(), setArchiveCredential: vi.fn() },
@@ -40,7 +41,7 @@ const open = (props = {}) => {
 }
 
 const toggle = () => screen.getByRole('switch', { name: 'Archive telemetry before dropping it' })
-const saveButton = () => screen.getByRole('button', { name: /^Save$/ })
+const saveButton = () => screen.getByRole('button', { name: /^Save Destination$/ })
 const type = (label, value) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 
 beforeEach(() => {
@@ -68,7 +69,7 @@ describe('switching archiving on', () => {
     type('S3 bucket', 'plant-history')
     type('S3 access key ID', 'AKIAEXAMPLE')
     expect(toggle()).toBeDisabled()
-    type('Secret access key', 'wJalrXUtnFEMI')
+    type('Secret Access Key', 'wJalrXUtnFEMI')
     expect(toggle()).toBeEnabled()
     expect(screen.queryByText(/Still to set:/)).toBeNull()
   })
@@ -85,10 +86,14 @@ describe('switching archiving on', () => {
     expect(toggle()).toBeEnabled()
     // On with half a destination cannot be saved as it stands.
     type('S3 region', 'eu-west-2')
-    expect(saveButton()).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Save Destination', 'Give the S3 bucket, or switch archiving off')
+    expect(screen.getByLabelText('S3 bucket')).toHaveAccessibleDescription('Give the S3 bucket, or switch archiving off')
+    expect(screen.getByLabelText('Secret Access Key')).toHaveAccessibleDescription(/Give the secret access key, or switch archiving off$/)
+    expect(screen.getByLabelText('S3 bucket')).toHaveFocus()
+    expect(screen.getByLabelText('S3 region')).not.toHaveAccessibleDescription()
+    expect(api.patchSetting).not.toHaveBeenCalled()
 
     fireEvent.click(toggle())
-    expect(saveButton()).toBeEnabled()
     fireEvent.click(saveButton())
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     // Off is written before anything else.
@@ -97,7 +102,7 @@ describe('switching archiving on', () => {
 
   it('writes on last, after the destination and the secret', async () => {
     const onSaved = open({ values: COMPLETE, credentialSet: false })
-    type('Secret access key', '  wJalrXUtnFEMI  ')
+    type('Secret Access Key', '  wJalrXUtnFEMI  ')
     fireEvent.click(toggle())
     type('S3 region', 'eu-west-1')
     fireEvent.click(saveButton())
@@ -121,26 +126,39 @@ describe('saving', () => {
     expect(api.setArchiveCredential).not.toHaveBeenCalled()
   })
 
-  it('offers no Save while nothing has changed, and whitespace is not a key', () => {
+  it('writes nothing while nothing has changed, and says so; whitespace is not a key', () => {
     open({ values: COMPLETE, credentialSet: false })
-    expect(saveButton()).toBeDisabled()
-    type('Secret access key', '   ')
-    expect(saveButton()).toBeDisabled()
-    type('S3 region', 'eu-west-2 ')
+    type('Secret Access Key', '   ')
     // A trailing space is the same value: nothing to write.
-    expect(saveButton()).toBeDisabled()
+    type('S3 region', 'eu-west-2 ')
+    pressHeld(screen.getByRole('dialog'), 'Save Destination', 'Nothing has changed.')
+    expect(api.patchSetting).not.toHaveBeenCalled()
+    expect(api.setArchiveCredential).not.toHaveBeenCalled()
+  })
+
+  it('says the secret key is still to set when archiving is on without one', () => {
+    open({ values: { ...COMPLETE, 'archive.enabled': true }, credentialSet: false })
+    pressHeld(screen.getByRole('dialog'), 'Save Destination', 'Give the secret access key, or switch archiving off')
+    expect(screen.getByLabelText('Secret Access Key')).toHaveFocus()
+    expect(api.patchSetting).not.toHaveBeenCalled()
+  })
+
+  it('cannot be saved with archiving on and no site key, which the dialog cannot set', () => {
+    open({ values: { ...COMPLETE, 'archive.enabled': true }, credentialSet: true, siteKey: '' })
+    pressHeld(screen.getByRole('dialog'), 'Save Destination', 'Switch archiving off: this install has no site key')
+    expect(api.patchSetting).not.toHaveBeenCalled()
   })
 
   it('keeps the typed key and shows the refusal in the dialog when a write fails', async () => {
     api.setArchiveCredential.mockRejectedValue(
       Object.assign(new Error('Only an Administrator can set the archive credential'), { status: 403 }))
     const onSaved = open({ values: COMPLETE })
-    type('Secret access key', 'wJalrXUtnFEMI')
+    type('Secret Access Key', 'wJalrXUtnFEMI')
     fireEvent.click(saveButton())
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
       'Only an Administrator can set the secret access key. Nothing was stored.'))
     expect(onSaved).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Secret access key').value).toBe('wJalrXUtnFEMI')
+    expect(screen.getByLabelText('Secret Access Key').value).toBe('wJalrXUtnFEMI')
   })
 })
 
@@ -154,11 +172,12 @@ describe('what it shows', () => {
   it('asks before replacing a stored key, then writes it before archiving is switched on', async () => {
     const onSaved = open({ values: COMPLETE, credentialSet: true })
     fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
-    expect(screen.getByTestId('cold-secret-replace')).toHaveTextContent('the nightly export failing to authenticate')
+    const question = screen.getByRole('dialog', { name: 'Replace the Secret Access Key' })
+    expect(question).toHaveTextContent('the nightly export failing to authenticate')
+    await act(async () => { fireEvent.click(within(question).getByRole('button', { name: 'Replace Key' })) })
     // Answering the question is not a change: nothing to save until a key is typed.
-    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
-    expect(saveButton()).toBeDisabled()
-    type('Secret access key', 'second-key')
+    pressHeld(screen.getByRole('dialog'), 'Save Destination', 'Nothing has changed.')
+    type('Secret Access Key', 'second-key')
     fireEvent.click(toggle())
     fireEvent.click(saveButton())
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
@@ -170,7 +189,7 @@ describe('what it shows', () => {
 
   it('sets a first key without asking', () => {
     open({ values: COMPLETE, credentialSet: false })
-    expect(screen.getByLabelText('Secret access key')).toHaveAttribute('placeholder', 'Not set')
+    expect(screen.getByLabelText('Secret Access Key')).toHaveAttribute('placeholder', 'Not set')
     expect(screen.queryByRole('button', { name: 'Replace Key' })).toBeNull()
   })
 
@@ -178,10 +197,10 @@ describe('what it shows', () => {
     open({ values: COMPLETE })
     // Text, not a greyed field: nobody can change it here.
     const facts = document.querySelector('.metric-edit-facts')
-    expect(facts.querySelector('.form-label')).toHaveTextContent('Site key')
+    expect(facts.querySelector('.form-label')).toHaveTextContent('Site Key')
     expect(facts).toHaveTextContent(SITE_KEY)
     expect(facts).toHaveTextContent('Fixed at install by values.yaml coldArchive.s3.siteKey.')
-    expect(screen.queryByLabelText('Site key')).toBeNull()
+    expect(screen.queryByLabelText('Site Key')).toBeNull()
     expect(facts.querySelector('input')).toBeNull()
     expect(screen.getByRole('button', { name: /copy destination/i })).toHaveAccessibleName(
       /https:\/\/s3\.eu-west-2\.amazonaws\.com\/plant-history\/site=broughton-7f3a9c21\//,

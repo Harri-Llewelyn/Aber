@@ -11,7 +11,7 @@ import { useDerivedMetricsYaml } from '../../hooks/useDerivedMetricsYaml'
 import { useQuantityKinds } from '../../hooks/useQuantityKinds'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
 import {
-  groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup, isValidMetricName,
+  groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup,
   metricNameError,
   composeMetricName, METRIC_GROUP_SEPARATOR
 } from '../../utils/metricGroup'
@@ -45,6 +45,8 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { Badge } from '../common/Badge'
 import { DerivedTag } from '../common/DerivedTag'
 import { SearchInput } from '../common/SearchInput'
@@ -326,6 +328,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     setNewMetric(BLANK_METRIC)
     setAddError(null)
     setCataloguing(null)
+    addCheck.reset()
     setShowAddMetric(false)
   }
 
@@ -924,24 +927,23 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     ? parsePermittedValues(newMetric.permittedValues, newMetric.datatype)
     : { values: null, error: null }
 
-  const canAddMetric =
-    effectiveType !== '' &&
-    isValidMetricName(composedName) &&
-    datatypeChosen &&
-    !permitted.error &&
-    (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '')
-  // Why Add is off, where nothing in the form says so already: the name, the datatype and the
-  // permitted values each say their own problem where they are typed or chosen.
-  const addProblem = effectiveType === ''
-    ? (isCustomStandard ? 'Give the metric a name'
-      : usingCustomType ? 'Type the custom type'
-        : isIso ? 'Choose a KPI'
-          : isOpcua ? 'Choose a data point'
-            : isAshrae ? 'Choose a concept'
-              : isVda ? 'Choose a field'
-                : 'Choose a data item type')
-    : newMetric.group === NEW_GROUP && newMetric.newGroup.trim() === '' ? 'Name the new group'
-      : null
+  const namesItself = usingCustomType || isCustomStandard
+  const addCheck = useFormCheck({
+    newGroup: { id: 'metric-new-group', missing: newMetric.group === NEW_GROUP && newMetric.newGroup.trim() === '' && 'Name the new group' },
+    type: {
+      id: 'metric-type',
+      missing: !namesItself && effectiveType === '' && (isIso ? 'Choose a KPI'
+        : isOpcua ? 'Choose a data point'
+          : isAshrae ? 'Choose a concept'
+            : isVda ? 'Choose a field'
+              : 'Choose a data item type'),
+    },
+    custom: { id: 'metric-custom', missing: namesItself && effectiveType === '' && (isCustomStandard ? 'Give the metric a name' : 'Type the custom type') },
+    // Said in the callout under the composed name, which is what it is about.
+    composed: { id: namesItself ? 'metric-custom' : newMetric.group === NEW_GROUP ? 'metric-new-group' : 'metric-instance', wrong: nameError },
+    datatype: { id: 'metric-datatype', missing: !datatypeChosen && 'Choose a Sparkplug datatype' },
+    permitted: { id: 'metric-add-permitted-values', wrong: permitted.error },
+  })
 
   /**
    * Edit is on both tabs: a deprecated metric still carries its id into the schemas that model it.
@@ -1540,23 +1542,20 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           title="Add Metric"
           icon={<IconPlus size={18} />}
           size="xl"
+          busy={adding}
           onClose={closeAddMetric}
-          problem={addProblem}
+          problem={addCheck.problem}
           error={addError}
+          dismiss="Cancel"
           footer={
-            <>
-              <button className="btn btn-ghost" onClick={closeAddMetric} disabled={adding}>Cancel</button>
-              <ActionButton
-                className="btn btn-primary"
-                pending={adding}
-                pendingLabel="Adding…"
-                disabled={!canAddMetric}
-                title={addProblem ?? undefined}
-                onClick={() => runAdd(handleAddMetric)}
-              >
-                Add
-              </ActionButton>
-            </>
+            <ActionButton
+              className="btn btn-primary"
+              pending={adding}
+              pendingLabel="Adding…"
+              onClick={() => addCheck.press(() => runAdd(handleAddMetric))}
+            >
+              Add Metric
+            </ActionButton>
           }
         >
           <div className="metric-form">
@@ -1610,8 +1609,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     value={newMetric.newGroup}
                     onChange={e => setNewMetric(m => ({ ...m, newGroup: e.target.value.replace(/\//g, '') }))}
                     placeholder="e.g. Hydraulic"
+                    {...fieldErrorProps(addCheck.errors.newGroup, 'metric-new-group-error')}
                   />
                 </Tooltip>
+                <FieldError id="metric-new-group-error" error={addCheck.errors.newGroup} />
               </div>
             )}
 
@@ -1640,6 +1641,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
+                    {...fieldErrorProps(addCheck.errors.type, 'metric-type-error')}
                   >
                     <option value="">— Select a type —</option>
                     {typeGroups.map(g => (
@@ -1650,6 +1652,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     <option value={CUSTOM_TYPE}>+ Not in MTConnect…</option>
                   </select>
                 </Tooltip>
+                <FieldError id="metric-type-error" error={addCheck.errors.type} />
               </div>
             )}
 
@@ -1664,6 +1667,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
+                    {...fieldErrorProps(addCheck.errors.type, 'metric-type-error')}
                   >
                     <option value="">— Select a KPI —</option>
                     {isoKpis.map(k => (
@@ -1673,6 +1677,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     ))}
                   </select>
                 </Tooltip>
+                <FieldError id="metric-type-error" error={addCheck.errors.type} />
               </div>
             )}
 
@@ -1689,6 +1694,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                       ? `${chosenDataPoint.companion_spec}${OPCUA_KEY_SEP}${chosenDataPoint.name}`
                       : ''}
                     onChange={e => handleTypeChange(e.target.value)}
+                    {...fieldErrorProps(addCheck.errors.type, 'metric-type-error')}
                   >
                     <option value="">— Select a data point —</option>
                     {/* Says why it is empty: a group no companion specification covers yields
@@ -1712,6 +1718,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     ))}
                   </select>
                 </Tooltip>
+                <FieldError id="metric-type-error" error={addCheck.errors.type} />
               </div>
             )}
 
@@ -1726,6 +1733,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
+                    {...fieldErrorProps(addCheck.errors.type, 'metric-type-error')}
                   >
                     <option value="">— Select a concept —</option>
                     {ashraeSections.map(section => (
@@ -1737,6 +1745,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     ))}
                   </select>
                 </Tooltip>
+                <FieldError id="metric-type-error" error={addCheck.errors.type} />
               </div>
             )}
 
@@ -1751,6 +1760,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     className="form-control"
                     value={newMetric.type}
                     onChange={e => handleTypeChange(e.target.value)}
+                    {...fieldErrorProps(addCheck.errors.type, 'metric-type-error')}
                   >
                     <option value="">— Select a field —</option>
                     {vdaSections.map(section => (
@@ -1762,6 +1772,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     ))}
                   </select>
                 </Tooltip>
+                <FieldError id="metric-type-error" error={addCheck.errors.type} />
               </div>
             )}
 
@@ -1778,8 +1789,10 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     value={newMetric.customType}
                     onChange={e => setNewMetric(m => ({ ...m, customType: e.target.value.replace(/\//g, '') }))}
                     placeholder="e.g. VIBRATION_RMS"
+                    {...fieldErrorProps(addCheck.errors.custom, 'metric-custom-error')}
                   />
                 </Tooltip>
+                <FieldError id="metric-custom-error" error={addCheck.errors.custom} />
               </div>
             )}
 
@@ -1855,6 +1868,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   className="form-control"
                   value={datatypeChosen ? newMetric.datatype : ''}
                   onChange={e => setNewMetric(m => ({ ...m, datatype: parseInt(e.target.value, 10) }))}
+                  {...fieldErrorProps(addCheck.errors.datatype, 'metric-datatype-error')}
                 >
                   {/* Shown only while nothing is chosen: a select must not read "Double" while the
                       form holds no datatype. */}
@@ -1862,6 +1876,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   {SPARKPLUG_DATATYPES.map(d => <option key={d.code} value={d.code}>{d.label}</option>)}
                 </select>
               </Tooltip>
+              <FieldError id="metric-datatype-error" error={addCheck.errors.datatype} />
             </div>
 
             <div className="form-group" style={{ flex: '2 1 200px' }}>
@@ -1881,7 +1896,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 datatype={newMetric.datatype}
                 value={newMetric.permittedValues}
                 onChange={text => setNewMetric(m => ({ ...m, permittedValues: text }))}
-                error={permitted.error}
+                error={addCheck.errors.permitted}
                 style={{ flex: '2 1 200px' }}
               />
             )}

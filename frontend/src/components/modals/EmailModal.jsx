@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
@@ -18,7 +19,7 @@ export function EmailModal({ roles, relay, saveRoles, onSaved, onClose }) {
   const [pending, run] = usePendingAction()
 
   const before = new Set(roles || [])
-  const unchanged = chosen.size === before.size && [...chosen].every(r => before.has(r))
+  const check = useFormCheck({}, { unchanged: chosen.size === before.size && [...chosen].every(r => before.has(r)) })
   // In the order the dashboard lists roles, so the stored list reads the same however it was ticked.
   const list = PERSON_ROLES.map(r => r.name).filter(name => chosen.has(name))
 
@@ -43,23 +44,16 @@ export function EmailModal({ roles, relay, saveRoles, onSaved, onClose }) {
     <Modal
       title="Email"
       icon={<IconMail size={18} />}
-      onClose={pending ? () => {} : onClose}
+      busy={pending}
+      onClose={onClose}
       lead="Aber emails an alert to the people in the roles ticked here when it starts firing, while it fires unacknowledged, and when it resolves. A person is told only if their account has an email address. Nobody is told until a role is ticked."
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={pending}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            pending={pending}
-            pendingLabel="Saving…"
-            disabled={unchanged}
-            title={unchanged ? 'Nothing has changed' : undefined}
-            onClick={save}
-          >
-            Save
-          </ActionButton>
-        </>
+        <ActionButton className="btn btn-primary" pending={pending} pendingLabel="Saving…" onClick={() => check.press(save)}>
+          Save Email
+        </ActionButton>
       )}
     >
       {relay && !relay.available && (
@@ -70,7 +64,7 @@ export function EmailModal({ roles, relay, saveRoles, onSaved, onClose }) {
       )}
 
       <fieldset className="form-group" disabled={pending} style={{ border: 0, padding: 0, margin: 0 }}>
-        <legend className="form-label">Roles told</legend>
+        <legend className="form-label">Roles Told</legend>
         {PERSON_ROLES.map(role => (
           <label key={role.name} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '12px', margin: '6px 0' }}>
             <input

@@ -49,14 +49,14 @@ const showPlan = (props = {}) => render(
 const SUBJECTS = [
   {
     what: '3D model', show: showModel, write: () => api.uploadDeviceModel, file: model, stored: { path: `${DEVICE_ID}/cnc-v2.glb` },
-    picker: () => screen.getByTestId('model-3d-input'), title: 'Replace 3D model', confirm: 'Replace Model',
+    picker: () => screen.getByTestId('model-3d-input'), title: 'Replace 3D Model', confirm: 'Replace Model',
     asks: 'Replace the 3D model of CNC_01 with "cnc-v2.glb"? The stored file is replaced. Download it first to keep a copy.',
     wrong: () => model('drawing.step'), refused: /not a supported format/, reload: 'onChange',
     toast: ["3D model attached to 'CNC_01': cnc-v2.glb", 'success', { to: deviceUrl(DEVICE_ID) }],
   },
   {
     what: 'area plan', show: showPlan, write: () => api.uploadAreaPlan, file: svg, stored: {},
-    picker: () => screen.getByLabelText('Plan file for Assembly Hall'), title: 'Replace area plan', confirm: 'Replace plan',
+    picker: () => screen.getByLabelText('Plan file for Assembly Hall'), title: 'Replace Area Plan', confirm: 'Replace Plan',
     asks: 'Replace the plan of Assembly Hall with "hall-v2.svg"? The stored file is replaced. Download it first to keep a copy.',
     wrong: () => new File(['png'], 'plan.png', { type: 'image/png' }), refused: /not an SVG/, reload: 'onChanged',
     toast: ['Plan attached to Assembly Hall', 'success', { to: siteMapAreaUrl(AREA_ID) }],
@@ -162,7 +162,7 @@ describe('replacing a stored area plan', () => {
     const props = { cells: [], canManage: true, showToast: vi.fn(), onChanged: vi.fn() }
     const { rerender } = render(<AreaPlanPanel area={area()} {...props} />)
     await choose(screen.getByLabelText('Plan file for Assembly Hall'), svg())
-    await screen.findByRole('dialog', { name: 'Replace area plan' })
+    await screen.findByRole('dialog', { name: 'Replace Area Plan' })
     rerender(<AreaPlanPanel area={area({ area_id: 'a0000000-0000-4000-8000-000000000002', area_name: 'Paint Shop' })} {...props} />)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(api.uploadAreaPlan).not.toHaveBeenCalled()
@@ -175,7 +175,7 @@ describe('attaching the first file', () => {
     showModel({ device: device(null) })
     await choose(screen.getByTestId('model-3d-input'), model())
     expect(api.uploadDeviceModel).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole('dialog', { name: 'Replace 3D model' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Replace 3D Model' })).toBeNull()
   })
 
   it('asks nothing for an area with no plan', async () => {
@@ -203,15 +203,15 @@ describe('the two alike', () => {
   it('say before a removal that the file is deleted, and that it can be downloaded first, and ask for nothing typed', () => {
     const { unmount } = showModel()
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
-    const removeModel = screen.getByRole('dialog', { name: 'Remove 3D model' })
+    const removeModel = screen.getByRole('dialog', { name: 'Remove 3D Model' })
     expect(removeModel).toHaveAccessibleDescription(
       'Remove the 3D model from CNC_01? The device keeps its other details. The stored file is deleted. Download it first to keep a copy.')
     expect(within(removeModel).queryByRole('textbox')).toBeNull()
     unmount()
 
     showPlan()
-    fireEvent.click(screen.getByRole('button', { name: 'Remove plan' }))
-    const removePlan = screen.getByRole('dialog', { name: 'Remove area plan' })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Plan' }))
+    const removePlan = screen.getByRole('dialog', { name: 'Remove Area Plan' })
     expect(removePlan).toHaveAccessibleDescription(
       'Remove the plan from Assembly Hall? Cells keep their places on the default outline. The stored file is deleted. Download it first to keep a copy.')
     expect(within(removePlan).queryByRole('textbox')).toBeNull()
@@ -227,7 +227,7 @@ describe('downloading an area plan', () => {
     const opened = vi.spyOn(window, 'open').mockReturnValue(null)
     api.areaPlanDownloadUrl.mockResolvedValue('http://stack.test/storage/v1/object/sign/area-plans/x?token=t&download=y')
     showPlan({ canManage })
-    const button = screen.getByRole('button', { name: 'Download plan' })
+    const button = screen.getByRole('button', { name: 'Download Plan' })
     expect(button).toHaveClass('btn', 'btn-sm', 'context-action')
     expect(button.parentElement).toHaveClass('context-buttons', 'area-plan-panel-buttons')
     expect(tooltipOf(button)).toBe('Save Assembly-Hall-plan.svg to this computer')
@@ -240,14 +240,14 @@ describe('downloading an area plan', () => {
 
   it('is the only button a reader has there', () => {
     showPlan({ canManage: false })
-    expect([...document.querySelectorAll('.area-plan-panel-buttons .btn')].map(b => b.textContent.trim())).toEqual(['Download plan'])
+    expect([...document.querySelectorAll('.area-plan-panel-buttons .btn')].map(b => b.textContent.trim())).toEqual(['Download Plan'])
   })
 
   it('is not held while a turn is unsaved, since the file is as it was uploaded', () => {
     showPlan()
-    fireEvent.click(screen.getByRole('button', { name: 'Turn right' }))
-    expect(screen.getByRole('button', { name: 'Replace plan' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Download plan' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Turn Right' }))
+    expect(screen.getByRole('button', { name: 'Replace Plan' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Download Plan' })).toBeEnabled()
   })
 
   it('says why it could not be made, and opens nothing', async () => {
@@ -255,7 +255,7 @@ describe('downloading an area plan', () => {
     const showToast = vi.fn()
     api.areaPlanDownloadUrl.mockRejectedValue(new Error('Object not found'))
     showPlan({ showToast })
-    fireEvent.click(screen.getByRole('button', { name: 'Download plan' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Download Plan' }))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('Object not found', 'error'))
     expect(opened).not.toHaveBeenCalled()
   })

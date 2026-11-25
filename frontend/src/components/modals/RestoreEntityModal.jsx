@@ -2,7 +2,7 @@ import React from 'react'
 import { IconRefreshCw } from '../common/Icons'
 import { ConfirmModal } from './ConfirmModal'
 
-/** The confirming button's word for each type, so it repeats the drawer's action. */
+/** The title's and the confirming button's word for each type, so they repeat the drawer's action. */
 const TYPE_WORD = { area: 'Area', cell: 'Cell', gateway: 'Gateway', device: 'Device' }
 
 /**
@@ -17,7 +17,7 @@ const TYPE_WORD = { area: 'Area', cell: 'Cell', gateway: 'Gateway', device: 'Dev
 export function RestoreEntityModal({ type, name, credentialRevoked = false, forgeArchived = false, enrolled = false, onConfirm, onCancel }) {
   return (
     <ConfirmModal
-      title={`Restore ${type}`}
+      title={`Restore ${TYPE_WORD[type] || ''}`.trim()}
       icon={<IconRefreshCw size={18} />}
       message={
         `Restore the ${type} '${name}' to active service? ` +

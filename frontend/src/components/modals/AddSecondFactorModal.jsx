@@ -5,6 +5,7 @@ import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { IconScan } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import {
   CODE_LENGTH, groupedSecret, isCode, nextFactorName, qrImageSource,
 } from '../../utils/secondFactor'
@@ -21,9 +22,6 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
   // GoTrue's enrolment once it exists: { id, friendly_name, qr_code, secret }.
   const [enrolment, setEnrolment] = useState(null)
   const [code, setCode] = useState('')
-  // The code step's own first edit: the name typed at the first step does not count for it, and a
-  // refusal clears it with the code, so the refusal is not joined by a prompt for a new code.
-  const [codeEdited, setCodeEdited] = useState(false)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const nameRef = useRef(null)
@@ -31,11 +29,15 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
 
   const trimmed = name.trim()
   const taken = factors.some(f => (f.friendly_name || '').trim().toLowerCase() === trimmed.toLowerCase())
-  const nameProblem = !trimmed ? null : taken ? 'You already have an authenticator with that name.' : null
-  // Why the step's confirm is off, where its field does not say so already.
-  const problem = enrolment
-    ? (isCode(code) ? null : `Enter the ${CODE_LENGTH}-digit code your app shows`)
-    : (trimmed ? null : 'Give it a name')
+  const check = useFormCheck(enrolment
+    ? { code: { id: 'second-factor-new-code', missing: !isCode(code) && `Enter the ${CODE_LENGTH}-digit code your app shows` } }
+    : {
+      name: {
+        id: 'second-factor-name',
+        missing: !trimmed && 'Give it a name',
+        wrong: trimmed && taken && 'You already have an authenticator with that name.',
+      },
+    })
 
   // The second step's field, once it is drawn: initialFocus is read only as the dialog opens.
   useEffect(() => { if (enrolment) codeRef.current?.focus() }, [enrolment])
@@ -53,7 +55,6 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
   }, [trimmed])
 
   const confirm = useCallback(async () => {
-    if (!isCode(code)) return
     setBusy(true)
     setError(null)
     try {
@@ -63,7 +64,6 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
     } catch (err) {
       setError(err.message)
       setCode('')
-      setCodeEdited(false)
       setBusy(false)
       codeRef.current?.focus()
     }
@@ -80,48 +80,30 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
     <Modal
       title="Add Authenticator"
       icon={<IconScan size={18} />}
-      onClose={busy ? () => {} : cancel}
+      busy={busy}
+      onClose={cancel}
       lead={enrolment
         ? 'Scan the QR code with your authenticator app, or type the key into it. Then enter the 6-digit code the app shows.'
         : 'Use an authenticator app on your phone: any app that shows 6-digit codes. After this, signing in asks for its code after your password. Adding it signs you out of your other browsers and services, such as Grafana and Node-RED. This browser stays signed in.'}
       initialFocus={nameRef}
-      problem={problem}
-      touched={enrolment ? codeEdited : undefined}
+      problem={check.problem}
       error={error}
-      footer={(
-        <>
-          <button className="btn btn-ghost" onClick={cancel} disabled={busy}>Cancel</button>
-          {enrolment ? (
-            <ActionButton
-              pending={busy}
-              pendingLabel="Checking…"
-              className="btn btn-primary"
-              onClick={confirm}
-              disabled={problem !== null}
-              title={problem ?? undefined}
-            >
-              Add Authenticator
-            </ActionButton>
-          ) : (
-            <ActionButton
-              pending={busy}
-              pendingLabel="Starting…"
-              className="btn btn-primary"
-              onClick={start}
-              disabled={problem !== null || !!nameProblem}
-              title={problem || nameProblem || undefined}
-            >
-              Continue
-            </ActionButton>
-          )}
-        </>
+      dismiss="Cancel"
+      footer={enrolment ? (
+        <ActionButton pending={busy} pendingLabel="Checking…" className="btn btn-primary" onClick={() => check.press(confirm)}>
+          Add Authenticator
+        </ActionButton>
+      ) : (
+        <ActionButton pending={busy} pendingLabel="Starting…" className="btn btn-primary" onClick={() => check.press(start)}>
+          Continue
+        </ActionButton>
       )}
     >
       {enrolment ? (
         <>
           {qr && <img className="second-factor-qr" src={qr} alt="QR code for your authenticator app" />}
           <div className="form-group">
-            <div className="form-label" id="second-factor-key-label">Key, to type in instead</div>
+            <div className="form-label" id="second-factor-key-label">Key, to Type in Instead</div>
             <code className="second-factor-secret mono" aria-labelledby="second-factor-key-label">
               {groupedSecret(enrolment.secret)}
             </code>
@@ -134,18 +116,19 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
               id="second-factor-new-code"
               className="form-control mono second-factor-code"
               value={code}
-              onChange={e => { setCode(e.target.value); setCodeEdited(true); setError(null) }}
-              onKeyDown={e => { if (e.key === 'Enter' && !busy) confirm() }}
+              onChange={e => { setCode(e.target.value); setError(null) }}
+              onKeyDown={e => { if (e.key === 'Enter' && !busy) check.press(confirm) }}
               aria-required="true"
               inputMode="numeric"
               autoComplete="one-time-code"
               maxLength={CODE_LENGTH + 2}
               disabled={busy}
-              aria-describedby="second-factor-new-code-hint"
+              {...fieldErrorProps(check.errors.code, 'second-factor-new-code-error', 'second-factor-new-code-hint')}
             />
             <div id="second-factor-new-code-hint" className="form-hint">
               It changes every 30 seconds. Any code the app shows now works.
             </div>
+            <FieldError id="second-factor-new-code-error" error={check.errors.code} />
           </div>
         </>
       ) : (
@@ -157,17 +140,17 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
             className="form-control"
             value={name}
             onChange={e => { setName(e.target.value); setError(null) }}
-            onKeyDown={e => { if (e.key === 'Enter' && trimmed && !nameProblem && !busy) start() }}
+            onKeyDown={e => { if (e.key === 'Enter' && !busy) check.press(start) }}
             aria-required="true"
             maxLength={60}
             autoComplete="off"
             disabled={busy}
-            {...fieldErrorProps(nameProblem, 'second-factor-name-error', 'second-factor-name-hint')}
+            {...fieldErrorProps(check.errors.name, 'second-factor-name-error', 'second-factor-name-hint')}
           />
           <div id="second-factor-name-hint" className="form-hint">
             So you can tell your authenticators apart, such as &quot;Work phone&quot;.
           </div>
-          <FieldError id="second-factor-name-error" error={nameProblem} />
+          <FieldError id="second-factor-name-error" error={check.errors.name} />
         </div>
       )}
     </Modal>

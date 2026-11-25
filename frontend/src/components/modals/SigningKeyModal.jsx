@@ -44,26 +44,23 @@ export function SigningKeyModal({ issuedAt, onIssued, onClose, showToast }) {
 
   return (
     <Modal
-      title="Signing key"
+      title="Signing Key"
       icon={<IconLock size={18} />}
       size="lg"
-      onClose={busy ? () => {} : onClose}
+      busy={busy}
+      onClose={onClose}
       error={confirming ? error : null}
+      dismiss={confirming ? 'Cancel' : 'Done'}
       footer={confirming ? (
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel={rotating ? 'Rotating…' : 'Issuing…'}
-            className={rotating ? 'btn btn-danger' : 'btn btn-primary'}
-            onClick={issue}
-          >
-            <IconLock size={14} /> {action}
-          </ActionButton>
-        </>
-      ) : (
-        <button className="btn btn-primary" onClick={onClose}>Done</button>
-      )}
+        <ActionButton
+          pending={busy}
+          pendingLabel={rotating ? 'Rotating…' : 'Issuing…'}
+          className={rotating ? 'btn btn-danger' : 'btn btn-primary'}
+          onClick={issue}
+        >
+          <IconLock size={14} /> {action}
+        </ActionButton>
+      ) : null}
     >
       {confirming && (
         <div className="callout callout-warning">

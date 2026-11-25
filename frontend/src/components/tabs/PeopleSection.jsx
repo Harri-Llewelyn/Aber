@@ -624,7 +624,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'remove' && (
         <ConfirmModal
-          title={`Remove access for ${personLabel(confirming.person)}`}
+          title={`Remove Access for ${personLabel(confirming.person)}`}
           message={(
             <>
               They can no longer sign in, and their role
@@ -647,7 +647,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'password' && (
         <ConfirmModal
-          title={`Set a new password for ${personLabel(confirming.person)}`}
+          title={`Set a New Password for ${personLabel(confirming.person)}`}
           message={(
             <>
               Aber makes a new password and shows it to you once, for you to give them. Their
@@ -665,7 +665,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'sessions' && (
         <ConfirmModal
-          title={`End every session for ${personLabel(confirming.person)}`}
+          title={`End Every Session for ${personLabel(confirming.person)}`}
           message={(
             <>
               Every sign-in they have ends: the dashboard in each browser, and {studio && 'Studio, '}the
@@ -677,7 +677,6 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
           )}
           confirmLabel="End Sessions"
           pendingLabel="Ending…"
-          confirmClassName="btn btn-primary"
           onConfirm={confirmAct}
           onCancel={() => setConfirming(null)}
         />
@@ -705,12 +704,11 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'session' && (
         <ConfirmModal
-          title={`End a session for ${personLabel(confirming.person)}`}
+          title={`End a Session for ${personLabel(confirming.person)}`}
           icon={<IconLogOut size={18} />}
           message={endSessionQuestion(confirming.session, Date.now(), nameOf(confirming.person))}
           confirmLabel="End Session"
           pendingLabel="Ending…"
-          confirmClassName="btn btn-primary"
           onConfirm={confirmAct}
           onCancel={() => setConfirming(null)}
         />
@@ -726,7 +724,7 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
 
       {confirming?.act === 'restore' && (
         <ConfirmModal
-          title={`Restore access for ${personLabel(confirming.person)}`}
+          title={`Restore Access for ${personLabel(confirming.person)}`}
           message={(confirming.person.role_on_restore || confirming.person.role)
             ? `They can sign in again, as ${personRoleLabel(confirming.person.role_on_restore || confirming.person.role)}.`
             : 'They can sign in again. They hold no role, so set one afterwards.'}

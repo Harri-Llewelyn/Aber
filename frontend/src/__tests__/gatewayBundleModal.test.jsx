@@ -409,7 +409,7 @@ describe('GatewayBundleModal — failure on open', () => {
 
     await waitFor(() => expect(screen.getByText(/Forbidden: Insufficient privileges/)).toBeTruthy())
     expect(showToast).toHaveBeenCalledWith('Forbidden: Insufficient privileges', 'error')
-    expect(screen.getByRole('button', { name: /Try again/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Try Again/i })).toBeTruthy()
     // Nothing was handed to the browser to save, and no instructions are shown for a bundle that
     // does not exist.
     expect(clicked).toHaveLength(0)
@@ -428,7 +428,7 @@ describe('GatewayBundleModal — failure on open', () => {
     await waitFor(() => expect(screen.getByText(/not configured on this deployment/)).toBeTruthy())
     expect(screen.getByText(/SUPABASE_PUBLIC_URL is unset/)).toBeTruthy()
     expect(screen.getByText(/keeps its place in the list/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Try again/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Try Again/i })).toBeNull()
     // Close is the only footer action; the header's X is a separate control.
     expect(document.querySelector('.modal-actions').textContent.trim()).toBe('Close')
     expect(clicked).toHaveLength(0)
@@ -440,8 +440,8 @@ describe('GatewayBundleModal — failure on open', () => {
       .mockResolvedValueOnce(bundleResponse())
     renderModal()
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /Try again/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /Try again/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Try Again/i })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Try Again/i }))
 
     await ready()
     expect(screen.queryByText(/temporarily unavailable/)).toBeNull()

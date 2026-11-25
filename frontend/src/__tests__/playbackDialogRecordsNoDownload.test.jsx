@@ -27,6 +27,7 @@ vi.mock('../api', async () => {
 })
 
 import { api } from '../api'
+import { pressHeld } from '../test/dialogs'
 
 const GW = 'gwy160000000000400080000'
 const RECORDED = 'dev880000000000400080000'
@@ -77,14 +78,12 @@ describe('opening the playback dialog', () => {
   it('says a capture stored without its device list cannot be mapped, and how to play it', async () => {
     await openDialog(LISTLESS)
     const callout = screen.getByText(/stored without the list of devices it holds/)
-    expect(callout.textContent).toMatch(/Download it, then play the file with Play a file…/)
+    expect(callout.textContent).toMatch(/Download it, then play the file with Play a File…/)
     // No mapping and no lanes to prepare: ensure_shadow_devices() reads the same manifest.
-    expect(screen.queryByText(/Device mapping/)).toBeNull()
-    expect(screen.queryByText(/Prepare replay lanes/)).toBeNull()
+    expect(screen.queryByText(/Device Mapping/)).toBeNull()
+    expect(screen.queryByText(/Prepare Replay Lanes/)).toBeNull()
     expect(screen.queryByText(/publishes no device-level traffic/)).toBeNull()
-    const start = screen.getByRole('button', { name: 'Play back' })
-    expect(start).toBeDisabled()
-    expect(start).toHaveAccessibleDescription(/holds no list of its devices/)
+    pressHeld(screen.getByRole('dialog'), 'Play Back', /holds no list of its devices/)
   })
 
   it('maps from the manifest when it holds the list, reading nothing else', async () => {
@@ -99,7 +98,7 @@ describe('opening the playback dialog', () => {
     await openDialog({ ...LISTLESS, manifest: { birth_captured: true, device_ids: [] } })
     expect(screen.getByText(/publishes no device-level traffic/)).toBeInTheDocument()
     expect(screen.queryByText(/stored without the list/)).toBeNull()
-    expect(screen.getByRole('button', { name: 'Play back' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Play Back' })).toBeEnabled()
     expect(api.captureUrl).not.toHaveBeenCalled()
   })
 })
@@ -133,13 +132,13 @@ describe('the download call', () => {
  * made before, each with its Audit Trail row. It ends with one toast, which counts lanes rather
  * than recorded ids, because one device recorded under two of its ids has one lane.
  */
-describe('Prepare replay lanes', () => {
+describe('Prepare Replay Lanes', () => {
   const ALSO = 'a0000000-0000-4000-8000-000000000088'
   const TWO_IDS = { ...LISTLESS, id: 'cap-2', manifest: { birth_captured: true, device_ids: [RECORDED, ALSO] } }
   const prepare = async (showToast) => {
     render(<StartPlaybackModal capture={TWO_IDS} subjectName="Spindle 4" onConfirm={vi.fn()} onCancel={vi.fn()} showToast={showToast} />)
     await screen.findByText(/Plays back as/)
-    fireEvent.click(await screen.findByRole('button', { name: /Prepare replay lanes/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Prepare Replay Lanes/ }))
     await waitFor(() => expect(api.ensureShadowLanes).toHaveBeenCalledWith('cap-2'))
   }
 

@@ -7,11 +7,11 @@ import { PasswordShownOnce } from './PasswordShownOnce'
 export function NewPasswordModal({ email, password, onClose }) {
   return (
     <Modal
-      title={`New password for ${email}`}
+      title={`New Password for ${email}`}
       icon={<IconLock size={18} />}
       size="lg"
       onClose={onClose}
-      footer={<button className="btn btn-primary" onClick={onClose}>Done</button>}
+      dismiss="Done"
     >
       <PasswordShownOnce
         email={email}

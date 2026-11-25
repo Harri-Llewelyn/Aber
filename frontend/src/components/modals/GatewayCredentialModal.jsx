@@ -81,52 +81,47 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
     ? `{"${credential.mqtt_username}":"${credential.password}"}`
     : ''
 
-  let footer
+  let footer = null
+  let dismiss = 'Done'
   if (step === 'confirm') {
+    dismiss = 'Cancel'
     footer = (
-      <>
-        <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-        <ActionButton
-          pending={busy}
-          pendingLabel="Issuing…"
-          disabled={!confirmed}
-          className="btn btn-primary"
-          onClick={mint}
-          title={confirmed
-            ? 'Mint a broker credential and show it once'
-            : 'Type the gateway name to enable this'}
-        >
-          <IconLock size={14} /> Issue Credential
-        </ActionButton>
-      </>
+      <ActionButton
+        pending={busy}
+        pendingLabel="Issuing…"
+        disabled={!confirmed}
+        className="btn btn-primary"
+        onClick={mint}
+        title={confirmed
+          ? 'Mint a broker credential and show it once'
+          : 'Type the gateway name to enable this'}
+      >
+        <IconLock size={14} /> Issue Credential
+      </ActionButton>
     )
   } else if (step === 'issuing') {
-    footer = (
-      <>
-        <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
-        {error && (
-          <ActionButton pending={busy} pendingLabel="Retrying…" onClick={mint} title="Try issuing again">
-            <IconRefreshCw size={14} /> Try again
-          </ActionButton>
-        )}
-      </>
+    dismiss = 'Close'
+    footer = error && (
+      <ActionButton pending={busy} pendingLabel="Retrying…" onClick={mint} title="Try issuing again">
+        <IconRefreshCw size={14} /> Try Again
+      </ActionButton>
     )
-  } else {
-    footer = <button className="btn btn-primary" onClick={onClose}>Done</button>
   }
 
   const auditMissing = step === 'reveal' && credential?.audit_recorded === false
 
   return (
     <Modal
-      title={<>Broker credential for “{gateway.gateway_name}”</>}
+      title={<>Broker Credential for “{gateway.gateway_name}”</>}
       size="lg"
+      busy={busy}
       onClose={onClose}
       error={step !== 'reveal'
         ? error
         : auditMissing
           ? 'The credential was issued, but the Audit Trail entry could not be written. The account exists; the record of it does not.'
           : null}
+      dismiss={dismiss}
       footer={footer}
     >
       {step === 'confirm' && (

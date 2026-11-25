@@ -520,7 +520,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           the delete cascades to device attachments made to try it out. */}
       {discardTarget && (
         <ConfirmModal
-          title="Discard draft"
+          title="Discard Draft"
           icon={<IconTrash size={18} />}
           message={
             <>

@@ -40,6 +40,7 @@ vi.mock('../hooks/useRealtimeTable', () => ({ useRealtimeTable: vi.fn() }))
 
 import { api } from '../api'
 import { useRealtimeTable } from '../hooks/useRealtimeTable'
+import { pressHeld } from '../test/dialogs'
 
 const GATEWAY = {
   id: 'gw-1', name: 'Line 1 Gateway', sparkplug_id: 'gwy120000000000400080000',
@@ -188,14 +189,14 @@ describe('a file from another site', () => {
     identities: { edge_nodes: ['gwy120000000000400080000'], devices: ['dev999999999999999999999'] }
   }
 
-  it('is refused on the "Play a file…" path before anything is stored', async () => {
+  it('is refused on the "Play a File…" path before anything is stored', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     dropOnCard(fileOf(FOREIGN))
     expect(await screen.findByText(/this site does not have/, { ignore: '[role=tooltip]' })).toBeInTheDocument()
     expect(screen.getByText('dev999999999999999999999')).toBeInTheDocument()
-    expect(screen.queryByLabelText('File it against')).toBeNull()
-    expect(screen.getByRole('button', { name: /^Upload$/ })).toBeDisabled()
+    expect(screen.queryByLabelText('File It Against')).toBeNull()
+    pressHeld(screen.getByRole('dialog'), 'Upload Capture', 'This file records devices this site does not have.')
     expect(api.uploadCapture).not.toHaveBeenCalled()
   })
 
@@ -203,16 +204,16 @@ describe('a file from another site', () => {
     const panel = await openPanel({
       ...CAPTURE, manifest: { ...CAPTURE.manifest, device_ids: ['dev999999999999999999999'] }
     })
-    fireEvent.click(within(panel).getByRole('button', { name: /Play back/ }))
+    fireEvent.click(within(panel).getByRole('button', { name: /Play Back/ }))
     await screen.findByText(/Plays back as/)
     expect(await screen.findByText(/Every recorded device must exist/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Prepare replay lanes/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Prepare Replay Lanes/ })).toBeNull()
   })
 
-  it('says on the "Play a file…" button that every recorded device must exist here', async () => {
+  it('says on the "Play a File…" button that every recorded device must exist here', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    expect(screen.getByRole('button', { name: /Play a file…/ }))
+    expect(screen.getByRole('button', { name: /Play a File…/ }))
       .toHaveAccessibleDescription(expect.stringMatching(/Every device the file recorded must exist on this site/))
   })
 })
@@ -242,13 +243,13 @@ describe('a device recorded under the id it publishes', () => {
 
   it('offers its replay lanes rather than calling it a device this site does not have', async () => {
     const panel = await openPanel({ ...CAPTURE, manifest: { ...CAPTURE.manifest, device_ids: RECORDED } })
-    fireEvent.click(within(panel).getByRole('button', { name: /Play back/ }))
+    fireEvent.click(within(panel).getByRole('button', { name: /Play Back/ }))
     await screen.findByText(/Plays back as/)
-    expect(await screen.findByRole('button', { name: 'Prepare replay lanes (2)' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Prepare Replay Lanes (2)' })).toBeInTheDocument()
     expect(screen.queryByText(/Every recorded device must exist/)).toBeNull()
   })
 
-  it('is not refused on the "Play a file…" path', async () => {
+  it('is not refused on the "Play a File…" path', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     dropOnCard(fileOf({
@@ -260,7 +261,7 @@ describe('a device recorded under the id it publishes', () => {
       ],
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: RECORDED }
     }))
-    expect(await screen.findByLabelText('File it against')).toBeInTheDocument()
+    expect(await screen.findByLabelText('File It Against')).toBeInTheDocument()
     expect(screen.queryByText(/this site does not have/, { ignore: '[role=tooltip]' })).toBeNull()
   })
 })
@@ -278,7 +279,7 @@ describe('the upload dialog and the stored captures', () => {
     await screen.findByText('Line 1 Gateway')
     dropOnCard(fileOf(GOOD))
     expect(await screen.findByText(/so a playback refuses it/)).toBeInTheDocument()
-    expect(screen.getByLabelText('File it against')).toBeInTheDocument()
+    expect(screen.getByLabelText('File It Against')).toBeInTheDocument()
   })
 
   it('re-reads the stored captures when it opens, since captures is not published to Realtime', async () => {
@@ -286,7 +287,7 @@ describe('the upload dialog and the stored captures', () => {
     await screen.findByText('Line 1 Gateway')
     const before = api.listCaptures.mock.calls.length
     dropOnCard(fileOf(GOOD))
-    await screen.findByLabelText('File it against')
+    await screen.findByLabelText('File It Against')
     await waitFor(() => expect(api.listCaptures.mock.calls.length).toBeGreaterThan(before))
     expect(useRealtimeTable.mock.calls[0][0]).toEqual(['capture_jobs', 'playback_jobs'])
   })
@@ -298,11 +299,11 @@ describe('the upload dialog and the stored captures', () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     dropOnCard(fileOf(GOOD))
-    const subject = await screen.findByLabelText('File it against')
+    const subject = await screen.findByLabelText('File It Against')
     await waitFor(() => expect(subject.value).toBe('gateway:gw-1'))
     const calls = api.listCaptures.mock.calls.length
     fireEvent.change(screen.getByLabelText('Type the gateway name to confirm'), { target: { value: 'Line 1 Gateway' } })
-    fireEvent.click(screen.getByRole('button', { name: /Replace and upload/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Replace and Upload/ }))
     expect(await screen.findByText(/stored after this upload began/)).toBeInTheDocument()
     expect(api.uploadCapture).toHaveBeenCalledWith(expect.objectContaining({
       subjectKind: 'gateway', subjectId: 'gw-1', replace: true, expectedCaptureId: 'cap-1'
