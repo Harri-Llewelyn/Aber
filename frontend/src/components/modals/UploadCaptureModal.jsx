@@ -147,17 +147,16 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
           disabled={pending}
           testId="capture-upload-file"
         />
+        {parsed && (
+          <p className="form-hint">
+            {plural(parsed.messages.length, 'message')}
+            {manifest?.device_ids?.length
+              ? `, ${plural(manifest.device_ids.length, 'device id')}`
+              : ', no device-level traffic'}
+            {manifest && !manifest.birth_captured && ' — no birth certificate'}
+          </p>
+        )}
       </div>
-
-      {parsed && (
-        <p className="form-hint">
-          {plural(parsed.messages.length, 'message')}
-          {manifest?.device_ids?.length
-            ? `, ${plural(manifest.device_ids.length, 'device id')}`
-            : ', no device-level traffic'}
-          {manifest && !manifest.birth_captured && ' — no birth certificate'}
-        </p>
-      )}
 
       {unknownDevices.length > 0 && (
         <div className="callout callout-danger">
