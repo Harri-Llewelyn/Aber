@@ -129,7 +129,7 @@ export function ApplySchemasModal({ showToast, onApplied, onClose }) {
               <div>
                 This file removes {plural(removed.count, 'derived metric')}. Once the drafts are published, the devices bound to them
                 no longer have {removed.count === 1 ? 'it' : 'them'}. A file says what is saved, and a file exported before Aber 1.10 names none.
-                <ul className="apply-reasons">
+                <ul className="apply-removed">
                   {removed.schemas.map(s => (
                     <li key={s.name}><strong className="mono">{s.name}</strong>: <span className="mono">{s.metrics.join(', ')}</span></li>
                   ))}

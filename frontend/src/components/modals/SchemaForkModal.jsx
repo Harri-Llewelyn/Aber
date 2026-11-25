@@ -28,8 +28,8 @@ export function SchemaForkModal({ schema, deviceCount = 0, archivedCount = 0, re
       icon={<IconGitBranch size={18} />}
       message={<>
         Makes <strong>Draft v{next}</strong> from <strong>{schema?.schema_name}</strong> (v{schemaVersion(schema)}),
-        carrying over every metric it currently models. Nothing changes for any device until the
-        draft is published.
+        carrying over every metric it currently models and the derived metrics it names. Nothing changes
+        for any device until the draft is published.
       </>}
       confirmLabel={<><IconGitBranch size={13} /> Create Version v{next}</>}
       pendingLabel="Creating…"

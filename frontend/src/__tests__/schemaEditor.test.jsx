@@ -134,7 +134,7 @@ describe('one body', () => {
       const history = dialog.querySelector('details.schema-history')
       expect(history.open).toBe(false)
       const order = [...body(dialog).children]
-      expect(order.indexOf(history)).toBeGreaterThan(order.findIndex(el => el.classList.contains('modal-fill')))
+      expect(order.findIndex(el => el.contains(history))).toBeGreaterThan(order.findIndex(el => el.classList.contains('modal-fill')))
       const rows = [...history.querySelectorAll('li')].map(li => li.textContent)
       expect(rows[0]).toMatch(/Mill.*Initial release/)
       // The open version is marked in words as well as by its ground.

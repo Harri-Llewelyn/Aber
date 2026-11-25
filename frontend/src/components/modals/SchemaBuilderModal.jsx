@@ -7,11 +7,12 @@ import { datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { catalogPropertyEntry, isNumericType } from '../../utils/schemaProperty'
 import { Modal } from '../common/Modal'
 import { NO_RANGE } from '../common/PropertyRange'
-import { SchemaEditor, schemaFields, useSchemaForm } from '../common/SchemaEditor'
+import { SchemaEditor, schemaDerived, schemaFields, useSchemaForm } from '../common/SchemaEditor'
 
 /**
  * Build a schema from catalog metrics. Each metric's entry carries its type, and the catalog's
- * description and permitted values (as `enum`); a numeric one takes the range typed beside it. It
+ * description and permitted values (as `enum`); a numeric one takes the range typed beside it. The
+ * schema may name derived metrics computed from those. It
  * does this and nothing else: a device is given its schema on the Devices page, where the rest of
  * what a device needs -- its gateway, its cell, its conformance policy -- is also decided.
  */
@@ -21,7 +22,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
   const [error, setError] = useState(null)
   const [submitting, runSubmit] = usePendingAction()
 
-  // A derived metric is not offered: nothing publishes it, so a schema cannot model it.
+  // A derived metric is not offered among the metrics: nothing publishes it, so a schema does not model it.
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated && !m.derivation), [catalog])
   const numericNames = useMemo(
     () => new Set(activeCatalog.filter(m => isNumericType(datatypeToJsonSchemaType(m.datatype))).map(m => m.name)),
@@ -29,22 +30,25 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
   )
   const takesRange = (name) => numericNames.has(name)
 
-  const check = useFormCheck(schemaFields('schema-builder', { form, catalog: activeCatalog, takesRange }))
-
-  const buildSchemaPayload = () => {
+  // No `required`: a DDATA carries only the metrics that changed, so no single payload is the instance
+  // JSON Schema's `required` describes. `properties` is what the schema models.
+  const buildDefinition = () => {
     const properties = {}
     activeCatalog.filter(m => form.picked.has(m.name)).forEach(m => {
       properties[m.name] = catalogPropertyEntry(m, { range: takesRange(m.name) ? form.ranges[m.name] : undefined })
     })
+    return { type: 'object', properties }
+  }
+
+  const derived = schemaDerived({ form, catalog, definition: buildDefinition() })
+  const check = useFormCheck(schemaFields('schema-builder', { form, catalog: activeCatalog, takesRange, derived }))
+
+  const buildSchemaPayload = () => {
     return {
       schema_name: form.name,
       description: form.description,
-      // No `required`: a DDATA carries only the metrics that changed, so no single payload is the
-      // instance JSON Schema's `required` describes. `properties` is what the schema models.
-      schema_definition: {
-        type: 'object',
-        properties
-      },
+      schema_definition: buildDefinition(),
+      ...(form.derived.size > 0 && { derived_metrics: [...form.derived].sort() }),
       // The AAS Submodel this schema corresponds to, if it is a known one (an IDTA submodel
       // template id). Optional: most schemas are local compositions.
       semantic_id: form.semanticId.trim(),
@@ -85,6 +89,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
         errors={check.errors}
         catalog={activeCatalog}
         rangeOf={name => (takesRange(name) ? form.ranges[name] || NO_RANGE : null)}
+        derived={{ catalog, offered: derived.offered }}
       />
     </Modal>
   )

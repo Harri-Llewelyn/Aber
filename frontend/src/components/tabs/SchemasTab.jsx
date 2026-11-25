@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { deviceUrl, devicesForSchemaUrl, schemaUrl, trailUrl } from '../../routes'
+import { deviceUrl, devicesForSchemaUrl, metricUrl, schemaUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -25,8 +25,9 @@ import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
+import { OverflowText } from '../common/OverflowText'
 import {
-  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconUpload, IconTrash, IconHistory
+  IconCheck, IconClipboardList, IconCpu, IconLock, IconGitBranch, IconPencil, IconDownload, IconTag, IconUpload, IconTrash, IconHistory
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -588,6 +589,24 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               : null,
             full: true,
             help: 'The version this one was created from. Absent on the first version of a lineage.'
+          },
+          {
+            label: 'Derived Metrics',
+            value: selectedSchema.derived_metrics?.length > 0 ? (
+              <div className="context-device-list">
+                {selectedSchema.derived_metrics.map(name => {
+                  const metric = catalog.find(m => m.name === name)
+                  return (
+                    <RouteLink key={name} className="chip chip-link" to={metricUrl(metric?.metric_uuid, metric?.deprecated, true)} title={`Open ${name} on the Metrics page`}>
+                      <IconTag size={11} />
+                      <OverflowText className="chip-name">{name}</OverflowText>
+                    </RouteLink>
+                  )
+                })}
+              </div>
+            ) : null,
+            full: true,
+            help: 'The derived metrics a device bound to this version gets. Aber computes them, so no device publishes one.'
           },
           {
             // The chips answer which devices; the action below opens the Devices page filtered to
