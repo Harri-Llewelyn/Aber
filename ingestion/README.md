@@ -217,6 +217,10 @@ before it.
 Approval goes through the [`approve-quarantine`](../supabase/functions/approve-quarantine) edge
 function, which calls the atomic `public.approve_quarantined_device()` RPC.
 
+`devices.requarantined_at` says which kind of device is held. It is null on one that arrives held, and
+the hold of a registered device writes it (`0328`). The dashboard offers no match for a device that
+has it, and the RPC refuses to merge one, because a merge deletes the held row.
+
 ---
 
 ## Schema Conformance

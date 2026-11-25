@@ -3693,6 +3693,8 @@ const apiMethods = {
           // what a misconfigured gateway sent.
           reported_identity: d.reported_identity || null,
           quarantine_reason: d.quarantine_reason || null,
+          // When a registered device was last held again, or null for one nobody has registered.
+          requarantined_at: d.requarantined_at || null,
           reported_metrics: reportedMetrics,
           birth_payload: JSON.stringify(reportedMetrics)
         };

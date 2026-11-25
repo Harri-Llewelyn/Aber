@@ -259,9 +259,20 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
         self.assertNotIn('.delete()', self.source)
 
     def test_database_errors_are_not_relayed_to_the_caller(self):
-        """A raw Postgres message discloses table, column and constraint names."""
+        """
+        A raw Postgres message discloses table, column and constraint names. The one exception is a
+        merge the RPC refuses: raise_exception (P0001) carries a sentence written for the person, and
+        is answered 409 as it is worded.
+        """
         self.assertNotIn("rpcError.message }", self.source)
         self.assertIn("Approval failed", self.source)
+        self.assertRegex(self.source, r'rpcError\.code === "P0001"\s+\? 409\b')
+        self.assertRegex(self.source, r"error: status === 409\s+\? rpcError\.message\b")
+        # The log line and that answer: no other branch holds the message.
+        self.assertEqual(self.source.count("rpcError.message"), 2)
+        refusals = re.findall(r"RAISE EXCEPTION '((?:[^']|'')*)',\s+v_\w+\.name USING ERRCODE = '(\w+)'", self.rpc_sql)
+        self.assertEqual({code for _, code in refusals}, {"raise_exception"})
+        self.assertEqual(self.rpc_sql.count("'raise_exception'"), len(refusals))
 
 
 class TestApproveQuarantineRoleGate(unittest.TestCase):

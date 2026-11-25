@@ -37,9 +37,11 @@ function bestModelledOverlap(schemas, reportedMetrics) {
  * overlap outranks a name coincidence. A candidate is scored by whichever of its schemas matches
  * best, however each was attached. A device that publishes a valid sparkplug_id resolves exactly and
  * never reaches the queue; what is compared here is the quarantined device's reported label, since
- * `asset_id` is the UUID of its own quarantine row.
+ * `asset_id` is the UUID of its own quarantine row. A device held again (`requarantined_at`) was
+ * registered before, and a merge would delete what is set on it, so it is matched with nothing.
  */
 export function suggestMatches(quarantineItem, assets, schemas, { limit = 1 } = {}) {
+  if (quarantineItem?.requarantined_at) return []
   const candidates = (assets || []).filter(isNeverSeen)
   const reportedMetrics = quarantineItem?.reported_metrics || []
 
