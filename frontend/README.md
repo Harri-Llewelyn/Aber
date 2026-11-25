@@ -459,9 +459,17 @@ draft and of a read-only version, so a person meets one form. Drift check 592 ho
   their ranges. They are two to a row while there is room, at the `wide` step, so the dialog's body does
   not scroll at 1920 × 917. The metric list takes the height they leave, and below 210px the body scrolls
   instead. What is said about the list stands around it, so it never draws over what is below.
+- **Derived Metrics is under the metrics** (`common/SchemaDerivedMetrics.jsx`): the same picker, with the
+  derived metrics the ticked metrics cover (`schemaDerived()`). A ticked one whose input is unticked stays
+  ticked, so nothing is lost by mistake. It is said at once over the section, in the database's own words
+  (`derivedProblems()`, mirror check 174), and refuses the save. A save writes the metrics and the list in one
+  request, because the database judges them together.
 - **A version adds little:** its UUID and Change Description, the keys stored for each metric, the counts
   against the last saved draft, and its acts. Version History is a closed `<details>` under the metrics.
-  A section about the metrics goes there too: `SchemaEditor` draws its `children` below them.
+- **What stands under the metrics is a closed `<details>`,** in `.schema-asides`: closed ones share a line, so
+  the two take no more from the metric list than one, and the dialog's body does not scroll at 1920 × 917.
+  Opened, the Derived Metrics section takes its height from the metric list, which then goes below 210px.
+  Neither opens by itself, since the list would move under the pointer.
 - **A read-only version is the same body as text.** Each value is `.form-static` where its field was, a
   range is in words, and the list is as tall as its metrics, or scrolls inside itself. A draft is read the
   same way by a role that may not manage schemas.
@@ -2398,7 +2406,7 @@ where the lathes sit in several areas. Its arithmetic is `utils/history.js` and 
   the other drawers'). The metrics offered are those some device in service reports (`historyMetrics()`:
   `cellMetrics()` over every device, a last birth's or a schema's), with the catalog's unit and kind where it
   has them. A metric the catalog does not know is offered all the same, with no unit: it is reported, and the
-  Cell tab charts it. A derived metric is offered where some device reports all its inputs (`deviceMetrics()`
+  Cell tab charts it. A derived metric is offered where some device's schemas name it (`deviceMetrics()`
   with the catalog), with its *derived* tag.
 - **The name is one path segment**, `encodeURIComponent()`, so `Spindle/LOAD` is `Spindle%2FLOAD`
   (`metricHistoryPath()`, `metricNameFrom()`). An address naming a metric no device reports says so and links
@@ -2558,12 +2566,13 @@ definition, computed where it is read. History offers it, draws it and tags it; 
 its current value; Export saves its values. The database's rules are in
 [supabase/README.md](../supabase/README.md#history-draws-a-derived-metric-from-the-minutes-0282).
 
-- **A device reports a derived metric when it reports all its inputs.** `deviceMetrics(device, schemas,
-  catalog)` adds each such metric to what a device declared and its schemas model, so the Device tab's
-  charts and Metrics filter, the Cell and Area tabs' metric lists, and the Metric tab's picker and its
-  devices all follow one rule (`derivedReportedBy()`). Without the catalog it lists measured metrics
-  only, as it always did. Overview reads it with the catalog, so its box exports the derived metrics its
-  devices have the inputs of.
+- **A device has the derived metrics its schemas name.** `derivedMetricsOfDevice()` is the rule: several
+  schemas' together, and a replay lane its original's (`derived_schema_ids`, which `api.js` gives each device
+  with `derivedSchemaIds()`). `deviceMetrics(device, schemas, catalog)` adds them to what a device declared
+  and its schemas model. So the Device tab's charts and Metrics filter, the Cell and Area tabs' metric lists,
+  and the Metric tab's picker and its devices all follow it. Without the catalog it lists measured metrics
+  only. Overview reads it with the catalog, so its box exports the derived metrics its devices have. The
+  database and the AAS exporter answer the same (mirror check 173, `device-derived-metrics.json`).
 - **A read is split by the catalogue** (`splitDerived()`): a measured name goes to
   `api.readCarriedTelemetry()`, a derived one to `api.readDerivedSeries()`, which returns the same
   columns, so `chartSeries()` draws both. A derived series draws its value as the line and has no band
@@ -2599,11 +2608,14 @@ its current value; Export saves its values. The database's rules are in
   `api.readDerivedCurrent()` when the drawer opens on the device. A device with no value says so, a
   failed read says that, and a device none apply to has no line. The windows are `derivedWindowMinutes()`,
   held to `derived_window_minutes()` by mirror check 94.
-- **The derived drawer's Applies To lists the devices in service that report all the inputs**, by the
+- **The derived drawer's Applies To lists the devices in service whose schemas name the metric**, by the
   Metric tab's own function (`metricDevices()`): a chip each that opens the device, in name order
   (`appliesToDevices()`) and with no cap, as the Schemas drawer's Devices field lists them. The field's
-  help names the inputs once (`appliesToRule()`). With none, the field says "No device yet: none reports
-  …" (`appliesToNone()`).
+  help says the rule once (`APPLIES_TO_RULE`). With none, the field says why: no schema names the metric, or
+  none in service is bound to one that does (`appliesToNone()`).
+- **Its Schemas field says how many versions name it** ("2 name it", `schemasNaming()`), as a measured
+  metric's says how many model it. With none it says "No schema names it yet", with a link to the Schemas
+  page: until one does, no device has the metric.
 - `derivedMetricReads.test.js`, `historyDerivedMetric.test.jsx`, `devicesDerivedValues.test.jsx`,
   `derivedMetrics.test.jsx` and `metricAppliesToChips.test.jsx` hold the rule, the reads, the tag, the
   fold, the Export rule, the drawer's line and Applies To.
@@ -2841,7 +2853,7 @@ or every derived metric listed with none ticked. The format is `docs/derived-met
   marks the lines of its Save. The editor's text is lost with the dialog.
 - **A property says what a derived metric cannot do there.** `x-derived-says`, on a property marked
   `"x-completes": "metric"`, is what its hover says when the name is a derived metric. The device schemas'
-  hover says no schema can model one. This file's says no derived metric is built on another.
+  hover says a schema names one under `derived_metrics`. This file's says no derived metric is built on another.
 - **The preview changes a description and nothing else.** Its statuses are **New**, **Changed**, **Unchanged**
   and **Refused**. A definition is fixed once saved, so a changed one is refused with the way to a new
   metric, and what **Changed** means is a description: the same definition under the name with another

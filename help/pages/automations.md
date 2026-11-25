@@ -38,7 +38,7 @@ The editor helps as you type:
 
 - **Completion** offers keys, types, severities, devices and metrics. Press **Ctrl Space** to ask for it.
 - **Point at a key, a device id or a metric** to read what it is. A metric shows its unit and the valid range its device's schema allows.
-- **A wavy line** marks a problem. A threshold outside a metric's valid range is a warning: it can never fire, or it is always past its limit, but it is allowed. A syntax error, or a reason the database refuses the file, is an error.
+- **A wavy line** marks a problem. A threshold outside a metric's valid range is a warning: it can never fire, or it is always past its limit, but it is allowed. So is a derived metric that none of the device's schemas names, on an automation you saved before. A new trigger on one is refused. A syntax error, or a reason the database refuses the file, is an error.
 - **The page keeps no comments.** Put your words in `description:`. The name beside each device id is written again every time the automation opens.
 
 Saving under a new `id:` makes a new automation. The old one stays as it was.
