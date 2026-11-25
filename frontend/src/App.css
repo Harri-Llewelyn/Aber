@@ -1889,7 +1889,8 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .table-group-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* A group's Show more, inside the table and under its own rows: the foot has its own inset and rule. */
+/* A group's Show more, inside the table and under its own rows: the foot has its own inset, and the row
+   above it the rule between them. */
 .table-group-foot > td { padding: 0; }
 .table-group-foot > td > .list-foot { border-top: none; }
 tbody tr.table-group-foot:hover { background: none; }
@@ -1904,6 +1905,9 @@ tbody tr.table-group-foot:hover { background: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A heading with a row to itself wraps its name, such as an imported file's, rather than cut it. */
+.table-group-row .group-heading-label,
+.vocab-section-head .group-heading-label { white-space: normal; overflow-wrap: anywhere; }
 .group-heading-count {
   flex-shrink: 0;
   font-size: 11px;
@@ -8664,6 +8668,7 @@ ol.gateway-steps {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-right: 16px;
   cursor: pointer;
   background: var(--bg-base);
   box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
@@ -8673,8 +8678,10 @@ ol.gateway-steps {
 
 .vocab-section-head > .table-group-button {
   width: auto;
+  min-width: 0;
   padding-right: 0;
 }
+.vocab-section-head > :not(.table-group-button) { flex-shrink: 0; }
 
 .vocab-in-use {
   font-size: 11px;
