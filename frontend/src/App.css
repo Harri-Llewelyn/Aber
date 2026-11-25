@@ -2009,7 +2009,7 @@ tbody tr:hover { background: var(--bg-glass); }
 .copy-field-value:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* Level with a one-line value. */
-.copy-field > .btn-icon { margin-top: 3px; }
+.copy-field > .btn-icon { flex: none; margin-top: 3px; }
 
 /* The note under a form field: muted, small, and a fixed 4px below the control. */
 .form-hint {
@@ -2749,6 +2749,7 @@ main:focus { outline: none; }
   flex: none;
   margin: 0;
 }
+.modal-problem:not(:empty) { margin-top: 8px; }
 
 /* One paragraph under the header saying what the dialog will do. */
 .modal-lead {
@@ -8100,7 +8101,6 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   gap: 8px;
 }
 
-
 /* A Third-party gateway's settings, two to a row in the order a node's own settings ask for them. */
 .gateway-settings {
   display: grid;
@@ -8681,7 +8681,6 @@ ol.gateway-steps {
 }
 .credential-status { font-size: 13px; color: var(--text-primary); }
 .credential-status svg { margin-right: 6px; vertical-align: -2px; }
-.credential-actions { display: flex; gap: 8px; margin-top: 10px; }
 .credential-keep { margin-top: 6px; }
 /* A badge whose meaning is its tooltip: the dotted underline says so. */
 .badge-hint {
