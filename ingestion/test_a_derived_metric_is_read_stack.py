@@ -173,7 +173,7 @@ class ADerivedMetricIsRead(unittest.TestCase):
         # A device has the derived metrics its schemas name, so a threshold on this one needs a schema (0336).
         with cls.owner.cursor() as cur:
             cur.execute("INSERT INTO public.schemas (schema_name, schema_definition, derived_metrics) VALUES (%s, %s, %s)"
-                        " RETURNING id::text", (f"{group}_Schema", json.dumps(
+                        " RETURNING id::text", (f"{cls.derived.split('/')[0]}_Schema", json.dumps(
                             {"type": "object", "properties": {cls.measured: {"type": "number"}}}), [cls.derived]))
             cls.schema_id = cur.fetchone()[0]
             cur.execute("INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s)"
