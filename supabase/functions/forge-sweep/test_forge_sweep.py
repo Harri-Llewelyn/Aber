@@ -63,7 +63,8 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "enroll-gateway"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "forge-membership"))
 from test_enroll_gateway import (  # noqa: E402
-    PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
+    PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, check_sparkplug_id, delete_broker_account,
+    delete_gateway_and_wait_for_revoke, enroll, rest, sign_in, sparkplug_id_of,
 )
 from test_forge_membership import (  # noqa: E402
     FORGE_URL, MACHINE_TOKEN, MACHINE_USER, ORGANISATION, PERSONAS, members_of, request, skip_or_fail,
@@ -81,6 +82,8 @@ except ImportError:  # the two merge tests skip; everything else here stands
     x509 = None
 
 SWEEP_SECRET = os.getenv("FORGE_SWEEP_SECRET", "")
+# The forge's SSH address from this host, as test_forge_events.py reads it.
+FORGE_SSH = os.getenv("GITEA_TEST_SSH", "")
 # Must agree with _shared/forge.ts.
 PLATFORM_ORGANISATION = "platform"
 PLATFORM_REPOSITORY = "gateway-platform"
@@ -459,23 +462,23 @@ class TestRepositories(ForgeSweepBase):
             raise
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"could not sign in as the seeded administrator ({err})")
-        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
+        cls.sparkplug_id = sparkplug_id_of(TEST_GW_ID)
+        cls.repo = f"gateway-{cls.sparkplug_id}"
+        # Class clean-ups, which Python also runs when setUpClass raises. In reverse: the repositories,
+        # the row, whose delete waits for the revoke it queues, then the account that outlives it.
+        cls.addClassCleanup(delete_broker_account, cls.sparkplug_id)
+        cls.addClassCleanup(delete_gateway_and_wait_for_revoke, TEST_GW_ID, cls.sparkplug_id)
+        cls.addClassCleanup(cls.delete_repositories)
+        # What a run that was killed left behind.
+        cls.delete_repositories()
+        delete_gateway_and_wait_for_revoke(TEST_GW_ID, cls.sparkplug_id)
         status, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body={"id": TEST_GW_ID, "name": "Test_Forge_Sweep", "status": "OFFLINE", "deployment": "remote"},
         )
         if status >= 300:
             raise unittest.SkipTest(f"could not create the test gateway: {rows}")
-        cls.sparkplug_id = rows[0]["sparkplug_id"]
-        cls.repo = f"gateway-{cls.sparkplug_id}"
-        cls.delete_repositories()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.delete_repositories()
-        # The broker account outlives the row; deleted through the service's admin credential.
-        delete_broker_account(cls.sparkplug_id)
-        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
+        check_sparkplug_id(TEST_GW_ID, rows[0]["sparkplug_id"])
 
     @classmethod
     def delete_repositories(cls):
@@ -484,19 +487,19 @@ class TestRepositories(ForgeSweepBase):
         forge(f"/repos/{ORGANISATION}/{HAND_MADE_REPOSITORY}", method="DELETE")
 
     def enrol(self):
+        """Enrol with a key made here. Its private half, which goes when the test ends."""
         key_dir = tempfile.mkdtemp(prefix="aber-forge-sweep-")
-        try:
-            key_path = os.path.join(key_dir, "id_ed25519")
-            subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "test", "-f", key_path], check=True, capture_output=True)
-            with open(f"{key_path}.pub", encoding="utf-8") as handle:
-                public_key = handle.read().strip()
-        finally:
-            shutil.rmtree(key_dir, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, key_dir, ignore_errors=True)
+        key_path = os.path.join(key_dir, "id_ed25519")
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "test", "-f", key_path], check=True, capture_output=True)
+        with open(f"{key_path}.pub", encoding="utf-8") as handle:
+            public_key = handle.read().strip()
         _, rows = rest("/rpc/issue_gateway_enrollment_token", method="POST", bearer=self.admin_token,
                        body={"p_gateway_id": TEST_GW_ID, "p_ttl_minutes": 30})
         status, payload = enroll(rows[0]["token"], ssh_public_key=public_key)
         self.assertEqual(status, 200, payload)
         self.assertIsNotNone(payload.get("repository"), payload)
+        return key_path
 
     def our_hooks(self):
         status, hooks = forge(f"/repos/{ORGANISATION}/{self.repo}/hooks")
@@ -646,6 +649,77 @@ class TestRepositories(ForgeSweepBase):
         status, body = sweep()
         self.assertEqual(status, 200, body)
         self.assertNotIn(self.repo, body["protected"], body)
+
+    # By priority, and the lowest number that matches decides. `aber-platform-*` is the machine account's.
+    ORDER = ["main", "appliance", "aber-platform-*", "**"]
+
+    def order(self):
+        status, rules = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections")
+        self.assertEqual(status, 200, rules)
+        return [rule["rule_name"] for rule in sorted(rules, key=lambda rule: rule["priority"])]
+
+    def delete_the_appliance_rule(self):
+        status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections/appliance", method="DELETE")
+        self.assertEqual(status, 204)
+
+    def swept_in_order(self):
+        """One pass, which puts the appliance rule back ahead of `**`, and a second, which finds it there."""
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertIn(f"{self.repo} (appliance)", body["protected"], body)
+        self.assertEqual(self.order(), self.ORDER, "the appliance's branch is decided by another rule")
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertNotIn(f"{self.repo} (appliance)", body["protected"], body)
+
+    def test_the_appliance_rule_deleted_alone_is_put_back_ahead_of_the_catch_all(self):
+        """
+        Gitea gives a rule made without a priority the highest number there is, which is behind `**`, and
+        `**` admits no deploy key: the sweep would say the rule is back, and the appliance could not report.
+        """
+        self.enrol()
+        self.assertEqual(self.order(), self.ORDER)
+        self.delete_the_appliance_rule()
+        self.swept_in_order()
+
+        # One found behind it, which is what a pass before 1.9.1 left.
+        status, answer = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections/appliance", method="PATCH",
+                               body={"priority": 1001})
+        self.assertEqual(status, 200, answer)
+        self.assertEqual(self.order()[-1], "appliance")
+        self.swept_in_order()
+
+    @unittest.skipIf(not FORGE_SSH, "GITEA_TEST_SSH must name the forge's SSH address as reachable from this host")
+    def test_the_appliance_reports_once_its_rule_is_put_back(self):
+        key = self.enrol()
+        self.delete_the_appliance_rule()
+        work = tempfile.mkdtemp(prefix="aber-forge-sweep-")
+        self.addCleanup(shutil.rmtree, work, ignore_errors=True)
+        env = {
+            **os.environ, "GIT_TERMINAL_PROMPT": "0",
+            "GIT_SSH_COMMAND": f'ssh -i "{key}" -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null '
+                               "-o StrictHostKeyChecking=no -o BatchMode=yes -o LogLevel=ERROR",
+        }
+
+        def git(*args):
+            result = subprocess.run(["git", *args], cwd=work, env=env, capture_output=True, text=True)
+            return result.returncode, (result.stdout + result.stderr).strip()
+
+        def report():
+            """A commit of the appliance's, pushed to its branch as flow-sync pushes one."""
+            code, out = git("-c", "user.name=gateway", "-c", "user.email=appliance@aber.invalid",
+                            "commit", "--quiet", "--allow-empty", "-m", "Report")
+            self.assertEqual(code, 0, out)
+            return git("push", "--quiet", "origin", "HEAD:refs/heads/appliance")
+
+        code, out = git("clone", "--quiet", f"{FORGE_SSH.rstrip('/')}/{ORGANISATION}/{self.repo}.git", ".")
+        self.assertEqual(code, 0, out)
+        code, out = report()
+        self.assertNotEqual(code, 0, "the key pushed a branch no rule gave it")
+        self.assertIn("protected branch", out)
+        self.swept_in_order()
+        code, out = report()
+        self.assertEqual(code, 0, out)
 
     def test_a_rule_changed_in_the_web_ui_is_in_the_audit_log_under_its_author(self):
         """

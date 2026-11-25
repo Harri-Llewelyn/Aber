@@ -15,7 +15,8 @@ Needs a stack with the example metrics loaded and an Administrator who can write
 which skips the checks and says why. Without a reachable stack every check skips.
 
 The subject is the AAS conformance device (test-harness/aas_fixture.py), provisioned at pinned ids as the
-other AAS suites do. The further ids are added to `Systems/TEMPERATURE` and taken away again at the end.
+other AAS suites do. The three further ids are added to `Systems/TEMPERATURE` and taken away again at the
+end, by id. A metric to which the site has given further ids of its own is left as it is, and the checks skip.
 """
 import http.client
 import json
@@ -90,6 +91,15 @@ def sign_in():
     return data.get("access_token") if status == 200 and isinstance(data, dict) else None
 
 
+def remove_further_ids():
+    """The suite's own three rows, by id."""
+    if not (TOKEN and METRIC_ROW):
+        return
+    for semantic_id, _, _ in FURTHER:
+        rest(TOKEN, "DELETE", f"/metric_semantic_ids?metric_id=eq.{METRIC_ROW['id']}"
+                              f"&semantic_id=eq.{urllib.parse.quote(semantic_id, safe='')}")
+
+
 TOKEN = sign_in()
 DEVICE = None
 METRIC_ROW = None
@@ -108,7 +118,13 @@ if TOKEN:
             METRIC_ROW = None
     if METRIC_ROW:
         # An earlier run that died leaves its rows; the primary key would then refuse these.
-        rest(TOKEN, "DELETE", f"/metric_semantic_ids?metric_id=eq.{METRIC_ROW['id']}")
+        remove_further_ids()
+        status, held = rest(TOKEN, "GET", f"/metric_semantic_ids?metric_id=eq.{METRIC_ROW['id']}&select=semantic_id")
+        if status != 200 or held:
+            SKIP_REASON = (f"{METRIC} holds further semantic ids of the site's own ({len(held)}), which the export would carry too"
+                           if status == 200 else f"the further ids of {METRIC} could not be read (HTTP {status}): {held}")
+            METRIC_ROW = None
+    if METRIC_ROW:
         for semantic_id, semantic_id_type, source in FURTHER:
             status, body = rest(TOKEN, "POST", "/metric_semantic_ids", {
                 "metric_id": METRIC_ROW["id"], "semantic_id": semantic_id,
@@ -120,11 +136,6 @@ if TOKEN:
         else:
             FURTHER_ADDED = True
 LIVE = FURTHER_ADDED
-
-
-def remove_further_ids():
-    if TOKEN and METRIC_ROW:
-        rest(TOKEN, "DELETE", f"/metric_semantic_ids?metric_id=eq.{METRIC_ROW['id']}")
 
 
 @unittest.skipUnless(LIVE, SKIP_REASON)

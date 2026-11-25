@@ -7,19 +7,10 @@ import { fail, pass, read } from './lib.mjs';
 // a class clean-up (addClassCleanup) runs either way. So a class with a setUpClass, its own or one it
 // inherits in its file, has no tearDownClass that does more than close what it opened, unless the
 // setUpClass calls it before it lets the exception go. The same for a module's pair. docs/testing.md
-// states the rule. What the source cannot say is whether a clean-up is registered early enough: it goes
-// before what it undoes, after the sign-ins that can skip.
+// states the rule. What this cannot say is whether a clean-up is registered early enough: it goes before
+// what it undoes, after the sign-ins that can skip. Check 591 holds that for a gateway's row.
 // -------------------------------------------------------------------------------------------------
-// The suites that enrol a gateway or keep a forge repository, whose classes still use tearDownClass.
-const LISTED = [
-  'supabase/functions/enroll-gateway/test_enroll_gateway.py',
-  'supabase/functions/enroll-gateway/test_gateway_lifecycle_broker.py',
-  'supabase/functions/forge-events/test_forge_events.py',
-  'supabase/functions/forge-sweep/test_forge_sweep.py',
-  'supabase/functions/forge-sweep/test_forge_sweep_follows_the_gateway_type.py',
-];
-
-const RULE = '**A suite that skips leaves the stack as it found it**';
+const RULE = '**A suite that skips leaves the stack as it found it.**';
 
 /** The lines indented further than the line at `at`: the body of a class or a function. */
 function bodyOf(lines, at) {
@@ -66,7 +57,7 @@ function inherited(classes, name, part) {
 }
 
 export default function check() {
-  const suites = suitesInLane('stack').filter((suite) => !LISTED.includes(suite));
+  const suites = suitesInLane('stack');
   const problems575 = [];
   let held = 0;
   for (const suite of suites) {

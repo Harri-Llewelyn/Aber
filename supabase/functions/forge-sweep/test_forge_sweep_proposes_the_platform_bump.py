@@ -34,7 +34,7 @@ import urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_forge_sweep import (  # noqa: E402
     FLOW_SHAPE_CONTEXT, FORGE_URL, MACHINE_USER, ORGANISATION, PLATFORM_ORGANISATION, PLATFORM_REPOSITORY,
-    ForgeSweepBase, as_forge_admin, forge, request, rest, stack_exec, sweep,
+    ForgeSweepBase, as_forge_admin, check_sparkplug_id, forge, request, rest, sparkplug_id_of, stack_exec, sweep,
 )
 
 # The forge's SSH address from this host, as test_forge_events.py reads it.
@@ -69,8 +69,6 @@ class TestThePlatformBump(ForgeSweepBase):
     def setUpClass(cls):
         super().setUpClass()
         cls.approver_token = None
-        cls.delete_approver()
-        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
         # One pass first: it publishes the playbook, whose tag is what the rest proposes.
         status, body = sweep()
         if status != 200:
@@ -82,24 +80,29 @@ class TestThePlatformBump(ForgeSweepBase):
         if not re.fullmatch(r"v\d+\.\d+\.\d+", cls.tag):
             raise unittest.SkipTest(f"this stack's platform is at {cls.tag}, which is not a release, so nothing is proposed")
 
+        cls.repo = f"gateway-{sparkplug_id_of(TEST_GW_ID)}"
+        cls.path = f"/repos/{ORGANISATION}/{cls.repo}"
+        cls.branch = f"{BRANCH_PREFIX}{cls.tag}"
+        # Before the row is made, and after every line that skips. Run in reverse: the repository, then the row.
+        cls.addClassCleanup(rest, f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
+        cls.addClassCleanup(forge, cls.path, method="DELETE")
+        # What a run that was killed left behind.
+        forge(cls.path, method="DELETE")
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
         status, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body={"id": TEST_GW_ID, "name": "Test_Forge_Platform_Bump", "status": "OFFLINE", "deployment": "remote"},
         )
         if status >= 300:
             raise unittest.SkipTest(f"could not create the test gateway: {rows}")
-        cls.repo = f"gateway-{rows[0]['sparkplug_id']}"
-        cls.path = f"/repos/{ORGANISATION}/{cls.repo}"
-        cls.branch = f"{BRANCH_PREFIX}{cls.tag}"
-        cls.addClassCleanup(rest, f"/gateways?id=eq.{TEST_GW_ID}", method="DELETE")
-        cls.addClassCleanup(forge, cls.path, method="DELETE")
-        forge(cls.path, method="DELETE")
+        check_sparkplug_id(TEST_GW_ID, rows[0]["sparkplug_id"])
         cls.make_approver()
 
     @classmethod
     def make_approver(cls):
         """A forge login, made as the door makes one, seated in `administrators`, with a token to act with."""
         cls.addClassCleanup(cls.delete_approver)
+        cls.delete_approver()
         stack_exec.output("forge", "curl", "-s", "-o", "/dev/null", "-H", f"X-WEBAUTH-USER: {APPROVER}", "http://127.0.0.1:3000/")
         status, answer = forge(cls.seat(), method="PUT")
         if status != 204:
