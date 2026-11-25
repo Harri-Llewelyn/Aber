@@ -243,26 +243,18 @@ RETURNS SETOF public.entity_directory
     SET search_path TO 'public'
     AS $$
   SELECT e.*
-    FROM (SELECT lower(btrim(p_query, E' 	
-')) AS text) q
+    FROM (SELECT lower(btrim(p_query, E' \t\r\n')) AS text) q
     CROSS JOIN public.entity_directory e
     CROSS JOIN LATERAL (
-      SELECT lower(E'
-' || e.id || E'
-' || array_to_string(e.second_ids, E'
-') || E'
-') AS ids,
+      SELECT lower(E'\n' || e.id || E'\n' || array_to_string(e.second_ids, E'\n') || E'\n') AS ids,
              lower(e.name) AS name
       OFFSET 0
     ) t
     CROSS JOIN LATERAL (
       SELECT CASE
-               WHEN strpos(t.ids, E'
-' || q.text || E'
-') > 0 THEN 0
+               WHEN strpos(t.ids, E'\n' || q.text || E'\n') > 0 THEN 0
                WHEN t.name = q.text THEN 1
-               WHEN length(q.text) >= 8 AND strpos(t.ids, E'
-' || q.text) > 0 THEN 2
+               WHEN length(q.text) >= 8 AND strpos(t.ids, E'\n' || q.text) > 0 THEN 2
                WHEN strpos(t.name, q.text) > 0 THEN 3
              END AS rank
       OFFSET 0
