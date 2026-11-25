@@ -834,7 +834,7 @@ paths:
         Buckets still being written are visible immediately — real-time aggregation unions the
         materialised part with the raw tail, so this does not lag behind `/rest/v1/telemetry`.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
         - { name: bucket, in: query, schema: { type: string }, description: 'Bucket start, e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -858,7 +858,7 @@ paths:
         As `/rest/v1/telemetry_1m`, bucketed to five minutes and aggregated from it. Identical
         columns.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string } }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string } }
         - { name: bucket, in: query, schema: { type: string }, description: 'e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -886,7 +886,7 @@ paths:
         kept for five years. For any question about a period older than the raw window, this is the
         only place an answer exists.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string } }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string } }
         - { name: bucket, in: query, schema: { type: string }, description: 'e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -959,7 +959,7 @@ paths:
               required: [p_resolution]
               properties:
                 p_resolution: { type: string, enum: [1m, 5m, 1h] }
-                p_asset_id: { type: string, example: dev220000000000400080000 }
+                p_asset_id: { type: string, example: dev220000000000400080000, description: 'Device Sparkplug ID (devices.sparkplug_id). Omitted: every device.' }
                 p_metric_name: { type: string, example: Systems/TEMPERATURE }
                 p_from: { type: string, format: date-time, description: 'Bucket start at or after.' }
                 p_to: { type: string, format: date-time, description: 'Bucket start at or before, or before when `p_to_inclusive` is false.' }

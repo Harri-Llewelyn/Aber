@@ -67,4 +67,4 @@ A published version never changes. So a version published before a metric had pe
 
 A schema whose definition lists no metrics at all is treated as "cannot be evaluated". That is a different answer from "models nothing". The difference decides whether its devices are flagged for publishing unmodelled metrics.
 
-Aber creates schema UUIDs itself. They are stable and safe to quote within Aber. They are not registered identifiers in anyone else's namespace.
+Aber creates schema UUIDs itself. Each version of a schema has its own. They are stable and safe to quote within Aber. They are not registered identifiers in anyone else's namespace.

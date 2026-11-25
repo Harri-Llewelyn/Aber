@@ -30,7 +30,8 @@ import { PICTURE_BUCKET, picturePath } from './utils/picture';
 // public.device_locations and merged onto each row as `effective_cell_id` / `location_source` /
 // `cell_mismatch`; `cell_id` stays the raw column. Read `effective_cell_id` to display, `cell_id`
 // to edit. No embed can express "unless the child has a place of its own".
-// `asset_id` is always the device UUID, including for quarantined devices.
+// `asset_id` on a row mapped here is the device UUID, a quarantined device's too. A `telemetry` or
+// `asset_config` row's `asset_id` is the `sparkplug_id`: toTelemetryKey() takes one to the other.
 /**
  * The IDTA Digital Nameplate template the editor and the AAS exporter both work against.
  * Mirrors NAMEPLATE_TEMPLATE_ID in supabase/functions/_shared/aas/shell.ts; the version is part

@@ -45,7 +45,9 @@ The sidebar flags Devices in two ways, and never adds the two numbers together. 
 - **Quarantined**: Aber could not match an announcement to a registered device. Quarantine is about identity, not readings. The four reasons are an unknown device, a malformed identifier, an identity mismatch and a gateway mismatch. The reason is stored, not just logged, so it is still there tomorrow. Whether readings match the schema is **Schema Conformance**, above.
 - **Archived**: out of service. It leaves the Active list, and the **Archived** filter option counts it. The Archived Entities page lists archived items of every kind.
 
-**Sparkplug ID** is the ID Aber issues to a device. It is made from the device's UUID and never changes, so renaming or moving a device breaks nothing that points at it. Readings, exports and alerts all use it. Some devices cannot be set to publish it, such as those behind an edge node you bring yourself. A device like that keeps its own ID. The details panel shows it as **Published ID**, under the **Sparkplug Device ID**. The **Sparkplug Topic Path** there is the ID the device publishes under, joined to its gateway's group and edge node.
+**Device UUID** is the device's own ID in Aber, and it never changes. The API, the Audit Trail and an automation's file name the device by it.
+
+**Sparkplug ID** is the ID Aber issues to a device. It is made from the device's UUID and never changes, so renaming or moving a device breaks nothing that points at it. Readings, exports and alerts all use it. In an exported file of readings, it is the `asset_id` column. Some devices cannot be set to publish it, such as those behind an edge node you bring yourself. A device like that keeps its own ID. The details panel shows it as **Published ID**, under the **Sparkplug Device ID**. The **Sparkplug Topic Path** there is the ID the device publishes under, joined to its gateway's group and edge node.
 
 ## Suppression windows
 

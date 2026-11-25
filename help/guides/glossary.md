@@ -176,6 +176,12 @@ An open standard for industrial data over MQTT. It fixes the topic names and the
 so any gateway that follows it can send data to Aber
 ([bringing your own edge node](../site/bring-your-own-edge-node.md)).
 
+### Sparkplug ID
+
+The ID Aber gives a gateway or a device: `gwy` or `dev`, then 21 characters made from its UUID. It
+never changes. Readings are kept under it
+([every ID Aber uses](../../docs/architecture.md#how-aber-identifies-things)).
+
 ### Factory+
 
 A framework from the AMRC for connecting factory systems, built on Sparkplug B. Aber is compatible
