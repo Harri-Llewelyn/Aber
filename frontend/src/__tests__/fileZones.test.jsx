@@ -290,6 +290,19 @@ describe("Capture's Play a File…", () => {
     await waitFor(async () => expect(await subject()).toHaveValue(''))
   })
 
+  it('knows nothing of a second file until it is read, and uploads neither meanwhile', async () => {
+    await open()
+    await choose(capturedBy('gwy13', 'line2.json'))
+    await subject()
+    const slow = capturedBy('gwy12', 'line1.json')
+    slow.text = () => new Promise(() => {})
+    await choose(slow)
+    expect(zone()).toHaveTextContent('Reading the file…')
+    expect(within(dialog()).queryByLabelText('File It Against')).toBeNull()
+    pressHeld(dialog(), 'Upload Capture', 'Reading the file…')
+    expect(api.uploadCapture).not.toHaveBeenCalled()
+  })
+
   it('keeps a subject chosen by hand, until a file names one of its own', async () => {
     await open()
     await choose(captured('nobody.json'))
@@ -390,6 +403,7 @@ describe("Capture's Play a File…", () => {
     await choose(capturedBy('gwy13', 'line2.json'))
     await subject()
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Play a File…/ }))
     expect(zone()).toHaveTextContent('Drop a capture file here, or click to choose one')
   })
