@@ -65,6 +65,10 @@ describe('CellsTab places a cell on its area plan', () => {
     const panel = document.querySelector('.context-panel')
     expect(within(panel).queryByText(/% across/)).toBeNull()
     expect(panel.querySelector('.area-plan-preview .area-plan-pin-selected')).toHaveTextContent('Bay 1')
+    // Under the fields and over the suppression windows, as the Areas drawer has an area's plan.
+    expect(panel.querySelector('.context-panel-facts .area-plan-preview')).toBeTruthy()
+    expect(within(panel.querySelector('.context-panel-facts')).getByText('Place on plan')).toBeInTheDocument()
+    expect(panel.querySelector('.context-panel-extras .suppression-windows')).toBeTruthy()
 
     fireEvent.click(screen.getByText('Bay 2'))
     expect(panel.querySelector('.area-plan-preview')).toBeNull()

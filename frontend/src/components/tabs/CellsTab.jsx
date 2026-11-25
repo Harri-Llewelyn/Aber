@@ -660,19 +660,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             help: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
           },
           {
-            // The plan itself, with this cell's pin ringed and the area's other cells dimmed, and
-            // Expand beside it.
-            label: 'Place on plan',
-            value: !selectedCell.area_id
-              ? null
-              : !isPlaced(selectedCell)
-                ? 'Not placed'
-                : selectedCellArea
-                  ? <ExpandablePlanPreview area={selectedCellArea} cells={cells} highlightCellId={selectedCell.cell_id} />
-                  : "Placed on its area's plan",
-            full: true
-          },
-          {
             // Chips rather than a comma-joined string: a cell is a junction, and its panel must
             // reach the gateways and devices it relates.
             label: 'Assigned Gateways',
@@ -824,6 +811,22 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                 : 'Archive Cell'
           },
         ].filter(Boolean) : []}
+        // The plan itself, with this cell's pin ringed and the area's other cells dimmed, and Expand
+        // on it: under the fields, where the Areas drawer has an area's plan.
+        beforeActions={selectedCell && (
+          <div className="area-plan-panel">
+            <div className="area-plan-panel-header">
+              <span className="context-panel-section-label">Place on plan</span>
+            </div>
+            {selectedCellArea && isPlaced(selectedCell)
+              ? <ExpandablePlanPreview area={selectedCellArea} cells={cells} highlightCellId={selectedCell.cell_id} />
+              : (
+                <span className="area-plan-panel-meta context-field-empty">
+                  {!selectedCell.area_id ? 'Not set' : !isPlaced(selectedCell) ? 'Not placed' : "Placed on its area's plan"}
+                </span>
+              )}
+          </div>
+        )}
       >
         {/* Every device in the cell when an alert is read. */}
         {selectedCell && (

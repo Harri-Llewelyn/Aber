@@ -698,8 +698,8 @@ the same component four times over, each conditional branch reachable from exact
 ### What sits where in a drawer
 
 Top to bottom: the title, what is wrong (`alert`, then `warnings`), the record's id (`recordId`), its
-description (`description`), the other fields, the facts (`beforeActions`, such as a gateway's devices),
-the tools (`children`, such as Capture's drop zone), and the actions, pinned at the foot. `ContextPanel`
+description (`description`), the other fields, the facts (`beforeActions`, such as a gateway's devices, or
+the plan of an area or of a cell's place in one), the tools (`children`, such as Capture's drop zone), and the actions, pinned at the foot. `ContextPanel`
 draws that order, so no page chooses its own.
 
 - **A drawer about a record starts with the record's id, then its description, then the rest.** The id
