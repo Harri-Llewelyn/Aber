@@ -33,10 +33,10 @@ const PLACEHOLDER = {
 }
 
 /**
- * A semantic id and its AAS reference type as one field, shared by the Schema builder, a draft
- * schema, Add Metric and a catalog metric's Edit so they cannot drift apart. `readOnly` shows the
- * pair as text. The type is empty and its select disabled while the id is blank: a type with no id
- * exports as a Reference with no key. `onChange` receives the next `{ semanticId, semanticIdType }`.
+ * A semantic id and its AAS reference type as one field, shared by the schema editor, Add Metric and a
+ * catalog metric's Edit so they cannot drift apart. `readOnly` shows the pair as text. The type is empty
+ * and its select disabled while the id is blank: a type with no id exports as a Reference with no key.
+ * `onChange` receives the next `{ semanticId, semanticIdType }`.
  *
  * `suggestion` is the pair the subject's own standard gives it, `{ semanticId, semanticIdType,
  * note }`. It is marked while the field shows it; once replaced, Use suggested hands it back
