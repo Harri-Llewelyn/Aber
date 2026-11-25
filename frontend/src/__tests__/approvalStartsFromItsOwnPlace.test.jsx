@@ -102,15 +102,15 @@ describe('the gateway a held device came through', () => {
 
   it('is named beside the picker, with what another choice does', () => {
     expect(cameThroughLine(held(), GATEWAYS))
-      .toBe('It came through Paint Line. Choose it only if the device has moved there: with any other gateway, it is held again.')
+      .toBe('It came through Paint Line. If the device has moved there, choose it, or it is held again.')
   })
 
   it('says one that is archived, and one that is not registered', () => {
     const archived = GATEWAYS.map(g => (g.gateway_id === OTHER ? { ...g, is_archived: true } : g))
     expect(cameThroughLine(held(), archived))
-      .toBe('It came through Paint Line, which is archived. Restore that gateway first: with any other, it is held again.')
+      .toBe('It came through Paint Line, which is archived. Restore it first, or the device is held again.')
     expect(cameThroughLine(held(), GATEWAYS.slice(0, 2)))
-      .toBe(`It came through the edge node ${OTHER_NODE}, which is not registered. With any gateway chosen, it is held again.`)
+      .toBe(`It came through ${OTHER_NODE}, which is not registered. With any gateway, it is held again.`)
   })
 
   it('says nothing once the device is on that gateway, nor of a device held for its identity', () => {

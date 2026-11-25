@@ -40,17 +40,15 @@ export const cameThrough = (reason) => CAME_THROUGH.exec(reason ?? '')?.[1] ?? n
 
 /**
  * Which gateway a device held for a GATEWAY_MISMATCH came through, and what approving it with another
- * does, in one line for the gateway picker; null for any other hold, and for one that came through the
- * gateway the device is on now.
+ * does at its next birth, in one line for the gateway picker; null for any other hold, and for one that
+ * came through the gateway the device is on now.
  */
 export function cameThroughLine(item, gateways) {
   const node = cameThrough(item?.quarantine_reason)
   if (!node) return null
   const gateway = gateways.find(g => g.sparkplug_id === node)
-  if (!gateway) return `It came through the edge node ${node}, which is not registered. With any gateway chosen, it is held again.`
-  if (gateway.is_archived) {
-    return `It came through ${gateway.gateway_name}, which is archived. Restore that gateway first: with any other, it is held again.`
-  }
+  if (!gateway) return `It came through ${node}, which is not registered. With any gateway, it is held again.`
+  if (gateway.is_archived) return `It came through ${gateway.gateway_name}, which is archived. Restore it first, or the device is held again.`
   if (gateway.gateway_id === item.gateway_id) return null
-  return `It came through ${gateway.gateway_name}. Choose it only if the device has moved there: with any other gateway, it is held again.`
+  return `It came through ${gateway.gateway_name}. If the device has moved there, choose it, or it is held again.`
 }
