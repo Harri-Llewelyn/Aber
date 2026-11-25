@@ -54,7 +54,10 @@ the forge refuses anonymous reads and the appliance has no key yet), runs it, wr
 appliance's `.env` and, beside it, the pinned root as `platform-root.pem` (the enrolment container
 trusts that file, not the host's store), and enrols by starting the compose project. Install first, enrol last: every
 step before enrolment can be re-run with the same command, and the token is spent only by the
-enrolment. The steps are in `help/site/remote-gateways.md` (*On the appliance: the command*), and
+enrolment. A re-issued command run where the first one did not enrol puts its own token in the
+`.env` and keeps every other line, the credential secret among them. It does so before the playbook
+runs, because the `appliance` role starts the project, and so enrolment, when it finds an `.env` and
+nothing running. The steps are in `help/site/remote-gateways.md` (*On the appliance: the command*), and
 the design in `docs/remote-gateways.md`.
 
 ## How an appliance runs it
