@@ -12,17 +12,16 @@ import { useState } from 'react'
 export function useYamlFile({ maxBytes, holds }) {
   const [file, setFile] = useState(null)
   const [reading, setReading] = useState(false)
-  const [error, setError] = useState(null)
   const limit = `${maxBytes / (1024 * 1024)} MiB`
 
   const onFile = async (chosen) => {
-    setError(null)
     setReading(true)
     try {
       const text = await chosen.text()
       setFile(held => ({ name: chosen.name, text, turn: (held?.turn ?? 0) + 1 }))
+      return null
     } catch {
-      setError(`${chosen.name} could not be read`)
+      return `${chosen.name} could not be read`
     } finally {
       setReading(false)
     }
@@ -39,7 +38,6 @@ export function useYamlFile({ maxBytes, holds }) {
       onFile,
       fileName: file?.name ?? null,
       busy: reading && 'Reading the file…',
-      error,
     },
   }
 }

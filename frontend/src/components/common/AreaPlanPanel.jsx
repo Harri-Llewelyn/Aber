@@ -41,8 +41,6 @@ const planProblem = (file) => {
 export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState(false)
-  // Why the upload of an area's first plan was refused, `{ areaId, why }`, said at the drop zone.
-  const [refused, setRefused] = useState(null)
 
   // The file chosen in place of the stored plan, `{ areaId, file }`, until Replace's dialog is
   // answered. It belongs to the area it was chosen for, as a turn does.
@@ -78,16 +76,8 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
     } finally { setBusy(false) }
   }
 
-  // The area's first plan, from the drop zone.
-  const upload = async (file) => {
-    setRefused(null)
-    try {
-      await attach(file)
-    } catch (e) {
-      setRefused({ areaId: area.area_id, why: e.message })
-      showToast?.(e.message, 'error')
-    }
-  }
+  // The area's first plan, from the drop zone, which says why one was refused.
+  const upload = (file) => attach(file).then(() => null, e => e.message)
 
   // Asked once the file has passed its checks, so a person who cancels the picker is asked nothing.
   const askToReplace = async (file) => {
@@ -231,7 +221,6 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
           onRefuse={why => showToast?.(why, 'error')}
           onFile={upload}
           busy={busy && 'Uploading…'}
-          error={refused?.areaId === area.area_id ? refused.why : null}
           testId="area-plan-input"
         />
       )}

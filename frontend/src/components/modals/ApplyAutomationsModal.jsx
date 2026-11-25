@@ -104,7 +104,7 @@ export function ApplyAutomationsModal({ text = null, verb = 'Apply', showToast, 
             required
             prompt="Drop a file of automations here, or click to choose one"
             {...upload.zone}
-            error={upload.zone.error ?? check.errors.file}
+            error={check.errors.file}
             disabled={applying}
             testId="automations-file"
           />

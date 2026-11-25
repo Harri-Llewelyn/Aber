@@ -81,7 +81,7 @@ export function DerivedMetricsEditorModal({ uploads = false, catalog, showToast,
               required
               prompt="Drop a file of derived metrics here, or click to choose one"
               {...upload.zone}
-              error={upload.zone.error ?? check.errors.file}
+              error={check.errors.file}
               testId="derived-metrics-file"
             />
           </div>

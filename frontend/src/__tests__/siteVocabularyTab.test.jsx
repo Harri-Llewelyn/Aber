@@ -294,7 +294,7 @@ describe('an import', () => {
     fireEvent.click(screen.getByRole('button', { name: /Import Vocabulary/ }))
     const dialog = screen.getByRole('dialog', { name: 'Import Vocabulary' })
     const body = JSON.stringify(jsonEnvironment([jsonConcept('https://example.test/new', 'New concept', 'Text.')]))
-    fireEvent.change(within(dialog).getByLabelText(/^File/), { target: { files: [new File([body], 'new.json')] } })
+    fireEvent.change(within(dialog).getByTestId('vocabulary-file'), { target: { files: [new File([body], 'new.json')] } })
     await within(dialog).findByRole('group', { name: 'What the File Holds' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Import Vocabulary' }))
 

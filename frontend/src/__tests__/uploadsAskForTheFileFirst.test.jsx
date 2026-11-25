@@ -117,14 +117,19 @@ describe.each(UPLOADS)('an upload of $what', (upload) => {
     expect(zone()).toHaveTextContent(upload.prompt)
   })
 
-  it('keeps the file it holds when another is refused', async () => {
+  it('keeps the file it holds, as right as it was, when another is refused or cannot be read', async () => {
     upload.check().mockResolvedValue([row('one')])
     show()
     await choose(upload.testId, yaml('a.yaml'))
-    await drop(new File(['x'], 'notes.txt', { type: 'text/plain' }))
-    expect(zone()).toHaveTextContent('a.yaml')
-    expect(screen.getByRole('dialog', { name: upload.after })).toBeInTheDocument()
-    expect(zone()).not.toHaveAttribute('aria-invalid')
+    const unreadable = yaml('gone.yaml')
+    unreadable.text = () => Promise.reject(new Error('gone'))
+    for (const [f, why] of [[new File(['x'], 'notes.txt', { type: 'text/plain' }), '"notes.txt" is not a YAML file'], [unreadable, 'gone.yaml could not be read']]) {
+      await drop(f)
+      expect(within(dialog()).getByText(why, { exact: false })).toHaveAttribute('role', 'alert')
+      expect(zone()).toHaveTextContent('a.yaml')
+      expect(screen.getByRole('dialog', { name: upload.after })).toBeInTheDocument()
+      expect(zone()).not.toHaveAttribute('aria-invalid')
+    }
   })
 
   it('takes no file dropped beside the zone', async () => {

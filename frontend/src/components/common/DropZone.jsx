@@ -45,7 +45,7 @@ const draggingFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes('F
  *
  * What is wrong with a file is a FieldError under the zone, which stays. A drop is held to `accept`, as
  * the picker is, and two files at once are refused. `refuse` is the caller's own check, on a file given
- * either way. A refused file never reaches `onFile`, and leaves the one already held.
+ * either way. A refused file leaves the one already held.
  *
  *   <label className="form-label" id="file-label" htmlFor="file">File <RequiredMark /></label>
  *   <DropZone id="file" labelledBy="file-label" required prompt="Drop an AAS file here, or click to choose one"
@@ -62,10 +62,11 @@ const draggingFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes('F
  * @param {string} kinds The same in words, for a drop it refuses: "a .json file".
  * @param {Function} [refuse] Takes the file, and returns why it is refused or null.
  * @param {Function} [onRefuse] Hears each refusal's words, for a page that says them elsewhere too.
- * @param {Function} onFile Takes a file nothing refused.
+ * @param {Function} onFile Takes a file nothing refused. What it returns, or resolves to, is why it was
+ *   refused after all: one that could not be read, or that the server would not have.
  * @param {string|null} [fileName] The file the caller holds.
  * @param {string|false|null} [busy] What is being done with it: "Uploading…". Nothing is taken meanwhile.
- * @param {string|null} [error] What the caller found wrong with the last file, or that one is missing.
+ * @param {string|null} [error] What is wrong with the file it holds, or that one is missing.
  * @param {boolean} [required] Said to a screen reader, which the label's asterisk is not.
  * @param {boolean} [disabled] The person may give no file here.
  * @param {string} [className] A layout class on the field, such as `modal-fill`.
@@ -78,14 +79,16 @@ export function DropZone({
   const zoneId = id ?? `${uid}-zone`
   const errorId = `${zoneId}-error`
   const [over, setOver] = useState(false)
-  // Why the last file given was not taken. It is about a later file than the caller's `error`.
+  // Why the last file given was not taken. It is about a later file than `error`, which is the held one's.
   const [refusal, setRefusal] = useState(null)
   const still = disabled || Boolean(busy)
 
-  const take = (file, why) => {
-    setRefusal(why)
-    if (why) onRefuse?.(why)
-    else onFile(file)
+  const refused = (why) => { setRefusal(why); onRefuse?.(why) }
+  const take = async (file, why) => {
+    if (why) { refused(why); return }
+    setRefusal(null)
+    const late = await onFile(file)
+    if (late) refused(late)
   }
   // The caller's own words for a kind it does not take come before the zone's.
   const drop = ([file, ...more]) => take(file,

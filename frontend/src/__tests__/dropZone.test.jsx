@@ -33,7 +33,7 @@ const show = (props = {}) => {
 /** The values a picker is given. Its own is '' in jsdom whatever it holds, so one set is what can be seen. */
 const holdsValue = (input) => {
   const values = []
-  Object.defineProperty(input, 'value', { configurable: true, get: () => values.at(-1) ?? 'held', set: v => values.push(v) })
+  Object.defineProperty(input, 'value', { configurable: true, get: () => values.at(-1) ?? 'held', set: v => { values.push(v) } })
   return values
 }
 const zone = () => screen.getByRole('button', { name: 'The file' })
@@ -181,6 +181,19 @@ describe("the caller's own check", () => {
     show({ refuse })
     fireEvent.drop(zone(), dragged(file('plan.png', 'image/png')))
     expect(refusal()).toHaveTextContent('plan.png is no capture')
+  })
+
+  it('may be made late, by what onFile resolves to, until the next file is given', async () => {
+    const onRefuse = vi.fn()
+    const { onFile } = show({ onRefuse })
+    onFile.mockResolvedValueOnce('The server would not have it.').mockResolvedValueOnce(null)
+    fireEvent.drop(zone(), dragged(file()))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The server would not have it.')
+    expect(onRefuse.mock.calls).toEqual([['The server would not have it.']])
+    expect(zone()).toHaveAttribute('aria-invalid', 'true')
+    fireEvent.drop(zone(), dragged(file()))
+    expect(refusal()).toBeNull()
+    expect(onFile).toHaveBeenCalledTimes(2)
   })
 
   it('stands aside for a picked file it has nothing against, past the picker’s filter', () => {

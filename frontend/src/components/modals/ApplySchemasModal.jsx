@@ -19,9 +19,9 @@ import {
 
 /**
  * Uploads a file of schemas. Its first step is the file, in a drop zone. Then it shows what the file would
- * do, before it does anything: each schema as new, changed (a new draft
- * version), unchanged or refused, with every reason and the line it is on. The text is parsed here, and
- * a syntax error is shown with its line without asking the database. Otherwise the check is
+ * do, before it does anything: each schema as new, changed (a new draft version), unchanged or refused,
+ * with every reason and the line it is on. The text is parsed here, and a syntax error is shown with its
+ * line without asking the database. Otherwise the check is
  * `apply_device_schemas(doc, true)`, and confirming is the same call with `false`: all of it applies or
  * none of it does. It deletes nothing and never edits a published version. A refusal from the second
  * call, such as the second-factor switch's, is shown in the dialog as it was worded. The preview and its
@@ -94,7 +94,7 @@ export function ApplySchemasModal({ showToast, onApplied, onClose }) {
           required
           prompt="Drop a file of schemas here, or click to choose one"
           {...upload.zone}
-          error={upload.zone.error ?? check.errors.file}
+          error={check.errors.file}
           disabled={applying}
           testId="schemas-file"
         />
