@@ -12,7 +12,7 @@ import { Tooltip } from './Tooltip'
 import { SaveDiscard } from './SaveDiscard'
 import { DropZone, useFilePicker } from './DropZone'
 
-/** Why Replace plan and Remove plan wait while a turn is unsaved. */
+/** Why Replace Plan and Remove Plan wait while a turn is unsaved. */
 const TURN_UNSAVED = 'Save or discard the turn first.'
 
 const PLAN_ACCEPT = '.svg,image/svg+xml'

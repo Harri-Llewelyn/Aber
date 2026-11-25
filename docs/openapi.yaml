@@ -7753,8 +7753,12 @@ paths:
         not the gateway's, and a tag named as a branch the appliance reads, with the release made from
         it. It makes `main` the default branch, turns proposals on, and gives a repository that was
         renamed its name back. One that is a mirror, or has a rule the API cannot name, loses its deploy
-        keys and is an error. Nothing is created that enrolment would not create, and a repository is
-        never deleted.
+        keys and is an error. A repository is never deleted.
+
+        Last, each Remote gateway in service whose `main` names an older platform release than this one is
+        proposed the move, in one pull request from the machine account. An Administrator approves it. That
+        pull request and its branch are the one thing a pass makes that enrolment would not. One that a
+        person closed is not made again.
 
         Authorised by `FORGE_SWEEP_SECRET` in the `x-sweep-secret` header, **not** by the publishable key.
         The identities acted on come from `user_roles` and the forge's own lists, never from the

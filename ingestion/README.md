@@ -649,8 +649,8 @@ id is worse: it is not bound to the Playback gateway, so the replayed DBIRTH fai
 [the binding check](#gateway-binding) and **quarantines that real device**
 (`GATEWAY_MISMATCH`), and its DDATA is dropped. Either way no reading reaches the historian.
 
-So the only `--map` targets that work are replay lanes, which the Capture page's **Prepare replay
-lanes** makes. Prepare them there, then map each captured device onto its lane.
+So the only `--map` targets that work are replay lanes, which the Capture page's **Prepare Replay
+Lanes** makes. Prepare them there, then map each captured device onto its lane.
 
 ### Marking what was replayed
 

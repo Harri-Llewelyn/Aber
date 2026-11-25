@@ -1620,7 +1620,7 @@ class CommandLineTests(unittest.TestCase):
 
     def test_the_map_help_names_the_replay_lanes(self):
         text = capture.build_parser()._subparsers._group_actions[0].choices["play"].format_help()
-        self.assertIn("Prepare replay lanes", " ".join(text.split()))
+        self.assertIn("Prepare Replay Lanes", " ".join(text.split()))
 
 
 if __name__ == "__main__":

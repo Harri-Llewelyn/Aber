@@ -791,7 +791,7 @@ SVG and every cell's `plan_x`/`plan_y` stay as uploaded; the arithmetic is in `u
   the saved turn, which the Site Map, the Cells page and the table read. While the draft differs
   from the saved turn the shared `SaveDiscard` pair (`components/common/SaveDiscard.jsx`, as on
   Profile) offers Save Turn, which calls `setAreaPlanRotation()` once and reloads, and Discard.
-  Replace plan and Remove plan are held until then. Opening another area or closing the panel
+  Replace Plan and Remove Plan are held until then. Opening another area or closing the panel
   drops the draft.
 
 ---
@@ -2929,6 +2929,10 @@ level all say it. "Campus" may gloss it in running text and tooltips, as in "the
 campus", but never names a control, a setting or an identifier. "Area" is used everywhere except
 in "building management system".
 
+- **Look first.** Before building a feature or an element, look for something similar: `components/common`,
+  `hooks`, `utils`, `App.css` and the sibling pages. Use it, or extend it for every caller. A second one drawn
+  apart is two looks for one thing. The pull request says what was found, and whether it was used, extended or
+  could not be ([`CONTRIBUTING.md`](../CONTRIBUTING.md#three-rules-worth-stating-up-front)).
 - **Page identity.** A page has one card. Its icon, title and one-sentence description are the
   card's `CardHeading`, stated once; there is no `PageHeading` above it. A tabbed page puts its tab
   bar inside that card, and the tabs' tooltips and the toolbar row follow [Tabs](#tabs). Buttons go
