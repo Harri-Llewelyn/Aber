@@ -348,7 +348,7 @@ class TestThePlatformBump(ForgeSweepBase):
         (row,) = rows
         return (row["forge_bump_tag"], row["forge_bump_number"]) if row["forge_bump_tag"] else None
 
-    def test_the_row_says_which_one_waits_until_it_is_closed_reopened_or_replaced(self):
+    def test_the_row_says_which_one_waits_while_one_does(self):
         self.make_repository()
         self.swept()
         (pull,) = self.pulls()
@@ -428,8 +428,11 @@ class TestThePlatformBump(ForgeSweepBase):
         self.assertEqual(status, 200, made)
         status, theirs = self.as_approver(f"{self.path}/pulls", "POST", {"head": "by-hand", "base": "main", "title": "By hand"})
         self.assertEqual(status, 201, theirs)
+        # And what the row said then.
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"forge_bump_tag": "v0.0.9", "forge_bump_number": older["number"]})
 
         body = self.swept()
+        self.assertEqual(self.waits(), (self.tag, current["number"]))
         self.assertEqual(len(self.proposed(body)), 1, body)
         states = {p["number"]: p["state"] for p in self.pulls()}
         self.assertEqual(states, {current["number"]: "open", older["number"]: "closed", theirs["number"]: "open"})
