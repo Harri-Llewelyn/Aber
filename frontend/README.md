@@ -667,7 +667,7 @@ anywhere else.
 - **A drop is held to what the picker offers.** `accept` filters the picker and checks a drop, and two files
   at once are refused. The page's own check (`refuse`) runs on a file given either way.
 - **A refusal is a `FieldError` at the zone, which stays.** A file it already held stays too, and is not
-  marked wrong. In a drawer the page toasts the refusal as well.
+  marked wrong. A plan's and a model's refusals are toasted as well.
 - **An upload's dialog opens first, and asks for the file.** The page takes no drop. Another file takes the
   first one's place in the same dialog, and nothing is lost but that file's own checks
   (`hooks/useYamlFile.js`).

@@ -30,6 +30,12 @@ const show = (props = {}) => {
   const { rerender } = render(view())
   return { onFile, again: more => rerender(view(more)) }
 }
+/** The values a picker is given. Its own is '' in jsdom whatever it holds, so one set is what can be seen. */
+const holdsValue = (input) => {
+  const values = []
+  Object.defineProperty(input, 'value', { configurable: true, get: () => values.at(-1) ?? 'held', set: v => values.push(v) })
+  return values
+}
 const zone = () => screen.getByRole('button', { name: 'The file' })
 const picker = () => screen.getByTestId('picker')
 const refusal = () => screen.queryByRole('alert')
@@ -64,9 +70,10 @@ describe('the zone as a control', () => {
   it('hands on the file chosen, and clears the picker so the same one can be chosen again', () => {
     const { onFile } = show()
     const chosen = file()
+    const values = holdsValue(picker())
     fireEvent.change(picker(), { target: { files: [chosen] } })
     expect(onFile).toHaveBeenCalledExactlyOnceWith(chosen)
-    expect(picker().value).toBe('')
+    expect(values).toEqual([''])
     fireEvent.change(picker(), { target: { files: [chosen] } })
     expect(onFile).toHaveBeenCalledTimes(2)
   })
@@ -267,9 +274,10 @@ describe('useFilePicker', () => {
     expect(opened).toHaveBeenCalledTimes(1)
     expect(screen.getByText('Plan').control).toBe(picker())
     const svg = file('plan.svg', 'image/svg+xml')
+    const values = holdsValue(picker())
     fireEvent.change(picker(), { target: { files: [svg] } })
     expect(onFile).toHaveBeenCalledExactlyOnceWith(svg)
-    expect(picker().value).toBe('')
+    expect(values).toEqual([''])
   })
 })
 
