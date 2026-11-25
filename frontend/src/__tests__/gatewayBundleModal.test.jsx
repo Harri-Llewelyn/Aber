@@ -195,8 +195,9 @@ describe('GatewayBundleModal — Copy Commands', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Copy Commands/i }))
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /Copy failed/i })).toBeTruthy())
-    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('clipboard'), 'error')
+    expect(await screen.findByText(/Could not reach the clipboard/)).toHaveAttribute('role', 'alert')
+    expect(screen.getByRole('button', { name: /Copy Commands/i })).toHaveAccessibleDescription(/Could not reach the clipboard/)
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('clipboard'), 'error')
   })
 })
 

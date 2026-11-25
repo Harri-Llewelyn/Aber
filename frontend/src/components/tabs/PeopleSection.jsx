@@ -721,7 +721,6 @@ export function PeopleSection({ showToast, currentUserId, drawerHost = null, can
           email={newPassword.email}
           password={newPassword.password}
           onClose={() => setNewPassword(null)}
-          showToast={showToast}
         />
       )}
 

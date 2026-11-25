@@ -38,8 +38,8 @@ vi.mock('../api', async (importOriginal) => ({
 vi.mock('../components/common/CopyableId', () => ({
   __esModule: true,
   default: () => null,
-  copyText: vi.fn().mockResolvedValue(true),
 }))
+vi.mock('../utils/copyText', () => ({ copyText: vi.fn().mockResolvedValue(true) }))
 
 const ME = 'a0000000-0000-4000-8000-000000000001'
 const OPERATOR = 'a0000000-0000-4000-8000-000000000003'

@@ -160,7 +160,6 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
   } else if (bundle) {
     footer = (
       <>
-        <button className="btn btn-ghost" onClick={onClose}>Done</button>
         {isCommand
           ? (
             <Tooltip text="For a machine that already has Docker, or one you set up by hand: mint a new token and download the bundle instead. This invalidates the command above.">
@@ -186,12 +185,13 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
           ? 'Mint a new token and show a fresh command. This invalidates the one you already have.'
           : 'Mint a new token and download a fresh bundle. This invalidates the one you already have.'}>
           <button
-            className="btn btn-primary"
+            className="btn btn-ghost"
             onClick={askToReissue}
           >
             <IconRefreshCw size={14} /> {isCommand ? 'Re-issue Command' : 'Re-issue Bundle'}
           </button>
         </Tooltip>
+        <button className="btn btn-primary" onClick={onClose}>Done</button>
       </>
     )
   }

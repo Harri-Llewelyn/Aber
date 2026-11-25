@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../../api'
-import { IconCheck, IconCopy, IconDownload, IconExternalLink } from '../common/Icons'
+import { CopyField } from '../common/CopyField'
+import { IconDownload, IconExternalLink } from '../common/Icons'
 import { Tooltip } from '../common/Tooltip'
 import {
   BRING_YOUR_OWN_EDGE_NODE, ROOT_CERTIFICATE_PATH, brokerAddress, brokerRow, helpSourceUrl,
@@ -25,37 +26,11 @@ export function useDirectoryBroker() {
   return broker
 }
 
-/** One value the engineer types into the node, with its copy button. */
-export function Setting({ id, label, value, copyLabel, copy, copied, hint, warning }) {
-  return (
-    <div className="form-group">
-      <label className="form-label" htmlFor={id}>{label}</label>
-      <div className="gateway-copy-row">
-        <input id={id} className="form-control mono" readOnly value={value || ''} />
-        <Tooltip text={`Copy ${copyLabel}`}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-icon"
-            onClick={() => copy(id, value)}
-            disabled={!value}
-            aria-label={`Copy ${copyLabel}`}
-          >
-            {copied === id ? <IconCheck size={13} /> : <IconCopy size={13} />}
-          </button>
-        </Tooltip>
-      </div>
-      {warning && <div className="form-hint hint-warning">{warning}</div>}
-      {hint && <div className="form-hint">{hint}</div>}
-    </div>
-  )
-}
-
 /**
  * Everything a Third-party gateway's edge node is configured with, in the order a node's own
  * settings ask for it. Shared by the issue and show-again dialogs, so both say the same thing.
- * `copy(id, value)` and `copied` are the dialog's, so a refused copy is reported in one place.
  */
-export function EdgeNodeSettings({ gateway, credential, copy, copied }) {
+export function EdgeNodeSettings({ gateway, credential }) {
   const broker = useDirectoryBroker()
   const sparkplugId = credential?.mqtt_username || gateway.sparkplug_id
   const hostId = primaryHostId()
@@ -64,69 +39,55 @@ export function EdgeNodeSettings({ gateway, credential, copy, copied }) {
   return (
     <>
       <div className="gateway-settings">
-        <Setting
+        <CopyField
           id="edge-broker-host"
-          label="Broker address"
+          label="Broker Address"
           value={broker?.host}
           copyLabel="broker address"
-          copy={copy}
-          copied={copied}
           warning={broker === null
             ? 'The broker address could not be read, so it is not shown. The System page lists it.'
             : broker?.problem}
         />
-        <Setting
+        <CopyField
           id="edge-broker-port"
-          label={broker && !broker.tls ? 'Port' : 'TLS port'}
+          label={broker && !broker.tls ? 'Port' : 'TLS Port'}
           value={broker?.port}
           copyLabel="port"
-          copy={copy}
-          copied={copied}
           hint={broker && !broker.tls
             ? 'This broker is published without TLS, so the node connects in plain MQTT.'
             : 'MQTT over TLS.'}
         />
-        <Setting
+        <CopyField
           id="edge-username"
           label="Username"
           value={credential.mqtt_username}
           copyLabel="username"
-          copy={copy}
-          copied={copied}
         />
-        <Setting
+        <CopyField
           id="edge-password"
           label="Password"
           value={credential.password}
           copyLabel="password"
-          copy={copy}
-          copied={copied}
         />
-        <Setting
+        <CopyField
           id="edge-node-id"
-          label="Edge node ID"
+          label="Edge Node ID"
           value={sparkplugId}
           copyLabel="edge node ID"
-          copy={copy}
-          copied={copied}
           hint="The same as the username. The broker drops anything published under another edge node ID."
         />
-        <Setting
+        <CopyField
           id="edge-group"
-          label="Sparkplug group"
+          label="Sparkplug Group"
           value={gateway.sparkplug_group}
           copyLabel="Sparkplug group"
-          copy={copy}
-          copied={copied}
           warning={gateway.sparkplug_group ? null : 'Not known here: the gateway’s drawer shows it in its topic path.'}
         />
-        <Setting
+        <CopyField
           id="edge-primary-host"
-          label="Primary host ID"
+          label="Primary Host ID"
           value={hostId}
           copyLabel="primary host ID"
-          copy={copy}
-          copied={copied}
           hint={hostId
             ? <>The node watches <span className="mono">spBv1.0/STATE/{hostId}</span>, and sends its birth only while Aber says it is online.</>
             : null}
@@ -134,36 +95,27 @@ export function EdgeNodeSettings({ gateway, credential, copy, copied }) {
             ? null
             : <>Not supplied to this dashboard. It is <span className="mono">ingestion.primaryHostId</span> in Aber’s Helm values.</>}
         />
-        <div className="form-group">
-          <label className="form-label" htmlFor="edge-root">Root certificate</label>
-          <div className="gateway-copy-row">
-            <input id="edge-root" className="form-control mono" readOnly value={rootUrl} />
-            <Tooltip text="Copy the root certificate’s address">
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon"
-                onClick={() => copy('edge-root', rootUrl)}
-                aria-label="Copy the root certificate’s address"
-              >
-                {copied === 'edge-root' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-              </button>
-            </Tooltip>
-            <Tooltip text="Download the root certificate">
-              <a
-                className="btn btn-ghost btn-icon"
-                href={ROOT_CERTIFICATE_PATH}
-                download="aber-root-ca.pem"
-                aria-label="Download the root certificate"
-              >
-                <IconDownload size={13} />
-              </a>
-            </Tooltip>
-          </div>
-          <div className="form-hint">
+        <CopyField
+          id="edge-root"
+          label="Root Certificate"
+          value={rootUrl}
+          copyLabel="the root certificate’s address"
+          hint={<>
             The node trusts this root to check the broker’s certificate. It is public. It is the
             same file as step 8 of the install guide.
-          </div>
-        </div>
+          </>}
+        >
+          <Tooltip text="Download the root certificate">
+            <a
+              className="btn btn-ghost btn-icon"
+              href={ROOT_CERTIFICATE_PATH}
+              download="aber-root-ca.pem"
+              aria-label="Download the root certificate"
+            >
+              <IconDownload size={13} />
+            </a>
+          </Tooltip>
+        </CopyField>
       </div>
       <p className="form-hint gateway-settings-help">
         What the node must do is on the help page{' '}

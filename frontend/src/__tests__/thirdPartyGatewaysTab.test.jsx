@@ -109,8 +109,8 @@ describe('registering a Third-party gateway', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     expect(api.post.mock.calls[0][1].deployment).toBe('third_party')
     await waitFor(() => expect(api.mintGatewayCredential).toHaveBeenCalledWith('4d000000-0000-4000-8000-000000000001'))
-    await waitFor(() => expect(screen.getByLabelText('Password').value).toBe(CREDENTIAL.password))
-    expect(screen.getByLabelText('Sparkplug group').value).toBe('Plant-A')
+    await waitFor(() => expect(screen.getByLabelText('Password').textContent).toBe(CREDENTIAL.password))
+    expect(screen.getByLabelText('Sparkplug Group').textContent).toBe('Plant-A')
     expect(screen.queryByText(/Set up “/)).toBeNull()
   })
 })
@@ -131,9 +131,9 @@ describe("a Third-party gateway's drawer", () => {
     await show([gateway()], { userRole: 'Administrator' })
     fireEvent.click(openDrawer().getByRole('button', { name: /Show Broker Credential/ }))
     fireEvent.click(screen.getByRole('button', { name: /Show Credential/ }))
-    await waitFor(() => expect(screen.getByLabelText('Password').value).toBe('kept'))
-    expect(screen.getByLabelText('Edge node ID').value).toBe('gwy4c0000000000400080000')
-    expect(screen.getByLabelText('Sparkplug group').value).toBe('Plant-A')
+    await waitFor(() => expect(screen.getByLabelText('Password').textContent).toBe('kept'))
+    expect(screen.getByLabelText('Edge Node ID').textContent).toBe('gwy4c0000000000400080000')
+    expect(screen.getByLabelText('Sparkplug Group').textContent).toBe('Plant-A')
   })
 
   it('confirms before issuing again from the drawer, and gives the settings once issued', async () => {
@@ -144,7 +144,7 @@ describe("a Third-party gateway's drawer", () => {
     expect(api.mintGatewayCredential).not.toHaveBeenCalled()
     fireEvent.change(confirm, { target: { value: 'Vendor_Node' } })
     fireEvent.click(screen.getByText(/Issue Credential/))
-    await waitFor(() => expect(screen.getByLabelText('Primary host ID').value).toBe('plant1'))
+    await waitFor(() => expect(screen.getByLabelText('Primary Host ID').textContent).toBe('plant1'))
   })
 
   it('says what it does not get, and shows no appliance health', async () => {

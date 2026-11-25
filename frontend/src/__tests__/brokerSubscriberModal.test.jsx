@@ -58,8 +58,8 @@ async function create(handlers) {
   fireEvent.change(nameBox(), { target: { value: `  ${ACCOUNT.name} ` } })
   fireEvent.change(purposeBox(), { target: { value: ACCOUNT.description } })
   await act(async () => { fireEvent.click(createButton()) })
-  await waitFor(() => expect(screen.getByDisplayValue(ACCOUNT.password)).toBeInTheDocument())
-  await waitFor(() => expect(screen.getByLabelText('Broker address').value).toBe('mqtt.plant.example'))
+  await waitFor(() => expect(screen.getByText(ACCOUNT.password)).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByLabelText('Broker Address').textContent).toBe('mqtt.plant.example'))
   return handlers
 }
 
@@ -100,12 +100,12 @@ describe('New Read-Only Account', () => {
       'Read-only account “Line 4 OEE board” created', 'success', { to: '/access-control/accounts' }
     )
 
-    const value = (label) => screen.getByLabelText(label).value
-    expect(value('Broker address')).toBe('mqtt.plant.example')
-    expect(value('TLS port')).toBe('8883')
+    const value = (label) => screen.getByLabelText(label).textContent
+    expect(value('Broker Address')).toBe('mqtt.plant.example')
+    expect(value('TLS Port')).toBe('8883')
     expect(value('Username')).toBe(ACCOUNT.mqtt_username)
     expect(value('Password')).toBe(ACCOUNT.password)
-    expect(value('Root certificate')).toMatch(/\/\.well-known\/aber\/ca\.pem$/)
+    expect(value('Root Certificate')).toMatch(/\/\.well-known\/aber\/ca\.pem$/)
     const topics = screen.getByRole('list', { name: 'Topics it may read' })
     expect(within(topics).getAllByRole('listitem').map(li => li.textContent)).toEqual(TOPICS)
     expect(screen.getByText(/not a Sparkplug Host Application/)).toBeTruthy()
@@ -115,7 +115,7 @@ describe('New Read-Only Account', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy password' }))
     await waitFor(() => expect(written).toEqual([ACCOUNT.password]))
-    fireEvent.click(screen.getByRole('button', { name: 'I have copied it' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(handlers.onClose).toHaveBeenCalled()
   })
 
@@ -132,7 +132,7 @@ describe('New Read-Only Account', () => {
     fireEvent.change(purposeBox(), { target: { value: ACCOUNT.description } })
     await act(async () => { fireEvent.click(createButton()) })
     await waitFor(() => expect(screen.getByText(/The broker address could not be read, so it is not shown. The System page lists it./)).toBeTruthy())
-    expect(screen.getByLabelText('Broker address').value).toBe('')
+    expect(screen.getByLabelText('Broker Address').textContent).toBe('—')
   })
 
   it('keeps the form as typed when the account could not be created', async () => {

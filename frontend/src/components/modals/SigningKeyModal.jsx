@@ -1,16 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
+import { CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
-import { IconCheck, IconCopy, IconLock, IconShieldAlert } from '../common/Icons'
-import { Tooltip } from '../common/Tooltip'
+import { IconLock, IconShieldAlert } from '../common/Icons'
 import { formatDateTime } from '../../utils/format'
 import { notificationsUrl } from '../../routes'
-
-const COPY_FEEDBACK_MS = 1600
-/** Said in the dialog and in a toast when the browser refuses a copy. */
-const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /**
  * Issue the webhook's signing key and show it once, as a machine identity's token is shown
@@ -24,10 +19,6 @@ export function SigningKeyModal({ issuedAt, onIssued, onClose, showToast }) {
   const [key, setKey] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [copyFailed, setCopyFailed] = useState(false)
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const rotating = Boolean(issuedAt)
   const action = rotating ? 'Rotate Key' : 'Issue Key'
@@ -49,15 +40,6 @@ export function SigningKeyModal({ issuedAt, onIssued, onClose, showToast }) {
     }
   }, [rotating, showToast, onIssued])
 
-  const copy = useCallback(async () => {
-    const ok = await copyText(key)
-    setCopied(ok)
-    setCopyFailed(!ok)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.(COPY_REFUSED, 'error')
-  }, [key, showToast])
-
   const confirming = step === 'confirm'
 
   return (
@@ -66,7 +48,7 @@ export function SigningKeyModal({ issuedAt, onIssued, onClose, showToast }) {
       icon={<IconLock size={18} />}
       size="lg"
       onClose={busy ? () => {} : onClose}
-      error={confirming ? error : copyFailed ? COPY_REFUSED : null}
+      error={confirming ? error : null}
       footer={confirming ? (
         <>
           <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
@@ -112,22 +94,16 @@ export function SigningKeyModal({ issuedAt, onIssued, onClose, showToast }) {
               <div>Closing this dialog discards it. Issuing another is the only way back.</div>
             </div>
           </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="signing-key">Signing key</label>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <input id="signing-key" className="form-control mono" readOnly value={key} />
-              <Tooltip text="Copy signing key">
-                <button type="button" className="btn btn-ghost btn-icon" onClick={copy} aria-label="Copy signing key">
-                  {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                </button>
-              </Tooltip>
-            </div>
-            <div className="form-hint">
+          <CopyField
+            id="signing-key"
+            label="Signing Key"
+            value={key}
+            hint={<>
               Give it to the receiver. Each message carries webhook-id, webhook-timestamp and
               webhook-signature headers, as Standard Webhooks writes them, so its own verifier can
               check them with this key.
-            </div>
-          </div>
+            </>}
+          />
         </>
       )}
     </Modal>

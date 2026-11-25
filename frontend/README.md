@@ -140,8 +140,9 @@ everyone but an Administrator for itself. `tabRoleGating.test.jsx` holds the fou
 ### What looks clickable
 
 Only what acts looks clickable. `.mono` is a typeface and takes the text colour; accent colour
-means a real link (the System page's open chip, a `.count-link`). A value that copies is a
-`CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A long
+means a real link (the System page's open chip, a `.count-link`). An id that copies is a
+`CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A value a
+dialog hands over is a `CopyField` ([A value to copy](#a-value-to-copy)). A long
 id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). The copy and the aria
 label always carry the full value. The tooltip carries it whenever the chip is cut, measured as the
 tooltip opens, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
@@ -591,8 +592,26 @@ table cell, as on Settings, the value is `.setting-static`.
   beside it, in `form-hint`.
 - **A label is not a `<label>`.** A `<label htmlFor>` names a control. A value drawn as text has none,
   so its name is a plain `form-label` div.
-- **Read-only copy fields stay inputs.** A credential, URL or token is there to be selected and
-  copied, so it is not covered.
+- **A value to copy has a box** ([A value to copy](#a-value-to-copy)), and is text all the same.
+
+### A value to copy
+
+A secret, a setting or an address that a dialog hands to a person is a `CopyField`
+(`common/CopyField.jsx`): its label, the value in a box, and a copy button whose icon is a tick for a
+moment. `CopyBlock`, beside it, is the same for a block of text, such as a client's setup. A command
+for an appliance is an `ApplianceCommand`.
+
+- **The value is text, never an input.** It is `.form-static`'s text in mono, in the box a block of
+  commands has, so it does not read as a field to fill. A click or Tab selects all of it, for a person
+  whose browser refuses the copy. A long value wraps, then scrolls inside its box.
+- **A refused copy is said under its own value,** as a `FieldError`, until that value is copied. It is
+  never in the dialog's error slot, which is for what the server refused, nor in a toast, which is
+  behind the dialog. In a drawer, an appliance's command says it in a toast.
+- **`useCopy()`** (`hooks/useCopy.js`) holds the tick's time and the refusal's words, for these and for
+  `CopyableId`. `copyText()` (`utils/copyText.js`) copies. Over plain HTTP the browser has no clipboard
+  API, so it selects a scratch field, which takes the focus. The control gets it back where the
+  keyboard was on it, and the dialog has it otherwise.
+- **The step that shows a secret once ends with Done,** its primary and its last button.
 
 ### A plan opens expanded
 
@@ -2918,7 +2937,7 @@ drift check share. The tree's shapes:
 | Heading | `{ type: 'heading', depth, id, children }`: `##` is an h3, one level under the drawer's title |
 | Paragraph; a tight list item's text | `{ type: 'paragraph' \| 'text', children }` |
 | List | `{ type: 'list', ordered, start, items }`, each item an array of blocks, so lists nest |
-| Code block | `{ type: 'code', lang, text }`, drawn with a Copy button (`copyText` from `CopyableId.jsx`) |
+| Code block | `{ type: 'code', lang, text }`, drawn with a Copy button (`utils/copyText.js`) |
 | Quote | `{ type: 'blockquote', children }` |
 | Table | `{ type: 'table', align, header, rows }`, each cell an array of inline nodes |
 | Rule | `{ type: 'hr' }` |

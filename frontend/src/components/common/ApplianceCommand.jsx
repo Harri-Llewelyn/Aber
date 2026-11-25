@@ -1,11 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useId } from 'react'
 import { APPLIANCE_COMMANDS_HELP } from '../../utils/applianceCommands'
-import { copyText } from './CopyableId'
+import { FieldError } from './FieldError'
 import { HelpLink } from './HelpLink'
-import { IconCheck, IconCopy, IconShieldAlert } from './Icons'
+import { IconCheck, IconCopy } from './Icons'
 import { Tooltip } from './Tooltip'
-
-const COPY_FEEDBACK_MS = 1600
+import { COPY_REFUSED, useCopy } from '../../hooks/useCopy'
 
 /**
  * A command to run on a gateway's appliance, with its copy button: one block wherever the dashboard
@@ -19,35 +18,28 @@ const COPY_FEEDBACK_MS = 1600
  * @param {boolean} [drawer] In a drawer: labelled as its fields are, with the copy button laid out as
  *   its other buttons are.
  * @param {node} [children] What to know before running it, under the block.
- * @param {Function} [showToast] Says that a copy was refused.
+ * @param {Function} [showToast] Says in a drawer that a copy was refused. A dialog says it under the block.
  */
 export function ApplianceCommand({
   command, label = 'On the appliance', copyLabel = 'Copy Command', copyTip = null, wrap = true,
   drawer = false, children = null, showToast,
 }) {
-  const [copied, setCopied] = useState(null)
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
+  const { copied, refusal, copy } = useCopy()
+  const errorId = useId()
+  const refusedHere = drawer ? null : refusal
 
-  const copy = async () => {
-    const ok = await copyText(command)
-    setCopied(ok ? 'copied' : 'failed')
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.('Could not reach the clipboard — select the commands and copy them.', 'error')
+  const press = async () => {
+    if (!(await copy(command)) && drawer) showToast?.(COPY_REFUSED, 'error')
   }
 
   const button = (
     <Tooltip text={copyTip}>
       <button
         className={drawer ? 'btn btn-ghost btn-sm context-action' : 'btn btn-ghost btn-sm'}
-        onClick={copy}
+        onClick={press}
+        aria-describedby={refusedHere ? errorId : undefined}
       >
-        {copied === 'copied'
-          ? <><IconCheck size={12} /> Copied</>
-          : copied === 'failed'
-            ? <><IconShieldAlert size={12} /> Copy failed</>
-            : <><IconCopy size={12} /> {copyLabel}</>}
+        {copied ? <><IconCheck size={12} /> Copied</> : <><IconCopy size={12} /> {copyLabel}</>}
       </button>
     </Tooltip>
   )
@@ -65,6 +57,7 @@ export function ApplianceCommand({
       <pre className={`mono gateway-code${wrap ? ' gateway-code-wrap' : ''}`}>{command}</pre>
       {drawer && <div className="context-buttons">{button}</div>}
       {children && <div className="form-hint">{children}</div>}
+      <FieldError id={errorId} error={refusedHere} />
     </div>
   )
 }

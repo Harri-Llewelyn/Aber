@@ -6,7 +6,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 import { ServiceTokenModal } from '../components/modals/ServiceTokenModal'
-import { copyText } from '../components/common/CopyableId'
+import { copyText } from '../utils/copyText'
 import { isMintableFromPage, describePrincipal } from '../utils/serviceIdentities'
 import { api } from '../api'
 
@@ -19,8 +19,8 @@ vi.mock('../api', () => ({ api: { mintServiceToken: vi.fn() } }))
 vi.mock('../components/common/CopyableId', () => ({
   __esModule: true,
   default: () => null,
-  copyText: vi.fn().mockResolvedValue(true),
 }))
+vi.mock('../utils/copyText', () => ({ copyText: vi.fn().mockResolvedValue(true) }))
 
 const PRINCIPAL = {
   principal_id: 'b0000000-0000-4000-8000-000000000001',
@@ -96,10 +96,10 @@ describe('ServiceTokenModal', () => {
 
     screen.getByRole('button', { name: /Issue Token/i }).click()
 
-    await waitFor(() => expect(screen.getByDisplayValue(MINTED.token)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(MINTED.token)).toBeTruthy())
     // THE jti IS SHOWN BECAUSE IT IS THE HANDLE FOR REVOKING THIS TOKEN. Without it, an operator
     // who has closed the dialog has to find the TOKEN_MINTED row in the Audit Trail.
-    expect(screen.getByDisplayValue(MINTED.jti)).toBeTruthy()
+    expect(screen.getByText(MINTED.jti)).toBeTruthy()
   })
 
   it('passes the chosen TTL through, defaulting to 30 days', async () => {
@@ -129,7 +129,7 @@ describe('ServiceTokenModal', () => {
     api.mintServiceToken.mockResolvedValue(MINTED)
     const view = open(overrides)
     fireEvent.click(screen.getByRole('button', { name: /Issue Token/i }))
-    await waitFor(() => expect(screen.getByDisplayValue(MINTED.token)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(MINTED.token)).toBeTruthy())
     return view
   }
 
@@ -156,12 +156,12 @@ describe('ServiceTokenModal', () => {
       expect(screen.queryByRole('group', { name: 'Connect' })).toBeNull()
       // i3X is still named in what revoking reaches; no setup or address for it is offered.
       expect(screen.queryByText(/i3X Explorer/)).toBeNull()
-      expect(screen.queryByDisplayValue(/i3x\.plant\.example/)).toBeNull()
+      expect(screen.queryByText(/i3x\.plant\.example/)).toBeNull()
     })
 
     it('gives the i3X server with /v1 on it, and a bearer token as the authentication', async () => {
       await mint()
-      expect(screen.getByLabelText('i3X server').value).toBe('https://i3x.plant.example/v1')
+      expect(screen.getByLabelText('i3X Server').textContent).toBe('https://i3x.plant.example/v1')
       // Plain text: a client takes the scheme as a choice, so there is nothing to paste.
       expect(screen.getByText('Bearer token')).toBeTruthy()
       expect(screen.queryByRole('button', { name: /Copy authentication/i })).toBeNull()
@@ -259,6 +259,6 @@ describe('ServiceTokenModal', () => {
 
     await waitFor(() => expect(screen.getByText(/that principal can sign in/i)).toBeTruthy())
     expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy()
-    expect(screen.queryByDisplayValue(MINTED.token)).toBeNull()
+    expect(screen.queryByText(MINTED.token)).toBeNull()
   })
 })

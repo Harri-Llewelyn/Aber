@@ -1,17 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
+import { CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
-import { IconCheck, IconCopy, IconEye, IconShieldAlert } from '../common/Icons'
+import { IconEye, IconShieldAlert } from '../common/Icons'
 import { NodeRedCredentialSteps } from './GatewayCredentialModal'
 import { EdgeNodeSettings } from './EdgeNodeSettings'
-import { Tooltip } from '../common/Tooltip'
 import { gatewayUrl } from '../../routes'
-
-const COPY_FEEDBACK_MS = 1600
-/** Said in the dialog and in a toast when the browser refuses a copy. */
-const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /**
  * Show a Host, Simulated or Third-party gateway's broker credential again, for an Administrator who
@@ -22,11 +17,6 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
   const [credential, setCredential] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(null)
-  const [copyFailed, setCopyFailed] = useState(false)
-
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const show = useCallback(async () => {
     setBusy(true)
@@ -40,15 +30,6 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
       setBusy(false)
     }
   }, [gateway, showToast])
-
-  const copy = useCallback(async (label, value) => {
-    const ok = await copyText(value)
-    setCopied(ok ? label : null)
-    setCopyFailed(!ok)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.(COPY_REFUSED, 'error')
-  }, [showToast])
 
   const footer = credential
     ? <button className="btn btn-primary" onClick={onClose}>Done</button>
@@ -66,7 +47,7 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
       title={<>Broker credential for “{gateway.gateway_name}”</>}
       size="lg"
       onClose={onClose}
-      error={error || (copyFailed ? COPY_REFUSED : null)}
+      error={error}
       footer={footer}
     >
       {!credential ? (
@@ -81,40 +62,11 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
           </div>
         </div>
       ) : gateway.deployment === 'third_party' ? (
-        <EdgeNodeSettings gateway={gateway} credential={credential} copy={copy} copied={copied} />
+        <EdgeNodeSettings gateway={gateway} credential={credential} />
       ) : (
         <>
-          <div className="form-group">
-            <label className="form-label">MQTT username</label>
-            <div className="gateway-copy-row">
-              <input className="form-control mono" readOnly value={credential.mqtt_username} />
-              <Tooltip text="Copy username">
-                <button
-                  className="btn btn-ghost btn-icon"
-                  onClick={() => copy('user', credential.mqtt_username)}
-                  aria-label="Copy username"
-                >
-                  {copied === 'user' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                </button>
-              </Tooltip>
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Password</label>
-            <div className="gateway-copy-row">
-              <input className="form-control mono" readOnly value={credential.password} />
-              <Tooltip text="Copy password">
-                <button
-                  className="btn btn-ghost btn-icon"
-                  onClick={() => copy('password', credential.password)}
-                  aria-label="Copy password"
-                >
-                  {copied === 'password' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                </button>
-              </Tooltip>
-            </div>
-          </div>
+          <CopyField id="gateway-username" label="MQTT Username" value={credential.mqtt_username} copyLabel="username" />
+          <CopyField id="gateway-password" label="Password" value={credential.password} />
 
           <NodeRedCredentialSteps />
         </>

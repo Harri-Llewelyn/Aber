@@ -1,18 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
+import { CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { IconShieldAlert } from '../common/Icons'
-import { Setting, useDirectoryBroker } from './EdgeNodeSettings'
+import { useDirectoryBroker } from './EdgeNodeSettings'
 import { ROOT_CERTIFICATE_PATH } from '../../utils/edgeNodeSettings'
 import { tabUrl } from '../../routes'
 import { SUBSCRIBER_DESCRIPTION_MAX, SUBSCRIBER_NAME_MAX } from '../../utils/serviceIdentities'
-
-const COPY_FEEDBACK_MS = 1600
-/** Said in the dialog and in a toast when the browser refuses a copy. */
-const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /** One line, as broker-subscriber accepts it: a line break typed in the box becomes a space. */
 const oneLine = (value) => value.replace(/[\r\n\t]+/g, ' ')
@@ -36,11 +32,7 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
   const [account, setAccount] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
-  const [copied, setCopied] = useState(null)
-  const [copyFailed, setCopyFailed] = useState(false)
   const nameRef = useRef(null)
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const nameLength = characters(name)
   const descriptionLength = characters(description)
@@ -72,15 +64,6 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
     }
   }, [name, description, onCreated, showToast])
 
-  const copy = useCallback(async (label, value) => {
-    const ok = await copyText(value)
-    setCopied(ok ? label : null)
-    setCopyFailed(!ok)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.(COPY_REFUSED, 'error')
-  }, [showToast])
-
   const auditMissing = account?.audit_recorded === false
 
   return (
@@ -98,13 +81,11 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
       problem={account ? undefined : problem}
       error={!account
         ? error
-        : copyFailed
-          ? COPY_REFUSED
-          : auditMissing
-            ? 'The account was created, but the Audit Trail entry could not be written. The account exists; the record of it does not.'
-            : null}
+        : auditMissing
+          ? 'The account was created, but the Audit Trail entry could not be written. The account exists; the record of it does not.'
+          : null}
       footer={account ? (
-        <button className="btn btn-primary" onClick={onClose}>I have copied it</button>
+        <button className="btn btn-primary" onClick={onClose}>Done</button>
       ) : (
         <>
           <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
@@ -169,7 +150,7 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
             </div>
           </div>
         </div>
-        <SubscriberSettings account={account} topics={topics} copy={copy} copied={copied} />
+        <SubscriberSettings account={account} topics={topics} />
       </>)}
     </Modal>
   )
@@ -179,48 +160,40 @@ export function BrokerSubscriberModal({ topics = null, onClose, onCreated, showT
  * What the consumer is configured with, in the order a client's own settings ask for it. The
  * broker comes from its `directory_services` row, as a Third-party gateway's does.
  */
-function SubscriberSettings({ account, topics, copy, copied }) {
+function SubscriberSettings({ account, topics }) {
   const broker = useDirectoryBroker()
   const rootUrl = `${window.location.origin}${ROOT_CERTIFICATE_PATH}`
   return (
     <div className="gateway-settings">
-      <Setting
+      <CopyField
         id="subscriber-broker-host"
-        label="Broker address"
+        label="Broker Address"
         value={broker?.host}
         copyLabel="broker address"
-        copy={copy}
-        copied={copied}
         warning={broker === null
           ? 'The broker address could not be read, so it is not shown. The System page lists it.'
           : broker?.problem}
       />
-      <Setting
+      <CopyField
         id="subscriber-broker-port"
-        label={broker && !broker.tls ? 'Port' : 'TLS port'}
+        label={broker && !broker.tls ? 'Port' : 'TLS Port'}
         value={broker?.port}
         copyLabel="port"
-        copy={copy}
-        copied={copied}
         hint={broker && !broker.tls
           ? 'This broker is published without TLS, so the client connects in plain MQTT.'
           : 'MQTT over TLS.'}
       />
-      <Setting
+      <CopyField
         id="subscriber-username"
         label="Username"
         value={account.mqtt_username}
         copyLabel="username"
-        copy={copy}
-        copied={copied}
       />
-      <Setting
+      <CopyField
         id="subscriber-password"
         label="Password"
         value={account.password}
         copyLabel="password"
-        copy={copy}
-        copied={copied}
       />
       <div className="form-group">
         <div className="form-label" id="subscriber-topics-label">Topics it may read</div>
@@ -244,13 +217,11 @@ function SubscriberSettings({ account, topics, copy, copied }) {
           an edge node to rebirth.
         </div>
       </div>
-      <Setting
+      <CopyField
         id="subscriber-root"
-        label="Root certificate"
+        label="Root Certificate"
         value={rootUrl}
         copyLabel="the root certificate’s address"
-        copy={copy}
-        copied={copied}
         hint="The client trusts this root to check the broker’s certificate. It is public."
       />
     </div>

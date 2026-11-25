@@ -1,46 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
+import { CopyField } from '../common/CopyField'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
-import { Tooltip } from '../common/Tooltip'
-import { IconCheck, IconCopy, IconGlobe, IconPlus, IconShieldAlert } from '../common/Icons'
+import { IconCheck, IconGlobe, IconPlus, IconShieldAlert } from '../common/Icons'
 import { appUrl } from '../../routes'
 import {
   APP_NAME_MAX, APP_REDIRECT_MAX, appNameProblem, clientTypeLabel, parseRedirectAddresses, redirectAddressesProblem,
 } from '../../utils/apps'
-
-const COPY_FEEDBACK_MS = 1600
-/** Said in the dialog when the browser refuses a copy. */
-const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
-
-/** One value the app is given, read-only, with its copy button. `copied` and `refused` are the id last copied or refused. */
-function GivenValue({ id, label, value, hint, copied, refused, onCopy }) {
-  const copyError = refused === id ? COPY_REFUSED : null
-  return (
-    <div className="form-group">
-      <label className="form-label" htmlFor={id}>{label}</label>
-      <div className="gateway-copy-row">
-        <input
-          id={id}
-          className="form-control mono"
-          readOnly
-          value={value}
-          aria-describedby={copyError ? `${id}-copy-error` : undefined}
-        />
-        <Tooltip text={`Copy ${label.toLowerCase()}`}>
-          <button type="button" className="btn btn-ghost btn-icon" onClick={() => onCopy(id, value)} aria-label={`Copy ${label.toLowerCase()}`}>
-            {copied === id ? <IconCheck size={13} /> : <IconCopy size={13} />}
-          </button>
-        </Tooltip>
-      </div>
-      {hint && <div className="form-hint">{hint}</div>}
-      <FieldError id={`${id}-copy-error`} error={copyError} />
-    </div>
-  )
-}
 
 /**
  * Register an app that signs people in with Aber: a name, whether it is public or confidential, and
@@ -60,11 +29,7 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
   const [registered, setRegistered] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(null)
-  const [refused, setRefused] = useState(null)
   const nameRef = useRef(null)
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const uris = parseRedirectAddresses(addresses)
   const nameProblem = appNameProblem(name)
@@ -89,15 +54,6 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
       setBusy(false)
     }
   }, [name, uris, clientType, onRegistered, showToast])
-
-  const copy = useCallback(async (id, value) => {
-    const ok = await copyText(value)
-    setCopied(ok ? id : null)
-    setRefused(ok ? null : id)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.(COPY_REFUSED, 'error')
-  }, [showToast])
 
   if (registered) {
     const issuer = authUrl.replace(/\/+$/, '')
@@ -130,27 +86,21 @@ export function RegisterAppModal({ onClose, onRegistered, showToast, siteDomain 
           </div>
         )}
 
-        <GivenValue id="registered-client-id" label="Client ID" value={registered.id} copied={copied} refused={refused} onCopy={copy} />
+        <CopyField id="registered-client-id" label="Client ID" value={registered.id} copyLabel="client ID" />
         {registered.client_secret && (
-          <GivenValue
+          <CopyField
             id="registered-client-secret"
-            label="Client secret"
+            label="Client Secret"
             value={registered.client_secret}
             hint="Sent as HTTP Basic credentials at the token endpoint: the client ID, then the secret."
-            copied={copied}
-            refused={refused}
-            onCopy={copy}
           />
         )}
         {issuer && (
-          <GivenValue
+          <CopyField
             id="registered-discovery"
-            label="Discovery address"
+            label="Discovery Address"
             value={`${issuer}/.well-known/openid-configuration`}
             hint="A sign-in library finds the issuer, the endpoints and the keys from this one address."
-            copied={copied}
-            refused={refused}
-            onCopy={copy}
           />
         )}
         <div className="form-hint">

@@ -40,8 +40,8 @@ vi.mock('../api', async (importOriginal) => ({
 vi.mock('../components/common/CopyableId', () => ({
   __esModule: true,
   default: () => null,
-  copyText: vi.fn().mockResolvedValue(true),
 }))
+vi.mock('../utils/copyText', () => ({ copyText: vi.fn().mockResolvedValue(true) }))
 
 const ME = 'a0000000-0000-4000-8000-000000000001'
 const OTHER_ADMIN = 'a0000000-0000-4000-8000-000000000002'
@@ -303,13 +303,13 @@ describe('adding a person', () => {
     await waitFor(() => expect(api.addPerson).toHaveBeenCalledWith('new@site.test', 'Operator', null))
     const reveal = await screen.findByRole('dialog')
     expect(reveal).toHaveTextContent('it is not shown again')
-    expect(within(reveal).getByLabelText('Password')).toHaveValue(MINTED)
+    expect(within(reveal).getByLabelText('Password')).toHaveTextContent(MINTED)
     // The list behind the dialog is read again so the person appears.
     await waitFor(() => expect(api.listPeople).toHaveBeenCalledTimes(2))
 
     fireEvent.click(within(reveal).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(screen.queryByDisplayValue(MINTED)).toBeNull()
+    expect(screen.queryByText(MINTED)).toBeNull()
   })
 
   it('with a mail relay, says an invitation was sent and shows no password', async () => {
@@ -492,15 +492,15 @@ describe('setting a new password', () => {
     const reveal = await screen.findByText('New password for operator@site.test')
     const dialog = reveal.closest('[role="dialog"]')
     expect(dialog).toHaveTextContent('it is not shown again')
-    expect(within(dialog).getByLabelText('Password')).toHaveValue(MINTED)
-    expect(within(dialog).getByLabelText('Email')).toHaveValue('operator@site.test')
+    expect(within(dialog).getByLabelText('Password')).toHaveTextContent(MINTED)
+    expect(within(dialog).getByLabelText('Email')).toHaveTextContent('operator@site.test')
     expect(toast).toHaveBeenCalledWith('operator@site.test has a new password', 'success', { to: personUrl(OPERATOR) })
     // Never in a toast.
     expect(JSON.stringify(toast.mock.calls)).not.toContain(MINTED)
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(screen.queryByDisplayValue(MINTED)).toBeNull()
+    expect(screen.queryByText(MINTED)).toBeNull()
   })
 
   it('shows the refusal, and no password dialog, when none was set', async () => {

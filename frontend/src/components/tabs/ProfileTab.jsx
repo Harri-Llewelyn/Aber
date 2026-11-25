@@ -3,7 +3,7 @@ import { IconUser, IconLock, IconAlertTriangle, IconCopy, IconCheck } from '../c
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
-import { copyText } from '../common/CopyableId'
+import { copyText } from '../../utils/copyText'
 import { useUrlTab } from '../../hooks/useUrlState'
 import { PROFILE_TABS } from '../../navigation'
 import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'

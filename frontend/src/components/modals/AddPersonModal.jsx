@@ -77,7 +77,6 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
           <PasswordShownOnce
             email={added.email}
             password={added.password}
-            showToast={showToast}
             hint="It cannot be shown again. If it is lost, open their row and select Set New Password."
           >
             Closing this dialog discards it, and nothing in Aber keeps a copy. Give it to{' '}

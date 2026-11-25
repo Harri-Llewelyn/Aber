@@ -51,8 +51,8 @@ vi.mock('../lib/supabaseClient', () => ({
 vi.mock('../components/common/CopyableId', () => ({
   __esModule: true,
   default: () => null,
-  copyText: vi.fn().mockResolvedValue(false),
 }))
+vi.mock('../utils/copyText', () => ({ copyText: vi.fn().mockResolvedValue(false) }))
 
 const PERSON = { user_id: 'u-1', email: 'operator@site.test', display_name: 'Owain' }
 const TOO_LONG = 'N'.repeat(81)
@@ -185,13 +185,14 @@ describe('Register App', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Register App/ })) })
 
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy client secret' })) })
-    saysWhy(screen.getByLabelText('Client secret'), COPY_REFUSED, { invalid: false })
+    saysWhy(screen.getByLabelText('Client Secret'), COPY_REFUSED, { invalid: false })
     saysNothing(screen.getByLabelText('Client ID'))
     expect(screen.getAllByRole('alert')).toHaveLength(1)
 
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy client id' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy client ID' })) })
     saysWhy(screen.getByLabelText('Client ID'), COPY_REFUSED, { invalid: false })
-    saysNothing(screen.getByLabelText('Client secret'))
+    // Each refusal is its own field's, and stays until that field is copied.
+    saysWhy(screen.getByLabelText('Client Secret'), COPY_REFUSED, { invalid: false })
   })
 })
 

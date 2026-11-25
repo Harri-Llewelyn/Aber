@@ -156,16 +156,16 @@ describe('for an Administrator', () => {
     fireEvent.click(within(toolbar()).getByRole('button', { name: /Issue signing key/ }))
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText(/shown/)).toBeInTheDocument()
-    expect(within(dialog).queryByDisplayValue(/whsec_/)).toBeNull()
+    expect(within(dialog).queryByText(/whsec_/)).toBeNull()
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: /Issue Key/ })) })
 
-    expect(within(screen.getByRole('dialog')).getByDisplayValue('whsec_fixture-not-a-real-key')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('whsec_fixture-not-a-real-key')).toBeInTheDocument()
     expect(screen.getByText('Copy this now — it is not shown again.')).toBeInTheDocument()
     expect(showToast).toHaveBeenCalledWith('Signing key issued', 'success', { to: '/settings/notifications' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.queryByDisplayValue(/whsec_/)).toBeNull()
+    expect(screen.queryByText(/whsec_/)).toBeNull()
 
     // Issued now, so asking again is a rotation, and asks before it shows anything.
     await waitFor(() => expect(within(toolbar()).getByRole('button', { name: /Rotate signing key/ })).toBeInTheDocument())
@@ -173,7 +173,7 @@ describe('for an Administrator', () => {
     const again = screen.getByRole('dialog')
     expect(within(again).getByText(/The old key stops signing at once/)).toBeInTheDocument()
     expect(within(again).getByRole('button', { name: /Rotate Key/ })).toHaveClass('btn-danger')
-    expect(within(again).queryByDisplayValue(/whsec_/)).toBeNull()
+    expect(within(again).queryByText(/whsec_/)).toBeNull()
     expect(api.issueNotificationSigningKey).toHaveBeenCalledTimes(1)
   })
 

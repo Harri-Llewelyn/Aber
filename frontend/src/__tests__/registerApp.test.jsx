@@ -42,8 +42,8 @@ vi.mock('../api', async (importOriginal) => ({
 vi.mock('../components/common/CopyableId', () => ({
   __esModule: true,
   default: () => null,
-  copyText: vi.fn().mockResolvedValue(true),
 }))
+vi.mock('../utils/copyText', () => ({ copyText: vi.fn().mockResolvedValue(true) }))
 
 const FIXTURE = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../test-harness/fixtures/app-redirect-addresses.json'), 'utf8'))
 
@@ -182,21 +182,21 @@ describe('the Register App dialog', () => {
     const done = await screen.findByRole('dialog', { name: 'Shift Reports is registered' })
     expect(api.registerApp).toHaveBeenCalledWith('Shift Reports', ['https://reports.example.org/cb', 'http://10.1.2.3:3000/cb'], 'confidential')
     expect(within(done).getByText(/Copy the client secret now/)).toBeInTheDocument()
-    expect(within(done).getByLabelText('Client secret')).toHaveValue(SECRET)
-    expect(within(done).getByLabelText('Client ID')).toHaveValue(NEW_ID)
-    expect(within(done).getByLabelText('Discovery address')).toHaveValue('http://127.0.0.1:54321/auth/v1/.well-known/openid-configuration')
+    expect(within(done).getByLabelText('Client Secret')).toHaveTextContent(SECRET)
+    expect(within(done).getByLabelText('Client ID')).toHaveTextContent(NEW_ID)
+    expect(within(done).getByLabelText('Discovery Address')).toHaveTextContent('http://127.0.0.1:54321/auth/v1/.well-known/openid-configuration')
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Shift Reports is registered'), 'success', { to: appUrl(NEW_ID) })
     // The list behind it is read again.
     await waitFor(() => expect(api.listApps).toHaveBeenCalledTimes(2))
 
     // Closing discards it: a new dialog is a blank form, and the secret is in no toast.
     fireEvent.click(within(done).getByRole('button', { name: 'Done' }))
-    expect(screen.queryByDisplayValue(SECRET)).not.toBeInTheDocument()
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument()
     expect(JSON.stringify(showToast.mock.calls)).not.toContain(SECRET)
     fireEvent.click(await screen.findByRole('button', { name: /Register App/ }))
     const again = await screen.findByRole('dialog', { name: 'Register an app' })
     expect(within(again).getByLabelText(/^Name/)).toHaveValue('')
-    expect(screen.queryByDisplayValue(SECRET)).not.toBeInTheDocument()
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument()
   })
 
   it('registers a public app, which has no secret to show', async () => {
@@ -211,7 +211,7 @@ describe('the Register App dialog', () => {
     expect(api.registerApp).toHaveBeenCalledWith('Plant Viewer', ['http://localhost:5173/cb'], 'public')
     expect(within(done).getByText(/It is a public app, so it has no secret/)).toBeInTheDocument()
     expect(within(done).queryByLabelText('Client secret')).not.toBeInTheDocument()
-    expect(within(done).getByLabelText('Client ID')).toHaveValue(NEW_ID)
+    expect(within(done).getByLabelText('Client ID')).toHaveTextContent(NEW_ID)
   })
 
   it('shows a refusal in the dialog, which stays open with what was typed', async () => {

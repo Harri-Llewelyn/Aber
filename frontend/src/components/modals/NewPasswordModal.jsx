@@ -4,7 +4,7 @@ import { IconLock } from '../common/Icons'
 import { PasswordShownOnce } from './PasswordShownOnce'
 
 /** The password Set New Password minted for `email`, shown once (PasswordShownOnce). */
-export function NewPasswordModal({ email, password, onClose, showToast }) {
+export function NewPasswordModal({ email, password, onClose }) {
   return (
     <Modal
       title={`New password for ${email}`}
@@ -16,7 +16,6 @@ export function NewPasswordModal({ email, password, onClose, showToast }) {
       <PasswordShownOnce
         email={email}
         password={password}
-        showToast={showToast}
         hint="It cannot be shown again. If it is lost, select Set New Password again."
       >
         Closing this dialog discards it, and nothing in Aber keeps a copy. Give it to {email} in

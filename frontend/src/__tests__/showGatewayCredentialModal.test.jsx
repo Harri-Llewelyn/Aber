@@ -24,7 +24,7 @@ describe('ShowGatewayCredentialModal', () => {
     renderModal()
     expect(api.showGatewayCredential).not.toHaveBeenCalled()
     expect(screen.getByText(/recorded in the Audit Trail under your name/i)).toBeInTheDocument()
-    expect(screen.queryByDisplayValue(KEPT.password)).toBeNull()
+    expect(screen.queryByText(KEPT.password)).toBeNull()
   })
 
   it('shows the kept username and password, and where they go in Node-RED', async () => {
@@ -32,8 +32,8 @@ describe('ShowGatewayCredentialModal', () => {
     renderModal()
     fireEvent.click(screen.getByRole('button', { name: /Show Credential/i }))
 
-    await waitFor(() => expect(screen.getByDisplayValue(KEPT.password)).toBeInTheDocument())
-    expect(screen.getByDisplayValue(KEPT.mqtt_username)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(KEPT.password)).toBeInTheDocument())
+    expect(screen.getByText(KEPT.mqtt_username)).toBeInTheDocument()
     expect(api.showGatewayCredential).toHaveBeenCalledWith('gw-1')
     expect(screen.getByText(/Use it in Node-RED/i)).toBeInTheDocument()
     expect(screen.getByText('Security')).toBeInTheDocument()

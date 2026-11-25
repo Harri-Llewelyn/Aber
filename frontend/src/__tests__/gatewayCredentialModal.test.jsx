@@ -97,9 +97,9 @@ describe('GatewayCredentialModal', () => {
     await confirmAndMint()
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue(CREDENTIAL.password)).toBeTruthy()
+      expect(screen.getByText(CREDENTIAL.password)).toBeTruthy()
     })
-    expect(screen.getAllByDisplayValue(CREDENTIAL.mqtt_username).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(CREDENTIAL.mqtt_username).length).toBeGreaterThan(0)
     expect(api.mintGatewayCredential).toHaveBeenCalledWith(GATEWAY.gateway_id)
   })
 
@@ -257,7 +257,7 @@ describe('GatewayCredentialModal', () => {
     })
     // And the password is still shown -- the account exists, and withholding it would strand one
     // nobody can ever authenticate as.
-    expect(screen.getByDisplayValue(CREDENTIAL.password)).toBeTruthy()
+    expect(screen.getByText(CREDENTIAL.password)).toBeTruthy()
   })
 })
 

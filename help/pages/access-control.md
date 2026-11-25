@@ -156,7 +156,7 @@ A system outside Aber that only reads the broker can have an account of its own.
 1. Open **Broker accounts** and select **New Read-Only Account**.
 2. Give the account a name, and say what it is for. Both are needed. The name can be up to 80 characters, and the purpose up to 500.
 3. Select **Create Read-Only Account**.
-4. Copy the settings the dialog shows into the system that will connect. Then select **I have copied it**.
+4. Copy the settings the dialog shows into the system that will connect. Then select **Done**.
 
 - **The password is shown once.** The broker keeps only a hash of it. If it is lost, delete the account and create another.
 - The dialog shows everything the system needs: the broker's address and port, the username, the password, the topics it may read and the root certificate.
