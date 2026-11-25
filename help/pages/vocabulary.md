@@ -94,12 +94,13 @@ To read a template:
 - **Not stated** means the template does not say how many. A dash in place of an id means it gives none.
 - **Under a name** is what the template says of the element, and the example it gives. Many elements have neither. The definitions IEC CDD and ECLASS wrote are left out, because those bodies license them separately.
 
-Two templates are listed:
+Three templates are listed:
 
-- **Digital Nameplate** (IDTA 02006): who made a machine, its serial number and its markings. Its `AddressInformation` has nothing inside it here. Its elements come from another IDTA template, which is not listed.
+- **Digital Nameplate** (IDTA 02006): who made a machine, its serial number and its markings. Its `AddressInformation` has nothing inside it here. Its elements are the ones inside `ContactInformation` in Contact Information, below.
+- **Contact Information** (IDTA 02002): how to reach a manufacturer. A Digital Nameplate takes its address from here. The Nameplate needs `Street`, `Zipcode`, `CityTown` and `NationalCode`, though this template marks them optional.
 - **Asset Interfaces Description** (IDTA 02017): where a machine's data can be read, over HTTP, Modbus or MQTT. It names its elements by the W3C's Web of Things ids.
 
-**A template is for looking up.** Nothing on this tab starts a metric or changes anything, and every role sees the same. Listing a template does not make a device's export conform to it.
+**A template is for looking up.** Nothing on this tab starts a metric or changes anything, and every role sees the same. Listing a template does not make a device's export conform to it. A device's Digital Nameplate says what that takes, on the [Devices page](devices.md).
 
 The elements come from IDTA's own files, which are under CC BY 4.0. The credit is on the tab, and the licence is linked from it.
 

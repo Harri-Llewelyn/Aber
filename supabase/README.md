@@ -10449,6 +10449,9 @@ name its own.
   are still `<AAS_BASE_IRI><sparkplug_id>` and what follows it. The specific ids do not use the base
   IRI, so changing it leaves them alone.
 
+**A submodel names a template only where it conforms.** See
+[What a shell's submodels claim](#what-a-shells-submodels-claim).
+
 **A semantic id resolves without an export.** `/concept-descriptions` lists the ConceptDescription
 of every id the shells' submodels use, and `/concept-descriptions/{id}` fetches one by its base64url
 id. Each is the one the shell's JSON export carries, built by the same `buildConceptDescriptions()`.
@@ -10481,6 +10484,56 @@ So a definition an imported vocabulary does not share stays out of both
 `LinkedSegment` whose endpoint is PostgREST's `/rest/v1/telemetry` (`AAS_HISTORIAN_ENDPOINT`),
 queried by `asset_id`. That is the REST API, not `aas-api`, so a client following it sends the
 `apikey` as well as a person's or a machine identity's token.
+
+### What a shell's submodels claim
+
+A submodel's `semanticId` says which published template it follows, and viewers choose a display by it. Naming a
+template asserts its mandatory elements, so a shell that names one and lacks them fails the check the name
+invites. `buildEnvironment()` in `_shared/aas/shell.ts` decides it, for `aas-export` and `aas-api` alike.
+
+**The Digital Nameplate claims IDTA 02006 per device, as it is built.** It carries
+`https://admin-shell.io/idta/nameplate/3/0/Nameplate` when every mandatory element has a value, and no
+`semanticId` otherwise.
+
+- **What is mandatory is the template's own list:** its top-level elements of cardinality `One` or `OneToMany` in
+  `idta_template_elements`. `AddressInformation` counts as the four elements its specification names, `Street`,
+  `Zipcode`, `CityTown` and `NationalCode` (`0324`). Eight paths in all. `mandatoryNameplatePaths()` makes the
+  list.
+- **A nested element is asked for only where its parent is.** `MarkingName` is mandatory inside a marking, and
+  Aber writes no markings. So only the top of the template, and the address, decide the claim.
+- **A value of spaces is none,** so a device that publishes one answers nothing and the operator's value stands.
+  A text over 1,023 characters is none either, because a multi-language property cannot hold it. It is left out,
+  not cut.
+- **Each element has its template's type and id,** read from the same rows. `ManufacturerName`,
+  `ManufacturerProductDesignation` and the address elements are multi-language, each with one text tagged `en`.
+  `URIOfTheProduct` is an `xs:anyURI` and `DateOfManufacture` an `xs:date`. Without the template's rows, each is
+  an `xs:string` Property and nothing is claimed.
+- **Only the template's elements are in it.** `AssetSparkplugId`, `EdgeGatewayName` and
+  `EdgeGatewaySparkplugId` are in the `PlatformConnection` submodel. In the nameplate, a validator reads each as
+  an element the template does not have.
+- **The device's own name never stands in** for `ManufacturerProductDesignation`. It is the site's name for the
+  asset, so a nameplate with no designation has none.
+- **A nameplate with no value is left out.** An empty submodel would say the device has one. `aas-api` answers
+  its id with a `404`.
+- **`stats` counts both:** `claimed_templates`, and `nameplate_missing_elements` for what the claim waits for. The
+  Nameplate dialog lists the second by name (`frontend/src/utils/nameplate.js`).
+
+**The other submodels claim nothing.** Each was read against the template in `admin-shell-io/submodel-templates`
+that comes nearest, at commit `5285185b`:
+
+| Submodel | Nearest template | Why it claims nothing |
+| :--- | :--- | :--- |
+| `VisualRepresentation` | Provision of 3D Models, IDTA 02026 | The template asks each model for a `FileId` and a classification. The file itself is in a `FileVersion`, which asks for a title, an id, a status, a date, a preview image and a named format. Aber holds one file and its name, so the rest would be invented |
+| `KeyPerformanceIndicators` | Process Variables for Manufacturing Key Performance Indicators, IDTA 02066 | Those are what a KPI is worked out from, such as `ActualProductionTime` and `GoodPart`, each a collection of a key, a value and a comment. Aber's are the KPIs |
+| `OperationalTelemetry` | Time Series Data, IDTA 02008 | It takes its schema's own semantic id, where it has one, and the `Segments` collection inside it follows 02008's shape. The template is a whole submodel, and asks for `Metadata` with a `Name` and a `Record` that describes each sample. The `Segments` collection is here to say where the history is |
+| `DerivedMetrics` | none | Metrics this deployment computes, which no standard names |
+| `PlatformConnection` | none | How this platform reaches the asset. Asset Interfaces Description (IDTA 02017) describes an endpoint a consumer connects to, which a Sparkplug id is not |
+
+`_shared/aas/nameplate_claim_test.ts` holds the rule, against the template's own file.
+`test_a_complete_nameplate_names_its_template.py` (unit lane) validates a complete and an incomplete nameplate
+against the IDTA JSON schema and XSD. It also holds a complete one to the template's file, element by element.
+`test_a_nameplate_claims_its_template_on_the_stack.py` (stack lane) reads the claim from the JSON export, both
+AASX serialisations and `aas-api`.
 
 ### Getting a shell into a third-party AAS server
 

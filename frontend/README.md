@@ -76,6 +76,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/standards.js` (`STANDARDS`) | the `standard` each arm of `concept_definitions` carries, and the one a metric group is registered under (mirror check 119) |
 | `utils/qudt.js` (`QUDT_VERSION`, `QUDT_KIND_NAMESPACE`, `QUDT_LABEL`) | the release the generator reads, the namespace the tables' CHECKs, i3X and the exporter name a quantity kind's id under, and the label the view gives QUDT's arm, which `STANDARDS` leaves out because no metric is filed under it (mirror checks 123 and 124) |
 | `utils/idtaTemplates.js` (`CARDINALITY_LABELS`) | the cardinalities `idta_template_elements` admits and the template generator reads (mirror check 153) |
+| `utils/nameplate.js` (`MANDATORY_ADDRESS_ELEMENTS`, `mandatoryNameplatePaths()`) | what a nameplate must hold before the exporter (`functions/_shared/aas/shell.ts`) names its template (mirror check 160) |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 | `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
@@ -585,6 +586,9 @@ table cell, as on Settings, the value is `.setting-static`.
 - **Fixed for this role** is a label too. A Settings row for anyone but an Administrator shows its
   value as text, and Actions says who can change it. The Notifications tab's rows are the same rows.
   So is a Digital Nameplate for a role that may neither edit nor propose; its notice says so.
+  Its problem line says from the open, in every mode, which fields the template still asks for before an
+  export names it. That is no problem with the form, so `.nameplate-standing` gives the line the hint's
+  look. A refused press takes the line's place until the next edit.
 - **Conditional stays a control, with its reason in words.** A field that is open to someone else, or
   once something else is set, keeps its control: a proposal's fields that a proposal cannot carry
   (`nonProposableFields()` words each), and Reference Type until an id is given. The reason sits

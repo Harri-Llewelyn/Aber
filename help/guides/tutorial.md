@@ -98,7 +98,7 @@ Create the schema before the device. Without one:
 
 - Aber cannot tell you when the device sends something its model does not include.
 - An [AAS](glossary.md#asset-administration-shell-aas) export of the device carries its
-  nameplate and nothing else.
+  nameplate and how it is connected, and no readings.
 - The device's **Configuration Parameters** panel has nothing to show.
 
 Add `Systems/TEMPERATURE` from step 5. Pick metric names from the catalog rather than inventing them.

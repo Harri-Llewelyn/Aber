@@ -55,7 +55,13 @@ export const PROPOSAL_FORMS = {
       hardware_version: 'hardware_version',
       firmware_version: 'firmware_version',
       software_version: 'software_version',
-      country_of_origin: 'country_of_origin'
+      country_of_origin: 'country_of_origin',
+      order_code_of_manufacturer: 'order_code_of_manufacturer',
+      address_street: 'address_street',
+      address_zipcode: 'address_zipcode',
+      address_city_town: 'address_city_town',
+      address_state_county: 'address_state_county',
+      address_national_code: 'address_national_code'
     },
     withheld: {}
   },

@@ -57,6 +57,9 @@ function valueOnly(element: any): unknown {
       // `value` is absent, not null, for an unpublished metric -- see the rule in shell.ts. Null is
       // the honest ValueOnly rendering of that: the element exists and has no value.
       return element.value ?? null;
+    case "MultiLanguageProperty":
+      // One object for each language, such as { "en": "…" }, as the specification writes one.
+      return (element.value ?? []).map((held: { language: string; text: string }) => ({ [held.language]: held.text }));
     case "File":
       return { contentType: element.contentType, value: element.value };
     case "SubmodelElementCollection": {

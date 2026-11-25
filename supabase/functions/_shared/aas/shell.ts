@@ -40,10 +40,26 @@ export const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-mo
 
 /**
  * The IDTA Digital Nameplate template whose element semanticIds this mapping attaches. It selects
- * rows from `idta_submodel_templates` and is not placed on the exported submodel. The version is
- * part of the identifier: 2.0 lives under admin-shell.io/zvei, 3.0 under admin-shell.io/idta.
+ * rows from `idta_submodel_templates` and `idta_template_elements`, and is the semanticId of a nameplate
+ * that holds every element the template asks for. The version is part of the identifier: 2.0 lives
+ * under admin-shell.io/zvei, 3.0 under admin-shell.io/idta.
  */
 export const NAMEPLATE_TEMPLATE_ID = "https://admin-shell.io/idta/nameplate/3/0/Nameplate";
+
+/** IDTA Contact Information, which defines the elements of the nameplate's AddressInformation. */
+export const CONTACT_INFORMATION_TEMPLATE_ID =
+  "https://admin-shell.io/zvei/nameplate/1/0/ContactInformations";
+
+/** The collection of Contact Information whose elements AddressInformation takes. */
+const CONTACT_INFORMATION_PATH = "ContactInformation";
+const ADDRESS_INFORMATION = "AddressInformation";
+
+/**
+ * What a nameplate's AddressInformation must hold. The Nameplate's specification names the four
+ * (*Mandatory information for address information*) and no template file does: Contact Information
+ * marks each one optional. The Nameplate dialog's copy is in frontend/src/utils/nameplate.js.
+ */
+export const MANDATORY_ADDRESS_ELEMENTS = ["Street", "Zipcode", "CityTown", "NationalCode"] as const;
 
 /**
  * The OPC 40001 Machinery identification members a device can publish a nameplate value under, by
@@ -167,15 +183,45 @@ export function property(
   };
 }
 
+/** The AAS schema's limit on one text of a MultiLanguageProperty. */
+const MAX_LANG_STRING_LENGTH = 1023;
+
+/**
+ * A MultiLanguageProperty holding one text. Aber stores the text and not its language, so it is
+ * tagged `en`, as every text the exporter writes is: the Nameplate's specification asks for at most
+ * one string, in any language.
+ */
+export function multiLanguageProperty(
+  idShort: string,
+  text: string,
+  opts: { semanticId?: string | null; description?: string | null } = {},
+) {
+  return {
+    modelType: "MultiLanguageProperty",
+    idShort,
+    value: [{ language: "en", text }],
+    semanticId: semanticReference(opts.semanticId),
+    description: opts.description
+      ? [{ language: "en", text: String(opts.description).slice(0, 1023) }]
+      : undefined,
+  };
+}
+
 /**
  * A SubmodelElementCollection, or undefined when it would be empty: `value` is `minItems: 1` in the
  * schema, so an empty collection is invalid.
  */
-export function collection(idShort: string, value: unknown[], description?: string) {
+export function collection(
+  idShort: string,
+  value: unknown[],
+  description?: string,
+  semanticId?: string | null,
+) {
   if (!value || value.length === 0) return undefined;
   return {
     modelType: "SubmodelElementCollection",
     idShort,
+    semanticId: semanticReference(semanticId),
     description: description ? [{ language: "en", text: description }] : undefined,
     value,
   };
@@ -488,9 +534,17 @@ function conceptDescription(
   };
 }
 
+/** The IEC 61360 `dataType` of a template's element, or undefined where none fits (a collection). */
+function iec61360OfElement(element: TemplateElement): string | undefined {
+  if (element.model_type === "MultiLanguageProperty") return "STRING_TRANSLATABLE";
+  if (element.model_type !== "Property") return undefined;
+  if (element.value_type === "xs:date") return "DATE";
+  return element.value_type === "xs:anyURI" ? "IRI" : "STRING";
+}
+
 /**
- * One ConceptDescription per semantic id, from rows the shell was built from: the nameplate
- * template, else the catalog rows carrying the id, else the schema. The definition is the
+ * One ConceptDescription per semantic id, from rows the shell was built from: the nameplate's
+ * templates, else the catalog rows carrying the id, else the schema. The definition is the
  * vocabulary's own text (`concept_definitions`) wherever a vocabulary defines the id, so one
  * metric's description never defines a standard concept. An id under one of ID_AUTHORITIES defers
  * to that authority. For any other id, a catalog description is the definition only when every
@@ -505,17 +559,39 @@ export function buildConceptDescriptions(
   ids: string[],
   rows:
     & Pick<DeviceRecord, "catalog" | "templates" | "schemas" | "definitions">
-    & Partial<Pick<DeviceRecord, "sources" | "siteConcepts">>,
+    & Partial<Pick<DeviceRecord, "elements" | "sources" | "siteConcepts">>,
 ): Record<string, unknown>[] {
   const definedBy = new Map(rows.definitions.map((d) => [d.semantic_id, d]));
+  const elements = rows.elements ?? [];
   return ids.map((id) => {
     const template = rows.templates.find((t) => t.semantic_id === id);
+    // A row's own `definition` is what the template says of the element, not of its concept, and no
+    // IEC CDD or ECLASS text is held, so an element's id is defined by naming the element.
+    const element = elements.find((e) => e.semantic_id === id);
     if (template) {
       return conceptDescription(
         id,
         template.id_short,
         template.description || `The IDTA 02006 nameplate element ${template.id_short}.`,
-        { dataType: "STRING" },
+        { dataType: element ? iec61360OfElement(element) : "STRING" },
+      );
+    }
+    if (element) {
+      const name = element.id_short ?? element.path;
+      return conceptDescription(
+        id,
+        name,
+        `The ${element.template_number} ${element.template_name} element ${name}.`,
+        { dataType: iec61360OfElement(element) },
+      );
+    }
+    const claimed = elements.find((e) => e.template_id === id);
+    if (claimed) {
+      return conceptDescription(
+        id,
+        claimed.template_name,
+        `The submodel template ${claimed.template_number}, ${claimed.template_name}. A submodel that ` +
+          "carries this id holds the elements the template asks for.",
       );
     }
 
@@ -624,6 +700,8 @@ export interface DeviceRecord {
   gateway: Record<string, unknown> | null;
   nameplate: Record<string, unknown> | null;
   templates: { id_short: string; semantic_id: string; description?: string | null }[];
+  /** The elements of the Digital Nameplate and Contact Information, as `idta_template_elements` holds them. */
+  elements?: TemplateElement[];
   schemas: Record<string, unknown>[];
   /** The further semantic ids of the catalog's metrics, as `metric_semantic_ids` holds them. */
   supplemental?: SupplementalSemanticId[];
@@ -655,6 +733,21 @@ export interface SiteConcept {
   site_vocabularies?: SiteVocabularyRef | null;
 }
 
+/** A row of `idta_template_elements`: an element of a submodel template, as the template's file has it. */
+export interface TemplateElement {
+  template_id: string;
+  template_name: string;
+  template_number: string;
+  path: string;
+  parent_path: string | null;
+  ordinal: number;
+  id_short: string | null;
+  model_type: string;
+  value_type?: string | null;
+  semantic_id?: string | null;
+  cardinality?: string | null;
+}
+
 /** A row of `metric_semantic_ids`: another published id of the concept a catalog metric measures. */
 export interface SupplementalSemanticId {
   metric_id: string;
@@ -682,7 +775,7 @@ export interface ConceptSource {
 type Client = any;
 
 /**
- * Read every row one device's shell is composed from, or null when there is no such device. The six
+ * Read every row one device's shell is composed from, or null when there is no such device. The eight
  * independent reads run in parallel, since the REST API hits this per request; the schemas and then
  * the vocabulary definitions follow, because each needs the rows before it.
  */
@@ -709,6 +802,7 @@ export async function loadDeviceRecord(
     { data: gatewayRows },
     { data: nameplateRows },
     { data: templateRows },
+    { data: elementRows },
     { data: supplementalRows },
   ] = await Promise.all([
     client.from("asset_config").select("*").eq("asset_id", device.sparkplug_id),
@@ -720,6 +814,10 @@ export async function loadDeviceRecord(
     client.from("device_nameplate").select("*").eq("device_id", device.id),
     client.from("idta_submodel_templates").select("id_short, semantic_id, description")
       .eq("template_id", NAMEPLATE_TEMPLATE_ID),
+    // Without rows (an error, or a database that lacks the table) a nameplate claims no template.
+    client.from("idta_template_elements")
+      .select("template_id, template_name, template_number, path, parent_path, ordinal, id_short, model_type, value_type, semantic_id, cardinality")
+      .in("template_id", [NAMEPLATE_TEMPLATE_ID, CONTACT_INFORMATION_TEMPLATE_ID]),
     // Without rows (an error, or a database that lacks the table) each metric exports its own id alone.
     client.from("metric_semantic_ids").select("metric_id, semantic_id, semantic_id_type"),
   ]);
@@ -768,6 +866,7 @@ export async function loadDeviceRecord(
     gateway: gatewayRows?.[0] ?? null,
     nameplate: nameplateRows?.[0] ?? null,
     templates: templateRows ?? [],
+    elements: elementRows ?? [],
     schemas: schemaRows ?? [],
     supplemental: supplementalRows ?? [],
     definitions: definitionRows ?? [],
@@ -832,6 +931,25 @@ export function buildSpecificAssetIds(
 }
 
 /**
+ * The elements a nameplate must hold to claim its template, as idShortPaths in the template's order:
+ * the top-level elements it asks for (One or OneToMany), with AddressInformation as the address
+ * elements its specification asks for. Empty without the template's rows, so nothing can claim it.
+ */
+export function mandatoryNameplatePaths(elements: readonly TemplateElement[] | undefined): string[] {
+  return (elements ?? [])
+    .filter((e) =>
+      e.template_id === NAMEPLATE_TEMPLATE_ID && e.parent_path === null &&
+      (e.cardinality === "One" || e.cardinality === "OneToMany")
+    )
+    .sort((a, b) => a.ordinal - b.ordinal)
+    .flatMap((e) =>
+      e.path === ADDRESS_INFORMATION
+        ? MANDATORY_ADDRESS_ELEMENTS.map((name) => `${ADDRESS_INFORMATION}.${name}`)
+        : [e.path]
+    );
+}
+
+/**
  * Compose one device's AAS Environment from the rows `loadDeviceRecord()` returned. Pure: no I/O
  * and no environment beyond the module constants, so the same graph is reproducible from a fixture.
  */
@@ -893,11 +1011,24 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     };
   };
 
-  // Submodel 1: Digital Nameplate. Element-level semanticIds only; the submodel carries none,
-  // because placing the IDTA 02006 template id on it would assert conformance to a template whose
-  // mandatory elements this platform cannot guarantee. Values are resolved device-first, with
-  // `device_nameplate` as the fallback. The join is on semantic id, not metric name: the catalog's
-  // semantic_id is the assertion that two differently named metrics mean the same concept.
+  // Submodel 1: Digital Nameplate. Each element carries its template's semanticId and type. The submodel
+  // carries the template's own id only where every element the template asks for is here. Values are
+  // resolved device-first, with `device_nameplate` as the fallback. The join is on semantic id, not
+  // metric name: the catalog's semantic_id is the assertion that two differently named metrics mean
+  // the same concept.
+  const templateElements = record.elements ?? [];
+  const nameplateElements = new Map(
+    templateElements
+      .filter((e) => e.template_id === NAMEPLATE_TEMPLATE_ID && e.parent_path === null)
+      .map((e) => [e.path, e]),
+  );
+  const addressElements = new Map(
+    templateElements
+      .filter((e) =>
+        e.template_id === CONTACT_INFORMATION_TEMPLATE_ID && e.parent_path === CONTACT_INFORMATION_PATH
+      )
+      .map((e) => [e.id_short, e]),
+  );
   const nameplateSemanticId = new Map<string, string>(
     templates.map((row) => [String(row.id_short), String(row.semantic_id)]),
   );
@@ -921,71 +1052,135 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     return metric ? valueFor(String(metric.name)) : null;
   };
 
+  /** The idShortPaths of the nameplate elements this device has a value for. */
+  const present = new Set<string>();
+  const hasText = (value: unknown) => value !== null && value !== undefined && String(value).trim() !== "";
+
   /**
-   * One nameplate property, sourced device-first and carrying its published IRDI. `source` is
-   * recorded in the description rather than as a sibling property, which a consumer would read as a
-   * second nameplate field.
+   * One nameplate element as its template types it, or null when there is no value. A value of spaces
+   * is none, and so is a text longer than a MultiLanguageProperty may hold: it is left out, not cut.
+   * Without the template's row (an error, or a database that lacks it) it is an xs:string Property.
    */
-  const nameplateProperty = (
+  const templateElement = (
+    path: string,
+    idShort: string,
+    element: TemplateElement | undefined,
+    value: unknown,
+    opts: { semanticId: string | null; description: string },
+  ) => {
+    if (!hasText(value)) return null;
+    const text = String(value);
+    const multiLanguage = element?.model_type === "MultiLanguageProperty";
+    if (multiLanguage && text.length > MAX_LANG_STRING_LENGTH) return null;
+    present.add(path);
+    return multiLanguage
+      ? multiLanguageProperty(idShort, text, opts)
+      : property(idShort, element?.value_type ?? "xs:string", text, opts);
+  };
+
+  const RECORDED = "Recorded against the asset by an operator.";
+
+  /**
+   * One nameplate element, sourced device-first and carrying its published id. A device that publishes
+   * an empty value answers nothing, so the operator's stands. `source` is recorded in the description
+   * rather than as a sibling property, which a consumer would read as a second nameplate field.
+   */
+  const nameplateElement = (
     idShort: string,
     operatorValue: unknown,
     opcSemanticId?: string,
   ) => {
     const published = opcSemanticId ? publishedValue(opcSemanticId) : null;
-    const value = published ?? operatorValue ?? null;
-    if (value === null || value === undefined || value === "") return null;
-    return property(idShort, "xs:string", value, {
-      semanticId: nameplateSemanticId.get(idShort) ?? null,
-      description: published !== null
-        ? "Published by the device at DBIRTH."
-        : "Recorded against the asset by an operator.",
+    const answered = hasText(published);
+    const element = nameplateElements.get(idShort);
+    return templateElement(idShort, idShort, element, answered ? published : operatorValue, {
+      semanticId: nameplateSemanticId.get(idShort) ?? element?.semantic_id ?? null,
+      description: answered ? "Published by the device at DBIRTH." : RECORDED,
     });
   };
 
-  const nameplateProps = [
-    nameplateProperty("URIOfTheProduct", nameplate?.uri_of_the_product, OPC_MACHINERY.ProductInstanceUri),
-    nameplateProperty("ManufacturerName", nameplate?.manufacturer_name, OPC_MACHINERY.Manufacturer),
-    // Falls back to the device's own name, which is the only designation that always exists.
-    nameplateProperty(
+  /** One element of AddressInformation: only an operator records one. */
+  const addressElement = (idShort: string, value: unknown) => {
+    const element = addressElements.get(idShort);
+    return templateElement(`${ADDRESS_INFORMATION}.${idShort}`, idShort, element, value, {
+      semanticId: element?.semantic_id ?? null,
+      description: RECORDED,
+    });
+  };
+
+  const nameplateElementsHeld = [
+    nameplateElement("URIOfTheProduct", nameplate?.uri_of_the_product, OPC_MACHINERY.ProductInstanceUri),
+    nameplateElement("ManufacturerName", nameplate?.manufacturer_name, OPC_MACHINERY.Manufacturer),
+    // The manufacturer's name for the product. The device's own name is the site's, and never stands in.
+    nameplateElement(
       "ManufacturerProductDesignation",
-      nameplate?.manufacturer_product_designation ?? device.name,
+      nameplate?.manufacturer_product_designation,
       OPC_MACHINERY.Model,
     ),
-    nameplateProperty("ManufacturerProductType", nameplate?.manufacturer_product_type),
+    collection(
+      ADDRESS_INFORMATION,
+      [
+        addressElement("Street", nameplate?.address_street),
+        addressElement("Zipcode", nameplate?.address_zipcode),
+        addressElement("CityTown", nameplate?.address_city_town),
+        addressElement("StateCounty", nameplate?.address_state_county),
+        addressElement("NationalCode", nameplate?.address_national_code),
+      ].filter((element) => element !== null),
+      undefined,
+      nameplateSemanticId.get(ADDRESS_INFORMATION) ?? nameplateElements.get(ADDRESS_INFORMATION)?.semantic_id,
+    ) ?? null,
+    nameplateElement("ManufacturerProductType", nameplate?.manufacturer_product_type),
+    nameplateElement("OrderCodeOfManufacturer", nameplate?.order_code_of_manufacturer),
     // SERIAL_NUMBER by name is the pre-semantic-id fallback: the demo schema publishes it under
     // that literal name, and metrics created before 0029 carry no semantic id to join on.
-    nameplateProperty(
+    nameplateElement(
       "SerialNumber",
       nameplate?.serial_number ?? valueFor("SERIAL_NUMBER"),
       OPC_MACHINERY.SerialNumber,
     ),
-    nameplateProperty("YearOfConstruction", nameplate?.year_of_construction, OPC_MACHINERY.YearOfConstruction),
-    nameplateProperty("DateOfManufacture", nameplate?.date_of_manufacture),
-    nameplateProperty("HardwareVersion", nameplate?.hardware_version),
-    nameplateProperty("FirmwareVersion", nameplate?.firmware_version ?? valueFor("Controller/FIRMWARE")),
-    nameplateProperty("SoftwareVersion", nameplate?.software_version, OPC_MACHINERY.SoftwareRevision),
-    nameplateProperty("CountryOfOrigin", nameplate?.country_of_origin),
-
-    // Factory+ concepts. No semanticId, because IDTA defines none for them and inventing one
-    // under admin-shell.io would be a forgery -- see supabase/migrations/archive/20260101000029_semantic_identifiers.sql's header.
-    // Neither a connection method (it is always Sparkplug B) nor a status (a live state a document
-    // cannot keep) is here. i3X and the REST API serve a device's live state.
-    property("AssetSparkplugId", "xs:string", device.sparkplug_id, {
-      description: "Immutable wire identity; the same value keys telemetry in the historian.",
-    }),
-    property("EdgeGatewayName", "xs:string", gateway?.name ?? null),
-    property("EdgeGatewaySparkplugId", "xs:string", gateway?.sparkplug_id ?? null),
+    nameplateElement("YearOfConstruction", nameplate?.year_of_construction, OPC_MACHINERY.YearOfConstruction),
+    nameplateElement("DateOfManufacture", nameplate?.date_of_manufacture),
+    nameplateElement("HardwareVersion", nameplate?.hardware_version),
+    nameplateElement("FirmwareVersion", nameplate?.firmware_version ?? valueFor("Controller/FIRMWARE")),
+    nameplateElement("SoftwareVersion", nameplate?.software_version, OPC_MACHINERY.SoftwareRevision),
+    nameplateElement("CountryOfOrigin", nameplate?.country_of_origin),
   ].filter((element) => element !== null);
 
-  const submodels: Record<string, unknown>[] = [
-    {
+  const mandatory = mandatoryNameplatePaths(templateElements);
+  const missing = mandatory.filter((path) => !present.has(path));
+  const claimsTemplate = mandatory.length > 0 && missing.length === 0;
+
+  const submodels: Record<string, unknown>[] = [];
+
+  // Left out when it would hold nothing: an empty submodel would say the device has a nameplate.
+  if (nameplateElementsHeld.length > 0) {
+    submodels.push({
       modelType: "Submodel",
       id: submodelId("Nameplate"),
       idShort: "DigitalNameplate",
       kind: "Instance",
-      submodelElements: nameplateProps,
-    },
-  ];
+      semanticId: claimsTemplate ? semanticReference(NAMEPLATE_TEMPLATE_ID) : undefined,
+      submodelElements: nameplateElementsHeld,
+    });
+  }
+
+  // Submodel: PlatformConnection, how this platform reaches the asset. No semanticId on it or in it,
+  // because IDTA defines none for these and inventing one under admin-shell.io would be a forgery. Neither
+  // a connection method (it is always Sparkplug B) nor a status (a live state a document cannot keep) is
+  // here: i3X and the REST API serve a device's live state.
+  submodels.push({
+    modelType: "Submodel",
+    id: submodelId("PlatformConnection"),
+    idShort: "PlatformConnection",
+    kind: "Instance",
+    submodelElements: [
+      property("AssetSparkplugId", "xs:string", device.sparkplug_id, {
+        description: "Immutable wire identity; the same value keys telemetry in the historian.",
+      }),
+      property("EdgeGatewayName", "xs:string", gateway?.name ?? null),
+      property("EdgeGatewaySparkplugId", "xs:string", gateway?.sparkplug_id ?? null),
+    ],
+  });
 
   // Per IDTA 02008: a segment whose records live outside the shell, named by an endpoint. This is
   // the standard's own answer to bulk history, and the reason none of it is inlined.
@@ -1125,10 +1320,10 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
   // The serial number and the product URI are what the Nameplate exports, with its semantic ids,
   // so the shell names them once. A replay lane is a recording of an asset, not a second asset,
   // and its DBIRTH repeats the original's serial number: it names none.
-  const nameplateElement = (idShort: string) =>
-    nameplateProps.find((element) => element?.idShort === idShort);
-  const serialNumber = nameplateElement("SerialNumber");
-  const productUri = nameplateElement("URIOfTheProduct");
+  const heldElement = (idShort: string) =>
+    nameplateElementsHeld.find((element) => element.idShort === idShort);
+  const serialNumber = heldElement("SerialNumber");
+  const productUri = heldElement("URIOfTheProduct");
   const specificAssetIds = device.shadow_of ? undefined : buildSpecificAssetIds([
     {
       name: SPECIFIC_ASSET_ID_NAMES.serialNumber,
@@ -1162,6 +1357,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     siteConcepts: record.siteConcepts,
     catalog,
     templates,
+    elements: record.elements,
     schemas,
     definitions,
     sources: record.sources,
@@ -1184,6 +1380,9 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     kpi_metrics: kpiTotal,
     derived_metrics: derivedRows.length,
     unmapped_semantic_ids: unmappedCount,
+    // The submodels that carry a published template's id, and what the nameplate lacks before it can.
+    claimed_templates: claimsTemplate ? 1 : 0,
+    nameplate_missing_elements: missing.length,
     // Keys that were taken, by another lineage with the same name or by a declared key, and were
     // qualified with a short form of their lineage's id to stay apart.
     submodel_key_clashes: keyClashes,

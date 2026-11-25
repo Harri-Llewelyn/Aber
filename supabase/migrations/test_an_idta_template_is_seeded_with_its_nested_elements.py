@@ -176,12 +176,13 @@ class TestTheReleasedNameplateRows(TemplateTestCase):
         self.assertEqual(len(released), 20)
         self.assertEqual(generated, released)
 
-    def test_they_differ_in_two_elements_alone_which_version_3_swapped(self):
+    def test_they_say_the_same_of_what_is_mandatory(self):
+        """0002 seeded version 2.0's answer for two elements, and 0323 gives every row the template's own."""
         rows = self.fetch(
             "SELECT t.id_short, t.is_mandatory, e.cardinality FROM public.idta_submodel_templates t"
             " JOIN public.idta_template_elements e ON e.template_id = t.template_id AND e.path = t.id_short"
             " WHERE t.is_mandatory IS DISTINCT FROM (e.cardinality IN ('One', 'OneToMany')) ORDER BY 1")
-        self.assertEqual(rows, [("OrderCodeOfManufacturer", False, "One"), ("YearOfConstruction", True, "ZeroToOne")])
+        self.assertEqual(rows, [])
 
     def test_a_generated_definition_defines_no_concept(self):
         """concept_definitions reads the released rows alone, so an export's text does not move."""

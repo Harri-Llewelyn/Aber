@@ -262,9 +262,9 @@ class TestTheRoutesServeWhatTheExportCarries(unittest.TestCase):
         whole, _, pages = walk(100)
         if pages > 1:
             self.skipTest(f"the stack's listing is more than one page of 100 ({len(whole)}+ ids)")
-        stepped, _, stepped_pages = walk(3)
+        stepped, _, stepped_pages = walk(2)
         self.assertEqual(stepped, whole)
-        self.assertGreaterEqual(stepped_pages, 2, "the planted ids alone fill more than one page of 3")
+        self.assertGreaterEqual(stepped_pages, 2, "the planted ids alone fill more than one page of 2")
 
     def test_an_id_no_listed_shell_references_is_a_404(self):
         for semantic_id in ("https://example.test/aber-514/nobody", UNMODELLED_ID, ARCHIVED_METRIC_ID,
