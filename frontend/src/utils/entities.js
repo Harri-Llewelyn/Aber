@@ -23,6 +23,8 @@ export const ENTITY_KINDS = [
   { kind: 'service_principals', label: 'Machine Identity', plural: 'Machine Identities' },
   { kind: 'user_roles', label: 'Person', plural: 'People' },
 ]
+/** The kinds entity_directory lists: people are read apart. */
+export const DIRECTORY_KINDS = ENTITY_KINDS.map(k => k.kind).filter(kind => kind !== 'user_roles')
 const KIND_ORDER = new Map(ENTITY_KINDS.map((k, i) => [k.kind, i]))
 
 /** A kind's one-record name, or its own word for a kind this build does not know. */
@@ -200,24 +202,20 @@ const STATE_ORDER = { active: 0, archived: 1, retired: 2 }
 const stateRank = (row) => STATE_ORDER[row.state] ?? 3
 
 /**
- * A search's rows as the search bar lists them: best first, at most `perKind` of one kind, and one of those
- * `keyOf` gives the same key. A whole id comes first and a whole name next, so a kind's share takes nothing
- * from either. Among equals, what is in service comes before what was taken out; then by name, and by kind: a
- * device before its captures, which go by its name.
+ * A search's rows as the search bar lists them: best first, at most `perKind` of one kind. A whole id comes
+ * first and a whole name next, so a kind's share takes nothing from either. Among equals, what is in service
+ * comes before what was taken out; then by name, and by kind: a device before its capture, which goes by its
+ * name.
  */
-export function shortlist(rows, text, { perKind, keyOf = entityKey }) {
+export function shortlist(rows, text, perKind) {
   const ranked = rows
     .map(row => ({ row, rank: findRank(row, text) ?? 4 }))
     .sort((a, b) => a.rank - b.rank || stateRank(a.row) - stateRank(b.row)
       || collator.compare(a.row.name ?? '', b.row.name ?? '') || byKindThenName(a.row, b.row))
-  const perKindTaken = new Map()
-  const keys = new Set()
+  const taken = new Map()
   return ranked.map(r => r.row).filter(row => {
-    const taken = perKindTaken.get(row.kind) ?? 0
-    const key = keyOf(row)
-    if (taken >= perKind || keys.has(key)) return false
-    perKindTaken.set(row.kind, taken + 1)
-    keys.add(key)
-    return true
+    const n = (taken.get(row.kind) ?? 0) + 1
+    taken.set(row.kind, n)
+    return n <= perKind
   })
 }

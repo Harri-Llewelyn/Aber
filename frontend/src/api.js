@@ -4913,46 +4913,35 @@ const apiMethods = {
    * The entities one text names, whatever their state: a whole id of any kind, the start of one, or any
    * part of a name (find_entities(), 0321). At most `limit` rows, a whole id first.
    *
-   * `share` is the search bar's. A full answer can be all of one kind in one state, since it goes by rank
-   * and then by name: four hundred devices before a cell, or two hundred deleted ones before a live one.
-   * Each kind and state with `share` rows is then left out of a further read, by name alone, until an
-   * answer is not full or holds no more of them. A refused further read leaves the rows so far.
+   * `share` is the search bar's, with the `kinds` it lists. A full answer can be all of one kind, since it
+   * goes by rank and then by name: four hundred devices before a cell, or two hundred deleted ones before
+   * one in service. Each kind with fewer than `share` rows in service is then read apart by name, its best
+   * `share`, all at once. One that is refused leaves the rows there are.
    */
-  findEntities: async (text, { limit = ENTITY_FIND_LIMIT, share = null } = {}) => {
+  findEntities: async (text, { limit = ENTITY_FIND_LIMIT, share = null, kinds = [] } = {}) => {
     const wanted = String(text || '').trim();
     if (!wanted) return [];
     const { data, error } = await supabase.rpc('find_entities', { p_query: text, p_limit: limit });
     if (error) throw new Error(error.message || 'Could not search the entities');
     const rows = data || [];
-    if (!share) return rows;
+    if (!share || rows.length < limit) return rows;
 
+    const inService = (kind) => rows.filter(row => row.kind === kind && row.state === 'active').length;
     // LIKE's wildcards are text here, as they are to find_entities().
     const pattern = `%${wanted.replace(/([%_\\])/g, '\\$1')}%`;
-    const groupOf = (row) => `${row.kind},${row.state}`;
-    const held = new Map(rows.map(row => [`${groupOf(row)},${row.id}`, row]));
-    const served = new Set();
-    let last = rows;
-    while (last.length >= limit) {
-      const counts = new Map();
-      for (const row of held.values()) counts.set(groupOf(row), (counts.get(groupOf(row)) || 0) + 1);
-      const more = [...counts.keys()].filter(group => counts.get(group) >= share && !served.has(group));
-      if (more.length === 0) break;
-      for (const group of more) served.add(group);
-      let query = supabase.from('entity_directory').select('*').ilike('name', pattern);
-      // PostgREST takes every `or` as one more condition.
-      for (const group of served) {
-        const [kind, state] = group.split(',');
-        query = query.or(`kind.neq.${kind},state.neq.${state}`);
-      }
-      const { data: next, error: refused } = await query.order('name').limit(limit);
-      if (refused) break;
-      last = next || [];
-      // Checked again here: PostgREST reads a `*` as a wildcard, and nothing escapes it.
-      for (const row of last) {
-        if (String(row.name || '').toLowerCase().includes(wanted.toLowerCase())) held.set(`${groupOf(row)},${row.id}`, row);
-      }
+    const reads = kinds.filter(kind => inService(kind) < share).map(async kind => {
+      // The three states are in this order by their own letters: active, archived, retired.
+      const { data: found, error: refused } = await supabase.from('entity_directory').select('*')
+        .eq('kind', kind).ilike('name', pattern).order('state').order('name').limit(share);
+      return refused ? [] : found || [];
+    });
+    const keyOf = (row) => `${row.state}:${row.kind}:${row.id}`;
+    const all = new Map(rows.map(row => [keyOf(row), row]));
+    for (const row of (await Promise.all(reads)).flat()) {
+      // Checked again: PostgREST reads a `*` as a wildcard, and nothing escapes it.
+      if (String(row.name || '').toLowerCase().includes(wanted.toLowerCase())) all.set(keyOf(row), row);
     }
-    return [...held.values()];
+    return [...all.values()];
   },
 
   delete: async (path, _options = {}) => {

@@ -3084,10 +3084,9 @@ opens itself on that call, so `App.jsx` needs no wiring for it.
 [the Entities page](#the-entities-page-lists-every-kind-and-finds-any-id), with people from the same
 `useLocalEntities()`, read as the bar first opens. It asks from two characters, once typing has rested 180 ms.
 `shortlist()` orders them: a whole id, a whole name, the start of an id, part of a name, and in service first
-among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`), and one row for each address, since a
-device's captures all open one page. An answer stops at 200 rows, which one kind can fill: four hundred
-devices before a cell. So `findEntities({ share })` then reads the view by name, without each kind and state that
-has its share, until an answer is not full. A row opens `recordUrl()`: its own page while the rail has that page,
+among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`). An answer stops at 200 rows, which one kind can
+fill: four hundred devices before a cell. So `findEntities({ share, kinds })` then reads each kind short of its share apart, by name, all
+at once. A row opens `recordUrl()`: its own page while the rail has that page,
 else `/entities?find=<id>`. An id adds *View in Entities* and *Find This ID in the Audit Trail*, whatever it
 names; a text is one by its shape (`isIdShaped()`) or by what it found (`idFoundBy()`). The trail is handed the
 record's own id for a further id of one record, since its search does not read every further id. Nothing moves

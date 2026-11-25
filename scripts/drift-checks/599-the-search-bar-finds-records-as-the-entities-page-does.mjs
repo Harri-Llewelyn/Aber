@@ -21,7 +21,7 @@ export default function check() {
     if (!/\buseLocalEntities\(userRole\b/.test(source)) problems599.push(`${file} does not read people by useLocalEntities()`);
     if (/api\.(listPeople|listUserAccounts)\(/.test(source)) problems599.push(`${file} reads people itself, not by useLocalEntities()`);
   }
-  if (!/api\.findEntities\(\w+, \{ share: RECORD_KIND_LIMIT \}\)/.test(bar)) problems599.push(`${BAR} does not ask for each kind's share, so one kind can fill the answer`);
+  if (!bar.includes('{ share: RECORD_KIND_LIMIT, kinds: DIRECTORY_KINDS }')) problems599.push(`${BAR} does not ask for each kind's share, so one kind can fill the answer`);
   for (const file of allFiles.filter((f) => /^frontend\/src\/(?!__tests__\/).+\.jsx?$/.test(f))) {
     const gone = read(file).match(/\b(resolveId|searchAssets)\b/)?.[1];
     if (gone) problems599.push(`${file} names ${gone}, which read five tables and is gone`);

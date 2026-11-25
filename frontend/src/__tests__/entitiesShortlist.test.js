@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { idFoundBy, inactiveState, isIdShaped, shortlist } from '../utils/entities'
+import { DIRECTORY_KINDS, ENTITY_KINDS, idFoundBy, inactiveState, isIdShaped, shortlist } from '../utils/entities'
 import { ENTITY_PAGES, KIND_ICONS, recordUrl } from '../utils/entityPages'
-import { ENTITY_KINDS } from '../utils/entities'
 import { ENTITIES_TABS, TABS } from '../navigation'
 import { ENTITY_FIND_LIMIT } from '../constants'
 import { entityUrl, findEntityUrl } from '../routes'
@@ -25,7 +24,7 @@ const names = (rows) => rows.map(r => r.name)
 
 describe('the shortlist', () => {
   it('holds at most its share of each kind, in the order people read numbers', () => {
-    const list = shortlist([...many('devices', 1, 40, 'Bay lathe'), ...many('cells', 100, 3, 'Bay zone')], 'bay', { perKind: 4 })
+    const list = shortlist([...many('devices', 1, 40, 'Bay lathe'), ...many('cells', 100, 3, 'Bay zone')], 'bay', 4)
     expect(names(list)).toEqual(['Bay lathe 1', 'Bay lathe 2', 'Bay lathe 3', 'Bay lathe 4', 'Bay zone 1', 'Bay zone 2', 'Bay zone 3'])
   })
 
@@ -34,26 +33,25 @@ describe('the shortlist', () => {
     const start = row('gateways', 2, 'Edge', { second_ids: ['press-1000'] })
     const whole = row('automations', 3, 'Zed', { second_ids: ['press-10'] })
     const name = row('schemas', 4, 'Press-10')
-    expect(names(shortlist([part, start, name, whole], 'PRESS-10', { perKind: 10 }))).toEqual(['Zed', 'Press-10', 'Edge', 'The press-10 yard'])
+    expect(names(shortlist([part, start, name, whole], 'PRESS-10', 10))).toEqual(['Zed', 'Press-10', 'Edge', 'The press-10 yard'])
   })
 
   it('has what is in service before the archived and the deleted, among equals', () => {
     const list = shortlist([
       row('devices', 1, 'Bay a', { state: 'retired' }), row('devices', 2, 'Bay b', { state: 'archived' }), row('devices', 3, 'Bay c'),
-    ], 'bay', { perKind: 10 })
+    ], 'bay', 10)
     expect(names(list)).toEqual(['Bay c', 'Bay b', 'Bay a'])
     // A whole name that was deleted still beats a part of one in service.
-    expect(names(shortlist([row('devices', 1, 'Bay', { state: 'retired' }), row('devices', 3, 'Bay c')], 'bay', { perKind: 10 }))).toEqual(['Bay', 'Bay c'])
+    expect(names(shortlist([row('devices', 1, 'Bay', { state: 'retired' }), row('devices', 3, 'Bay c')], 'bay', 10))).toEqual(['Bay', 'Bay c'])
   })
 
-  it('has a device before its captures, and each of what the key says are the same once', () => {
-    const captures = many('captures', 10, 5, 'x').map(c => ({ ...c, name: 'Lathe', page_id: 'p1' }))
-    const list = shortlist([...captures, row('devices', 1, 'Lathe')], 'lathe', { perKind: 10, keyOf: r => r.kind + r.page_id })
+  it('has a device before its capture, which goes by its name', () => {
+    const list = shortlist([row('captures', 10, 'Lathe'), row('devices', 1, 'Lathe')], 'lathe', 10)
     expect(list.map(r => r.kind)).toEqual(['devices', 'captures'])
   })
 
   it('keeps a row the database found by a rule of its own letters, last', () => {
-    expect(names(shortlist([row('devices', 1, 'İstanbul'), row('devices', 2, 'bay istanbul')], 'istanbul', { perKind: 10 }))).toEqual(['bay istanbul', 'İstanbul'])
+    expect(names(shortlist([row('devices', 1, 'İstanbul'), row('devices', 2, 'bay istanbul')], 'istanbul', 10))).toEqual(['bay istanbul', 'İstanbul'])
   })
 })
 
@@ -102,87 +100,71 @@ describe('a row', () => {
 })
 
 describe('the read that fills each kind\'s share', () => {
-  /** A read of the view: what was asked, and the answer it is given. */
+  /** A read of the view: what was asked, and the answer its kind is given. */
   let reads
-  const view = (...answers) => {
+  const view = (answers = {}) => {
     reads = []
     from.mockImplementation((table) => {
-      const read = { table, or: [] }
+      const read = { table, order: [] }
       reads.push(read)
       const query = {
         select: () => query,
+        eq: (column, value) => { read[column] = value; return query },
         ilike: (column, pattern) => { read.ilike = [column, pattern]; return query },
-        or: (filter) => { read.or.push(filter); return query },
-        order: (column) => { read.order = column; return query },
-        limit: (n) => { read.limit = n; return Promise.resolve(answers[reads.length - 1] ?? { data: [], error: null }) },
+        order: (column) => { read.order.push(column); return query },
+        limit: (n) => { read.limit = n; return Promise.resolve(answers[read.kind] ?? { data: [], error: null }) },
       }
       return query
     })
   }
   const full = (kind, name = 'Bay lathe', extra) => many(kind, 1, ENTITY_FIND_LIMIT, name, extra)
+  const bar = { share: 10, kinds: DIRECTORY_KINDS }
 
   beforeEach(() => { vi.clearAllMocks(); view() })
 
   it('is not made for the Entities page, nor where the answer is not full', async () => {
     rpc.mockResolvedValue({ data: full('devices'), error: null })
     expect(await api.findEntities('bay')).toHaveLength(ENTITY_FIND_LIMIT)
-    expect(reads).toHaveLength(0)
     rpc.mockResolvedValue({ data: full('devices').slice(1), error: null })
-    expect(await api.findEntities('bay', { share: 10 })).toHaveLength(ENTITY_FIND_LIMIT - 1)
+    expect(await api.findEntities('bay', bar)).toHaveLength(ENTITY_FIND_LIMIT - 1)
     expect(reads).toHaveLength(0)
     expect(rpc).toHaveBeenCalledWith('find_entities', { p_query: 'bay', p_limit: ENTITY_FIND_LIMIT })
   })
 
-  it('leaves out the kind and state that filled the answer, and adds what it crowded out', async () => {
-    rpc.mockResolvedValue({ data: full('devices'), error: null })
-    const cells = many('cells', 1000, 3, 'Bay zone')
-    view({ data: cells, error: null })
-    const rows = await api.findEntities(' Bay ', { share: 10 })
-    expect(reads).toEqual([{ table: 'entity_directory', ilike: ['name', '%Bay%'], or: ['kind.neq.devices,state.neq.active'], order: 'name', limit: ENTITY_FIND_LIMIT }])
-    expect(rows.filter(r => r.kind === 'cells')).toEqual(cells)
+  it('is of every kind but those with their share, each its best by state and name', async () => {
+    rpc.mockResolvedValue({ data: [...full('devices').slice(5), ...many('cells', 1000, 5, 'Bay zone')], error: null })
+    const cells = many('cells', 1003, 4, 'Bay zone')
+    view({ cells: { data: cells, error: null }, areas: { data: [row('areas', 9000, 'Bay')], error: null } })
+    const rows = await api.findEntities(' Bay ', bar)
+    expect(reads.map(r => r.kind)).toEqual(DIRECTORY_KINDS.filter(kind => kind !== 'devices'))
+    expect(reads[0]).toEqual({ table: 'entity_directory', kind: 'areas', ilike: ['name', '%Bay%'], order: ['state', 'name'], limit: 10 })
+    // One row for each, whichever answers named it.
+    expect(rows.filter(r => r.kind === 'cells').map(r => r.id)).toEqual([1000, 1001, 1002, 1003, 1004, 1005, 1006].map(n => row('cells', n).id))
     expect(rows).toHaveLength(ENTITY_FIND_LIMIT + 3)
   })
 
-  it('goes on while each answer is full, leaving out one more kind each time', async () => {
-    rpc.mockResolvedValue({ data: full('devices'), error: null })
-    view({ data: full('metric_catalog', 'Bay/TEMP'), error: null }, { data: many('areas', 5000, 1, 'Bay'), error: null })
-    const rows = await api.findEntities('bay', { share: 10 })
-    expect(reads.map(r => r.or)).toEqual([
-      ['kind.neq.devices,state.neq.active'],
-      ['kind.neq.devices,state.neq.active', 'kind.neq.metric_catalog,state.neq.active'],
-    ])
-    expect(new Set(rows.map(r => r.kind))).toEqual(new Set(['devices', 'metric_catalog', 'areas']))
-  })
-
-  it('finds the live ones where deleted ones filled the answer', async () => {
+  it('finds the ones in service where deleted ones filled the answer', async () => {
     rpc.mockResolvedValue({ data: full('devices', 'Bay lathe', { state: 'retired' }), error: null })
-    view({ data: [row('devices', 9000, 'Bay press')], error: null })
-    const rows = await api.findEntities('bay', { share: 10 })
-    expect(reads[0].or).toEqual(['kind.neq.devices,state.neq.retired'])
-    expect(rows.at(-1).name).toBe('Bay press')
-  })
-
-  it('stops where the answer holds no more of any kind than its share', async () => {
-    rpc.mockResolvedValue({ data: full('devices'), error: null })
-    view({ data: full('devices', 'Bay other').map(r => ({ ...r, id: r.id.replace('a', 'b') })), error: null })
-    await api.findEntities('bay', { share: 10 })
-    expect(reads).toHaveLength(1)
+    view({ devices: { data: [row('devices', 9000, 'Bay press')], error: null } })
+    const rows = await api.findEntities('bay', bar)
+    expect(names(shortlist(rows, 'bay', 10))[0]).toBe('Bay press')
+    // The order it asks for is the one that puts them first.
+    expect(['retired', 'active', 'archived'].sort()).toEqual(['active', 'archived', 'retired'])
   })
 
   it('takes a wildcard as it was typed', async () => {
     rpc.mockResolvedValue({ data: full('devices', 'a'), error: null })
-    view({ data: [row('cells', 900, '100%_\\ b'), row('cells', 901, '100 x')], error: null })
-    await api.findEntities('100%_\\', { share: 10 })
+    await api.findEntities('100%_\\', bar)
     expect(reads[0].ilike).toEqual(['name', '%100\\%\\_\\\\%'])
     // PostgREST reads a star as a wildcard whatever is done to it, so what it let through is checked.
-    view({ data: [row('cells', 900, 'Bay*1'), row('cells', 901, 'Bay 1')], error: null })
-    const rows = await api.findEntities('bay*1', { share: 10 })
+    view({ cells: { data: [row('cells', 900, 'Bay*1'), row('cells', 901, 'Bay 1')], error: null } })
+    const rows = await api.findEntities('bay*1', bar)
     expect(names(rows.filter(r => r.kind === 'cells'))).toEqual(['Bay*1'])
   })
 
-  it('leaves the rows it has where the further read is refused', async () => {
+  it('leaves the rows there are where one is refused', async () => {
     rpc.mockResolvedValue({ data: full('devices'), error: null })
-    view({ data: null, error: { message: 'statement timeout' } })
-    expect(await api.findEntities('bay', { share: 10 })).toHaveLength(ENTITY_FIND_LIMIT)
+    view({ cells: { data: null, error: { message: 'statement timeout' } }, areas: { data: [row('areas', 9000, 'Bay')], error: null } })
+    expect(await api.findEntities('bay', bar)).toHaveLength(ENTITY_FIND_LIMIT + 1)
   })
 })

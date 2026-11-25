@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { isUuid } from '../../utils/isUuid'
-import { findRank, idFoundBy, inactiveState, isIdShaped, isWholeId, kindLabel, mergeFound, shortlist } from '../../utils/entities'
+import { DIRECTORY_KINDS, entityKey, findRank, idFoundBy, inactiveState, isIdShaped, isWholeId, kindLabel, mergeFound, shortlist } from '../../utils/entities'
 import { KIND_ICONS, recordUrl } from '../../utils/entityPages'
 import { plural } from '../../utils/format'
 import { findEntityUrl, trailUrl } from '../../routes'
@@ -107,7 +107,7 @@ export function GlobalSearch({ tabs, currentTab, userRole, onNavigate, onSelectS
     let stale = false
     const timer = setTimeout(() => {
       Promise.resolve()
-        .then(() => api.findEntities(trimmed, { share: RECORD_KIND_LIMIT }))
+        .then(() => api.findEntities(trimmed, { share: RECORD_KIND_LIMIT, kinds: DIRECTORY_KINDS }))
         .then(
           rows => { if (!stale) setFound({ text: trimmed, rows: Array.isArray(rows) ? rows : [] }) },
           () => { if (!stale) setFound({ text: trimmed, rows: [] }) }
@@ -123,13 +123,8 @@ export function GlobalSearch({ tabs, currentTab, userRole, onNavigate, onSelectS
   const records = useMemo(() => {
     if (!searchable || found.text === '' || !local.loaded) return []
     const rows = mergeFound(found.rows, local.rows, found.text)
-    return shortlist(
-      found.text === trimmed ? rows : rows.filter(row => findRank(row, trimmed) !== null),
-      trimmed,
-      // Every capture of one device or gateway opens the same page, by that name: one row says it.
-      { perKind: RECORD_KIND_LIMIT, keyOf: row => recordUrl(row, tabs) }
-    )
-  }, [searchable, found, local, trimmed, tabs])
+    return shortlist(found.text === trimmed ? rows : rows.filter(row => findRank(row, trimmed) !== null), trimmed, RECORD_KIND_LIMIT)
+  }, [searchable, found, local, trimmed])
 
   /* Whether the text is an id, known once the answer is in: by its shape, or by a record it is an id of.
      The two rows it offers come after the records, so before the answer they would move. */
@@ -139,16 +134,15 @@ export function GlobalSearch({ tabs, currentTab, userRole, onNavigate, onSelectS
   const results = useMemo(() => {
     const recordRows = records.map(row => {
       const Icon = KIND_ICONS[row.kind]
-      const to = recordUrl(row, tabs)
       return {
-        key: `record:${to}`,
+        key: `record:${entityKey(row)}`,
         kind: 'record',
         label: row.name || '(unnamed)',
         // The kind is the answer the search was opened to get, and a state that is not "in service" is said.
         detail: [kindLabel(row.kind), inactiveState(row)].filter(Boolean).join(' · '),
         foundBy: idFoundBy(row, trimmed),
         icon: Icon && <Icon size={15} />,
-        to
+        to: recordUrl(row, tabs)
       }
     })
 

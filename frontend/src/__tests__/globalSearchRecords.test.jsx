@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { visiblePages } from '../navigation'
 import { DEFAULT_ROLE_PERMISSIONS_MAP } from '../hooks/usePermissions'
 import { entityUrl, findEntityUrl, identityUrl, personUrl, trailUrl } from '../routes'
+import { DIRECTORY_KINDS } from '../utils/entities'
 import { KNOWN_PRINCIPALS } from '../utils/serviceIdentities'
 
 /**
@@ -88,9 +89,9 @@ describe('the search', () => {
   it('asks the one search for an id and for a name, with each kind\'s share', async () => {
     show('Operator')
     type(DEVICE.id)
-    await waitFor(() => expect(api.findEntities).toHaveBeenCalledWith(DEVICE.id, { share: RECORD_KIND_LIMIT }))
+    await waitFor(() => expect(api.findEntities).toHaveBeenCalledWith(DEVICE.id, { share: RECORD_KIND_LIMIT, kinds: DIRECTORY_KINDS }))
     type('haas')
-    await waitFor(() => expect(api.findEntities).toHaveBeenCalledWith('haas', { share: RECORD_KIND_LIMIT }))
+    await waitFor(() => expect(api.findEntities).toHaveBeenCalledWith('haas', { share: RECORD_KIND_LIMIT, kinds: DIRECTORY_KINDS }))
     expect(api.findEntities).toHaveBeenCalledTimes(2)
   })
 
@@ -425,9 +426,8 @@ describe('how many are listed', () => {
     expect(labels()).toHaveLength(RECORD_KIND_LIMIT)
   })
 
-  it('lists the captures of one device once, after the device, since they open one page', async () => {
-    const captures = Array.from({ length: 12 }, (_, i) => rec('captures', uuid(5000 + i), 'Haas 10', { variant: 'device', page_id: DEVICE.id, second_ids: [`x/${i}.json`] }))
-    api.findEntities.mockResolvedValue([...captures, DEVICE])
+  it('puts a device before its capture, which goes by its name', async () => {
+    api.findEntities.mockResolvedValue([rec('captures', uuid(5000), 'Haas 10', { variant: 'device', page_id: DEVICE.id }), DEVICE])
     show('Shopfloor_Manager')
     type('haas 10')
     await screen.findAllByText('Haas 10')
