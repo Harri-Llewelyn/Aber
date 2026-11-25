@@ -83,9 +83,11 @@ function AutomationList({ showToast, canWrite, onExport, onUpload, version }) {
     let live = true
     Promise.all([
       api.automationsForEntity(entityId),
-      api.resolveId(entityId).catch(() => []),
+      api.findEntities(entityId).catch(() => []),
     ]).then(([rows, found]) => {
-      if (live) setEntity({ id: entityId, name: found[0]?.name ?? null, reasons: reasonsByKey(rows) })
+      // The entity this id is the key of: a search finds a name that holds it as well.
+      const named = found.find(row => row.id === entityId.toLowerCase())
+      if (live) setEntity({ id: entityId, name: named?.name ?? null, reasons: reasonsByKey(rows) })
     }).catch(() => { if (live) setEntity({ id: entityId, name: null, reasons: new Map() }) })
     return () => { live = false }
   }, [entityId, filtered, version])

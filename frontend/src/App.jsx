@@ -679,23 +679,16 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
           </button>
         </Tooltip>
 
-        {/* Takes the same `navTabs` the rail does and the same drill-down helpers every other
-            surface navigates with, so a pasted device id lands at the address clicking that device
-            does. */}
+        {/* Takes the same `navTabs` the rail does, so it opens a record on its own page only where
+            this viewer may open that page, at the address every other surface opens it by. */}
         <GlobalSearch
           tabs={navTabs}
           currentTab={tab}
+          userRole={userRole}
           onNavigate={handleNavClick}
-          onSelectDevice={showDevice}
-          onSelectGateway={showGateway}
-          onSelectCell={showCell}
-          onSelectArea={showArea}
-          onSelectSchema={showSchema}
           onSelectSetting={showSetting}
           onSelectSection={showSection}
-          /* No type: the search knows the id and not what it belongs to, and the trail's own
-             search matches an entity id whatever kind carries it. */
-          onSelectTrail={(id) => viewTrailFor(id, '')}
+          onOpen={navigate}
         />
 
         {/* The right-hand side holds the two controls whose values move, the alert pill and the

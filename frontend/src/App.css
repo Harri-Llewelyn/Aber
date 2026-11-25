@@ -1087,6 +1087,14 @@ a.sidebar-item { text-decoration: none; }
   white-space: nowrap;
 }
 
+/* A record: its name, over the id it was found by where the text was one. Each is cut and slides by itself
+   (OverflowText), and wraps where nothing may move. */
+.global-search-record { flex: 1; min-width: 0; }
+.global-search-record .global-search-record-id { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+@media (prefers-reduced-motion: reduce) {
+  .global-search-record .overflow-text { white-space: normal; overflow-wrap: anywhere; }
+}
+
 /* Which page a card is on, or which kind of thing an id turned out to be -- the answer the search
    was opened to get, so it is quiet but never truncated. */
 .global-search-result-detail {
@@ -1118,8 +1126,11 @@ a.sidebar-item { text-decoration: none; }
   color: var(--text-muted);
 }
 
-/* A finding above the results rather than instead of them: an id always has the Audit Trail
-   row to offer, so this says what the asset probes did not find and leaves the row to speak. */
+/* What an id offers whatever it names, under the records. */
+.global-search-id:not(:first-child) { border-top: 1px solid var(--border); }
+
+/* A finding above those rows rather than instead of them: an id always has them to offer, so this
+   says what the search did not find and leaves them to speak. */
 .global-search-note {
   padding: 9px 12px;
   border-bottom: 1px solid var(--border);

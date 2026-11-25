@@ -25,6 +25,7 @@ import { SearchInput } from '../common/SearchInput'
 import { EntityDrawer } from './EntityDrawer'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { useDisplayNames } from '../../hooks/useDisplayNames'
+import { useLocalEntities } from '../../hooks/useLocalEntities'
 import { PersonName } from '../common/PersonName'
 import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
@@ -34,8 +35,7 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { hadEnrolled } from '../../utils/credentialState'
 import {
-  ENTITY_KINDS, PINNED_IDENTITY_ROWS, byKindThenName, entityKey, findText, isWholeId, kindLabel, mergeFound, personRow,
-  variantBadge,
+  ENTITY_KINDS, byKindThenName, entityKey, findText, isWholeId, kindLabel, mergeFound, variantBadge,
 } from '../../utils/entities'
 import { formatDate, formatDateTime, plural } from '../../utils/format'
 import { applyFacets } from '../../utils/listFilters'
@@ -116,7 +116,6 @@ const RETIRED_SORT = {
  */
 export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, unmappedMetricsTo }) {
   const [active, setActive]     = useState({ rows: NONE, loaded: false, error: null })
-  const [people, setPeople]     = useState({ rows: NONE, loaded: false })
   const [archives, setArchives] = useState([])
   const [retired, setRetired]   = useState([])
   const [exports, setExports]   = useState([])
@@ -128,13 +127,8 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
   const [kinds, setKinds] = useUrlList('kind', NONE, { allowed: ENTITY_KINDS.map(k => k.kind) })
   const text = findText(find)
 
-  /* People and the pinned identities, which no table the view reads holds: the read of people an
-     Administrator has, and the one an Auditor has. Nobody else has one, so nobody else asks. */
-  const seesIdentities = userRole === 'Administrator' || userRole === 'Auditor'
-  const local = useMemo(
-    () => (seesIdentities ? [...PINNED_IDENTITY_ROWS, ...people.rows.map(personRow)] : NONE),
-    [seesIdentities, people]
-  )
+  // People and the pinned identities, which no table the view reads holds.
+  const { rows: local, loaded: localLoaded } = useLocalEntities(userRole)
 
   /* What the search found, for the text it was asked with. `found.text` lags `text` while one is typed and
      while the answer is on its way, and what is listed is always one answer's. Asked again after an act on
@@ -220,24 +214,12 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
 
   useEffect(() => { load() }, [load])
 
-  useEffect(() => {
-    if (!seesIdentities) { setPeople({ rows: NONE, loaded: true }); return undefined }
-    let live = true
-    const settle = (rows) => { if (live) setPeople({ rows: Array.isArray(rows) ? rows : NONE, loaded: true }) }
-    // list_people() says whose access was removed and is an Administrator's; list_user_accounts() is the
-    // read an Auditor has.
-    Promise.resolve()
-      .then(() => (userRole === 'Administrator' ? api.listPeople() : api.listUserAccounts()))
-      .then(settle, () => settle(NONE))
-    return () => { live = false }
-  }, [seesIdentities, userRole])
-
   // The Active row whose drawer is open, in the address as `?entity=`.
   const inService = (id) => everyActive.find(row => row.id === id)
     ?? matches.find(row => row.state === 'active' && row.id === id) ?? null
   const [selectedId, setSelectedId] = useUrlState('entity', '', {
     // A row only the search found is known once it has answered.
-    allowed: active.loaded && people.loaded && !searching ? id => inService(id) !== null : null
+    allowed: active.loaded && localLoaded && !searching ? id => inService(id) !== null : null
   })
   const selected = stage === 'active' && selectedId ? inService(selectedId) : null
   const toggle = (row) => setSelectedId(id => (id === row.id ? '' : row.id))

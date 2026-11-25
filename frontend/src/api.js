@@ -4910,83 +4910,49 @@ const apiMethods = {
   },
 
   /**
-   * Which kind of thing a UUID names, and what it is called.
-   *
-   * The search bar's third answer: pasting an id from a Grafana alert, a topic or a log line.
-   * Five tables because five pages can focus one row. All five are asked at once and a list comes
-   * back, so on the day two tables answer the caller shows both. A miss and a refusal both come
-   * back empty: RLS returns no rows rather than an error, and the palette must not claim to know
-   * which.
-   */
-  resolveId: async (uuid) => {
-    if (!isUuid(uuid)) return [];
-
-    // `maybeSingle` rather than `single`: four of the five probes always miss. The name column is
-    // named per table (`schemas` calls it `schema_name`).
-    const probe = (table, kind, nameColumn) =>
-      supabase.from(table).select(`id, ${nameColumn}`).eq('id', uuid).maybeSingle()
-        .then(({ data, error }) => (error || !data ? null : { kind, id: data.id, name: data[nameColumn] }));
-
-    return (await Promise.all([
-      probe('devices', 'device', 'name'),
-      probe('gateways', 'gateway', 'name'),
-      probe('cells', 'cell', 'name'),
-      probe('areas', 'area', 'name'),
-      probe('schemas', 'schema', 'schema_name')
-    ])).filter(Boolean);
-  },
-
-  /**
    * The entities one text names, whatever their state: a whole id of any kind, the start of one, or any
    * part of a name (find_entities(), 0321). At most `limit` rows, a whole id first.
+   *
+   * `share` is the search bar's. A full answer can be all of one kind in one state, since it goes by rank
+   * and then by name: four hundred devices before a cell, or two hundred deleted ones before a live one.
+   * Each kind and state with `share` rows is then left out of a further read, by name alone, until an
+   * answer is not full or holds no more of them. A refused further read leaves the rows so far.
    */
-  findEntities: async (text, { limit = ENTITY_FIND_LIMIT } = {}) => {
-    if (!String(text || '').trim()) return [];
+  findEntities: async (text, { limit = ENTITY_FIND_LIMIT, share = null } = {}) => {
+    const wanted = String(text || '').trim();
+    if (!wanted) return [];
     const { data, error } = await supabase.rpc('find_entities', { p_query: text, p_limit: limit });
     if (error) throw new Error(error.message || 'Could not search the entities');
-    return data || [];
-  },
+    const rows = data || [];
+    if (!share) return rows;
 
-  /**
-   * The five asset kinds, matched by name.
-   *
-   * The companion to `resolveId`, separate because a name search can hit many rows and fails
-   * differently. `ilike` with the term escaped, since `%` and `_` are LIKE wildcards. Capped per
-   * kind, not overall, so four hundred devices cannot crowd out three cells. RLS decides what
-   * comes back.
-   */
-  searchAssets: async (term) => {
-    const needle = String(term || '').trim();
-    if (needle.length < 2) return [];
-
-    const escaped = needle.replace(/([%_\\])/g, '\\$1');
-    const probe = (table, kind, nameColumn) =>
-      supabase
-        .from(table)
-        .select(`id, ${nameColumn}`)
-        .ilike(nameColumn, `%${escaped}%`)
-        .limit(10)
-        .then(({ data, error }) => (error ? [] : (data || []).map(r => ({
-          kind, id: r.id, name: r[nameColumn]
-        }))));
-
-    const found = await Promise.all([
-      probe('devices', 'device', 'name'),
-      probe('gateways', 'gateway', 'name'),
-      probe('cells', 'cell', 'name'),
-      probe('areas', 'area', 'name'),
-      probe('schemas', 'schema', 'schema_name')
-    ]);
-
-    // AN EXACT MATCH FIRST, then alphabetical. Somebody who typed a full name wants that row, and
-    // it would otherwise sit wherever its table happened to fall among the five.
-    const lowered = needle.toLowerCase();
-    return found.flat().sort((a, b) => {
-      const aExact = String(a.name || '').toLowerCase() === lowered;
-      const bExact = String(b.name || '').toLowerCase() === lowered;
-      if (aExact !== bExact) return aExact ? -1 : 1;
-      return String(a.name || '').localeCompare(String(b.name || ''));
-    });
+    // LIKE's wildcards are text here, as they are to find_entities().
+    const pattern = `%${wanted.replace(/([%_\\])/g, '\\$1')}%`;
+    const groupOf = (row) => `${row.kind},${row.state}`;
+    const held = new Map(rows.map(row => [`${groupOf(row)},${row.id}`, row]));
+    const served = new Set();
+    let last = rows;
+    while (last.length >= limit) {
+      const counts = new Map();
+      for (const row of held.values()) counts.set(groupOf(row), (counts.get(groupOf(row)) || 0) + 1);
+      const more = [...counts.keys()].filter(group => counts.get(group) >= share && !served.has(group));
+      if (more.length === 0) break;
+      for (const group of more) served.add(group);
+      let query = supabase.from('entity_directory').select('*').ilike('name', pattern);
+      // PostgREST takes every `or` as one more condition.
+      for (const group of served) {
+        const [kind, state] = group.split(',');
+        query = query.or(`kind.neq.${kind},state.neq.${state}`);
+      }
+      const { data: next, error: refused } = await query.order('name').limit(limit);
+      if (refused) break;
+      last = next || [];
+      // Checked again here: PostgREST reads a `*` as a wildcard, and nothing escapes it.
+      for (const row of last) {
+        if (String(row.name || '').toLowerCase().includes(wanted.toLowerCase())) held.set(`${groupOf(row)},${row.id}`, row);
+      }
+    }
+    return [...held.values()];
   },
 
   delete: async (path, _options = {}) => {

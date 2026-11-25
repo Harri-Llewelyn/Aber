@@ -95,6 +95,9 @@ export const entityUrl = (type, id, variant = null) => {
   return url && id ? url(id, variant) : null
 }
 
+/** The Entities page searched by a text. A whole id that names one entity opens that entity, whatever its state. */
+export const findEntityUrl = (text) => pageUrl('entities', { find: text })
+
 /** One proposal with its drawer open, on the queue that holds it: Awaiting a decision or Decided. */
 export const proposalUrl = (id, decided = false) => pageUrl('approvals', { proposal: id }, decided ? 'decided' : '')
 
