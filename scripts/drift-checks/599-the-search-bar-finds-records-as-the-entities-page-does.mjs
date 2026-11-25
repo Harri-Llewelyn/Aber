@@ -33,8 +33,8 @@ export default function check() {
   const readme = read(README).split('\n\n').find((text) => text.startsWith("**Its records are `find_entities()`'s**"))?.replace(/\s+/g, ' ') ?? '';
   if (!readme) problems599.push(`${README} has no paragraph on the search bar's records`);
 
-  const number = (name) => bar.match(new RegExp(`const ${name} = (\\d+)\\n`))?.[1];
-  const [limit, least, settle] = ['RECORD_KIND_LIMIT', 'RECORD_SEARCH_MIN', 'SETTLE_MS'].map(number);
+  const numbers = new Map([...bar.matchAll(/^(?:export )?const ([A-Z_]+) = (\d+)$/gm)].map((m) => [m[1], m[2]]));
+  const [limit, least, settle] = ['RECORD_KIND_LIMIT', 'RECORD_SEARCH_MIN', 'SETTLE_MS'].map((name) => numbers.get(name));
   for (const [value, name] of [[limit, 'RECORD_KIND_LIMIT'], [least, 'RECORD_SEARCH_MIN'], [settle, 'SETTLE_MS']]) {
     if (!value) problems599.push(`could not read ${name} out of ${BAR}`);
   }
