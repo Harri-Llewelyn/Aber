@@ -565,7 +565,7 @@ export function hoverAt(text, pos, facts, model = AUTOMATIONS_MODEL) {
 function catalogueMetricHover(name, facts, property) {
   const info = facts.metrics.get(name)
   if (!info) return { title: name, lines: ['Not in the metric catalogue. Register it on the Metrics page first.'] }
-  if (info.derived) return { title: name, lines: [property?.['x-derived-says'] ?? 'A derived metric. Nothing publishes it, so a schema cannot model it.'] }
+  if (info.derived) return { title: name, lines: [property?.['x-derived-says'] ?? 'A derived metric. Nothing publishes it, so a schema names it under derived_metrics.'] }
   return { title: name, lines: [info.unit ? `Unit: ${info.unit}` : 'No unit in the catalogue.'] }
 }
 
