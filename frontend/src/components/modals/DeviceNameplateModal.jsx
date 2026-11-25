@@ -196,8 +196,6 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
   // What the export still waits for before it names the template, by label and in the template's order.
   const missing = mandatory.filter(path => !held.has(path)).map(path => labelByPath.get(path) ?? path)
 
-  const close = () => { if (!saving) onClose(false) }
-
   /** Whether the primary may go ahead. Says why not in the problem line, and goes to the first field. */
   const mayGoAhead = () => {
     if (!firstWrong && !unchanged) return true
@@ -328,35 +326,29 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
       title={<>Digital Nameplate — <span className="mono">{asset.asset_name}</span></>}
       icon={<IconTag size={18} />}
       size="xl"
-      onClose={close}
+      busy={saving}
+      onClose={() => onClose(false)}
       lead="IDTA 02006 Digital Nameplate v3.0. These values are exported in this device's Asset Administration Shell, each carrying the identifier IDTA publishes for it. Every field is optional: a nameplate is filled in as it is discovered."
       problem={refusal ?? standing}
-      touched
       error={error}
-      footer={
-        <>
-          <button className="btn btn-ghost" onClick={close} disabled={saving}>
-            {reading || unread ? 'Close' : 'Cancel'}
-          </button>
-          {/* One primary control, saying what it will do. It stays pressable: the press says what is
-              in the way. The label swaps for a permanent refusal. */}
-          {unread || reading ? null : canManage ? (
-            <ActionButton pending={saving} pendingLabel="Saving…" onClick={save} disabled={loading}>
-              Save Nameplate
-            </ActionButton>
-          ) : (
-            <ActionButton
-              pending={saving}
-              pendingLabel="Proposing…"
-              onClick={propose}
-              disabled={loading}
-              title="Ask for these changes — an approver applies them, or says why not"
-            >
-              Propose a Change
-            </ActionButton>
-          )}
-        </>
-      }
+      dismiss={reading || unread ? 'Close' : 'Cancel'}
+      // One primary control, saying what it will do. It stays pressable: the press says what is in the
+      // way. The label swaps for a permanent refusal.
+      footer={unread || reading ? null : canManage ? (
+        <ActionButton pending={saving} pendingLabel="Saving…" onClick={save} disabled={loading}>
+          Save Nameplate
+        </ActionButton>
+      ) : (
+        <ActionButton
+          pending={saving}
+          pendingLabel="Proposing…"
+          onClick={propose}
+          disabled={loading}
+          title="Ask for these changes — an approver applies them, or says why not"
+        >
+          Propose a Change
+        </ActionButton>
+      )}
     >
 
         {/* No banner for a reader who can propose: the footer button says Propose a Change. The

@@ -79,8 +79,8 @@ describe('ActionButton', () => {
 })
 
 describe("Modal's problem line", () => {
-  const Form = ({ problem, touched }) => (
-    <Modal title="Rename Area" onClose={vi.fn()} problem={problem} touched={touched} footer={<ActionButton>Save</ActionButton>}>
+  const Form = ({ problem }) => (
+    <Modal title="Rename Area" onClose={vi.fn()} problem={problem} footer={<ActionButton>Save</ActionButton>}>
       <input aria-label="Other" defaultValue="" />
     </Modal>
   )
@@ -96,13 +96,6 @@ describe("Modal's problem line", () => {
     rerender(<Form problem="Give the area a name" />)
     expect(line).toHaveTextContent('Give the area a name')
     expect(line.querySelector('svg')).toBeTruthy()
-  })
-
-  it('waits for `touched` where a caller knows its problem before the person has asked', () => {
-    const { rerender } = render(<Form problem="Give the area a name" touched={false} />)
-    expect(document.querySelector('.modal-problem')).toHaveTextContent(/^$/)
-    rerender(<Form problem="Give the area a name" touched />)
-    expect(document.querySelector('.modal-problem')).toHaveTextContent('Give the area a name')
   })
 
   it('is not drawn on a dialog that never refuses', () => {
