@@ -13,7 +13,7 @@ const README = 'frontend/README.md';
 export default function check() {
   const problems606 = [];
   const tab = read(TAB).replace(/\r\n/g, '\n');
-  const constant = (name) => new RegExp(`export const ${name} = '([^']+)'`).exec(read(WORDS))?.[1];
+  const constant = (name) => read(WORDS).split(`export const ${name} = '`)[1]?.split("'")[0];
   const label = constant('PLAYBACK_GATEWAY_LABEL');
   const param = constant('PLAYBACK_GATEWAY_PARAM');
   const release = /<IconGitBranch size=\{13\} \/> ([A-Z][a-z ]+) \(\{releasesWaiting\}\)/.exec(tab)?.[1];
