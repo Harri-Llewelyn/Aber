@@ -1,14 +1,14 @@
 import { allFiles, fail, pass, read } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
-// 581. Every kind the Entities page lists has a page its drawer opens, an icon, and a name for each further
-// id it has; and the page it opens is the one entityUrl() builds an address on, by the rail's name. A kind
+// 581. Every kind the Entities page lists has a page its drawer and the search bar open, an icon, and a name for
+// each further id it has; and the page it opens is the one entityUrl() builds an address on, by the rail's name. A kind
 // with none is a row whose drawer leads nowhere. The kinds are the words audit_trail.entity_type uses.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
   const problems581 = [];
   const entities = read('frontend/src/utils/entities.js');
-  const drawer = read('frontend/src/components/tabs/EntityDrawer.jsx');
+  const entityPages = read('frontend/src/utils/entityPages.js');
   const routes = read('frontend/src/routes.js');
   const nav = read('frontend/src/navigation.jsx');
   const constants = read('frontend/src/constants.js');
@@ -19,8 +19,8 @@ export default function check() {
   };
   const kinds = [...(entities.match(/export const ENTITY_KINDS = \[([\s\S]*?)\n\]/)?.[1] ?? '').matchAll(/kind: '([a-z_]+)'/g)].map((m) => m[1]);
   const words = [...constants.matchAll(/\btable: '([a-z_]+)'/g)].map((m) => m[1]);
-  const pages = new Map([...block(drawer, 'ENTITY_PAGES').matchAll(/^ {2}([a-z_]+): \{ type: '([a-z]+)', page: '([^']+)' \}/gm)].map((m) => [m[1], { type: m[2], page: m[3] }]));
-  const icons = [...block(drawer, 'KIND_ICONS').matchAll(/^ {2}([a-z_]+): Icon\w+,/gm)].map((m) => m[1]);
+  const pages = new Map([...block(entityPages, 'ENTITY_PAGES').matchAll(/^ {2}([a-z_]+): \{ type: '([a-z]+)', page: '([^']+)' \}/gm)].map((m) => [m[1], { type: m[2], page: m[3] }]));
+  const icons = [...block(entityPages, 'KIND_ICONS').matchAll(/^ {2}([a-z_]+): Icon\w+,/gm)].map((m) => m[1]);
   const named = [...block(entities, 'SECOND_ID_LABELS').matchAll(/^ {2}([a-z_]+): \[/gm)].map((m) => m[1]);
   const built = new Map((routes.match(/export const entityUrl = [\s\S]*?\{ ([^}]*) \}\[type\]/)?.[1] ?? '')
     .split(',').map((p) => p.split(':').map((x) => x.trim())).filter(([type, fn]) => type && fn));
@@ -42,9 +42,9 @@ export default function check() {
   if (built.size < 10) problems581.push(`read only ${built.size} kinds out of entityUrl()`);
   for (const kind of kinds) {
     if (!words.includes(kind)) problems581.push(`${kind} is no word of AUDIT_TRAIL_ENTITY_TYPES, so its Audit Trail cannot be opened by kind`);
-    if (!icons.includes(kind)) problems581.push(`EntityDrawer.jsx has no icon for ${kind}`);
+    if (!icons.includes(kind)) problems581.push(`utils/entityPages.js has no icon for ${kind}`);
     const page = pages.get(kind);
-    if (!page) { problems581.push(`EntityDrawer.jsx has no page for ${kind}`); continue; }
+    if (!page) { problems581.push(`utils/entityPages.js has no page for ${kind}`); continue; }
     if (!rail.has(page.page)) problems581.push(`${kind} opens ${page.page}, which the rail does not list`);
     const builder = built.get(page.type);
     if (!builder) { problems581.push(`entityUrl() builds no address for ${page.type}, ${kind}'s`); continue; }

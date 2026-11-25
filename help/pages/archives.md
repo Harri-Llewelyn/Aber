@@ -23,6 +23,8 @@ If the whole of the ID names one entity, that entity opens. For an entity in ser
 - **Kind** narrows the list to some kinds, such as devices. Each kind shows how many it has.
 - **The address keeps the search,** so you can send a link to what you found.
 
+**The search bar finds entities from any page.** Press **Ctrl+K** (**Cmd+K** on a Mac) and type two or more characters of a name, or paste an ID. Entities come after pages and help, 10 of a kind at most, so type more to narrow them. Select one to open it on its own page. If your role can't open that page, or the entity was deleted, it opens on this page. An ID adds two rows below. **View in Entities** searches this page for it. **Find This ID in the Audit Trail** opens its history, for a role that may read it. Both are there even when nothing is found, because the Audit Trail records more kinds than this page lists.
+
 ## Active entities
 
 The **Active** tab lists what is in service:

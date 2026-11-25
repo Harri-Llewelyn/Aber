@@ -534,7 +534,7 @@ const ENTITY_ID_HELP =
   'The row this change was made to -- a device, a schema, a setting -- in the table its lane '
   + 'names. It is the id the rest of the platform knows that entity by. Paste it into the search '
   + 'box above for everything that has ever happened to it, or into the global search (Ctrl+K), '
-  + 'which opens the entity itself where it has a page and offers this one where it does not.'
+  + 'which opens the entity itself where it has a page, and offers Entities and this page beside it.'
 
 const MUTATION_ID_HELP =
   'This audit row, not the thing it changed. It is the value to quote in a ticket or an incident '
