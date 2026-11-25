@@ -110,11 +110,15 @@ const DECLARED_IN_3C = /^(?:FUNCTION )?(?:live_constraint_definition|live_policy
 const STATED_LATER = {
   'public.audit_trail audit_trail_select_asset': '0177_policies_check_the_caller_once_per_query.sql',
   'public.audit_trail audit_trail_select_security': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.backups backups_select_administrator': '0330_a_search_asks_about_the_tombstones_once.sql',
+  'public.captures captures_select_privileged': '0330_a_search_asks_about_the_tombstones_once.sql',
   'public.change_proposals change_proposals_insert_proposer': '0177_policies_check_the_caller_once_per_query.sql',
   'public.change_proposals change_proposals_select_own_or_approver': '0177_policies_check_the_caller_once_per_query.sql',
   'public.change_proposals change_proposals_update_own_open': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.machine_principals machine_principals_select_admin_or_auditor': '0330_a_search_asks_about_the_tombstones_once.sql',
   'public.platform_alerts platform_alerts_select_authenticated': '0204_a_service_token_warns_before_it_expires.sql',
   'public.principal_permissions principal_permissions_select_own_or_admin': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.retired_entities retired_entities_select_privileged': '0330_a_search_asks_about_the_tombstones_once.sql',
   'public.system_settings system_settings_select_authenticated': '0177_policies_check_the_caller_once_per_query.sql',
   'public.user_roles user_roles_select_own_or_privileged': '0177_policies_check_the_caller_once_per_query.sql',
 };
