@@ -22,8 +22,6 @@ export function ServicePrincipalRevocationModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  const close = useCallback(() => onClose(), [onClose])
-
   const submit = useCallback(async () => {
     setBusy(true)
     setError(null)
@@ -50,23 +48,22 @@ export function ServicePrincipalRevocationModal({
   return (
     <Modal
       title={`${reinstating ? 'Reinstate' : 'Withdraw'} “${principalName}”`}
-      onClose={close}
+      busy={busy}
+      onClose={onClose}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={close}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel={reinstating ? 'Reinstating…' : 'Withdrawing…'}
-            className={reinstating ? 'btn btn-primary' : 'btn btn-danger'}
-            onClick={submit}
-            title={reinstating
-              ? 'Lift the withdrawal. Previous tokens stay revoked.'
-              : 'Refuse every token naming this identity, now and in future.'}
-          >
-            {reinstating ? 'Reinstate Identity' : 'Withdraw Identity'}
-          </ActionButton>
-        </>
+        <ActionButton
+          pending={busy}
+          pendingLabel={reinstating ? 'Reinstating…' : 'Withdrawing…'}
+          className={reinstating ? 'btn btn-primary' : 'btn btn-danger'}
+          onClick={submit}
+          title={reinstating
+            ? 'Lift the withdrawal. Previous tokens stay revoked.'
+            : 'Refuse every token naming this identity, now and in future.'}
+        >
+          {reinstating ? 'Reinstate Identity' : 'Withdraw Identity'}
+        </ActionButton>
       }
     >
       {reinstating ? (

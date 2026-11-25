@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabaseClient'
 import { tabLink } from '../test/tabBar'
 import { filterList, offered, pick } from '../test/listFilters'
 import { helpTipText } from '../test/tooltips'
+import { pressHeld } from '../test/dialogs'
 
 /**
  * The Devices tab's location UI. The distinction under test is between the resolved cell and the
@@ -300,7 +301,8 @@ describe('the edit form', () => {
     // convert every inherited device into an explicitly filed one on the next save.
     await show([device()])
     openEdit()
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'CNC_01A' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: '', location_scope: 'gateway' })
@@ -311,22 +313,32 @@ describe('the edit form', () => {
     openEdit()
     fireEvent.click(screen.getByRole('radio', { name: /In a cell/i }))
     fireEvent.change(cellPicker(), { target: { value: CELL_2 } })
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: CELL_2, area_id: '', location_scope: 'cell' })
   })
 
-  it('requires a cell once In a cell is chosen: the button says so, and the picker prompts for one', async () => {
-    // `devices_cell_scope_names_a_cell` refuses it, so the form holds the save instead.
+  it('sends nothing for an edit that changes nothing, and says so', async () => {
+    await show([device()])
+    openEdit()
+    pressHeld(screen.getByRole('dialog'), /Save Device/i, 'Nothing has changed.')
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('requires a cell once In a cell is chosen: the press says so, and the picker prompts for one', async () => {
+    // `devices_cell_scope_names_a_cell` refuses it, so the form says it before the request.
     await show([device()])
     openEdit()
     fireEvent.click(screen.getByRole('radio', { name: /In a cell/i }))
     expect(within(cellPicker()).getByText('— Choose a cell —')).toBeInTheDocument()
     expect(cellPicker().value).toBe('')
-    expect(screen.getByRole('button', { name: /Save Configuration/i })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), /Save Device/i, 'Choose which cell the device is in')
+    expect(cellPicker()).toHaveAccessibleDescription('Choose which cell the device is in')
+    expect(cellPicker()).toHaveFocus()
+    expect(api.put).not.toHaveBeenCalled()
     fireEvent.change(cellPicker(), { target: { value: CELL_2 } })
-    expect(screen.getByRole('button', { name: /Save Configuration/i })).toBeEnabled()
+    expect(cellPicker()).not.toHaveAttribute('aria-invalid')
   })
 
   it('returns to following the gateway, and sends no cell, when Follow Gateway is chosen again', async () => {
@@ -334,7 +346,7 @@ describe('the edit form', () => {
     openEdit()
     fireEvent.click(screen.getByRole('radio', { name: /Follow Gateway/i }))
     expect(cellPicker()).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: '', location_scope: 'gateway' })
@@ -346,7 +358,7 @@ describe('the edit form', () => {
     // One radio of three rather than a checkbox beside the cell picker:
     // `devices_site_wide_has_no_cell` makes the answers exclusive, and a radio group says so.
     fireEvent.click(screen.getByRole('radio', { name: /Site-Wide/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', location_scope: 'site_wide' })
@@ -392,12 +404,12 @@ describe('the edit form', () => {
     // One area: no dropdown, its name is stated and the save carries it.
     expect(document.querySelector('#device-area')).toBeNull()
     expect(screen.getByText('Area 1')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: 'area-1', location_scope: 'area_wide' })
   })
 
-  it('asks which area when there are several, and holds the save until one is chosen', async () => {
+  it('asks which area when there are several, and sends nothing until one is chosen', async () => {
     await show([device()], {
       areas: [
         { area_id: 'area-1', area_name: 'Area 1', cells: [], cell_count: 0 },
@@ -408,11 +420,13 @@ describe('the edit form', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
     const areaPicker = document.querySelector('#device-area')
     expect(areaPicker.value).toBe('')
-    // `devices_area_wide_names_its_area` would refuse the row, so the button says so instead.
-    expect(screen.getByRole('button', { name: /Save Configuration/i })).toBeDisabled()
+    // `devices_area_wide_names_its_area` would refuse the row, so the press says so instead.
+    pressHeld(screen.getByRole('dialog'), /Save Device/i, 'Choose which area the device serves')
+    expect(areaPicker).toHaveFocus()
+    expect(api.put).not.toHaveBeenCalled()
 
     fireEvent.change(areaPicker, { target: { value: 'area-2' } })
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', area_id: 'area-2', location_scope: 'area_wide' })
   })
@@ -436,7 +450,8 @@ describe('the edit form', () => {
       active_gateway_id: 'gw-sim', cell_id: CELL_2, location_scope: 'cell', effective_cell_id: null, location_source: 'simulated'
     })])
     openEdit()
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'CNC_01A' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: CELL_2 })
@@ -643,12 +658,12 @@ describe('approving a quarantined device', () => {
     expect(screen.getByText(/Area-Wide in Assembly, from AssemblyFlow\. It moves when the gateway does\./)).toBeInTheDocument()
   })
 
-  it('holds the button until a cell is picked once In a cell is chosen', async () => {
+  it('asks for a cell once In a cell is chosen, and sends nothing without one', async () => {
     await openApproval()
     fireEvent.click(screen.getByRole('radio', { name: /In a cell/i }))
-    expect(approveButton()).toBeDisabled()
-    fireEvent.change(document.getElementById('approve-cell'), { target: { value: CELL_2 } })
-    expect(approveButton()).toBeEnabled()
+    pressHeld(screen.getByRole('dialog'), /Approve & Onboard/, 'Choose which cell the device is in')
+    expect(document.getElementById('approve-cell')).toHaveFocus()
+    expect(supabase.functions.invoke).not.toHaveBeenCalled()
   })
 
   it('forwards the chosen cell to the edge function', async () => {
@@ -664,7 +679,7 @@ describe('approving a quarantined device', () => {
     })
   })
 
-  it('forwards Area-Wide with its area, and holds the button until an area is named', async () => {
+  it('forwards Area-Wide with its area, and sends nothing until an area is named', async () => {
     supabase.functions.invoke.mockResolvedValue({ data: { success: true }, error: null })
     api.get.mockImplementation(routeGet([], {
       quarantine: [quarantined],
@@ -680,7 +695,8 @@ describe('approving a quarantined device', () => {
     await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())
 
     fireEvent.click(screen.getByRole('radio', { name: /Area-Wide/i }))
-    expect(approveButton()).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), /Approve & Onboard/, 'Choose which area the device serves')
+    expect(supabase.functions.invoke).not.toHaveBeenCalled()
     fireEvent.change(document.querySelector('#approve-area'), { target: { value: 'area-2' } })
     fireEvent.click(approveButton())
 

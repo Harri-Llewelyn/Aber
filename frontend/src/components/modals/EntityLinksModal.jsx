@@ -4,12 +4,14 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { FormProblem } from '../common/FormProblem'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { entityUrl } from '../../routes'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ConfirmModal } from './ConfirmModal'
 import { Tooltip } from '../common/Tooltip'
@@ -92,6 +94,9 @@ function getDomainBadgeIcon(url = '') {
   return <Badge size="sm" icon={<IconGlobe size={12} />}>External Link</Badge>
 }
 
+/** A stored link as the form holds it. */
+const formOf = (doc) => ({ display_name: doc.display_name, url: doc.url, link_tag: doc.link_tag || 'other' })
+
 export function EntityLinksModal({ entityType, entityId, entityName, onClose, showToast, hasPermission }) {
   const [links, setLinks]             = useState([])
   const [loading, setLoading]         = useState(true)
@@ -100,8 +105,6 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [form, setForm]               = useState({ display_name: '', url: '', link_tag: 'other' })
   const [error, setError]             = useState(null)
-  // The link form's first edit, so a form that has just opened does not scold.
-  const [linkEdited, setLinkEdited]   = useState(false)
 
   const canManage = hasPermission?.(PERMISSION_UUIDS.LINK_MANAGE) ?? false
 
@@ -117,28 +120,31 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
   const openNew = () => {
     setEditingLink(null)
     setForm({ display_name: '', url: '', link_tag: 'other' })
-    setLinkEdited(false)
+    linkCheck.reset()
     setShowForm(true)
   }
 
   const openEdit = (doc) => {
     setEditingLink(doc)
-    setForm({ display_name: doc.display_name, url: doc.url, link_tag: doc.link_tag || 'other' })
-    setLinkEdited(false)
+    setForm(formOf(doc))
+    linkCheck.reset()
     setShowForm(true)
   }
 
-  const setField = (key) => (e) => { setForm(f => ({ ...f, [key]: e.target.value })); setLinkEdited(true) }
+  const setField = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }))
 
-  // Why Save Link is off, said above the form's buttons from its first edit.
-  const linkProblem = !form.display_name.trim() ? 'Give the link a name'
-    : !form.url.trim() ? 'Enter the address it links to'
-      : !form.url.startsWith('http://') && !form.url.startsWith('https://') ? 'The address must start with http:// or https://'
-        : null
+  // The link form's own check, said above its buttons.
+  const linkCheck = useFormCheck({
+    name: { id: 'link-name', missing: !form.display_name.trim() && 'Give the link a name' },
+    url: {
+      id: 'link-url',
+      missing: !form.url.trim() ? 'Enter the address it links to'
+        : !form.url.startsWith('http://') && !form.url.startsWith('https://') && 'The address must start with http:// or https://',
+    },
+  }, { unchanged: !!editingLink && Object.entries(formOf(editingLink)).every(([k, v]) => form[k] === v) })
 
   const save = async () => {
     setError(null)
-    if (linkProblem) return
 
     try {
       if (editingLink) {
@@ -164,7 +170,6 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
     showToast(`Link '${name}' removed${entityName ? ` from '${entityName}'` : ''}`, 'success', { to: entityUrl(entityType, entityId) })
   }
 
-  // The link form's Save, held while linkProblem says why.
   const [savingLink, runSaveLink] = usePendingAction()
 
   return (
@@ -172,9 +177,10 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
       title={<>Attached Links — <strong>{entityName}</strong></>}
       icon={<IconBookOpen size={18} />}
       size="lg"
+      busy={savingLink}
       onClose={onClose}
       error={error}
-      footer={<button className="btn btn-ghost" onClick={onClose}>Close</button>}
+      dismiss="Close"
       fill
     >
 
@@ -201,11 +207,13 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="link-name">Display Name <RequiredMark /></label>
-              <input id="link-name" className="form-control" value={form.display_name} onChange={setField('display_name')} placeholder="e.g. Operating Manual, Asset Register Entry, Measurement Data Share" aria-required="true" />
+              <input id="link-name" className="form-control" value={form.display_name} onChange={setField('display_name')} placeholder="e.g. Operating Manual, Asset Register Entry, Measurement Data Share" aria-required="true" {...fieldErrorProps(linkCheck.errors.name, 'link-name-error')} />
+              <FieldError id="link-name-error" error={linkCheck.errors.name} />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="link-url">Link URL (SharePoint, Google Drive, an asset tracker, any URL) <RequiredMark /></label>
-              <input id="link-url" className="form-control" type="url" value={form.url} onChange={setField('url')} placeholder="https://company.sharepoint.com/documents/manual.pdf" aria-required="true" />
+              <input id="link-url" className="form-control" type="url" value={form.url} onChange={setField('url')} placeholder="https://company.sharepoint.com/documents/manual.pdf" aria-required="true" {...fieldErrorProps(linkCheck.errors.url, 'link-url-error')} />
+              <FieldError id="link-url-error" error={linkCheck.errors.url} />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="link-tag">Tag</label>
@@ -222,16 +230,14 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
                 {TAG_HINTS[form.link_tag]}
               </div>
             </div>
-            <FormProblem problem={linkEdited ? linkProblem : null} />
+            <FormProblem problem={linkCheck.problem} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowForm(false)} disabled={savingLink}>Cancel</button>
               <ActionButton
                 className="btn btn-primary btn-sm"
                 pending={savingLink}
                 pendingLabel="Saving…"
-                disabled={linkProblem !== null}
-                title={linkProblem ?? undefined}
-                onClick={() => runSaveLink(save)}
+                onClick={() => linkCheck.press(() => runSaveLink(save))}
               >
                 Save Link
               </ActionButton>
@@ -291,10 +297,10 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
 
         {confirmDelete && (
           <ConfirmModal
-            title="Remove link"
+            title="Remove Link"
             icon={<IconTrash size={18} />}
             message={`Are you sure you want to remove the link '${confirmDelete.display_name}'?`}
-            confirmLabel="Remove link"
+            confirmLabel="Remove Link"
             pendingLabel="Removing…"
             onConfirm={() => removeLink(confirmDelete.id, confirmDelete.display_name)}
             onCancel={() => setConfirmDelete(null)}

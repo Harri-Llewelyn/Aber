@@ -1,43 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { useRef, useState } from 'react'
+import { useCopy } from '../../hooks/useCopy'
 import { IconCopy, IconCheck } from './Icons'
-import { overlayHost } from './Modal'
 import { Tooltip } from './Tooltip'
 
-const FEEDBACK_MS = 1600
 const TAIL_CHARS = 24
-
-/**
- * Copy the given text, returning true on success. `navigator.clipboard` exists only in a secure
- * context, and the dashboard is served over plain HTTP, so anyone reaching it by IP has none; the
- * execCommand fallback is what makes copy work there. Its field goes in the open dialog when there
- * is one: outside it the page is inert, and an inert field cannot be selected.
- */
-export async function copyText(text) {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text)
-      return true
-    } catch {
-      // Permission denied or a non-secure origin that still exposes the API. Fall through.
-    }
-  }
-
-  try {
-    const el = document.createElement('textarea')
-    el.value = text
-    // Keep it out of view and out of the tab order, but still selectable.
-    el.setAttribute('readonly', '')
-    el.style.position = 'fixed'
-    el.style.top = '-9999px'
-    overlayHost().appendChild(el)
-    el.select()
-    const ok = document.execCommand('copy')
-    el.remove()
-    return ok
-  } catch {
-    return false
-  }
-}
 
 /**
  * A monospace identifier that copies itself when clicked. A button, so it is keyboard-reachable and
@@ -61,25 +27,14 @@ export async function copyText(text) {
  */
 export default function CopyableId({ value, label = 'identifier', title, onNotify, className = '', display, variant, truncate = 'end' }) {
   const asButton = variant === 'button'
-  const [state, setState] = useState(null) // 'copied' | 'failed'
+  const { copied, refusal, copy } = useCopy({ brief: true })
   const [cut, setCut] = useState(false)
-  const timer = useRef(null)
   const valueRef = useRef(null)
-
-  useEffect(() => () => clearTimeout(timer.current), [])
 
   if (!value) return <span className="mono">—</span>
 
-  const flash = (next) => {
-    setState(next)
-    clearTimeout(timer.current)
-    timer.current = setTimeout(() => setState(null), FEEDBACK_MS)
-  }
-
   const handleCopy = async () => {
-    const ok = await copyText(value)
-    flash(ok ? 'copied' : 'failed')
-    if (ok) {
+    if (await copy(value)) {
       onNotify?.(`Copied ${label} to clipboard`, 'success')
     } else {
       // Never fail silently: if the browser blocked it, say so, because the user's next move
@@ -115,7 +70,7 @@ export default function CopyableId({ value, label = 'identifier', title, onNotif
         aria-label={`Copy ${label} ${value}`}
       >
         {asButton
-          ? (state === 'copied' ? <IconCheck size={13} /> : <IconCopy size={13} />)
+          ? (copied ? <IconCheck size={13} /> : <IconCopy size={13} />)
           : null}
         {asButton ? <span>{shown}</span> : (
           <span ref={valueRef} className={`copyable-id-value${split ? ' copyable-id-value-start' : ''}`}>
@@ -124,10 +79,10 @@ export default function CopyableId({ value, label = 'identifier', title, onNotif
               : shown}
           </span>
         )}
-        {!asButton && (state === 'copied'
+        {!asButton && (copied
           ? <IconCheck size={12} className="copyable-id-icon" />
           : <IconCopy size={12} className="copyable-id-icon" />)}
-        {state === 'failed' && <span className="copyable-id-error">copy blocked</span>}
+        {refusal && <span className="copyable-id-error">copy blocked</span>}
       </button>
     </Tooltip>
   )

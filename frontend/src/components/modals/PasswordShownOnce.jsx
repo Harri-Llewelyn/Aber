@@ -1,34 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { copyText } from '../common/CopyableId'
-import { FieldError } from '../common/FieldError'
-import { IconCheck, IconCopy, IconShieldAlert } from '../common/Icons'
-import { Tooltip } from '../common/Tooltip'
-
-const COPY_FEEDBACK_MS = 1600
-/** Said in the dialog and in a toast when the browser refuses a copy. */
-const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
+import React from 'react'
+import { CopyField } from '../common/CopyField'
+import { IconShieldAlert } from '../common/Icons'
 
 /**
- * A password manage-people minted, shown once: the warning, the person's address, and the password
- * with a copy button. The password lives in the calling dialog's state until it closes: not in a
- * toast, the URL or the Audit Trail. `children` says who to give it to and what it does; `hint`
+ * A password manage-people minted, shown once: the warning, the person's address, and the password,
+ * each with its copy button. The password lives in the calling dialog's state until it closes: not in
+ * a toast, the URL or the Audit Trail. `children` says who to give it to and what it does; `hint`
  * says what to do if it is lost.
  */
-export function PasswordShownOnce({ email, password, hint, showToast, children }) {
-  const [copied, setCopied] = useState(false)
-  const [copyFailed, setCopyFailed] = useState(false)
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
-
-  const copy = useCallback(async () => {
-    const ok = await copyText(password)
-    setCopied(ok)
-    setCopyFailed(!ok)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.(COPY_REFUSED, 'error')
-  }, [password, showToast])
-
+export function PasswordShownOnce({ email, password, hint, children }) {
   return (
     <>
       <div className="callout callout-warning">
@@ -39,34 +19,8 @@ export function PasswordShownOnce({ email, password, hint, showToast, children }
         </div>
       </div>
 
-      <div className="form-group">
-        <label className="form-label" htmlFor="person-email">Email</label>
-        <input id="person-email" className="form-control mono" readOnly value={email} />
-      </div>
-
-      <div className="form-group">
-        <label className="form-label" htmlFor="person-password">Password</label>
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <input
-            id="person-password"
-            className="form-control mono"
-            readOnly
-            value={password || ''}
-            aria-describedby={copyFailed ? 'person-password-copy-error' : undefined}
-          />
-          <Tooltip text="Copy password">
-            <button
-              className="btn btn-ghost btn-icon"
-              onClick={copy}
-              aria-label="Copy password"
-            >
-              {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
-            </button>
-          </Tooltip>
-        </div>
-        {hint && <div className="form-hint">{hint}</div>}
-        <FieldError id="person-password-copy-error" error={copyFailed ? COPY_REFUSED : null} />
-      </div>
+      <CopyField id="person-email" label="Email" value={email} copyLabel="email address" />
+      <CopyField id="person-password" label="Password" value={password} hint={hint} />
     </>
   )
 }

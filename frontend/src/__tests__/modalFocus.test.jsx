@@ -4,7 +4,7 @@ import path from 'node:path'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Modal } from '../components/common/Modal'
-import { copyText } from '../components/common/CopyableId'
+import { copyText } from '../utils/copyText'
 import { SearchInput, focusPageSearch } from '../components/common/SearchInput'
 import { ConfirmModal } from '../components/modals/ConfirmModal'
 import { AddPersonModal } from '../components/modals/AddPersonModal'
@@ -333,7 +333,7 @@ describe('where each dialog starts', () => {
 
   const cases = [
     ['AddPersonModal', <AddPersonModal key="a" onClose={vi.fn()} />, () => screen.getByLabelText('Email')],
-    ['ChangePasswordModal', <ChangePasswordModal key="b" email="admin@aber.local" onClose={vi.fn()} />, () => screen.getByLabelText('Current password')],
+    ['ChangePasswordModal', <ChangePasswordModal key="b" email="admin@aber.local" onClose={vi.fn()} />, () => screen.getByLabelText('Current Password')],
     ['TakeBackupModal', <TakeBackupModal key="c" holds="the platform database" onConfirm={vi.fn()} onCancel={vi.fn()} />, () => screen.getByLabelText('Note (optional)')],
     ['ServicePrincipalCreateModal', <ServicePrincipalCreateModal key="d" onClose={vi.fn()} />, () => screen.getByLabelText('Name')],
     ['ServicePrincipalDescribeModal', <ServicePrincipalDescribeModal key="e" principal={PRINCIPAL} onClose={vi.fn()} />, () => screen.getByLabelText('Name')],

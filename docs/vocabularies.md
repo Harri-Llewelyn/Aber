@@ -639,7 +639,7 @@ equipment or a substance, not a reading. In 223P a reading is a `QuantifiableObs
 with a QUDT quantity kind (`qudt:hasQuantityKind`), observed by a sensor. So
 `TemperatureSensor` as the semantic id of a Property whose value is 21.4 tells an AAS consumer the
 Property is a sensor. The dashboard therefore offers no 223P class as an id: `ashrae223Prefill()`
-fills none, and neither the suggestion nor *Search vocabularies* lists one. Use on the Vocabulary
+fills none, and neither the suggestion nor *Search Vocabularies* lists one. Use on the Vocabulary
 page starts a metric in the `BMS` group, named after the class, and the operator supplies the
 datatype, the units and the id. A class shows as in use when a 223P metric is named after it.
 `check-docs-drift.mjs` check 47 holds the prefill and the example set to this.
@@ -855,7 +855,7 @@ is verified against a source Aber ships: the file is the site's.
   apart.
 - **Licensed definitions stay home until an Administrator says otherwise.** An export carries an
   imported concept's id and preferred name. Its definition is the file's text only once the
-  Administrator confirms that the licence allows sharing it (**Share definitions**, with a line
+  Administrator confirms that the licence allows sharing it (**Share Definitions**, with a line
   saying the licence is the site's responsibility). Until then the IEC 61360 definition, which is
   mandatory in English, is "*name*, as *ISO 22400-2:2014* defines it.", and it never falls back to
   the catalog's description, which may be a copy of the licensed text. For the same reason a metric

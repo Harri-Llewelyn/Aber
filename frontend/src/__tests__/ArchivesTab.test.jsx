@@ -289,7 +289,7 @@ describe('ArchivesTab restore asks first', () => {
     await showArchives(() => true, [ARCHIVED_GATEWAY])
     fireEvent.click(restoreButton())
 
-    const dialog = await screen.findByRole('dialog', { name: 'Restore gateway' })
+    const dialog = await screen.findByRole('dialog', { name: 'Restore Gateway' })
     expect(within(dialog).getByRole('button', { name: 'Restore Gateway' })).toBeInTheDocument()
   })
 

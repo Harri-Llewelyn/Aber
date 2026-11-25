@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { playbackWorkerDeployed } from '../../config'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { IconPlay, IconShieldAlert } from '../common/Icons'
@@ -51,7 +53,7 @@ function describeWorkerPassword(sources) {
  * re-checks the credential and the device map, and refuses any gateway that is not a shadow. The
  * captured ids come from the manifest alone, as ensure_shadow_devices() reads them. The dialog never
  * reads the file: only a download the person asks for may, and issue_capture_download() records it.
- * `subjectName` names what was recorded, in the toast Prepare replay lanes ends with.
+ * `subjectName` names what was recorded, in the toast Prepare Replay Lanes ends with.
  */
 export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null, onConfirm, onCancel, showToast }) {
   const [targets, setTargets] = useState(null)
@@ -127,7 +129,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
     : null
   /**
    * What keeps a gateway from publishing, if anything: `note` is said beside its name, `reason` is
-   * why Play back is held. Null when the gateway holds a credential the worker holds as well.
+   * why it cannot be played back on. Null when the gateway holds a credential the worker holds as well.
    */
   const credentialState = (t) => {
     if (!t.gateway_has_broker_credential) {
@@ -174,21 +176,24 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
       setError(err.message)
     }
   })
-  // The worker check is not part of `ready` when the status is unknown: a dialog that refuses
-  // because it could not read a courtesy row would be worse than the failure it prevents.
-  const ready = deployed
-    && capturedDevices !== null
-    && !!target
-    && !held
-    && unmapped.length === 0
-
-  // Why Play back is off, where no callout above says so already: those name a missing worker and
-  // a capture with no device list.
-  const problem = ready || !deployed || capturedDevices === null ? null
-    : !target ? 'Choose the Playback gateway'
-      : held ? held.reason
-        : unmapped.length > 0 ? `${plural(unmapped.length, 'device')} still to map`
-          : null
+  // The worker check is not part of this when the status is unknown: a dialog that refuses because it
+  // could not read a courtesy row would be worse than the failure it prevents.
+  const check = useFormCheck({
+    worker: { missing: !deployed && 'The playback worker is not deployed on this site (playback.enabled)' },
+    capture: { missing: capturedDevices === null && 'This capture holds no list of its devices. Download it, then play it with Play a File…' },
+    target: {
+      id: 'playback-target',
+      missing: target ? held?.reason
+        : targets === null ? 'Loading the Playback gateway…'
+          : targets.length === 0 ? 'The Playback gateway could not be found'
+            : 'Choose the Playback gateway',
+    },
+    devices: {
+      id: 'playback-devices',
+      missing: unknown.length > 0 ? 'This capture records devices this site does not have'
+        : unmapped.length > 0 && `${plural(unmapped.length, 'device')} still to map`,
+    },
+  })
 
   const submit = () => run(async () => {
     setError(null)
@@ -201,10 +206,11 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
 
   return (
     <Modal
-      title={`Play back capture${capture.note ? ` — ${capture.note}` : ''}`}
+      title={`Play Back Capture${capture.note ? ` — ${capture.note}` : ''}`}
       icon={<IconPlay size={18} />}
       size="wide"
-      onClose={pending ? () => {} : onCancel}
+      busy={pending}
+      onClose={onCancel}
       lead={<>
         {plural(capture.message_count, 'message')} recorded from{' '}
         <code>{capture.subject_sparkplug_id}</code>. Playing back rewrites every captured identity
@@ -212,29 +218,13 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
         the account that publishes it, so a capture can never be played back under the identity it
         was recorded from.
       </>}
-      problem={problem}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            pending={pending}
-            pendingLabel="Starting…"
-            disabled={!ready}
-            // Stated rather than left to a greyed-out button, which explains nothing about why.
-            title={ready ? undefined : (
-              !deployed ? 'The playback worker is not deployed on this site (playback.enabled)'
-                : capturedDevices === null ? 'This capture holds no list of its devices. Download it, then play it with Play a file…'
-                  : !target ? 'Choose the Playback gateway'
-                    : held ? held.reason
-                      : `${plural(unmapped.length, 'device')} still to map`
-            )}
-            onClick={submit}
-          >
-            Play back
-          </ActionButton>
-        </>
+        <ActionButton className="btn btn-primary" pending={pending} pendingLabel="Starting…" onClick={() => check.press(submit)}>
+          Play Back
+        </ActionButton>
       }
     >
       {/* First, because nothing below matters until it is fixed. */}
@@ -269,14 +259,14 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
           <IconShieldAlert size={14} className="callout-icon" />
           <div>
             This capture was stored without the list of devices it holds, so they cannot be mapped
-            here. Download it, then play the file with <strong>Play a file…</strong>. That stores it
+            here. Download it, then play the file with <strong>Play a File…</strong>. That stores it
             again with its list of devices.
           </div>
         </div>
       )}
 
       <div className="form-group">
-        {!only && <label className="form-label" htmlFor="playback-target">Playback gateway <RequiredMark /></label>}
+        {!only && <label className="form-label" htmlFor="playback-target">Playback Gateway <RequiredMark /></label>}
         {targets === null && <p className="form-hint">Loading the Playback gateway…</p>}
         {targets !== null && targets.length === 0 && (
           <div className="callout callout-warning">
@@ -310,6 +300,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
               onChange={e => setTargetId(e.target.value)}
               disabled={pending}
               aria-required="true"
+              {...fieldErrorProps(check.errors.target, 'playback-target-error', 'playback-target-hint')}
             >
               <option value="">Choose the Playback gateway…</option>
               {targets.map(t => {
@@ -321,10 +312,11 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
                 )
               })}
             </select>
-            <p className="form-hint">
+            <p id="playback-target-hint" className="form-hint">
               Only the Playback gateway is listed: nothing else publishes as it, so a playback never
               shares a live publisher's sequence numbers.
             </p>
+            <FieldError id="playback-target-error" error={check.errors.target} />
             {passwordInUse && <p className="form-hint">{passwordInUse}</p>}
           </>
         )}
@@ -411,8 +403,8 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
       )}
 
       {target && capturedDevices !== null && capturedDevices.length > 0 && (
-        <div className="form-group">
-          <label className="form-label">Device mapping</label>
+        <div className="form-group" id="playback-devices" role="group" aria-labelledby="playback-devices-label">
+          <div className="form-label" id="playback-devices-label">Device Mapping</div>
           <p className="form-hint">
             Every device in the capture plays back as its replay lane, a device of {target.name}{' '}
             that stands in for it. A playback with a device left unmapped is refused.
@@ -440,7 +432,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
                 onClick={prepareLanes}
                 title="Create a replay lane for each device in this capture, bound to this gateway"
               >
-                Prepare replay lanes ({unmapped.length})
+                Prepare Replay Lanes ({unmapped.length})
               </ActionButton>
             </div>
           )}
@@ -473,6 +465,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
                           onChange={e => setDeviceMap(m => ({ ...m, [captured]: e.target.value }))}
                           disabled={pending}
                           aria-required="true"
+                          {...fieldErrorProps(!deviceMap[captured] && check.errors.devices, 'playback-devices-error')}
                         >
                           <option value="">Choose a device…</option>
                           {target.devices.map(d => (
@@ -488,6 +481,7 @@ export function StartPlaybackModal({ capture, subjectName, knownDeviceIds = null
               </table>
             </div>
           )}
+          <FieldError id="playback-devices-error" error={check.errors.devices} />
         </div>
       )}
 

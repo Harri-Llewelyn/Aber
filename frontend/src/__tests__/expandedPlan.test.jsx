@@ -208,10 +208,10 @@ describe('the Areas panel', () => {
   it('keeps the turns in a row under the heading, Replace and Remove under the card, and Expand on it, for a plan a manager may change', () => {
     panel({ area: OFFICE, cells: [], canManage: true })
     const expand = screen.getByRole('button', { name: 'Expand plan: Office Floor' })
-    const turnRight = screen.getByRole('button', { name: 'Turn right' })
+    const turnRight = screen.getByRole('button', { name: 'Turn Right' })
     expect(turnRight.closest('.area-plan-panel-actions')).not.toBeNull()
     expect(turnRight.closest('.area-plan-panel-header')).toBeNull()
-    for (const name of [/Replace plan/, /Remove plan/]) {
+    for (const name of [/Replace Plan/, /Remove Plan/]) {
       const button = screen.getByRole('button', { name })
       expect(button.closest('.area-plan-panel-header')).toBeNull()
       expect(button.closest('.area-plan-panel-buttons')).not.toBeNull()
@@ -223,7 +223,7 @@ describe('the Areas panel', () => {
 
   it('draws an unsaved turn in the expanded plan, as the preview draws it', () => {
     panel({ area: OFFICE, cells: [], canManage: true })
-    fireEvent.click(screen.getByRole('button', { name: 'Turn right' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Turn Right' }))
     expect(document.querySelector('.plan-card .area-plan').dataset.rotation).toBe('90')
     press(screen.getByRole('button', { name: 'Expand plan: Office Floor' }))
     expect(dialog().querySelector('.area-plan').dataset.rotation).toBe('90')

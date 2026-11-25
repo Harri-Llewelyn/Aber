@@ -130,7 +130,7 @@ describe('the Schema Conformance control', () => {
     await show([device({ submodel_schema_ids: [SCHEMA_UUID] })])
     openEdit()
     fireEvent.change(policySelect(), { target: { value: 'enforce' } })
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     const [, body] = api.put.mock.calls[0]

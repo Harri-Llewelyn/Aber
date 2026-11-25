@@ -527,7 +527,7 @@ describe("exporting a cell's metric", () => {
     await screen.findAllByRole('figure')
     const before = Date.now()
     fireEvent.click(exportButton())
-    const dialog = await screen.findByRole('dialog', { name: /Export readings — 3 devices/ })
+    const dialog = await screen.findByRole('dialog', { name: /Export Readings — 3 devices/ })
     expect(within(dialog).getByText(/^3 devices · 1 metric · Last 24 hours \(.+ – .+\)$/)).toBeInTheDocument()
     for (const name of ['Lathe 3', 'Lathe 4', 'Mill 2']) expect(within(dialog).getByText(name)).toBeInTheDocument()
     // Press 1 reports nothing and Weld bot is in another cell.
@@ -549,7 +549,7 @@ describe("exporting a cell's metric", () => {
     await visit('/history/cell/c1?metric=Coolant/TEMP')
     await screen.findAllByRole('figure')
     fireEvent.click(exportButton())
-    const dialog = await screen.findByRole('dialog', { name: /Export readings — Mill 2/ })
+    const dialog = await screen.findByRole('dialog', { name: /Export Readings — Mill 2/ })
     fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
     await waitFor(() => expect(asked()).toHaveLength(1))
     expect(asked()[0].assetIds).toEqual([telemetryKey({ asset_id: MILL })])
@@ -570,7 +570,7 @@ describe("exporting a cell's metric", () => {
       expect(exportButton()).toHaveClass('btn-disabled')
       expect(exportButton()).toHaveAccessibleDescription(DENIED)
       fireEvent.click(exportButton())
-      expect(screen.queryByRole('dialog', { name: /Export readings/ })).toBeNull()
+      expect(screen.queryByRole('dialog', { name: /Export Readings/ })).toBeNull()
       // The charts stay.
       expect(screen.getAllByRole('figure').length).toBeGreaterThan(0)
       cleanup()
@@ -583,7 +583,7 @@ describe("exporting a cell's metric", () => {
     expect(exportButton()).toBeDisabled()
     expect(exportButton()).toHaveAccessibleDescription('An export can cover at most 14 days, set on Settings › History. This window is 30 days.')
     fireEvent.click(exportButton())
-    expect(screen.queryByRole('dialog', { name: /Export readings/ })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: /Export Readings/ })).toBeNull()
     expect(asked()).toEqual([])
   })
 

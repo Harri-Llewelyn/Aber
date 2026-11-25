@@ -19,6 +19,7 @@ import { expectCardHeading, expectSearchFirst } from '../test/cardHeading'
 import { tabLink, tabLinks } from '../test/tabBar'
 import { dropdownButton, openDropdown, pick } from '../test/listFilters'
 import { helpTipText, tooltipOf } from '../test/tooltips'
+import { pressHeld } from '../test/dialogs'
 
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -249,14 +250,15 @@ describe('rejecting', () => {
     await selectRow()
 
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-    const heading = await screen.findByText('Reject this proposal')
+    const heading = await screen.findByText('Reject This Proposal')
     // Scoped to the dialog: the card's Reject and the dialog's confirm are both `btn-danger`.
     const dialog = heading.closest('.modal')
-    const confirm = within(dialog).getByRole('button', { name: 'Reject' })
 
     // The constraint requires it too; this is the form agreeing with the database rather than
     // standing in for it.
-    expect(confirm).toBeDisabled()
+    pressHeld(dialog, 'Reject', 'Say why it is rejected')
+    expect(within(dialog).getByLabelText('Reason')).toHaveAccessibleDescription(/the only thing they get.*Say why it is rejected$/)
+    expect(api.post).not.toHaveBeenCalled()
   })
 
   it('sends the reason it was given', async () => {
@@ -265,9 +267,9 @@ describe('rejecting', () => {
     await selectRow()
 
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-    const heading = await screen.findByText('Reject this proposal')
+    const heading = await screen.findByText('Reject This Proposal')
     const dialog = heading.closest('.modal')
-    fireEvent.change(screen.getByLabelText(/why\?/i), {
+    fireEvent.change(within(dialog).getByLabelText('Reason'), {
       target: { value: 'that machine is being retired' }
     })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Reject' }))

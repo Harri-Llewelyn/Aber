@@ -4,7 +4,7 @@
  * writes only what was typed; and a refusal (403) is named as one, with what was typed kept.
  */
 import React, { useState } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { CredentialField, useCredential } from '../components/common/CredentialField'
 
@@ -32,20 +32,26 @@ const open = ({ stored = false, write = vi.fn().mockResolvedValue(true) } = {}) 
   return write
 }
 const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+/** Replace Key, and its question answered. */
+const replace = async () => {
+  fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
+  await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Replace Key' })) })
+}
 
 describe('a first set', () => {
   it('goes straight to the field, with no question', () => {
     open()
-    const field = screen.getByLabelText('Secret access key')
+    const field = screen.getByLabelText('Secret Access Key')
     expect(field).toHaveAttribute('type', 'password')
     expect(field).toHaveAttribute('placeholder', 'Not set')
-    expect(screen.queryByRole('button', { name: 'Replace It' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Replace Key' })).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.queryByText(/already stored/)).toBeNull()
   })
 
   it('writes the trimmed key on save, and then reads as stored', async () => {
     const write = open()
-    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: '  wJalrXUtnFEMI  ' } })
+    fireEvent.change(screen.getByLabelText('Secret Access Key'), { target: { value: '  wJalrXUtnFEMI  ' } })
     save()
     await waitFor(() => expect(screen.getByTestId('saved')).toHaveTextContent('true'))
     expect(write).toHaveBeenCalledWith('wJalrXUtnFEMI')
@@ -55,7 +61,7 @@ describe('a first set', () => {
 
   it('writes nothing for an empty or blank field', async () => {
     const write = open()
-    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: '   ' } })
+    fireEvent.change(screen.getByLabelText('Secret Access Key'), { target: { value: '   ' } })
     save()
     await waitFor(() => expect(screen.getByTestId('saved')).toHaveTextContent('false'))
     expect(write).not.toHaveBeenCalled()
@@ -67,7 +73,7 @@ describe('a stored key', () => {
     const { container } = render(<Harness stored write={vi.fn()} />)
     expect(screen.getByText('Stored in the vault')).toBeInTheDocument()
     expect(container.querySelector('input')).toBeNull()
-    expect(screen.getByRole('group', { name: 'Secret access key' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Secret Access Key' })).toBeInTheDocument()
   })
 
   it('is kept when the dialog saves without replacing it', async () => {
@@ -77,24 +83,24 @@ describe('a stored key', () => {
     expect(write).not.toHaveBeenCalled()
   })
 
-  it('asks before replacing, saying what is lost, and Keep It goes back', () => {
+  it('asks before replacing in a dialog of its own, saying what is lost, and Cancel goes back', () => {
     open({ stored: true })
     fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
-    const question = screen.getByTestId('key-replace')
+    const question = screen.getByRole('dialog', { name: 'Replace the Secret Access Key' })
     expect(question).toHaveTextContent('A key is already stored')
     expect(question).toHaveTextContent('If the new one is wrong, the next copy fails.')
     expect(question).toHaveTextContent('cannot be recovered')
     // No field until the question is answered.
     expect(document.querySelector('input')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Keep It' }))
+    fireEvent.click(within(question).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByText('Stored in the vault')).toBeInTheDocument()
   })
 
   it('takes a new key once the question is answered, focused, and writes it on save', async () => {
     const write = open({ stored: true })
-    fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
-    const field = screen.getByLabelText('Secret access key')
+    await replace()
+    const field = screen.getByLabelText('Secret Access Key')
     expect(field).toHaveFocus()
     expect(field.value).toBe('')
     expect(field).toHaveAttribute('placeholder', 'The new key')
@@ -106,9 +112,8 @@ describe('a stored key', () => {
 
   it('drops what was typed when the person keeps the stored key after all', async () => {
     const write = open({ stored: true })
-    fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
-    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'typo' } })
+    await replace()
+    fireEvent.change(screen.getByLabelText('Secret Access Key'), { target: { value: 'typo' } })
     fireEvent.click(screen.getByRole('button', { name: 'Keep the Stored Key' }))
     save()
     await waitFor(() => expect(screen.getByTestId('saved')).toHaveTextContent('false'))
@@ -120,25 +125,24 @@ describe('a refusal', () => {
   it('names a 403 as one, and keeps what was typed', async () => {
     const write = vi.fn().mockRejectedValue(Object.assign(new Error('forbidden'), { status: 403 }))
     open({ stored: true, write })
-    fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
-    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'not-mine' } })
+    await replace()
+    fireEvent.change(screen.getByLabelText('Secret Access Key'), { target: { value: 'not-mine' } })
     save()
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Only an Administrator can set the secret access key. The stored one is unchanged.')
-    expect(screen.getByLabelText('Secret access key').value).toBe('not-mine')
+    expect(screen.getByLabelText('Secret Access Key').value).toBe('not-mine')
   })
 
   it('says nothing was stored when the refused write was the first', async () => {
     open({ write: vi.fn().mockRejectedValue(Object.assign(new Error('forbidden'), { status: 403 })) })
-    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'not-mine' } })
+    fireEvent.change(screen.getByLabelText('Secret Access Key'), { target: { value: 'not-mine' } })
     save()
     expect(await screen.findByRole('alert')).toHaveTextContent('Nothing was stored.')
   })
 
   it('passes any other failure through in its own words', async () => {
     open({ write: vi.fn().mockRejectedValue(new Error('the vault did not answer')) })
-    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'k' } })
+    fireEvent.change(screen.getByLabelText('Secret Access Key'), { target: { value: 'k' } })
     save()
     expect(await screen.findByRole('alert')).toHaveTextContent('the vault did not answer')
   })

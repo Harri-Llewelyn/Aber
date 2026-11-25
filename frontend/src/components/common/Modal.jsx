@@ -1,4 +1,4 @@
-import React, { useId, useLayoutEffect, useRef, useState } from 'react'
+import React, { useId, useLayoutEffect, useRef } from 'react'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { FormProblem } from './FormProblem'
 import { IconAlertTriangle, IconX } from './Icons'
@@ -85,20 +85,16 @@ function returnFocus(dialog) {
  *
  * ```jsx
  * <Modal
- *   title="Rename area"
+ *   title="Rename Area"
  *   icon={<IconEdit size={18} />}
+ *   busy={saving}
  *   onClose={() => setOpen(false)}
  *   lead="The name is shown on the Site Map and in the Audit Trail."
  *   initialFocus={nameRef}
- *   problem={name.trim() ? null : 'Give the area a name'}
+ *   problem={check.problem}
  *   error={saveError}
- *   footer={
- *     <>
- *       <button className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
- *       <ActionButton className="btn btn-primary" pending={saving} disabled={!name.trim()}
- *         onClick={save}>Save</ActionButton>
- *     </>
- *   }
+ *   dismiss="Cancel"
+ *   footer={<ActionButton pending={saving} pendingLabel="Saving…" onClick={() => check.press(save)}>Save Area</ActionButton>}
  * >
  *   <div className="form-group">...</div>
  * </Modal>
@@ -117,10 +113,12 @@ function returnFocus(dialog) {
  * (an area's plan, a device's 3D model); pass `fill` with it. A form is never sm, and sibling dialogs
  * share a step: drift check 530 holds both.
  *
- * @param {Function} onClose Called by Escape, the close button, a close request from the browser
- * (Android's back gesture) and (when enabled) the backdrop. A dialog that must not close while work
- * runs passes a no-op for that time; the button and the key then do nothing rather than the layer
- * leaving the Escape stack.
+ * @param {Function} onClose Called by Escape, the close button, the dismiss button, a close request
+ * from the browser (Android's back gesture) and (when enabled) the backdrop.
+ *
+ * @param {boolean} [busy] Holds the dialog open while its work runs: each of those then does nothing,
+ * and the two buttons are greyed. The layer stays on the Escape stack, so the key does not reach the
+ * dialog beneath. Never a no-op `onClose`: that locks one way out and leaves another.
  *
  * @param {React.ReactNode} [lead] One paragraph under the header saying what the dialog will do.
  * It is the dialog's accessible description.
@@ -131,13 +129,13 @@ function returnFocus(dialog) {
  * revokes or overwrites. Read once, as the dialog opens; `autoFocus` inside a dialog does not work,
  * because the control is focused before the dialog is shown.
  *
- * @param {string|null} [problem] Why the confirm is off, for a dialog whose confirm can be: the
- * first problem, or null when there is none. Shown above the footer in the form's warning hint, in
- * a live region, once the person has edited a field in the body, so a dialog that has just opened
- * does not scold. Leave it out on a dialog that never refuses, and the line is not drawn.
+ * @param {string|null} [problem] Why the act cannot go ahead, or null: the first problem, shown above
+ * the footer in the form's warning hint, in a live region. A form's is `useFormCheck()`'s, which is
+ * null until a press asks for it, so a dialog that has just opened does not scold. Leave it out on a
+ * dialog that never refuses, and the line is not drawn.
  *
- * @param {boolean} [touched] Replaces "once the person has edited a field": for a dialog with steps,
- * where the edits of one step do not count for the next, or one that waits for a particular field.
+ * @param {boolean} [touched] False holds the line back, for a caller that knows its problem before the
+ * person has asked.
  *
  * @param {React.ReactNode} [error] The failure to show, in the danger box above the footer. Falsy
  * renders nothing. Show a failure here rather than only in a toast: the toasts are behind an open
@@ -148,10 +146,13 @@ function returnFocus(dialog) {
  * height left over (and scrolls inside itself) instead of its own height guess. Without it the body
  * is an ordinary block.
  *
- * @param {React.ReactNode} [footer] The buttons, as siblings (the row is `.modal-actions`).
- * Convention, not enforced: dismiss on the left (ghost "Cancel", or "Close" for a read-only
- * dialog), the primary act on the right, and a destructive act rightmost and styled
- * `btn btn-danger`.
+ * @param {'Cancel'|'Close'|'Done'} [dismiss] The dismiss button, which calls `onClose`. "Cancel" while
+ * anything can be lost and "Close" when nothing can, both ghost and before the footer's acts; "Done"
+ * after a result, the primary and after them.
+ *
+ * @param {React.ReactNode} [footer] The acts, as siblings, in the row with the dismiss button
+ * (`.modal-actions`): a lesser act first as ghost, then the primary, and a destructive act rightmost
+ * as `btn btn-danger`.
  *
  * @param {boolean} [closeOnOverlay] Whether a click outside the box closes it. Default false:
  * set it only on a dialog that holds no input, where nothing can be discarded by a stray click.
@@ -167,11 +168,13 @@ export function Modal({
   icon = null,
   size,
   onClose,
+  busy = false,
   lead = null,
   initialFocus,
   problem,
-  touched,
+  touched = true,
   error = null,
+  dismiss = null,
   footer = null,
   closeOnOverlay = false,
   headerActions = null,
@@ -182,19 +185,18 @@ export function Modal({
   const titleId = useId()
   const leadId = useId()
   const ref = useRef(null)
+  const close = () => { if (!busy) onClose?.() }
   // The listeners below are bound once, as the dialog opens, and read the props through this.
   const latest = useRef(null)
-  latest.current = { onClose, initialFocus }
-  useEscapeKey(onClose)
-  // Set by the first change a field in the body raises: React's onChange bubbles to the body.
-  const [edited, setEdited] = useState(false)
-  const problemShown = touched ?? edited
+  latest.current = { close, initialFocus }
+  useEscapeKey(close)
+  const held = busy ? ' btn-disabled' : ''
 
   useLayoutEffect(() => {
     const dialog = ref.current
     // A close request the Escape stack did not take. Escape reaches the stack first, which cancels
     // the keypress, so this is another kind, such as Android's back gesture.
-    const onCancel = (e) => { e.preventDefault(); latest.current.onClose?.() }
+    const onCancel = (e) => { e.preventDefault(); latest.current.close() }
     // The browser closes a dialog itself when it will not let a close request be cancelled. The
     // dialog goes when React unmounts it, so until then it opens again.
     const onNativeClose = () => { dialog.showModal(); focusStart(dialog, null) }
@@ -234,7 +236,7 @@ export function Modal({
       aria-describedby={lead ? leadId : undefined}
       tabIndex={-1}
       // A click on the backdrop, or on the dialog around the box, has the dialog as its target.
-      onClick={closeOnOverlay ? e => { if (e.target === e.currentTarget) onClose() } : undefined}
+      onClick={closeOnOverlay ? e => { if (e.target === e.currentTarget) close() } : undefined}
     >
       <div className={modalClass}>
         <div className="modal-header-row">
@@ -245,20 +247,20 @@ export function Modal({
           <div className="modal-header-controls">
             {headerActions}
             <Tooltip text="Close (Esc)">
-              <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close">
+              <button type="button" className={`btn btn-ghost btn-icon${held}`} onClick={close} disabled={busy} aria-label="Close">
                 <IconX size={15} />
               </button>
             </Tooltip>
           </div>
         </div>
 
-        <div className={`modal-body${fill ? ' modal-body-fill' : ''}`} onChange={() => setEdited(true)}>
+        <div className={`modal-body${fill ? ' modal-body-fill' : ''}`}>
           {lead && <p className="modal-lead" id={leadId}>{lead}</p>}
           {children}
         </div>
 
         {problem !== undefined && (
-          <FormProblem problem={problemShown ? problem : null} className="modal-problem" />
+          <FormProblem problem={touched ? problem : null} className="modal-problem" />
         )}
 
         {error && (
@@ -268,7 +270,17 @@ export function Modal({
           </div>
         )}
 
-        {footer && <div className="modal-actions">{footer}</div>}
+        {(dismiss || footer) && (
+          <div className="modal-actions">
+            {dismiss && dismiss !== 'Done' && (
+              <button type="button" className={`btn btn-ghost${held}`} onClick={close} disabled={busy}>{dismiss}</button>
+            )}
+            {footer}
+            {dismiss === 'Done' && (
+              <button type="button" className={`btn btn-primary${held}`} onClick={close} disabled={busy}>Done</button>
+            )}
+          </div>
+        )}
       </div>
     </dialog>
   )

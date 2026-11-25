@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { FieldError, fieldErrorProps } from './FieldError'
 import { HelpTip } from './HelpTip'
 import {
   SEMANTIC_ID_TYPES, followSemanticIdType, storedSemanticIdPair, sameSemanticIdPair
@@ -55,7 +56,7 @@ const LABEL = { marginBottom: 0 }
  */
 export function SemanticIdField({
   idPrefix, subject = 'schema', semanticId = '', semanticIdType = '', onChange, readOnly = false,
-  suggestion = null, candidates = null, ownStandard = '', style
+  suggestion = null, candidates = null, ownStandard = '', error = null, style
 }) {
   const idFor = `${idPrefix}-semantic-id`
   const typeFor = `${idPrefix}-semantic-id-type`
@@ -132,8 +133,10 @@ export function SemanticIdField({
                 semanticIdType: followSemanticIdType(semanticId, semanticIdType, e.target.value)
               })}
               placeholder={PLACEHOLDER[subject]}
+              {...fieldErrorProps(error, `${idFor}-error`)}
             />
           )}
+          <FieldError id={`${idFor}-error`} error={error} />
         </div>
 
         <div style={{ flex: '0 0 160px' }}>
@@ -176,7 +179,7 @@ export function SemanticIdField({
           {canRestore && (
             <Tooltip text={`Put the suggested id back: ${suggested.semanticId}`}>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange?.({ ...suggested })}>
-                Use suggested
+                Use Suggested
               </button>
             </Tooltip>
           )}
@@ -190,7 +193,7 @@ export function SemanticIdField({
                 aria-controls={`${idPrefix}-semantic-id-picker`}
                 onClick={() => (picking ? closePicker() : setPicking(true))}
               >
-                {picking ? 'Close search' : 'Search vocabularies'}
+                {picking ? 'Close Search' : 'Search Vocabularies'}
               </button>
             </Tooltip>
           )}

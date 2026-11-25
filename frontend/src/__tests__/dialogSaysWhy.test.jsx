@@ -2,6 +2,8 @@ import React from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActionButton } from '../components/common/ActionButton'
+import { FieldError, fieldErrorProps } from '../components/common/FieldError'
+import { sameForm, useFormCheck } from '../hooks/useFormCheck'
 import { Modal } from '../components/common/Modal'
 import { ConfirmModal } from '../components/modals/ConfirmModal'
 import { AcknowledgeAlertModal } from '../components/modals/AcknowledgeAlertModal'
@@ -17,27 +19,39 @@ import { ServicePrincipalCreateModal } from '../components/modals/ServicePrincip
 import { ServicePrincipalDescribeModal } from '../components/modals/ServicePrincipalDescribeModal'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
+import { pressHeld, wrongIn } from '../test/dialogs'
+import { changeOwnPassword } from '../utils/passwords'
 
 /**
- * Every dialog says why it cannot go ahead, where the person is looking, and its confirm looks
- * refused while it cannot: greyed by ActionButton, the first problem in a warning hint inside the
- * dialog from the first edit (never on open), and a refusal from the server in the dialog's error
- * slot as it was worded. frontend/README.md, "A dialog says why it cannot go ahead".
+ * Every dialog says why it cannot go ahead, where the person is looking. Its primary is pressable: a
+ * press with something missing sends nothing, says it beside each field, names the first above the
+ * buttons and puts the focus there. A dialog that has just opened says nothing. A refusal from the
+ * server is in the dialog's error slot as it was worded. frontend/README.md, "A dialog says why it
+ * cannot go ahead".
  */
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() } }
+  return {
+    ...actual,
+    api: {
+      get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), addPerson: vi.fn(), changePersonEmail: vi.fn(),
+      startFactorEnrolment: vi.fn(), verifyFactorCode: vi.fn(), removeFactor: vi.fn(), createBrokerSubscriber: vi.fn(),
+      createServicePrincipal: vi.fn(), describeServicePrincipal: vi.fn()
+    }
+  }
 })
 
 vi.mock('../lib/supabaseClient', () => ({
   supabase: { functions: { invoke: vi.fn() } }
 }))
 
-beforeEach(() => vi.clearAllMocks())
+vi.mock('../utils/passwords', async () => ({ ...(await vi.importActual('../utils/passwords')), changeOwnPassword: vi.fn() }))
 
-/** The text of every warning hint in the dialog, joined: where a reason is said. */
-const reasons = (dialog) => [...dialog.querySelectorAll('.hint-danger')].map(el => el.textContent.trim()).join(' ').trim()
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.spyOn(window, 'open').mockImplementation(() => null)
+})
 
 describe('ActionButton', () => {
   it('greys a disabled button, as it greys a refused one', () => {
@@ -65,40 +79,29 @@ describe('ActionButton', () => {
 })
 
 describe("Modal's problem line", () => {
-  const Form = ({ problem, touched }) => {
-    const [name, setName] = React.useState('')
-    return (
-      <Modal title="Rename area" onClose={vi.fn()} problem={problem ?? (name ? null : 'Give the area a name')} touched={touched}
-        footer={<ActionButton disabled={!name}>Save</ActionButton>}>
-        <label htmlFor="n">Name</label>
-        <input id="n" value={name} onChange={e => setName(e.target.value)} />
-        <input aria-label="Other" defaultValue="" />
-      </Modal>
-    )
-  }
+  const Form = ({ problem, touched }) => (
+    <Modal title="Rename Area" onClose={vi.fn()} problem={problem} touched={touched} footer={<ActionButton>Save</ActionButton>}>
+      <input aria-label="Other" defaultValue="" />
+    </Modal>
+  )
 
-  it('says nothing on open, then the problem from the first edit, in a live region above the buttons', () => {
-    render(<Form />)
-    const dialog = screen.getByRole('dialog')
-    const line = dialog.querySelector('.modal-problem')
+  it('is a live region above the buttons, empty until there is a problem', () => {
+    const { rerender } = render(<Form problem={null} />)
+    const line = screen.getByRole('dialog').querySelector('.modal-problem')
     expect(line).toHaveTextContent(/^$/)
     expect(line).toHaveAttribute('aria-live', 'polite')
     expect(line).toHaveClass('form-hint', 'hint-danger')
     expect(line.parentElement.lastElementChild).toHaveClass('modal-actions')
 
-    fireEvent.change(screen.getByLabelText('Other'), { target: { value: 'x' } })
+    rerender(<Form problem="Give the area a name" />)
     expect(line).toHaveTextContent('Give the area a name')
     expect(line.querySelector('svg')).toBeTruthy()
-
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Machine Shop' } })
-    expect(line).toHaveTextContent(/^$/)
   })
 
-  it('follows `touched` where the dialog says when to start', () => {
-    const { rerender } = render(<Form touched={false} />)
-    fireEvent.change(screen.getByLabelText('Other'), { target: { value: 'x' } })
+  it('waits for `touched` where a caller knows its problem before the person has asked', () => {
+    const { rerender } = render(<Form problem="Give the area a name" touched={false} />)
     expect(document.querySelector('.modal-problem')).toHaveTextContent(/^$/)
-    rerender(<Form touched />)
+    rerender(<Form problem="Give the area a name" touched />)
     expect(document.querySelector('.modal-problem')).toHaveTextContent('Give the area a name')
   })
 
@@ -111,124 +114,219 @@ describe("Modal's problem line", () => {
 describe('ConfirmModal', () => {
   it('shows a refusal in the dialog as it was worded, and stays open', async () => {
     const onConfirm = vi.fn().mockRejectedValue(new Error('Cell has devices filed in it.'))
-    render(<ConfirmModal title="Archive entity" message="Archive it?" confirmLabel="Archive" onConfirm={onConfirm} onCancel={vi.fn()} />)
+    render(<ConfirmModal title="Archive Entity" message="Archive it?" confirmLabel="Archive" onConfirm={onConfirm} onCancel={vi.fn()} />)
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Archive' })) })
-    const dialog = screen.getByRole('dialog', { name: 'Archive entity' })
+    const dialog = screen.getByRole('dialog', { name: 'Archive Entity' })
     expect(within(dialog).getByRole('alert')).toHaveTextContent('Cell has devices filed in it.')
     expect(within(dialog).getByRole('button', { name: 'Archive' })).toBeEnabled()
   })
 })
 
+/** A form whose primary is pressable, as a dialog draws it: two fields, the second wrong as typed. */
+function Example({ save, unchanged = false }) {
+  const [name, setName] = React.useState('')
+  const [code, setCode] = React.useState('')
+  const check = useFormCheck({
+    name: { id: 'ex-name', missing: !name && 'Give it a name' },
+    code: { id: 'ex-code', missing: !code && 'Give it a code', wrong: code.includes(' ') && 'A code has no spaces' },
+  }, { unchanged })
+  return (
+    <Modal title="Example" onClose={vi.fn()} problem={check.problem} dismiss="Cancel"
+      footer={<ActionButton onClick={() => check.press(() => { save(); setCode('') })}>Save Example</ActionButton>}>
+      <input aria-label="Name" id="ex-name" value={name} onChange={e => setName(e.target.value)} {...fieldErrorProps(check.errors.name, 'ex-name-error')} />
+      <FieldError id="ex-name-error" error={check.errors.name} />
+      <input aria-label="Code" id="ex-code" value={code} onChange={e => setCode(e.target.value)} {...fieldErrorProps(check.errors.code, 'ex-code-error')} />
+      <FieldError id="ex-code-error" error={check.errors.code} />
+    </Modal>
+  )
+}
+
+describe('useFormCheck', () => {
+  const dialog = () => screen.getByRole('dialog', { name: 'Example' })
+  const type = (label, value) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
+
+  it('says nothing on open, and what is missing on every field at once when it is pressed', () => {
+    const save = vi.fn()
+    render(<Example save={save} />)
+    expect(wrongIn(dialog())).toEqual([])
+
+    pressHeld(dialog(), 'Save Example', 'Give it a name')
+    expect(wrongIn(dialog())).toEqual(['Give it a name', 'Give it a code', 'Give it a name'])
+    expect(screen.getByLabelText('Name')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText('Name')).toHaveFocus()
+    expect(save).not.toHaveBeenCalled()
+
+    // Each clears as it is fixed, and the line names the next.
+    type('Name', 'Press')
+    expect(wrongIn(dialog())).toEqual(['Give it a code', 'Give it a code'])
+    pressHeld(dialog(), 'Save Example', 'Give it a code')
+    expect(screen.getByLabelText('Code')).toHaveFocus()
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('says what is wrong with a value as it is typed, under its field alone', () => {
+    render(<Example save={vi.fn()} />)
+    type('Code', 'a b')
+    expect(wrongIn(dialog())).toEqual(['A code has no spaces'])
+    expect(dialog().querySelector('.modal-problem')).toHaveTextContent(/^$/)
+    type('Name', 'Press')
+    pressHeld(dialog(), 'Save Example', 'A code has no spaces')
+  })
+
+  it('starts again after a press that goes ahead, so a field it emptied is not asked for', () => {
+    const save = vi.fn()
+    render(<Example save={save} />)
+    pressHeld(dialog(), 'Save Example', 'Give it a name')
+    type('Name', 'Press')
+    type('Code', 'ab')
+    fireEvent.click(screen.getByRole('button', { name: 'Save Example' }))
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText('Code')).toHaveValue('')
+    expect(wrongIn(dialog())).toEqual([])
+  })
+
+  it('says that nothing has changed, and sends nothing', () => {
+    const save = vi.fn()
+    render(<Example save={save} unchanged />)
+    type('Name', 'Press')
+    type('Code', 'ab')
+    pressHeld(dialog(), 'Save Example', 'Nothing has changed.')
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it('compares two forms by what they hold', () => {
+    expect(sameForm({ name: 'A', description: '' }, { name: 'A' })).toBe(true)
+    expect(sameForm({ plan_x: 0.5 }, { plan_x: '0.5' })).toBe(true)
+    expect(sameForm({ ids: ['a', 'b'] }, { ids: ['b', 'a'] })).toBe(true)
+    expect(sameForm({ ids: ['a'] }, { ids: ['a', 'b'] })).toBe(false)
+    expect(sameForm({ name: 'A' }, { name: 'a' })).toBe(false)
+  })
+})
+
 /**
- * The dialogs whose confirm a form holds: each opened empty, then given one edit that leaves it
- * incomplete. Dialogs held only by a typed gate say why in the gate's label; UploadCaptureModal and
- * StartPlaybackModal read files and the API first, and their own tests cover them.
+ * The dialogs a form is in front of: each opened, left incomplete, and pressed. `sends` is what the press
+ * would have called. Dialogs held only by a typed gate say why in the gate's label; UploadCaptureModal
+ * and StartPlaybackModal read files and the API first, and their own tests cover them.
  */
 const DIALOGS = [
   {
-    name: 'Acknowledge alert',
-    render: () => <AcknowledgeAlertModal alert={{ alert_name: 'Device Offline' }} onConfirm={vi.fn()} onCancel={vi.fn()} />,
-    confirm: 'Acknowledge alert',
-    edit: (d) => fireEvent.change(within(d).getByLabelText('Note (optional)'), { target: { value: 'belt change' } }),
-    says: 'Choose a reason',
+    name: 'Acknowledge Alert',
+    render: (spy) => <AcknowledgeAlertModal alert={{ alert_name: 'Device Offline' }} onConfirm={spy} onCancel={vi.fn()} />,
+    confirm: 'Acknowledge Alert',
+    says: ['Choose a reason'],
+    focus: 'Reason',
   },
   {
-    name: 'Add a person',
+    name: 'Add a Person',
     render: () => <AddPersonModal onClose={vi.fn()} />,
     confirm: /Add Person/,
-    edit: (d) => fireEvent.change(within(d).getByLabelText('Display name (optional)'), { target: { value: 'Owain' } }),
-    says: 'Enter their email address',
+    says: ['Enter their email address'],
+    focus: 'Email',
+    sends: () => api.addPerson,
   },
   {
-    name: /Change the email address/,
+    name: /Change the Email Address/,
     render: () => <ChangeEmailModal person={{ user_id: 'u1', email: 'op@site.test' }} onClose={vi.fn()} />,
     confirm: 'Change Email',
-    edit: (d) => fireEvent.change(within(d).getByLabelText('New email address'), { target: { value: 'op@' } }),
-    says: 'That is not an email address.',
+    says: ['Type their new email address'],
+    focus: 'New Email Address',
+    sends: () => api.changePersonEmail,
   },
   {
-    name: 'Change your password',
+    name: 'Change Your Password',
     render: () => <ChangePasswordModal email="op@site.test" onClose={vi.fn()} />,
     confirm: 'Change Password',
-    edit: (d) => fireEvent.change(within(d).getByLabelText('New password'), { target: { value: 'short' } }),
-    says: 'Enter your current password.',
+    says: ['Enter your current password.', /The new password needs at least/],
+    focus: 'Current Password',
+    sends: () => changeOwnPassword,
+    // The button submits a form, which jsdom does on a click.
   },
   {
     name: 'Add Authenticator',
     render: () => <AddSecondFactorModal factors={[]} onClose={vi.fn()} />,
     confirm: 'Continue',
-    // The name is filled in for them, so the edit that leaves it incomplete empties it.
-    open: 'enabled',
-    edit: (d) => fireEvent.change(within(d).getByLabelText('Name'), { target: { value: '  ' } }),
-    says: 'Give it a name',
+    // The name is filled in for them.
+    empty: (d) => fireEvent.change(within(d).getByLabelText('Name'), { target: { value: '  ' } }),
+    says: ['Give it a name'],
+    focus: 'Name',
+    sends: () => api.startFactorEnrolment,
   },
   {
     name: 'Remove Phone',
     render: () => <RemoveSecondFactorModal factor={{ id: 'f1', friendly_name: 'Phone' }} needsCode onClose={vi.fn()} />,
     confirm: 'Remove Authenticator',
-    edit: (d) => fireEvent.change(within(d).getByLabelText('Code from Phone'), { target: { value: '12' } }),
-    says: 'Enter the 6-digit code Phone shows',
+    says: ['Enter the 6-digit code Phone shows'],
+    focus: 'Code from Phone',
+    sends: () => api.verifyFactorCode,
   },
   {
-    name: 'New read-only broker account',
+    name: 'New Read-Only Broker Account',
     render: () => <BrokerSubscriberModal onClose={vi.fn()} />,
     confirm: 'Create Read-Only Account',
-    edit: (d) => fireEvent.change(within(d).getByLabelText('Name'), { target: { value: 'Line 4 OEE board' } }),
-    says: 'Say what the account is for',
+    says: ['Give the account a name', 'Say what the account is for'],
+    focus: 'Name',
+    sends: () => api.createBrokerSubscriber,
   },
   {
-    name: 'New machine identity',
+    name: 'New Machine Identity',
     render: () => <ServicePrincipalCreateModal onClose={vi.fn()} />,
     confirm: 'Create Machine Identity',
-    edit: (d) => fireEvent.change(within(d).getByLabelText('Purpose (optional)'), { target: { value: 'reports' } }),
-    says: 'Give the identity a name',
+    empty: (d) => fireEvent.click(within(d).getAllByRole('checkbox').find(box => box.checked)),
+    says: ['Give the identity a name', 'Choose at least one permission for it to hold'],
+    focus: 'Name',
+    sends: () => api.createServicePrincipal,
   },
   {
     name: /Describe/,
     render: () => <ServicePrincipalDescribeModal principal={{ principal_id: 'p1', name: 'Reports', purpose: '' }} onClose={vi.fn()} />,
-    confirm: 'Save',
-    edit: (d) => fireEvent.change(within(d).getByLabelText('Name'), { target: { value: '' } }),
-    says: 'Give the identity a name',
+    confirm: 'Save Identity',
+    empty: (d) => fireEvent.change(within(d).getByLabelText('Name'), { target: { value: '' } }),
+    says: ['Give the identity a name'],
+    focus: 'Name',
+    sends: () => api.describeServicePrincipal,
   },
   {
-    name: /Report platform bug/,
+    name: /Report Platform Bug/,
     render: () => <BugReportModal onClose={vi.fn()} showToast={vi.fn()} persona="Operator" activeTab="devices" />,
     confirm: /Submit Issue on GitHub/,
-    edit: (d) => fireEvent.change(within(d).getByLabelText('Issue Title'), { target: { value: ' ' } }),
-    says: 'Give the issue a title',
+    says: ['Give the issue a title'],
+    focus: 'Issue Title',
+    sends: () => window.open,
   },
   {
     name: /Approve Discovered Device/,
-    render: () => (
+    render: (spy) => (
       <ApproveQuarantineModal
         item={{ asset_id: 'd1', asset_name: 'CNC_9', entity_type: 'DEVICE', reported_identity: 'cnc9' }}
         cells={[]} gateways={[]} areas={[{ area_id: 'a1', area_name: 'Machine Shop' }, { area_id: 'a2', area_name: 'Stores' }]}
-        onApprove={vi.fn()} onMerge={vi.fn()} onCancel={vi.fn()}
+        onApprove={spy} onMerge={vi.fn()} onCancel={vi.fn()}
       />
     ),
     confirm: /Approve/,
-    open: 'enabled',
-    edit: (d) => fireEvent.click(within(d).getByLabelText('Area-Wide')),
-    says: 'Choose which area the device serves',
+    empty: (d) => fireEvent.click(within(d).getByLabelText('Area-Wide')),
+    says: ['Choose which area the device serves'],
+    focus: 'Area',
   },
 ]
 
-describe('a dialog whose form holds its confirm', () => {
-  it.each(DIALOGS.map(c => [String(c.name), c]))('%s says why, from the first edit', (_, c) => {
-    render(c.render())
+describe('a dialog with something missing', () => {
+  it.each(DIALOGS.map(c => [String(c.name), c]))('%s says it on the press, beside each field, and sends nothing', (_, c) => {
+    const spy = vi.fn()
+    render(c.render(spy))
     const dialog = screen.getByRole('dialog', { name: c.name })
-    const confirm = within(dialog).getByRole('button', { name: c.confirm })
-    if (c.open !== 'enabled') {
-      expect(confirm).toBeDisabled()
-      expect(confirm).toHaveClass('btn-disabled')
-    }
-    expect(reasons(dialog)).toBe('')
+    c.empty?.(dialog)
+    expect(wrongIn(dialog)).toEqual([])
 
-    c.edit(dialog)
+    pressHeld(dialog, c.confirm, c.says[0])
 
-    expect(confirm).toBeDisabled()
-    expect(confirm).toHaveClass('btn-disabled')
-    expect(reasons(dialog)).toContain(c.says)
+    // Every field's own message, and the line above the buttons naming the first.
+    const said = wrongIn(dialog)
+    expect(said).toHaveLength(c.says.length + 1)
+    c.says.forEach((says, i) => expect(said[i]).toMatch(says))
+    const field = within(dialog).getByLabelText(c.focus)
+    expect(field).toHaveFocus()
+    expect(field).toHaveAccessibleDescription(expect.stringMatching(c.says[0]))
+    expect(c.sends?.() ?? spy).not.toHaveBeenCalled()
   })
 })
 
@@ -242,24 +340,29 @@ describe('New Device', () => {
     await waitFor(() => expect(api.get).toHaveBeenCalled())
     fireEvent.click(await screen.findByRole('button', { name: /New Device/i }))
     const dialog = screen.getByRole('dialog', { name: 'Register New Device' })
-    return { showToast, dialog, save: within(dialog).getByRole('button', { name: /Save Configuration/i }) }
+    return { showToast, dialog, save: within(dialog).getByRole('button', { name: /Save Device/i }) }
   }
 
-  it('holds Save until the device has a name, marks the name required, and says so from the first edit', async () => {
-    const { dialog, save } = await show()
-    expect(save).toBeDisabled()
-    expect(save).toHaveClass('btn-disabled')
+  it('marks the name required, asks for it on the press, and starts clean each time it opens', async () => {
+    const { dialog } = await show()
     expect(within(dialog).getByLabelText('Device Name')).toHaveAttribute('aria-required', 'true')
     expect(dialog.querySelector('label[for="device-name"] .required-mark')).toBeTruthy()
-    expect(reasons(dialog)).toBe('')
+    expect(wrongIn(dialog)).toEqual([])
 
     fireEvent.change(within(dialog).getByPlaceholderText(/Spindle rebuilt 2026-03/), { target: { value: 'Second lathe' } })
-    expect(dialog.querySelector('.modal-problem')).toHaveTextContent('Give the device a name')
+    expect(wrongIn(dialog)).toEqual([])
+    pressHeld(dialog, /Save Device/, 'Give the device a name')
+    expect(within(dialog).getByLabelText('Device Name')).toHaveFocus()
+    expect(api.post).not.toHaveBeenCalled()
 
     fireEvent.change(within(dialog).getByLabelText('Device Name'), { target: { value: 'Lathe_02' } })
-    expect(save).toBeEnabled()
-    expect(save).not.toHaveClass('btn-disabled')
-    expect(reasons(dialog)).toBe('')
+    expect(wrongIn(dialog)).toEqual([])
+    fireEvent.change(within(dialog).getByLabelText('Device Name'), { target: { value: '' } })
+    expect(wrongIn(dialog)).not.toEqual([])
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: /New Device/i }))
+    expect(wrongIn(screen.getByRole('dialog', { name: 'Register New Device' }))).toEqual([])
   })
 
   it('shows a refusal in the dialog, as it was worded, and toasts nothing behind it', async () => {

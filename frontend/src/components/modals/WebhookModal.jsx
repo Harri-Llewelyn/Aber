@@ -1,9 +1,11 @@
 import React, { useState } from 'react'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { CredentialField, useCredential } from '../common/CredentialField'
 import { Modal } from '../common/Modal'
-import { IconAlertTriangle, IconGlobe } from '../common/Icons'
+import { IconAlertTriangle, IconGlobe, IconTrash } from '../common/Icons'
+import { ConfirmModal } from './ConfirmModal'
 import { hostOf, parseHosts } from '../../utils/notifications'
 
 /**
@@ -25,12 +27,14 @@ export function WebhookModal({ webhook, saveHosts, writeUrl, onSaved, onRemove, 
   const typedHost = credential.typed ? hostOf(credential.value) : null
   const unlisted = typedHost && !hosts.includes(typedHost) ? typedHost : null
 
+  const before = webhook?.allowedHosts || []
+  const hostsChanged = hosts.length !== before.length || hosts.some((h, i) => h !== before[i])
+  const check = useFormCheck({}, { unchanged: !hostsChanged && !credential.typed })
+
   const save = () => run(async () => {
     setError(null)
     try {
-      const before = webhook?.allowedHosts || []
-      const changed = hosts.length !== before.length || hosts.some((h, i) => h !== before[i])
-      if (changed) await saveHosts(hosts)
+      if (hostsChanged) await saveHosts(hosts)
       await credential.commit()
       await onSaved?.()
     } catch (err) {
@@ -38,47 +42,28 @@ export function WebhookModal({ webhook, saveHosts, writeUrl, onSaved, onRemove, 
     }
   })
 
-  const remove = () => run(async () => {
-    setError(null)
-    try {
-      await onRemove()
-    } catch (err) {
-      setError(err.message)
-    }
-  })
-
-  const footer = removing ? (
-    <>
-      <span className="form-hint" style={{ marginRight: 'auto' }}>
-        Stop the webhook, and drop what is waiting for it? The delivery log keeps every row.
-      </span>
-      <button className="btn btn-ghost" onClick={() => setRemoving(false)} disabled={pending}>Keep it</button>
-      <ActionButton className="btn btn-danger" pending={pending} pendingLabel="Removing…" onClick={remove}>
-        Remove the webhook
-      </ActionButton>
-    </>
-  ) : (
-    <>
-      <button className="btn btn-ghost" onClick={onClose} disabled={pending}>Cancel</button>
-      <ActionButton className="btn btn-primary" pending={pending} pendingLabel="Saving…" onClick={save}>
-        Save
-      </ActionButton>
-      {webhook?.urlSet && (
-        <button className="btn btn-danger" onClick={() => setRemoving(true)} disabled={pending}>
-          Remove the webhook
-        </button>
-      )}
-    </>
-  )
-
   return (
     <Modal
       title="Webhook"
       icon={<IconGlobe size={18} />}
-      onClose={pending ? () => {} : onClose}
+      busy={pending}
+      onClose={onClose}
       lead="Aber posts each alert to this address as it fires, while it fires unacknowledged, and when it resolves. Each message is a CloudEvents event, signed with the signing key. A redirect is never followed."
+      problem={check.problem}
       error={error}
-      footer={footer}
+      dismiss="Cancel"
+      footer={(
+        <>
+          <ActionButton className="btn btn-primary" pending={pending} pendingLabel="Saving…" onClick={() => check.press(save)}>
+            Save Webhook
+          </ActionButton>
+          {webhook?.urlSet && (
+            <ActionButton className="btn btn-danger" disabled={pending} onClick={() => setRemoving(true)}>
+              Remove Webhook
+            </ActionButton>
+          )}
+        </>
+      )}
     >
       <CredentialField
         id="webhook-url"
@@ -89,7 +74,7 @@ export function WebhookModal({ webhook, saveHosts, writeUrl, onSaved, onRemove, 
       />
 
       <div className="form-group">
-        <label className="form-label" htmlFor="webhook-hosts">Allowed hosts</label>
+        <label className="form-label" htmlFor="webhook-hosts">Allowed Hosts</label>
         <textarea
           id="webhook-hosts"
           className="form-control mono"
@@ -117,6 +102,19 @@ export function WebhookModal({ webhook, saveHosts, writeUrl, onSaved, onRemove, 
           </div>
         )}
       </div>
+
+      {/* Inside this dialog, so it opens over it and Escape closes it first. */}
+      {removing && (
+        <ConfirmModal
+          title="Remove Webhook"
+          icon={<IconTrash size={18} />}
+          message="Stop the webhook, and drop what is waiting for it? The delivery log keeps every row."
+          confirmLabel="Remove Webhook"
+          pendingLabel="Removing…"
+          onConfirm={onRemove}
+          onCancel={() => setRemoving(false)}
+        />
+      )}
     </Modal>
   )
 }

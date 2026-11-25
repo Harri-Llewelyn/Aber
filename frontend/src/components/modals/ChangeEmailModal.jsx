@@ -7,6 +7,7 @@ import { RequiredMark } from '../common/RequiredMark'
 import { IconUser } from '../common/Icons'
 import { EMAIL, normaliseEmail } from '../../utils/people'
 import { personUrl } from '../../routes'
+import { useFormCheck } from '../../hooks/useFormCheck'
 
 /**
  * Change Email, from a person's drawer: an Administrator gives someone else a new address, in use
@@ -41,54 +42,47 @@ export function ChangeEmailModal({ person, onClose, onChanged, showToast }) {
     }
   }, [next, person, onChanged, onClose, showToast])
 
-  const ready = !!next && !problem
+  const check = useFormCheck({
+    email: { id: 'change-email-input', missing: !next && 'Type their new email address', wrong: problem },
+  })
 
   return (
     <Modal
-      title={`Change the email address for ${person.email}`}
+      title={`Change the Email Address for ${person.email}`}
       icon={<IconUser size={18} />}
-      onClose={busy ? () => {} : onClose}
+      busy={busy}
+      onClose={onClose}
       lead="They sign in with the new address from now on. Every session they have ends, so they will have to sign in again. Nothing is sent to either address, so tell them yourself."
       initialFocus={inputRef}
-      // What is wrong with an address typed is said under the field; an empty one, here.
-      problem={next ? null : 'Type their new email address'}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Changing…"
-            className="btn btn-primary"
-            onClick={save}
-            disabled={!ready}
-            title={ready ? undefined : problem || 'Type their new email address first'}
-          >
-            Change Email
-          </ActionButton>
-        </>
+        <ActionButton pending={busy} pendingLabel="Changing…" className="btn btn-primary" onClick={() => check.press(save)}>
+          Change Email
+        </ActionButton>
       )}
     >
       <div className="form-group">
-        <label className="form-label" htmlFor="change-email-input">New email address <RequiredMark /></label>
+        <label className="form-label" htmlFor="change-email-input">New Email Address <RequiredMark /></label>
         <input
           id="change-email-input"
           className="form-control"
           type="email"
           value={email}
           onChange={e => setEmail(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && ready && !busy) save() }}
+          onKeyDown={e => { if (e.key === 'Enter' && !busy) check.press(save) }}
           placeholder="name@example.com"
           autoComplete="off"
           disabled={busy}
           ref={inputRef}
           aria-required="true"
-          {...fieldErrorProps(problem, 'change-email-error', 'change-email-hint')}
+          {...fieldErrorProps(check.errors.email, 'change-email-error', 'change-email-hint')}
         />
         <div id="change-email-hint" className="form-hint">
           Their role, name and history stay. Approvals and Archived Entities keep the address they had when they acted.
         </div>
-        <FieldError id="change-email-error" error={problem} />
+        <FieldError id="change-email-error" error={check.errors.email} />
       </div>
     </Modal>
   )

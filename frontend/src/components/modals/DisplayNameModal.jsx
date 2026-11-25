@@ -6,6 +6,7 @@ import { Modal } from '../common/Modal'
 import { IconUser } from '../common/Icons'
 import { DISPLAY_NAME_MAX, displayNameProblem, normaliseDisplayName } from '../../utils/displayName'
 import { personUrl } from '../../routes'
+import { useFormCheck } from '../../hooks/useFormCheck'
 
 /**
  * Change Name, from a People row: an Administrator sets or clears another person's display name
@@ -20,7 +21,7 @@ export function DisplayNameModal({ person, onClose, onSaved, showToast }) {
 
   const problem = displayNameProblem(name)
   const next = normaliseDisplayName(name)
-  const unchanged = next === (person.display_name || null)
+  const check = useFormCheck({ name: { id: 'display-name-input', wrong: problem } }, { unchanged: next === (person.display_name || null) })
 
   const save = useCallback(async () => {
     setBusy(true)
@@ -42,47 +43,40 @@ export function DisplayNameModal({ person, onClose, onSaved, showToast }) {
 
   return (
     <Modal
-      title={`Change the name for ${person.email}`}
+      title={`Change the Name for ${person.email}`}
       icon={<IconUser size={18} />}
-      onClose={busy ? () => {} : onClose}
+      busy={busy}
+      onClose={onClose}
       lead="Shown first, with their email address beside it. Their email address does not change, and stays how they sign in."
       initialFocus={inputRef}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={(
-        <>
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Saving…"
-            className="btn btn-primary"
-            onClick={save}
-            disabled={!!problem || unchanged}
-            title={problem || (unchanged ? 'Type a different name first' : undefined)}
-          >
-            Save
-          </ActionButton>
-        </>
+        <ActionButton pending={busy} pendingLabel="Saving…" className="btn btn-primary" onClick={() => check.press(save)}>
+          Save Name
+        </ActionButton>
       )}
     >
       <div className="form-group">
-        <label className="form-label" htmlFor="display-name-input">Display name</label>
+        <label className="form-label" htmlFor="display-name-input">Display Name</label>
         <input
           id="display-name-input"
           className="form-control"
           type="text"
           value={name}
           onChange={e => setName(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !problem && !unchanged && !busy) save() }}
+          onKeyDown={e => { if (e.key === 'Enter' && !busy) check.press(save) }}
           placeholder="Their name, as colleagues know it"
           autoComplete="off"
           disabled={busy}
           ref={inputRef}
-          {...fieldErrorProps(problem, 'display-name-error', 'display-name-hint')}
+          {...fieldErrorProps(check.errors.name, 'display-name-error', 'display-name-hint')}
         />
         <div id="display-name-hint" className="form-hint">
           {`Up to ${DISPLAY_NAME_MAX} characters. Leave it empty to show their email address alone.`}
         </div>
-        <FieldError id="display-name-error" error={problem} />
+        <FieldError id="display-name-error" error={check.errors.name} />
       </div>
     </Modal>
   )

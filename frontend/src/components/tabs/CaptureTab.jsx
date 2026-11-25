@@ -110,7 +110,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // The subject whose drawer is open, in the address as `?subject=`.
   const [selectedId, setSelectedId] = useUrlState('subject')
   const [startFor, setStartFor] = useState(null)
-  // { capture, subject } while Delete capture's dialog is open: a capture is named by its subject.
+  // { capture, subject } while Delete Capture's dialog is open: a capture is named by its subject.
   const [deleteFor, setDeleteFor] = useState(null)
   const [playFor, setPlayFor] = useState(null)
   const [uploadFile, setUploadFile] = useState(null)
@@ -125,7 +125,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const [jobId, setJobId] = useUrlState('job')
   const onSearch = (text) => { setSearch(text); if (jobId) setJobId('') }
   const [draggingPlay, setDraggingPlay] = useState(false)
-  // Set when a file comes in through "Play a file…" or a drop on the card: once it has been stored,
+  // Set when a file comes in through "Play a File…" or a drop on the card: once it has been stored,
   // the playback dialog opens on the capture it produced rather than sending the operator back to
   // the table to find it.
   const [playAfterUpload, setPlayAfterUpload] = useState(false)
@@ -381,7 +381,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }
   }
 
-  // Run from Delete capture's dialog, which shows a refusal and stays open. Read again either way.
+  // Run from Delete Capture's dialog, which shows a refusal and stays open. Read again either way.
   const onDelete = async () => {
     try {
       await api.deleteCapture(deleteFor.capture)
@@ -402,7 +402,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }
 
   /**
-   * A file from "Play a file…" or dropped on the card: store it, then play it back. The subject is
+   * A file from "Play a File…" or dropped on the card: store it, then play it back. The subject is
    * inferred from the file's `identities` and offered, not assumed. The file is read twice on purpose:
    * UploadCaptureModal does the validation, so this guess is not a second definition of a valid
    * capture.
@@ -504,7 +504,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     <div className="page-layout page-fill">
       <div className="page-main">
 
-        {/* One card. A file dropped anywhere on it is stored and played back, as "Play a file…"
+        {/* One card. A file dropped anywhere on it is stored and played back, as "Play a File…"
             does: the panel's own drop zone is the one that only stores. */}
         <div className={`card card-fill capture-card${draggingPlay ? ' capture-card-drop' : ''}`} {...cardDrop}>
           <CardHeading
@@ -521,7 +521,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             tabs={VIEWS}
           />
 
-          {/* Play a file… is the page's, on every tab; the filters are the subject tables'. The
+          {/* Play a File… is the page's, on every tab; the filters are the subject tables'. The
               search is on every tab: the finished jobs are read a page at a time, newest first, and
               a search reads on through the older ones. */}
           <div className="filter-bar">
@@ -574,7 +574,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 onClick={() => playFileRef.current?.click()}
                 title="Store a capture file and play it straight back. Every device the file recorded must exist on this site. Dropping it on this card does the same."
               >
-                <IconPlay size={13} /> Play a file…
+                <IconPlay size={13} /> Play a File…
               </ActionButton>
             </div>
           </div>
@@ -845,7 +845,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         )}
         actions={selected ? [
           {
-            label: capture ? 'Record again' : 'Record capture',
+            label: capture ? 'Record Again' : 'Record Capture',
             icon: <IconRecord size={13} />,
             // The one primary: Record for a role that can; Download, below, for one that cannot.
             primary: canManage || !capture,
@@ -860,7 +860,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             onClick: () => setStartFor(selected)
           },
           capture && {
-            label: 'Play back…',
+            label: 'Play Back…',
             icon: <IconPlay size={13} />,
             disabled: !canManage || !!activePlayback,
             title: !canManage
@@ -882,7 +882,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             onClick: () => onDownload(capture, selected)
           },
           capture && {
-            label: 'Delete capture',
+            label: 'Delete Capture',
             icon: <IconTrash size={13} />,
             danger: true,
             disabled: !canManage,
@@ -927,7 +927,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         )}
       </ContextPanel>
 
-      {/* Two inputs, because the panel's drop zone and "Play a file…" do different things with a
+      {/* Two inputs, because the panel's drop zone and "Play a File…" do different things with a
           file: one stores it, the other stores it and plays it back. A shared input could play back
           a file somebody meant only to store. */}
       <input
@@ -981,12 +981,12 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
       {deleteFor && (
         <ConfirmModal
-          title="Delete capture"
+          title="Delete Capture"
           icon={<IconTrash size={18} />}
           message={`Delete the capture of ${deleteFor.subject.name}, recorded ${formatDateTime(deleteFor.capture.recorded_at)}${deleteFor.capture.note ? ` — ${deleteFor.capture.note}` : ''}? The file is removed from storage and cannot be recovered.`}
           requireTyped={deleteFor.subject.name}
           requireTypedLabel={`${deleteFor.subject.kind} name`}
-          confirmLabel="Delete capture"
+          confirmLabel="Delete Capture"
           pendingLabel="Deleting…"
           onCancel={() => setDeleteFor(null)}
           onConfirm={onDelete}

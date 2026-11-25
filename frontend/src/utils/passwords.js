@@ -8,13 +8,15 @@ import { supabase } from '../lib/supabaseClient'
 /** The chart's rule for the first administrator's password. GoTrue's own minimum (6) is lower. */
 export const MIN_PASSWORD_LENGTH = 12
 
-/** Why the form cannot be sent yet, or null. */
-export function newPasswordProblem(current, next, again) {
-  if (!current) return 'Enter your current password.'
-  if (next.length < MIN_PASSWORD_LENGTH) return `The new password needs at least ${MIN_PASSWORD_LENGTH} characters.`
-  if (next === current) return 'The new password must be different from your current one.'
-  if (next !== again) return 'The two copies of the new password do not match.'
-  return null
+/** Why the form cannot be sent yet, by its three fields: null for one that is right. */
+export function newPasswordProblems(current, next, again) {
+  return {
+    current: current ? null : 'Enter your current password.',
+    next: next.length < MIN_PASSWORD_LENGTH ? `The new password needs at least ${MIN_PASSWORD_LENGTH} characters.`
+      : next === current ? 'The new password must be different from your current one.'
+        : null,
+    again: next === again ? null : 'The two copies of the new password do not match.',
+  }
 }
 
 /**

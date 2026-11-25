@@ -63,8 +63,8 @@ const issued = async (props = {}) => {
     })
     fireEvent.click(screen.getByText(/Issue Credential/i))
   }
-  await waitFor(() => expect(screen.getByDisplayValue(CREDENTIAL.password)).toBeInTheDocument())
-  await waitFor(() => expect(screen.getByLabelText('Broker address').value).toBe('mqtt.plant.example'))
+  await waitFor(() => expect(screen.getByText(CREDENTIAL.password)).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByLabelText('Broker Address').textContent).toBe('mqtt.plant.example'))
 }
 
 describe("a Third-party gateway's credential dialog", () => {
@@ -76,15 +76,15 @@ describe("a Third-party gateway's credential dialog", () => {
 
   it('shows every setting the node is configured with, in one place', async () => {
     await issued()
-    const value = (label) => screen.getByLabelText(label).value
-    expect(value('Broker address')).toBe('mqtt.plant.example')
-    expect(value('TLS port')).toBe('8883')
+    const value = (label) => screen.getByLabelText(label).textContent
+    expect(value('Broker Address')).toBe('mqtt.plant.example')
+    expect(value('TLS Port')).toBe('8883')
     expect(value('Username')).toBe(GATEWAY.sparkplug_id)
     expect(value('Password')).toBe(CREDENTIAL.password)
-    expect(value('Edge node ID')).toBe(GATEWAY.sparkplug_id)
-    expect(value('Sparkplug group')).toBe('Plant-A')
-    expect(value('Primary host ID')).toBe('plant1')
-    expect(value('Root certificate')).toMatch(/\/\.well-known\/aber\/ca\.pem$/)
+    expect(value('Edge Node ID')).toBe(GATEWAY.sparkplug_id)
+    expect(value('Sparkplug Group')).toBe('Plant-A')
+    expect(value('Primary Host ID')).toBe('plant1')
+    expect(value('Root Certificate')).toMatch(/\/\.well-known\/aber\/ca\.pem$/)
     expect(screen.getByText('Copy these into the edge node now.')).toBeInTheDocument()
     expect(screen.queryByText(/Use it in Node-RED/i)).toBeNull()
   })
@@ -136,21 +136,21 @@ describe("a Third-party gateway's credential dialog", () => {
     api.mintGatewayCredential.mockRejectedValueOnce(new Error('The broker credential service is unreachable.'))
     render(<GatewayCredentialModal gateway={GATEWAY} confirmFirst={false} onClose={vi.fn()} showToast={vi.fn()} />)
     await waitFor(() => expect(screen.getAllByText(/credential service is unreachable/).length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: /Try again/ }))
-    await waitFor(() => expect(screen.getByDisplayValue(CREDENTIAL.password)).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Try Again/ }))
+    await waitFor(() => expect(screen.getByText(CREDENTIAL.password)).toBeInTheDocument())
   })
 
   it('says when the broker address only resolves inside Aber', async () => {
     api.get.mockResolvedValue([{ ...DIRECTORY[0], endpoint_url: 'mqtt://mosquitto:1883' }])
     render(<GatewayCredentialModal gateway={GATEWAY} confirmFirst={false} onClose={vi.fn()} showToast={vi.fn()} />)
     await waitFor(() => expect(screen.getByText(/resolves only inside Aber/)).toBeInTheDocument())
-    expect(screen.getByLabelText('Port').value).toBe('1883')
+    expect(screen.getByLabelText('Port').textContent).toBe('1883')
   })
 
   it('says where the primary host id is set when the dashboard was not given it', async () => {
     delete globalThis.__ABER_CONFIG__
     await issued({ confirmFirst: false })
-    expect(screen.getByLabelText('Primary host ID').value).toBe('')
+    expect(screen.getByLabelText('Primary Host ID').textContent).toBe('—')
     expect(screen.getByText('ingestion.primaryHostId')).toBeInTheDocument()
   })
 
@@ -158,7 +158,7 @@ describe("a Third-party gateway's credential dialog", () => {
     api.get.mockRejectedValue(new Error('permission denied'))
     render(<GatewayCredentialModal gateway={GATEWAY} confirmFirst={false} onClose={vi.fn()} showToast={vi.fn()} />)
     await waitFor(() => expect(screen.getByText(/The broker address could not be read, so it is not shown. The System page lists it./)).toBeInTheDocument())
-    expect(screen.getByLabelText('Broker address').value).toBe('')
+    expect(screen.getByLabelText('Broker Address').textContent).toBe('—')
   })
 })
 
@@ -168,10 +168,10 @@ describe("showing a Third-party gateway's credential again", () => {
     render(<ShowGatewayCredentialModal gateway={GATEWAY} onClose={vi.fn()} showToast={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Show Credential/i }))
 
-    await waitFor(() => expect(screen.getByLabelText('Password').value).toBe('kept'))
-    await waitFor(() => expect(screen.getByLabelText('Broker address').value).toBe('mqtt.plant.example'))
-    expect(screen.getByLabelText('Sparkplug group').value).toBe('Plant-A')
-    expect(screen.getByLabelText('Primary host ID').value).toBe('plant1')
+    await waitFor(() => expect(screen.getByLabelText('Password').textContent).toBe('kept'))
+    await waitFor(() => expect(screen.getByLabelText('Broker Address').textContent).toBe('mqtt.plant.example'))
+    expect(screen.getByLabelText('Sparkplug Group').textContent).toBe('Plant-A')
+    expect(screen.getByLabelText('Primary Host ID').textContent).toBe('plant1')
     expect(within(document.body).queryByText(/Use it in Node-RED/i)).toBeNull()
     expect(api.showGatewayCredential).toHaveBeenCalledWith(GATEWAY.gateway_id)
   })

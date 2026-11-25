@@ -23,7 +23,7 @@ export default function check() {
     ['Add', EDITOR, /^\s+Add$/m],
     ['Remove', EDITOR, /^\s+Remove$/m],
     ['Source', EDITOR, /Source <span/],
-    ['Search vocabularies', FIELD, /\? 'Close search' : 'Search vocabularies'/],
+    ['Search Vocabularies', FIELD, /\? 'Close Search' : 'Search Vocabularies'/],
     ['Save Metric', MODAL, /^\s+Save Metric$/m],
   ];
   for (const [label, file, shape] of controls) {

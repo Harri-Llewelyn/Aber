@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
+import { pressHeld } from '../test/dialogs'
 
 /**
  * The Edit Gateway dialog's Sparkplug group: refused as gateways_sparkplug_group_format refuses it,
@@ -47,7 +48,7 @@ const show = async (row, hasPermission = () => true) => {
 }
 
 const type = (field, value) => fireEvent.change(field, { target: { value } })
-const save = () => screen.getByRole('button', { name: /^(Save|Propose a change)$/ })
+const save = () => screen.getByRole('button', { name: /^(Save Gateway|Propose a Change)$/ })
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -62,16 +63,18 @@ describe('the Sparkplug group in the Edit Gateway dialog', () => {
     expect(screen.queryByLabelText('Sparkplug Group')).toBeNull()
   })
 
-  it('refuses a separator or a wildcard, says why, and withholds Save', async () => {
+  it('refuses a separator or a wildcard, says why, and sends nothing', async () => {
     const field = await show(gateway())
     type(field, 'Plant/B')
     expect(screen.getByRole('alert')).toHaveTextContent('one level of the topic, so it cannot contain /')
     expect(field).toHaveAttribute('aria-invalid', 'true')
-    expect(save()).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Save Gateway', 'one level of the topic, so it cannot contain /')
 
     type(field, '')
     expect(screen.getByRole('alert')).toHaveTextContent('A Sparkplug group cannot be empty.')
-    expect(save()).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Save Gateway', 'A Sparkplug group cannot be empty.')
+    expect(field).toHaveFocus()
+    expect(api.put).not.toHaveBeenCalled()
   })
 
   it('saves a new group with the rest of the form, having said what it moves', async () => {

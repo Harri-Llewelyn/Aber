@@ -2,17 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api'
 import { playbackWorkerDeployed } from '../../config'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
+import { CopyBlock, CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
 import { typedNameMatches } from '../../utils/gatewayType'
-import { IconCheck, IconCopy, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
+import { IconCheck, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import { EdgeNodeSettings } from './EdgeNodeSettings'
 import { gatewayUrl } from '../../routes'
-import { Tooltip } from '../common/Tooltip'
-
-const COPY_FEEDBACK_MS = 1600
-/** Said in the dialog and in a toast when the browser refuses a copy. */
-const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /**
  * Issue a Host or Third-party gateway's broker credential and show it once. A Remote gateway's
@@ -31,12 +26,8 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
   const [credential, setCredential] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(null)
-  const [copyFailed, setCopyFailed] = useState(false)
 
-  const copyTimer = useRef(null)
   const requested = useRef(false)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const confirmed = typedNameMatches(typed, gateway.gateway_name)
   // A Third-party node is configured by its engineer, who needs every setting rather than a step in
@@ -75,15 +66,6 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
     mint()
   }, [confirmFirst, mint])
 
-  const copy = useCallback(async (label, value) => {
-    const ok = await copyText(value)
-    setCopied(ok ? label : null)
-    setCopyFailed(!ok)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.(COPY_REFUSED, 'error')
-  }, [showToast])
-
   // Two destinations, decided by the gateway before anything the server said. A host-run gateway's
   // pair is typed on its broker node's Security tab in the Node-RED editor, which stores it
   // encrypted and keeps it across restarts. The Playback gateway's is delivered to the playback
@@ -99,54 +81,47 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
     ? `{"${credential.mqtt_username}":"${credential.password}"}`
     : ''
 
-  let footer
+  let footer = null
+  let dismiss = 'Done'
   if (step === 'confirm') {
+    dismiss = 'Cancel'
     footer = (
-      <>
-        <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-        <ActionButton
-          pending={busy}
-          pendingLabel="Issuing…"
-          disabled={!confirmed}
-          className="btn btn-primary"
-          onClick={mint}
-          title={confirmed
-            ? 'Mint a broker credential and show it once'
-            : 'Type the gateway name to enable this'}
-        >
-          <IconLock size={14} /> Issue Credential
-        </ActionButton>
-      </>
+      <ActionButton
+        pending={busy}
+        pendingLabel="Issuing…"
+        disabled={!confirmed}
+        className="btn btn-primary"
+        onClick={mint}
+        title={confirmed
+          ? 'Mint a broker credential and show it once'
+          : 'Type the gateway name to enable this'}
+      >
+        <IconLock size={14} /> Issue Credential
+      </ActionButton>
     )
   } else if (step === 'issuing') {
-    footer = (
-      <>
-        <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
-        {error && (
-          <ActionButton pending={busy} pendingLabel="Retrying…" onClick={mint} title="Try issuing again">
-            <IconRefreshCw size={14} /> Try again
-          </ActionButton>
-        )}
-      </>
+    dismiss = 'Close'
+    footer = error && (
+      <ActionButton pending={busy} pendingLabel="Retrying…" onClick={mint} title="Try issuing again">
+        <IconRefreshCw size={14} /> Try Again
+      </ActionButton>
     )
-  } else {
-    footer = <button className="btn btn-primary" onClick={onClose}>I have copied it</button>
   }
 
   const auditMissing = step === 'reveal' && credential?.audit_recorded === false
 
   return (
     <Modal
-      title={<>Broker credential for “{gateway.gateway_name}”</>}
+      title={<>Broker Credential for “{gateway.gateway_name}”</>}
       size="lg"
+      busy={busy}
       onClose={onClose}
       error={step !== 'reveal'
         ? error
-        : copyFailed
-          ? COPY_REFUSED
-          : auditMissing
+        : auditMissing
           ? 'The credential was issued, but the Audit Trail entry could not be written. The account exists; the record of it does not.'
           : null}
+      dismiss={dismiss}
       footer={footer}
     >
       {step === 'confirm' && (
@@ -237,45 +212,21 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
           )}
 
           {isThirdParty ? (
-            <EdgeNodeSettings gateway={gateway} credential={credential} copy={copy} copied={copied} />
+            <EdgeNodeSettings gateway={gateway} credential={credential} />
           ) : (<>
-          <div className="form-group">
-            <label className="form-label">MQTT username</label>
-            <div className="gateway-copy-row">
-              <input className="form-control mono" readOnly value={credential.mqtt_username} />
-              <Tooltip text="Copy username">
-                <button
-                  className="btn btn-ghost btn-icon"
-                  onClick={() => copy('user', credential.mqtt_username)}
-                  aria-label="Copy username"
-                >
-                  {copied === 'user' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                </button>
-              </Tooltip>
-            </div>
-            {/* Looks like a coincidence and is a constraint: the gateway's broker role confines it
-                to its own edge-node segment. */}
-            <div className="form-hint">
+          {/* The username looks like a coincidence and is a constraint: the gateway's broker role
+              confines it to its own edge-node segment. */}
+          <CopyField
+            id="gateway-username"
+            label="MQTT Username"
+            value={credential.mqtt_username}
+            copyLabel="username"
+            hint={<>
               This is the gateway’s Sparkplug ID, and it cannot be anything else — the broker
               confines the account to the edge node named by its username.
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Password</label>
-            <div className="gateway-copy-row">
-              <input className="form-control mono" readOnly value={credential.password} />
-              <Tooltip text="Copy password">
-                <button
-                  className="btn btn-ghost btn-icon"
-                  onClick={() => copy('password', credential.password)}
-                  aria-label="Copy password"
-                >
-                  {copied === 'password' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                </button>
-              </Tooltip>
-            </div>
-          </div>
+            </>}
+          />
+          <CopyField id="gateway-password" label="Password" value={credential.password} />
 
           {/* Any gateway but the Playback gateway: Node-RED, whatever the server delivered. For the
               Playback gateway, delivered means there is nothing to do: the credential service wrote
@@ -312,31 +263,28 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
             </div>
           ) : (
             <div className="form-group">
-              <label className="form-label">For secrets.mqttPlaybackCredentials</label>
-              <pre className="mono gateway-code">{secretBlock}</pre>
-              <div className="gateway-block-head">
-                <span className="form-hint">
-                  {deliveryFailed && (
-                    <strong className="gateway-delivery-failed">
-                      Automatic delivery to the playback worker failed, so this has to be
-                      placed by hand:
-                    </strong>
-                  )}
-                  Set <span className="mono">secrets.mqttPlaybackCredentials</span> to this object
-                  and upgrade the release. Already have other targets in there? Add this key to
-                  the existing object rather than replacing it. The upgrade restarts the playback
-                  worker, which then holds the password.
-                  {!workerDeployed && (
-                    <>
-                      {' '}The worker is not deployed on this site, so set{' '}
-                      <span className="mono">playback.enabled: true</span> in the same upgrade.
-                    </>
-                  )}
-                </span>
-                <button className="btn btn-ghost" onClick={() => copy('secret', secretBlock)}>
-                  {copied === 'secret' ? <IconCheck size={13} /> : <IconCopy size={13} />} Copy block
-                </button>
-              </div>
+              <CopyBlock
+                text={secretBlock}
+                copyLabel="Copy Block"
+                head={<div className="form-label">For secrets.mqttPlaybackCredentials</div>}
+              >
+                {deliveryFailed && (
+                  <strong className="gateway-delivery-failed">
+                    Automatic delivery to the playback worker failed, so this has to be
+                    placed by hand:
+                  </strong>
+                )}
+                Set <span className="mono">secrets.mqttPlaybackCredentials</span> to this object
+                and upgrade the release. Already have other targets in there? Add this key to
+                the existing object rather than replacing it. The upgrade restarts the playback
+                worker, which then holds the password.
+                {!workerDeployed && (
+                  <>
+                    {' '}The worker is not deployed on this site, so set{' '}
+                    <span className="mono">playback.enabled: true</span> in the same upgrade.
+                  </>
+                )}
+              </CopyBlock>
             </div>
           )}
           </>)}
@@ -354,7 +302,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast, confirmFir
 export function NodeRedCredentialSteps() {
   return (
     <div className="form-group">
-      <label className="form-label">Use it in Node-RED</label>
+      <div className="form-label">Use It in Node-RED</div>
       <ol className="form-hint gateway-steps">
         <li>
           In the Node-RED editor, open the <strong>mqtt-broker</strong> node this gateway

@@ -186,18 +186,18 @@ describe('Turn left and Turn right', () => {
   it('sit in a row of their own under the heading, with Replace plan and Remove plan apart under the card, labelled and described', () => {
     panel()
     const names = within(actions()).getAllByRole('button').map(b => b.textContent.trim())
-    expect(names).toEqual(['Turn left', 'Turn right'])
+    expect(names).toEqual(['Turn Left', 'Turn Right'])
     // Not in the heading's row, and above the plan's card.
     expect(actions().closest('.area-plan-panel-header')).toBeNull()
     expect(document.querySelector('.area-plan-panel-header').compareDocumentPosition(actions()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(actions().compareDocumentPosition(document.querySelector('.plan-card')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Away from the turns, so a missed Turn right cannot open a file dialog.
     const fileButtons = document.querySelector('.area-plan-panel-buttons')
-    expect(within(fileButtons).getAllByRole('button').map(b => b.textContent.trim())).toEqual(['Download plan', 'Replace plan', 'Remove plan'])
+    expect(within(fileButtons).getAllByRole('button').map(b => b.textContent.trim())).toEqual(['Download Plan', 'Replace Plan', 'Remove Plan'])
     expect(document.querySelector('.plan-card').compareDocumentPosition(fileButtons) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(tooltipOf(screen.getByRole('button', { name: 'Turn left' }))).toMatch(/anticlockwise/)
-    expect(tooltipOf(screen.getByRole('button', { name: 'Turn right' }))).toMatch(/clockwise/)
-    expect(screen.getByRole('button', { name: 'Turn right' }).querySelector('svg')).not.toBeNull()
+    expect(tooltipOf(screen.getByRole('button', { name: 'Turn Left' }))).toMatch(/anticlockwise/)
+    expect(tooltipOf(screen.getByRole('button', { name: 'Turn Right' }))).toMatch(/clockwise/)
+    expect(screen.getByRole('button', { name: 'Turn Right' }).querySelector('svg')).not.toBeNull()
   })
 
   it('turn the preview at once, and write nothing until Save Turn', () => {
@@ -205,10 +205,10 @@ describe('Turn left and Turn right', () => {
     const area = turned(90)
     panel({ area, onChanged })
 
-    press('Turn right')
+    press('Turn Right')
     expect(drawn()).toBe(180)
-    press('Turn left')
-    press('Turn left')
+    press('Turn Left')
+    press('Turn Left')
     expect(drawn()).toBe(0)
     expect(api.setAreaPlanRotation).not.toHaveBeenCalled()
     expect(onChanged).not.toHaveBeenCalled()
@@ -222,9 +222,9 @@ describe('Turn left and Turn right', () => {
     expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull()
     const [left, right] = within(actions()).getAllByRole('button')
 
-    press('Turn right')
+    press('Turn Right')
     const names = within(actions()).getAllByRole('button').map(b => b.textContent.trim())
-    expect(names).toEqual(['Turn left', 'Turn right', 'Save Turn', 'Discard'])
+    expect(names).toEqual(['Turn Left', 'Turn Right', 'Save Turn', 'Discard'])
     // The pair is added after the turns, which stay the row's first two, so they do not move.
     expect(within(actions()).getAllByRole('button').slice(0, 2)).toEqual([left, right])
     expect(screen.getByRole('button', { name: 'Save Turn' })).toHaveClass('btn', 'btn-primary', 'btn-sm')
@@ -237,17 +237,17 @@ describe('Turn left and Turn right', () => {
     api.setAreaPlanRotation.mockResolvedValue({})
     const { rerender } = panel({ onChanged })
 
-    press('Turn right')
-    press('Turn right')
-    press('Turn left')
-    press('Turn left')
-    press('Turn left')
+    press('Turn Right')
+    press('Turn Right')
+    press('Turn Left')
+    press('Turn Left')
+    press('Turn Left')
     await act(async () => { press('Save Turn') })
     expect(api.setAreaPlanRotation).toHaveBeenCalledTimes(1)
     expect(api.setAreaPlanRotation).toHaveBeenCalledWith(expect.objectContaining({ area_id: 'a', plan_rotation: 90 }), 0)
     expect(onChanged).toHaveBeenCalledTimes(1)
     // Held until the page has the saved turn.
-    for (const name of ['Turn left', 'Turn right', 'Save Turn', 'Discard']) {
+    for (const name of ['Turn Left', 'Turn Right', 'Save Turn', 'Discard']) {
       expect(screen.getByRole('button', { name })).toBeDisabled()
     }
     expect(drawn()).toBe(0)
@@ -255,7 +255,7 @@ describe('Turn left and Turn right', () => {
     rerender(<AreaPlanPanel {...props({ area: turned(0), onChanged })} />)
     await act(async () => { finish() })
     expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Turn left' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Turn Left' })).toBeEnabled()
     expect(drawn()).toBe(0)
   })
 
@@ -263,7 +263,7 @@ describe('Turn left and Turn right', () => {
     api.setAreaPlanRotation.mockResolvedValue({})
     const showToast = vi.fn()
     const { unmount } = panel({ showToast })
-    press('Turn right')
+    press('Turn Right')
     await act(async () => { press('Save Turn') })
     expect(showToast).toHaveBeenCalledTimes(1)
     expect(showToast).toHaveBeenCalledWith('Plan of Assembly Hall turned 180° clockwise', 'success', { to: areaUrl('a') })
@@ -272,26 +272,26 @@ describe('Turn left and Turn right', () => {
     // Back to the drawing as uploaded, which is no turn at all.
     showToast.mockClear()
     panel({ showToast })
-    press('Turn left')
+    press('Turn Left')
     await act(async () => { press('Save Turn') })
     expect(showToast).toHaveBeenCalledWith('Plan of Assembly Hall turned back to how it was drawn', 'success', { to: areaUrl('a') })
   })
 
   it('offer nothing to save once the turns come back to the saved one', () => {
     panel()
-    press('Turn left')
-    press('Turn right')
+    press('Turn Left')
+    press('Turn Right')
     expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
-    for (let i = 0; i < 4; i++) press('Turn right')
+    for (let i = 0; i < 4; i++) press('Turn Right')
     expect(screen.queryByRole('button', { name: 'Save Turn' })).toBeNull()
     expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull()
     expect(drawn()).toBe(90)
-    expect(screen.getByRole('button', { name: /Replace plan/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /Replace Plan/ })).toBeEnabled()
   })
 
   it('put the preview back to the saved turn on Discard, with no request', () => {
     panel()
-    press('Turn left')
+    press('Turn Left')
     expect(drawn()).toBe(0)
     press('Discard')
     expect(drawn()).toBe(90)
@@ -301,11 +301,11 @@ describe('Turn left and Turn right', () => {
 
   it('grey out Replace plan and Remove plan while a turn is unsaved, and say why', () => {
     panel()
-    const replace = () => screen.getByRole('button', { name: /Replace plan/ })
-    const remove = () => screen.getByRole('button', { name: /Remove plan/ })
+    const replace = () => screen.getByRole('button', { name: /Replace Plan/ })
+    const remove = () => screen.getByRole('button', { name: /Remove Plan/ })
     expect(tooltipOf(remove())).toBe('The area keeps the default outline')
 
-    press('Turn right')
+    press('Turn Right')
     for (const button of [replace(), remove()]) {
       expect(button).toBeDisabled()
       expect(button).toHaveClass('btn-disabled')
@@ -324,7 +324,7 @@ describe('Turn left and Turn right', () => {
   it('drop an unsaved turn when the panel turns to another area', () => {
     const other = { ...turned(90), area_id: 'b', area_name: 'Paint Shop' }
     const { rerender } = panel()
-    press('Turn right')
+    press('Turn Right')
     expect(screen.getByRole('button', { name: 'Save Turn' })).toBeInTheDocument()
 
     rerender(<AreaPlanPanel {...props({ area: other })} />)
@@ -341,7 +341,7 @@ describe('Turn left and Turn right', () => {
     api.setAreaPlanRotation.mockRejectedValue(new Error('You do not have permission to change this area.'))
     const onChanged = vi.fn()
     panel({ showToast, onChanged })
-    press('Turn left')
+    press('Turn Left')
     await act(async () => { press('Save Turn') })
     expect(showToast).toHaveBeenCalledWith('You do not have permission to change this area.', 'error')
     expect(showToast).toHaveBeenCalledTimes(1)
@@ -352,9 +352,9 @@ describe('Turn left and Turn right', () => {
 
   it('are offered only on a plan, to somebody who may upload one', () => {
     const { unmount } = panel({ area: { ...WIDE, plan_path: null, plan_aspect: null, plan_rotation: 0 } })
-    expect(screen.queryByRole('button', { name: /Turn left|Turn right/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Turn Left|Turn Right/ })).toBeNull()
     unmount()
     panel({ canManage: false })
-    expect(screen.queryByRole('button', { name: /Turn left|Turn right/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Turn Left|Turn Right/ })).toBeNull()
   })
 })

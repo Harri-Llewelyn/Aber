@@ -2,10 +2,12 @@ import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { GRANTABLE_PERMISSIONS, permissionReach } from '../../utils/serviceIdentities'
 import { identityUrl } from '../../routes'
+import { useFormCheck } from '../../hooks/useFormCheck'
 
 const NAME_MAX = 80
 const PURPOSE_MAX = 500
@@ -29,8 +31,6 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
   const [error, setError] = useState(null)
   const nameRef = useRef(null)
 
-  const close = useCallback(() => onClose(), [onClose])
-
   const toggle = useCallback((perm) => {
     setPermissions(prev => {
       const next = new Set(prev)
@@ -41,12 +41,11 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
   }, [])
 
   const trimmedName = name.trim()
-  const canSubmit = trimmedName.length > 0 && trimmedName.length <= NAME_MAX
-    && purpose.length <= PURPOSE_MAX && permissions.size > 0 && !busy
   // The fields' maxLength holds the upper bounds; what is left to say is what is missing.
-  const problem = trimmedName.length === 0 ? 'Give the identity a name'
-    : permissions.size === 0 ? 'Choose at least one permission for it to hold'
-      : null
+  const check = useFormCheck({
+    name: { id: 'principal-name', missing: trimmedName.length === 0 && 'Give the identity a name' },
+    holds: { id: 'principal-holds', missing: permissions.size === 0 && 'Choose at least one permission for it to hold' },
+  })
 
   const submit = useCallback(async () => {
     setBusy(true)
@@ -72,9 +71,10 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
 
   return (
     <Modal
-      title="New machine identity"
+      title="New Machine Identity"
       size="md"
-      onClose={close}
+      busy={busy}
+      onClose={onClose}
       lead={<>
         An identity for a process that reaches this stack's <strong>database</strong> through the
         API: a reporting tool, an MCP client, a script. It cannot sign in, holds the permissions
@@ -82,22 +82,19 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
         client is issued a broker account, not a machine identity.
       </>}
       initialFocus={nameRef}
-      problem={problem}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={close}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Creating…"
-            className="btn btn-primary"
-            disabled={!canSubmit}
-            onClick={submit}
-            title={problem ?? 'Create the identity. No token is issued until you choose to.'}
-          >
-            Create Machine Identity
-          </ActionButton>
-        </>
+        <ActionButton
+          pending={busy}
+          pendingLabel="Creating…"
+          className="btn btn-primary"
+          onClick={() => check.press(submit)}
+          title="Create the identity. No token is issued until you choose to."
+        >
+          Create Machine Identity
+        </ActionButton>
       }
     >
       <div className="form-group">
@@ -112,8 +109,10 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           aria-required="true"
+          {...fieldErrorProps(check.errors.name, 'principal-name-error', 'principal-name-hint')}
         />
-        <div className="form-hint">What the page lists it as. Unique, ignoring case.</div>
+        <div id="principal-name-hint" className="form-hint">What the page lists it as. Unique, ignoring case.</div>
+        <FieldError id="principal-name-error" error={check.errors.name} />
       </div>
 
       <div className="form-group">
@@ -134,7 +133,12 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
         </div>
       </div>
 
-      <fieldset className="form-group" style={{ border: 'none', margin: 0, padding: 0 }}>
+      <fieldset
+        id="principal-holds"
+        className="form-group"
+        style={{ border: 'none', margin: 0, padding: 0 }}
+        aria-describedby={check.errors.holds ? 'principal-holds-error' : undefined}
+      >
         <legend className="form-label">Holds <RequiredMark title="Required: at least one" /></legend>
         {GRANTABLE_PERMISSIONS.map(perm => (
           <label
@@ -160,6 +164,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
           or change who has access. Withdrawing the identity or revoking a token refuses it at the
           API from the next request.
         </div>
+        <FieldError id="principal-holds-error" error={check.errors.holds} />
       </fieldset>
     </Modal>
   )

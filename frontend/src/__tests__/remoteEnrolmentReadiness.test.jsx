@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 import { tooltipOf } from '../test/tooltips'
+import { pressHeld } from '../test/dialogs'
 
 /**
  * The Gateways page asks whether this deployment can enrol an appliance before it offers a remote
@@ -64,7 +65,14 @@ const show = async (readiness, rows = [gateway()], hasPermission = () => true) =
 
 const openNew = () => fireEvent.click(screen.getByRole('button', { name: /New Gateway/ }))
 const typeSelect = () => document.querySelector('#gateway-type')
-const save = () => screen.getByRole('button', { name: 'Save' })
+const save = () => screen.getByRole('button', { name: 'Save Gateway' })
+/** Nothing is in the way of a new Remote gateway: the press sends it. */
+const saves = async () => {
+  api.post.mockRejectedValue(new Error('not asked here'))
+  fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'Bench' } })
+  fireEvent.click(save())
+  await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/gateways', expect.objectContaining({ deployment: 'remote' })))
+}
 // The page banner, found by its heading text; it is one of the page's three shared banners.
 const BANNER = /Remote gateways cannot be enrolled on this deployment/
 const banner = async () => (await screen.findByText(BANNER)).closest('.callout-page')
@@ -81,15 +89,19 @@ describe('remote enrolment readiness', () => {
     expect(notice.textContent).toContain('Host and Simulated gateways are unaffected')
   })
 
-  it('withholds Save for a new Remote gateway and says why in the form', async () => {
+  it('saves no new Remote gateway, and says why in the form and under its type', async () => {
     await show(NOT_READY)
     await banner()
     openNew()
     // Remote is the default type, so the withholding is the first thing the form says.
     expect(typeSelect().value).toBe('remote')
     expect(screen.getByText(/This deployment cannot issue an install command or bundle yet/)).toBeTruthy()
-    expect(save().disabled).toBe(true)
-    expect(tooltipOf(save())).toMatch(/cannot be enrolled/)
+    expect(screen.getByText(/A Remote gateway cannot be saved until it can/)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'Bench' } })
+    pressHeld(screen.getByRole('dialog'), 'Save Gateway', 'This deployment cannot set up a Remote gateway yet')
+    expect(typeSelect()).toHaveAccessibleDescription('This deployment cannot set up a Remote gateway yet')
+    expect(typeSelect()).toHaveFocus()
+    expect(api.post).not.toHaveBeenCalled()
   })
 
   it('leaves Host and Simulated gateways unaffected', async () => {
@@ -100,7 +112,6 @@ describe('remote enrolment readiness', () => {
     fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'Bench' } })
     fireEvent.change(typeSelect(), { target: { value: 'host' } })
     expect(screen.queryByText(/cannot issue an install command or bundle yet/)).toBeNull()
-    expect(save().disabled).toBe(false)
     fireEvent.click(save())
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     expect(api.post.mock.calls[0][1].deployment).toBe('host')
@@ -121,9 +132,9 @@ describe('remote enrolment readiness', () => {
     expect(screen.queryByText(BANNER)).toBeNull()
     openNew()
     expect(screen.getByText(/On save you will be given an install command, or a bundle/)).toBeTruthy()
-    // Held only for its name, which every gateway needs.
-    fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'Bench' } })
-    expect(save().disabled).toBe(false)
+    // Its name is all it needs, as every gateway does.
+    pressHeld(screen.getByRole('dialog'), 'Save Gateway', 'Give the gateway a name')
+    await saves()
   })
 
   it('blocks nothing when the probe fails, since the function still refuses for itself', async () => {
@@ -131,8 +142,7 @@ describe('remote enrolment readiness', () => {
     await waitFor(() => expect(api.enrolmentReadiness).toHaveBeenCalled())
     expect(screen.queryByText(BANNER)).toBeNull()
     openNew()
-    fireEvent.change(screen.getByLabelText('Gateway Name'), { target: { value: 'Bench' } })
-    expect(save().disabled).toBe(false)
+    await saves()
   })
 
   it('does not ask on behalf of someone who cannot create a gateway', async () => {

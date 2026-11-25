@@ -51,6 +51,7 @@ import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { ActionButton } from '../common/ActionButton'
+import { sameForm, useFormCheck } from '../../hooks/useFormCheck'
 import { ApplianceCommand, ApplianceCommandsHelp } from '../common/ApplianceCommand'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, FieldGroup, rowSelectHandler } from '../common/ContextPanel'
@@ -215,6 +216,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', deployment: 'remote', is_simulated: false, access_url: '', cell_id: '', area_id: '', location_scope: SCOPE_CELL }
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
+  // What the form opened with.
+  const [formOpened, setFormOpened] = useState(blank)
   // Derived: the form carries `deployment` and `is_simulated` (what the API takes); the select one word.
   const formType = gatewayType(form)
   // Derived off the two flags: a simulated gateway cannot hold a cell.
@@ -400,8 +403,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const enrolmentProblems = enrolmentBlocked
     ? (enrolment.addresses || []).filter(a => a.problem).map(a => `${a.variable} is ${a.problem}`)
     : []
-  // Save is withheld for a gateway that would need setup this deployment cannot issue: a new Remote
-  // one, or an existing gateway moved to Remote. Renaming a Remote gateway is not that.
+  // A gateway that would need setup this deployment cannot issue is not saved: a new Remote one, or an
+  // existing gateway moved to Remote. Renaming a Remote gateway is not that.
   const remoteWithheld = !proposeMode && enrolmentBlocked && formType === GATEWAY_TYPES.REMOTE
     && (!editing || editing.deployment !== 'remote')
 
@@ -438,12 +441,21 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const offeredGroup = editingMismatch && !proposeMode && form.sparkplug_group !== editingMismatch.observed
     ? editingMismatch.observed : null
   const groupChanged = groupEdited && !groupProblem
-  // Why Save is off and nothing beside a field says so: the type's hint says why a Remote gateway
-  // is withheld, and the group's field says what is wrong with it. The database refuses Area-Wide
-  // with no area; it would take an empty name.
-  const formProblem = !(form.gateway_name || '').trim() ? 'Give the gateway a name'
-    : locationIncomplete(form) ? 'Choose which area the gateway serves'
-      : null
+  // The database refuses Area-Wide with no area; it would take an empty name. A proposal of nothing is
+  // refused too, so one not filed yet is held to what it would change.
+  const formCheck = useFormCheck({
+    name: { id: 'gateway-name', missing: !(form.gateway_name || '').trim() && 'Give the gateway a name' },
+    type: { id: 'gateway-type', missing: remoteWithheld && 'This deployment cannot set up a Remote gateway yet' },
+    location: { id: 'gateway-area', missing: locationIncomplete(form) && 'Choose which area the gateway serves' },
+    group: { id: 'gateway-sparkplug-group', wrong: groupProblem },
+  }, {
+    unchanged: !!editing && (proposeMode && !editingProposal
+      ? Object.keys(patchFromForm('gateway', editing, form)).length === 0
+      : sameForm(formOpened, form)),
+  })
+  const openForm = (gateway, seed) => {
+    setEditing(gateway); setForm(seed); setFormOpened(seed); formCheck.reset(); setShowForm(true)
+  }
   const groupFollowsTheNode = groupChanged && form.sparkplug_group === editing.observed_sparkplug_group
 
   /** The note under a field a proposal may not name: disabled with the reason rather than hidden. */
@@ -705,7 +717,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             className="btn btn-primary btn-sm"
             permitted={canManage}
             deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.GATEWAY_MANAGE)}
-            onClick={() => { setEditing(null); setForm(blank); setShowForm(true) }}
+            onClick={() => openForm(null, blank)}
           >
             <IconPlus size={14} /> New Gateway
           </ActionButton>
@@ -832,39 +844,30 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         <Modal
           title={editing ? 'Edit Gateway' : 'Register Gateway'}
           size="md"
+          busy={saving}
           onClose={closeForm}
-          problem={formProblem}
+          problem={formCheck.problem}
           error={formError}
+          dismiss="Cancel"
           footer={
-            <>
-              <button className="btn btn-ghost" onClick={closeForm} disabled={saving}>Cancel</button>
-              <ActionButton
-                pending={saving}
-                pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
-                // A credential is not ended without a question, as it is not replaced without one.
-                onClick={() => (typeChange?.credential ? setConfirmTypeChange(true) : runSave(save))}
-                disabled={formProblem !== null || remoteWithheld || !!groupProblem}
-                title={remoteWithheld
-                  ? 'Remote gateways cannot be enrolled on this deployment yet'
-                  : groupProblem
-                  ? groupProblem
-                  : formProblem
-                  ? formProblem
-                  : proposeMode
-                    ? 'Ask for these changes — an approver applies them, or says why not'
-                    : undefined}
-              >
-                {proposeMode ? (editingProposal ? 'Update your proposal' : 'Propose a change') : 'Save'}
-              </ActionButton>
-            </>
+            <ActionButton
+              pending={saving}
+              pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
+              // A credential is not ended without a question, as it is not replaced without one.
+              onClick={() => formCheck.press(() => (typeChange?.credential ? setConfirmTypeChange(true) : runSave(save)))}
+              title={proposeMode ? 'Ask for these changes — an approver applies them, or says why not' : undefined}
+            >
+              {proposeMode ? (editingProposal ? 'Update Your Proposal' : 'Propose a Change') : 'Save Gateway'}
+            </ActionButton>
           }
         >
         <div className="form-group">
           <label className="form-label" htmlFor="gateway-name">Gateway Name <RequiredMark /></label>
-          <input id="gateway-name" className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} placeholder="e.g. Sim_Gateway_Cell1_Machining" aria-required="true" />
-          <div className="form-hint">
+          <input id="gateway-name" className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} placeholder="e.g. Sim_Gateway_Cell1_Machining" aria-required="true" {...fieldErrorProps(formCheck.errors.name, 'gateway-name-error', 'gateway-name-hint')} />
+          <div id="gateway-name-hint" className="form-hint">
             A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID, which is generated from the database key and never moves.
           </div>
+          <FieldError id="gateway-name-error" error={formCheck.errors.name} />
         </div>
         <div className="form-group">
           <label className="form-label" htmlFor="gateway-description">Description</label>
@@ -899,6 +902,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 ? { cell_id: '', area_id: '', location_scope: SCOPE_CELL }
                 : {})
             }))}
+            {...fieldErrorProps(formCheck.errors.type, 'gateway-type-error')}
           >
             {SELECTABLE_TYPES.map(t => (
               <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
@@ -908,7 +912,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           <div className="form-hint">
             {gatewayTypeDescription(formType)}
             {remoteWithheld
-              ? <> <strong className="gateway-withheld">This deployment cannot issue an install command or bundle yet:</strong> {enrolmentProblems.join('; ')}. Save is withheld for a Remote gateway until it can; Host and Simulated gateways are unaffected.</>
+              ? <> <strong className="gateway-withheld">This deployment cannot issue an install command or bundle yet:</strong> {enrolmentProblems.join('; ')}. A Remote gateway cannot be saved until it can. Host and Simulated gateways are unaffected.</>
               : !editing && formType === GATEWAY_TYPES.REMOTE
                 ? ' On save you will be given an install command, or a bundle, to run on that machine; it enrols itself and appears here as online.'
                 : !editing && formType === GATEWAY_TYPES.THIRD_PARTY
@@ -920,6 +924,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               {typeChangeHint}
             </div>
           )}
+          <FieldError id="gateway-type-error" error={formCheck.errors.type} />
         </div>
         {/* One exclusive scope, then the cell or area it calls for. A simulated gateway reads as In a
             cell with none chosen whatever is stored, since its lane resolves ahead of the stored
@@ -934,6 +939,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             areas={areas}
             disabled={!formAcceptsCell}
             cellEmptyLabel="— No cell assigned —"
+            error={formCheck.errors.location}
           />
 
           <div className="form-hint">
@@ -957,7 +963,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               disabled={proposeMode}
               value={form.sparkplug_group ?? ''}
               onChange={e => setForm(f => ({ ...f, sparkplug_group: e.target.value }))}
-              {...fieldErrorProps(groupProblem, 'gateway-sparkplug-group-error')}
+              {...fieldErrorProps(formCheck.errors.group, 'gateway-sparkplug-group-error')}
             />
             {offeredGroup && (
               <Tooltip text="The group this gateway was last seen publishing under">
@@ -993,7 +999,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 address.
               </div>
             )}
-            <FieldError id="gateway-sparkplug-group-error" error={groupProblem} />
+            <FieldError id="gateway-sparkplug-group-error" error={formCheck.errors.group} />
           </div>
         )}
         <div className="form-group">
@@ -1019,7 +1025,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       {/* Over the form, which stays open behind it, so Cancel goes back to the edit. */}
       {showForm && confirmTypeChange && typeChange && (
         <ConfirmModal
-          title="Change gateway type"
+          title="Change Gateway Type"
           icon={<IconShieldAlert size={18} />}
           message={<>
             Saving <strong>{editing.gateway_name}</strong> as {gatewayTypeLabel(formType)} ends{' '}
@@ -1031,7 +1037,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               ? 'Once saved, set it up from its drawer: the appliance is issued a new credential when it enrols.'
               : 'Once saved, issue it a broker credential from its drawer.'}
           </>}
-          confirmLabel="Change type"
+          confirmLabel="Change Type"
           pendingLabel="Saving…"
           onConfirm={saveEdit}
           onCancel={() => setConfirmTypeChange(false)}
@@ -1425,14 +1431,12 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
             primary: primaryAction === 'edit',
             onClick: () => {
-              setEditing(selected)
               const mine = proposeMode
                 ? openProposals.find(pr => pr.entity_type === 'gateways' && pr.entity_id === selected.gateway_id)
                 : null
               setEditingProposal(mine || null)
               // The picker wants '' for no area, not null.
-              setForm({ ...selected, area_id: selected.area_id || '', ...formFromPatch('gateway', mine?.patch) })
-              setShowForm(true)
+              openForm(selected, { ...selected, area_id: selected.area_id || '', ...formFromPatch('gateway', mine?.patch) })
             },
             disabled: !canManage && !canPropose,
             title: proposeMode

@@ -47,24 +47,23 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
 
   return (
     <Modal
-      title={`${existing ? 'Replace capture' : 'Record capture'} — ${subject.name}`}
+      title={`${existing ? 'Replace Capture' : 'Record Capture'} — ${subject.name}`}
       icon={<IconRecord size={18} />}
-      onClose={pending ? () => {} : onCancel}
+      busy={pending}
+      onClose={onCancel}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
-          <ActionButton
-            className={existing ? 'btn btn-danger' : 'btn btn-primary'}
-            pending={pending}
-            pendingLabel="Starting…"
-            disabled={!gate.open}
-            title={gate.reason}
-            onClick={submit}
-          >
-            {existing ? 'Replace and record' : 'Start recording'}
-          </ActionButton>
-        </>
+        <ActionButton
+          className={existing ? 'btn btn-danger' : 'btn btn-primary'}
+          pending={pending}
+          pendingLabel="Starting…"
+          disabled={!gate.open}
+          title={gate.reason}
+          onClick={submit}
+        >
+          {existing ? 'Replace and Record' : 'Start Recording'}
+        </ActionButton>
       }
     >
       {existing && (
@@ -102,7 +101,7 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
       </div>
 
       <div className="form-group">
-        <label className="form-label" htmlFor="capture-seconds">Record for</label>
+        <label className="form-label" htmlFor="capture-seconds">Record For</label>
         <select
           id="capture-seconds"
           className="form-control"

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { IconCheck, IconCopy } from './Icons'
-import { copyText } from './CopyableId'
+import { copyText } from '../../utils/copyText'
 import { HelpLink, OnlineLink, RepoLink } from './HelpLink'
 
 /**

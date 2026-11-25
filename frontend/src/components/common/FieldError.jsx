@@ -14,6 +14,9 @@ export const fieldErrorProps = (error, errorId, hintId) => ({
   'aria-describedby': [hintId, error && errorId].filter(Boolean).join(' ') || undefined
 })
 
+/** Whether a control's props are those of one whose value is wrong. */
+export const isWrong = (props) => Boolean(props['aria-invalid'])
+
 /**
  * What is wrong with one field, beneath the field and its hint, in FormProblem's look: the form's
  * warning hint with its icon. Draws nothing without an `error`. When an error shows is the form's to

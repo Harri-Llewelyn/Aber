@@ -116,7 +116,7 @@ No platform backup has succeeded for 36 hours. A restore can only go back to the
 Check first:
 
 1. Open **Backups**. A failed backup shows its reason.
-2. Select **Take a backup** and watch the result.
+2. Select **Take a Backup** and watch the result.
 3. If no backup ever starts, the backup service may not be running. Tell whoever runs the server.
 
 ### Off-site Backup Stale
@@ -546,7 +546,7 @@ The historian has had no successful physical backup for 36 hours. It fires only 
 Check first:
 
 1. Open **Backups** and read the historian's card.
-2. Select **Take a backup**. The card shows the result.
+2. Select **Take a Backup**. The card shows the result.
 3. Check **Historian WAL Archiving Failing**. A broken repository causes both.
 
 ### Historian WAL Archiving Failing

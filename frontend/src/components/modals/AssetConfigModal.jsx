@@ -114,7 +114,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
       icon={<IconFileText size={18} />}
       size="wide"
       onClose={onClose}
-      footer={<button className="btn btn-ghost" onClick={onClose}>Close</button>}
+      dismiss="Close"
     >
       {attachedSchemas.length > 0 && (
         <div className="callout callout-info">

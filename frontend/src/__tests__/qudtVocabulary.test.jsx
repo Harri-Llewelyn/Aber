@@ -159,7 +159,7 @@ describe('Add Metric and the QUDT quantity kinds', () => {
   const standardSelect = () => screen.getByLabelText('Standard')
   const semanticIdInput = () => screen.getByRole('textbox', { name: /Semantic ID/ })
   const referenceType = () => screen.getByLabelText('Reference Type')
-  const openSearch = () => fireEvent.click(screen.getByRole('button', { name: 'Search vocabularies' }))
+  const openSearch = () => fireEvent.click(screen.getByRole('button', { name: 'Search Vocabularies' }))
   const search = (text) => fireEvent.change(
     screen.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: text } })
   const listed = () => {
@@ -266,7 +266,7 @@ describe('Edit Metric and the QUDT quantity kinds', () => {
     const modal = open(mtconnect)
     fireEvent.click(modal.getByRole('button', { name: 'Add Further ID' }))
     const field = furtherSection(modal)
-    fireEvent.click(field.getByRole('button', { name: 'Search vocabularies' }))
+    fireEvent.click(field.getByRole('button', { name: 'Search Vocabularies' }))
     fireEvent.change(field.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: 'temperature' } })
     fireEvent.click(field.getByRole('button', { name: /Temperature/ }))
 
@@ -277,12 +277,12 @@ describe('Edit Metric and the QUDT quantity kinds', () => {
   it('offers none as the primary id of that metric, so its own field has no search at all', () => {
     // The only candidates are quantity kinds, and an MTConnect metric may not have one as its own id.
     const modal = open(mtconnect)
-    expect(modal.queryAllByRole('button', { name: 'Search vocabularies' })).toHaveLength(0)
+    expect(modal.queryAllByRole('button', { name: 'Search Vocabularies' })).toHaveLength(0)
   })
 
   it('offers the kinds as the primary id of a Custom metric', () => {
     const modal = open({ ...mtconnect, standard: null, semantic_id: null, semantic_id_type: null, name: 'Hydraulic/OIL_TEMPERATURE' })
-    fireEvent.click(modal.getAllByRole('button', { name: 'Search vocabularies' })[0])
+    fireEvent.click(modal.getAllByRole('button', { name: 'Search Vocabularies' })[0])
     fireEvent.change(modal.getByRole('textbox', { name: 'Search the vocabularies and templates' }), { target: { value: 'flow' } })
     expect(modal.getByRole('list', { name: 'Matching concepts' }).textContent).toContain('Volume Flow Rate')
   })

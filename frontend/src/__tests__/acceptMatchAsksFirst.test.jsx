@@ -39,7 +39,7 @@ const element = (props) => (
 )
 const show = (props = {}) => render(element(props))
 const approval = () => screen.getByRole('dialog', { name: /Approve Discovered Device/ })
-const question = () => screen.queryByRole('dialog', { name: 'Accept match' })
+const question = () => screen.queryByRole('dialog', { name: 'Accept Match' })
 const press = () => fireEvent.click(within(approval()).getAllByRole('button', { name: 'Accept Match' })[0])
 
 beforeEach(() => vi.clearAllMocks())

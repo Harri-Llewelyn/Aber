@@ -110,7 +110,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
         Every unexpired mint is a live credential — issuing another <strong>adds</strong> one
         rather than replacing it, so each is revoked separately.
       </>}
-      footer={<button className="btn btn-primary" onClick={close}>Done</button>}
+      dismiss="Close"
     >
       <div className="callout callout-warning">
         <IconShieldAlert size={14} className="callout-icon" />

@@ -31,14 +31,25 @@ describe('the block', () => {
     expect(written).toEqual([commands.CONVERGE_JOURNAL])
   })
 
-  it('reports a refused copy on the button and in a toast', async () => {
+  it('reports a refused copy under itself in a dialog, where a toast would be behind it', async () => {
     vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => { throw new Error('refused') }) } })
     const showToast = vi.fn()
     render(<ApplianceCommand command="true" showToast={showToast} />)
 
     fireEvent.click(button('Copy Command'))
-    await waitFor(() => expect(button('Copy failed')).toBeInTheDocument())
-    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Could not reach the clipboard'), 'error')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the clipboard')
+    expect(button('Copy Command')).toHaveAccessibleDescription(/Could not reach the clipboard/)
+    expect(showToast).not.toHaveBeenCalled()
+  })
+
+  it('reports a refused copy in a toast from a drawer', async () => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => { throw new Error('refused') }) } })
+    const showToast = vi.fn()
+    render(<ApplianceCommand drawer command="true" showToast={showToast} />)
+
+    fireEvent.click(button('Copy Command'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Could not reach the clipboard'), 'error'))
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('is laid out in a dialog as the install command is: label and button on one line, the code under it', () => {

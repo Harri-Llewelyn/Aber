@@ -464,7 +464,7 @@ describe('the destination button', () => {
 
     const reads = api.get.mock.calls.length
     fireEvent.change(screen.getByLabelText('S3 bucket'), { target: { value: 'plant-history-2' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save Destination$/ }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(api.patchSetting).toHaveBeenCalledWith('archive.bucket', 'plant-history-2')
     expect(api.get.mock.calls.length).toBeGreaterThan(reads)

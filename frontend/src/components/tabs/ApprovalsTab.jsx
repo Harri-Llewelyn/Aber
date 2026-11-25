@@ -23,6 +23,8 @@ import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
 import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { RequiredMark } from '../common/RequiredMark'
 import { formatDateTime, formatRelative } from '../../utils/format'
 import { canDecide } from '../../utils/proposalAuthority'
@@ -286,7 +288,7 @@ function DiffTable({ proposal, names, replaced }) {
 function RejectDialog({ onCancel, onConfirm, busy }) {
   const [reason, setReason] = useState('')
   const [error, setError] = useState(null)
-  const problem = reason.trim() === '' ? 'Say why it is rejected' : null
+  const check = useFormCheck({ reason: { id: 'reject-reason', missing: reason.trim() === '' && 'Say why it is rejected' } })
   const reject = async () => {
     setError(null)
     try {
@@ -297,33 +299,28 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
   }
   return (
     <Modal
-      title="Reject this proposal"
+      title="Reject This Proposal"
       icon={<IconX size={18} />}
-      onClose={busy ? () => {} : onCancel}
-      problem={problem}
+      busy={busy}
+      onClose={onCancel}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
-          <ActionButton
-            type="button"
-            className="btn btn-danger"
-            pending={busy}
-            pendingLabel="Rejecting…"
-            disabled={problem !== null}
-            title={problem ?? undefined}
-            onClick={reject}
-          >
-            Reject
-          </ActionButton>
-        </>
+        <ActionButton
+          type="button"
+          className="btn btn-danger"
+          pending={busy}
+          pendingLabel="Rejecting…"
+          onClick={() => check.press(reject)}
+        >
+          Reject
+        </ActionButton>
       }
     >
       {/* A CHECK constraint requires the reason: a rejected proposal frees its slot at once, so
           the reason is what makes a second attempt different from the first. */}
-      <label className="form-label" htmlFor="reject-reason">
-        Why? The proposer sees this, and it is the only thing they get other than “no”. <RequiredMark />
-      </label>
+      <label className="form-label" htmlFor="reject-reason">Reason <RequiredMark /></label>
       <textarea
         id="reject-reason"
         className="form-control"
@@ -332,7 +329,12 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
         onChange={e => setReason(e.target.value)}
         placeholder="That machine is being retired next month."
         aria-required="true"
+        {...fieldErrorProps(check.errors.reason, 'reject-reason-error', 'reject-reason-hint')}
       />
+      <div id="reject-reason-hint" className="form-hint">
+        The proposer sees this, and it is the only thing they get other than “no”.
+      </div>
+      <FieldError id="reject-reason-error" error={check.errors.reason} />
     </Modal>
   )
 }

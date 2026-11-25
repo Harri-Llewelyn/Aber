@@ -14,12 +14,12 @@ export default function check() {
   const problems237 = [];
   const help = devices.slice(devices.indexOf('## Suppression windows'));
   if (!devices.includes('## Suppression windows')) problems237.push('help/pages/devices.md has no "## Suppression windows" section');
-  for (const label of ['Schedule window…', 'Change…', 'End now', 'Cancel window', 'From cell', 'NOW']) {
+  for (const label of ['Schedule Window…', 'Change…', 'End Now', 'Cancel Window', 'From cell', 'NOW']) {
     if (!code.includes(label)) problems237.push(`${SECTION}: no longer draws "${label}"`);
     if (!help.includes(`**${label}**`)) problems237.push(`help/pages/devices.md: the section does not name **${label}**`);
   }
-  if (!code.includes("'Schedule window'") || !help.includes('Select **Schedule window**.')) {
-    problems237.push("the dialog's confirm and the help's last step do not both say Schedule window");
+  if (!code.includes("'Schedule Window'") || !help.includes('Select **Schedule Window**.')) {
+    problems237.push("the dialog's confirm and the help's last step do not both say Schedule Window");
   }
   for (const page of ['help/pages/gateways.md', 'help/pages/cells.md', 'help/pages/site-map.md']) {
     if (!read(page).includes('(devices.md#suppression-windows)')) problems237.push(`${page} does not link to devices.md#suppression-windows`);

@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { backupUrl } from '../routes'
 import { BackupsTab, BACKUP_STALE_HOURS, physicalBackupState, keptBecause, backupWarnings } from '../components/tabs/BackupsTab'
@@ -44,6 +44,7 @@ import { api } from '../api'
 import { expectCardHeading, pageToolbar } from '../test/cardHeading'
 import { dropdownButton, pick } from '../test/listFilters'
 import { getByTooltip, tooltipOf } from '../test/tooltips'
+import { pressHeld } from '../test/dialogs'
 
 const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
 
@@ -131,7 +132,7 @@ describe('the list of runs', () => {
     expect(within(bar).getByRole('button', { name: /^Status: / })).toBeInTheDocument()
     const actions = bar.querySelector(':scope > .filter-bar-actions')
     const buttons = within(actions).getAllByRole('button').map(b => b.textContent.trim())
-    expect(buttons).toEqual(['Set a destination', 'Take a backup'])
+    expect(buttons).toEqual(['Set a destination', 'Take a Backup'])
   })
 
   it('lists a completed run with its backup: note, size, contents and retention', async () => {
@@ -468,15 +469,15 @@ describe('the off-site copy', () => {
     expect(screen.getByTestId('offsite-circularity')).toHaveTextContent('Keep the bucket credentials and the decryption key outside this stack')
 
     const type = (label, value) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
-    type('S3 endpoint', ' https://minio.example:9000 ')
+    type('S3 Endpoint', ' https://minio.example:9000 ')
     type('Region', 'us-east-1')
     type('Bucket', 'backups')
-    type('Key prefix', 'site-a')
-    type('Access key ID', 'backup-writer')
-    type('Encryption recipient', DESTINATION.recipient)
-    type('Secret access key', ' s3cret ')
+    type('Key Prefix', 'site-a')
+    type('Access Key ID', 'backup-writer')
+    type('Encryption Recipient', DESTINATION.recipient)
+    type('Secret Access Key', ' s3cret ')
     fireEvent.click(screen.getByLabelText(/Address the bucket by path/))
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Destination' }))
 
     await waitFor(() => expect(api.setBackupOffsiteDestination).toHaveBeenCalledWith({
       endpoint: 'https://minio.example:9000', region: 'us-east-1', bucket: 'backups', prefix: 'site-a',
@@ -495,7 +496,10 @@ describe('the off-site copy', () => {
     // Said to be stored, and never shown: there is no field until the person asks to replace it.
     expect(screen.getByText('Stored in the vault')).toBeInTheDocument()
     expect(document.querySelector('#offsite-secret')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    pressHeld(screen.getByRole('dialog'), 'Save Destination', 'Nothing has changed.')
+    expect(api.setBackupOffsiteDestination).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('Bucket'), { target: { value: 'Not A Bucket' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Destination' }))
     expect(await screen.findByText(/must be an S3 bucket name/)).toBeInTheDocument()
     expect(api.setBackupOffsiteCredential).not.toHaveBeenCalled()
   })
@@ -507,10 +511,11 @@ describe('the off-site copy', () => {
     renderTab()
     fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
     fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
-    expect(screen.getByTestId('offsite-secret-replace')).toHaveTextContent('the next off-site copy failing')
-    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
-    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'rotated' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    const question = screen.getByRole('dialog', { name: 'Replace the Secret Access Key' })
+    expect(question).toHaveTextContent('the next off-site copy failing')
+    await act(async () => { fireEvent.click(within(question).getByRole('button', { name: 'Replace Key' })) })
+    fireEvent.change(screen.getByLabelText('Secret Access Key'), { target: { value: 'rotated' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Destination' }))
     await waitFor(() => expect(api.setBackupOffsiteCredential).toHaveBeenCalledWith('rotated'))
     expect(api.setBackupOffsiteDestination.mock.invocationCallOrder[0])
       .toBeLessThan(api.setBackupOffsiteCredential.mock.invocationCallOrder[0])
@@ -523,11 +528,13 @@ describe('the off-site copy', () => {
     renderTab()
     fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
     fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
-    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'rotated' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole('dialog', { name: 'Replace the Secret Access Key' })).getByRole('button', { name: 'Replace Key' }))
+    })
+    fireEvent.change(screen.getByLabelText('Secret Access Key'), { target: { value: 'rotated' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Destination' }))
     expect(await screen.findByText('Only an Administrator can set the secret access key. The stored one is unchanged.')).toBeInTheDocument()
-    expect(screen.getByLabelText('Secret access key').value).toBe('rotated')
+    expect(screen.getByLabelText('Secret Access Key').value).toBe('rotated')
   })
 
   it('removes the destination after asking, and says so as a success, as Save does', async () => {
@@ -535,9 +542,12 @@ describe('the off-site copy', () => {
     api.clearBackupOffsiteDestination.mockResolvedValue(true)
     const { props } = renderTab()
     fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Remove the destination' }))
-    expect(screen.getByText(/Copies already made stay in the bucket/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Destination' }))
+    const question = screen.getByRole('dialog', { name: 'Remove Destination' })
+    expect(question).toHaveTextContent('Copies already made stay in the bucket.')
+    expect(within(question).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(api.clearBackupOffsiteDestination).not.toHaveBeenCalled()
+    fireEvent.click(within(question).getByRole('button', { name: 'Remove Destination' }))
     await waitFor(() => expect(api.clearBackupOffsiteDestination).toHaveBeenCalled())
     await waitFor(() => expect(props.showToast).toHaveBeenCalledWith(
       'Off-site destination removed. Copies already made stay in the bucket.', 'success', { to: backupUrl() }))
@@ -928,7 +938,7 @@ describe('whether backups are working now', () => {
 
 /** The header button opens the dialog; the dialog's own button is the one that asks. */
 function openDialog() {
-  fireEvent.click(screen.getByRole('button', { name: /Take a backup/ }))
+  fireEvent.click(screen.getByRole('button', { name: /Take a Backup/ }))
   return screen.getByLabelText('Note (optional)').closest('.modal')
 }
 
@@ -943,7 +953,7 @@ describe('asking', () => {
     // Every component, Grafana by its name.
     expect(modal).toHaveTextContent('the forge, the broker accounts, Grafana and the internal CA')
     fireEvent.change(within(modal).getByLabelText('Note (optional)'), { target: { value: '  pre-upgrade  ' } })
-    fireEvent.click(within(modal).getByRole('button', { name: /Take a backup/ }))
+    fireEvent.click(within(modal).getByRole('button', { name: /Take a Backup/ }))
 
     await waitFor(() => expect(api.requestBackup).toHaveBeenCalledWith('pre-upgrade'))
     expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/queued/i), 'success', { to: backupUrl() })
@@ -955,7 +965,7 @@ describe('asking', () => {
     const { props } = renderTab()
     await screen.findByTestId('run-j-1')
     const modal = openDialog()
-    fireEvent.click(within(modal).getByRole('button', { name: /Take a backup/ }))
+    fireEvent.click(within(modal).getByRole('button', { name: /Take a Backup/ }))
     await waitFor(() => expect(modal).toHaveTextContent(/One backup runs at a time/))
     expect(props.showToast).not.toHaveBeenCalled()
     expect(screen.getByLabelText('Note (optional)')).toBeInTheDocument()
@@ -974,7 +984,7 @@ describe('asking', () => {
     api.activeBackupJob.mockResolvedValue({ id: 'j-2', status: 'PENDING', origin: 'requested', note: 'now', created_at: new Date().toISOString() })
     api.cancelBackupJob.mockResolvedValue(true)
     const { props } = renderTab()
-    const button = await screen.findByRole('button', { name: /Take a backup/ })
+    const button = await screen.findByRole('button', { name: /Take a Backup/ })
     expect(button).toBeDisabled()
     expect(screen.getByText('Queued')).toBeInTheDocument()
 

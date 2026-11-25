@@ -9,6 +9,7 @@ import { requiresRolesTitle } from '../hooks/usePermissions'
 import { metricUrl, tabUrl } from '../routes'
 import { queryTabLink } from '../test/tabBar'
 import { tooltipOf } from '../test/tooltips'
+import { pressHeld } from '../test/dialogs'
 
 /**
  * Export, Upload and New in YAML on the Derived tab. Export saves the derived metrics ticked, or every
@@ -69,7 +70,8 @@ const openDerived = async (canManage = true) => {
   await screen.findByRole('checkbox', { name: 'Select Controller/PARTS_PER_HOUR' })
 }
 const dialogs = () => [...document.querySelectorAll('dialog[open]')].map(d => within(d))
-const topDialog = () => within([...document.querySelectorAll('dialog[open]')].at(-1))
+const topElement = () => [...document.querySelectorAll('dialog[open]')].at(-1)
+const topDialog = () => within(topElement())
 const toolbar = () => document.querySelector('.filter-bar-actions')
 
 const file = (text, name = 'derived-metrics.yaml') => new File([text], name, { type: 'application/yaml' })
@@ -359,7 +361,7 @@ describe('Upload', () => {
     expect(heads[1]).toMatch(/^Unchanged/)
     expect(d.getByText('Line 3')).toBeInTheDocument()
     expect(d.getByText(/Controller\/NOTHING is not in the catalogue/)).toBeInTheDocument()
-    expect(document.querySelector('.modal-problem')).toHaveTextContent('1 derived metric refused. Fix the lines named above, then try again.')
+    expect(topElement().querySelector('.modal-problem')).toHaveTextContent('1 derived metric refused. Fix the lines named above, then try again.')
     expect(d.getByRole('button', { name: 'Apply 0 Derived Metrics' })).toBeDisabled()
     expect(api.applyDerivedMetrics).toHaveBeenCalledTimes(1)
     // Closing the preview leaves the editor, with the text as it was, to fix.
@@ -404,14 +406,15 @@ describe('Upload', () => {
     expect(dialogs()).toHaveLength(2)
   })
 
-  it('says nothing would change, and holds Apply, for a file that is what the site has', async () => {
+  it('says nothing would change, and applies nothing, for a file that is what the site has', async () => {
     api.applyDerivedMetrics.mockResolvedValue([UNCHANGED])
     await openDerived()
     await upload(file(FILE_TEXT))
     await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
     const d = topDialog()
     expect(d.getByText('Every derived metric here is already as the file says. Nothing would change.')).toBeInTheDocument()
-    expect(d.getByRole('button', { name: 'Apply 0 Derived Metrics' })).toBeDisabled()
+    pressHeld(topElement(), 'Apply 0 Derived Metrics', 'Nothing has changed.')
+    expect(api.applyDerivedMetrics).toHaveBeenCalledTimes(1)
   })
 
   it('names the line of a syntax error in the file without asking the database', async () => {
@@ -450,18 +453,17 @@ describe('Upload', () => {
 })
 
 describe('New in YAML', () => {
-  it('opens the same editor empty, and holds Apply Derived Metrics until something is written', async () => {
+  it('opens the same editor empty, and says on the press that nothing is written', async () => {
     await openDerived()
     fireEvent.click(screen.getByRole('button', { name: /New in YAML/ }))
     await editorOpen('New Derived Metrics in YAML')
     const d = topDialog()
     expect(d.getByRole('heading', { name: 'New Derived Metrics in YAML' })).toBeInTheDocument()
     expect(editorText()).toBe('')
-    const add = d.getByRole('button', { name: 'Apply Derived Metrics' })
-    expect(add).toBeDisabled()
-    expect(tooltipOf(add)).toBe('Write at least one derived metric')
+    pressHeld(topElement(), 'Apply Derived Metrics', 'Write at least one derived metric')
+    expect(dialogs()).toHaveLength(1)
     typeIn(FILE_TEXT)
-    await waitFor(() => expect(d.getByRole('button', { name: 'Apply Derived Metrics' })).toBeEnabled())
+    await waitFor(() => expect(topElement().querySelector('.modal-problem')).toHaveTextContent(/^$/))
   })
 
   it('checks what was written, and applies it without a file name in the toast', async () => {
@@ -470,9 +472,8 @@ describe('New in YAML', () => {
     fireEvent.click(screen.getByRole('button', { name: /New in YAML/ }))
     await editorOpen('New Derived Metrics in YAML')
     typeIn(FILE_TEXT)
-    await waitFor(() => expect(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })).toBeEnabled())
     await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply Derived Metrics' })) })
-    expect(topDialog().getByRole('heading', { name: 'Apply derived metrics' })).toBeInTheDocument()
+    expect(topDialog().getByRole('heading', { name: 'Apply Derived Metrics' })).toBeInTheDocument()
     await act(async () => { fireEvent.click(topDialog().getByRole('button', { name: 'Apply 1 Derived Metric' })) })
     expect(showToast).toHaveBeenCalledWith("Derived metric 'Controller/PARTS_PER_SHIFT' added to the catalog", 'success', { to: metricUrl('made-id', false, true) })
   })

@@ -612,7 +612,7 @@ describe('exporting from Overview', () => {
     expect(exportIn(popover)).not.toHaveAttribute('aria-disabled')
 
     fireEvent.click(exportIn(popover))
-    const dialog = await screen.findByRole('dialog', { name: /Export readings — 3 devices/ })
+    const dialog = await screen.findByRole('dialog', { name: /Export Readings — 3 devices/ })
     // The box is gone, and the dialog holds what it picked.
     expect(screen.queryByRole('dialog', { name: 'Selection' })).not.toBeInTheDocument()
     expect(within(dialog).getByText(/^3 devices · 2 metrics · /)).toBeInTheDocument()
@@ -638,7 +638,7 @@ describe('exporting from Overview', () => {
     await visit('/history/overview?span=day&at=2026-11-02')
     const popover = tenToTwo()
     fireEvent.click(exportIn(popover))
-    const dialog = await screen.findByRole('dialog', { name: /Export readings — 3 devices/ })
+    const dialog = await screen.findByRole('dialog', { name: /Export Readings — 3 devices/ })
     // The rate of a counter none of them reports is not offered.
     expect(within(dialog).getByText(/^3 devices · 3 metrics · /)).toBeInTheDocument()
     expect(within(dialog).getByText('Spindle/LOAD_RATE')).toBeInTheDocument()
@@ -658,7 +658,7 @@ describe('exporting from Overview', () => {
     fireEvent.focus(button)
     await waitFor(() => expect(screen.getByText(DENIED)).toBeInTheDocument())
     fireEvent.click(button)
-    expect(screen.queryByRole('dialog', { name: /Export readings/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /Export Readings/ })).not.toBeInTheDocument()
     // The charts stay: Chart and Zoom are as they were.
     expect(within(popover).getByRole('button', { name: /Zoom/ })).not.toHaveAttribute('aria-disabled')
   })
@@ -679,7 +679,7 @@ describe('exporting from Overview', () => {
     fireEvent.focus(button)
     await waitFor(() => expect(screen.getByText(/^An export can cover at most 14 days, set on Settings › History\. This window is 2\d days\.$/)).toBeInTheDocument())
     fireEvent.click(button)
-    expect(screen.queryByRole('dialog', { name: /Export readings/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /Export Readings/ })).not.toBeInTheDocument()
     expect(asked()).toEqual([])
   })
 
@@ -697,7 +697,7 @@ describe('exporting from Overview', () => {
     expect(toolbarExport()).toHaveClass('btn-primary')
     expect(toolbarExport()).not.toHaveAttribute('aria-disabled')
     fireEvent.click(toolbarExport())
-    const dialog = await screen.findByRole('dialog', { name: /Export readings — 2 devices/ })
+    const dialog = await screen.findByRole('dialog', { name: /Export Readings — 2 devices/ })
     fireEvent.click(within(dialog).getByRole('button', { name: /^Export CSV$/ }))
     await waitFor(() => expect(asked()).toHaveLength(1))
     expect(asked()[0].assetIds.sort()).toEqual([LATHE, MILL].map(telemetryKey).sort())
@@ -722,7 +722,7 @@ describe('exporting from Overview', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Pick Lathe 3' }))
     expect(toolbarExport()).toHaveAttribute('aria-disabled', 'true')
     fireEvent.click(toolbarExport())
-    expect(screen.queryByRole('dialog', { name: /Export readings/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /Export Readings/ })).not.toBeInTheDocument()
   })
 
   it('says why when the devices declare no metric, and has nothing to export', async () => {

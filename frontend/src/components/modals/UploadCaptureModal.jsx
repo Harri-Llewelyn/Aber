@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
 import { captureManifest, captureFileProblem } from '../../api'
+import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { TypedGate, useTypedGate } from '../common/TypedGate'
@@ -61,8 +63,15 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
     : []
   const ready = !!parsed && !!subject && unknownDevices.length === 0
   const gate = useTypedGate(ready && subject.capture ? subject.name : null, `${subject?.kind} name`)
-  // A file that is not a capture, or records devices this site lacks, is said in a callout.
-  const problem = parsed && unknownDevices.length === 0 && !subject ? 'Choose a gateway or device to file it against' : null
+  const check = useFormCheck({
+    // The file is chosen before the dialog opens. What is wrong with it is said in a callout.
+    file: {
+      missing: parsed === undefined ? 'Reading the file…'
+        : readError ? 'This file is not a capture.'
+          : unknownDevices.length > 0 && 'This file records devices this site does not have.',
+    },
+    subject: { id: 'upload-subject', missing: !subject && 'Choose a gateway or device to file it against' },
+  })
 
   const submit = () => run(async () => {
     setError(null)
@@ -75,29 +84,24 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
 
   return (
     <Modal
-      title="Upload capture"
+      title="Upload Capture"
       icon={<IconUpload size={18} />}
-      onClose={pending ? () => {} : onCancel}
-      problem={problem}
+      busy={pending}
+      onClose={onCancel}
+      problem={check.problem}
       error={error}
+      dismiss="Cancel"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
-          <ActionButton
-            className={subject?.capture ? 'btn btn-danger' : 'btn btn-primary'}
-            pending={pending}
-            pendingLabel="Uploading…"
-            disabled={!ready || !gate.open}
-            title={ready ? gate.reason : (
-              readError ? 'This file is not a capture'
-                : unknownDevices.length > 0 ? 'This file records devices this site does not have'
-                  : 'Choose a subject'
-            )}
-            onClick={submit}
-          >
-            {subject?.capture ? 'Replace and upload' : 'Upload'}
-          </ActionButton>
-        </>
+        <ActionButton
+          className={subject?.capture ? 'btn btn-danger' : 'btn btn-primary'}
+          pending={pending}
+          pendingLabel="Uploading…"
+          disabled={!gate.open}
+          title={gate.reason}
+          onClick={() => check.press(submit)}
+        >
+          {subject?.capture ? 'Replace and Upload' : 'Upload Capture'}
+        </ActionButton>
       }
     >
       <p className="mono form-hint">{file.name}</p>
@@ -154,7 +158,7 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
 
       {parsed && unknownDevices.length === 0 && (
         <div className="form-group">
-          <label className="form-label" htmlFor="upload-subject">File it against <RequiredMark /></label>
+          <label className="form-label" htmlFor="upload-subject">File It Against <RequiredMark /></label>
           <select
             id="upload-subject"
             className="form-control"
@@ -162,6 +166,7 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
             onChange={e => { setSubjectKey(e.target.value); gate.setTyped('') }}
             disabled={pending}
             aria-required="true"
+            {...fieldErrorProps(check.errors.subject, 'upload-subject-error', 'upload-subject-hint')}
           >
             <option value="">Choose a gateway or device…</option>
             <optgroup label="Gateways">
@@ -179,10 +184,11 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
               ))}
             </optgroup>
           </select>
-          <p className="form-hint">
+          <p id="upload-subject-hint" className="form-hint">
             A capture is stored per subject, under that subject&apos;s own prefix. A subject being
             recorded cannot take an upload until the recording ends.
           </p>
+          <FieldError id="upload-subject-error" error={check.errors.subject} />
         </div>
       )}
 

@@ -13,6 +13,7 @@ import { SettingsTab } from '../components/tabs/SettingsTab'
 import { api } from '../api'
 import { SETTINGS_TABS } from '../navigation'
 import { deliveryOutcome, parseHosts, peopleCount, roleLabel, SEVERITIES } from '../utils/notifications'
+import { pressHeld } from '../test/dialogs'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -156,16 +157,16 @@ describe('for an Administrator', () => {
     fireEvent.click(within(toolbar()).getByRole('button', { name: /Issue signing key/ }))
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText(/shown/)).toBeInTheDocument()
-    expect(within(dialog).queryByDisplayValue(/whsec_/)).toBeNull()
+    expect(within(dialog).queryByText(/whsec_/)).toBeNull()
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: /Issue Key/ })) })
 
-    expect(within(screen.getByRole('dialog')).getByDisplayValue('whsec_fixture-not-a-real-key')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('whsec_fixture-not-a-real-key')).toBeInTheDocument()
     expect(screen.getByText('Copy this now — it is not shown again.')).toBeInTheDocument()
     expect(showToast).toHaveBeenCalledWith('Signing key issued', 'success', { to: '/settings/notifications' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.queryByDisplayValue(/whsec_/)).toBeNull()
+    expect(screen.queryByText(/whsec_/)).toBeNull()
 
     // Issued now, so asking again is a rotation, and asks before it shows anything.
     await waitFor(() => expect(within(toolbar()).getByRole('button', { name: /Rotate signing key/ })).toBeInTheDocument())
@@ -173,7 +174,7 @@ describe('for an Administrator', () => {
     const again = screen.getByRole('dialog')
     expect(within(again).getByText(/The old key stops signing at once/)).toBeInTheDocument()
     expect(within(again).getByRole('button', { name: /Rotate Key/ })).toHaveClass('btn-danger')
-    expect(within(again).queryByDisplayValue(/whsec_/)).toBeNull()
+    expect(within(again).queryByText(/whsec_/)).toBeNull()
     expect(api.issueNotificationSigningKey).toHaveBeenCalledTimes(1)
   })
 
@@ -213,7 +214,7 @@ describe('for an Administrator', () => {
     expect(within(dialog).getByTestId('webhook-host-unlisted')).toHaveTextContent('hooks.example.net is not an allowed host')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Allow It' }))
     expect(within(dialog).queryByTestId('webhook-host-unlisted')).toBeNull()
-    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Save' })) })
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Save Webhook' })) })
 
     expect(api.patchSetting).toHaveBeenCalledWith('notifications.webhook_allowed_hosts', ['hooks.example.net'])
     expect(api.setNotificationWebhookUrl).toHaveBeenCalledWith('https://Hooks.Example.net/receiver/x')
@@ -226,10 +227,11 @@ describe('for an Administrator', () => {
     api.clearNotificationWebhookUrl.mockResolvedValue(2)
     await show()
     fireEvent.click(within(toolbar()).getByRole('button', { name: /Change webhook/ }))
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove the webhook' }))
-    await act(async () => {
-      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove the webhook' }))
-    })
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove Webhook' }))
+    const question = screen.getByRole('dialog', { name: 'Remove Webhook' })
+    expect(question).toHaveTextContent('The delivery log keeps every row.')
+    expect(api.clearNotificationWebhookUrl).not.toHaveBeenCalled()
+    await act(async () => { fireEvent.click(within(question).getByRole('button', { name: 'Remove Webhook' })) })
     expect(api.clearNotificationWebhookUrl).toHaveBeenCalledTimes(1)
     expect(showToast).toHaveBeenCalledWith('Webhook removed. 2 waiting messages were dropped.', 'success',
       { to: '/settings/notifications' })
@@ -313,12 +315,10 @@ describe('email', () => {
     await show()
     fireEvent.click(await within(toolbar()).findByRole('button', { name: /Set up email/ }))
     const dialog = screen.getByRole('dialog')
-    const save = within(dialog).getByRole('button', { name: 'Save' })
-    expect(save).toBeDisabled()
-    expect(save).toHaveClass('btn-disabled')
+    const save = pressHeld(dialog, 'Save Email', 'Nothing has changed.')
+    expect(api.patchSetting).not.toHaveBeenCalled()
     fireEvent.click(within(dialog).getByLabelText(/Operator/))
     fireEvent.click(within(dialog).getByLabelText(/Administrator/))
-    expect(save).toBeEnabled()
     await act(async () => { fireEvent.click(save) })
     expect(api.patchSetting).toHaveBeenCalledWith('notifications.email_roles', ['Administrator', 'Operator'])
     expect(showToast).toHaveBeenCalledWith('Email saved. Alerts are emailed to the Administrator, Operator roles.', 'success',
@@ -334,7 +334,7 @@ describe('email', () => {
     const dialog = screen.getByRole('dialog')
     fireEvent.click(within(dialog).getByLabelText(/Administrator/))
     fireEvent.click(within(dialog).getByLabelText(/Shopfloor Manager/))
-    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Save' })) })
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Save Email' })) })
     expect(api.patchSetting).toHaveBeenCalledWith('notifications.email_roles', [])
     expect(showToast).toHaveBeenCalledWith('Email saved. Nobody is emailed about alerts now.', 'success', { to: '/settings/notifications' })
   })
@@ -345,7 +345,7 @@ describe('email', () => {
     fireEvent.click(await within(toolbar()).findByRole('button', { name: /Set up email/ }))
     const dialog = screen.getByRole('dialog')
     fireEvent.click(within(dialog).getByLabelText(/Operator/))
-    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Save' })) })
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Save Email' })) })
     expect(within(screen.getByRole('dialog')).getByText(/which is not a role/)).toBeInTheDocument()
     expect(showToast).not.toHaveBeenCalled()
   })

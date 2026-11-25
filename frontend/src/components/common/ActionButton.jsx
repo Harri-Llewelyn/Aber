@@ -7,9 +7,11 @@ import { Tooltip } from './Tooltip'
  * the double-submit guard usePendingAction opens. `className` is passed in whole rather than
  * composed from variant props.
  *
- * A button that cannot go ahead looks refused: `disabled` adds `btn-disabled`, the greyed look,
- * unless it is pending, where `btn-loading` keeps the label legible. Say why where the person is
- * looking as well (Modal's `problem`); `title`, its tooltip, is never the only place.
+ * A dialog's primary is never `disabled` for what its form still needs: the press says it
+ * (hooks/useFormCheck.js). `disabled` is for a typed gate, for an act another control's work holds,
+ * and for one nobody here can make possible, whose reason is then in view. It adds `btn-disabled`, the
+ * greyed look, unless the button is pending, where `btn-loading` keeps the label legible. `title`, its
+ * tooltip, is never the only place a reason is.
  *
  * `permitted` is for a button the signed-in role may not use: `permitted={false}` disables it,
  * adds `btn-disabled`, shows `deniedTitle` as its tooltip and never calls `onClick`. It replaces

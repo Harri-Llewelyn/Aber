@@ -164,6 +164,6 @@ describe('the sign-in challenge', () => {
     render(<App />)
     act(() => authCallback('PASSWORD_RECOVERY', session))
     expect(await screen.findByRole('heading', { name: 'Enter your code' })).toBeInTheDocument()
-    expect(screen.queryByLabelText(/New password/)).toBeNull()
+    expect(screen.queryByLabelText(/New Password/)).toBeNull()
   })
 })

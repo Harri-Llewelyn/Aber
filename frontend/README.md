@@ -141,8 +141,9 @@ everyone but an Administrator for itself. `tabRoleGating.test.jsx` holds the fou
 ### What looks clickable
 
 Only what acts looks clickable. `.mono` is a typeface and takes the text colour; accent colour
-means a real link (the System page's open chip, a `.count-link`). A value that copies is a
-`CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A long
+means a real link (the System page's open chip, a `.count-link`). An id that copies is a
+`CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A value a
+dialog hands over is a `CopyField` ([A value to copy](#a-value-to-copy)). A long
 id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`). The copy and the aria
 label always carry the full value. The tooltip carries it whenever the chip is cut, measured as the
 tooltip opens, and otherwise says "Click to copy this {label}". A read-only or disabled `.form-control` takes the page background and muted
@@ -246,7 +247,8 @@ screen readers read it unevenly, and on an icon-only button it was often the onl
   description. A tooltip shows on hover and focus, so it goes on something that takes focus; a
   sentence about anything else belongs in visible text or a `HelpTip`, or on the column header.
   A control that gets focus back, as a dialog's opener does, shows its tooltip, and the first
-  Escape closes that. A component that draws a control takes the text as a prop and wraps its own
+  Escape closes that. A field that is wrong (`fieldErrorProps`) shows its tooltip to the pointer
+  alone: the bubble opens where its `FieldError` is. A component that draws a control takes the text as a prop and wraps its own
   element: `ActionButton`'s `title` and `deniedTitle`, `RouteLink`'s, `CopyableId`'s and
   `AreaPlanPin`'s `title`, and a `ContextPanel` action's. `Badge`'s `title` is the one on
   something that takes no focus, so a pointer alone sees it. An icon-only button is a `TipButton`,
@@ -498,31 +500,36 @@ on the backdrop.
 
 ### A dialog says why it cannot go ahead
 
-A dialog whose confirm cannot go ahead yet says why where the person is looking. Its confirm looks
-refused while it cannot. `dialogSaysWhy.test.jsx` holds the pattern for the dialogs a form holds.
+A dialog whose act cannot go ahead yet says why where the person is looking, when they press it.
+`dialogSaysWhy.test.jsx` holds the pattern, and drift check 578 refuses a primary that is disabled
+instead.
 
-- **A held confirm is greyed.** `ActionButton` adds `btn-disabled` whenever it is disabled and not
-  pending, as it does for `permitted={false}`. A pending one keeps `btn-loading`, which stays
-  legible. The `disabled` attribute alone changes nothing in `App.css`, so a dialog's confirm is an
-  `ActionButton`, never a plain `<button disabled>`.
-- **The first problem is said above the buttons.** Pass it as `Modal`'s `problem`, or null when
-  there is none. `Modal` draws it between the body and the error slot, so it stays in view while the
-  body scrolls. It is the form's warning hint (`form-hint hint-danger`, with its icon), in a live
-  region.
-- **It appears from the person's first edit, never on open.** A dialog that has just opened does
-  not scold. A dialog with steps passes `touched` for the step it is on, and so does one that waits
-  for a particular field (Change Password waits for the new password).
-- **A form with buttons of its own** inside a dialog (Attach a link) draws `FormProblem` above them.
-- **A problem with one field's value as typed is said under that field,** not above the buttons as
-  well: too long, not an email address, a name already taken.
+- **The primary is never disabled for what the form still needs.** A disabled button cannot be
+  pressed, so it cannot say what is missing. It is disabled only while its work runs, behind a typed
+  gate, or where nobody looking at it can act at all, as for a role that may not. The reason for the
+  last is then in view, not only in a tooltip.
+- **`useFormCheck()` (`hooks/useFormCheck.js`) holds what a form needs.** It takes the fields in the
+  order they appear, each with what is `missing` or `wrong`. The dialog presses its act through
+  `check.press()`, passes `check.problem` to `Modal` and draws `check.errors` beside the fields. A
+  press with something in the way sends nothing. It shows every field's error at once, names the first
+  above the buttons and puts the focus there.
+- **What is missing waits for the press; what is wrong with a value shows as it is typed.** A dialog
+  that has just opened does not scold, and neither does one being filled in. Each error goes as its
+  field is put right.
+- **An edit that changes nothing says so.** The press sends nothing, and the problem line says "Nothing
+  has changed." A form that opens with a record passes `unchanged`; `sameForm()` compares the two.
+- **The first problem is said above the buttons.** `Modal` draws `problem` between the body and the
+  error slot, so it stays in view while the body scrolls. It is the form's warning hint
+  (`form-hint hint-danger`, with its icon), in a live region. A dialog that can be refused and takes no
+  input says why from the start: Export Readings, and a file whose checks fail.
+- **A form with buttons of its own** inside a dialog (Attach a link, a further semantic id) has its own
+  `useFormCheck()` and draws `FormProblem` above them.
 - **A field's error is a `FieldError`, under the field and its hint.** It has `FormProblem`'s look,
   and the hint keeps its own text. `fieldErrorProps(error, errorId, hintId)`, spread on the control,
   sets `aria-invalid`, which takes the danger border from `App.css`, and names the hint and then the
   error in `aria-describedby`. When an error shows is the form's to decide. It is announced once, as
   it appears; one that changes with each key is drawn at once, and announced when it has stood still
   for a second. Drift checks 560 and 561 refuse one drawn by hand and one no control names.
-- **An edit that changes nothing is not a problem.** Its confirm is greyed and its tooltip says so.
-  Nothing is said in red, because the form shows it.
 - **A required field says so on its label** with `RequiredMark`, and its control carries
   `aria-required`. `App.css` draws the asterisk, so the label's text stays the field's name.
 - **A refusal from the database or a function is shown in `Modal`'s `error`,** worded as it came.
@@ -530,16 +537,44 @@ refused while it cannot. `dialogSaysWhy.test.jsx` holds the pattern for the dial
   than toasting it behind the dialog.
 - **`ConfirmModal` shows a rejected `onConfirm` in its own error slot.** So its `onConfirm` closes
   the dialog only once the act has succeeded.
-- **The tooltip on a held confirm can stay,** but it is never the only place the reason is.
+- **A held act is greyed.** `ActionButton` adds `btn-disabled` whenever it is disabled and not
+  pending, as it does for `permitted={false}`. A pending one keeps `btn-loading`, which stays
+  legible. The `disabled` attribute alone changes nothing in `App.css`.
 
-Three kinds of dialog explain themselves another way:
+Two kinds of dialog explain themselves another way:
 
-- **A typed gate** says what to type in its label: ConfirmModal's `requireTyped`, the same
-  `TypedGate` in a form, and a gateway's credential and setup dialogs.
-- **The schema builder** keeps Save pressable. Pressing it reveals what is missing beside each
-  field, because its problems are spread across a long form.
+- **A typed gate** holds its button until the text matches, and says what to type in its label:
+  ConfirmModal's `requireTyped`, the same `TypedGate` in a form, and a gateway's credential and setup
+  dialogs. It is the one thing missing that holds a button. What else such a form needs is said on the
+  press.
 - **A role that may not act** sees `permitted={false}`, with the roles that may in the tooltip
   ([Permission gating](#permission-gating)).
+
+The schema editor and the schema detail are still to be rebuilt to this.
+
+### A dialog is closed and confirmed one way
+
+`Modal` draws the dismiss button and holds the dialog open while its work runs, so every way out of a
+dialog agrees. `dialogFooters.test.js` reads every dialog's footer, and drift check 577 refuses a no-op
+`onClose`.
+
+- **`Modal` holds itself open with `busy`.** While it is true, Escape, the × and the dismiss button do
+  nothing, nor does a close request from the browser or a click on the backdrop. The layer stays on the
+  Escape stack, so the key does not reach the dialog beneath. The two buttons are greyed.
+- **`dismiss` is one of three words.** "Cancel" while anything can be lost, "Close" when nothing can,
+  and "Done" after a result. Cancel and Close are ghost and come first. Done is the primary and comes
+  last. A viewer, such as an expanded plan, has none: the × closes it.
+- **`footer` holds the acts,** in order: a lesser act as ghost, the one primary, and a destructive act
+  rightmost as `btn btn-danger`.
+- **A question inside a dialog is a `ConfirmModal` over it,** drawn inside it so that Escape closes the
+  question first. Its own dismiss is Cancel. A dialog's footer never turns into the question.
+- **The same act has one label and one class on every page.** The drawer's action, the dialog's title
+  and its button name it alike: Propose a Change, End Session (danger, wherever it is). Saving names the
+  thing: Save Area, Save Device.
+- **Title Case for buttons, dialog titles and field labels. Sentence case for hints, messages, help and
+  an option that is a sentence.** A name in a title keeps its own case, and "(optional)" after a label is
+  a hint. A typed gate's label is the instruction it is. `App.css` draws field labels in capitals, so
+  theirs is read rather than seen.
 
 ### Typed text guards removing access and what cannot be undone
 
@@ -595,8 +630,27 @@ table cell, as on Settings, the value is `.setting-static`.
   beside it, in `form-hint`.
 - **A label is not a `<label>`.** A `<label htmlFor>` names a control. A value drawn as text has none,
   so its name is a plain `form-label` div.
-- **Read-only copy fields stay inputs.** A credential, URL or token is there to be selected and
-  copied, so it is not covered.
+- **A value to copy has a box** ([A value to copy](#a-value-to-copy)), and is text all the same.
+
+### A value to copy
+
+A secret, a setting or an address that a dialog hands to a person is a `CopyField`
+(`common/CopyField.jsx`): its label, the value in a box, and a copy button whose icon is a tick for a
+moment. `CopyBlock`, beside it, is the same for a block of text, such as a client's setup. A command
+for an appliance is an `ApplianceCommand`.
+
+- **The value is text, never an input.** It is `.form-static`'s text in mono, in the box a block of
+  commands has, so it does not read as a field to fill. A click or Tab selects all of it, for a person
+  whose browser refuses the copy. A long value wraps, then scrolls inside its box.
+- **A refused copy is said under its own value,** as a `FieldError`, until that value is copied. It is
+  scrolled into view, and a block says it before its hint. It is never in the dialog's error slot, which
+  is for what the server refused, nor in a toast, which is behind the dialog. In a drawer, an
+  appliance's command says it in a toast.
+- **`useCopy()`** (`hooks/useCopy.js`) holds the tick's time and the refusal's words, for these and for
+  `CopyableId`. `copyText()` (`utils/copyText.js`) copies. Over plain HTTP the browser has no clipboard
+  API, so it selects a scratch field, which takes the focus. The control gets it back where the
+  keyboard was on it, and the dialog has it otherwise.
+- **The step that shows a secret once ends with Done,** its primary and its last button.
 
 ### A plan opens expanded
 
@@ -686,7 +740,7 @@ SVG and every cell's `plan_x`/`plan_y` stay as uploaded; the arithmetic is in `u
   the frame (`placeInFrame()`, with the turn `AreaPlan` provides by context), so its label stays
   upright and still slides inward at the frame's edges. A click is read as fractions of the frame
   and turned back (`placeOnDrawing()`) before `onPlaceClick` sees it.
-- **A turn is a draft until Save Turn.** `AreaPlanPanel`'s Turn left and Turn right change a turn
+- **A turn is a draft until Save Turn.** `AreaPlanPanel`'s Turn Left and Turn Right change a turn
   held in the panel for the area it was made on, and pass the preview a copy of the area at that
   turn, so the preview and the expanded plan draw it with no request. The page's own copy keeps
   the saved turn, which the Site Map, the Cells page and the table read. While the draft differs
@@ -772,9 +826,9 @@ draws that order, so no page chooses its own.
   with a NOW or UPCOMING badge beside its reason, its times by `formatDateTime()` and who scheduled
   it. A device's drawer passes its current cell, whose windows are listed marked From cell and
   changed from the cell's drawer. A Shopfloor Manager or an Administrator (`maySuppress()`) gets
-  Schedule window…, Change… and End now, or Cancel window before it starts. The dialogs
+  Schedule Window…, Change… and End Now, or Cancel Window before it starts. The dialogs
   (`modals/SuppressionWindowModal.jsx`) take local times with `datetime-local`, as the time control's
-  custom range does; End now and Cancel window ask first, and the confirm repeats the act's name.
+  custom range does; End Now and Cancel Window ask first, and the confirm repeats the act's name.
   The end field's `max` is the window's own start plus `alerts.suppression_max_days` (`useSetting`,
   falling back to `SUPPRESSION_MAX_DAYS`, 7), and a hint under it names the limit and its Settings
   tab. An end past it is refused inline, as an end in the past is; a change of the reason alone is
@@ -1148,7 +1202,7 @@ Administrator's, as every change on Settings is; anyone else is told whose it is
   told or the site has no relay, **Change email** after) and **Email a test**. **`EmailModal`** ticks
   the roles told, in the dashboard's order (`PERSON_ROLES`), and saves
   `notifications.email_roles`, which is left out of the table (`EMAIL_DIALOG_KEYS`) as the hosts are.
-  Its Save is greyed until a role changes. `notifications.email_min_severity` is a choice in its row.
+  A save that changes no role sends nothing. `notifications.email_min_severity` is a choice in its row.
   **Email a test** queues `queue_test_email_notification()` and toasts how it went, in the
   dispatcher's words.
 - **Every role reads who is emailed.** A line under the toolbar names the roles told, or says nobody is
@@ -1649,12 +1703,12 @@ the page, as on the Site Map, goes there too. The row runs edge to edge and is r
 is below it. A page or tab with nothing to filter and no buttons draws no toolbar.
 
 **Actions are filled, filter controls are outlined.** Every action in `.filter-bar-actions` is
-`btn-primary`: New Device, Export CSV, Play a file…, Take a backup, a destination button. A filter
+`btn-primary`: New Device, Export CSV, Play a File…, Take a Backup, a destination button. A filter
 control is `btn-ghost`, because it changes what the page shows rather than doing something: Clear
 filters, Filters (n), and an on/off toggle such as Needs attention, which is filled
 only while it is on, so its look says whether it is. **Amber (`btn-warning`) marks a destination
 that needs finishing**: Set a destination and Complete the destination. Backups shows two filled
-buttons side by side, Change destination and Take a backup, with the main one still last. Only the
+buttons side by side, Change destination and Take a Backup, with the main one still last. Only the
 toolbar follows this rule: a side panel keeps exactly one primary action, and Discard stays
 outlined beside Save. `toolbarActionsFilled.test.js` reads every `.filter-bar-actions` group in
 the source and fails on an outlined button written into one.
@@ -2392,8 +2446,8 @@ serve them all, so there is one set of rules.
   as its tooltip, the database's own sentence ("An export can cover at most 14 days, set on
   Settings › History. This window is 20 days."), and Overview's box adds "over the 14-day export
   limit" to its words as it is drawn, for a role that may export. The dialog says it again as its
-  `problem` and holds its confirm. It passes `touched` from the start: the person cannot change the
-  window here, so there is nothing to edit first. A window of exactly the limit is allowed.
+  `problem` from the start and holds its confirm: the person cannot change the window here, so no
+  press of theirs could say more. A window of exactly the limit is allowed.
   More than 1,000 devices or 500 metrics, which the database refuses too, is said the same way
   (`exportSizeProblem()`).
 - **One call, `api.exportTelemetry()`, returns the rows.** The database refuses, bounds, reads and
@@ -2687,8 +2741,8 @@ drawer: neither the drawer nor the detail dialog offers **Download JSON**. The f
   `"x-completes": "metric"`. What is a threshold's alone (devices, holds, valid ranges) is the automations'
   model's. No page hosts the editor for schemas yet: the YAML is exported and uploaded, not edited in place.
 - **Upload is the Automations upload.** `ApplySchemasModal` is `ApplyAutomationsModal`'s pattern on the
-  same parts: `useApplyPreview()` makes the dry run and holds its phases, `describeApply()` says why Apply
-  is held, and `ApplyResults` draws each result with its reasons placed on their lines. The text is read by
+  same parts: `useApplyPreview()` makes the dry run and holds its phases, `describeApply()` says why a
+  file cannot be applied, and `ApplyResults` draws each result with its reasons placed on their lines. The text is read by
   `parseAutomationsYaml()`, which is not about automations. A refusal's path (`$[0].metrics[1].minimum`)
   is placed by `locatePath()`. A changed schema is a **new draft**, and the preview says which metrics it
   adds, removes and changes the range of.
@@ -2922,7 +2976,7 @@ drift check share. The tree's shapes:
 | Heading | `{ type: 'heading', depth, id, children }`: `##` is an h3, one level under the drawer's title |
 | Paragraph; a tight list item's text | `{ type: 'paragraph' \| 'text', children }` |
 | List | `{ type: 'list', ordered, start, items }`, each item an array of blocks, so lists nest |
-| Code block | `{ type: 'code', lang, text }`, drawn with a Copy button (`copyText` from `CopyableId.jsx`) |
+| Code block | `{ type: 'code', lang, text }`, drawn with a Copy button (`utils/copyText.js`) |
 | Quote | `{ type: 'blockquote', children }` |
 | Table | `{ type: 'table', align, header, rows }`, each cell an array of inline nodes |
 | Rule | `{ type: 'hr' }` |

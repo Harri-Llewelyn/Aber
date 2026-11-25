@@ -106,13 +106,11 @@ export function ValidatePayloadModal({ schemas, initialSchemaUuid, onClose }) {
       icon={<IconCheck size={18} />}
       size="md"
       onClose={onClose}
+      dismiss="Close"
       footer={
-        <>
-          <button className="btn btn-ghost" onClick={onClose}>Close</button>
-          <ActionButton className="btn btn-primary" pending={loading} pendingLabel="Validating…" onClick={handleValidate}>
-            Validate Payload
-          </ActionButton>
-        </>
+        <ActionButton className="btn btn-primary" pending={loading} pendingLabel="Validating…" onClick={handleValidate}>
+          Validate Payload
+        </ActionButton>
       }
     >
       <div className="form-group">

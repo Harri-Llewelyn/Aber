@@ -33,7 +33,7 @@ const FAMILIES = [
   ["changing one of a person's details", [['modals/DisplayNameModal.jsx'], ['modals/ChangeEmailModal.jsx'], ['modals/ChangeRoleModal.jsx']]],
   ['exporting', [['modals/DeviceExportModal.jsx'], ['modals/TelemetryExportModal.jsx']]],
   ['applying a YAML file', [['modals/ApplySchemasModal.jsx'], ['modals/ApplyDerivedMetricsModal.jsx'], ['modals/ApplyAutomationsModal.jsx']]],
-  ['an off-site destination', [['modals/BackupDestinationModal.jsx'], ['modals/ColdStorageDestinationModal.jsx']]],
+  ['an off-site destination', [['modals/BackupDestinationModal.jsx', 'Off-Site Destination'], ['modals/ColdStorageDestinationModal.jsx', 'Cold Storage Destination']]],
   ['getting a capture', [['modals/StartCaptureModal.jsx'], ['modals/UploadCaptureModal.jsx']]],
 ];
 

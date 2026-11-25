@@ -7,6 +7,7 @@ import { requiresRolesTitle } from '../hooks/usePermissions'
 import { PERMISSION_UUIDS } from '../constants'
 import { schemaUrl } from '../routes'
 import { tooltipOf } from '../test/tooltips'
+import { pressHeld } from '../test/dialogs'
 
 /**
  * Export and Upload on the Schemas list. Export saves the schemas ticked, or every schema in force with
@@ -283,14 +284,15 @@ describe('Upload', () => {
     expect(document.querySelector('dialog')).not.toBeNull()
   })
 
-  it('says nothing would change, and holds Apply, for a file that is what the site has', async () => {
+  it('says nothing would change, and applies nothing, for a file that is what the site has', async () => {
     api.applyDeviceSchemas.mockResolvedValue([results[1]])
     renderTab()
     await ready()
     await choose(file(FILE_TEXT))
     const d = dialog()
     expect(d.getByText('Every schema here is already as the file says. Nothing would change.')).toBeInTheDocument()
-    expect(d.getByRole('button', { name: 'Apply 0 Schemas' })).toBeDisabled()
+    pressHeld(screen.getByRole('dialog'), 'Apply 0 Schemas', 'Nothing has changed.')
+    expect(api.applyDeviceSchemas).toHaveBeenCalledTimes(1)
   })
 
   it('names the line of a syntax error in the file without asking the database', async () => {

@@ -6,6 +6,7 @@ import { identityUrl } from '../routes'
 import { ServicePrincipalCreateModal } from '../components/modals/ServicePrincipalCreateModal'
 import { GRANTABLE_PERMISSIONS, describePrincipal, permissionReach } from '../utils/serviceIdentities'
 import { api } from '../api'
+import { pressHeld } from '../test/dialogs'
 
 vi.mock('../api', () => ({ api: { createServicePrincipal: vi.fn() } }))
 
@@ -132,18 +133,21 @@ describe('ServicePrincipalCreateModal', () => {
 
   it('cannot be submitted without a name', () => {
     open()
-    expect(screen.getByRole('button', { name: /Create Machine Identity/i }).disabled).toBe(true)
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: '   ' } })
-    expect(screen.getByRole('button', { name: /Create Machine Identity/i }).disabled).toBe(true)
+    pressHeld(screen.getByRole('dialog'), 'Create Machine Identity', 'Give the identity a name')
+    expect(screen.getByLabelText('Name')).toHaveAccessibleDescription(/Give the identity a name$/)
+    expect(api.createServicePrincipal).not.toHaveBeenCalled()
   })
 
   it('cannot be submitted with every permission unticked', () => {
     open()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Line 4 OEE report' } })
-    expect(screen.getByRole('button', { name: /Create Machine Identity/i }).disabled).toBe(false)
     // The first is ticked by default; untick it.
     fireEvent.click(screen.getAllByRole('checkbox')[0])
-    expect(screen.getByRole('button', { name: /Create Machine Identity/i }).disabled).toBe(true)
+    pressHeld(screen.getByRole('dialog'), 'Create Machine Identity', 'Choose at least one permission for it to hold')
+    expect(screen.getByRole('group', { name: /Holds/ })).toHaveAccessibleDescription('Choose at least one permission for it to hold')
+    expect(screen.getAllByRole('checkbox')[0]).toHaveFocus()
+    expect(api.createServicePrincipal).not.toHaveBeenCalled()
   })
 
   it('creates with the trimmed name, the chosen permissions in menu order, and hands the row on', async () => {

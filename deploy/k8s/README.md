@@ -1271,7 +1271,7 @@ pgBackRest drops it, and a restore cannot cross the gap. The second alert is the
 
 **The Backups page shows it**, on a Historian card above the list. It gives the last backup with
 its type and label, and when the next is due. It also gives the repository's size, and the last
-failure with pgBackRest's reason. **Take a backup** on that page also asks the sidecar for a
+failure with pgBackRest's reason. **Take a Backup** on that page also asks the sidecar for a
 differential. The sidecar takes it within a minute, and the platform backup does not wait for it. From a shell:
 
 ```bash
@@ -1357,7 +1357,7 @@ supabaseDb:
 - **One repository, two stanzas.** On `s3` both databases share the bucket, the path and the
   Secret. On `posix` each has a claim of its own, because a ReadWriteOnce volume cannot be mounted
   by both database pods: `supabaseDb.physicalBackup.posix` sizes the platform database's.
-- **The nightly logical dump carries on**, and **Take a backup** on the Backups page still dumps the
+- **The nightly logical dump carries on**, and **Take a Backup** on the Backups page still dumps the
   platform database. A dump is what a partial restore needs.
 - **The repository holds pgsodium's root key.** It is a file in the data directory, so every backup
   carries it. On `s3` it is encrypted with `REPO_CIPHER_PASS`, like every other file. Keep a `posix`

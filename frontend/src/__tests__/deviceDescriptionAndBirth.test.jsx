@@ -64,7 +64,7 @@ describe('a device description', () => {
     const box = screen.getByPlaceholderText(/Spindle rebuilt 2026-03/)
     expect(box.value).toBe('Spindle rebuilt')
     fireEvent.change(box, { target: { value: 'Runs warm' } })
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ description: 'Runs warm' })
@@ -75,7 +75,7 @@ describe('a device description', () => {
     fireEvent.click(screen.getByRole('button', { name: /New Device/i }))
     fireEvent.change(screen.getByPlaceholderText(/CNC Mill 01/), { target: { value: 'Lathe_02' } })
     fireEvent.change(screen.getByPlaceholderText(/Spindle rebuilt 2026-03/), { target: { value: 'Second lathe' } })
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     expect(api.post.mock.calls[0][1]).toMatchObject({ asset_name: 'Lathe_02', description: 'Second lathe' })
@@ -92,7 +92,7 @@ describe('a device that has never published', () => {
     expect(tooltipOf(edit)).toBe('Edit device parameters')
     fireEvent.click(edit)
     fireEvent.change(screen.getByPlaceholderText(/Spindle rebuilt 2026-03/), { target: { value: 'Installed Friday' } })
-    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Save Device/i }))
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ description: 'Installed Friday' })
   })
@@ -105,7 +105,7 @@ describe('a device that has never published', () => {
     const propose = openPanel().getByText('Propose a Change').closest('button')
     expect(propose).not.toBeDisabled()
     fireEvent.click(propose)
-    expect(await screen.findByRole('button', { name: 'Propose a change' })).toBeInTheDocument()
+    expect(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Propose a Change' })).toBeInTheDocument()
   })
 
   it('can be edited after it has published and gone offline', async () => {

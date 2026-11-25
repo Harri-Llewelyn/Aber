@@ -13,7 +13,7 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
 
   return (
     <ConfirmModal
-      title={<>Deprecate metric <span className="mono">{metric.name}</span></>}
+      title={<>Deprecate Metric <span className="mono">{metric.name}</span></>}
       size="md"
       icon={<IconAlertTriangle size={18} />}
       message={metric.derivation ? <>
@@ -55,7 +55,7 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
             <>
               <span>Replaced by <span className="mono">{replacement.name}</span></span>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSupersededBy('')}>
-                No replacement
+                No Replacement
               </button>
             </>
           ) : 'No replacement chosen.'}

@@ -10,7 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import App from '../App'
 import { ChangePasswordModal } from '../components/modals/ChangePasswordModal'
-import { MIN_PASSWORD_LENGTH, newPasswordProblem } from '../utils/passwords'
+import { MIN_PASSWORD_LENGTH, newPasswordProblems } from '../utils/passwords'
 
 vi.mock('../lib/supabaseClient', () => ({
   SUPABASE_URL: 'https://api.site.test',
@@ -35,6 +35,7 @@ vi.mock('../lib/supabaseClient', () => ({
 }))
 
 import { supabase } from '../lib/supabaseClient'
+import { pressHeld, wrongIn } from '../test/dialogs'
 
 const EMAIL = 'operator@site.test'
 const CURRENT = 'the-old-one-12'
@@ -59,9 +60,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 function fill(dialog, { current = CURRENT, next = NEXT, again = next } = {}) {
-  fireEvent.change(within(dialog).getByLabelText('Current password'), { target: { value: current } })
-  fireEvent.change(within(dialog).getByLabelText('New password'), { target: { value: next } })
-  fireEvent.change(within(dialog).getByLabelText('New password again'), { target: { value: again } })
+  fireEvent.change(within(dialog).getByLabelText('Current Password'), { target: { value: current } })
+  fireEvent.change(within(dialog).getByLabelText('New Password'), { target: { value: next } })
+  fireEvent.change(within(dialog).getByLabelText('New Password Again'), { target: { value: again } })
 }
 
 const submit = (dialog) => within(dialog).getByRole('button', { name: 'Change Password' })
@@ -97,7 +98,7 @@ describe('the Change Password dialog', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Your current password is not right. Nothing was changed.')
     expect(supabase.auth.updateUser).toHaveBeenCalledWith({ password: NEXT, current_password: 'not-the-current-one' })
     expect(onClose).not.toHaveBeenCalled()
-    expect(within(dialog).getByLabelText('Current password')).toHaveValue('')
+    expect(within(dialog).getByLabelText('Current Password')).toHaveValue('')
   })
 
   it.each([
@@ -123,31 +124,35 @@ describe('the Change Password dialog', () => {
 
   it('cannot be sent until the new password meets the rules, and says which', () => {
     const { dialog } = show()
-    expect(submit(dialog)).toBeDisabled()
+    // The browser's own check would stop the press before the form could say anything.
+    expect(dialog.querySelector('form')).toHaveAttribute('novalidate')
+    expect(wrongIn(dialog)).toEqual([])
+    pressHeld(dialog, 'Change Password', 'Enter your current password.')
+    expect(within(dialog).getByLabelText('Current Password')).toHaveFocus()
 
-    fill(dialog, { next: 'short' })
-    expect(submit(dialog)).toBeDisabled()
-    expect(dialog).toHaveTextContent(`at least ${MIN_PASSWORD_LENGTH} characters`)
+    fill(dialog, { next: 'short', again: 'short' })
+    pressHeld(dialog, 'Change Password', `at least ${MIN_PASSWORD_LENGTH} characters`)
+    expect(within(dialog).getByLabelText('New Password')).toHaveAccessibleDescription(/needs at least 12 characters/)
 
-    fill(dialog, { next: CURRENT })
-    expect(submit(dialog)).toBeDisabled()
-    expect(dialog).toHaveTextContent('different from your current one')
+    fill(dialog, { next: CURRENT, again: CURRENT })
+    pressHeld(dialog, 'Change Password', 'different from your current one')
 
     fill(dialog, { again: `${NEXT}x` })
-    expect(submit(dialog)).toBeDisabled()
-    expect(dialog).toHaveTextContent('do not match')
+    pressHeld(dialog, 'Change Password', 'do not match')
+    expect(within(dialog).getByLabelText('New Password Again')).toHaveFocus()
+    expect(supabase.auth.updateUser).not.toHaveBeenCalled()
 
     fill(dialog)
-    expect(submit(dialog)).toBeEnabled()
+    expect(wrongIn(dialog)).toEqual([])
   })
 
   it('holds the rules: twelve characters, a different password, and two matching copies', () => {
     expect(MIN_PASSWORD_LENGTH).toBe(12)
-    expect(newPasswordProblem('', NEXT, NEXT)).toMatch(/current password/)
-    expect(newPasswordProblem(CURRENT, 'x'.repeat(11), 'x'.repeat(11))).toMatch(/at least 12/)
-    expect(newPasswordProblem(CURRENT, 'x'.repeat(12), 'x'.repeat(12))).toBeNull()
-    expect(newPasswordProblem(CURRENT, CURRENT, CURRENT)).toMatch(/different/)
-    expect(newPasswordProblem(CURRENT, NEXT, 'other')).toMatch(/do not match/)
+    expect(newPasswordProblems('', NEXT, NEXT)).toEqual({ current: expect.stringMatching(/current password/), next: null, again: null })
+    expect(newPasswordProblems(CURRENT, 'x'.repeat(11), 'x'.repeat(11)).next).toMatch(/at least 12/)
+    expect(newPasswordProblems(CURRENT, 'x'.repeat(12), 'x'.repeat(12))).toEqual({ current: null, next: null, again: null })
+    expect(newPasswordProblems(CURRENT, CURRENT, CURRENT).next).toMatch(/different/)
+    expect(newPasswordProblems(CURRENT, NEXT, 'other').again).toMatch(/do not match/)
   })
 })
 
@@ -186,7 +191,7 @@ describe('the Profile page', () => {
     const button = await openProfile()
     expect(button).toBeEnabled()
     fireEvent.click(button)
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Change your password')
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Change Your Password')
   })
 
   it('is disabled for a machine identity, which has no password, saying why', async () => {

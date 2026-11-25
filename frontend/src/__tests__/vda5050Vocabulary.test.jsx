@@ -7,6 +7,7 @@ import { api } from '../api'
 import { tabBar, tabLink } from '../test/tabBar'
 import { getByTooltip, queryByTooltip } from '../test/tooltips'
 import { HELP_SOURCES as HELP_CORPUS } from './helpSources'
+import { pressHeld } from '../test/dialogs'
 
 /**
  * VDA 5050 on the Vocabulary page and in Add Metric: the tab, its entries, the handover of a click
@@ -140,7 +141,7 @@ describe('Add Metric from a VDA 5050 field', () => {
   const valuesInput = () => screen.getByRole('textbox', { name: 'Permitted Values' })
   const namePreview = () => screen.getByText(/Devices will publish this metric as/)
   const unitsSelect = () => screen.getByLabelText('Units')
-  const addButton = () => screen.getByRole('button', { name: /^Add$/ })
+  const addDialog = () => screen.getByRole('dialog', { name: 'Add Metric' })
 
   const renderWith = (entry) => render(
     <MetricsTab
@@ -160,7 +161,9 @@ describe('Add Metric from a VDA 5050 field', () => {
     expect(datatypeSelect().value).toBe('12')
     expect(semanticIdInput().value).toBe(ID('operatingMode'))
     expect(valuesInput().value).toBe('STARTUP, AUTOMATIC, MANUAL')
-    expect(addButton().disabled).toBe(false)
+    api.post.mockResolvedValue({})
+    fireEvent.click(within(addDialog()).getByRole('button', { name: 'Add Metric' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/metric-catalog', expect.objectContaining({ name: 'AGV/operatingMode' })))
   })
 
   it('names a nested field by its path and leaves the unit, which the schema writes as m/s, to the operator', async () => {
@@ -212,6 +215,7 @@ describe('Add Metric from a VDA 5050 field', () => {
 
     fireEvent.change(standardSelect(), { target: { value: 'VDA 5050' } })
     expect(fieldSelect().value).toBe('')
-    expect(addButton().disabled).toBe(true)
+    pressHeld(addDialog(), 'Add Metric', 'Choose a field')
+    expect(fieldSelect()).toHaveFocus()
   })
 })

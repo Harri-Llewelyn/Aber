@@ -1,20 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
+import { CopyBlock, CopyField } from '../common/CopyField'
 import { Modal } from '../common/Modal'
-import { IconCheck, IconCopy, IconLock, IconShieldAlert } from '../common/Icons'
+import { IconLock, IconShieldAlert } from '../common/Icons'
 import { SegmentedControl } from '../common/SegmentedControl'
 import { formatDate } from '../../utils/format'
 import { i3xBaseUrl, i3xClientSetups } from '../../utils/i3xClientSetups'
 import { i3xUrl } from '../../constants'
 import { identityUrl } from '../../routes'
 import { REVOCATION_REACHES, SIGNATURE_ONLY } from '../../utils/revocationScope'
-import { Tooltip } from '../common/Tooltip'
-
-const COPY_FEEDBACK_MS = 1600
-/** Said in the dialog and in a toast when the browser refuses a copy. */
-const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /** Mirrors `service_token_max_days()`. The database refuses anything past it; this is the shortlist. */
 const TTL_CHOICES = [7, 30, 90]
@@ -23,33 +18,11 @@ const DEFAULT_TTL = 30
 /** What the Connect section's Authentication row says: the scheme, never the publishable key. */
 const AUTHENTICATION = 'Bearer token'
 
-/** One value of the Connect section, read-only, with its copy button. */
-function ConnectValue({ id, label, value, copyLabel, copy, copied }) {
-  return (
-    <div className="form-group">
-      <label className="form-label" htmlFor={id}>{label}</label>
-      <div className="gateway-copy-row">
-        <input id={id} className="form-control mono" readOnly value={value} />
-        <Tooltip text={`Copy ${copyLabel}`}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-icon"
-            onClick={() => copy(id, value)}
-            aria-label={`Copy ${copyLabel}`}
-          >
-            {copied === id ? <IconCheck size={13} /> : <IconCopy size={13} />}
-          </button>
-        </Tooltip>
-      </div>
-    </div>
-  )
-}
-
 /**
  * How to connect a client that reads through the i3X server, with the minted token in each setup.
  * `origin` is VITE_I3X_URL; blank leaves out the address and every setup, since each names it.
  */
-function ConnectSection({ origin, token, copy, copied }) {
+function ConnectSection({ origin, token }) {
   const setups = origin ? i3xClientSetups(origin, token) : []
   const [client, setClient] = useState(setups[0]?.id)
   const setup = setups.find(s => s.id === client) || setups[0]
@@ -63,39 +36,34 @@ function ConnectSection({ origin, token, copy, copied }) {
       </div>
       <div className="gateway-settings">
         {origin && (
-          <ConnectValue
+          <CopyField
             id="svc-connect-server"
-            label="i3X server"
+            label="i3X Server"
             value={i3xBaseUrl(origin)}
             copyLabel="i3X server address"
-            copy={copy}
-            copied={copied}
           />
         )}
         {/* Plain text, no copy button: a client offers it as a choice, such as Explorer's dropdown. */}
         <div className="form-group">
           <div className="form-label">Authentication</div>
-          <div className="token-connect-text">{AUTHENTICATION}</div>
+          <p className="form-static token-connect-text">{AUTHENTICATION}</p>
         </div>
       </div>
       {setup ? (
-        <>
-          <div className="gateway-block-head">
+        <CopyBlock
+          text={setup.text}
+          copyLabel="Copy Setup"
+          head={(
             <SegmentedControl
               label="Client"
               options={setups.map(s => ({ id: s.id, label: s.label }))}
               value={setup.id}
               onChange={setClient}
             />
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => copy(`setup-${setup.id}`, setup.text)}>
-              {copied === `setup-${setup.id}`
-                ? <><IconCheck size={12} /> Copied</>
-                : <><IconCopy size={12} /> Copy Setup</>}
-            </button>
-          </div>
-          <pre className="mono gateway-code gateway-code-wrap">{setup.text}</pre>
-          <div className="form-hint">{setup.hint}</div>
-        </>
+          )}
+        >
+          {setup.hint}
+        </CopyBlock>
       ) : (
         <div className="form-hint">
           This dashboard does not know the site’s i3X server address, so no client setup is shown.
@@ -123,11 +91,6 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
   const [minted, setMinted] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(null)
-  const [copyFailed, setCopyFailed] = useState(false)
-
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const mint = useCallback(async () => {
     setBusy(true)
@@ -147,17 +110,6 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
     }
   }, [principal, principalName, days, showToast])
 
-  const copy = useCallback(async (label, value) => {
-    const ok = await copyText(value)
-    setCopied(ok ? label : null)
-    setCopyFailed(!ok)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.(COPY_REFUSED, 'error')
-  }, [showToast])
-
-  const close = useCallback(() => onClose(), [onClose])
-
   const expiresOn = minted ? formatDate(minted.expires_at) : null
   // Without telemetry:read an identity sees nothing through i3X, so a setup would only mislead.
   const readsTelemetry = (principal.permissions || []).includes('telemetry:read')
@@ -168,24 +120,21 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
     <Modal
       title={`Token for “${principalName}”`}
       size="lg"
-      onClose={close}
-      error={confirming ? error : copyFailed ? COPY_REFUSED : null}
+      busy={busy}
+      onClose={onClose}
+      error={confirming ? error : null}
+      dismiss={confirming ? 'Cancel' : 'Done'}
       footer={confirming ? (
-        <>
-          <button className="btn btn-ghost" onClick={close}>Cancel</button>
-          <ActionButton
-            pending={busy}
-            pendingLabel="Issuing…"
-            className="btn btn-primary"
-            onClick={mint}
-            title="Sign a token and show it once"
-          >
-            <IconLock size={14} /> Issue Token
-          </ActionButton>
-        </>
-      ) : (
-        <button className="btn btn-primary" onClick={close}>Done</button>
-      )}
+        <ActionButton
+          pending={busy}
+          pendingLabel="Issuing…"
+          className="btn btn-primary"
+          onClick={mint}
+          title="Sign a token and show it once"
+        >
+          <IconLock size={14} /> Issue Token
+        </ActionButton>
+      ) : null}
     >
       {confirming && (
         <>
@@ -205,7 +154,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="svc-token-ttl">Valid for</label>
+            <label className="form-label" htmlFor="svc-token-ttl">Valid For</label>
             <select
               id="svc-token-ttl"
               className="form-control"
@@ -241,46 +190,25 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Token</label>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <input className="form-control mono" readOnly value={minted.token} />
-              <Tooltip text="Copy token">
-                <button
-                  className="btn btn-ghost btn-icon"
-                  onClick={() => copy('token', minted.token)}
-                  aria-label="Copy token"
-                >
-                  {copied === 'token' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                </button>
-              </Tooltip>
-            </div>
-            <div className="form-hint">
-              Expires {expiresOn}. Give it to the client that will present it, as its bearer token.
-            </div>
-          </div>
+          <CopyField
+            id="svc-token"
+            label="Token"
+            value={minted.token}
+            hint={`Expires ${expiresOn}. Give it to the client that will present it, as its bearer token.`}
+          />
 
-          <div className="form-group">
-            {/* The jti is the handle for revoking this token; without it an operator must find the
-                TOKEN_MINTED row in the Audit Trail. */}
-            <label className="form-label">Token ID (jti)</label>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <input className="form-control mono" readOnly value={minted.jti} />
-              <Tooltip text="Copy token ID">
-                <button
-                  className="btn btn-ghost btn-icon"
-                  onClick={() => copy('jti', minted.jti)}
-                  aria-label="Copy token ID"
-                >
-                  {copied === 'jti' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                </button>
-              </Tooltip>
-            </div>
-            <div className="form-hint">
+          {/* The jti is the handle for revoking this token; without it an operator must find the
+              TOKEN_MINTED row in the Audit Trail. */}
+          <CopyField
+            id="svc-token-jti"
+            label="Token ID (jti)"
+            value={minted.jti}
+            copyLabel="token ID"
+            hint={<>
               Keep this. It is what identifies this token for revocation, and it is recorded in
               the Audit Trail — unlike the token itself.
-            </div>
-          </div>
+            </>}
+          />
 
           {/* The scope comes from the response (`revocation_scope`, set by mint-service-token), not
               from a literal here, so this cannot drift from what revocation covers. */}
@@ -297,7 +225,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
 
           {/* Built from the minted token in this component's state, so the setups go with it. */}
           {readsTelemetry && (
-            <ConnectSection origin={i3xUrl()} token={minted.token} copy={copy} copied={copied} />
+            <ConnectSection origin={i3xUrl()} token={minted.token} />
           )}
         </>
       )}
