@@ -22,7 +22,7 @@ import { ApplyAutomationsModal } from '../modals/ApplyAutomationsModal'
 import { AutomationDetail } from './AutomationDetail'
 import { BuiltInAlerts } from './BuiltInAlerts'
 import { AUTOMATIONS_TABS, tabHref } from '../../navigation'
-import { AUTOMATION_FILE_MAX_BYTES, renderAutomationsYaml } from '../../utils/automationYaml'
+import { renderAutomationsYaml } from '../../utils/automationYaml'
 import { downloadBlob } from '../../utils/downloadBlob'
 import { formatDateTime, formatRelative, plural } from '../../utils/format'
 import { isUuid } from '../../utils/isUuid'
@@ -338,26 +338,8 @@ export function AutomationsTab({ showToast, userRole, hasPermission }) {
   const canWrite = mayWriteAutomations(userRole)
   const triggerId = params.get('trigger')
 
-  // A file chosen to upload, as text, to be checked and shown before it applies.
-  const [upload, setUpload] = useState(null)
+  const [uploading, setUploading] = useState(false)
   const [version, setVersion] = useState(0)
-  const fileRef = useRef(null)
-
-  const onFile = async (e) => {
-    const file = e.target.files?.[0]
-    // The same file chosen twice must raise the change again.
-    e.target.value = ''
-    if (!file) return
-    if (file.size > AUTOMATION_FILE_MAX_BYTES) {
-      showToast(`${file.name} is larger than ${AUTOMATION_FILE_MAX_BYTES / (1024 * 1024)} MiB, more than a file of automations holds`, 'error')
-      return
-    }
-    try {
-      setUpload({ name: file.name, text: await file.text() })
-    } catch {
-      showToast(`${file.name} could not be read`, 'error')
-    }
-  }
 
   const exportAutomations = async (keys) => {
     try {
@@ -375,7 +357,7 @@ export function AutomationsTab({ showToast, userRole, hasPermission }) {
   }
 
   const applied = () => {
-    setUpload(null)
+    setUploading(false)
     setVersion(v => v + 1)
   }
 
@@ -418,7 +400,7 @@ export function AutomationsTab({ showToast, userRole, hasPermission }) {
         showToast={showToast}
         canWrite={canWrite}
         onExport={exportAutomations}
-        onUpload={() => fileRef.current?.click()}
+        onUpload={() => setUploading(true)}
         version={version}
       />
     )
@@ -430,27 +412,15 @@ export function AutomationsTab({ showToast, userRole, hasPermission }) {
         <div className="card card-fill">
           {head}
           {body}
-          <input
-            ref={fileRef}
-            type="file"
-            className="sr-only"
-            accept=".yaml,.yml,text/yaml,application/yaml,application/x-yaml"
-            tabIndex={-1}
-            aria-hidden="true"
-            data-testid="automations-file"
-            onChange={onFile}
-          />
         </div>
       </div>
 
-      {upload && (
+      {uploading && (
         <ApplyAutomationsModal
-          text={upload.text}
-          source={upload.name}
           verb="Apply"
           showToast={showToast}
           onApplied={applied}
-          onClose={() => setUpload(null)}
+          onClose={() => setUploading(false)}
         />
       )}
     </div>

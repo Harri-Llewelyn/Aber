@@ -1,4 +1,4 @@
-import React, { useId, useRef, useState } from 'react'
+import React, { useId, useState } from 'react'
 import { api } from '../../api'
 import { useFormCheck } from '../../hooks/useFormCheck'
 import { usePendingAction } from '../../hooks/usePendingAction'
@@ -9,6 +9,7 @@ import {
   SITE_VOCABULARY_LIMITS as LIMITS, SOURCE_FORMAT_LABELS, VOCABULARY_KINDS, standardCitation
 } from '../../utils/siteVocabulary'
 import { ActionButton } from '../common/ActionButton'
+import { DropZone } from '../common/DropZone'
 import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { IconUpload } from '../common/Icons'
 import { Modal } from '../common/Modal'
@@ -35,7 +36,7 @@ const nameOfFile = (fileName) => String(fileName || '').replace(/\.(aasx|json|xm
  */
 export function ImportVocabularyModal({ showToast, onImported, onClose }) {
   const uid = useId()
-  const fileRef = useRef(null)
+  const [fileName, setFileName] = useState(null)
   const [reading, setReading] = useState(false)
   const [preview, setPreview] = useState(null)
   const [fileProblem, setFileProblem] = useState(null)
@@ -52,11 +53,8 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
 
   const published = kind === VOCABULARY_KINDS.PUBLISHED
 
-  const choose = async (e) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    setReading(true); setPreview(null); setFileProblem(null); setHolders(new Map()); setError(null)
+  const choose = async (file) => {
+    setFileName(file.name); setReading(true); setPreview(null); setFileProblem(null); setHolders(new Map()); setError(null)
     try {
       const read = await readConceptDescriptionsFile(file)
       // Which vocabulary already defines each id: the same question the import asks.
@@ -132,24 +130,23 @@ export function ImportVocabularyModal({ showToast, onImported, onClose }) {
       }
     >
       <div className="form-group">
-        <label className="form-label" htmlFor={`${uid}-file`}>File <RequiredMark /></label>
-        <input
+        <label className="form-label" id={`${uid}-file-label`} htmlFor={`${uid}-file`}>File <RequiredMark /></label>
+        <DropZone
           id={`${uid}-file`}
-          ref={fileRef}
-          type="file"
-          className="form-control"
+          labelledBy={`${uid}-file-label`}
+          required
+          prompt="Drop an AAS file here, or click to choose one"
+          hint="An .aasx package, or an AAS JSON or XML environment, up to 25 MB."
+          note="Only its ConceptDescriptions with IEC 61360 content are taken."
           accept=".aasx,.json,.xml,application/json,text/xml,application/xml"
-          aria-required="true"
-          {...fieldErrorProps(check.errors.file, `${uid}-file-error`, `${uid}-file-hint`)}
+          kinds="an .aasx, .json or .xml file"
+          onFile={choose}
+          fileName={fileName}
+          busy={reading && 'Reading the file…'}
+          error={check.errors.file}
           disabled={pending}
-          onChange={choose}
+          testId="vocabulary-file"
         />
-        <div className="form-hint" id={`${uid}-file-hint`}>
-          {reading
-            ? 'Reading the file…'
-            : 'An .aasx package, or an AAS JSON or XML environment, up to 25 MB. Only its ConceptDescriptions with IEC 61360 content are taken.'}
-        </div>
-        <FieldError id={`${uid}-file-error`} error={check.errors.file} />
       </div>
 
       {preview && (

@@ -157,7 +157,9 @@ describe('Export', () => {
 
 describe('Upload', () => {
   const file = (text, name = 'device-schemas.yaml') => new File([text], name, { type: 'application/yaml' })
+  const openUpload = () => fireEvent.click(screen.getByRole('button', { name: /Upload/ }))
   const choose = async (f) => {
+    if (!screen.queryByTestId('schemas-file')) openUpload()
     await act(async () => { fireEvent.change(screen.getByTestId('schemas-file'), { target: { files: [f] } }) })
   }
   const FILE_TEXT = [
@@ -317,17 +319,19 @@ describe('Upload', () => {
     const big = file('x', 'big.yaml')
     Object.defineProperty(big, 'size', { value: 9 * 1024 * 1024 })
     await choose(big)
-    expect(showToast).toHaveBeenCalledWith('big.yaml is larger than 8 MiB, more than a file of schemas holds', 'error')
-    expect(document.querySelector('dialog')).toBeNull()
+    expect(dialog().getByRole('alert')).toHaveTextContent('big.yaml is larger than 8 MiB, more than a file of schemas holds')
+    expect(api.applyDeviceSchemas).not.toHaveBeenCalled()
   })
 
-  it('offers Upload through the toolbar button, which opens the file chooser for YAML', async () => {
+  it('offers Upload through the toolbar button, whose dialog asks for a YAML file first', async () => {
     renderTab()
     await ready()
+    openUpload()
+    expect(screen.getByRole('dialog', { name: 'Upload Schemas' })).toBeInTheDocument()
     const input = screen.getByTestId('schemas-file')
     const click = vi.spyOn(input, 'click')
-    fireEvent.click(screen.getByRole('button', { name: /Upload/ }))
-    expect(click).toHaveBeenCalled()
+    fireEvent.click(dialog().getByRole('button', { name: /^File/ }))
+    expect(click).toHaveBeenCalledTimes(1)
     expect(input).toHaveAttribute('accept', expect.stringContaining('.yaml'))
   })
 })

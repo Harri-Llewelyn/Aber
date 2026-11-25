@@ -19,9 +19,10 @@ import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import { JobHistory } from './CaptureHistory'
 import {
   IconClipboardList, IconCpu, IconDownload, IconInfo, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash,
-  IconUpload, IconX
+  IconX
 } from '../common/Icons'
 import { OverflowText } from '../common/OverflowText'
+import { DropZone, useFilePicker } from '../common/DropZone'
 import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
 import { Badge } from '../common/Badge'
@@ -42,6 +43,10 @@ import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils
 // Role checks, as the RLS makes them (`has_role`), not a permission; the title names the same list.
 const WRITE_ROLES = ['Administrator', 'Shopfloor_Manager']
 const DENIED_TITLE = `Requires ${WRITE_ROLES.map(r => r.replace(/_/g, ' ')).join(' or ')}`
+
+/** What a capture file is to a picker and a drop zone. The size is the bucket's, which refuses a larger one. */
+const CAPTURE_ACCEPT = '.json,application/json'
+const CAPTURE_FILE_MAX_BYTES = 100 * 1024 * 1024
 
 /**
  * The page's tabs (navigation.jsx): the two subjects a capture records, then the finished
@@ -114,7 +119,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const [deleteFor, setDeleteFor] = useState(null)
   const [playFor, setPlayFor] = useState(null)
   const [uploadFile, setUploadFile] = useState(null)
-  const [dragging, setDragging] = useState(false)
   const [busyId, setBusyId] = useState(null)
 
   const [storedFilter, setStoredFilter] = useUrlList('stored', NONE, { allowed: ['with', 'without'], aliases: STORED_ALIASES })
@@ -135,8 +139,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // ensure_shadow_devices() counts them.
   const [knownDeviceIds, setKnownDeviceIds] = useState(() => new Set())
 
-  const fileRef = useRef(null)
-  const playFileRef = useRef(null)
   // A depth, not a flag: dragenter and dragleave fire for every child the pointer crosses.
   const dragDepth = useRef(0)
   const [stopPending, runStop] = usePendingAction()
@@ -392,13 +394,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }
   }
 
-  const onFilePicked = (event) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (file && selected) {
-      setPlayAfterUpload(false)
-      setUploadFile({ file, preset: { kind: selected.kind, id: selected.id } })
-    }
+  /** A file given to the drawer's zone: filed against the drawer's subject, and stored only. */
+  const onStoreFileChosen = (file) => {
+    setPlayAfterUpload(false)
+    setUploadFile({ file, preset: { kind: selected.kind, id: selected.id } })
   }
 
   /**
@@ -426,11 +425,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     setUploadFile({ file, preset })
   }
 
-  const onPlayFilePicked = (event) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (file) onPlayFileChosen(file)
-  }
+  // A picker of its own: "Play a File…" stores a file and plays it back, and the drawer's zone only
+  // stores one. A shared one could play back a file somebody meant only to store.
+  const play = useFilePicker({ accept: CAPTURE_ACCEPT, onFile: onPlayFileChosen, testId: 'capture-play-file' })
 
   const onUpload = async ({ subject, replace, expectedCaptureId }) => {
     let stored
@@ -571,7 +568,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 className="btn btn-primary btn-sm"
                 permitted={canManage}
                 deniedTitle={DENIED_TITLE}
-                onClick={() => playFileRef.current?.click()}
+                onClick={play.open}
                 title="Store a capture file and play it straight back. Every device the file recorded must exist on this site. Dropping it on this card does the same."
               >
                 <IconPlay size={13} /> Play a File…
@@ -663,7 +660,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
           {draggingPlay && (
             <div className="capture-drop-overlay">
-              <IconPlay size={16} /> Drop the file to store it and play it back
+              <IconPlay size={20} />
+              <span className="drop-zone-line">Drop the file to store it and play it back</span>
             </div>
           )}
         </div>
@@ -899,27 +897,17 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               {capture ? 'Replace by upload' : 'Upload a capture'}
             </div>
             {canManage ? (
-              <Tooltip text="Upload a capture recorded elsewhere. To play it back, every device it recorded must exist on this site.">
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Upload a capture for ${selected.name}`}
-                  onClick={() => fileRef.current?.click()}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
-                  onDragOver={e => { e.preventDefault(); setDragging(true) }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={e => {
-                    e.preventDefault()
-                    setDragging(false)
-                    const dropped = e.dataTransfer?.files?.[0]
-                    if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
-                  }}
-                  className={`capture-drop${dragging ? ' capture-drop-active' : ''}`}
-                >
-                  <IconUpload size={14} className="capture-drop-icon" />
-                  Drop a capture file here, or click to choose one
-                </div>
-              </Tooltip>
+              <DropZone
+                key={selected.id}
+                label={`Upload a capture for ${selected.name}`}
+                prompt="Drop a capture file here, or click to choose one"
+                hint={`A .json file recorded elsewhere, up to ${formatBytes(CAPTURE_FILE_MAX_BYTES)}`}
+                note="To play it back, every device it recorded must exist on this site."
+                accept={CAPTURE_ACCEPT}
+                kinds="a .json file"
+                onFile={onStoreFileChosen}
+                testId="capture-file"
+              />
             ) : (
               <p className="form-hint">{DENIED_TITLE}.</p>
             )}
@@ -927,23 +915,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         )}
       </ContextPanel>
 
-      {/* Two inputs, because the panel's drop zone and "Play a File…" do different things with a
-          file: one stores it, the other stores it and plays it back. A shared input could play back
-          a file somebody meant only to store. */}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".json,application/json"
-        style={{ display: 'none' }}
-        onChange={onFilePicked}
-      />
-      <input
-        ref={playFileRef}
-        type="file"
-        accept=".json,application/json"
-        style={{ display: 'none' }}
-        onChange={onPlayFilePicked}
-      />
+      {play.picker}
 
       {uploadFile && (
         <UploadCaptureModal

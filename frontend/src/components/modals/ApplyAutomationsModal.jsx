@@ -1,12 +1,15 @@
-import React, { useMemo, useState } from 'react'
+import React, { useId, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { ApplyResults } from '../common/ApplyResults'
+import { DropZone } from '../common/DropZone'
 import { IconZap } from '../common/Icons'
+import { RequiredMark } from '../common/RequiredMark'
 import { describeApply, useApplyPreview } from '../../hooks/useApplyPreview'
 import { useFormCheck } from '../../hooks/useFormCheck'
-import { parseAutomationsYaml } from '../../utils/automationYaml'
+import { useYamlFile } from '../../hooks/useYamlFile'
+import { AUTOMATION_FILE_MAX_BYTES, parseAutomationsYaml } from '../../utils/automationYaml'
 import { plural } from '../../utils/format'
 import { automationUrl, automationsUrl } from '../../routes'
 import { appliedWords, changeWords, refusedCount } from '../../utils/automations'
@@ -20,22 +23,31 @@ import { appliedWords, changeWords, refusedCount } from '../../utils/automations
  * switch's, is shown in the dialog as it was worded. The preview and its list are shared with the
  * dialog that applies a file of schemas (useApplyPreview, ApplyResults).
  *
- * @param {string} text The YAML to check and apply.
- * @param {string} [source] Where it came from, "automations.yaml", for the lead; the editor's own text has none.
+ * Given no text it is the upload's dialog: its first step is the file, in a drop zone, and another file
+ * chosen there is checked in place of the one before.
+ *
+ * @param {string|null} [text] The editor's YAML, to check and apply. Null for an upload, which asks for a file.
  * @param {'Save'|'Apply'} verb The act, which the confirm button repeats with the count: "Apply 3 Automations".
  * @param {Function} showToast Says the act once it is applied: an applied file writes Audit Trail rows, so it ends in a success toast that links to what it made.
  * @param {Function} onChecked Called with each preview's results, so the editor can mark the refusals on their lines.
  * @param {Function} onApplied Called with the results once everything is applied; the caller closes the dialog.
  * @param {Function} onClose
  */
-export function ApplyAutomationsModal({ text, source = null, verb = 'Apply', showToast, onChecked, onApplied, onClose }) {
-  const parsed = useMemo(() => parseAutomationsYaml(text), [text])
+export function ApplyAutomationsModal({ text = null, verb = 'Apply', showToast, onChecked, onApplied, onClose }) {
+  const uid = useId()
+  const uploads = text === null
+  const upload = useYamlFile({ maxBytes: AUTOMATION_FILE_MAX_BYTES, holds: 'a file of automations' })
+  const source = upload.file?.name ?? null
+  const parsed = useMemo(
+    () => (text === null ? upload.file && parseAutomationsYaml(upload.file.text) : parseAutomationsYaml(text)),
+    [text, upload.file]
+  )
   // `checking` until the preview is in; then the results, or the reason the check failed.
   const [preview, setPreview] = useApplyPreview(parsed, () => api.applyAutomations(parsed.document, true), onChecked)
   const [applyError, setApplyError] = useState(null)
   const [applying, setApplying] = useState(false)
   const { results, refused, written, unread, checking, problem, held, unchanged, count } = describeApply(preview, parsed, 'automation')
-  const check = useFormCheck({}, { unchanged })
+  const check = useFormCheck(uploads ? { file: { id: `${uid}-file`, missing: upload.missing } } : {}, { unchanged })
 
   const confirm = async () => {
     setApplyError(null)
@@ -60,7 +72,7 @@ export function ApplyAutomationsModal({ text, source = null, verb = 'Apply', sho
 
   return (
     <Modal
-      title={`${verb} ${source ? source : 'Automations'}`}
+      title={uploads && !source ? 'Upload Automations' : `${verb} ${source ? source : 'Automations'}`}
       icon={<IconZap size={18} />}
       size="lg"
       lead={verb === 'Save'
@@ -79,10 +91,26 @@ export function ApplyAutomationsModal({ text, source = null, verb = 'Apply', sho
           disabled={held}
           onClick={() => check.press(confirm)}
         >
-          {`${verb} ${plural(written, 'Automation')}`}
+          {parsed ? `${verb} ${plural(written, 'Automation')}` : 'Apply Automations'}
         </ActionButton>
       )}
     >
+      {uploads && (
+        <div className="form-group">
+          <label className="form-label" id={`${uid}-file-label`} htmlFor={`${uid}-file`}>File <RequiredMark /></label>
+          <DropZone
+            id={`${uid}-file`}
+            labelledBy={`${uid}-file-label`}
+            required
+            prompt="Drop a file of automations here, or click to choose one"
+            {...upload.zone}
+            error={upload.zone.error ?? check.errors.file}
+            disabled={applying}
+            testId="automations-file"
+          />
+        </div>
+      )}
+
       {preview.phase === 'checking' && <p className="apply-note" role="status">Checking the file…</p>}
       {preview.phase === 'failed' && <p className="apply-note apply-note-problem" role="alert">{preview.error}</p>}
 

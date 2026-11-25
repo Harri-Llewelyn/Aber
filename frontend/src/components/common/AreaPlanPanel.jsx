@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { api } from '../../api'
 import { AREA_PLAN_MAX_BYTES, areaPlanFileName, decodeSvgBytes, isSvgFile, nextRotation, planRotation, readSvgPlan } from '../../utils/areaPlans'
 import { STORED_FILE_DELETED, STORED_FILE_REPLACED } from '../../utils/storedFile'
@@ -10,9 +10,19 @@ import { IconDownload, IconUpload, IconTrash, IconRotateCcw, IconRotateCw } from
 import { areaUrl, siteMapAreaUrl } from '../../routes'
 import { Tooltip } from './Tooltip'
 import { SaveDiscard } from './SaveDiscard'
+import { DropZone, useFilePicker } from './DropZone'
 
 /** Why Replace plan and Remove plan wait while a turn is unsaved. */
 const TURN_UNSAVED = 'Save or discard the turn first.'
+
+const PLAN_ACCEPT = '.svg,image/svg+xml'
+const LIMIT = `${Math.round(AREA_PLAN_MAX_BYTES / 1048576)} MiB`
+
+/** Why a file given as a plan is refused before it is read, or null. */
+const planProblem = (file) => {
+  if (!isSvgFile(file)) return `"${file.name}" is not an SVG. An area plan is an SVG drawing.`
+  return file.size > AREA_PLAN_MAX_BYTES ? `"${file.name}" is over the ${LIMIT} limit.` : null
+}
 
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, turn it, replace it,
@@ -20,8 +30,9 @@ const TURN_UNSAVED = 'Save or discard the turn first.'
  * row under its heading, Download, Replace and Remove under its card (each group in the drawer's grid
  * of buttons), and Expand on the card, which opens it
  * window-sized (PlanViewer). Replace sits away from the turns because a missed turn would open a
- * file dialog. Download is for every role that sees the plan. An area with no plan shows the drop zone rather than a button, the same gesture a
- * device's 3D model takes; a reader who may not upload sees the default outline instead.
+ * file dialog. Download is for every role that sees the plan. An area with no plan shows the drop zone
+ * rather than a button, since the file is usually already in a folder somebody is dragging from; a reader
+ * who may not upload sees the default outline instead.
  *
  * A turn is a draft held here: the preview and the expanded plan draw it, and nothing is written
  * until Save Turn, which writes the drafted turn once. Each write is one call, and the panel asks
@@ -29,9 +40,9 @@ const TURN_UNSAVED = 'Save or discard the turn first.'
  */
 export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) {
   const [busy, setBusy] = useState(false)
-  const [dragging, setDragging] = useState(false)
   const [confirm, setConfirm] = useState(false)
-  const fileInput = useRef(null)
+  // Why the upload of an area's first plan was refused, `{ areaId, why }`, said at the drop zone.
+  const [refused, setRefused] = useState(null)
 
   // The file chosen in place of the stored plan, `{ areaId, file }`, until Replace's dialog is
   // answered. It belongs to the area it was chosen for, as a turn does.
@@ -54,7 +65,6 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
 
   const placed = (cells || []).filter(c => c.plan_x !== null && c.plan_x !== undefined && !c.is_archived).length
   const placedLine = `${plural(placed, 'cell')} placed on it`
-  const limitMiB = Math.round(AREA_PLAN_MAX_BYTES / 1048576)
 
   // Uploads a checked file and attaches it. A refusal is thrown, for whoever asked to show.
   const attach = async (file) => {
@@ -68,18 +78,26 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
     } finally { setBusy(false) }
   }
 
+  // The area's first plan, from the drop zone.
   const upload = async (file) => {
-    if (!file) return
-    if (!isSvgFile(file)) { showToast?.(`"${file.name}" is not an SVG. An area plan is an SVG drawing.`, 'error'); return }
-    if (file.size > AREA_PLAN_MAX_BYTES) { showToast?.(`"${file.name}" is over the ${limitMiB} MiB limit.`, 'error'); return }
+    setRefused(null)
     try {
-      if (!area.plan_path) { await attach(file); return }
-      // Asked once the file has passed its checks, so a person who cancels the picker is asked nothing.
-      const { problem } = readSvgPlan(decodeSvgBytes(await file.arrayBuffer()))
+      await attach(file)
+    } catch (e) {
+      setRefused({ areaId: area.area_id, why: e.message })
+      showToast?.(e.message, 'error')
+    }
+  }
+
+  // Asked once the file has passed its checks, so a person who cancels the picker is asked nothing.
+  const askToReplace = async (file) => {
+    try {
+      const problem = planProblem(file) ?? readSvgPlan(decodeSvgBytes(await file.arrayBuffer())).problem
       if (problem) throw new Error(problem)
       setReplacement({ areaId: area.area_id, file })
     } catch (e) { showToast?.(e.message, 'error') }
   }
+  const replace = useFilePicker({ accept: PLAN_ACCEPT, onFile: askToReplace, testId: 'area-plan-input' })
 
   // A signed URL in a new tab, as a capture's download is: the bucket is private and the link is short-lived.
   const downloadPlan = async () => {
@@ -114,41 +132,6 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
     } catch (e) { showToast?.(e.message, 'error') }
     finally { setBusy(false) }
   }
-
-  const openPicker = () => { if (canManage && !busy && !turnUnsaved) fileInput.current?.click() }
-
-  const onDrop = (event) => {
-    // preventDefault on BOTH dragover and drop, or the browser navigates to the dropped file and
-    // the page is simply gone.
-    event.preventDefault()
-    setDragging(false)
-    if (!canManage || busy) return
-    upload(event.dataTransfer?.files?.[0])
-  }
-
-  const onDragOver = (event) => {
-    event.preventDefault()
-    if (canManage && !busy) setDragging(true)
-  }
-
-  const picker = (
-    <input
-      ref={fileInput}
-      type="file"
-      accept=".svg,image/svg+xml"
-      style={{ display: 'none' }}
-      onChange={e => {
-        const file = e.target.files?.[0]
-        // Cleared so re-picking the SAME file fires a change event again, after a failure or a Cancel.
-        e.target.value = ''
-        upload(file)
-      }}
-      /* The picker sits inside the zone so its label stays with it, which means its own click
-         would bubble back to the zone and open it a second time. */
-      onClick={e => e.stopPropagation()}
-      aria-label={`Plan file for ${area.area_name}`}
-    />
-  )
 
   return (
     <div className="area-plan-panel">
@@ -219,10 +202,10 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
               </Tooltip>
               {turnable && (
                 <>
-                  {picker}
+                  {replace.picker}
                   {/* Held while a turn is unsaved, so a replacement is never taken with a turn nobody saved. */}
                   <Tooltip text={turnUnsaved ? TURN_UNSAVED : null}>
-                    <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={openPicker}>
+                    <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={replace.open}>
                       <IconUpload size={13} /> Replace Plan
                     </button>
                   </Tooltip>
@@ -237,30 +220,20 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
           )}
         </>
       ) : (
-        <div
-          className="area-plan-panel-row area-plan-panel-drop"
-          data-plan="outline"
-          data-dragging={dragging ? 'yes' : undefined}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onDragLeave={() => setDragging(false)}
-          onClick={openPicker}
-          role="button"
-          tabIndex={0}
-          aria-label={`Upload plan for ${area.area_name}`}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker() }
-          }}
-        >
-          {picker}
-          <IconUpload size={20} />
-          <span className="area-plan-panel-drop-line">
-            {busy ? 'Uploading…' : 'Drop an SVG plan here, or click to browse'}
-          </span>
-          <span className="area-plan-panel-meta">
-            Default outline · {placedLine} · SVG up to {limitMiB} MiB
-          </span>
-        </div>
+        <DropZone
+          key={area.area_id}
+          label={`Upload plan for ${area.area_name}`}
+          prompt="Drop an SVG plan here, or click to choose one"
+          hint={`Default outline · ${placedLine} · SVG up to ${LIMIT}`}
+          accept={PLAN_ACCEPT}
+          kinds="an SVG"
+          refuse={planProblem}
+          onRefuse={why => showToast?.(why, 'error')}
+          onFile={upload}
+          busy={busy && 'Uploading…'}
+          error={refused?.areaId === area.area_id ? refused.why : null}
+          testId="area-plan-input"
+        />
       )}
     </div>
   )

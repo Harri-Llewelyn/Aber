@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { api, model3dPublicUrl, model3dDownloadUrl } from '../../api'
 import {
   MODEL_3D_EXTENSIONS,
@@ -8,6 +8,7 @@ import {
 } from '../../utils/model3d'
 import { IconCube, IconUpload, IconTrash, IconDownload, IconGlobe } from './Icons'
 import { ActionButton } from './ActionButton'
+import { DropZone, useFilePicker } from './DropZone'
 import { Model3DViewer } from './Model3DViewer'
 import { HelpTip } from './HelpTip'
 import { Modal } from './Modal'
@@ -23,6 +24,14 @@ export const MODEL_STORAGE_NOTE =
 // The bucket's own limit, mirrored. Kept as a constant rather than read from the bucket because
 // fetching it would be a round trip per render for a value that changes once a deployment.
 const MAX_BYTES = 50 * 1024 * 1024
+const ACCEPT = MODEL_3D_EXTENSIONS.join(',')
+const KINDS = MODEL_3D_EXTENSIONS.join(', ')
+
+/** Why a file given as a model is refused before the upload, or null. */
+const modelProblem = (file) => {
+  if (!isAcceptedModelFile(file.name)) return `"${file.name}" is not a supported format. Accepted: ${KINDS}`
+  return file.size > MAX_BYTES ? `"${file.name}" is ${formatFileSize(file.size)}; the limit is ${formatFileSize(MAX_BYTES)}.` : null
+}
 
 /**
  * A device's 3D model in a window-sized dialog: the viewer and the attached file's controls, or,
@@ -48,13 +57,11 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
   // A model that is another device's is never changed from here.
   const canManage = mayManage && !modelOf
   const [busy, setBusy] = useState(false)
-  const [dragging, setDragging] = useState(false)
   const [error, setError] = useState(null)
   const [size, setSize] = useState(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
   // The file chosen in place of the attached one, until Replace's dialog is answered.
   const [replacement, setReplacement] = useState(null)
-  const inputRef = useRef(null)
 
   const path = (modelOf || device)?.model_3d_path || null
   const deviceId = device?.asset_id || device?.id
@@ -100,32 +107,27 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
     }
   }, [deviceId, deviceName, onChange, showToast])
 
+  // The device's first model, from the drop zone. A refused upload is the dialog's error; a refused file
+  // is said at the zone, and in a toast as that is.
   const handleFile = useCallback(async (file) => {
-    if (!file) return
     setError(null)
-
-    if (!isAcceptedModelFile(file.name)) {
-      const message = `"${file.name}" is not a supported format. Accepted: ${MODEL_3D_EXTENSIONS.join(', ')}`
-      setError(message)
-      showToast?.(message, 'error')
-      return
-    }
-    if (file.size > MAX_BYTES) {
-      const message = `"${file.name}" is ${formatFileSize(file.size)}; the limit is ${formatFileSize(MAX_BYTES)}.`
-      setError(message)
-      showToast?.(message, 'error')
-      return
-    }
-
-    // Asked once the file has passed its checks, so a person who cancels the picker is asked nothing.
-    if (path) { setReplacement(file); return }
     try {
       await attach(file)
     } catch (err) {
       setError(err.message)
       showToast?.(err.message, 'error')
     }
-  }, [attach, path, showToast])
+  }, [attach, showToast])
+  const handleRefused = (why) => { setError(null); showToast?.(why, 'error') }
+
+  // Asked once the file has passed its checks, so a person who cancels the picker is asked nothing.
+  const askToReplace = (file) => {
+    const why = modelProblem(file)
+    setError(why)
+    if (why) showToast?.(why, 'error')
+    else setReplacement(file)
+  }
+  const replace = useFilePicker({ accept: ACCEPT, onFile: askToReplace, testId: 'model-3d-input' })
 
   // Run from the Remove dialog, which shows a refusal and stays open. The dialog closes once the
   // model is gone, so the success toast, which a dialog would hide, is where the person is looking.
@@ -143,20 +145,6 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
       setBusy(false)
     }
   }, [deviceId, deviceName, path, onChange, onClose, showToast])
-
-  const onDrop = (event) => {
-    event.preventDefault()
-    setDragging(false)
-    if (!canManage || busy) return
-    handleFile(event.dataTransfer?.files?.[0])
-  }
-
-  const onDragOver = (event) => {
-    // preventDefault on BOTH dragover and drop, or the browser navigates to the dropped file and
-    // the page is simply gone.
-    event.preventDefault()
-    if (canManage && !busy) setDragging(true)
-  }
 
   // `?download=` rather than the bare public URL -- see model3dDownloadUrl() for why the
   // `download` attribute alone cannot do this across origins.
@@ -215,7 +203,7 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
                       <button
                         className="btn btn-sm btn-ghost"
                         disabled={busy}
-                        onClick={() => inputRef.current?.click()}
+                        onClick={replace.open}
                       >
                         <IconUpload size={12} /> Replace
                       </button>
@@ -238,63 +226,25 @@ export function Model3DUploader({ device, modelOf, canManage: mayManage, showToa
             <div className="model-viewer-expanded modal-fill">
               <Model3DViewer path={path} name={modelName} />
             </div>
+            {/* Not drawn for another device's model: nothing here may attach a file to it. */}
+            {!modelOf && replace.picker}
           </>
         ) : (
-          /* The AAS consequence, as context for the gesture, is the tooltip; the storage sentence is
-             in the zone itself, where the decision to upload is made. */
-          <Tooltip text="Attached models are exported as an AAS VisualRepresentation submodel">
-            <div
-              className="model-drop modal-fill"
-              onDrop={onDrop}
-              onDragOver={onDragOver}
-              onDragLeave={() => setDragging(false)}
-              onClick={() => canManage && !busy && inputRef.current?.click()}
-              role="button"
-              tabIndex={canManage ? 0 : -1}
-              aria-label="Upload a 3D model"
-              onKeyDown={(e) => {
-                if ((e.key === 'Enter' || e.key === ' ') && canManage && !busy) {
-                  e.preventDefault()
-                  inputRef.current?.click()
-                }
-              }}
-              style={{
-                borderColor: dragging ? 'var(--accent)' : 'var(--border)',
-                background: dragging ? 'var(--bg-surface)' : 'transparent',
-                cursor: canManage && !busy ? 'pointer' : 'not-allowed',
-                opacity: canManage ? 1 : 0.6
-              }}
-            >
-              <IconUpload size={22} />
-              <div className="model-drop-prompt">
-                {busy
-                  ? 'Uploading…'
-                  : canManage
-                    ? 'Drop a 3D model here, or click to browse'
-                    : 'No 3D model attached'}
-              </div>
-              <div className="model-drop-limits">
-                {MODEL_3D_EXTENSIONS.join(', ')} · up to {formatFileSize(MAX_BYTES)}
-              </div>
-              {canManage && <div className="model-drop-note">{MODEL_STORAGE_NOTE}</div>}
-            </div>
-          </Tooltip>
-        )}
-
-        {/* Not drawn for another device's model: nothing here may attach a file to it. */}
-        {!modelOf && (
-          <input
-            ref={inputRef}
-            type="file"
-            accept={MODEL_3D_EXTENSIONS.join(',')}
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              // Cleared so re-picking the SAME file fires a change event again, after a failure or a Cancel.
-              e.target.value = ''
-              handleFile(file)
-            }}
-            data-testid="model-3d-input"
+          /* The whole note is in the zone, where the decision to upload is made. */
+          <DropZone
+            className="modal-fill"
+            label="Upload a 3D model"
+            prompt={canManage ? 'Drop a 3D model here, or click to choose one' : 'No 3D model attached'}
+            hint={`${KINDS} · up to ${formatFileSize(MAX_BYTES)}`}
+            note={canManage ? `Attached models are exported as an AAS VisualRepresentation submodel. ${MODEL_STORAGE_NOTE}` : null}
+            accept={ACCEPT}
+            kinds={`one of ${KINDS}`}
+            refuse={modelProblem}
+            onRefuse={handleRefused}
+            onFile={handleFile}
+            busy={busy && 'Uploading…'}
+            disabled={!canManage}
+            testId="model-3d-input"
           />
         )}
       </Modal>

@@ -1,53 +1,64 @@
-import React, { useMemo, useState } from 'react'
+import React, { useId, useMemo, useState } from 'react'
 import SCHEMA from '../../../public/json-schema/derived-metrics.schema.json'
 import { AutomationEditor } from '../common/AutomationEditor'
 import { ActionButton } from '../common/ActionButton'
 import CopyableId from '../common/CopyableId'
+import { DropZone } from '../common/DropZone'
 import { Modal } from '../common/Modal'
 import { IconTag } from '../common/Icons'
+import { RequiredMark } from '../common/RequiredMark'
 import { ApplyDerivedMetricsModal } from './ApplyDerivedMetricsModal'
 import { useFormCheck } from '../../hooks/useFormCheck'
+import { useYamlFile } from '../../hooks/useYamlFile'
 import { buildFacts } from '../../utils/automationEditorHelp'
-import { derivedSchemaComment } from '../../utils/derivedMetricsFile'
+import { DERIVED_METRICS_FILE_MAX_BYTES, derivedSchemaComment } from '../../utils/derivedMetricsFile'
 
 /**
  * The Derived tab's YAML editor, in a dialog: derived metrics written, or a file read, as the
  * Automations page's editor shows them, with completion and hover from this site's catalogue and the
  * published JSON Schema, and a mark on each line the database refused. **Apply Derived Metrics** checks
  * the text and shows what it would do before anything is written (ApplyDerivedMetricsModal); a refused
- * line is marked here when that dialog is closed. Nothing is saved by closing it. The text starts as
- * `text`: a file's, or empty for a new file.
+ * line is marked here when that dialog is closed. Nothing is saved by closing it.
  *
- * @param {string} text What the editor opens with.
- * @param {string} [source] The uploaded file's name, which the preview and the toast repeat; none for a new file.
+ * An upload's first step is the file, in a drop zone, and the editor opens on its text. Another file
+ * chosen there opens in place of the one before, and of what was typed over it.
+ *
+ * @param {boolean} [uploads] Asks for a file. Otherwise the editor opens empty, for a new one.
  * @param {Array} catalog The metric catalog as the page reads it, for completion and hover.
  * @param {Function} showToast
  * @param {Function} onApplied Called with the results once the derived metrics are applied; the caller closes the dialog.
  * @param {Function} onClose
  */
-export function DerivedMetricsEditorModal({ text: initial, source = null, catalog, showToast, onApplied, onClose }) {
-  const [text, setText] = useState(initial)
-  const [refusals, setRefusals] = useState(null)
+export function DerivedMetricsEditorModal({ uploads = false, catalog, showToast, onApplied, onClose }) {
+  const uid = useId()
+  const upload = useYamlFile({ maxBytes: DERIVED_METRICS_FILE_MAX_BYTES, holds: 'a file of derived metrics' })
+  const { file } = upload
+  const source = file?.name ?? null
+  const editing = !uploads || file !== null
+  // What was typed and which lines were refused, of the file they are about: another file opens over both.
+  const [edited, setEdited] = useState({ file: null, text: '', refusals: null })
+  const { text, refusals } = edited.file === file ? edited : { text: file.text, refusals: null }
   const [checking, setChecking] = useState(false)
   const facts = useMemo(() => buildFacts({ catalog }), [catalog])
   const origin = typeof window === 'undefined' ? '' : window.location.origin
 
-  // The editor draws its text in a shadow root, so the one field is named by the problem line alone.
-  const check = useFormCheck({ text: { missing: text.trim() === '' && 'Write at least one derived metric' } })
+  // The editor draws its text in a shadow root, so its field is named by the problem line alone.
+  const check = useFormCheck(editing
+    ? { text: { missing: text.trim() === '' && 'Write at least one derived metric' } }
+    : { file: { id: `${uid}-file`, missing: upload.missing } })
 
-  const change = (next) => {
-    setText(next)
-    // Marks of a refusal are for the text it refused; any edit makes them stale.
-    setRefusals(null)
-  }
+  // Marks of a refusal are for the text it refused; any edit makes them stale.
+  const change = (next) => setEdited({ file, text: next, refusals: null })
 
   return (
     <>
       <Modal
-        title={source ? `Edit ${source}` : 'New Derived Metrics in YAML'}
+        title={source ? `Edit ${source}` : uploads ? 'Upload Derived Metrics' : 'New Derived Metrics in YAML'}
         icon={<IconTag size={18} />}
         size="wide"
-        lead="Write each derived metric under a dash, with its name, kind and inputs. Nothing is applied until you check the file and confirm what it would do. A definition is fixed once saved, so only a description can change."
+        lead={editing
+          ? 'Write each derived metric under a dash, with its name, kind and inputs. Nothing is applied until you check the file and confirm what it would do. A definition is fixed once saved, so only a description can change.'
+          : 'Opens a file of derived metrics in the editor. Nothing is applied until you check the file and confirm what it would do. A definition is fixed once saved, so only a description can change.'}
         onClose={onClose}
         problem={check.problem}
         dismiss="Cancel"
@@ -61,32 +72,49 @@ export function DerivedMetricsEditorModal({ text: initial, source = null, catalo
           </ActionButton>
         )}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <AutomationEditor
-            value={text}
-            onChange={change}
-            facts={facts}
-            refusals={refusals}
-            schema={SCHEMA}
-            label="Derived metrics YAML"
-          />
-          <p className="automation-note">
-            A definition is fixed once saved, and the unit comes from the inputs, so a file gives neither a unit nor a datatype.
-            The file says what is saved, so leaving out a description clears the one a metric has.
-            Press <code>Ctrl Space</code> for completion.
-          </p>
-          <div className="automation-schema-line">
-            <span>In VS Code, start your own file with this line to get the same help:</span>
-            <CopyableId value={derivedSchemaComment(origin)} label="schema line" onNotify={showToast} truncate="end" />
+        {uploads && (
+          <div className="form-group">
+            <label className="form-label" id={`${uid}-file-label`} htmlFor={`${uid}-file`}>File <RequiredMark /></label>
+            <DropZone
+              id={`${uid}-file`}
+              labelledBy={`${uid}-file-label`}
+              required
+              prompt="Drop a file of derived metrics here, or click to choose one"
+              {...upload.zone}
+              error={upload.zone.error ?? check.errors.file}
+              testId="derived-metrics-file"
+            />
           </div>
-        </div>
+        )}
+        {editing && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <AutomationEditor
+              key={file?.turn ?? 'new'}
+              value={text}
+              onChange={change}
+              facts={facts}
+              refusals={refusals}
+              schema={SCHEMA}
+              label="Derived metrics YAML"
+            />
+            <p className="automation-note">
+              A definition is fixed once saved, and the unit comes from the inputs, so a file gives neither a unit nor a datatype.
+              The file says what is saved, so leaving out a description clears the one a metric has.
+              Press <code>Ctrl Space</code> for completion.
+            </p>
+            <div className="automation-schema-line">
+              <span>In VS Code, start your own file with this line to get the same help:</span>
+              <CopyableId value={derivedSchemaComment(origin)} label="schema line" onNotify={showToast} truncate="end" />
+            </div>
+          </div>
+        )}
       </Modal>
       {checking && (
         <ApplyDerivedMetricsModal
           text={text}
           source={source}
           showToast={showToast}
-          onChecked={setRefusals}
+          onChecked={refused => setEdited({ file, text, refusals: refused })}
           onApplied={onApplied}
           onClose={() => setChecking(false)}
         />

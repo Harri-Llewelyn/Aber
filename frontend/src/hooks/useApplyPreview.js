@@ -5,17 +5,19 @@ import { RESULT_STATUSES, refusedCount, writtenCount } from '../utils/automation
 /**
  * The check a dialog makes before a file's document changes anything: `check()` is the database's dry
  * run of it (apply_automations(doc, true), apply_device_schemas(doc, true)), made once for each text
- * that parses. Returns `[preview, setPreview]`: `preview.phase` is `unread` (the text is not YAML),
- * `checking`, `ready` (`results` are in) or `failed` (`error` says why the check could not be made).
+ * that parses. Returns `[preview, setPreview]`: `preview.phase` is `waiting` (no file is chosen yet),
+ * `unread` (the text is not YAML), `checking`, `ready` (`results` are in) or `failed` (`error` says why
+ * the check could not be made).
  * `onChecked` hears each preview's refusals, so an editor can mark them on their lines. A dialog sets
  * the preview itself when the apply it confirms answers with refusals the preview did not.
  *
- * @param {object} parsed What parseAutomationsYaml() gave for the text: `document` is the JSON to check, or null.
+ * @param {object|null} parsed What parseAutomationsYaml() gave for the text: `document` is the JSON to check, or
+ *   null. Null itself while an upload has no file.
  * @param {Function} check Returns a promise of the results, one per item of the document.
  * @param {Function} [onChecked] Called with the `{ path, message }` list of a preview.
  */
 export function useApplyPreview(parsed, check, onChecked) {
-  const [preview, setPreview] = useState({ phase: 'checking', results: [], error: null })
+  const [preview, setPreview] = useState({ phase: parsed ? 'checking' : 'waiting', results: [], error: null })
   const checked = useRef(onChecked)
   checked.current = onChecked
   // Read as the effect runs, so it asks about the text of the render that started it.
@@ -23,6 +25,10 @@ export function useApplyPreview(parsed, check, onChecked) {
   asking.current = check
 
   useEffect(() => {
+    if (parsed === null) {
+      setPreview({ phase: 'waiting', results: [], error: null })
+      return undefined
+    }
     if (parsed.document === null) {
       setPreview({ phase: 'unread', results: [], error: null })
       return undefined

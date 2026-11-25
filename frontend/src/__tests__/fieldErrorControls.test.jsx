@@ -380,7 +380,7 @@ describe('the rest', () => {
     render(<ImportVocabularyModal onImported={vi.fn()} onClose={vi.fn()} />)
     const file = screen.getByLabelText(/^File/)
     saysNothing(file)
-    fireEvent.change(file, { target: { files: [fileOf('not json', 'kpis.json')] } })
+    fireEvent.change(screen.getByTestId('vocabulary-file'), { target: { files: [fileOf('not json', 'kpis.json')] } })
     await screen.findByRole('alert')
     saysWhy(file, /./, { hint: 'Only its ConceptDescriptions with IEC 61360 content are taken.' })
   })

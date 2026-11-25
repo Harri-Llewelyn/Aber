@@ -971,7 +971,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     return document.querySelector('.context-panel')
   }
 
-  const planRow = () => document.querySelector('.area-plan-panel-row')
+  const planRow = () => document.querySelector('.area-plan-panel .drop-zone')
   const planPanel = () => document.querySelector('.area-plan-panel')
 
   it('draws the plan with every cell on it, with the fields and above the actions', async () => {
@@ -1010,7 +1010,6 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
 
   it('offers a drop zone on an area with no plan, and Replace and Remove on one with', async () => {
     await openArea('Press Hall')
-    expect(planRow().getAttribute('data-plan')).toBe('outline')
     expect(screen.getByRole('button', { name: 'Upload plan for Press Hall' })).toBe(planRow())
     expect(within(planRow()).getByText(/Drop an SVG plan here/)).toBeInTheDocument()
     expect(within(planRow()).getByText(/Default outline · 0 cells placed on it/)).toBeInTheDocument()
@@ -1036,7 +1035,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     api.uploadAreaPlan.mockResolvedValue({})
     await openArea('Press Hall')
     const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
-    const input = within(planRow()).getByLabelText('Plan file for Press Hall')
+    const input = within(planPanel()).getByTestId('area-plan-input')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
     expect(api.uploadAreaPlan).toHaveBeenCalledTimes(1)
     expect(api.uploadAreaPlan.mock.calls[0][0]).toMatchObject({ area_id: 'area-b' })
@@ -1048,7 +1047,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     const showToast = vi.fn()
     await openArea('Press Hall', { showToast })
     const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
-    const input = within(planRow()).getByLabelText('Plan file for Press Hall')
+    const input = within(planPanel()).getByTestId('area-plan-input')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
     expect(showToast).toHaveBeenCalledWith('Plan attached to Press Hall', 'success', { to: siteMapAreaUrl('area-b') })
     expect(siteMapAreaUrl('area-b')).toBe('/site-map?area=area-b')
@@ -1070,7 +1069,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
     fireEvent.click(screen.getByText('North Shop'))
     const file = new File(['png'], 'plan.png', { type: 'image/png' })
-    const input = within(planPanel()).getByLabelText('Plan file for North Shop')
+    const input = within(planPanel()).getByTestId('area-plan-input')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
     expect(api.uploadAreaPlan).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/not an SVG/), 'error')

@@ -459,9 +459,10 @@ describe('for a role that may not write', () => {
 
 describe('Upload', () => {
   const file = (text, name = 'automations.yaml') => new File([text], name, { type: 'application/yaml' })
+  const openUpload = () => fireEvent.click(screen.getByRole('button', { name: /Upload/ }))
   const choose = async (f) => {
-    const input = screen.getByTestId('automations-file')
-    await act(async () => { fireEvent.change(input, { target: { files: [f] } }) })
+    if (!screen.queryByTestId('automations-file')) openUpload()
+    await act(async () => { fireEvent.change(screen.getByTestId('automations-file'), { target: { files: [f] } }) })
   }
   const FILE_TEXT = [
     '- id: one', '  alias: One', '  triggers:', '    - trigger: threshold', `      device: ${LATHE}`, '      metric: Spindle/LOAD', '      above: 1',
@@ -550,20 +551,22 @@ describe('Upload', () => {
   })
 
   it('refuses a file that is too large to be a file of automations', async () => {
-    const toast = await show({ url: '/automations' })
+    await show({ url: '/automations' })
     const big = file('x', 'big.yaml')
     Object.defineProperty(big, 'size', { value: 3 * 1024 * 1024 })
     await choose(big)
-    expect(toast).toHaveBeenCalledWith('big.yaml is larger than 2 MiB, more than a file of automations holds', 'error')
-    expect(document.querySelector('dialog')).toBeNull()
+    expect(dialog().getByRole('alert')).toHaveTextContent('big.yaml is larger than 2 MiB, more than a file of automations holds')
+    expect(api.applyAutomations).not.toHaveBeenCalled()
   })
 
-  it('offers Upload to a writer through the toolbar button, which opens the file chooser', async () => {
+  it('offers Upload to a writer through the toolbar button, whose dialog asks for a file first', async () => {
     await show({ url: '/automations' })
+    openUpload()
+    expect(screen.getByRole('dialog', { name: 'Upload Automations' })).toBeInTheDocument()
     const input = screen.getByTestId('automations-file')
     const click = vi.spyOn(input, 'click')
-    fireEvent.click(screen.getByRole('button', { name: /Upload/ }))
-    expect(click).toHaveBeenCalled()
+    fireEvent.click(dialog().getByRole('button', { name: /^File/ }))
+    expect(click).toHaveBeenCalledTimes(1)
     expect(input).toHaveAttribute('accept', expect.stringContaining('.yaml'))
   })
 })

@@ -1222,7 +1222,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     permitted={canManageSchema}
                     deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
                     title="Choose a derived-metrics.yaml file. It opens in the editor, and is checked and shown to you before anything is saved"
-                    onClick={yaml.chooseFile}
+                    onClick={yaml.uploadFile}
                   >
                     <IconUpload size={13} aria-hidden="true" /> Upload
                   </ActionButton>
@@ -1998,8 +1998,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       {yaml.editing && (
         <Suspense fallback={null}>
           <DerivedMetricsEditorModal
-            text={yaml.editing.text}
-            source={yaml.editing.name}
+            uploads={yaml.editing.uploads}
             catalog={catalog}
             showToast={showToast}
             onApplied={yaml.applied}
@@ -2007,16 +2006,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           />
         </Suspense>
       )}
-      <input
-        ref={yaml.fileRef}
-        type="file"
-        className="sr-only"
-        accept=".yaml,.yml,text/yaml,application/yaml,application/x-yaml"
-        tabIndex={-1}
-        aria-hidden="true"
-        data-testid="derived-metrics-file"
-        onChange={yaml.onFile}
-      />
 
       {deprecateTarget && (
         <DeprecateMetricModal

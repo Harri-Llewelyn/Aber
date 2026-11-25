@@ -56,7 +56,7 @@ const SUBJECTS = [
   },
   {
     what: 'area plan', show: showPlan, write: () => api.uploadAreaPlan, file: svg, stored: {},
-    picker: () => screen.getByLabelText('Plan file for Assembly Hall'), title: 'Replace Area Plan', confirm: 'Replace Plan',
+    picker: () => screen.getByTestId('area-plan-input'), title: 'Replace Area Plan', confirm: 'Replace Plan',
     asks: 'Replace the plan of Assembly Hall with "hall-v2.svg"? The stored file is replaced. Download it first to keep a copy.',
     wrong: () => new File(['png'], 'plan.png', { type: 'image/png' }), refused: /not an SVG/, reload: 'onChanged',
     toast: ['Plan attached to Assembly Hall', 'success', { to: siteMapAreaUrl(AREA_ID) }],
@@ -152,7 +152,7 @@ describe('replacing a stored area plan', () => {
   it('asks nothing about an SVG that states no size, which the upload would refuse', async () => {
     const showToast = vi.fn()
     showPlan({ showToast })
-    await choose(screen.getByLabelText('Plan file for Assembly Hall'), svg('loose.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>'))
+    await choose(screen.getByTestId('area-plan-input'), svg('loose.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>'))
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/states no size/), 'error'))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(api.uploadAreaPlan).not.toHaveBeenCalled()
@@ -161,7 +161,7 @@ describe('replacing a stored area plan', () => {
   it('drops the question when the panel turns to another area', async () => {
     const props = { cells: [], canManage: true, showToast: vi.fn(), onChanged: vi.fn() }
     const { rerender } = render(<AreaPlanPanel area={area()} {...props} />)
-    await choose(screen.getByLabelText('Plan file for Assembly Hall'), svg())
+    await choose(screen.getByTestId('area-plan-input'), svg())
     await screen.findByRole('dialog', { name: 'Replace Area Plan' })
     rerender(<AreaPlanPanel area={area({ area_id: 'a0000000-0000-4000-8000-000000000002', area_name: 'Paint Shop' })} {...props} />)
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -181,7 +181,7 @@ describe('attaching the first file', () => {
   it('asks nothing for an area with no plan', async () => {
     api.uploadAreaPlan.mockResolvedValue({})
     showPlan({ area: area({ plan_path: null }) })
-    await choose(screen.getByLabelText('Plan file for Assembly Hall'), svg())
+    await choose(screen.getByTestId('area-plan-input'), svg())
     expect(api.uploadAreaPlan).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('dialog')).toBeNull()
   })
