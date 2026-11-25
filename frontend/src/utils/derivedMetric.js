@@ -265,34 +265,39 @@ export function derivedMetricsOfDevice(device, schemas, catalog) {
 export const schemasNaming = (name, schemas) => (schemas || []).filter(s => (s.derived_metrics || []).includes(name))
 
 /**
- * Every reason a schema may not name a derived metric, `{ name, problem }` each, in the words the database
- * refuses it with: schema_derived_metric_problems() (0336), held to the same fixture. `definition` is the
- * schema's, `modelled` the names it models (modelledMetrics()), and `kept` the names it, or the version it
- * was made from, names already: a deprecated one may stay and may not be added.
+ * Why a schema may not name one derived metric, in the words the database refuses it with
+ * (schema_derived_metric_problems(), 0336; mirror check 174). `metric` is the catalog's row of `name`, or
+ * undefined.
  */
-export function derivedProblems({ definition, modelled }, names, catalog, kept = []) {
-  const has = new Set(modelled || [])
-  const stays = new Set(kept)
-  const byName = new Map((catalog || []).map(m => [m.name, m]))
-  return names.flatMap(name => {
-    const metric = byName.get(name)
-    const say = (problem) => ({ name, problem })
-    if (!metric) return say(`${name} is not in the metric catalogue. Add it on the Metrics page first.`)
-    if (!isDerived(metric)) {
-      return say(`${name} is a measured metric, so it goes among the metrics the schema models. A schema's derived metrics are the ones Aber computes.`)
-    }
-    if (metric.deprecated && !stays.has(name)) return say(`${name} is deprecated. A schema may keep it but not add it.`)
+function namingProblems(name, metric, { definition, has, stays }) {
+  if (!metric) return [`${name} is not in the metric catalogue. Add it on the Metrics page first.`]
+  if (!isDerived(metric)) {
+    return [`${name} is a measured metric, so it goes among the metrics the schema models. A schema's derived metrics are the ones Aber computes.`]
+  }
+  if (metric.deprecated && !stays.has(name)) return [`${name} is deprecated. A schema may keep it but not add it.`]
 
-    const problems = derivationInputs(metric.derivation).filter(input => !has.has(input)).map(input =>
-      say(`${name} is computed from ${input}, which this schema does not model. Add ${input} to its metrics, or leave ${name} out.`))
-    const permitted = metric.derivation.kind === 'time_in_state' ? definition?.properties?.[metric.derivation.input]?.enum : null
-    if (Array.isArray(permitted)) {
-      const values = permitted.map(String)
-      problems.push(...metric.derivation.states.filter(state => !values.includes(state)).map(state =>
-        say(`${name} counts the state "${state}", which this schema does not permit ${metric.derivation.input} to report (${values.join(', ')}). Leave ${name} out, or add the state to the metric's permitted values.`)))
-    }
-    return problems
-  })
+  const problems = derivationInputs(metric.derivation).filter(input => !has.has(input)).map(input =>
+    `${name} is computed from ${input}, which this schema does not model. Add ${input} to its metrics, or leave ${name} out.`)
+  const permitted = metric.derivation.kind === 'time_in_state' ? definition?.properties?.[metric.derivation.input]?.enum : null
+  if (Array.isArray(permitted)) {
+    const values = permitted.map(String)
+    problems.push(...metric.derivation.states.filter(state => !values.includes(state)).map(state =>
+      `${name} counts the state "${state}", which this schema does not permit ${metric.derivation.input} to report (${values.join(', ')}). Leave ${name} out, or add the state to the metric's permitted values.`))
+  }
+  return problems
+}
+
+const naming = ({ definition, modelled }, kept) => ({ definition, has: new Set(modelled || []), stays: new Set(kept) })
+
+/**
+ * Every reason a schema may not name these derived metrics, `{ name, problem }` each, in the order of the
+ * names. `definition` is the schema's, `modelled` the names it models (modelledMetrics()), and `kept` the
+ * names it, or the version it was made from, names already: a deprecated one may stay and may not be added.
+ */
+export function derivedProblems(schema, names, catalog, kept = []) {
+  const held = naming(schema, kept)
+  const byName = new Map((catalog || []).map(m => [m.name, m]))
+  return names.flatMap(name => namingProblems(name, byName.get(name), held).map(problem => ({ name, problem })))
 }
 
 /**
@@ -300,8 +305,9 @@ export function derivedProblems({ definition, modelled }, names, catalog, kept =
  * A deprecated one is offered only where the version names it already.
  */
 export function derivedOffered(schema, catalog, kept = []) {
+  const held = naming(schema, kept)
   return (catalog || [])
-    .filter(m => isDerived(m) && derivedProblems(schema, [m.name], catalog, kept).length === 0)
+    .filter(m => isDerived(m) && namingProblems(m.name, m, held).length === 0)
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
 }
 
