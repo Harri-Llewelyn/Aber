@@ -90,8 +90,7 @@ export function MetricPicker({
       filters={(
         <Tooltip text="Metrics already selected stay selected.">
           <select
-            className="form-control"
-            style={{ flex: '0 0 165px' }}
+            className="form-control metric-picker-standard"
             value={standard}
             onChange={e => setStandard(e.target.value)}
             aria-label="Standard"
@@ -107,20 +106,20 @@ export function MetricPicker({
       )}
       groupsOf={metricGroups}
       renderItem={(m, { picked }) => (
-        <>
-          <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
+        <span className="metric-picker-facts">
+          <span className="mono metric-picker-name">{m.name}</span>
           {renderNote?.(m, picked)}
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
-          {showUnits && m.units && <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{m.units}</span>}
+          <span className="metric-picker-fact">{datatypeLabel(m.datatype)}</span>
+          {showUnits && m.units && <span className="mono metric-picker-unit">{m.units}</span>}
           {/* Which standard a metric came from is what makes a mixed-standard choice
               legible; the tick marks the ones carrying an AAS semantic id. */}
           <Tooltip text={m.semantic_id ? `Semantic id ${m.semantic_id}` : null}>
-            <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
+            <span className="metric-picker-origin">
               {m.standard || LOCAL_EXTENSION_LABEL}{m.semantic_id ? ' ✓' : ''}
             </span>
           </Tooltip>
-          {m.description && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>{m.description}</span>}
-        </>
+          {m.description && <span className="metric-picker-description">{m.description}</span>}
+        </span>
       )}
       renderExtra={renderExtra}
       listStyle={listStyle}

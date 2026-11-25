@@ -3980,7 +3980,7 @@ paths:
       tags: [Registry]
       summary: Import a vocabulary read from an AAS file
       description: |
-        What the Vocabulary page's Import vocabulary calls (`0306`). The dashboard reads the file in the
+        What the Vocabulary page's Import Vocabulary calls (`0306`). The dashboard reads the file in the
         browser; this checks every row again and stores it. **An Administrator behind the second factor
         only** (`42501`, detail `mfa_required`). `SECURITY DEFINER`.
 

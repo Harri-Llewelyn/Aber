@@ -134,9 +134,6 @@ function returnFocus(dialog) {
  * null until a press asks for it, so a dialog that has just opened does not scold. Leave it out on a
  * dialog that never refuses, and the line is not drawn.
  *
- * @param {boolean} [touched] False holds the line back, for a caller that knows its problem before the
- * person has asked.
- *
  * @param {React.ReactNode} [error] The failure to show, in the danger box above the footer. Falsy
  * renders nothing. Show a failure here rather than only in a toast: the toasts are behind an open
  * dialog, where they can be neither read nor heard. A refusal from the database or a function goes
@@ -172,7 +169,6 @@ export function Modal({
   lead = null,
   initialFocus,
   problem,
-  touched = true,
   error = null,
   dismiss = null,
   footer = null,
@@ -260,7 +256,7 @@ export function Modal({
         </div>
 
         {problem !== undefined && (
-          <FormProblem problem={touched ? problem : null} className="modal-problem" />
+          <FormProblem problem={problem} className="modal-problem" />
         )}
 
         {error && (

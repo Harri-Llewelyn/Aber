@@ -213,20 +213,16 @@ describe('a schema’s fields', () => {
     saysNothing(metrics)
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Schema' }))
-    saysWhy(name, 'Give the schema a name before saving it.')
+    saysWhy(name, 'Give the schema a name')
     // A group takes no aria-invalid.
     saysWhy(metrics, 'Tick at least one metric.', { invalid: false })
   })
 
-  it('Build Schema from Catalog, a range: marked as typed, and said from a save attempt', () => {
+  it('Build Schema from Catalog, a range, as it is typed', () => {
     render(<SchemaBuilderModal catalog={CATALOG} onSubmit={vi.fn()} onCancel={vi.fn()} />)
     tick()
     saysNothing(bound('Minimum'))
     badRange()
-    expect(bound('Minimum')).toHaveAttribute('aria-invalid', 'true')
-    expect(bound('Minimum')).not.toHaveAttribute('aria-describedby')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save Schema' }))
     for (const which of ['Minimum', 'Maximum']) saysWhy(bound(which), RANGE)
   })
 

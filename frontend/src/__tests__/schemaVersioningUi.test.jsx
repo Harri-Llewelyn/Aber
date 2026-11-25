@@ -117,6 +117,10 @@ beforeEach(() => {
 const metricBox = (scope, name) => scope.getAllByRole('checkbox')
   .find(box => box.closest('label')?.querySelector('.mono')?.textContent === name)
 
+/** The open draft holds what is stored: its dismiss button is Cancel while an edit can be lost. */
+const nothingToSave = () => waitFor(() =>
+  expect(within(document.querySelector('.modal-actions')).queryByText('Close')).toBeTruthy())
+
 describe('Registry — read-only protections and status badges', () => {
   it('badges an active schema as v1 · Active and marks it read-only', async () => {
     renderTab()
@@ -431,7 +435,7 @@ describe('Detail modal — read-only vs draft', () => {
       expect(descriptionOnly.description).toBe('Six axis arm, coolant loop')
       expect(descriptionOnly).not.toHaveProperty('schema_definition')
 
-      await waitFor(() => expect(modal.getByRole('button', { name: 'Save Draft' }).disabled).toBe(true))
+      await nothingToSave()
       fireEvent.click(metricBox(modal, 'Systems/SPINDLE_TEMPERATURE'))
       fireEvent.click(modal.getByRole('button', { name: 'Save Draft' }))
       await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
@@ -563,7 +567,10 @@ describe('Detail modal — read-only vs draft', () => {
       const minimum = modal.getByRole('spinbutton', { name: 'Minimum of Systems/TEMPERATURE' })
       expect(minimum.value).toBe('0')
       // Nothing changed yet: the stored range and list are what the catalog and the fields say.
-      expect(modal.getByRole('button', { name: 'Save Draft' }).disabled).toBe(true)
+      await nothingToSave()
+      fireEvent.click(modal.getByRole('button', { name: 'Save Draft' }))
+      expect(modal.getByText('Nothing has changed.')).toBeTruthy()
+      expect(api.put).not.toHaveBeenCalled()
 
       fireEvent.change(modal.getByRole('spinbutton', { name: 'Maximum of Systems/TEMPERATURE' }), { target: { value: '120' } })
       fireEvent.change(minimum, { target: { value: '' } })
@@ -582,9 +589,15 @@ describe('Detail modal — read-only vs draft', () => {
       const modal = await openDraft()
       fireEvent.change(modal.getByRole('spinbutton', { name: 'Maximum of Systems/TEMPERATURE' }), { target: { value: '-5' } })
 
-      expect(modal.getByRole('alert').textContent).toMatch(/Systems\/TEMPERATURE: The minimum is above the maximum/)
-      expect(modal.getByRole('button', { name: 'Save Draft' }).disabled).toBe(true)
-      expect(modal.getByRole('button', { name: /Publish Version v2/ }).disabled).toBe(true)
+      const said = /Systems\/TEMPERATURE: The minimum is above the maximum/
+      expect(modal.getByRole('alert').textContent).toMatch(said)
+      for (const name of ['Save Draft', 'Publish Version v2']) {
+        fireEvent.click(modal.getByRole('button', { name }))
+        expect(document.querySelector('.modal-problem').textContent).toMatch(said)
+        expect(document.activeElement).toBe(modal.getByRole('spinbutton', { name: 'Minimum of Systems/TEMPERATURE' }))
+      }
+      expect(api.put).not.toHaveBeenCalled()
+      expect(api.post).not.toHaveBeenCalled()
     })
   })
 
@@ -626,8 +639,8 @@ describe('Detail modal — read-only vs draft', () => {
     expect(band('Systems')).toHaveTextContent(/2 selected$/)
   })
 
-  // While editing, the picker takes the height the window leaves rather than a fixed cap.
-  it('lets the draft picker fill the dialog, and leaves a published version as it was', async () => {
+  // The list takes the height the window leaves rather than a fixed cap, in a draft and as text.
+  it('lets the metric list fill the dialog, in a draft and in a published version', async () => {
     schemaRows = [V1, DRAFT_V2]
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
@@ -641,7 +654,9 @@ describe('Detail modal — read-only vs draft', () => {
 
     fireEvent.click(screen.getByText('Close'))
     fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
-    expect(document.querySelector('.modal .modal-body')).not.toHaveClass('modal-body-fill')
+    const body = document.querySelector('.modal .modal-body')
+    expect(body).toHaveClass('modal-body-fill')
+    expect(body.querySelector(':scope > .modal-fill')).toContainElement(within(body).getByText('Systems/TEMPERATURE'))
   })
 })
 
@@ -702,12 +717,12 @@ describe('Detail modal — semantic id', () => {
 
     expect(idInput().value).toBe(NAMEPLATE)
     expect(typeSelect().value).toBe('IRI')
-    expect(saveDraft().disabled).toBe(true)
+    await nothingToSave()
 
     // The type was the guess for the old id, so it follows the new one.
     fireEvent.change(idInput(), { target: { value: IEC_CDD } })
     expect(typeSelect().value).toBe('IRDI')
-    expect(saveDraft().disabled).toBe(false)
+    expect(modal().getByText('Cancel')).toBeTruthy()
 
     fireEvent.click(saveDraft())
     await waitFor(() => expect(api.put).toHaveBeenCalled())
@@ -716,7 +731,7 @@ describe('Detail modal — semantic id', () => {
     expect(body).toMatchObject({ semantic_id: IEC_CDD, semantic_id_type: 'IRDI' })
 
     // Reloaded from the registry: the draft now holds the pair, so nothing is left to save.
-    await waitFor(() => expect(saveDraft().disabled).toBe(true))
+    await nothingToSave()
     expect(idInput().value).toBe(IEC_CDD)
     expect(typeSelect().value).toBe('IRDI')
   })
@@ -732,7 +747,7 @@ describe('Detail modal — semantic id', () => {
     fireEvent.click(saveDraft())
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ semantic_id: '', semantic_id_type: '' })
-    await waitFor(() => expect(saveDraft().disabled).toBe(true))
+    await nothingToSave()
     expect(idInput().value).toBe('')
   })
 

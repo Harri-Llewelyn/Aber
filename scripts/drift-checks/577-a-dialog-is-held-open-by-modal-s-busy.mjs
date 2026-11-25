@@ -13,13 +13,6 @@ import { dialogsIn, footersOf, propAt, propText, tagEnd } from '../lib/jsx-dialo
 
 const COMPONENTS = 'frontend/src/components/';
 
-/** The dialogs that draw their own footers, and why. */
-const OWN_FOOTER = {
-  [`${COMPONENTS}modals/SchemaBuilderModal.jsx`]: 'rebuilt with the one schema editor',
-  [`${COMPONENTS}modals/SchemaDetailModal.jsx`]: 'rebuilt with the one schema editor',
-  [`${COMPONENTS}modals/DeviceNameplateModal.jsx`]: 'draws its own dismiss button, under the same rule',
-};
-
 /** The dialogs an act of which may end with the dialog closed, and why. */
 const MAY_CLOSE = {
   [`${COMPONENTS}modals/ValidatePayloadModal.jsx`]: 'it changes nothing, so closing it while it checks loses nothing',
@@ -38,7 +31,7 @@ export default function check() {
 
   for (const [file, src] of sources) {
     const here = dialogsIn(src);
-    if (!here.length || file in OWN_FOOTER) continue;
+    if (!here.length) continue;
     const code = src.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' ')).replace(/(^|\s)\/\/[^\n]*/g, '$1');
     // A handler: named one, passed as one, or chosen between. A `.catch(() => {})` is not.
     const handlers = /\b(?:on[A-Z]\w*=\{|const \w*(?:[cC]lose|[cC]ancel|[dD]ismiss)\w* = )[^\n]*/g;
@@ -64,7 +57,7 @@ export default function check() {
     }
   }
 
-  for (const file of [...Object.keys(OWN_FOOTER), ...Object.keys(MAY_CLOSE)]) {
+  for (const file of Object.keys(MAY_CLOSE)) {
     if (!sources.some(([f, src]) => f === file && src.includes('<Modal'))) problems577.push(`${file} is listed as an exception, and holds no <Modal>`);
   }
   if (!held) problems577.push('no <Modal> passes busy: the prop moved, or was renamed');
@@ -74,6 +67,6 @@ export default function check() {
     fail('A dialog is not held open by Modal\'s busy (frontend/README.md, A dialog is closed and confirmed one way):\n' +
       problems577.map((p) => `        ${p}`).join('\n'));
   } else {
-    pass(`the ${held} dialogs of ${dialogs} whose act runs are held open by Modal's busy, and no source that holds one locks a way out with a no-op, but for ${Object.keys(OWN_FOOTER).length} with their own footers`);
+    pass(`the ${held} dialogs of ${dialogs} whose act runs are held open by Modal's busy, and no source that holds one locks a way out with a no-op`);
   }
 }

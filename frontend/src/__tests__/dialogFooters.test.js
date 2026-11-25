@@ -17,13 +17,6 @@ import { dialogsIn, footersOf as footers, propAt, propText, tagEnd, withoutComme
 const COMPONENTS = path.resolve(__dirname, '../components')
 const WORDS = ['Cancel', 'Close', 'Done']
 
-/** The schema dialogs draw their own footers until one editor replaces them; the nameplate draws its own. */
-const OWN_FOOTER = {
-  'modals/SchemaBuilderModal.jsx': 'rebuilt with the one schema editor',
-  'modals/SchemaDetailModal.jsx': 'rebuilt with the one schema editor',
-  'modals/DeviceNameplateModal.jsx': 'draws its own dismiss button, under the same rule',
-}
-
 /** Viewers: they change nothing and have no row of buttons. */
 const NO_FOOTER = {
   'common/HelpPanel.jsx': 'the help, expanded',
@@ -60,7 +53,6 @@ it('every dialog is one the reader can read', () => {
 
 describe('the dismiss button', () => {
   it.each(modals.map(d => [d.name, d]))('%s is Modal’s, and says one of its three words', (_, d) => {
-    if (d.file in OWN_FOOTER) return
     if (d.file in NO_FOOTER) {
       expect(propAt(d.tag, 'dismiss')).toBe(-1)
       expect(propAt(d.tag, 'footer')).toBe(-1)
@@ -76,7 +68,6 @@ describe('the dismiss button', () => {
   })
 
   it.each(modals.map(d => [d.name, d]))('%s draws none of its own', (_, d) => {
-    if (d.file in OWN_FOOTER) return
     for (const footer of footersOf(d)) {
       expect(footer).not.toMatch(/>\s*(Cancel|Close|Done|Keep\b[^<]*|I have copied it)\s*</)
       expect(footer).not.toMatch(/onClick=\{(onClose|onCancel|close|closeForm|backOut|cancel)\}/)
@@ -84,13 +75,12 @@ describe('the dismiss button', () => {
   })
 
   it('is listed as left out only where it is', () => {
-    for (const file of [...Object.keys(OWN_FOOTER), ...Object.keys(NO_FOOTER)]) expect(modals.some(d => d.file === file), file).toBe(true)
+    for (const file of Object.keys(NO_FOOTER)) expect(modals.some(d => d.file === file), file).toBe(true)
   })
 })
 
 describe('the acts', () => {
   it.each(modals.map(d => [d.name, d]))('%s stand in order: ghost, the one primary, danger last', (_, d) => {
-    if (d.file in OWN_FOOTER) return
     for (const footer of footersOf(d)) {
       const kinds = buttonsIn(footer).map(kindsOf)
       const order = ['ghost', 'primary', 'danger']
@@ -139,7 +129,6 @@ describe('the acts', () => {
 describe('a dialog whose act runs', () => {
   it.each(modals.map(d => [d.name, d]))('%s holds itself open while it does', (_, d) => {
     expect(propText(d.tag, 'onClose'), 'a no-op onClose locks one way out and leaves another').not.toMatch(/\(\)\s*=>\s*\{\s*\}/)
-    if (d.file in OWN_FOOTER) return
     const running = footersOf(d).flatMap(buttonsIn).map(tag => propText(tag, 'pending')).filter(Boolean)
     // Validate Payload sends nothing anywhere: closing it while it checks loses nothing.
     if (!running.length || d.file === 'modals/ValidatePayloadModal.jsx') return
@@ -151,8 +140,8 @@ describe('a dialog whose act runs', () => {
 
 /** The small words Title Case leaves alone inside a title. */
 const SMALL = new Set(['a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'from', 'in', 'into', 'nor', 'of', 'on', 'onto', 'or', 'the', 'to', 'up', 'with', 'instead'])
-/** A bracketed note, a name set in a title, a file's name and a word with no letters are not read. */
-const inTitleCase = (text) => text.replace(/\([^)]*\)/g, '').replace(/\$\{\}/g, '').split(/\s+/).filter(w => /^[a-z]/.test(w) && !/[.\d]/.test(w))
+/** A bracketed note, a name or a version set in a title, a file's name and a word with no letters are not read. */
+const inTitleCase = (text) => text.replace(/\([^)]*\)/g, '').replace(/\bv?\$\{\}/g, '').split(/\s+/).filter(w => /^[a-z]/.test(w) && !/[.\d]/.test(w))
   .every(w => SMALL.has(w))
 
 /** A prop's words: its own text, or each string in its expression, with a name in it left out. */
@@ -170,7 +159,6 @@ describe('the words', () => {
   it('a title and an act are in Title Case', () => {
     const wrong = []
     for (const d of dialogs) {
-      if (d.file in OWN_FOOTER || d.file === 'modals/SchemaForkModal.jsx') continue
       const acts = d.kind === 'ConfirmModal' ? words(d.tag, 'confirmLabel')
         : footersOf(d).flatMap(f => [...f.matchAll(/>\s*([A-Z][^<>{}]*?)\s*(?:\{[^{}]*\})?\s*<\/(?:button|ActionButton)>/g)].map(m => m[1]))
       for (const said of [...words(d.tag, 'title'), ...acts]) {
@@ -183,8 +171,7 @@ describe('the words', () => {
   it("a field's label in a dialog is in Title Case", () => {
     const wrong = []
     for (const [file, src] of sources) {
-      const own = file.startsWith('modals/') ? src : dialogsIn(src).map(d => d.body ?? '').join('\n')
-      if (file in OWN_FOOTER) continue
+      const own = file.startsWith('modals/') || file === 'common/SchemaEditor.jsx' ? src : dialogsIn(src).map(d => d.body ?? '').join('\n')
       for (const m of withoutComments(own).matchAll(/className="form-label"[^>]*>\s*([A-Za-z][^<{\n]*)/g)) {
         const said = m[1].trim()
         // A typed gate's label is the instruction it is.

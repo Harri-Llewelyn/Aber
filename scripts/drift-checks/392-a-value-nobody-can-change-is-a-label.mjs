@@ -5,8 +5,8 @@ import { fail, pass, read } from './lib.mjs';
 // The places that drew a fixed value as a greyed input (a Settings row, a nameplate value the
 // device publishes, Cold Storage's site key, Add Metric's Units, and a Settings row for a role that
 // may not change it) draw text, as do a replay lane's Serving Gateway and a Digital Nameplate for a
-// role that may neither edit nor propose. Deprecate Metric and a draft schema choose a metric from
-// the list the schema builder uses, and frontend/README.md states the rule beside the dialog rules.
+// role that may neither edit nor propose. Deprecate Metric and the schema editor choose a metric from
+// MetricPicker, and frontend/README.md states the rule beside the dialog rules.
 // The Settings help no longer describes a greyed field.
 // -------------------------------------------------------------------------------------------------
 export default function check() {
@@ -18,7 +18,7 @@ export default function check() {
     metrics: 'frontend/src/components/tabs/MetricsTab.jsx',
     devices: 'frontend/src/components/tabs/DevicesTab.jsx',
     deprecate: 'frontend/src/components/modals/DeprecateMetricModal.jsx',
-    draft: 'frontend/src/components/modals/SchemaDetailModal.jsx',
+    editor: 'frontend/src/components/common/SchemaEditor.jsx',
   };
   const src = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, read(f)]));
   // A bare `readOnly` attribute, alone on its line, is a fixed value drawn as an input.
@@ -30,7 +30,7 @@ export default function check() {
   if (/disabled=\{proposeMode \|\| !!editing\?\.shadow_of\}/.test(src.devices)) problems392.push(`${files.devices} greys a replay lane's gateway, which nobody can change`);
   if (/disabled=\{!canManage && !proposeMode\}/.test(src.nameplate)) problems392.push(`${files.nameplate} greys the inputs of a role that may neither edit nor propose`);
   if (/disabled=\{!unitsApply\}/.test(src.metrics)) problems392.push(`${files.metrics} greys Units for a type that takes none`);
-  for (const key of ['deprecate', 'draft']) {
+  for (const key of ['deprecate', 'editor']) {
     if (!src[key].includes('<MetricPicker')) problems392.push(`${files[key]} does not choose a metric with MetricPicker`);
   }
   if (src.deprecate.includes('<select')) problems392.push(`${files.deprecate} chooses the replacement from a <select>`);
@@ -40,6 +40,6 @@ export default function check() {
   if (problems392.length) {
     for (const p of problems392) fail(`a fixed value is a label: ${p}`);
   } else {
-    pass("a value nobody can change is drawn as text in the Settings rows, the nameplate, Cold Storage, Add Metric and a replay lane's gateway, Deprecate Metric and a draft schema choose from MetricPicker, and the README states the rule");
+    pass("a value nobody can change is drawn as text in the Settings rows, the nameplate, Cold Storage, Add Metric and a replay lane's gateway, Deprecate Metric and the schema editor choose from MetricPicker, and the README states the rule");
   }
 }

@@ -31,7 +31,7 @@ export function SchemaForkModal({ schema, deviceCount = 0, archivedCount = 0, re
         carrying over every metric it currently models. Nothing changes for any device until the
         draft is published.
       </>}
-      confirmLabel={<><IconGitBranch size={13} /> {`Create Version v${next}`}</>}
+      confirmLabel={<><IconGitBranch size={13} /> Create Version v{next}</>}
       pendingLabel="Creating…"
       confirmClassName="btn btn-primary"
       onConfirm={() => onConfirm(changeDescription.trim())}
@@ -39,7 +39,7 @@ export function SchemaForkModal({ schema, deviceCount = 0, archivedCount = 0, re
     >
       <div className="form-group">
         <label className="form-label" htmlFor="schema-change-description">
-          Change Description (Optional)
+          Change Description (optional)
         </label>
         <textarea
           id="schema-change-description"

@@ -417,7 +417,7 @@ too little headroom over its own tint to survive a second one.
 (`.modal-actions`) keep their size; only `.modal-body` (the lead and the children) scrolls, so Save
 never scrolls away and an error never pushes it down. `.modal` itself must not scroll. A dialog
 whose list should take the leftover height passes `fill` and marks that child `modal-fill`; the
-schema builder's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
+schema editor's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
 window and is not needed any more.
 
 The header row holds the title and the controls: a dialog's `headerActions`, then the close button.
@@ -438,9 +438,9 @@ handler. Two pickers build on it.
 
 - **`MetricPicker`** groups the catalog's metrics and adds the standard filter. A catalog metric is
   always chosen from it, never from a dropdown, which stops being usable as the catalog grows: the
-  schema builder, Add Derived Metric, Deprecate Metric's Superseded By, and the schema editor for a
-  draft, which adds each metric's stored keys with `renderNote`. The vocabulary pickers in Add Metric
-  (MTConnect's data item types and the others) are still grouped dropdowns.
+  schema editor, which adds a draft's stored keys with `renderNote`, Add Derived Metric, and Deprecate
+  Metric's Superseded By. The vocabulary pickers in Add Metric (MTConnect's data item types and the
+  others) are still grouped dropdowns.
 - **`SchemaPicker`** lists the schemas a device can have, in Register New Device and Edit Device
   Configuration. A row is two lines: the name and version, with the Schemas page's badge while the
   version is not in force, over the metric count and the description. The search reads the name, the
@@ -451,6 +451,20 @@ handler. Two pickers build on it.
   reduced motion a row's cut text wraps, since a tooltip on a row would cover the rows under it, and
   the list is always 200px.
 
+**A schema has one editor** (`common/SchemaEditor.jsx`), the body of Build Schema from Catalog, of a
+draft and of a read-only version, so a person meets one form. Drift check 592 holds it.
+
+- **The fields stand in one order:** the name, the description, the semantic id, then the metrics with
+  their ranges. They are two to a row while there is room, at the `wide` step, so the dialog's body does
+  not scroll at 1920 × 917. The metric list takes the height they leave, and below 210px the body scrolls
+  instead. What is said about the list stands around it, so it never draws over what is below.
+- **A version adds little:** its UUID and Change Description, the keys stored for each metric, the counts
+  against the last saved draft, and its acts. Version History is a closed `<details>` under the metrics.
+  A section about the metrics goes there too: `SchemaEditor` draws its `children` below them.
+- **A read-only version is the same body as text.** Each value is `.form-static` where its field was, a
+  range is in words, and the list is as tall as its metrics, or scrolls inside itself. A draft is read the
+  same way by a role that may not manage schemas.
+
 ### A dialog's width is named by its content
 
 `Modal`'s `size` is a step of one scale in `App.css`, named by what earns it: `sm` 400px for a
@@ -458,10 +472,11 @@ question with no field, the default 480px for stacked form fields, `md` 560px fo
 in it, `lg` 640px for content rather than input, `xl` 720px for two columns of fields, and `wide`
 900px for a table. `full` is the window, for a viewer. A form is never `sm`. A dialog with steps
 keeps its widest step from first to last, so one that ends by showing a secret is `lg` throughout.
-Sibling dialogs share a step: an asset's create and edit forms are all `md`, and both Add Metric
-dialogs are `xl`. Drift check 530 holds the families, and fails when one's members disagree or an
-`sm` dialog holds a field. Every step uses `.modal`'s padding except `full`, and a rule for one
-dialog's layout hangs on its own class (`className`), never on its step.
+Sibling dialogs share a step: an asset's create and edit forms are all `md`, both Add Metric dialogs
+are `xl`, and the dialogs that build a schema and show a version are `wide`. Drift check 530 holds the
+families, and fails when one's members disagree or an `sm` dialog holds a field. Every step uses
+`.modal`'s padding except `full`, and a rule for one dialog's layout hangs on its own class
+(`className`), never on its step.
 
 ### A dialog takes focus
 
@@ -550,7 +565,8 @@ Two kinds of dialog explain themselves another way:
 - **A role that may not act** sees `permitted={false}`, with the roles that may in the tooltip
   ([Permission gating](#permission-gating)).
 
-The schema editor and the schema detail are still to be rebuilt to this.
+A dialog with two acts that ask for different things has a `useFormCheck()` for each, and the last one
+pressed speaks. In a draft schema, Save Draft asks for a change and Publish does not.
 
 ### A dialog is closed and confirmed one way
 
@@ -617,13 +633,15 @@ table cell, as on Settings, the value is `.setting-static`.
 
 - **Fixed for everyone** is a label: Add Metric's Units for a type that takes none, the Sparkplug
   group and the archive site key, a nameplate value the device publishes, Cold Storage's site key,
-  and a replay lane's Serving Gateway, which stays on Playback. Its hint says why.
+  a schema version's name, and a replay lane's Serving Gateway, which stays on Playback. Its hint says
+  why.
 - **Fixed for this role** is a label too. A Settings row for anyone but an Administrator shows its
   value as text, and Actions says who can change it. The Notifications tab's rows are the same rows.
-  So is a Digital Nameplate for a role that may neither edit nor propose; its notice says so.
-  Its problem line says from the open, in every mode, which fields the template still asks for before an
-  export names it. That is no problem with the form, so `.nameplate-standing` gives the line the hint's
-  look. A refused press takes the line's place until the next edit.
+  So is a draft schema for a role that may not manage schemas, and a Digital Nameplate for one that may
+  neither edit nor propose; a notice at the top says so. The nameplate's problem line says from the open,
+  in every mode, which fields the template still asks for before an export names it. That is no problem
+  with the form, so `.nameplate-standing` gives the line the hint's look. A refused press takes the
+  line's place until the next edit.
 - **Conditional stays a control, with its reason in words.** A field that is open to someone else, or
   once something else is set, keeps its control: a proposal's fields that a proposal cannot carry
   (`nonProposableFields()` words each), and Reference Type until an id is given. The reason sits
@@ -3519,11 +3537,9 @@ to these numbers; jsdom lays nothing out, so screenshots are the check that they
 ## Error Handling
 
 Async handlers invoked from `onClick` must terminate their own promise chain. `SchemaDetailModal`'s
-`run()` demonstrates the case: `SchemasTab.handleSaveDraft` toasts an error and then **rethrows**,
-purely so a failed save aborts the publish that would otherwise activate a version whose edits were
-rejected. That control-flow rethrow had nowhere to land and surfaced as an unhandled promise
-rejection in the browser console. `run()` now catches it, logs, and does not re-toast — the user
-has already been told.
+`write()` demonstrates the case: `SchemasTab.handleSaveDraft` throws a refusal, so a failed save aborts
+the publish that would otherwise activate a version whose edits were rejected. `write()` catches it and
+shows it in the dialog's error slot, as it was worded. Nothing is toasted behind the dialog.
 
 ---
 

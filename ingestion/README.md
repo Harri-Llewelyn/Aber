@@ -400,7 +400,7 @@ Run it from `ingestion/` after `npm run proto`, which generates the Sparkplug bi
   `scripts/mosquitto-provision-gateway.mjs`: that break-glass script writes no platform record,
   so `playback_stale_credentials()` cannot see the change and every dashboard playback is then
   refused (CONNACK rc=5).
-- **`--map` targets are replay lanes**, which the Capture page's **Prepare replay lanes** makes
+- **`--map` targets are replay lanes**, which the Capture page's **Prepare Replay Lanes** makes
   (`ensure_shadow_devices()`). Any other id is refused or held: see
   [Playback meets quarantine first](#playback-meets-quarantine-first).
 

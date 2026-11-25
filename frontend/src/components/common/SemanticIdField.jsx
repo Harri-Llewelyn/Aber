@@ -32,14 +32,11 @@ const PLACEHOLDER = {
   further: 'e.g. 0112/2///61987#ABA951#009'
 }
 
-const LABEL_ROW = { display: 'flex', alignItems: 'center', marginBottom: '7px' }
-const LABEL = { marginBottom: 0 }
-
 /**
- * A semantic id and its AAS reference type as one field, shared by the Schema builder, a draft
- * schema, Add Metric and a catalog metric's Edit so they cannot drift apart. `readOnly` shows the
- * pair as text. The type is empty and its select disabled while the id is blank: a type with no id
- * exports as a Reference with no key. `onChange` receives the next `{ semanticId, semanticIdType }`.
+ * A semantic id and its AAS reference type as one field, shared by the schema editor, Add Metric and a
+ * catalog metric's Edit so they cannot drift apart. `readOnly` shows the pair as text. The type is empty
+ * and its select disabled while the id is blank: a type with no id exports as a Reference with no key.
+ * `onChange` receives the next `{ semanticId, semanticIdType }`.
  *
  * `suggestion` is the pair the subject's own standard gives it, `{ semanticId, semanticIdType,
  * note }`. It is marked while the field shows it; once replaced, Use suggested hands it back
@@ -105,28 +102,27 @@ export function SemanticIdField({
   // label's name too, and the control stops being the only thing that does.
   return (
     <div className="form-group" style={style}>
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
-          <div style={LABEL_ROW}>
+      <div className="semantic-id-fields">
+        <div className="semantic-id-own">
+          <div className="semantic-id-label">
             {readOnly
-              ? <span className="form-label" style={LABEL}>Semantic ID</span>
+              ? <span className="form-label">Semantic ID</span>
               : (
-                <label className="form-label" style={LABEL} htmlFor={idFor}>
+                <label className="form-label" htmlFor={idFor}>
                   {subject === 'further' ? 'Further Semantic ID' : 'Semantic ID'}
-                  {subject !== 'further' && <> <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span></>}
+                  {subject !== 'further' && <> <span className="semantic-id-optional">(optional)</span></>}
                 </label>
               )}
             <HelpTip text={HELP[subject]} label="What a semantic ID is for" />
           </div>
           {readOnly ? (
-            <div className="mono" style={{ fontSize: '12px', wordBreak: 'break-all', color: hasId ? 'var(--text-primary)' : 'var(--text-dim)' }}>
+            <div className={`form-static mono semantic-id-static${hasId ? '' : ' form-static-none'}`}>
               {hasId ? semanticId : '—'}
             </div>
           ) : (
             <input
               id={idFor}
-              className="form-control mono"
-              style={{ fontSize: '11px' }}
+              className="form-control mono semantic-id-input"
               value={semanticId}
               onChange={e => onChange?.({
                 semanticId: e.target.value,
@@ -139,15 +135,15 @@ export function SemanticIdField({
           <FieldError id={`${idFor}-error`} error={error} />
         </div>
 
-        <div style={{ flex: '0 0 160px' }}>
-          <div style={LABEL_ROW}>
+        <div className="semantic-id-type">
+          <div className="semantic-id-label">
             {readOnly
-              ? <span className="form-label" style={LABEL}>Reference Type</span>
-              : <label className="form-label" style={LABEL} htmlFor={typeFor}>{subject === 'further' ? 'Further Reference Type' : 'Reference Type'}</label>}
+              ? <span className="form-label">Reference Type</span>
+              : <label className="form-label" htmlFor={typeFor}>{subject === 'further' ? 'Further Reference Type' : 'Reference Type'}</label>}
             <HelpTip text={TYPE_HELP} label="What the reference type says" />
           </div>
           {readOnly ? (
-            <div style={{ fontSize: '12px', color: hasId && semanticIdType ? 'var(--text-primary)' : 'var(--text-dim)' }}>
+            <div className={`form-static${hasId && semanticIdType ? '' : ' form-static-none'}`}>
               {hasId && semanticIdType ? semanticIdType : '—'}
             </div>
           ) : (
@@ -234,7 +230,7 @@ export function SemanticIdField({
                     >
                       <span className="semantic-id-picker-head">
                         <span>{c.label}</span>
-                        <span className="badge badge-neutral" style={{ fontSize: '11px' }}>{c.standard}</span>
+                        <span className="badge badge-sm badge-neutral">{c.standard}</span>
                       </span>
                       <span className="mono semantic-id-picker-id">{c.semanticId}</span>
                     </button>
