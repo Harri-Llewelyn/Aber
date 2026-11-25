@@ -12,6 +12,9 @@ import { serverError } from "../_shared/failure.ts";
  * it is running, and what `converged.json` on that branch says its last convergence did -- the
  * platform tag and outcome, and what this gateway's own custom.yml did (0106).
  *
+ * A push to `main` that brings the platform release the row says waits for approval also clears that
+ * (0327): the merge arrived. forge-sweep writes it.
+ *
  * The signature is the whole of the authentication: `X-Gitea-Signature` is the hex HMAC-SHA256 of
  * the raw body under the hook's secret, verified against GITEA_WEBHOOK_SECRET. The body is read as
  * bytes before it is parsed. A missing or wrong signature is 401; an unset secret is 503, never a
@@ -27,6 +30,7 @@ import { serverError } from "../_shared/failure.ts";
  * Gitea records as a failed delivery, and none of these is a failure.
  */
 
+import { clearMergedBump } from "../_shared/bumpRecord.ts";
 import {
   APPLIANCE_BRANCH,
   fileAtCommit,
@@ -361,6 +365,10 @@ export default async function handler(req: Request): Promise<Response> {
   }
   if (!data || data.length === 0) {
     return json({ ignored: `no gateway has sparkplug id '${sparkplugId}'` }, 200);
+  }
+  if (branch === "main") {
+    const cfg = forgeConfig();
+    if (cfg) await clearMergedBump(cfg, admin, repository, sparkplugId, sha);
   }
 
   console.log(`forge-events: ${sparkplugId} ${branch} is at ${sha.slice(0, 12)}${flowSha256 ? ` (${FLOW_FILE} ${flowSha256.slice(0, 12)})` : ` (no ${FLOW_FILE})`}`);

@@ -11896,7 +11896,7 @@ the characters of one tag and leaves every other byte of `platform.yml` as it wa
 somebody. There is one for each tag, whatever became of it, so closing it is an answer and the sweep
 does not ask again; a newer platform's proposal closes the older one with a comment that names it. A
 pass opens ten at most and begins none after thirty seconds, inside the worker's sixty. The forge
-holds all of it, so there is no row and no migration.
+holds all of it. The gateway's row carries a copy of the one that waits, for the drawer (`0327`).
 
 **The branch is the machine account's alone, and that is the security of it.** The bump is made on
 `aber-platform-<tag>`, under a rule of its own that `ensureBumpProtection()` puts beside the others:

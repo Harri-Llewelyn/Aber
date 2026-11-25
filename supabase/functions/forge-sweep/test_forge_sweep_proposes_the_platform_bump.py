@@ -4,7 +4,8 @@
 #     release gets one pull request, the machine account's, and no second one from the next pass. A
 #     member of administrators, and nobody before them, approves it and merges it. One a person
 #     closed is not opened again, a tag somebody chose is left alone, and an older proposal is closed
-#     for the newer one. Nobody else can write the branch it is made from, which is what stops an
+#     for the newer one. The gateway's row says which one waits until it is merged, closed or replaced.
+#     Nobody else can write the branch it is made from, which is what stops an
 #     Administrator approving a change of their own as Aber's. Needs the stack, the forge, the
 #     organisation and FORGE_SWEEP_SECRET; signs nobody in.
 
@@ -228,9 +229,12 @@ class TestThePlatformBump(ForgeSweepBase):
         status, answer = self.as_approver(*review)
         self.assertEqual(status, 200, answer)
         self.assertTrue(answer["official"], "an approval by a member of administrators did not count")
+        self.assertEqual(self.waits(), (self.tag, pull["number"]))
         status, answer = self.as_approver(*merge)
         self.assertEqual(status, 200, answer)
         self.assertEqual(self.text_at("main"), pointer_naming(self.tag))
+        # The forge's own delivery of the merge clears the row: the lease this test holds keeps a pass out.
+        self.until("the merge cleared what waits", lambda: self.waits() is None)
 
         body = self.swept()
         self.assertEqual(self.proposed(body), [], body)
@@ -338,6 +342,52 @@ class TestThePlatformBump(ForgeSweepBase):
         self.assertEqual(self.proposed(self.swept()), [])
         self.assertEqual([p["state"] for p in self.pulls()], ["open"])
 
+    def waits(self):
+        """What the gateway's row says waits for approval: the release and its pull request, or None."""
+        _, rows = rest(f"/gateways?id=eq.{TEST_GW_ID}&select=forge_bump_tag,forge_bump_number")
+        (row,) = rows
+        return (row["forge_bump_tag"], row["forge_bump_number"]) if row["forge_bump_tag"] else None
+
+    def test_the_row_says_which_one_waits_while_one_does(self):
+        self.make_repository()
+        self.swept()
+        (pull,) = self.pulls()
+        self.assertEqual(self.waits(), (self.tag, pull["number"]))
+        # A row that lost it has it back from the proposal itself.
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"forge_bump_tag": None, "forge_bump_number": None})
+        self.swept()
+        self.assertEqual(self.waits(), (self.tag, pull["number"]))
+
+        for state, expected in (("closed", None), ("open", (self.tag, pull["number"]))):
+            status, answer = self.as_approver(f"{self.path}/pulls/{pull['number']}", "PATCH", {"state": state})
+            self.assertEqual(status, 201, answer)
+            self.swept()
+            self.assertEqual(self.waits(), expected, state)
+
+        # Nothing waits on a gateway the sweep proposes nothing for, and it waits again when it is back.
+        for change, back in (({"deployment": "host"}, {"deployment": "remote"}), ({"is_archived": True}, {"is_archived": False})):
+            with self.subTest(change):
+                self.addCleanup(rest, f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body=back)
+                rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body=change)
+                self.swept()
+                self.assertIsNone(self.waits())
+                rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body=back)
+                self.swept()
+                self.assertEqual(self.waits(), (self.tag, pull["number"]))
+
+        # A tag that moved another way leaves the proposal open and nothing to wait for. Committed as the
+        # machine account, whose rule is opened for it and put back by the pass.
+        status, answer = forge(f"{self.path}/branch_protections/main", method="PATCH", body={
+            "enable_push": True, "enable_push_whitelist": True, "push_whitelist_usernames": [MACHINE_USER], "enable_status_check": False})
+        self.assertEqual(status, 200, answer)
+        _, file = forge(f"{self.path}/contents/platform.yml?ref=main")
+        status, answer = forge(f"{self.path}/contents/platform.yml", method="PUT", body={
+            "content": encoded(pointer_naming(self.tag)), "sha": file["sha"], "branch": "main", "message": "By hand"})
+        self.assertEqual(status, 200, answer)
+        self.swept()
+        self.assertIsNone(self.waits())
+        self.assertEqual([p["state"] for p in self.pulls()], ["open"])
+
     def test_a_tag_somebody_chose_is_left_alone(self):
         for chosen in ("my-branch", f"{self.tag}-rc.1", "v999.0.0", self.tag):
             with self.subTest(tag=chosen):
@@ -378,8 +428,11 @@ class TestThePlatformBump(ForgeSweepBase):
         self.assertEqual(status, 200, made)
         status, theirs = self.as_approver(f"{self.path}/pulls", "POST", {"head": "by-hand", "base": "main", "title": "By hand"})
         self.assertEqual(status, 201, theirs)
+        # And what the row said then.
+        rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"forge_bump_tag": "v0.0.9", "forge_bump_number": older["number"]})
 
         body = self.swept()
+        self.assertEqual(self.waits(), (self.tag, current["number"]))
         self.assertEqual(len(self.proposed(body)), 1, body)
         states = {p["number"]: p["state"] for p in self.pulls()}
         self.assertEqual(states, {current["number"]: "open", older["number"]: "closed", theirs["number"]: "open"})
