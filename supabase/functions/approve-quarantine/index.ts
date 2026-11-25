@@ -156,9 +156,12 @@ export default async function handler(req: Request): Promise<Response> {
 
     if (rpcError) {
       // Map the RPC's own SQLSTATEs onto HTTP codes, and do not relay the driver's message, which
-      // discloses table, column and constraint names.
+      // discloses table, column and constraint names. P0001 (raise_exception) is a merge the RPC
+      // refuses in a sentence written for the person, so that one is answered as it is worded.
       const status = rpcError.code === "P0002" || rpcError.code === "no_data_found"
         ? 404
+        : rpcError.code === "P0001"
+        ? 409
         : rpcError.code === "42501"
         ? 403
         : rpcError.code === "22023"
@@ -171,7 +174,9 @@ export default async function handler(req: Request): Promise<Response> {
 
       return jsonResponse(
         {
-          error: status === 404
+          error: status === 409
+            ? rpcError.message
+            : status === 404
             ? "Device not found"
             : status === 403
             ? "Forbidden: Insufficient privileges"
