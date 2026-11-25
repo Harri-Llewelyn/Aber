@@ -11,6 +11,7 @@ import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
 import { AUDIT_TRAIL_ACTIONS, AUDIT_TRAIL_CLASSES, ENTITY_FIND_LIMIT, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { judgePayload } from './utils/payloadConformance';
+import { derivedSchemaIds } from './utils/derivedMetric';
 import { lineageVersionLabel } from './utils/schemaVersion';
 import { readSetting } from './config';
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
@@ -3572,7 +3573,9 @@ const apiMethods = {
       // gateway), and the resolved value is `effective_cell_id`.
       return (data || []).map(d => ({
         ...mapDeviceRow(d, d.gateways, locations?.get(d.id)),
-        submodel_schema_ids: schemasByDevice.get(d.id) || []
+        submodel_schema_ids: schemasByDevice.get(d.id) || [],
+        // Whose derived metrics it has: a replay lane has its original's.
+        derived_schema_ids: derivedSchemaIds(d, schemasByDevice)
       }));
     }
 
@@ -4000,6 +4003,8 @@ const apiMethods = {
         lineage_root_id: s.lineage_root_id ?? s.id,
         description: s.description,
         schema_definition: s.schema_definition,
+        // The derived metrics its devices get (0336).
+        derived_metrics: s.derived_metrics ?? [],
         semantic_id: s.semantic_id ?? null,
         semantic_id_type: s.semantic_id_type ?? null,
         // Defaulted here as well as in the column, so a client against a database that has not
@@ -4485,6 +4490,7 @@ const apiMethods = {
         schema_name: body.schema_name,
         description: body.description,
         schema_definition: body.schema_definition,
+        ...('derived_metrics' in body && { derived_metrics: body.derived_metrics }),
         ...semanticIdPair(body),
         // A newly built schema is v1 and in force immediately; `version` and `status` are left to their
         // column defaults because sending them is what the provenance trigger refuses.
@@ -4673,6 +4679,7 @@ const apiMethods = {
     if (path.startsWith('/api/v1/schemas/')) {
       const patch = {};
       if ('schema_definition' in body) patch.schema_definition = body.schema_definition;
+      if ('derived_metrics' in body) patch.derived_metrics = body.derived_metrics;
       if ('description' in body) patch.description = body.description;
       if ('change_description' in body) patch.change_description = emptyToNull(body.change_description);
       // The pair travels together, so clearing the id clears the type with it.

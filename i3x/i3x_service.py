@@ -455,9 +455,9 @@ def _modelled_metrics(schema_definition) -> set:
     `schema_definition` is free-form JSONB and hand-written schemas carry either, which is why
     `modelledMetrics()` in deviceTags.js reads both.
 
-    ONE OF FOUR IMPLEMENTATIONS, all held to `test-harness/fixtures/modelled-metrics.json` -- with
-    deviceTags.js, `modelled_metrics()` in ingestion/validate.py, and `modelledMetrics()` in
-    supabase/functions/aas-export/index.ts. This one is asserted by
+    ONE OF FIVE IMPLEMENTATIONS, all held to `test-harness/fixtures/modelled-metrics.json` -- with
+    deviceTags.js, `modelled_metrics()` in ingestion/validate.py, `modelledMetrics()` in
+    supabase/functions/aas-export/index.ts, and the database's. This one is asserted by
     `ModelledMetricsContractTest` in test_i3x_service.py.
 
     `!isinstance(props, dict)` IS LOAD-BEARING: an array `properties` must contribute nothing, and
@@ -466,7 +466,7 @@ def _modelled_metrics(schema_definition) -> set:
 
     RETURNS AN EMPTY SET, NOT None, where the mirrors distinguish "declares neither, cannot be
     evaluated" from "models nothing". i3X has no caller that asks -- `_build_objects` iterates the
-    result to decide what to project -- so the NAMES agree exactly with the other three and only
+    result to decide what to project -- so the NAMES agree exactly with the other four and only
     that distinction is dropped. The contract test asserts the collapse rather than leaving it
     implied.
     """

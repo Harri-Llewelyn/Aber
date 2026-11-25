@@ -8,9 +8,9 @@ import { queryTabLink } from '../test/tabBar'
 import { getByTooltip, helpTipText } from '../test/tooltips'
 
 /**
- * A derived metric's Applies To, in the Metrics drawer: a chip for each device that reports every
- * input, which opens the device on the Devices page, as the Schemas drawer's Devices field does. The
- * inputs are said once, in the field's help. With no device, the field says what none reports yet.
+ * A derived metric's Applies To, in the Metrics drawer: a chip for each device whose schemas name it,
+ * which opens the device on the Devices page, as the Schemas drawer's Devices field does. The rule is
+ * said once, in the field's help. With no device, the field says why.
  */
 
 vi.mock('../api', async () => {
@@ -37,9 +37,15 @@ const CATALOG = [
 
 const GROUPS = [{ group_uuid: 'g1', name: 'Controller', standard: 'MTConnect' }, { group_uuid: 'g2', name: 'Power', standard: null }]
 
-const press = (n, metrics = ['Controller/PART_COUNT']) => ({
-  asset_id: `p${n}`, asset_name: `Press ${n}`, last_birth_metrics: metrics, status: 'ONLINE', location_source: 'inherited'
+const press = (n, schemaIds = ['s-press']) => ({
+  asset_id: `p${n}`, asset_name: `Press ${n}`, last_birth_metrics: ['Controller/PART_COUNT', 'Power/PHASE_A', 'Power/PHASE_B'],
+  submodel_schema_ids: schemaIds, status: 'ONLINE', location_source: 'inherited'
 })
+
+const SCHEMAS = [
+  { schema_uuid: 's-press', schema_name: 'Press_Schema', schema_definition: { type: 'object' }, derived_metrics: ['Controller/PARTS_PER_HOUR'] },
+  { schema_uuid: 's-power', schema_name: 'Power_Schema', schema_definition: { type: 'object' }, derived_metrics: ['Power/TOTAL'] },
+]
 
 let devices = []
 
@@ -50,6 +56,7 @@ beforeEach(() => {
     if (path.startsWith('/api/v1/devices')) return Promise.resolve(devices)
     if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(CATALOG)
     if (path.startsWith('/api/v1/metric-groups')) return Promise.resolve(GROUPS)
+    if (path.startsWith('/api/v1/schemas')) return Promise.resolve(SCHEMAS)
     return Promise.resolve([])
   })
 })
@@ -100,27 +107,26 @@ describe("a derived metric's Applies To", () => {
     expect(chip.querySelector('.chip-name.overflow-text').textContent).toBe('Press 1')
   })
 
-  it('says once, in its help, what the devices report, and only names them beside it', async () => {
+  it('says once, in its help, which devices they are, and only names them beside it', async () => {
     devices = [press(1), press(2)]
     const drawer = await openDrawer('Controller/PARTS_PER_HOUR')
     expect(helpTipText('What Applies To means', drawer)).toBe(
-      'The devices in service that report Controller/PART_COUNT. Each opens on the Devices page. Nothing is stored: the value is computed when it is drawn.'
+      'The devices in service bound to a schema that names it. Each opens on the Devices page. Nothing is stored: the value is computed when it is drawn.'
     )
     expect(field(drawer).querySelector('.context-field-value').textContent).toBe('Press 1Press 2')
   })
 
-  it("names every input of a sum in its help, and lists only the devices that report all of them", async () => {
-    devices = [press(1, ['Power/PHASE_A']), press(2, ['Power/PHASE_A', 'Power/PHASE_B'])]
+  it('lists only the devices whose schemas name it, of those that report every input', async () => {
+    devices = [press(1), press(2, ['s-power'])]
     const drawer = await openDrawer('Power/TOTAL')
-    expect(helpTipText('What Applies To means', drawer)).toMatch(/^The devices in service that report Power\/PHASE_A and Power\/PHASE_B\. /)
     expect(chips(drawer).map(a => a.textContent)).toEqual(['Press 2'])
   })
 
-  it('says no device yet, and what none reports, when there is none', async () => {
-    devices = [press(1, ['Other/X'])]
+  it('says no device yet, and why, when there is none', async () => {
+    devices = [press(1)]
     const drawer = await openDrawer('Controller/UPTIME')
     expect(chips(drawer)).toHaveLength(0)
-    expect(field(drawer).querySelector('.context-field-value').textContent).toBe('No device yet: none reports Controller/EXECUTION')
+    expect(field(drawer).querySelector('.context-field-value').textContent).toBe('No device yet: no schema names it')
   })
 
   it('keeps View in History, which compares the devices on one scale', async () => {

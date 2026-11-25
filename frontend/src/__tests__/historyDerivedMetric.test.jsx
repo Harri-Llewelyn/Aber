@@ -1,6 +1,6 @@
 /**
- * History draws a derived metric (0282): each tab offers the derived metrics a device's reports make
- * possible, reads them through derived_series() and not telemetry_carried(), tags them, and leaves
+ * History draws a derived metric (0282): each tab offers the derived metrics a device's schemas
+ * name, reads them through derived_series() and not telemetry_carried(), tags them, and leaves
  * them out of Export. uPlot draws on a canvas jsdom does not have, so a stand-in records what each
  * chart was built with.
  */
@@ -50,8 +50,8 @@ const PRESS2 = id(2)
 const LATHE = id(3)
 const inCell = { location_source: 'inherited', status: 'ONLINE' }
 const devices = [
-  { asset_id: PRESS1, asset_name: 'Press 1', effective_cell_id: 'c1', last_birth_metrics: ['Controller/PART_COUNT', 'Controller/EXECUTION'], ...inCell },
-  { asset_id: PRESS2, asset_name: 'Press 2', effective_cell_id: 'c1', last_birth_metrics: ['Controller/PART_COUNT'], ...inCell },
+  { asset_id: PRESS1, asset_name: 'Press 1', effective_cell_id: 'c1', last_birth_metrics: ['Controller/PART_COUNT', 'Controller/EXECUTION'], submodel_schema_ids: ['s1'], ...inCell },
+  { asset_id: PRESS2, asset_name: 'Press 2', effective_cell_id: 'c1', last_birth_metrics: ['Controller/PART_COUNT'], submodel_schema_ids: ['s2'], ...inCell },
   { asset_id: LATHE, asset_name: 'Lathe 3', effective_cell_id: 'c2', last_birth_metrics: ['Spindle/LOAD'], ...inCell },
 ]
 const cells = [
@@ -69,11 +69,17 @@ const catalog = [
   { name: UPTIME, datatype: 10, derivation: { kind: 'time_in_state', input: 'Controller/EXECUTION', states: ['ACTIVE'] } },
 ]
 
+/** Press 1's schema names both derived metrics, Press 2's one of them, and the lathe has none. */
+const schemas = [
+  { schema_uuid: 's1', schema_name: 'Press_A', schema_definition: { type: 'object' }, derived_metrics: [RATE, UPTIME] },
+  { schema_uuid: 's2', schema_name: 'Press_B', schema_definition: { type: 'object' }, derived_metrics: [RATE] },
+]
+
 const routeGet = (path) => {
   if (path.startsWith('/api/v1/devices')) return Promise.resolve(devices)
   if (path.startsWith('/api/v1/cells')) return Promise.resolve(cells)
   if (path.startsWith('/api/v1/areas')) return Promise.resolve(areas)
-  if (path.startsWith('/api/v1/schemas')) return Promise.resolve([])
+  if (path.startsWith('/api/v1/schemas')) return Promise.resolve(schemas)
   if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(catalog)
   return Promise.resolve([])
 }
@@ -126,7 +132,7 @@ afterEach(() => {
 })
 
 describe('the Device tab', () => {
-  it('draws each derived metric the device reports the inputs of, tagged, read by derived_series()', async () => {
+  it('draws each derived metric the device has, tagged, read by derived_series()', async () => {
     await visit(`/history/device/${PRESS1}?range=24h`)
     const figure = await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (count/h)' })
     expect(within(figure).getByText('Derived')).toBeInTheDocument()
@@ -158,14 +164,14 @@ describe('the Device tab', () => {
     expect(rate.getByText(/^Latest 50 count[/]h · /)).toBeInTheDocument()
   })
 
-  it('offers only the derived metrics whose inputs the device reports', async () => {
+  it("offers only the derived metrics the device's schemas name", async () => {
     await visit(`/history/device/${PRESS2}?range=24h`)
     await screen.findByRole('figure', { name: 'Controller/PARTS_PER_HOUR (count/h)' })
     expect(screen.queryByRole('figure', { name: /^Controller[/]UPTIME/ })).not.toBeInTheDocument()
     expect(api.readDerivedSeries.mock.calls[0][0].metricNames).toEqual([RATE])
   })
 
-  it('offers none to a device that reports no input, and reads none', async () => {
+  it('offers none to a device with no schema, and reads none', async () => {
     await visit(`/history/device/${LATHE}?range=24h`)
     await screen.findByRole('figure', { name: 'Spindle/LOAD (kW)' })
     expect(screen.getAllByRole('figure')).toHaveLength(1)
@@ -222,7 +228,7 @@ describe('the Device tab', () => {
 })
 
 describe('the Cell tab', () => {
-  it('reads the machines that report every input through derived_series(), and tags the metric', async () => {
+  it('reads the machines whose schemas name it through derived_series(), and tags the metric', async () => {
     await visit(`/history/cell/c1?metric=${encodeURIComponent(RATE)}`)
     await waitFor(() => expect(plots.length).toBeGreaterThan(0))
     expect(api.readCarriedTelemetry).not.toHaveBeenCalled()
@@ -233,10 +239,10 @@ describe('the Cell tab', () => {
     expect(screen.getByText(/is computed from other metrics. No device reports it./)).toBeInTheDocument()
   })
 
-  it('names the machines that lack an input, and offers the derived metric of the machines that have them', async () => {
+  it('names the machines that do not have it, and offers the derived metric of the machines that do', async () => {
     await visit(`/history/cell/c1?metric=${encodeURIComponent(UPTIME)}`)
     await waitFor(() => expect(plots.length).toBeGreaterThan(0))
-    // Press 2 does not report EXECUTION, so only Press 1 is charted.
+    // Press 2's schema does not name it, so only Press 1 is charted.
     expect(api.readDerivedSeries.mock.calls[0][0].assetIds).toEqual([telemetryKey({ asset_id: PRESS1 })])
     expect(screen.getByText('Press 2 does not report Controller/UPTIME.')).toBeInTheDocument()
   })
@@ -255,7 +261,7 @@ describe('the Cell tab', () => {
     expect(api.readHourOfDay).not.toHaveBeenCalled()
   })
 
-  it('exports it for the machines that report its inputs', async () => {
+  it('exports it for the machines that have it', async () => {
     await visit(`/history/cell/c1?metric=${encodeURIComponent(RATE)}`)
     await waitFor(() => expect(plots.length).toBeGreaterThan(0))
     const button = screen.getByRole('button', { name: /Export CSV/ })
@@ -278,7 +284,7 @@ describe('the Cell tab', () => {
 })
 
 describe('the Metric tab', () => {
-  it('lists each derived metric with the devices that report all its inputs, and its tag', async () => {
+  it('lists each derived metric with the devices whose schemas name it, and its tag', async () => {
     await visit('/history/metric')
     const table = await screen.findByRole('table', { name: /choose a metric/i })
     const rows = within(table).getAllByRole('row').slice(1).map(r => [...r.querySelectorAll('td')].map(c => c.textContent))
@@ -291,7 +297,7 @@ describe('the Metric tab', () => {
     ])
   })
 
-  it('compares the derived metric across the devices that report its inputs', async () => {
+  it('compares the derived metric across the devices that have it', async () => {
     await visit(`/history/metric/${encodeURIComponent(RATE)}`)
     await waitFor(() => expect(plots.length).toBeGreaterThan(0))
     expect(api.readCarriedTelemetry).not.toHaveBeenCalled()

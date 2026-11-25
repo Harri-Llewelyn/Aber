@@ -242,9 +242,9 @@ export function file(idShort: string, value: string, contentType: string, descri
 }
 
 /**
- * The metric names one schema models: `properties` keys plus `required` entries. The fourth of four
+ * The metric names one schema models: `properties` keys plus `required` entries. One of five
  * implementations, kept in step by test-harness/fixtures/modelled-metrics.json with
- * `frontend/src/utils/deviceTags.js`, `ingestion/validate.py` and `i3x/i3x_service.py`;
+ * `frontend/src/utils/deviceTags.js`, `ingestion/validate.py`, `i3x/i3x_service.py` and the database;
  * test_aas_export.py extracts this function by regex and executes it, so the signature tokens are
  * part of the contract. An array `properties` contributes nothing: `Object.keys(["a","b"])` is
  * `["0","1"]`, which fails the idShort pattern. Returns a sorted array so two exports of the same
@@ -262,18 +262,6 @@ export function modelledMetrics(definition: Record<string, unknown> | null): str
     for (const key of required) if (typeof key === "string") names.add(key);
   }
   return [...names].sort();
-}
-
-/** The input names of a derived metric's definition (metric_catalog.derivation), in the order it holds them. */
-export function derivationInputs(derivation: Record<string, unknown> | null): string[] {
-  if (!derivation || typeof derivation !== "object") return [];
-  if (derivation.kind === "sum") {
-    const inputs = Array.isArray(derivation.inputs) ? derivation.inputs : [];
-    return inputs
-      .map((i) => (i && typeof i === "object" ? (i as { metric?: unknown }).metric : null))
-      .filter((m): m is string => typeof m === "string");
-  }
-  return typeof derivation.input === "string" ? [derivation.input] : [];
 }
 
 /**
@@ -308,22 +296,20 @@ export function describeDerivation(derivation: Record<string, unknown> | null): 
 }
 
 /**
- * The derived metrics of a device: each catalog row with a definition whose inputs are all among
- * `reported`, the metrics the device declared and its schemas model, in name order. A derived metric
- * applies to every device that reports all its inputs, as the dashboard's History offers it.
+ * The derived metrics of a device: each catalog row with a definition that one of its schemas names, in
+ * name order. `schemas` are the ones the metrics come from, which for a replay lane are its original's.
+ * One rule with device_derived_metrics() (0336) and the dashboard's derivedMetricsOfDevice(), which
+ * test-harness/fixtures/device-derived-metrics.json holds together.
  */
 export function derivedMetricsFor(
-  reported: Iterable<string>,
+  schemas: Record<string, unknown>[],
   catalog: Record<string, unknown>[],
 ): Record<string, unknown>[] {
-  const has = new Set(reported);
+  const named = new Set(
+    schemas.flatMap((s) => (Array.isArray(s.derived_metrics) ? s.derived_metrics : [])).map(String),
+  );
   return catalog
-    .filter((m) => {
-      const derivation = m.derivation as Record<string, unknown> | null | undefined;
-      if (!derivation) return false;
-      const inputs = derivationInputs(derivation);
-      return inputs.length > 0 && inputs.every((name) => has.has(name));
-    })
+    .filter((m) => m.derivation && named.has(String(m.name)))
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
@@ -703,6 +689,8 @@ export interface DeviceRecord {
   /** The elements of the Digital Nameplate and Contact Information, as `idta_template_elements` holds them. */
   elements?: TemplateElement[];
   schemas: Record<string, unknown>[];
+  /** A replay lane's original's schemas, which its derived metrics come from. Absent, they come from `schemas`. */
+  derivedSchemas?: Record<string, unknown>[];
   /** The further semantic ids of the catalog's metrics, as `metric_semantic_ids` holds them. */
   supplemental?: SupplementalSemanticId[];
   /** `concept_definitions` rows for the ids conceptIdsFor() names. */
@@ -828,6 +816,17 @@ export async function loadDeviceRecord(
     ? await client.from("schemas").select("*").in("id", schemaIds)
     : { data: [] };
 
+  // A replay lane has its original's derived metrics, whatever its own bindings say by now.
+  let derivedSchemas: Record<string, unknown>[] | undefined;
+  if (device.shadow_of) {
+    const { data: originalLinks } = await client.from("device_schemas").select("schema_id").eq("device_id", device.shadow_of);
+    const originalIds = (originalLinks ?? []).map((l: { schema_id: string }) => l.schema_id).filter(Boolean);
+    const { data: originalSchemas } = originalIds.length > 0
+      ? await client.from("schemas").select("id, derived_metrics").in("id", originalIds)
+      : { data: [] };
+    derivedSchemas = originalSchemas ?? [];
+  }
+
   // One query for every vocabulary definition the shell can use. Without rows (an error, or a
   // database that lacks the view) each definition falls back to the catalog text.
   const conceptIds = conceptIdsFor({
@@ -868,6 +867,7 @@ export async function loadDeviceRecord(
     templates: templateRows ?? [],
     elements: elementRows ?? [],
     schemas: schemaRows ?? [],
+    ...(derivedSchemas ? { derivedSchemas } : {}),
     supplemental: supplementalRows ?? [],
     definitions: definitionRows ?? [],
     sources: sourceRows ?? [],
@@ -1262,20 +1262,12 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     }
   }
 
-  // Submodel: DerivedMetrics. A derived metric is in no schema and no birth, so the telemetry
-  // submodels above never list it: this one adds each whose inputs the device reports, all of them. No
+  // Submodel: DerivedMetrics. A derived metric is in no schema's metrics and no birth, so the telemetry
+  // submodels above never list it: this one adds each that one of the device's schemas names. No
   // semanticId, because it is a local extension (so it is counted as unmapped, the honest form), and
   // no value: a shell is the asset's description, and a current value would need a read of the
   // historian that the loader does not make. The description says how Aber computes it.
-  const reported = new Set<string>(
-    (Array.isArray(device.last_birth_metrics) ? device.last_birth_metrics : []).map(String),
-  );
-  for (const schema of schemas) {
-    for (const name of modelledMetrics((schema.schema_definition as Record<string, unknown> | null) ?? null)) {
-      reported.add(name);
-    }
-  }
-  const derivedRows = derivedMetricsFor(reported, catalog);
+  const derivedRows = derivedMetricsFor(record.derivedSchemas ?? schemas, catalog);
   if (derivedRows.length > 0) {
     unmappedCount += derivedRows.length;
     submodels.push({

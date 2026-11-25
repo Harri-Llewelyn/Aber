@@ -1,7 +1,7 @@
 import { parseDocument, isMap, isScalar, isSeq } from 'yaml'
 import SCHEMA from '../../public/json-schema/automations.schema.json'
 import { deviceMetrics, validRanges } from './history'
-import { SHARE_FRACTION_NOTE } from './derivedMetric'
+import { SHARE_FRACTION_NOTE, derivedMetricsOfDevice } from './derivedMetric'
 import { unitSticks, unitSymbol } from './units'
 import { locateReasons, parseAutomationsYaml } from './automationYaml'
 
@@ -134,19 +134,27 @@ export function buildFacts({ devices = [], schemas = [], catalog = [], documentD
   }
   const modelled = new Map()
   const ranges = new Map()
+  const derivedOf = new Map()
   return {
     metrics,
     devices: [...byId.values()],
     deviceById: byId,
-    /** The metric names a device models or declares: a metric it reports is offered first. */
+    /** The metric names a device models or declares, and the derived metrics its schemas name: what it has is offered first. */
     modelledOf(id) {
       if (!modelled.has(id)) {
         const d = byId.get(id)?.device
         let names = []
-        try { names = d ? deviceMetrics(d, schemas) : [] } catch { names = [] }
+        try { names = d ? deviceMetrics(d, schemas, catalog) : [] } catch { names = [] }
         modelled.set(id, new Set(names))
       }
       return modelled.get(id)
+    },
+    /** Whether a metric is a derived one that a known device's schemas do not name: the rule automations_parse() holds (0336). */
+    lacksDerived(id, metric) {
+      const d = byId.get(id)?.device
+      if (!d || !metrics.get(metric)?.derived) return false
+      if (!derivedOf.has(id)) derivedOf.set(id, new Set(derivedMetricsOfDevice(d, schemas, catalog)))
+      return !derivedOf.get(id).has(metric)
     },
     /** A device's valid range for a metric, `{ minimum, maximum }` from its schemas, or null. */
     rangeOf(id, metric) {
@@ -582,6 +590,8 @@ function metricHover(name, facts, ids) {
   if (!info) return { title: name, lines: ['Not in the metric catalogue. Register it on the Metrics page first.'] }
   if (!info.measured) return { title: name, lines: ['Not a number, so it has no threshold to compare with.'] }
   const lines = [info.unit ? `Unit: ${info.unit}` : 'No unit in the catalogue.']
+  const lacking = lacksWords(facts, ids, name)
+  if (lacking) lines.push(lacking)
   const range = ids.length ? widestRange(facts, ids, name) : null
   if (range?.bounded) lines.push(`Valid range on ${range.where}: ${rangeWords(range, info.unit)}.`)
   else if (range) lines.push(`No valid range is set on ${range.where}'s schema.`)
@@ -633,6 +643,39 @@ export function rangeWarnings(text, facts) {
   return out
 }
 
+/** Which of a trigger's devices do not have a derived metric, in words, or null: "Lathe 3 does not have X: none of its schemas names it." */
+function lacksWords(facts, ids, metric) {
+  const names = ids.filter(id => facts.lacksDerived(id, metric)).map(id => facts.deviceById.get(id).name)
+  if (names.length === 0) return null
+  return names.length === 1
+    ? `${names[0]} does not have ${metric}: none of its schemas names it.`
+    : `${names.length} of its devices do not have ${metric}: none of their schemas names it (${names.slice(0, 3).join(', ')}${names.length > 3 ? ' and more' : ''}).`
+}
+
+/**
+ * A warning for each threshold on a derived metric that a device of its trigger does not have. A new one
+ * is refused by the database, and one saved already goes on, so here it is never an error.
+ */
+export function derivedWarnings(text, facts) {
+  const doc = parseDocument(text, { prettyErrors: false })
+  if (doc.errors.length || !isSeq(doc.contents)) return []
+  const out = []
+  for (const automation of doc.contents.items) {
+    const triggers = isMap(automation) ? automation.get('triggers', true) : null
+    if (!isSeq(triggers)) continue
+    for (const trigger of triggers.items) {
+      const node = isMap(trigger) ? trigger.get('metric', true) : null
+      if (!isScalar(node) || typeof node.value !== 'string') continue
+      const lacking = lacksWords(facts, devicesOf(trigger.toJS(doc)), node.value)
+      if (lacking) {
+        out.push({ from: node.range[0], to: node.range[1], severity: 'warning',
+          message: `${lacking} A trigger saved already goes on, and a new one is refused.` })
+      }
+    }
+  }
+  return out
+}
+
 /** The refusals the database gave, as marks on the lines they name: `{ from, to, severity: 'error', message }`. */
 export function refusalMarks(text, reasons) {
   if (!reasons?.length) return []
@@ -651,10 +694,10 @@ export function syntaxMarks(text) {
   }))
 }
 
-/** Every mark for the text: a syntax error stands alone (nothing else can be read), else the range warnings and the refusals. */
+/** Every mark for the text: a syntax error stands alone (nothing else can be read), else the refusals and the warnings. */
 export function marksFor(text, facts, reasons, model = AUTOMATIONS_MODEL) {
   const syntax = syntaxMarks(text)
   if (syntax.length) return syntax
-  // A threshold's range is the automations' alone: no other file has a trigger to compare it with.
-  return [...refusalMarks(text, reasons), ...(facts && model.automations ? rangeWarnings(text, facts) : [])]
+  // A threshold's warnings are the automations' alone: no other file has a trigger to compare with.
+  return [...refusalMarks(text, reasons), ...(facts && model.automations ? [...rangeWarnings(text, facts), ...derivedWarnings(text, facts)] : [])]
 }

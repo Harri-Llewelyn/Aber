@@ -1,5 +1,5 @@
 /**
- * The Devices drawer's Derived Metrics: each derived metric whose inputs the device reports, with its
+ * The Devices drawer's Derived Metrics: each derived metric the device's schemas name, with its
  * current value by the rule derived_current() holds, its tag and the window in words. One read when the
  * drawer opens on a device; a device with no value, a read that fails, and a device none of whose
  * derived metrics apply are each said in words or leave the field out.
@@ -25,7 +25,7 @@ const base = {
   status: 'ONLINE', cell_id: null, location_scope: 'cell', effective_cell_id: 'cell-1', gateway_cell_id: 'cell-1',
   location_source: 'inherited', active_gateway_id: 'gw-1',
 }
-const press = { ...base, asset_id: 'dev-1', asset_name: 'Press 1', sparkplug_id: 'dev_1111222233334444', last_birth_metrics: ['Controller/PART_COUNT', 'Controller/EXECUTION', 'Power/PHASE_A', 'Power/PHASE_B'] }
+const press = { ...base, asset_id: 'dev-1', asset_name: 'Press 1', sparkplug_id: 'dev_1111222233334444', last_birth_metrics: ['Controller/PART_COUNT', 'Controller/EXECUTION', 'Power/PHASE_A', 'Power/PHASE_B'], submodel_schema_ids: ['s1', 's2'] }
 const lathe = { ...base, asset_id: 'dev-2', asset_name: 'Lathe 3', sparkplug_id: 'dev_5555666677778888', last_birth_metrics: ['Spindle/LOAD'] }
 const cell = { cell_id: 'cell-1', cell_name: 'Assembly', is_archived: false, gateways: [], gateway_count: 0 }
 const catalog = [
@@ -39,12 +39,19 @@ const catalog = [
   { name: 'Power/TOTAL', units: 'KILOWATT', datatype: 10, derivation: { kind: 'sum', inputs: [{ metric: 'Power/PHASE_A', sign: 1 }, { metric: 'Power/PHASE_B', sign: 1 }] } },
 ]
 
+/** Two schemas, each naming some: the device has both's. The lathe's names none, though it reports an input. */
+const schemas = [
+  { schema_uuid: 's1', schema_name: 'Press_Schema', schema_definition: { type: 'object', properties: {} }, derived_metrics: ['Controller/PARTS_PER_HOUR', 'Controller/UPTIME'] },
+  { schema_uuid: 's2', schema_name: 'Power_Schema', schema_definition: { type: 'object', properties: {} }, derived_metrics: ['Power/TOTAL'] },
+]
+
 const routeGet = (path) => {
   if (path.includes('/telemetry')) return Promise.resolve([])
   if (path.includes('/config')) return Promise.resolve([])
   if (path.startsWith('/api/v1/cells')) return Promise.resolve([cell])
   if (path.startsWith('/api/v1/devices')) return Promise.resolve([press, lathe])
   if (path.startsWith('/api/v1/metric-catalog')) return Promise.resolve(catalog)
+  if (path.startsWith('/api/v1/schemas')) return Promise.resolve(schemas)
   return Promise.resolve([])
 }
 
@@ -79,7 +86,7 @@ const open = async (name) => {
 const field = () => within(panel()).queryByText('Derived Metrics')?.closest('.context-field')
 
 describe("the Devices drawer's derived metrics", () => {
-  it('lists each derived metric the device reports the inputs of, with its value, its tag and its window', async () => {
+  it("lists each derived metric the device's schemas name, with its value, its tag and its window", async () => {
     await open('Press 1')
     await waitFor(() => expect(field()?.textContent).toContain('120.4 count/h'))
     const rows = [...field().querySelectorAll('.derived-values li')].map(li => li.textContent.replace(/\s+/g, ' ').trim())

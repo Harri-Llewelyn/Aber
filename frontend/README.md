@@ -94,8 +94,8 @@ last definition of each function**, because migrations are replayed on every boo
 while the guard was reading the dead one.
 
 One more mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
-contract** instead: `test-harness/fixtures/modelled-metrics.json`, asserted by four implementations in
-three languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
+contract** instead: `test-harness/fixtures/modelled-metrics.json`, asserted by five implementations in
+four languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
 
 `utils/payloadConformance.js`, Validate Payload's copy of `ingestion/conformance.py`, has one too:
 `test-harness/fixtures/payload-conformance.json`, asserted by vitest and by
@@ -1000,10 +1000,10 @@ draws that order, so no page chooses its own.
 
 ### What the modelled-metrics fixture caught, twice
 
-`modelledMetrics()` answers "which metrics does this schema model?" and exists four times, in three
-languages, because it runs in four processes that cannot import one another:
-`utils/deviceTags.js`, `ingestion/validate.py`, `i3x/i3x_service.py` and
-`supabase/functions/_shared/aas/shell.ts`.
+`modelledMetrics()` answers "which metrics does this schema model?" and exists five times, in four
+languages, because it runs in five processes that cannot import one another:
+`utils/deviceTags.js`, `ingestion/validate.py`, `i3x/i3x_service.py`,
+`supabase/functions/_shared/aas/shell.ts` and the database's `schema_modelled_metrics()` (`0336`).
 
 `typeof [] === 'object'`, so a schema with `properties: ['Temp','Pressure']` reached `Object.keys`
 and came back modelling two metrics named **`'0'` and `'1'`**. The dashboard judged the device

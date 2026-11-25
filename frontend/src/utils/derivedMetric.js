@@ -243,16 +243,66 @@ export function derivedDefinitions(catalog) {
 }
 
 /**
- * The derived metrics whose inputs are all among `reported`, a device's metric names (what it declared
- * and what its schemas model: "reports"), by name in name order. A derived metric applies to every
- * device that reports all its inputs, and an input that is itself derived does not count: none can be.
+ * The ids of the schemas a device's derived metrics come from, of a row of `devices`: its own, or, for a
+ * replay lane, its original's. `idsByDevice` is a Map of device id to the ids of its schemas.
  */
-export function derivedReportedBy(reported, catalog) {
-  const has = reported instanceof Set ? reported : new Set(reported)
-  return [...derivedDefinitions(catalog)]
-    .filter(([, def]) => derivationInputs(def).every(input => has.has(input)))
-    .map(([name]) => name)
-    .sort((a, b) => a.localeCompare(b))
+export const derivedSchemaIds = (device, idsByDevice) => idsByDevice.get(device.shadow_of ?? device.id) || []
+
+/**
+ * The derived metrics a device has, by name in name order: the ones its schemas name, several schemas'
+ * together. `derived_schema_ids` are derivedSchemaIds()'s, and a device without them has its own. One rule
+ * with device_derived_metrics() (0336) and the AAS exporter's derivedMetricsFor(), which
+ * test-harness/fixtures/device-derived-metrics.json holds together.
+ */
+export function derivedMetricsOfDevice(device, schemas, catalog) {
+  const ids = new Set(device?.derived_schema_ids ?? device?.submodel_schema_ids ?? [])
+  const known = derivedDefinitions(catalog)
+  const named = new Set((schemas || []).filter(s => ids.has(s.schema_uuid)).flatMap(s => s.derived_metrics || []))
+  return [...named].filter(name => known.has(name)).sort((a, b) => a.localeCompare(b))
+}
+
+/** The schema versions that name a derived metric, of any status, as a metric's models are counted. */
+export const schemasNaming = (name, schemas) => (schemas || []).filter(s => (s.derived_metrics || []).includes(name))
+
+/**
+ * Every reason a schema may not name a derived metric, `{ name, problem }` each, in the words the database
+ * refuses it with: schema_derived_metric_problems() (0336), held to the same fixture. `definition` is the
+ * schema's, `modelled` the names it models (modelledMetrics()), and `kept` the names it, or the version it
+ * was made from, names already: a deprecated one may stay and may not be added.
+ */
+export function derivedProblems({ definition, modelled }, names, catalog, kept = []) {
+  const has = new Set(modelled || [])
+  const stays = new Set(kept)
+  const byName = new Map((catalog || []).map(m => [m.name, m]))
+  return names.flatMap(name => {
+    const metric = byName.get(name)
+    const say = (problem) => ({ name, problem })
+    if (!metric) return say(`${name} is not in the metric catalogue. Add it on the Metrics page first.`)
+    if (!isDerived(metric)) {
+      return say(`${name} is a measured metric, so it goes among the metrics the schema models. A schema's derived metrics are the ones Aber computes.`)
+    }
+    if (metric.deprecated && !stays.has(name)) return say(`${name} is deprecated. A schema may keep it but not add it.`)
+
+    const problems = derivationInputs(metric.derivation).filter(input => !has.has(input)).map(input =>
+      say(`${name} is computed from ${input}, which this schema does not model. Add ${input} to its metrics, or leave ${name} out.`))
+    const permitted = metric.derivation.kind === 'time_in_state' ? definition?.properties?.[metric.derivation.input]?.enum : null
+    if (Array.isArray(permitted)) {
+      const values = permitted.map(String)
+      problems.push(...metric.derivation.states.filter(state => !values.includes(state)).map(state =>
+        say(`${name} counts the state "${state}", which this schema does not permit ${metric.derivation.input} to report (${values.join(', ')}). Leave ${name} out, or add the state to the metric's permitted values.`)))
+    }
+    return problems
+  })
+}
+
+/**
+ * The derived metrics a schema may name as it is, as catalog rows in name order: what its editor offers.
+ * A deprecated one is offered only where the version names it already.
+ */
+export function derivedOffered(schema, catalog, kept = []) {
+  return (catalog || [])
+    .filter(m => isDerived(m) && derivedProblems(schema, [m.name], catalog, kept).length === 0)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
 }
 
 /** `names` split into the measured ones and the derived ones, each in the order given. */
@@ -295,12 +345,9 @@ export const isShare = (derivation) => derivation?.kind === 'time_in_state'
 /** A catalog row's unit as a chart and a drawer say it: a time in state's is SHARE_UNIT, any other its own, or null. */
 export const unitOf = (metric) => (isShare(metric?.derivation) ? SHARE_UNIT : (metric?.units ?? null))
 
-/** A list of names as the dashboard says one: "A", "A and B", "A, B and C". */
-const listWords = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`)
-
 /**
- * The derived drawer's Applies To lists the devices that report every input (the Metric tab's rule),
- * a chip for each. These are its order and its words.
+ * The derived drawer's Applies To lists the devices in service that have the metric (the Metric tab's
+ * rule), a chip for each. These are its order and its words.
  */
 // The collation utils/tableSort.js gives a text column ("Press 2" before "Press 10", case aside). This
 // module imports nothing, because the mirror check loads it in Node.
@@ -310,8 +357,9 @@ const nameOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'ba
 export const appliesToDevices = (devices) =>
   [...devices].sort((a, b) => nameOrder.compare(a.asset_name ?? '', b.asset_name ?? ''))
 
-/** What the devices report, said once in the field's help: "The devices in service that report Power/A and Power/B." */
-export const appliesToRule = (derivation) => `The devices in service that report ${listWords(derivationInputs(derivation))}.`
+/** Which devices those are, said once in the field's help. */
+export const APPLIES_TO_RULE = 'The devices in service bound to a schema that names it.'
 
-/** The field with no device: "No device yet: none reports Controller/PART_COUNT". */
-export const appliesToNone = (derivation) => `No device yet: none reports ${listWords(derivationInputs(derivation))}`
+/** The field with no device: no schema names the metric, or no device in service is bound to one that does. */
+export const appliesToNone = (naming) =>
+  (naming === 0 ? 'No device yet: no schema names it' : 'No device yet: none in service is bound to a schema that names it')

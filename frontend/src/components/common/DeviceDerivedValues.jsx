@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../../api'
 import { DerivedTag } from './DerivedTag'
-import { currentWords, derivedDefinitions, derivedReportedBy, unitOf } from '../../utils/derivedMetric'
-import { deviceMetrics, readingWords, telemetryKey } from '../../utils/history'
+import { currentWords, derivedDefinitions, derivedMetricsOfDevice, unitOf } from '../../utils/derivedMetric'
+import { readingWords, telemetryKey } from '../../utils/history'
 
 /**
- * The Devices drawer's derived metrics: each derived metric whose inputs the device reports, with its
+ * The Devices drawer's derived metrics: each derived metric the device's schemas name, with its
  * current value by the rule derived_current() holds (a counter rate and a time in state over the last
  * hour, a sum at the last whole minute), the unit, its tag and the window in words. One read when the
  * drawer opens on the device, so a value is as old as the opening. A device with no value yet says so,
@@ -59,17 +59,17 @@ export function DeviceDerivedValues({ device, names, catalog }) {
 }
 
 /**
- * The drawer's field for a device, or null when no derived metric applies to it: the ones whose inputs
- * it reports, by the rule History's pickers use (deviceMetrics()).
+ * The drawer's field for a device, or null when none of its schemas names a derived metric: the rule
+ * History's pickers use (derivedMetricsOfDevice()).
  */
 export function derivedValuesField({ device, schemas, catalog }) {
   if (!device) return null
-  const names = derivedReportedBy(new Set(deviceMetrics(device, schemas)), catalog)
+  const names = derivedMetricsOfDevice(device, schemas, catalog)
   if (names.length === 0) return null
   return {
     label: 'Derived Metrics',
     full: true,
     value: <DeviceDerivedValues device={device} names={names} catalog={catalog} />,
-    help: 'Metrics Aber computes from the ones this device reports. A rate and a share of time are over the last hour, a sum is its value at the last minute. No device publishes them.',
+    help: "Metrics Aber computes, named by this device's schemas. A rate and a share of time are over the last hour, a sum is its value at the last minute. No device publishes them.",
   }
 }

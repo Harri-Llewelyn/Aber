@@ -58,8 +58,8 @@ import { SINGLE_KEY_SHORTCUTS } from '../../shortcuts'
  * The YAML editor of the Automations page: CodeMirror 6 with YAML highlighting, line numbers,
  * completion and hover from a JSON Schema (the automations', unless it is given another) and this
  * site's devices and metrics (utils/automationEditorHelp.js), and lint marks for syntax errors, for
- * thresholds outside a metric's valid range (the automations' schema alone) and for the database's
- * refusals. Loaded only with the page.
+ * thresholds outside a metric's valid range or on a derived metric a device does not have (the
+ * automations' schema alone) and for the database's refusals. Loaded only with the page.
  *
  * It lives in a shadow root. CodeMirror styles itself with <style> elements, which the dashboard's
  * Content-Security-Policy refuses (style-src names no inline style); in a shadow root it adopts a
@@ -118,7 +118,7 @@ const theme = EditorView.theme({
 })
 
 /** What completion and lint read when the page has none: nothing about the site, the schema's own words still. */
-const NO_FACTS = { metrics: new Map(), devices: [], deviceById: new Map(), modelledOf: () => new Set(), rangeOf: () => null }
+const NO_FACTS = { metrics: new Map(), devices: [], deviceById: new Map(), modelledOf: () => new Set(), lacksDerived: () => false, rangeOf: () => null }
 
 /** A completion result of the pure help as CodeMirror's: its options apply their own text. */
 function toCompletions(result) {
