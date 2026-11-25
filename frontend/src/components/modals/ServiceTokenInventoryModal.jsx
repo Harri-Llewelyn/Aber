@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
+import { FieldError } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { ConfirmModal } from './ConfirmModal'
 import { IconShieldAlert } from '../common/Icons'
@@ -147,6 +148,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
                 const state = tokenState(t)
                 const used = lastUse(t)
                 const error = errors.get(t.jti)
+                const errorId = `token-${t.jti}-error`
                 return (
                   <tr key={t.jti || `${t.issued_at}-${t.expiresAtMs}`}>
                     <td className="mono">{t.jti || NO_VALUE}</td>
@@ -159,7 +161,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
                     </td>
                     <td>
                       <Badge size="sm" tone={state.tone}>{state.label}</Badge>
-                      {error && <div className="form-hint hint-danger">{error}</div>}
+                      <FieldError id={errorId} error={error} />
                     </td>
                     <td className="row-actions">
                       {/* Offered only where it would do something: revoke_service_token() refuses
@@ -168,6 +170,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
                         <ActionButton
                           className="btn btn-sm btn-danger btn-danger-reveal"
                           onClick={() => setConfirming(t)}
+                          aria-describedby={error ? errorId : undefined}
                           title="Revoke this token. The API refuses it from the next request onward; this cannot be undone."
                         >
                           Revoke

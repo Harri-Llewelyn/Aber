@@ -512,8 +512,14 @@ refused while it cannot. `dialogSaysWhy.test.jsx` holds the pattern for the dial
   not scold. A dialog with steps passes `touched` for the step it is on, and so does one that waits
   for a particular field (Change Password waits for the new password).
 - **A form with buttons of its own** inside a dialog (Attach a link) draws `FormProblem` above them.
-- **A problem with one field's value as typed is said under that field,** in its hint: too long,
-  not an email address, a name already taken. It is not repeated above the buttons.
+- **A problem with one field's value as typed is said under that field,** not above the buttons as
+  well: too long, not an email address, a name already taken.
+- **A field's error is a `FieldError`, under the field and its hint.** It has `FormProblem`'s look,
+  and the hint keeps its own text. `fieldErrorProps(error, errorId, hintId)`, spread on the control,
+  sets `aria-invalid`, which takes the danger border from `App.css`, and names the hint and then the
+  error in `aria-describedby`. When an error shows is the form's to decide. It is announced once, as
+  it appears; one that changes with each key is drawn at once, and announced when it has stood still
+  for a second. Drift checks 560 and 561 refuse one drawn by hand and one no control names.
 - **An edit that changes nothing is not a problem.** Its confirm is greyed and its tooltip says so.
   Nothing is said in red, because the form shows it.
 - **A required field says so on its label** with `RequiredMark`, and its control carries

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
-import { IconAlertTriangle, IconFileCode } from '../common/Icons'
+import { IconFileCode } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { catalogPropertyEntry, isNumericType, rangeError } from '../../utils/schemaProperty'
@@ -10,20 +11,8 @@ import { RequiredMark } from '../common/RequiredMark'
 import { SemanticIdField } from '../common/SemanticIdField'
 import { Tooltip } from '../common/Tooltip'
 
-/** Border treatment for a field a save attempt found empty, or a range that cannot be saved. */
-const INVALID_FIELD = { borderColor: 'var(--danger)' }
-
 /** What the asterisk means on this form's labels. */
 const REQUIRED = 'Required: the schema cannot be saved without it'
-
-/** What a save attempt found missing, beneath the field it is about, in the form's warning hint. */
-function FieldError({ children }) {
-  return (
-    <div role="alert" className="form-hint hint-danger">
-      <IconAlertTriangle size={12} /> {children}
-    </div>
-  )
-}
 
 const RANGE_HELP = 'The valid range of this reading in this schema. A device set to Enforce drops a '
   + 'reading outside it. Leave a side blank for no bound.'
@@ -34,9 +23,10 @@ export const NO_RANGE = { minimum: '', maximum: '' }
 /**
  * A numeric property's valid range, beside its row while it is ticked: what the schema writes as
  * `minimum` and `maximum`. Shared by the builder and a draft's editor. `range` is the typed
- * `{ minimum, maximum }`; `onChange` receives the next one.
+ * `{ minimum, maximum }`; `onChange` receives the next one. `errorId` is the id of the FieldError
+ * that names this range while it cannot be saved, when the form has drawn one.
  */
-export function PropertyRange({ name, range, onChange }) {
+export function PropertyRange({ name, range, onChange, errorId }) {
   const error = rangeError(range)
   const field = (key, label, placeholder) => (
     <input
@@ -47,8 +37,8 @@ export function PropertyRange({ name, range, onChange }) {
       placeholder={placeholder}
       value={range[key]}
       onChange={e => onChange({ ...range, [key]: e.target.value })}
-      aria-invalid={error ? true : undefined}
-      style={{ width: '84px', padding: '4px 8px', fontSize: '12px', ...(error ? INVALID_FIELD : {}) }}
+      {...fieldErrorProps(error, errorId)}
+      style={{ width: '84px', padding: '4px 8px', fontSize: '12px' }}
     />
   )
   return (
@@ -113,8 +103,10 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
     badRanges.length ? 'a valid range' : null
   ].filter(Boolean)
   const canSave = missing.length === 0
-  const nameMissing = showRequired && !schemaName.trim()
-  const metricsMissing = showRequired && selectedMetrics.length === 0
+  const nameError = showRequired && !schemaName.trim() ? 'Give the schema a name before saving it.' : null
+  const metricsError = showRequired && selectedMetrics.length === 0
+    ? 'Tick at least one metric. A schema with none constrains nothing.' : null
+  const rangesError = showRequired && badRanges.length > 0 ? `Fix the range of ${badRanges.join(' ')}` : null
 
   const buildSchemaPayload = () => {
     const properties = {}
@@ -188,14 +180,13 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
         <input
           id="schema-builder-name"
           className="form-control"
-          style={nameMissing ? INVALID_FIELD : undefined}
-          aria-invalid={nameMissing || undefined}
+          {...fieldErrorProps(nameError, 'schema-builder-name-error')}
           aria-required="true"
           value={schemaName}
           onChange={e => setSchemaName(e.target.value)}
           placeholder="e.g. Six-Axis-Robot-Arm-Standard"
         />
-        {nameMissing && <FieldError>Give the schema a name before saving it.</FieldError>}
+        <FieldError id="schema-builder-name-error" error={nameError} />
       </div>
 
       <div className="form-group">
@@ -214,13 +205,19 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
         }}
       />
 
-      <div className="form-group modal-fill" style={{ display: 'flex', flexDirection: 'column', minHeight: '260px' }}>
-        <label className="form-label">
+      <div
+        className="form-group modal-fill"
+        style={{ display: 'flex', flexDirection: 'column', minHeight: '260px' }}
+        role="group"
+        aria-labelledby="schema-builder-metrics-label"
+        aria-describedby={metricsError ? 'schema-builder-metrics-error' : undefined}
+      >
+        <label className="form-label" id="schema-builder-metrics-label">
           Metrics <RequiredMark title={REQUIRED} />
           <span className="section-count">{selectedMetrics.length} selected</span>
         </label>
-        {metricsMissing && <FieldError>Tick at least one metric. A schema with none constrains nothing.</FieldError>}
-        {showRequired && badRanges.length > 0 && <FieldError>Fix the range of {badRanges.join(' ')}</FieldError>}
+        <FieldError id="schema-builder-metrics-error" error={metricsError} className="field-error-above" />
+        <FieldError id="schema-builder-ranges-error" error={rangesError} className="field-error-above" />
         {/* The search and the standard filter narrow what is listed, never what is selected. */}
         <MetricPicker
           metrics={activeCatalog}
@@ -232,6 +229,7 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
               name={m.name}
               range={rangeOf(m.name)}
               onChange={range => setRanges(prev => ({ ...prev, [m.name]: range }))}
+              errorId={rangesError ? 'schema-builder-ranges-error' : undefined}
             />
           )}
         />

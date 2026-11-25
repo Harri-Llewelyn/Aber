@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { IconAlertTriangle, IconPlus, IconX } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { MetricPicker } from '../common/MetricPicker'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
@@ -196,10 +197,10 @@ export function AddDerivedMetricModal({ catalog, groups, declared, onConfirm, on
               value={form.leaf}
               onChange={e => set({ leaf: e.target.value.replace(/\//g, '') })}
               placeholder="e.g. PARTS_PER_HOUR"
-              aria-invalid={nameHeld ? true : undefined}
+              {...fieldErrorProps(nameHeld, 'derived-name-error')}
             />
           </Tooltip>
-          {nameHeld && <p className="form-hint hint-danger" role="alert">{nameHeld}</p>}
+          <FieldError id="derived-name-error" error={nameHeld} />
         </div>
 
         <div className="form-group" style={{ flex: '1 1 180px' }}>

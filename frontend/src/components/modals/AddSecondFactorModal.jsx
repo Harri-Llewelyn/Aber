@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { IconScan } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
@@ -161,12 +162,12 @@ export function AddSecondFactorModal({ factors, onAdded, onClose }) {
             maxLength={60}
             autoComplete="off"
             disabled={busy}
-            aria-invalid={nameProblem ? 'true' : undefined}
-            aria-describedby="second-factor-name-hint"
+            {...fieldErrorProps(nameProblem, 'second-factor-name-error', 'second-factor-name-hint')}
           />
-          <div id="second-factor-name-hint" className={nameProblem ? 'form-hint hint-danger' : 'form-hint'}>
-            {nameProblem || 'So you can tell your authenticators apart, such as "Work phone".'}
+          <div id="second-factor-name-hint" className="form-hint">
+            So you can tell your authenticators apart, such as &quot;Work phone&quot;.
           </div>
+          <FieldError id="second-factor-name-error" error={nameProblem} />
         </div>
       )}
     </Modal>

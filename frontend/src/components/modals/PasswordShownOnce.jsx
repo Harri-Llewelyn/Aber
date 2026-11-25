@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { copyText } from '../common/CopyableId'
+import { FieldError } from '../common/FieldError'
 import { IconCheck, IconCopy, IconShieldAlert } from '../common/Icons'
 import { Tooltip } from '../common/Tooltip'
 
@@ -46,7 +47,13 @@ export function PasswordShownOnce({ email, password, hint, showToast, children }
       <div className="form-group">
         <label className="form-label" htmlFor="person-password">Password</label>
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <input id="person-password" className="form-control mono" readOnly value={password || ''} />
+          <input
+            id="person-password"
+            className="form-control mono"
+            readOnly
+            value={password || ''}
+            aria-describedby={copyFailed ? 'person-password-copy-error' : undefined}
+          />
           <Tooltip text="Copy password">
             <button
               className="btn btn-ghost btn-icon"
@@ -58,7 +65,7 @@ export function PasswordShownOnce({ email, password, hint, showToast, children }
           </Tooltip>
         </div>
         {hint && <div className="form-hint">{hint}</div>}
-        {copyFailed && <div className="form-hint hint-danger" role="alert">{COPY_REFUSED}</div>}
+        <FieldError id="person-password-copy-error" error={copyFailed ? COPY_REFUSED : null} />
       </div>
     </>
   )
