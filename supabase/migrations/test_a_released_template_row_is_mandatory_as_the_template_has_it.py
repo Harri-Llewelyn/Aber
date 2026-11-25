@@ -110,7 +110,7 @@ class TestABoot(ReleasedRowsCase):
         self.assertEqual(moved, set(SWAPPED))
 
     def test_a_corrected_text_still_reaches_the_table(self):
-        """The trigger decides is_mandatory and nothing else: 0002 may still correct a description."""
+        """0002 may still correct a description: the trigger gives a text to ten rows, and this is not one (0334)."""
         self.cur.execute(RELEASED.replace("Legal name of the manufacturer.", "The manufacturer's legal name."
                                           .replace("'", "''")))
         self.assertEqual(

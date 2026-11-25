@@ -514,6 +514,10 @@ its tests.
   IRDIs (`ManufacturerName` → `0112/2///61987#ABA565#009`), while a few are admin-shell.io IRIs
   (`UniqueFacilityIdentifier`, and `AddressInformation`, which still points at the **1/0**
   ContactInformations namespace even in the 3.0 template).
+- **A row's description is an exported definition.** The dialog and the semantic id picker show it, and an
+  export gives it as the definition of the element's ConceptDescription. So it says what the element is, in
+  our own words. It claims nothing of what is mandatory, and holds no note on the seed or on this platform.
+  Since `0334` the trigger gives ten of the 20 rows theirs, whatever `0002` proposes on a boot.
 - **The exporter already had a Nameplate submodel.** This was a retrofit: the existing one carried
   no semanticId on the submodel or on any property.
 - **The submodel claims the IDTA template id where it conforms, and not otherwise.** Naming

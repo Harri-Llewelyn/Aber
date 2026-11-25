@@ -457,6 +457,21 @@ def semantic_ids(node) -> set:
     return found
 
 
+# A Nameplate row's text is exported as its element's definition. These were in ten of them until 0334.
+NOT_A_DEFINITION = ("Mandatory unless", "the template still points", "this platform", "in the template", "the one exported")
+
+
+def english_definitions(environment: dict) -> dict:
+    """Each ConceptDescription's English definition, by its idShort."""
+    return {
+        cd.get("idShort"): text["text"]
+        for cd in environment.get("conceptDescriptions") or []
+        for spec in cd.get("embeddedDataSpecifications") or []
+        for text in spec.get("dataSpecificationContent", {}).get("definition") or []
+        if text.get("language") == "en"
+    }
+
+
 def concept_description_problems(environment: dict) -> list:
     """
     What is wrong with an Environment's ConceptDescriptions, as sentences.
@@ -1051,6 +1066,14 @@ class TestAasExportSchemaConformance(unittest.TestCase):
 
     def test_every_semantic_id_has_a_concept_description(self):
         self.assertEqual(concept_description_problems(self.body.get("aas", {})), [])
+
+    def test_no_definition_is_a_claim_on_the_template_or_a_note_to_ourselves(self):
+        definitions = english_definitions(self.body.get("aas", {}))
+        # Elements the fixture's nameplate holds, whose rows had such a text. Another device may hold fewer.
+        if PROVISION_FIXTURE:
+            for id_short in ("ManufacturerProductType", "SerialNumber", "YearOfConstruction", "FirmwareVersion"):
+                self.assertIn(id_short, definitions)
+        self.assertEqual({k: v for k, v in definitions.items() if any(n in v for n in NOT_A_DEFINITION)}, {})
 
     def test_no_empty_collections_are_emitted(self):
         for node in TestAasExportLive.walk(self.body.get("aas", {})):
