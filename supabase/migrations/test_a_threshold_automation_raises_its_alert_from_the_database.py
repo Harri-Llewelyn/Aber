@@ -207,6 +207,15 @@ class EvaluatorBase(unittest.TestCase):
         self.assertEqual([r["status"] for r in results], ["new"] * len(documents), results)
         return results
 
+    def name_in_a_schema(self, metrics, derived):
+        """Binds both devices to a schema that names these derived metrics: a device has the ones its schemas name (0336)."""
+        self.owner()
+        self.cur.execute("INSERT INTO public.schemas (schema_name, schema_definition, derived_metrics) VALUES (%s, %s, %s)"
+                         " RETURNING id;", ("Test_0271_Schema", Json({"type": "object", "properties": {m: {} for m in metrics}}), derived))
+        schema = self.cur.fetchone()[0]
+        for device in (DEV_A, DEV_B):
+            self.cur.execute("INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);", (device, schema))
+
     def trigger_id(self, key="spindle", device=DEV_A):
         self.owner()
         self.cur.execute("SELECT t.id FROM public.automation_triggers t JOIN public.automations a ON a.id = t.automation_id"
@@ -906,6 +915,7 @@ class DerivedMetrics(Standing):
                 (self.POWER, {"kind": "sum", "inputs": [{"metric": self.PHASE_A, "sign": 1}, {"metric": self.PHASE_B, "sign": 1}]})):
             self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, derivation) VALUES (%s, 10, %s);",
                              (name, Json(derivation)))
+        self.name_in_a_schema([self.COUNT, self.STATE, self.PHASE_A, self.PHASE_B], [self.RATE, self.UPTIME, self.POWER])
         self.cur.execute("SELECT date_trunc('minute', now());")
         self.end = self.cur.fetchone()[0]
 
@@ -1149,6 +1159,7 @@ class ARealHistorian(EvaluatorBase):
         self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, units) VALUES (%s, 10, 'COUNT');", (counter,))
         self.cur.execute("INSERT INTO public.metric_catalog (name, datatype, derivation) VALUES (%s, 10, %s);",
                          (rate, Json({"kind": "counter_rate", "input": counter})))
+        self.name_in_a_schema([counter], [rate])
         self.apply(automation(triggers=[trigger(metric=rate, above=None, below=1000, **{"for": None})]))
         t = self.trigger_id()
         # A reading in each of the five whole minutes before the last, 10 more each: 40 parts over the four

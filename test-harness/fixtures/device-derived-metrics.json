@@ -1,0 +1,128 @@
+{
+  "about": "The derived metrics a device has, and what a schema may name. One rule in SQL (device_derived_metrics() and schema_derived_metric_problems(), 0336), in the dashboard (derivedMetricsOfDevice() and derivedProblems() in utils/derivedMetric.js) and, for the first, in the AAS exporter (derivedMetricsFor() in _shared/aas/shell.ts). Each is run over these cases and gives exactly these answers.",
+  "catalog": [
+    { "name": "Fixture_0336/PART_COUNT", "datatype": 10 },
+    { "name": "Fixture_0336/SCRAP_COUNT", "datatype": 10 },
+    { "name": "Fixture_0336/MODE", "datatype": 12 },
+    { "name": "Fixture_0336/DOOR", "datatype": 11 },
+    { "name": "Fixture_0336/PHASE_A", "datatype": 10 },
+    { "name": "Fixture_0336/PHASE_B", "datatype": 10 },
+    { "name": "Fixture_0336_D/PARTS_PER_HOUR", "datatype": 10, "derivation": { "kind": "counter_rate", "input": "Fixture_0336/PART_COUNT" } },
+    { "name": "Fixture_0336_D/SCRAP_PER_HOUR", "datatype": 10, "derivation": { "kind": "counter_rate", "input": "Fixture_0336/SCRAP_COUNT" } },
+    { "name": "Fixture_0336_D/AUTOMATIC", "datatype": 10, "derivation": { "kind": "time_in_state", "input": "Fixture_0336/MODE", "states": ["AUTO", "SEMI"] } },
+    { "name": "Fixture_0336_D/DOOR_OPEN", "datatype": 10, "derivation": { "kind": "time_in_state", "input": "Fixture_0336/DOOR", "states": ["true"] } },
+    { "name": "Fixture_0336_D/NET", "datatype": 10, "derivation": { "kind": "sum", "inputs": [{ "metric": "Fixture_0336/PHASE_A", "sign": 1 }, { "metric": "Fixture_0336/PHASE_B", "sign": -1 }] } },
+    { "name": "Fixture_0336_D/RETIRED", "datatype": 10, "derivation": { "kind": "counter_rate", "input": "Fixture_0336/PART_COUNT" }, "deprecated": true }
+  ],
+  "schemas": [
+    { "key": "press", "metrics": ["Fixture_0336/PART_COUNT", "Fixture_0336/SCRAP_COUNT"], "derived_metrics": ["Fixture_0336_D/PARTS_PER_HOUR", "Fixture_0336_D/SCRAP_PER_HOUR"] },
+    { "key": "meter", "metrics": ["Fixture_0336/PHASE_A", "Fixture_0336/PHASE_B", "Fixture_0336/PART_COUNT"], "derived_metrics": ["Fixture_0336_D/NET", "Fixture_0336_D/PARTS_PER_HOUR"] },
+    { "key": "models-and-names-none", "metrics": ["Fixture_0336/PART_COUNT"], "derived_metrics": [] },
+    { "key": "phase-a", "metrics": ["Fixture_0336/PHASE_A"], "derived_metrics": [] },
+    { "key": "phase-b", "metrics": ["Fixture_0336/PHASE_B"], "derived_metrics": [] },
+    { "key": "keeps-a-retired-one", "metrics": ["Fixture_0336/PART_COUNT"], "derived_metrics": ["Fixture_0336_D/RETIRED"] }
+  ],
+  "devices": [
+    { "key": "no-schema", "birth": ["Fixture_0336/PART_COUNT"], "schemas": [], "expected": [] },
+    { "key": "one-schema", "schemas": ["press"], "expected": ["Fixture_0336_D/PARTS_PER_HOUR", "Fixture_0336_D/SCRAP_PER_HOUR"] },
+    { "key": "several-schemas-have-the-union", "schemas": ["press", "meter"], "expected": ["Fixture_0336_D/NET", "Fixture_0336_D/PARTS_PER_HOUR", "Fixture_0336_D/SCRAP_PER_HOUR"] },
+    { "key": "reports-every-input-and-no-schema-names-it", "birth": ["Fixture_0336/PART_COUNT"], "schemas": ["models-and-names-none"], "expected": [] },
+    { "key": "the-inputs-are-split-across-its-schemas", "schemas": ["phase-a", "phase-b"], "expected": [] },
+    { "key": "never-reported-anything", "birth": [], "schemas": ["meter"], "expected": ["Fixture_0336_D/NET", "Fixture_0336_D/PARTS_PER_HOUR"] },
+    { "key": "a-deprecated-one-a-schema-keeps", "schemas": ["keeps-a-retired-one"], "expected": ["Fixture_0336_D/RETIRED"] },
+    { "key": "a-lane-has-its-originals", "shadow_of": "one-schema", "schemas": ["meter"], "expected": ["Fixture_0336_D/PARTS_PER_HOUR", "Fixture_0336_D/SCRAP_PER_HOUR"] },
+    { "key": "a-lane-of-a-device-with-none", "shadow_of": "no-schema", "schemas": ["press"], "expected": [] }
+  ],
+  "problems": [
+    {
+      "about": "Every input is modelled",
+      "definition": { "properties": { "Fixture_0336/PART_COUNT": { "type": "number" }, "Fixture_0336/PHASE_A": { "type": "number" }, "Fixture_0336/PHASE_B": { "type": "number" } } },
+      "names": ["Fixture_0336_D/PARTS_PER_HOUR", "Fixture_0336_D/NET"],
+      "problems": []
+    },
+    {
+      "about": "A metric named in `required` alone is modelled",
+      "definition": { "properties": {}, "required": ["Fixture_0336/PART_COUNT"] },
+      "names": ["Fixture_0336_D/PARTS_PER_HOUR"],
+      "problems": []
+    },
+    {
+      "about": "One input of two is not modelled",
+      "definition": { "properties": { "Fixture_0336/PHASE_A": { "type": "number" } } },
+      "names": ["Fixture_0336_D/NET"],
+      "problems": ["Fixture_0336_D/NET is computed from Fixture_0336/PHASE_B, which this schema does not model. Add Fixture_0336/PHASE_B to its metrics, or leave Fixture_0336_D/NET out."]
+    },
+    {
+      "about": "Every reason, in the order of the names and of the inputs",
+      "definition": { "properties": {} },
+      "names": ["Fixture_0336_D/PARTS_PER_HOUR", "Fixture_0336_D/NET"],
+      "problems": [
+        "Fixture_0336_D/PARTS_PER_HOUR is computed from Fixture_0336/PART_COUNT, which this schema does not model. Add Fixture_0336/PART_COUNT to its metrics, or leave Fixture_0336_D/PARTS_PER_HOUR out.",
+        "Fixture_0336_D/NET is computed from Fixture_0336/PHASE_A, which this schema does not model. Add Fixture_0336/PHASE_A to its metrics, or leave Fixture_0336_D/NET out.",
+        "Fixture_0336_D/NET is computed from Fixture_0336/PHASE_B, which this schema does not model. Add Fixture_0336/PHASE_B to its metrics, or leave Fixture_0336_D/NET out."
+      ]
+    },
+    {
+      "about": "A name the catalogue lacks",
+      "definition": { "properties": { "Fixture_0336/PART_COUNT": {} } },
+      "names": ["Fixture_0336_D/NOWHERE"],
+      "problems": ["Fixture_0336_D/NOWHERE is not in the metric catalogue. Add it on the Metrics page first."]
+    },
+    {
+      "about": "A measured metric",
+      "definition": { "properties": { "Fixture_0336/PART_COUNT": {} } },
+      "names": ["Fixture_0336/PART_COUNT"],
+      "problems": ["Fixture_0336/PART_COUNT is a measured metric, so it goes among the metrics the schema models. A schema's derived metrics are the ones Aber computes."]
+    },
+    {
+      "about": "A deprecated one is not added",
+      "definition": { "properties": { "Fixture_0336/PART_COUNT": {} } },
+      "names": ["Fixture_0336_D/RETIRED"],
+      "problems": ["Fixture_0336_D/RETIRED is deprecated. A schema may keep it but not add it."]
+    },
+    {
+      "about": "A deprecated one is kept where the version names it",
+      "definition": { "properties": { "Fixture_0336/PART_COUNT": {} } },
+      "names": ["Fixture_0336_D/RETIRED"],
+      "kept": ["Fixture_0336_D/RETIRED"],
+      "problems": []
+    },
+    {
+      "about": "A deprecated one that is kept still needs its input",
+      "definition": { "properties": {} },
+      "names": ["Fixture_0336_D/RETIRED"],
+      "kept": ["Fixture_0336_D/RETIRED"],
+      "problems": ["Fixture_0336_D/RETIRED is computed from Fixture_0336/PART_COUNT, which this schema does not model. Add Fixture_0336/PART_COUNT to its metrics, or leave Fixture_0336_D/RETIRED out."]
+    },
+    {
+      "about": "The schema's copy of the input permits every state",
+      "definition": { "properties": { "Fixture_0336/MODE": { "type": "string", "enum": ["SETUP", "AUTO", "SEMI"] } } },
+      "names": ["Fixture_0336_D/AUTOMATIC"],
+      "problems": []
+    },
+    {
+      "about": "The schema's copy of the input restricts nothing",
+      "definition": { "properties": { "Fixture_0336/MODE": { "type": "string" } } },
+      "names": ["Fixture_0336_D/AUTOMATIC"],
+      "problems": []
+    },
+    {
+      "about": "The schema's copy of the input leaves one state out",
+      "definition": { "properties": { "Fixture_0336/MODE": { "type": "string", "enum": ["SETUP", "AUTO"] } } },
+      "names": ["Fixture_0336_D/AUTOMATIC"],
+      "problems": ["Fixture_0336_D/AUTOMATIC counts the state \"SEMI\", which this schema does not permit Fixture_0336/MODE to report (SETUP, AUTO). Leave Fixture_0336_D/AUTOMATIC out, or add the state to the metric's permitted values."]
+    },
+    {
+      "about": "A boolean's permitted values are true and false, and a state is text",
+      "definition": { "properties": { "Fixture_0336/DOOR": { "type": "boolean", "enum": [true, false] } } },
+      "names": ["Fixture_0336_D/DOOR_OPEN"],
+      "problems": []
+    },
+    {
+      "about": "A boolean that may only be false",
+      "definition": { "properties": { "Fixture_0336/DOOR": { "type": "boolean", "enum": [false] } } },
+      "names": ["Fixture_0336_D/DOOR_OPEN"],
+      "problems": ["Fixture_0336_D/DOOR_OPEN counts the state \"true\", which this schema does not permit Fixture_0336/DOOR to report (false). Leave Fixture_0336_D/DOOR_OPEN out, or add the state to the metric's permitted values."]
+    }
+  ]
+}

@@ -16,6 +16,9 @@
 --     permits. A version inserted without a list takes its parent's, so fork_schema() carries it and is
 --     not declared again.
 --   * trg_metric_catalog_derived_is_named refuses to delete or rename a derived metric a version names.
+--   * device_derived_metrics() is the rule, once: the union of what the schemas bound to a device name, a
+--     replay lane's being its original's. automations_parse() refuses a threshold on a derived metric the
+--     device does not have. One the automation already watches stays.
 --   * The versions there are: every version a device is bound to, and every draft, takes the derived
 --     metrics whose inputs it models, once, on the boot that adds the column. The fill writes a
 --     published version under a lock and leaves no Audit Trail row, as 0298's did. Two NOTICEs name
@@ -26,6 +29,9 @@
 --
 -- Reasoning: supabase/README.md, "A schema names the derived metrics its devices get (0336)".
 -- Idempotent.
+--
+-- Redefines public.automations_parse: 0336 refuses a threshold on a derived metric that none of the
+--   device's schemas names, and names those schemas, unless the automation watches it already
 
 -- -------------------------------------------------------------------------------------------------
 -- 1. What a definition needs and what a schema models
@@ -390,12 +396,447 @@ END $fill$;
 COMMENT ON COLUMN public.schemas.derived_metrics IS 'The derived metrics a device bound to this version gets, by catalogue name, in name order. Never a metric the version models: nothing publishes a derived metric. Part of the version: fixed once it is published, and a version made without a list takes its parent''s (0336).';
 
 -- -------------------------------------------------------------------------------------------------
+-- 5. The derived metrics a device has
+-- -------------------------------------------------------------------------------------------------
+-- The rule, once: the derived metrics the schemas bound to a device name, several schemas' together. A
+-- replay lane has its original's, whatever its own bindings say by now. derivedMetricsOfDevice() in
+-- utils/derivedMetric.js and derivedMetricsFor() in the AAS exporter are the same rule, and
+-- test-harness/fixtures/device-derived-metrics.json holds the three together.
+CREATE OR REPLACE FUNCTION public.device_derived_metrics(p_device_ids uuid[] DEFAULT NULL::uuid[])
+RETURNS TABLE (device_id uuid, metric_name text)
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $$
+  SELECT DISTINCT d.id, c.name
+    FROM public.devices d
+    JOIN public.device_submodels ds ON ds.device_id = coalesce(d.shadow_of, d.id)
+    JOIN public.schemas s ON s.id = ds.schema_id
+   CROSS JOIN LATERAL unnest(s.derived_metrics) AS n(name)
+    JOIN public.metric_catalog c ON c.name = n.name AND c.derivation IS NOT NULL
+   WHERE p_device_ids IS NULL OR d.id = ANY (p_device_ids);
+$$;
+
+ALTER FUNCTION public.device_derived_metrics(uuid[]) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.device_derived_metrics(uuid[]) FROM PUBLIC, anon, authenticated, service_role;
+
+COMMENT ON FUNCTION public.device_derived_metrics(uuid[]) IS
+  'The derived metrics a device has, one row for each: the ones named by the schemas bound to it, or, for '
+  'a replay lane, to its original. Every device, or the ones given (0336).';
+
+-- Why a device does not have a derived metric, as a sentence for a refusal: its schemas by name, or that
+-- it has none.
+CREATE OR REPLACE FUNCTION public.device_lacks_derived_metric_words(p_device_id uuid, p_metric text) RETURNS text
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $$
+  SELECT CASE WHEN x.schemas IS NULL
+              THEN format('%s has no schema, so it has no derived metric. Give it one that names `%s`.', d.name, p_metric)
+              ELSE format('%s does not have `%s`: none of its schemas names it (%s). Name it in one of them on the Schemas page.',
+                          d.name, p_metric, x.schemas)
+         END
+    FROM public.devices d
+   CROSS JOIN LATERAL (
+     SELECT string_agg(s.lineage_name || ' v' || s.version, ', ' ORDER BY s.lineage_name, s.version) AS schemas
+       FROM public.device_submodels ds JOIN public.schemas s ON s.id = ds.schema_id
+      WHERE ds.device_id = coalesce(d.shadow_of, d.id)) x
+   WHERE d.id = p_device_id;
+$$;
+
+ALTER FUNCTION public.device_lacks_derived_metric_words(uuid, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.device_lacks_derived_metric_words(uuid, text) FROM PUBLIC, anon, authenticated, service_role;
+
+COMMENT ON FUNCTION public.device_lacks_derived_metric_words(uuid, text) IS
+  'Why a device does not have a derived metric, in one sentence that names the schemas bound to it, or '
+  'says that it has none (0336).';
+
+-- -------------------------------------------------------------------------------------------------
+-- 6. A threshold on a derived metric
+-- -------------------------------------------------------------------------------------------------
+-- Reads the catalogue and the devices and writes nothing. A file is bounded: 500 automations, 100
+-- triggers each, 500 devices a trigger and 10,000 devices in all. For each automation, in
+-- order: {index, key, reasons, canon}. `canon` is the automation as it would be stored, with every
+-- value typed and every default made explicit, and null when there is any reason to refuse it. It
+-- is checked field by field and every reason is collected, so a person fixes a file in one pass.
+-- A threshold on a derived metric is for a device that has it. One the automation watches already is
+-- kept, as a schema keeps a deprecated metric: a schema may stop naming a derived metric at any time,
+-- and the file an export writes must still apply.
+CREATE OR REPLACE FUNCTION public.automations_parse(p_doc jsonb) RETURNS jsonb
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+  c_id      CONSTANT text := '^[a-z0-9][a-z0-9_-]{0,63}$';
+  c_uuid    CONSTANT text := '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  c_for     CONSTANT text := '^(0|[1-9][0-9]{0,2})[smh]$';
+  c_max_automations CONSTANT integer := 500;
+  c_max_triggers    CONSTANT integer := 100;
+  c_max_devices     CONSTANT integer := 500;
+  c_max_rows        CONSTANT integer := 10000;
+  v_out      jsonb := '[]'::jsonb;
+  v_seen     jsonb := '{}'::jsonb;
+  v_auto     jsonb;
+  v_apath    text;
+  v_reasons  jsonb;
+  v_rows     jsonb;
+  v_actions  jsonb;
+  v_key      text;
+  v_id       text;
+  v_alias    text;
+  v_desc     text := '';
+  v_enabled  boolean := true;
+  v_list     jsonb;
+  v_trig     jsonb;
+  v_tpath    text;
+  v_dpath    text;
+  v_devs     jsonb;
+  v_dev      jsonb;
+  v_dev_id   text;
+  v_dev_ids  text[];
+  v_dev_count integer;
+  v_visited  integer := 0;
+  v_metric   text;
+  v_metric_ok boolean;
+  v_derived  boolean;
+  v_cmp      text;
+  v_val      jsonb;
+  v_num      numeric;
+  v_threshold double precision;
+  v_hold     integer;
+  v_for      text;
+  v_act      jsonb;
+  v_ok       boolean;
+BEGIN
+  IF jsonb_typeof(p_doc) IS DISTINCT FROM 'array' THEN
+    RETURN jsonb_build_array(jsonb_build_object('index', NULL, 'key', NULL, 'reasons', jsonb_build_array(
+      public.automation_reason('$', 'A file holds a list of automations. Start each one with `- id:`.')), 'canon', NULL));
+  END IF;
+  IF jsonb_array_length(p_doc) > c_max_automations THEN
+    RETURN jsonb_build_array(jsonb_build_object('index', NULL, 'key', NULL, 'reasons', jsonb_build_array(
+      public.automation_reason('$', format('A file holds at most %s automations. Split it.', c_max_automations))),
+      'canon', NULL));
+  END IF;
+
+  FOR i IN 0 .. jsonb_array_length(p_doc) - 1 LOOP
+    v_auto := p_doc -> i;
+    v_apath := format('$[%s]', i);
+    v_reasons := '[]'::jsonb;
+    v_rows := '[]'::jsonb;
+    v_actions := '[]'::jsonb;
+    v_id := NULL;
+    v_alias := NULL;
+    v_desc := '';
+    v_enabled := true;
+
+    IF jsonb_typeof(v_auto) IS DISTINCT FROM 'object' THEN
+      v_out := v_out || jsonb_build_object('index', i, 'key', NULL, 'canon', NULL, 'reasons', jsonb_build_array(
+        public.automation_reason(v_apath, 'An automation is a set of keys: id, alias, triggers and actions at least.')));
+      CONTINUE;
+    END IF;
+
+    -- A key nothing here means is refused, never ignored.
+    FOR v_key IN SELECT jsonb_object_keys(v_auto) LOOP
+      IF NOT v_key = ANY (ARRAY['id', 'alias', 'description', 'enabled', 'triggers', 'conditions', 'actions']) THEN
+        v_reasons := v_reasons || public.automation_reason(public.automation_path(v_apath, v_key), format(
+          '`%s` is not a key an automation takes. Remove it. The keys are id, alias, description, enabled, triggers, conditions and actions.', v_key));
+      END IF;
+    END LOOP;
+
+    -- id
+    v_val := v_auto -> 'id';
+    IF v_val IS NULL OR jsonb_typeof(v_val) <> 'string' OR (v_val #>> '{}') !~ c_id THEN
+      v_reasons := v_reasons || public.automation_reason(v_apath || '.id',
+        '`id` is the automation''s fixed name: 1 to 64 lowercase letters, digits, hyphens or underscores, starting with a letter or a digit.');
+    ELSE
+      v_id := v_val #>> '{}';
+      IF v_seen ? v_id THEN
+        v_reasons := v_reasons || public.automation_reason(v_apath || '.id', format(
+          '`%s` is already the id of the automation at %s. Give each automation its own id.', v_id, v_seen ->> v_id));
+      ELSE
+        v_seen := v_seen || jsonb_build_object(v_id, v_apath);
+      END IF;
+    END IF;
+
+    -- alias
+    v_val := v_auto -> 'alias';
+    IF v_val IS NULL OR jsonb_typeof(v_val) <> 'string'
+       OR char_length(v_val #>> '{}') NOT BETWEEN 1 AND 120
+       OR (v_val #>> '{}') !~ '^\S' OR (v_val #>> '{}') !~ '\S$' OR (v_val #>> '{}') ~ '[[:cntrl:]]' THEN
+      v_reasons := v_reasons || public.automation_reason(v_apath || '.alias',
+        '`alias` is the name the list shows: 1 to 120 characters, with no space or control character at either end.');
+    ELSE
+      v_alias := v_val #>> '{}';
+    END IF;
+
+    -- description
+    IF v_auto ? 'description' THEN
+      v_val := v_auto -> 'description';
+      IF jsonb_typeof(v_val) <> 'string' OR char_length(v_val #>> '{}') > 1000 THEN
+        v_reasons := v_reasons || public.automation_reason(v_apath || '.description',
+          '`description` is text of at most 1,000 characters.');
+      ELSE
+        v_desc := v_val #>> '{}';
+      END IF;
+    END IF;
+
+    -- enabled
+    IF v_auto ? 'enabled' THEN
+      v_val := v_auto -> 'enabled';
+      IF jsonb_typeof(v_val) <> 'boolean' THEN
+        v_reasons := v_reasons || public.automation_reason(v_apath || '.enabled', '`enabled` is true or false.');
+      ELSE
+        v_enabled := (v_val #>> '{}')::boolean;
+      END IF;
+    END IF;
+
+    -- conditions: none exist yet, so only an absent or empty list is accepted.
+    IF v_auto ? 'conditions' THEN
+      v_val := v_auto -> 'conditions';
+      v_ok := CASE WHEN jsonb_typeof(v_val) = 'array' THEN jsonb_array_length(v_val) > 0 ELSE true END;
+      IF v_ok THEN
+        v_reasons := v_reasons || public.automation_reason(v_apath || '.conditions',
+          'This release has no condition types. Remove `conditions`, or leave it empty.');
+      END IF;
+    END IF;
+
+    -- triggers
+    v_list := v_auto -> 'triggers';
+    IF v_list IS NULL OR jsonb_typeof(v_list) <> 'array' THEN
+      v_reasons := v_reasons || public.automation_reason(v_apath || '.triggers',
+        '`triggers` is the list of what starts the automation. Give a list, with at least one trigger unless `enabled` is false.');
+    ELSIF jsonb_array_length(v_list) > c_max_triggers THEN
+      v_reasons := v_reasons || public.automation_reason(v_apath || '.triggers',
+        format('An automation takes at most %s triggers.', c_max_triggers));
+    ELSE
+      IF jsonb_array_length(v_list) = 0 AND v_enabled THEN
+        v_reasons := v_reasons || public.automation_reason(v_apath || '.triggers',
+          'An enabled automation needs a trigger. Add one, or set `enabled: false`.');
+      END IF;
+      FOR j IN 0 .. jsonb_array_length(v_list) - 1 LOOP
+        v_trig := v_list -> j;
+        v_tpath := format('%s.triggers[%s]', v_apath, j);
+        IF jsonb_typeof(v_trig) <> 'object' THEN
+          v_reasons := v_reasons || public.automation_reason(v_tpath,
+            'A trigger is a set of keys: trigger, device, metric and above or below.');
+          CONTINUE;
+        END IF;
+
+        FOR v_key IN SELECT jsonb_object_keys(v_trig) LOOP
+          IF NOT v_key = ANY (ARRAY['trigger', 'device', 'metric', 'above', 'below', 'for']) THEN
+            v_reasons := v_reasons || public.automation_reason(public.automation_path(v_tpath, v_key), format(
+              '`%s` is not a key a threshold trigger takes. Remove it. The keys are trigger, device, metric, above, below and for.', v_key));
+          END IF;
+        END LOOP;
+
+        -- trigger: the type
+        v_val := v_trig -> 'trigger';
+        IF v_val IS NULL OR jsonb_typeof(v_val) <> 'string' OR (v_val #>> '{}') <> 'threshold' THEN
+          v_reasons := v_reasons || public.automation_reason(v_tpath || '.trigger',
+            '`trigger` names the type. This release has `threshold`.');
+        END IF;
+
+        -- metric: one in the catalogue, and a number
+        v_metric := NULL;
+        v_derived := false;
+        v_val := v_trig -> 'metric';
+        IF v_val IS NULL OR jsonb_typeof(v_val) <> 'string' THEN
+          v_reasons := v_reasons || public.automation_reason(v_tpath || '.metric',
+            '`metric` is the catalogue name of the reading, such as Spindle/LOAD.');
+        ELSE
+          v_metric := v_val #>> '{}';
+          -- A derived metric is accepted: every one is a Double, and the evaluator reads its current value.
+          -- Whether a device has it is asked with the device, below.
+          SELECT m.datatype BETWEEN 1 AND 10, m.derivation IS NOT NULL INTO v_metric_ok, v_derived
+            FROM public.metric_catalog m WHERE m.name = v_metric;
+          IF v_metric_ok IS NULL THEN
+            v_reasons := v_reasons || public.automation_reason(v_tpath || '.metric', format(
+              '`%s` is not in the metric catalogue. Register it on the Metrics page first.', v_metric));
+            v_metric := NULL;
+          ELSIF NOT v_metric_ok THEN
+            v_reasons := v_reasons || public.automation_reason(v_tpath || '.metric', format(
+              '`%s` is not a number, so it has no threshold to compare with. Use a numeric metric.', v_metric));
+            v_metric := NULL;
+          END IF;
+        END IF;
+
+        -- above or below: exactly one, a number
+        v_cmp := NULL;
+        v_threshold := NULL;
+        IF (v_trig ? 'above') AND (v_trig ? 'below') THEN
+          v_reasons := v_reasons || public.automation_reason(v_tpath, 'Give `above` or `below`, not both.');
+        ELSIF NOT (v_trig ? 'above') AND NOT (v_trig ? 'below') THEN
+          v_reasons := v_reasons || public.automation_reason(v_tpath, 'A threshold trigger needs `above` or `below`.');
+        ELSE
+          v_cmp := CASE WHEN v_trig ? 'above' THEN 'above' ELSE 'below' END;
+          v_val := v_trig -> v_cmp;
+          v_ok := false;
+          IF jsonb_typeof(v_val) = 'number' THEN
+            v_num := (v_val #>> '{}')::numeric;
+            IF abs(v_num) <= 1.7976931348623157e308::numeric THEN
+              BEGIN
+                v_threshold := v_num::double precision;
+                v_ok := true;
+              EXCEPTION WHEN numeric_value_out_of_range THEN
+                v_ok := false;
+              END;
+            END IF;
+          END IF;
+          IF NOT v_ok THEN
+            v_reasons := v_reasons || public.automation_reason(v_tpath || '.' || v_cmp,
+              format('`%s` is a number, with no unit: the value is in the metric''s catalogue unit.', v_cmp));
+            v_cmp := NULL;
+          END IF;
+        END IF;
+
+        -- for: how long it must hold, 30s, 5m or 1h
+        v_hold := 0;
+        IF v_trig ? 'for' THEN
+          v_val := v_trig -> 'for';
+          IF jsonb_typeof(v_val) <> 'string' OR (v_val #>> '{}') !~ c_for THEN
+            v_reasons := v_reasons || public.automation_reason(v_tpath || '.for',
+              '`for` is how long it must hold before it fires: a whole number and s, m or h, such as 30s, 5m or 1h, up to 999 of one unit.');
+            v_hold := NULL;
+          ELSE
+            v_for := v_val #>> '{}';
+            v_hold := substring(v_for FROM '^[0-9]+')::integer
+                      * CASE right(v_for, 1) WHEN 's' THEN 1 WHEN 'm' THEN 60 ELSE 3600 END;
+          END IF;
+        END IF;
+
+        -- device: one id or a list, each a device that exists and is not archived
+        v_devs := NULL;
+        v_val := v_trig -> 'device';
+        v_dpath := v_tpath || '.device';
+        v_dev_count := CASE WHEN jsonb_typeof(v_val) = 'array' THEN jsonb_array_length(v_val) ELSE 0 END;
+        IF v_val IS NULL THEN
+          v_reasons := v_reasons || public.automation_reason(v_dpath,
+            '`device` is the id of the device to watch, or a list of ids. Copy them from the Devices page.');
+        ELSIF jsonb_typeof(v_val) = 'string' THEN
+          v_devs := jsonb_build_array(v_val);
+        ELSIF jsonb_typeof(v_val) = 'array' AND v_dev_count BETWEEN 1 AND c_max_devices THEN
+          v_devs := v_val;
+        ELSE
+          v_reasons := v_reasons || public.automation_reason(v_dpath, format(
+            '`device` is a device id, or a list of 1 to %s of them.', c_max_devices));
+        END IF;
+        IF v_devs IS NOT NULL THEN
+          v_dev_ids := ARRAY[]::text[];
+          FOR k IN 0 .. jsonb_array_length(v_devs) - 1 LOOP
+            -- Every device of every trigger is a row to check, so the whole file is bounded.
+            v_visited := v_visited + 1;
+            IF v_visited > c_max_rows THEN
+              RETURN jsonb_build_array(jsonb_build_object('index', NULL, 'key', NULL, 'reasons', jsonb_build_array(
+                public.automation_reason('$', format('A file holds at most %s devices across its triggers. Split it.', c_max_rows))),
+                'canon', NULL));
+            END IF;
+            v_dev := v_devs -> k;
+            IF jsonb_typeof(v_val) = 'array' THEN v_dpath := format('%s.device[%s]', v_tpath, k); END IF;
+            v_dev_id := NULL;
+            IF jsonb_typeof(v_dev) <> 'string' OR (v_dev #>> '{}') !~ c_uuid THEN
+              v_reasons := v_reasons || public.automation_reason(v_dpath,
+                'A device is named by its id: a lowercase uuid, as the Devices page shows it.');
+            ELSIF (v_dev #>> '{}') = ANY (v_dev_ids) THEN
+              v_reasons := v_reasons || public.automation_reason(v_dpath, 'This device is listed twice.');
+            ELSE
+              v_dev_id := v_dev #>> '{}';
+              v_dev_ids := v_dev_ids || v_dev_id;
+              SELECT NOT coalesce(d.is_archived, false) INTO v_ok FROM public.devices d WHERE d.id = v_dev_id::uuid;
+              IF v_ok IS NULL THEN
+                v_reasons := v_reasons || public.automation_reason(v_dpath, format(
+                  'No device has the id %s. Copy an id from the Devices page.', v_dev_id));
+                v_dev_id := NULL;
+              ELSIF NOT v_ok THEN
+                v_reasons := v_reasons || public.automation_reason(v_dpath, format(
+                  'Device %s is archived. Restore it, or name another device.', v_dev_id));
+                v_dev_id := NULL;
+              END IF;
+              IF v_dev_id IS NOT NULL AND v_metric IS NOT NULL AND v_derived
+                 AND NOT EXISTS (SELECT 1 FROM public.device_derived_metrics(ARRAY[v_dev_id::uuid]) x WHERE x.metric_name = v_metric)
+                 AND NOT EXISTS (SELECT 1 FROM public.automation_triggers t JOIN public.automations a ON a.id = t.automation_id
+                                  WHERE a.key = v_id AND NOT t.is_archived
+                                    AND t.entity_id = v_dev_id::uuid AND t.metric_name = v_metric) THEN
+                v_reasons := v_reasons || public.automation_reason(
+                  v_dpath, public.device_lacks_derived_metric_words(v_dev_id::uuid, v_metric));
+                v_dev_id := NULL;
+              END IF;
+            END IF;
+            IF v_dev_id IS NOT NULL AND v_metric IS NOT NULL AND v_cmp IS NOT NULL AND v_hold IS NOT NULL THEN
+              v_rows := v_rows || jsonb_build_object(
+                'position', j, 'device_position', k, 'kind', 'threshold', 'entity_id', v_dev_id,
+                'metric_name', v_metric, 'comparison', v_cmp, 'threshold', to_jsonb(v_threshold),
+                'hold_seconds', v_hold);
+            END IF;
+          END LOOP;
+        END IF;
+      END LOOP;
+    END IF;
+
+    -- actions: one `alert`
+    v_list := v_auto -> 'actions';
+    IF v_list IS NULL OR jsonb_typeof(v_list) <> 'array' THEN
+      v_reasons := v_reasons || public.automation_reason(v_apath || '.actions',
+        '`actions` is what the automation does. Give a list with one `alert`.');
+    ELSIF jsonb_array_length(v_list) <> 1 THEN
+      v_reasons := v_reasons || public.automation_reason(v_apath || '.actions',
+        'An automation takes exactly one action in this release: an `alert`.');
+    ELSE
+      v_act := v_list -> 0;
+      v_tpath := v_apath || '.actions[0]';
+      IF jsonb_typeof(v_act) <> 'object' THEN
+        v_reasons := v_reasons || public.automation_reason(v_tpath, 'An action is a set of keys: action and severity.');
+      ELSE
+        FOR v_key IN SELECT jsonb_object_keys(v_act) LOOP
+          IF NOT v_key = ANY (ARRAY['action', 'severity']) THEN
+            v_reasons := v_reasons || public.automation_reason(public.automation_path(v_tpath, v_key), format(
+              '`%s` is not a key an alert action takes. Remove it. The keys are action and severity.', v_key));
+          END IF;
+        END LOOP;
+        v_val := v_act -> 'action';
+        IF v_val IS NULL OR jsonb_typeof(v_val) <> 'string' OR (v_val #>> '{}') <> 'alert' THEN
+          v_reasons := v_reasons || public.automation_reason(v_tpath || '.action',
+            '`action` names the type. This release has `alert`.');
+        END IF;
+        v_val := v_act -> 'severity';
+        IF v_val IS NULL OR jsonb_typeof(v_val) <> 'string'
+           OR NOT (v_val #>> '{}') = ANY (ARRAY['critical', 'warning', 'info']) THEN
+          v_reasons := v_reasons || public.automation_reason(v_tpath || '.severity',
+            '`severity` is critical, warning or info.');
+        ELSE
+          v_actions := jsonb_build_array(jsonb_build_object('position', 0, 'kind', 'alert', 'severity', v_val #>> '{}'));
+        END IF;
+      END IF;
+    END IF;
+
+    v_out := v_out || jsonb_build_object(
+      'index', i, 'key', v_id, 'reasons', v_reasons,
+      'canon', CASE WHEN jsonb_array_length(v_reasons) = 0 THEN
+                 jsonb_build_object('key', v_id, 'alias', v_alias, 'description', v_desc, 'enabled', v_enabled,
+                                    'rows', v_rows, 'actions', v_actions)
+               END);
+  END LOOP;
+  RETURN v_out;
+END
+$$;
+
+ALTER FUNCTION public.automations_parse(jsonb) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.automations_parse(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+
+COMMENT ON FUNCTION public.automations_parse(jsonb) IS
+  'Checks a document of automations and writes nothing: for each, {index, key, reasons, canon}. '
+  'canon is the automation as it would be stored, typed and with its defaults explicit, and null '
+  'when there is any reason to refuse it. Every reason is collected, each with a JSON path. '
+  'Refuses a key it does not know, a metric that is not a number in the catalogue, a device that '
+  'is not there or is archived, a derived metric the device does not have (unless the automation '
+  'watches it already), and anything but one `threshold` trigger type and one `alert` action. Called by '
+  'apply_automations() (0256, 0336).';
+
+-- -------------------------------------------------------------------------------------------------
 -- What this file did, and nothing wider.
 -- -------------------------------------------------------------------------------------------------
 -- Structure, and what the two readers of a definition say of a few literals. Nothing is planted.
 DO $check$
 DECLARE
-  v_fn text;
+  v_fn  text;
+  v_src text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_attribute
                   WHERE attrelid = 'public.schemas'::regclass AND attname = 'derived_metrics'
@@ -424,7 +865,9 @@ BEGIN
   FOREACH v_fn IN ARRAY ARRAY['public.derivation_input_names(jsonb)', 'public.schema_modelled_metrics(jsonb)',
                               'public.schema_derived_metric_problems(jsonb, text[], text[])',
                               'public.schemas_check_their_derived_metrics()',
-                              'public.refuse_losing_a_named_derived_metric()'] LOOP
+                              'public.refuse_losing_a_named_derived_metric()',
+                              'public.device_derived_metrics(uuid[])', 'public.device_lacks_derived_metric_words(uuid, text)',
+                              'public.automations_parse(jsonb)'] LOOP
     IF has_function_privilege('anon', v_fn, 'EXECUTE') OR has_function_privilege('authenticated', v_fn, 'EXECUTE') THEN
       RAISE EXCEPTION '0336: a browser-facing role may execute %', v_fn;
     END IF;
@@ -443,6 +886,12 @@ BEGIN
         '{"properties": {"A/X": {}, "B/Y": {}}, "required": ["B/Y", "C/Z"]}')) n) IS DISTINCT FROM ARRAY['A/X', 'B/Y', 'C/Z']
      OR cardinality(public.schema_modelled_metrics('{"properties": ["A/X"]}')) <> 0 THEN
     RAISE EXCEPTION '0336: schema_modelled_metrics() does not name what a definition models';
+  END IF;
+  -- The document's check asks the rule, and the automation's own rows.
+  SELECT p.prosrc INTO v_src FROM pg_proc p WHERE p.oid = 'public.automations_parse(jsonb)'::regprocedure;
+  IF position('public.device_derived_metrics(ARRAY[v_dev_id::uuid])' IN v_src) = 0
+     OR position('a.key = v_id AND NOT t.is_archived' IN v_src) = 0 THEN
+    RAISE EXCEPTION '0336: automations_parse() does not ask whether the device has the derived metric, or whether the automation watches it already';
   END IF;
 END
 $check$;
