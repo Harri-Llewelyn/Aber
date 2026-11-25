@@ -4,7 +4,7 @@ import { FieldError } from './FieldError'
 import { HelpLink } from './HelpLink'
 import { IconCheck, IconCopy } from './Icons'
 import { Tooltip } from './Tooltip'
-import { COPY_REFUSED, useCopy } from '../../hooks/useCopy'
+import { COPY_REFUSED, useCopy, useRefusalShown } from '../../hooks/useCopy'
 
 /**
  * A command to run on a gateway's appliance, with its copy button: one block wherever the dashboard
@@ -27,6 +27,7 @@ export function ApplianceCommand({
   const { copied, refusal, copy } = useCopy()
   const errorId = useId()
   const refusedHere = drawer ? null : refusal
+  useRefusalShown(errorId, refusedHere)
 
   const press = async () => {
     if (!(await copy(command)) && drawer) showToast?.(COPY_REFUSED, 'error')
@@ -56,8 +57,8 @@ export function ApplianceCommand({
         )}
       <pre className={`mono gateway-code${wrap ? ' gateway-code-wrap' : ''}`}>{command}</pre>
       {drawer && <div className="context-buttons">{button}</div>}
-      {children && <div className="form-hint">{children}</div>}
       <FieldError id={errorId} error={refusedHere} />
+      {children && <div className="form-hint">{children}</div>}
     </div>
   )
 }

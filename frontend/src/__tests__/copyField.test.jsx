@@ -1,6 +1,7 @@
 import React from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApplianceCommand } from '../components/common/ApplianceCommand'
 import { CopyBlock, CopyField } from '../components/common/CopyField'
 import { Modal } from '../components/common/Modal'
 import { COPY_FEEDBACK_MS, COPY_REFUSED } from '../hooks/useCopy'
@@ -118,6 +119,25 @@ describe('CopyField', () => {
   })
 })
 
+it.each([
+  ['a value', () => <CopyField id="a" label="Username" value="one" />, 'Copy username'],
+  ['a block', () => <CopyBlock text="one" head="Setup" copyLabel="Copy Setup">A long hint.</CopyBlock>, 'Copy Setup'],
+  ['a command', () => <ApplianceCommand command="one">A long hint.</ApplianceCommand>, 'Copy Command'],
+])('%s brings its refused copy into view, and a block says it before the hint', async (_, Shown, copy) => {
+  const seen = []
+  Element.prototype.scrollIntoView = function () { seen.push(this.textContent.trim()) }
+  try {
+    render(<Shown />)
+    refuse()
+    await press(copy)
+    expect(seen).toEqual([COPY_REFUSED])
+    const hint = screen.queryByText('A long hint.')
+    if (hint) expect(screen.getByRole('alert').compareDocumentPosition(hint)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  } finally {
+    delete Element.prototype.scrollIntoView
+  }
+})
+
 describe('CopyBlock', () => {
   it('shows the text, copies it whole, and says a refusal under it', async () => {
     const text = 'line one\nline two'
@@ -171,7 +191,7 @@ describe('the step that shows a secret once', () => {
     refuse()
     showToast.mockClear()
     await press(name)
-    expect(screen.getByLabelText(label)).toHaveAccessibleDescription(new RegExp(`${COPY_REFUSED}$`))
+    expect(screen.getByRole('textbox', { name: label })).toHaveAccessibleDescription(expect.stringContaining(COPY_REFUSED))
     expect(document.querySelector('.modal-error')).toBeNull()
     expect(showToast).not.toHaveBeenCalled()
   }

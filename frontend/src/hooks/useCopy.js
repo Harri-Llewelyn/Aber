@@ -29,3 +29,8 @@ export function useCopy({ brief = false } = {}) {
 
   return { copied: state === 'copied', refusal: state === 'refused' ? COPY_REFUSED : null, copy }
 }
+
+/** Brings the refusal's line into view: a dialog's body scrolls, so it can come up below what is seen. */
+export function useRefusalShown(id, refusal) {
+  useEffect(() => { if (refusal) document.getElementById(id)?.scrollIntoView?.({ block: 'nearest' }) }, [id, refusal])
+}

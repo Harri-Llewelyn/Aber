@@ -1,5 +1,5 @@
 import React, { useId } from 'react'
-import { useCopy } from '../../hooks/useCopy'
+import { useCopy, useRefusalShown } from '../../hooks/useCopy'
 import { NO_VALUE } from '../../utils/format'
 import { FieldError } from './FieldError'
 import { IconCheck, IconCopy } from './Icons'
@@ -28,6 +28,7 @@ const selectValue = (e) => window.getSelection()?.selectAllChildren(e.currentTar
 export function CopyField({ id, label, value, copyLabel = label.toLowerCase(), hint = null, warning = null, children }) {
   const { copied, refusal, copy } = useCopy()
   const errorId = `${id}-copy-error`
+  useRefusalShown(errorId, refusal)
   const hasValue = value !== undefined && value !== null && value !== ''
   const described = [warning && `${id}-warning`, hint && `${id}-hint`].filter(Boolean)
   return (
@@ -70,7 +71,7 @@ export function CopyField({ id, label, value, copyLabel = label.toLowerCase(), h
 
 /**
  * A block of text a person copies whole, such as a client's setup: what it is with the copy button
- * on one line, the text under it, and `children` as the hint. A refused copy is said under it.
+ * on one line, the text under it, a copy the browser refuses said under that, and `children` as the hint.
  * Give it a `key` of its own when the text changes under it, so the last one's tick does not stay.
  *
  * @param {string} text What is shown and copied.
@@ -80,6 +81,7 @@ export function CopyField({ id, label, value, copyLabel = label.toLowerCase(), h
 export function CopyBlock({ text, head, copyLabel = 'Copy', children }) {
   const { copied, refusal, copy } = useCopy()
   const errorId = useId()
+  useRefusalShown(errorId, refusal)
   return (
     <>
       <div className="gateway-block-head">
@@ -94,8 +96,8 @@ export function CopyBlock({ text, head, copyLabel = 'Copy', children }) {
         </button>
       </div>
       <pre className="mono gateway-code gateway-code-wrap">{text}</pre>
-      {children && <div className="form-hint">{children}</div>}
       <FieldError id={errorId} error={refusal} />
+      {children && <div className="form-hint">{children}</div>}
     </>
   )
 }
