@@ -3080,18 +3080,20 @@ or guide it is in beside it (none when the heading is that title). The arrow key
 like any other row. Choosing one calls `openHelpAt(file, id)` and closes the search. The panel
 opens itself on that call, so `App.jsx` needs no wiring for it.
 
-**Its records are `find_entities()`'s** (0321), by a name or an id, as on
-[the Entities page](#the-entities-page-lists-every-kind-and-finds-any-id), with people from the same
+**The top bar's search finds its records with `find_entities()`** (0321), by a name or an id, as
+[the Entities page](#the-entities-page-lists-every-kind-and-finds-any-id) does, with people from the same
 `useLocalEntities()`, read as the bar first opens. It asks from two characters, once typing has rested 180 ms.
-`shortlist()` orders them: a whole id, a whole name, the start of an id, part of a name, and in service first
-among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`). An answer stops at 200 rows, which one kind can
-fill: four hundred devices before a cell. So `findEntities({ share, kinds })` then reads each kind short of its share apart, by name, all
-at once. A row opens `recordUrl()`: its own page while the rail has that page,
+`shortlist()` orders them: a whole id, a whole name, the start of an id, part of a name, and in service
+first among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`). An answer stops at 200 rows, which one kind can
+fill: four hundred devices before a cell. So `findEntities({ share, kinds })` then reads each kind short of
+its share apart, by name, all at once. A row opens `recordUrl()`: its own page while the rail has that page,
 else `/entities?find=<id>`. An id adds *View in Entities* and *Find This ID in the Audit Trail*, whatever it
-names; a text is one by its shape (`isIdShaped()`) or by what it found (`idFoundBy()`). The trail is handed the
-record's own id for a further id of one record, since its search does not read every further id. Nothing moves
-as the records arrive: they are last, the two id rows come with them, and the highlight follows its row by key.
-Until the answer is in, the last answer's rows that the new text names as well stay.
+names; a text is one by its shape (`isIdShaped()`) or by what it found (`idFoundBy()`). The trail is handed
+the record's own id for a further id of one record, since its search does not read every further id. Nothing
+moves as the records arrive: they are last, the two id rows come with them, and the highlight follows its row
+by key. Until the answer is in, the last answer's rows that the new text names as well stay. With 4,950
+devices and 200 tombstones, the records were in 260 to 300 ms after the last key, and 330 to 400 ms where
+kinds were read apart.
 
 ### Opening help from anywhere
 

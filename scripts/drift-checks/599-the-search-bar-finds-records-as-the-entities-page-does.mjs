@@ -30,7 +30,7 @@ export default function check() {
   const help = read(HELP);
   const paragraph = help.split('\n').find((line) => line.startsWith('**The search bar finds entities from any page.**')) ?? '';
   if (!paragraph) problems599.push(`${HELP} has no paragraph on the search bar`);
-  const readme = read(README).split('\n\n').find((text) => text.startsWith("**Its records are `find_entities()`'s**"))?.replace(/\s+/g, ' ') ?? '';
+  const readme = read(README).split('\n\n').find((text) => text.startsWith("**The top bar's search finds its records with `find_entities()`**"))?.replace(/\s+/g, ' ') ?? '';
   if (!readme) problems599.push(`${README} has no paragraph on the search bar's records`);
 
   const numbers = new Map([...bar.matchAll(/^(?:export )?const ([A-Z_]+) = (\d+)$/gm)].map((m) => [m[1], m[2]]));
