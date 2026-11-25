@@ -1,6 +1,8 @@
 import { DERIVED_TAG_TITLE } from '../components/common/DerivedTag'
 import { KNOWN_PRINCIPALS } from './serviceIdentities'
 import { SCHEMA_STATUS } from './schemaVersion'
+import { isSparkplugId } from './sparkplugId'
+import { inferSemanticIdType } from './standards'
 
 /**
  * What the Entities page lists: the rows of entity_directory (0321), and beside them the two it does not
@@ -22,6 +24,8 @@ export const ENTITY_KINDS = [
   { kind: 'service_principals', label: 'Machine Identity', plural: 'Machine Identities' },
   { kind: 'user_roles', label: 'Person', plural: 'People' },
 ]
+/** The kinds entity_directory lists: people are read apart. */
+export const DIRECTORY_KINDS = ENTITY_KINDS.map(k => k.kind).filter(kind => kind !== 'user_roles')
 const KIND_ORDER = new Map(ENTITY_KINDS.map((k, i) => [k.kind, i]))
 
 /** A kind's one-record name, or its own word for a kind this build does not know. */
@@ -32,6 +36,9 @@ export const kindRank = (kind) => KIND_ORDER.get(kind) ?? ENTITY_KINDS.length
 
 /** One row's key among every row of the page. A deleted entity's id is not used again, and a test's may be. */
 export const entityKey = (row) => `${row.state}:${row.kind}:${row.id}`
+
+/** A row's state where it is not in service, as the Entities page's tabs name it, or null. */
+export const inactiveState = (row) => ({ archived: 'Archived', retired: 'Retired' })[row?.state] ?? null
 
 /** The badge for what sets a row apart within its kind, or null where its kind says it all. */
 export function variantBadge(row) {
@@ -144,6 +151,35 @@ export function findRank(row, text) {
   return null
 }
 
+/** The id of the row's that `text` is, or is the start of, or null where the row was found by its name. */
+export function idFoundBy(row, text) {
+  const rank = findRank(row, text)
+  if (rank !== 0 && rank !== 2) return null
+  const q = findText(text)
+  const ids = [row.id, ...(row.second_ids ?? [])].map(String)
+  return ids.find(id => id.toLowerCase() === q) ?? ids.find(id => id.toLowerCase().startsWith(q)) ?? null
+}
+
+/** The groups of a UUID, in hexadecimal digits. */
+const UUID_GROUPS = [8, 4, 4, 4, 12]
+
+/** Whether `text` is a UUID, or the start of one from the characters a search counts. */
+function isUuidStart(text) {
+  const groups = text.split('-')
+  return text.length >= ID_PREFIX_MIN && groups.length <= UUID_GROUPS.length
+    && groups.every((group, i) => /^[0-9a-f]*$/i.test(group)
+      && (i === groups.length - 1 ? group.length <= UUID_GROUPS[i] : group.length === UUID_GROUPS[i]))
+}
+
+/**
+ * Whether a text is an id by its shape, whether or not anything has it: a UUID, the start of one, a
+ * Sparkplug id Aber issues, or a semantic id. Any other is known for one by what it names (`idFoundBy`).
+ */
+export function isIdShaped(text) {
+  const q = String(text ?? '').trim()
+  return isUuidStart(q) || isSparkplugId(q.toLowerCase()) || inferSemanticIdType(q) !== ''
+}
+
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
 /** The order the Active tab lists in: by kind, then by name. */
@@ -160,4 +196,27 @@ export function mergeFound(found, local, text) {
     .sort((a, b) => collator.compare(a.name ?? '', b.name ?? ''))
   const ranked = [...found, ...own].map((row, i) => ({ row, i, rank: findRank(row, text) ?? 4 }))
   return ranked.sort((a, b) => a.rank - b.rank || a.i - b.i).map(r => r.row)
+}
+
+/** In service first. */
+const STATE_ORDER = { active: 0, archived: 1, retired: 2 }
+const stateRank = (row) => STATE_ORDER[row.state] ?? 3
+
+/**
+ * A search's rows as the search bar lists them: best first, at most `perKind` of one kind. A whole id comes
+ * first and a whole name next, so a kind's share takes nothing from either. Among equals, what is in service
+ * comes before what was taken out; then by name, and by kind: a device before its capture, which goes by its
+ * name.
+ */
+export function shortlist(rows, text, perKind) {
+  const ranked = rows
+    .map(row => ({ row, rank: findRank(row, text) ?? 4 }))
+    .sort((a, b) => a.rank - b.rank || stateRank(a.row) - stateRank(b.row)
+      || collator.compare(a.row.name ?? '', b.row.name ?? '') || byKindThenName(a.row, b.row))
+  const taken = new Map()
+  return ranked.map(r => r.row).filter(row => {
+    const n = (taken.get(row.kind) ?? 0) + 1
+    taken.set(row.kind, n)
+    return n <= perKind
+  })
 }

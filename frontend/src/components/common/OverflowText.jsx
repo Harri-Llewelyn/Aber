@@ -19,15 +19,19 @@ const RETURN_MS = 250
  * text reacts to the pointer alone. A label's focus is its checkbox's. Measured as it activates
  * (`scrollWidth` against `clientWidth`), so a drawer opening or the window narrowing needs no
  * listener. `onMeasure(cut)` hears each measurement, so the control can give its tooltip only to
- * text that is really cut.
+ * text that is really cut. `active` slides it as focus does, for an option a person highlighted
+ * while the focus is elsewhere, as in a combobox's list.
  *
  *   <button type="button" onClick={open}><OverflowText className="trail-lane-name">{name}</OverflowText></button>
  */
-export function OverflowText({ children, className = '', onMeasure }) {
+export function OverflowText({ children, className = '', onMeasure, active }) {
   const outer = useRef(null)
   // The latest callback, read when the effect's listeners measure.
   const measured = useRef(onMeasure)
   measured.current = onMeasure
+  const held = useRef(false)
+  held.current = Boolean(active)
+  const refresh = useRef(null)
 
   useEffect(() => {
     const el = outer.current
@@ -43,7 +47,7 @@ export function OverflowText({ children, className = '', onMeasure }) {
       clearTimeout(settle)
       const shift = el.scrollWidth - el.clientWidth
       measured.current?.(shift > 0)
-      if ((hovered || focused) && shift > 0 && !still()) {
+      if ((hovered || focused || held.current) && shift > 0 && !still()) {
         el.style.setProperty('--overflow-ms', `${Math.max(SLIDE_MIN_MS, Math.round((shift / SLIDE_PX_PER_SECOND) * 1000))}ms`)
         el.style.setProperty('--overflow-shift', `${-shift}px`)
         el.classList.add('overflow-text-sliding')
@@ -55,6 +59,7 @@ export function OverflowText({ children, className = '', onMeasure }) {
       }
     }
 
+    refresh.current = update
     // Keyboard focus only: a click's focus would hold the text slid after the pointer has gone.
     const keyboardFocus = (e) => {
       try { return e.target.matches(':focus-visible') } catch { return true }
@@ -69,6 +74,7 @@ export function OverflowText({ children, className = '', onMeasure }) {
     host.addEventListener('focusin', onFocus)
     host.addEventListener('focusout', onBlur)
     return () => {
+      refresh.current = null
       clearTimeout(settle)
       host.removeEventListener('mouseenter', onEnter)
       host.removeEventListener('mouseleave', onLeave)
@@ -76,6 +82,12 @@ export function OverflowText({ children, className = '', onMeasure }) {
       host.removeEventListener('focusout', onBlur)
     }
   }, [])
+
+  useEffect(() => {
+    if (!active) return undefined
+    refresh.current?.()
+    return () => refresh.current?.()
+  }, [active])
 
   return (
     <span ref={outer} className={`overflow-text${className ? ` ${className}` : ''}`}>

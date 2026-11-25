@@ -4,43 +4,11 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { TABS, tabIsVisible } from '../../navigation'
 import { areaUrl, automationsForEntityUrl, cellUrl, deviceUrl, entityUrl, gatewayUrl, trailUrl } from '../../routes'
 import { entityWarnings, kindLabel, secondIdFields, variantBadge } from '../../utils/entities'
+import { ENTITY_PAGES, KIND_ICONS } from '../../utils/entityPages'
 import { Badge } from '../common/Badge'
 import { ContextPanel } from '../common/ContextPanel'
 import { RouteLink } from '../common/RouteLink'
-import {
-  IconClipboardList, IconCpu, IconFactory, IconHardDrive, IconHistory, IconLayoutDashboard, IconLock, IconRadio,
-  IconRecord, IconTag, IconUser, IconZap,
-} from '../common/Icons'
-
-/** Each kind's own page, as `entityUrl` names the kind and as the rail names the page. */
-const ENTITY_PAGES = {
-  areas: { type: 'area', page: 'Areas' },
-  cells: { type: 'cell', page: 'Cells' },
-  gateways: { type: 'gateway', page: 'Gateways' },
-  devices: { type: 'device', page: 'Devices' },
-  schemas: { type: 'schema', page: 'Schemas' },
-  metric_catalog: { type: 'metric', page: 'Metrics' },
-  automations: { type: 'automation', page: 'Automations' },
-  captures: { type: 'capture', page: 'Capture' },
-  backups: { type: 'backup', page: 'Backups' },
-  service_principals: { type: 'identity', page: 'Access Control' },
-  user_roles: { type: 'person', page: 'Access Control' },
-}
-
-/** Each kind's glyph, as its own page and the Audit Trail's sections draw it. */
-const KIND_ICONS = {
-  areas: IconFactory,
-  cells: IconLayoutDashboard,
-  gateways: IconRadio,
-  devices: IconCpu,
-  schemas: IconClipboardList,
-  metric_catalog: IconTag,
-  automations: IconZap,
-  captures: IconRecord,
-  backups: IconHardDrive,
-  service_principals: IconLock,
-  user_roles: IconUser,
-}
+import { IconCpu, IconFactory, IconHistory, IconLayoutDashboard, IconRadio, IconZap } from '../common/Icons'
 
 /** A link to the entity this one is in or of, by name: none while the page holds no row for it. */
 function PlaceChip({ to, icon, name, page }) {

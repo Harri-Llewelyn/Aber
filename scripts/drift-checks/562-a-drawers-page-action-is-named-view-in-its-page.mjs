@@ -91,7 +91,9 @@ export default function check() {
         }
         // The event's own entity, whose page ENTITY_PAGES names.
         if (label === 'View in ${entityPage.page}' && url.startsWith('entityUrl(entityPage.type,')) {
-          const pages = [...src.matchAll(/type: '[a-z]+',\s+page: '([^']+)'/g)].map((x) => x[1]);
+          // The drawer's own table, or the one the Entities page's drawer shares with the search bar.
+          const table = src.includes("from '../../utils/entityPages'") ? read('frontend/src/utils/entityPages.js') : src;
+          const pages = [...table.matchAll(/type: '[a-z]+',\s+page: '([^']+)'/g)].map((x) => x[1]);
           for (const p of pages) if (!PAGES.has(p)) offences.push(`${file}: ENTITY_PAGES names ${p}, which the rail does not`);
           if (pages.length === 0) offences.push(`${file}: could not read ENTITY_PAGES`);
           continue;

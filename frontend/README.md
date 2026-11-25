@@ -351,7 +351,8 @@ cut before the name is (`OverflowText`): a Filters panel's section says what is 
 `common/OverflowText.jsx` draws one line that may not fit, cut with an ellipsis at rest. While the
 pointer is on it, or on the button, link or label it sits in, or that control has keyboard focus,
 text that is really cut slides at about reading pace (`SLIDE_PX_PER_SECOND`) until its end shows. It
-slides back when they leave. A label's focus is its checkbox's.
+slides back when they leave. A label's focus is its checkbox's. An option highlighted while the focus is
+elsewhere, as in the top bar's search, passes `active`, which slides it as focus does.
 
 - It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
   control's tooltip must carry the whole text, or the text must wrap there (a list picker's rows).
@@ -1640,7 +1641,8 @@ apart within its kind, and what each kind's further ids are called.
 - **Two things are beside the view's rows,** for an Administrator and an Auditor alone: people, and the
   identities a migration pinned. No table holds either. People come from `list_people()` for an
   Administrator, who sees whose access was removed, and from `list_user_accounts()` for an Auditor. The
-  pinned identities are `KNOWN_PRINCIPALS`. Nobody else asks for either.
+  pinned identities are `KNOWN_PRINCIPALS`. Nobody else asks for either. `useLocalEntities()` is the read, here
+  and in the top bar's search.
 - **The search is `find_entities()`,** asked once typing rests. Each tab lists what it found and nothing
   else, so a tab and the search cannot disagree. `findRank()` applies the same rule to the rows the
   browser holds, and mirror check `159` holds the two to it.
@@ -1650,9 +1652,9 @@ apart within its kind, and what each kind's further ids are called.
   closed stays closed.
 - **The Active table is the whole list, sorted in the browser,** and draws `ACTIVE_PAGE` rows at a time.
 - **`EntityDrawer` is the same for every kind.** It reads the row and nothing more, except how many
-  automations apply to a device. `entityUrl()` in `routes.js` knows each kind's own page, and
-  `tabIsVisible()` decides whether this reader may open it: an Auditor reads an identity here, and Access
-  Control is an Administrator's.
+  automations apply to a device. `entityUrl()` in `routes.js` knows each kind's own page (`ENTITY_PAGES` in
+  `utils/entityPages.js` is the rail's name for it), and `tabIsVisible()` decides whether this reader may
+  open it: an Auditor reads an identity here, and Access Control is an Administrator's.
 - **A retired row is for `archive:manage` or `audit_trail:read`.** A reader with neither is told so, rather
   than that nothing has been retired.
 
@@ -3095,6 +3097,21 @@ waits for two characters as the name search does. A row is the heading, with the
 or guide it is in beside it (none when the heading is that title). The arrow keys and Enter walk it
 like any other row. Choosing one calls `openHelpAt(file, id)` and closes the search. The panel
 opens itself on that call, so `App.jsx` needs no wiring for it.
+
+**The top bar's search finds its records with `find_entities()`** (0321), by a name or an id, as
+[the Entities page](#the-entities-page-lists-every-kind-and-finds-any-id) does, with people from the same
+`useLocalEntities()`, read as the bar first opens. It asks from two characters, once typing has rested 180 ms.
+`shortlist()` orders them: a whole id, a whole name, the start of an id, part of a name, and in service
+first among equals. It keeps 10 of a kind (`RECORD_KIND_LIMIT`). An answer stops at 200 rows, which one kind can
+fill: four hundred devices before a cell. So `findEntities({ share, kinds })` then reads each kind short of
+its share apart, by name, all at once. A row opens `recordUrl()`: its own page while the rail has that page,
+else `/entities?find=<id>`. An id adds *View in Entities* and *Find This ID in the Audit Trail*, whatever it
+names; a text is one by its shape (`isIdShaped()`) or by what it found (`idFoundBy()`). The trail is handed
+the record's own id for a further id of one record, since its search does not read every further id. Nothing
+moves as the records arrive: they are last, the two id rows come with them, and the highlight follows its row
+by key. Until the answer is in, the last answer's rows that the new text names as well stay. With 4,950
+devices and 200 tombstones, the records were in 260 to 300 ms after the last key, and 330 to 400 ms where
+kinds were read apart.
 
 ### Opening help from anywhere
 

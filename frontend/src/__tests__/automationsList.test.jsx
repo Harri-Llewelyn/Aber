@@ -22,7 +22,7 @@ vi.mock('../api', async () => {
       readAutomations: vi.fn(),
       automationsDocument: vi.fn(),
       automationsForEntity: vi.fn(),
-      resolveId: vi.fn(),
+      findEntities: vi.fn(),
       setAutomationEnabled: vi.fn(),
       applyAutomations: vi.fn(),
       automationOfTrigger: vi.fn(),
@@ -85,7 +85,7 @@ beforeEach(() => {
   download.blobs.length = 0
   api.readAutomations.mockResolvedValue(read())
   api.automationsForEntity.mockResolvedValue([])
-  api.resolveId.mockResolvedValue([])
+  api.findEntities.mockResolvedValue([])
   api.setAutomationEnabled.mockResolvedValue({})
   api.get.mockResolvedValue([])
   api.automationsDocument.mockResolvedValue({ automations: [hot], devices: read().devices })
@@ -192,7 +192,7 @@ describe('from a device to its automations', () => {
 
   it('narrows the list to the automations that apply, names the device in a chip, and says why each applies', async () => {
     api.automationsForEntity.mockResolvedValue(rows)
-    api.resolveId.mockResolvedValue([{ kind: 'device', id: LATHE, name: 'Lathe 3' }])
+    api.findEntities.mockResolvedValue([{ kind: 'devices', id: LATHE, name: 'Lathe 3', state: 'active' }])
     await show({ url: `/automations?entity=${LATHE}` })
     await screen.findByText('Applies to')
     expect(api.automationsForEntity).toHaveBeenCalledWith(LATHE)
@@ -206,7 +206,7 @@ describe('from a device to its automations', () => {
 
   it('clears the filter from the chip, back to every automation', async () => {
     api.automationsForEntity.mockResolvedValue(rows)
-    api.resolveId.mockResolvedValue([{ kind: 'device', id: LATHE, name: 'Lathe 3' }])
+    api.findEntities.mockResolvedValue([{ kind: 'devices', id: LATHE, name: 'Lathe 3', state: 'active' }])
     await show({ url: `/automations?entity=${LATHE}` })
     await screen.findByText('Applies to')
     fireEvent.click(screen.getByRole('button', { name: /Show every automation/ }))
