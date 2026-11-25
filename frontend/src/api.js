@@ -3053,6 +3053,20 @@ const apiMethods = {
   },
 
   /**
+   * The two times that say whether a Remote gateway's enrolment stands, as they are now: what the setup
+   * dialog reads as its question opens. Null when the gateway is gone.
+   */
+  gatewayEnrolment: async (gatewayId) => {
+    const { data, error } = await supabase
+      .from('gateways')
+      .select('enrolled_at,credential_revoked_at')
+      .eq('id', gatewayId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || "Could not read the gateway's enrolment");
+    return data;
+  },
+
+  /**
    * Find or create one replay lane per device in a capture, and return the map to publish under.
    *
    * A write, hung off an explicit click rather than off opening a dialog. Idempotent: a lane is

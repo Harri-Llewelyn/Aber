@@ -13,6 +13,9 @@ import {
   IconCopy, IconDownload, IconRefreshCw, IconShieldAlert
 } from '../common/Icons'
 
+/** What an issue leaves: the enrolment has ended, and nothing has enrolled with the new token yet. */
+const NOT_ENROLLED = { enrolled_at: null, credential_revoked_at: null }
+
 /**
  * The setup step for a remote gateway: issues a single-use token and shows it as an install
  * command to paste on the appliance, or downloads it as a ZIP bundle. Issuing replaces any live
@@ -21,8 +24,10 @@ import {
  * once per mount. The command is offered when `installer.available`; switching between command and
  * bundle is a re-issue and asks first.
  *
- * `gateway` is the caller's row, whole: whether the setup revokes a credential is read from it here, so
- * no caller can leave the warning out.
+ * `gateway` is the caller's row, whole: whether the setup revokes a credential is worked out here, so no
+ * caller can leave the warning out. The row is as the page last read it, so each time the question opens
+ * the dialog reads the two times again and goes by those. Until that read answers, and when it fails, it
+ * goes by what it has: the row, or after its own issue, an enrolment that has ended.
  *
  * A gateway that has ever enrolled (`enrolled_at`, whatever its credential is now) may be going back
  * on the machine that holds its old enrolment, so the dialog shows how to clear it above the command.
@@ -40,10 +45,14 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
   const [mode, setMode] = useState(installer?.available ? 'command' : 'bundle')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(!confirmFirst)
+  // What the gateway's enrolment is known to be since the dialog opened, or null: the row, then.
+  const [enrolment, setEnrolment] = useState(null)
   // Re-rendered every second only while a live token is on screen.
   const [now, setNow] = useState(() => Date.now())
 
   const requested = useRef(false)
+  // The read the question waits for, or null.
+  const asking = useRef(null)
 
   const remaining = bundle ? tokenTimeRemaining(bundle.expiresAt, now) : null
   const expired = remaining !== null && remaining <= 0
@@ -55,6 +64,9 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
     return () => clearInterval(id)
   }, [bundle, expired, step])
 
+  // A read still on its way is of before the issue, so it is dropped.
+  const ended = useCallback(() => { asking.current = null; setEnrolment(NOT_ENROLLED) }, [])
+
   const generate = useCallback(async () => {
     setBusy(true)
     setError(null)
@@ -62,6 +74,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
       if (mode === 'command') {
         const result = await api.installCommand(gateway.gateway_id)
         setBundle({ ...result, kind: 'command' })
+        ended()
         setNow(Date.now())
         setTyped('')
         setStep('ready')
@@ -82,6 +95,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
       URL.revokeObjectURL(url)
 
       setBundle({ ...result, kind: 'bundle' })
+      ended()
       setNow(Date.now())
       setTyped('')
       setStep('ready')
@@ -94,7 +108,23 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
     } finally {
       setBusy(false)
     }
-  }, [gateway, mode, showToast])
+  }, [gateway, mode, showToast, ended])
+
+  useEffect(() => {
+    if (step !== 'confirm') return undefined
+    const mine = {}
+    asking.current = mine
+    const read = async () => {
+      try {
+        const answer = await api.gatewayEnrolment(gateway.gateway_id)
+        if (asking.current === mine && answer) setEnrolment(answer)
+      } catch {
+        // What the dialog has stands.
+      }
+    }
+    read()
+    return () => { asking.current = null }
+  }, [step, gateway.gateway_id])
 
   useEffect(() => {
     if (confirmFirst || requested.current) return
@@ -108,8 +138,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
     : `aber-gateway-${sparkplugId || 'bundle'}`
   const isCommand = bundle?.kind === 'command'
   const enrolledBefore = Boolean(gateway.enrolled_at)
-  // Once this dialog has issued, the enrolment no longer stands, and nothing more is revoked.
-  const revokesCredential = setupRevokesCredential(gateway) && !bundle
+  const revokesCredential = setupRevokesCredential(enrolment ?? gateway)
 
   // The install command is the server's text verbatim.
   const commands = isCommand ? bundle.command : startBundle(folder)

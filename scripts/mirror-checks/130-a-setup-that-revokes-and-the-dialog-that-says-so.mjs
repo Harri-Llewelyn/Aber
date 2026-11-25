@@ -13,10 +13,11 @@ const OPENERS = {
 // gateway_has_broker_credential() says its enrolment stands, and check 129 holds that rule against
 // enrolmentStands(). setupRevokesCredential() is enrolmentStands(), and two places ask it: the drawer,
 // which names the action Re-issue Setup and never offers it while the gateway is online, and the setup
-// dialog, which says the old appliance's credential is revoked. The dialog reads the row it is given,
-// so every caller hands its row over whole, and Access Control's read selects both times. If the sides
-// read different rules, the dialog promises a revocation the database does not make, or a person is
-// cut off without being told.
+// dialog, which says the old appliance's credential is revoked. The dialog goes by the two times it reads
+// as its question opens, and by the row it is given until they answer. So every caller hands its row over
+// whole, Access Control's read and the dialog's select both times, and the dialog's own issue leaves an
+// enrolment that has ended. If the sides read different rules, the dialog promises a revocation the
+// database does not make, or a person is cut off without being told.
 export default function check() {
   const issue = lastDefinition('CREATE OR REPLACE FUNCTION public.issue_gateway_enrollment_token(', '$$;',
     'issue_gateway_enrollment_token()');
@@ -40,9 +41,21 @@ export default function check() {
   if (offered) compare('setupRevokes', 'the drawer offers setup only while the gateway is not online', offered[1], '!isGatewayOnline');
 
   const modal = read('frontend/src/components/modals/GatewayBundleModal.jsx');
-  const asks = need(modal, /const revokesCredential = ([^\n]*)\(gateway\) && !bundle\n/,
+  const asks = need(modal, /const revokesCredential = ([A-Za-z]+)\(([^\n]*)\)\n/,
     "the setup dialog's rule for the revocation in GatewayBundleModal.jsx");
-  if (asks) compare('setupRevokes', 'the function the setup dialog reads', asks[1], 'setupRevokesCredential');
+  if (asks) {
+    compare('setupRevokes', 'the function the setup dialog reads', asks[1], 'setupRevokesCredential');
+    compare('setupRevokes', 'what the setup dialog asks it of: what it knows since it opened, else its row', asks[2], 'enrolment ?? gateway');
+  }
+  const opens = need(modal, /useEffect\(\(\) => \{\n {4}if \(step !== '([a-z]+)'\) return undefined\n[\s\S]{0,160}await api\.([A-Za-z]+)\(gateway\.gateway_id\)/,
+    "the setup dialog's read of the gateway as its question opens in GatewayBundleModal.jsx");
+  if (opens) {
+    compare('setupRevokes', 'the step whose opening reads the gateway again', opens[1], 'confirm');
+    compare('setupRevokes', 'what the setup dialog reads the gateway with', opens[2], 'gatewayEnrolment');
+  }
+  // Both shapes of the issue, the command and the bundle, end the enrolment the dialog knows of.
+  compare('setupRevokes', 'the issues after which the dialog takes the enrolment to have ended',
+    [...modal.matchAll(/setBundle\(\{ \.\.\.result, kind: '([a-z]+)' \}\)\n +ended\(\)\n/g)].map((m) => m[1]).join(', '), 'command, bundle');
   const says = need(modal, /\{([^{}]*) && \(\s*<> This gateway has already enrolled, so this also revokes the broker credential/,
     'the setup dialog\'s revocation sentence in GatewayBundleModal.jsx');
   if (says) compare('setupRevokes', 'what the dialog reads before it says the credential is revoked', says[1], 'revokesCredential');
@@ -58,11 +71,15 @@ export default function check() {
     const handed = need(read(`${components}/tabs/${file}`), shape, `the row ${file} hands the setup dialog`);
     if (handed) compare('setupRevokes', `the row ${file} hands the setup dialog, whole`, handed[1], row);
   }
-  const columns = need(read('frontend/src/api.js'), /listGatewayCredentials: async[\s\S]*?\.select\('([^']*)'\)/,
-    "Access Control's read of the gateways in api.js");
-  if (columns) {
+  const READS = [
+    ["Access Control's read", /listGatewayCredentials: async[\s\S]*?\.select\('([^']*)'\)/],
+    ["the setup dialog's own read", /gatewayEnrolment: async[\s\S]*?\.select\('([^']*)'\)/],
+  ];
+  for (const [whose, shape] of READS) {
+    const columns = need(read('frontend/src/api.js'), shape, `${whose} of the gateways in api.js`);
+    if (!columns) continue;
     const selects = columns[1].split(',');
-    compare('setupRevokes', "the times Access Control's read selects",
+    compare('setupRevokes', `the times ${whose} selects`,
       ['enrolled_at', 'credential_revoked_at'].filter((column) => selects.includes(column)).join(', '), 'enrolled_at, credential_revoked_at');
   }
 }
