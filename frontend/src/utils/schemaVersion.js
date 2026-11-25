@@ -108,6 +108,9 @@ export const lineageOf = (schemas, schema) => {
  */
 export const isCurrentSchema = (schema) => schemaStatus(schema) !== SCHEMA_STATUS.ARCHIVED
 
+/** Whether a version is in force: neither a draft nor superseded. */
+export const isInForce = (schema) => isCurrentSchema(schema) && !isSchemaEditable(schema)
+
 /**
  * Whether a schema may be attached to a device that does not already carry it. An archived version
  * is history: `publish_schema_version()` repoints every device to the successor, and offering it

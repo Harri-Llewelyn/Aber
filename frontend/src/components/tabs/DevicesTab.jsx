@@ -23,6 +23,7 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
+import { SchemaPicker } from '../common/SchemaPicker'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
@@ -67,7 +68,7 @@ import {
   outOfVocabularyMetrics, OUT_OF_VOCABULARY_TAG
 } from '../../utils/deviceTags'
 import { oldDevicesLinkChanges, STATUS_OUT_OF_VOCABULARY, STATUS_UNMODELLED } from '../../utils/devicesAddress'
-import { assignableSchemas, isAssignableSchema, schemaStatus, statusLabel } from '../../utils/schemaVersion'
+import { assignableSchemas, isAssignableSchema } from '../../utils/schemaVersion'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
@@ -412,6 +413,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       schema_ids: current.includes(schemaId) ? current.filter(id => id !== schemaId) : [...current, schemaId]
     }
   })
+
+  /** Archived versions are not offered, except one this device already carries. The database refuses the write as well. */
+  const offeredSchemas = useMemo(
+    () => assignableSchemas(schemas, editing ? schemaIdsForDevice(editing) : []),
+    [schemas, editing]
+  )
 
   /** The schema rows the form has ticked: what the device will be judged against once saved. */
   const formSchemas = schemas.filter(s => (form.schema_ids || []).includes(s.schema_uuid))
@@ -1396,32 +1403,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               )
             })()}
 
-            {/* A fieldset of checkboxes: the legend names the group to a screen reader, and Tab and
-                Space work without a custom widget. */}
-            <fieldset className="form-group schema-picker">
-              <legend className="form-label">Schemas (optional)</legend>
-              <Withheld field="schema_ids" />
-              {/* Archived versions are not offered; assignableSchemas() keeps the ones this device
-                  already carries, labelled with their status. The database refuses the write as well. */}
-              <div className="form-control schema-checklist">
-                {(() => {
-                  const offered = assignableSchemas(schemas, editing ? schemaIdsForDevice(editing) : [])
-                  if (offered.length === 0) {
-                    return <span className="cell-meta">No schemas yet. Create one on the Schemas page.</span>
-                  }
-                  return offered.map(s => (
-                    <label key={s.schema_uuid}>
-                      <input
-                        type="checkbox"
-                        disabled={proposeMode}
-                        checked={(form.schema_ids || []).includes(s.schema_uuid)}
-                        onChange={() => toggleSchema(s.schema_uuid)}
-                      />
-                      <span>{isAssignableSchema(s) ? s.schema_name : `${s.schema_name} · ${statusLabel(schemaStatus(s))}`}</span>
-                    </label>
-                  ))
-                })()}
-              </div>
+            <SchemaPicker
+              legend="Schemas (optional)"
+              note={<Withheld field="schema_ids" />}
+              schemas={offeredSchemas}
+              value={form.schema_ids || []}
+              onToggle={toggleSchema}
+              disabled={proposeMode}
+            >
               {/* What the ticked schemas make of the device, as text: nothing here can be typed
                   into. Absent while no ticked schema models a group. */}
               {formGroups.length > 0 && (
@@ -1445,7 +1434,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   silently detach it — move it forward by publishing from the Schemas page, not from here.
                 </div>
               )}
-            </fieldset>
+            </SchemaPicker>
 
             {/* Only when editing: a device being created has no schema yet, and the column defaults
                 to 'audit' server-side. */}

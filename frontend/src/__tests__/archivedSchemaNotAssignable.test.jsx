@@ -82,7 +82,7 @@ const schemaPicker = () =>
   within(document.querySelector('.modal')).getByRole('group', { name: /Schemas/ })
 
 const optionTexts = () =>
-  within(schemaPicker()).getAllByRole('checkbox').map(cb => cb.closest('label').textContent.trim())
+  within(schemaPicker()).getAllByRole('checkbox').map(cb => cb.getAttribute('aria-label'))
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -115,7 +115,7 @@ describe('the Edit Details schema picker', () => {
   it('still offers a draft, which is how a version is tried before publishing', async () => {
     await show([device({ submodel_schema_ids: [V2] })])
     openEdit()
-    expect(optionTexts()).toContain('Test_Schema_v3')
+    expect(optionTexts()).toContain('Test_Schema_v3 · Draft')
   })
 
   it('keeps a device that is already on an archived version showing it, labelled', async () => {

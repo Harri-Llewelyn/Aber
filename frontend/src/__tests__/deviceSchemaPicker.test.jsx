@@ -74,7 +74,7 @@ const show = async (rows) => {
 const picker = () => within(screen.getByRole('group', { name: /Schemas/ }))
 const box = (name) => picker().getByRole('checkbox', { name })
 const ticked = () => picker().getAllByRole('checkbox').filter(cb => cb.checked)
-  .map(cb => cb.closest('label').textContent.trim())
+  .map(cb => cb.getAttribute('aria-label'))
 
 const openEdit = () => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText('CNC_01'))
@@ -196,7 +196,7 @@ describe('the picker is a labelled group of checkboxes', () => {
     await show([device()])
     openEdit()
     // Native checkboxes in a fieldset: Tab moves between them and Space toggles, with no handler.
-    expect(screen.getByRole('group', { name: 'Schemas (optional)' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Schemas (optional) 0 selected' })).toBeTruthy()
     for (const { schema_name } of SCHEMAS) {
       expect(box(schema_name).tagName).toBe('INPUT')
     }
