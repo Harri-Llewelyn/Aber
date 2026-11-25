@@ -1333,13 +1333,21 @@ paths:
         (`audit_domain = 'asset'`) is readable by `Administrator`, `Shopfloor_Manager` and
         `Auditor`, the security lane by `Administrator` and `Auditor`.
 
-        `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
-        `device_nameplate`, `device_submodels`, `schemas`, `metric_catalog` and `change_proposals` in
-        the asset lane, and `user_roles`, `service_principals`, `broker_accounts` (a read-only broker
-        account, 0218), `system_settings`, `backup_jobs`, `backups` and `service_logs` (a read of a
-        service's logs, 0225) in the security lane. A trail older than their retirement also holds `area_floors`,
-        `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
-        entity's history after deleting it, collect the ids first.
+        `entity_type` is the kind of thing an event is about, and `entity_id` says which one.
+        [`docs/architecture.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/docs/architecture.md#entity_type-the-word-for-a-kind),
+        *How Aber identifies things*, says what each word is about. Some are no table's name.
+
+        - The asset lane holds `areas`, `cells`, `gateways`, `devices`, `device_nameplate`,
+          `device_submodels`, `schemas`, `metric_catalog`, `metric_semantic_ids`, `site_vocabularies`,
+          `change_proposals`, `automations`, `capture_jobs`, `captures`, `playback_jobs`,
+          `platform_alerts` and `telemetry`.
+        - The security lane holds `user_roles`, `service_principals`, `oauth_clients`,
+          `broker_accounts`, `service_logs`, `notification_channels`, `system_settings`, `backup_jobs`
+          and `backups`.
+
+        A trail older than their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
+        `device_links` rows. Rows key on `entity_id`. To find an entity's history after deleting it,
+        collect the ids first.
 
         `actor_source` records who made the change (`user` / `ingestion` / `service` /
         `migration`). The trigger refuses to accept `user` from a client-supplied header.
@@ -1580,12 +1588,13 @@ paths:
       description: |
         One row per database principal created from the Access Control page (`0125`): the name
         the page lists it by, the purpose in the Administrator's own words, who created it and
-        when. The three identities a migration pinned have no row here; the dashboard names them
+        when. The four identities a migration pinned have no row here; the dashboard names them
         from its own registry.
 
-        **Written only by `create_machine_principal()`**, in the same transaction as the
+        **Inserted only by `create_machine_principal()`**, in the same transaction as the
         `auth.users` row it describes, so an identity created from the page cannot exist without a
-        name. No write policy exists. Deleting the `auth.users` row cascades to this one.
+        name. Only `describe_machine_principal()` changes a row: its name, its purpose or both. No
+        write policy exists. Deleting the `auth.users` row cascades to this one.
 
         Read is `Administrator` and `Auditor`, matching `list_user_accounts()`: a name here labels
         audit-trail rows both roles may read, and holds nothing a token could be derived from.
@@ -5269,7 +5278,7 @@ paths:
       summary: List external links attached to an asset
       description: 'A link registry, not a file store — `url` points at an external system.'
       parameters:
-        - { name: entity_type, in: query, schema: { type: string }, description: '`eq.cell` | `eq.gateway` | `eq.device`' }
+        - { name: entity_type, in: query, schema: { type: string }, description: '`eq.area` | `eq.cell` | `eq.gateway` | `eq.device`' }
         - { name: entity_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
         - $ref: '#/components/parameters/Select'
       responses:
@@ -5290,7 +5299,7 @@ paths:
               type: object
               required: [entity_type, entity_id, display_name, url]
               properties:
-                entity_type: { type: string, enum: [cell, gateway, device] }
+                entity_type: { type: string, enum: [area, cell, gateway, device] }
                 entity_id: { type: string }
                 display_name: { type: string }
                 url: { type: string, format: uri }
@@ -8624,12 +8633,16 @@ components:
         entity_type:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
-                 change_proposals, user_roles, service_principals, broker_accounts, system_settings, backup_jobs,
-                 backups, capture_jobs, captures, playback_jobs, oauth_clients, service_logs, platform_alerts,
-                 notification_channels, automations, telemetry]
+                 metric_semantic_ids, site_vocabularies, change_proposals, user_roles, service_principals,
+                 broker_accounts, system_settings, backup_jobs, backups, capture_jobs, captures, playback_jobs,
+                 oauth_clients, service_logs, platform_alerts, notification_channels, automations, telemetry]
           description: >-
-            The table the event is about: the types the trail records today. A trail older than
-            their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
+            The kind of thing the event is about: the words the trail records today. Most are a table's
+            name, and the event is about a row of it. Some are not: a `user_roles` event is about a person,
+            a `telemetry` event about an export of readings, and no table is named `service_principals`.
+            [`docs/architecture.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/docs/architecture.md#entity_type-the-word-for-a-kind),
+            *How Aber identifies things*, says what each word is about and what `entity_id` holds. A trail
+            older than their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
             `device_links` rows.
         entity_id: { type: string, format: uuid }
         action:
@@ -9886,7 +9899,7 @@ components:
       description: An external link attached to an asset. No binary is stored by this platform.
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        entity_type: { type: string, enum: [cell, gateway, device] }
+        entity_type: { type: string, enum: [area, cell, gateway, device] }
         entity_id: { type: string }
         display_name: { type: string }
         url: { type: string, format: uri }
