@@ -95,5 +95,5 @@ for (const { name, templateId, rows } of seeded) {
   });
 }
 
-console.log(`IDTA templates intact: ${seeded.map(({ name, rows }) => `${name} (${rows.length} elements)`).join(', ')} in ${BLOCKS.length} block.`);
+console.log(`IDTA templates intact: ${seeded.map(({ name, rows }) => `${name} (${rows.length} elements)`).join(', ')} in ${BLOCKS.length} blocks.`);
 console.log(`  Digest, row form (${COLUMNS.length} columns), parents, order, ids, cardinalities and hand-written rows verified.`);

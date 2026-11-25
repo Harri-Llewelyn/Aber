@@ -65,13 +65,17 @@ const device = (id: string, extra: Row = {}) => ({
 
 /**
  * Three devices: d1 and d2 published and sharing a metric's id, d3 archived. A site vocabulary that
- * does not share its definitions holds GROUP_KPI, which d2 carries. Every device's nameplate names
- * itself, so all three reference the template's DESIGNATION.
+ * does not share its definitions holds GROUP_KPI, which d2 carries. Every device's nameplate records
+ * a product designation, so all three reference the template's DESIGNATION.
  */
 function site(): Record<string, Row[]> {
   const unshared = { name: "Group naming standard", kind: "site_own", standard_name: null, standard_edition: null, definitions_shareable: false };
   return {
     devices: [device("d1"), device("d2"), device("d3", { is_archived: true })],
+    device_nameplate: ["d1", "d2", "d3"].map((id) => ({
+      device_id: id,
+      manufacturer_product_designation: "Hydraulic press",
+    })),
     device_schemas: [
       { device_id: "d1", schema_id: "s1", submodel_key: null },
       { device_id: "d2", schema_id: "s2", submodel_key: null },

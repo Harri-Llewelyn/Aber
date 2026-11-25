@@ -11,12 +11,13 @@
  * rather than read. No network is used.
  *
  * `--vendor` writes the copy to keep from a file downloaded from that repository. It leaves out the
- * ConceptDescriptions whose text an IEC CDD or ECLASS dictionary issued, and prints both SHA-256s for
- * the README and TEMPLATES. Nothing else of the file changes but, where it says so, its layout.
+ * ConceptDescriptions whose text an IEC CDD or ECLASS dictionary issued, and each sentence of an
+ * element's description that quotes one, and prints both SHA-256s for the README and TEMPLATES. Nothing
+ * else of the file changes but, where it says so, its layout.
  *
  * How a template is read is scripts/lib/idta-template.mjs. Each block is in the migration that seeds it
- * (0320 for the first two, never 0002, which is released). It is written only while that migration is
- * unreleased; once released, a block that would now read differently stops the run.
+ * (0320 for the first two, 0324 for the third, never 0002, which is released). It is written only while
+ * that migration is unreleased; once released, a block that would now read differently stops the run.
  * scripts/check-idta-seed-sync.mjs recomputes the digests the blocks carry.
  */
 
@@ -24,7 +25,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { REGION, TEMPLATES, dictionaryConcepts, planBlocks, templateRows, vendoredText } from './lib/idta-template.mjs';
+import { REGION, TEMPLATES, dictionaryConcepts, planBlocks, quotedDefinitions, templateRows, vendoredText } from './lib/idta-template.mjs';
 import { isUnreleased, regionAt, spliceRegion } from './lib/opcua-seed-blocks.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,7 +37,8 @@ if (flag === '--vendor') {
   const source = readFileSync(resolve(from), 'utf8');
   const { text: kept, reformatted } = vendoredText(source);
   writeFileSync(resolve(to), kept, 'utf8');
-  console.log(`${from}\n  sha256:${sha256(source)} (${Buffer.byteLength(source)} bytes), ${dictionaryConcepts(JSON.parse(source)).length} ConceptDescriptions with IEC CDD or ECLASS text`);
+  const environment = JSON.parse(source);
+  console.log(`${from}\n  sha256:${sha256(source)} (${Buffer.byteLength(source)} bytes), ${dictionaryConcepts(environment).length} ConceptDescriptions with IEC CDD or ECLASS text, ${quotedDefinitions(environment).length} quoted in an element's text`);
   console.log(`${to}\n  sha256:${sha256(kept)} (${Buffer.byteLength(kept)} bytes), ${source === kept ? 'byte for byte the same' : `those left out${reformatted ? ', and the JSON laid out again' : ''}`}`);
   process.exit(0);
 }

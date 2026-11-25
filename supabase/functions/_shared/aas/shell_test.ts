@@ -253,16 +253,17 @@ Deno.test("the nameplate's OPC UA ids are Machinery ExpandedNodeIds", () => {
   }
 });
 
-Deno.test("a nameplate holds no connection method and no status, whatever the device row says", () => {
+Deno.test("no submodel holds a connection method or a status, whatever the device row says", () => {
   const rows = record(DEFINED);
   rows.device = { ...rows.device, connection_method: "Sparkplug B", status: "ONLINE" };
   // deno-lint-ignore no-explicit-any
-  const nameplate = (buildEnvironment(rows).submodels as any[])
-    .find((s) => s.idShort === "DigitalNameplate").submodelElements;
-  // deno-lint-ignore no-explicit-any
-  const idShorts = nameplate.map((e: any) => e.idShort);
-  assert.equal(idShorts.includes("AssetSparkplugId"), true);
-  assert.equal(idShorts.filter((id: string) => id === "ConnectionMethod" || id === "Status"), []);
+  const submodels = buildEnvironment(rows).submodels as any[];
+  for (const idShort of ["DigitalNameplate", "PlatformConnection"]) {
+    // deno-lint-ignore no-explicit-any
+    const held = submodels.find((s) => s.idShort === idShort).submodelElements.map((e: any) => e.idShort);
+    assert.equal(held.length > 0, true, idShort);
+    assert.equal(held.filter((id: string) => id === "ConnectionMethod" || id === "Status"), [], idShort);
+  }
 });
 
 // A derived metric: a catalog row with a definition, in no schema and no birth.
