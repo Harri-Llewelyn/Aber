@@ -459,7 +459,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
                      onKeyDown={onRowKey(row)}
                    >
                      <td>
-                       <strong className="entity-name">{row.name || '—'}</strong>
+                       <strong>{row.name || '—'}</strong>
                        {badge && <Badge size="sm" tone={badge.tone} title={badge.title} className="badge-follow">{badge.label}</Badge>}
                      </td>
                      <td><Badge size="sm" className="entity-kind">{kindLabel(row.kind)}</Badge></td>
