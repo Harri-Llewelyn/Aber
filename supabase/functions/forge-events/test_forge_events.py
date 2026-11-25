@@ -182,7 +182,10 @@ class ForgeEventsBase(unittest.TestCase):
     @staticmethod
     def require_the_forge():
         """Asked before the gateway is made, as the sign-in is: a class that skips makes none."""
-        status, _ = forge_as_machine("/api/v1/version")
+        try:
+            status, _ = forge_as_machine("/api/v1/version")
+        except OSError as err:
+            skip_or_fail(f"no forge reachable at {FORGE_URL}: {err}")
         if status != 200:
             skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
 
