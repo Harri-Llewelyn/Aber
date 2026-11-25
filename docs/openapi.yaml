@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Aber API
-  version: "1.9.0"
+  version: "1.9.1"
   description: |
     The HTTP surface of Aber, the shopfloor data platform. Every request goes through
     the **Envoy API gateway** on `http://127.0.0.1:54321`, which routes to five upstreams:
@@ -7618,8 +7618,15 @@ paths:
         `gateways` organisation (a playbook made by hand), without the incident template. It is the
         backstop for what `forge-membership` does at the door: a revoked login that never returns is
         unseated here, and its SSH key with it. A member who is not a dashboard identity was seated by
-        hand and is left alone. Nothing is created that enrolment would not create, and nothing is
-        deleted.
+        hand and is left alone.
+
+        A gateway's repository is held by its teams, under Aber's rules. A pass removes anybody who
+        holds one by name, any rule of somebody else's that could loosen Aber's, a deploy key that is
+        not the gateway's, and a tag named as a branch the appliance reads, with the release made from
+        it. It makes `main` the default branch, turns proposals on, and gives a repository that was
+        renamed its name back. One that is a mirror, or has a rule the API cannot name, loses its deploy
+        keys and is an error. Nothing is created that enrolment would not create, and a repository is
+        never deleted.
 
         Authorised by `FORGE_SWEEP_SECRET` in the `x-sweep-secret` header, **not** by the publishable key.
         The identities acted on come from `user_roles` and the forge's own lists, never from the
@@ -7654,7 +7661,7 @@ paths:
       responses:
         '200':
           description: >-
-            The pass completed. `placed`, `removed`, `hooked`, `protected`, `rekeyed`, `revoked`,
+            The pass completed. `placed`, `removed`, `hooked`, `protected`, `untagged`, `rekeyed`, `revoked`,
             `archived`, `restored`, `published` and `recorded` list what changed; `errors` lists what
             the forge refused, per item; `warnings` lists what the sweep declined and was right to
             decline -- a released tag found at other content than this build ships, which no retry

@@ -94,6 +94,12 @@ would leave the Directory's exempt prefix and start any function without the key
 it is judged by the route it names, and the key check refuses it. `--runtime` sends `../` and
 `%2e%2e` from every open prefix to the gated catch-all and expects the key check's 401.
 
+**The Studio and forge listeners resolve it too**, before any of their filters runs. Their admission
+step puts its function's name in front of the path, and the edge runtime answers for the first segment
+left after the dot segments. On a raw path, `/../<function>` would ask that function to admit the
+request. They leave an escaped slash alone, because a branch name in the forge's URLs holds `%2F`.
+The static check holds it for every listener that asks a function to admit a request.
+
 ## An app's token
 
 A token GoTrue's OAuth server issued to an app names the app in its `client_id` claim. On the API
@@ -306,6 +312,12 @@ SUPABASE_PUBLISHABLE_KEY=$(kubectl -n aber get secret aber-secrets \
   -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d) \
   node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
 ```
+
+To probe the two doors as well, forward their ports and name them: `18082:8002` with
+`FORGE_DOOR_URL=http://127.0.0.1:18082`, and `18081:8001` with
+`STUDIO_DOOR_URL=http://127.0.0.1:18081` where Studio is on. A door with no session answers with a
+redirect to sign in, and the address in its `state` shows whether the path was resolved. Not through
+the ingress: Traefik resolves dot segments itself. CI probes the forge's.
 
 The runtime pass asserts posture, not configuration: gated routes refused before their upstream,
 open ones through, a valid key accepted by header and by query, an unregistered key refused, and

@@ -30,6 +30,11 @@ import { serverError } from "../_shared/failure.ts";
  * gateway row on purpose, because its wiki is where a plant's notes about that gateway live. A
  * member who is not a dashboard identity was put there by hand and is left alone.
  *
+ * A gateway's repository is the exception. It is held by the two teams, so anybody who holds it by
+ * name is removed first. Its branch rules and tag rules are Aber's and no others, each put right in
+ * place before another is removed, so `main` is never without its own. Its default branch is `main`.
+ * And a tag named as a branch the appliance reads is deleted, with the release made from it.
+ *
  * Authorised by FORGE_SWEEP_SECRET in `x-sweep-secret`, not by the anon key: the edge runtime boots
  * with VERIFY_JWT=false, and the gateway's key check proves only that the caller holds a key that
  * ships in every browser bundle. An unset secret is 503, never a pass. The identities acted on come
@@ -44,16 +49,24 @@ import {
   CUSTOM_EXAMPLE_REPOSITORY,
   deleteDeployKey,
   DEPLOY_KEY_TITLE,
+  deployKeyTitle,
   ensureApplianceProtection,
   ensureBranchProtection,
   ensureBumpProtection,
+  ensureDefaultBranch,
   ensureDeployKey,
+  ensureHeldByTeams,
   ensureOrganisation,
   ensurePlatformOrganisation,
+  ensureProposals,
+  ensureTagProtection,
   ensureWebhook,
+  findRepository,
+  finishBranchRules,
   FORGE_ORGANISATION,
   FORGE_TEAMS,
   type ForgeConfig,
+  type ForgeRepository,
   type ForgeTeamRole,
   forgeApi,
   forgeConfig,
@@ -69,6 +82,8 @@ import {
   type PublishSpec,
   publishToForge,
   publishTrust,
+  refuseMirror,
+  repositoryNameFor,
   setRepositoryArchived,
   TRUST_PREFIX,
   type TrustRoot,
@@ -118,6 +133,8 @@ interface Summary {
   removed: string[];
   hooked: string[];
   protected: string[];
+  /** A tag removed because it was named as a branch the appliance reads, and the commit it named. */
+  untagged: string[];
   /** Keys re-registered read-write on an active gateway's repository. */
   rekeyed: string[];
   /** Keys removed from the repository of a gateway that is archived, deleted or no longer Remote. */
@@ -285,6 +302,13 @@ async function sweepDeployKeys(
     return;
   }
   for (const key of keys) {
+    // Aber has titled every gateway's key this way. Another was added by a person who held the
+    // repository, and would be registered for writing below.
+    if (key.title !== deployKeyTitle(sparkplugId)) {
+      await deleteDeployKey(cfg, { name }, key);
+      summary.revoked.push(`${name}: '${key.title}'`);
+      continue;
+    }
     if (key.read_only) {
       await ensureDeployKey(cfg, { name }, sparkplugId, key.key, false);
       summary.rekeyed.push(`${name}: '${key.title}'`);
@@ -293,6 +317,18 @@ async function sweepDeployKeys(
     if (platform && await ensureDeployKey(cfg, PLATFORM_REF, sparkplugId, key.key, true) !== "kept") {
       summary.rekeyed.push(`${PLATFORM_ORGANISATION}/${PLATFORM_REPOSITORY}: '${key.title}' (read-only)`);
     }
+  }
+}
+
+/**
+ * A gateway's key on a repository that is no gateway's: the repository was the gateway's under another
+ * name, which nothing here holds as one. Removed, so that no appliance deploys from it.
+ */
+async function sweepStrayKeys(cfg: ForgeConfig, name: string, summary: Summary): Promise<void> {
+  for (const key of await listDeployKeys(cfg, { name })) {
+    if (!DEPLOY_KEY_TITLE.test(key.title)) continue;
+    await deleteDeployKey(cfg, { name }, key);
+    summary.revoked.push(`${name}: '${key.title}'`);
   }
 }
 
@@ -372,6 +408,30 @@ async function recordArchived(
 }
 
 /**
+ * Who holds a gateway's repository beside its teams (ensureHeldByTeams): nobody. One the forge will
+ * not remove is an error on every pass.
+ */
+async function sweepHolders(cfg: ForgeConfig, name: string, summary: Summary): Promise<void> {
+  const { removed, kept } = await ensureHeldByTeams(cfg, name);
+  for (const login of removed) summary.removed.push(`${login} from '${name}'`);
+  for (const login of kept) summary.errors.push(`${name}: the forge would not take it from '${login}'`);
+}
+
+/**
+ * The tags of a gateway's repository (ensureTagProtection). A tag that was there under a name the
+ * appliance reads is reported with its commit, since an appliance may have followed it; one the
+ * forge will not remove is an error on every pass until it is gone.
+ */
+async function sweepTags(cfg: ForgeConfig, name: string, summary: Summary): Promise<boolean> {
+  const { changed, found } = await ensureTagProtection(cfg, name);
+  for (const { tag, commit, removed } of found) {
+    if (removed) summary.untagged.push(`${name}: '${tag}' at ${commit}`);
+    else summary.errors.push(`${name}: the forge would not remove the tag '${tag}' at ${commit}`);
+  }
+  return changed;
+}
+
+/**
  * The repository half. A gateway's repository gets what enrolment gives one, or the forge's
  * archive if its gateway has been archived; any other repository in the organisation gets `main`
  * protected. A repository that already has everything costs a handful of reads. Returns the
@@ -409,25 +469,41 @@ async function sweepRepositories(
 
   // `archived` comes from the listing, so the reconciliation below costs a PATCH only where the
   // forge and the row disagree. Gitea puts it on every repository it lists.
-  const repositories = await listAll<{ name: string; archived?: boolean }>(
+  const listed = await listAll<ForgeRepository>(
     cfg,
     `/orgs/${FORGE_ORGANISATION}/repos`,
     `the repositories of '${FORGE_ORGANISATION}'`,
   );
   const inService: string[] = [];
-  for (const { name, archived } of repositories) {
-    const named = GATEWAY_REPOSITORY.exec(name);
+  const repositories = new Map(listed.map((r) => [r.id, r]));
+  const names = new Set(listed.map(({ name }) => name));
+  // A gateway's repository that is not listed under its name may be there under another.
+  for (const [sparkplugId, { forge_repository_at }] of gateways) {
+    const name = repositoryNameFor(sparkplugId);
+    if (!forge_repository_at || names.has(name)) continue;
+    try {
+      const found = await findRepository(cfg, name);
+      if (!found) continue;
+      if (repositories.has(found.id)) summary.protected.push(`${name} (name)`);
+      repositories.set(found.id, found);
+    } catch (err) {
+      summary.errors.push(`${name}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  for (const { name, archived, default_branch, mirror, has_pull_requests } of repositories.values()) {
+    // A name is the same to Gitea in any case. One whose gateway is gone has no row to be renamed by.
+    const named = GATEWAY_REPOSITORY.exec(name.toLowerCase());
     const gateway = named ? gateways.get(named[1]) : undefined;
     try {
       // A repository somebody made by hand: `main` protected and nothing else. One they also
       // archived is left entirely alone -- protecting a branch is a write, and Gitea refuses
       // writes to an archived repository, so the attempt would be an error on every pass.
-      // `seedTemplate: false` is not a default: ensureBranchProtection() seeds unless told not
-      // to, and a playbook is not a gateway -- it gets no incident template.
+      // `gateway: false` is not a default: a playbook is not a gateway, so its rule is made closed,
+      // nothing is seeded into it and a rule somebody tuned stays.
       if (!named) {
-        if (!archived && await ensureBranchProtection(cfg, name, { seedTemplate: false })) {
-          summary.protected.push(name);
-        }
+        if (archived) continue;
+        if (await ensureBranchProtection(cfg, name, { gateway: false })) summary.protected.push(name);
+        await sweepStrayKeys(cfg, name, summary);
         continue;
       }
 
@@ -436,6 +512,9 @@ async function sweepRepositories(
       // thing the archive prevents this pass from removing. A pass that dies between the two
       // leaves the keys gone and the archive to the next one.
       if (!gateway || gateway.is_archived) {
+        // Somebody who holds it could take it out of the archive. Gitea removes one from an archived
+        // repository too (measured).
+        await sweepHolders(cfg, name, summary);
         await sweepDeployKeys(cfg, name, named[1], gateway, platform, summary);
         await recordRepository(admin, name, named[1], gateway, summary);
         if (await setRepositoryArchived(cfg, name, true, archived)) summary.archived.push(name);
@@ -448,9 +527,26 @@ async function sweepRepositories(
       // is still read-only until this call, and everything after it is a write.
       if (await setRepositoryArchived(cfg, name, false, archived)) summary.restored.push(name);
       await recordArchived(admin, named[1], gateway, false);
-      if (await ensureBranchProtection(cfg, name, { seedTemplate: true })) summary.protected.push(name);
-      if (await ensureApplianceProtection(cfg, name)) summary.protected.push(`${name} (appliance)`);
-      if (await ensureBumpProtection(cfg, name)) summary.protected.push(`${name} (platform bumps)`);
+      await sweepHolders(cfg, name, summary);
+      await refuseMirror(cfg, name, mirror);
+      // Each by itself: one that fails leaves the others done. Nothing is registered unless all are.
+      let held = true;
+      const hold = async (what: string, step: () => Promise<boolean>) => {
+        try {
+          if (await step()) summary.protected.push(what);
+        } catch (err) {
+          held = false;
+          summary.errors.push(`${what}: ${err instanceof Error ? err.message : err}`);
+        }
+      };
+      await hold(`${name} (proposals)`, () => ensureProposals(cfg, name, has_pull_requests));
+      await hold(`${name} (tags)`, () => sweepTags(cfg, name, summary));
+      await hold(name, () => ensureBranchProtection(cfg, name, { gateway: true }));
+      await hold(`${name} (appliance)`, () => ensureApplianceProtection(cfg, name));
+      await hold(`${name} (platform bumps)`, () => ensureBumpProtection(cfg, name));
+      await hold(`${name} (rules)`, () => finishBranchRules(cfg, name));
+      await hold(`${name} (default branch)`, () => ensureDefaultBranch(cfg, name, default_branch));
+      if (!held) continue;
       if (await ensureWebhook(cfg, name)) summary.hooked.push(name);
       await sweepDeployKeys(cfg, name, named[1], gateway, platform, summary);
       await recordRepository(admin, name, named[1], gateway, summary);
@@ -637,7 +733,7 @@ function leaseUnreadable(req: Request, error: unknown): Response {
 /** A pass's counts, and its errors in full, for the log. */
 function tally(summary: Summary): string {
   return `placed ${summary.placed.length}, removed ${summary.removed.length}, ` +
-    `hooked ${summary.hooked.length}, protected ${summary.protected.length}, ` +
+    `hooked ${summary.hooked.length}, protected ${summary.protected.length}, untagged ${summary.untagged.length}, ` +
     `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
     `archived ${summary.archived.length}, restored ${summary.restored.length}, ` +
     `published ${summary.published.length}, recorded ${summary.recorded.length}, ` +
@@ -712,7 +808,7 @@ export default async function handler(req: Request): Promise<Response> {
     holder = claimed.data as string;
   }
 
-  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], rekeyed: [], revoked: [], archived: [], restored: [], published: [], recorded: [], proposed: [], warnings: [], errors: [] };
+  const summary: Summary = { placed: [], removed: [], hooked: [], protected: [], untagged: [], rekeyed: [], revoked: [], archived: [], restored: [], published: [], recorded: [], proposed: [], warnings: [], errors: [] };
   try {
     const teamIds = await ensureOrganisation(cfg);
     const readersId = await ensurePlatformOrganisation(cfg);
@@ -736,7 +832,7 @@ export default async function handler(req: Request): Promise<Response> {
   // one thing declined already said so through console.warn where it was decided. It is counted
   // rather than repeated here for the same reason -- unlike an `errors` entry, which is raised in a
   // catch block that logs nothing of its own and would otherwise reach only the response body.
-  const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length +
+  const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length + summary.untagged.length +
     summary.rekeyed.length + summary.revoked.length + summary.archived.length + summary.restored.length +
     summary.published.length + summary.recorded.length + summary.proposed.length;
   if (changed || summary.errors.length) console.log(`forge-sweep: ${tally(summary)}`);

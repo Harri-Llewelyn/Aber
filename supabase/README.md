@@ -11315,7 +11315,7 @@ The wiki is a second git repository beside the first, edited in place by either 
 protection and no pull request, which is the right shape for notes and the wrong one for anything
 the appliance deploys, and the page says so. Seeded once, never overwritten. Its **issues** start
 with an *Incident* template and label, committed to `main` in the one moment the machine account
-still may — immediately before the branch is protected, because `enable_push: false` binds the
+still may — while the rule on it admits that account alone, because `enable_push: false` binds the
 machine account too and the contents API answers 403 afterwards. A repository from before this
 gets no template from enrolment; an administrator adds one by pull request. Projects and Packages
 are hidden from every repository (`DISABLED_REPO_UNITS`). Both teams may **create repositories**
@@ -11338,7 +11338,10 @@ below. Repositories that are not a gateway's, deleted branches and unknown gatew
 Gitea's outbound calls are `[security] EGRESS_MODE = strict` with `ALLOWED_HOST_LIST = private:9000`,
 which admits this one target; the deprecated `[webhook] ALLOWED_HOST_LIST` is set blank, because
 Gitea reads it first and an upgraded `app.ini` still holds a portless `private` that would refuse
-port 9000. `0095` ends with `ensure_gateway_status_view()`, and the baseline's
+port 9000. What the forge fetches and pushes by itself is a second policy, `[migrations] EGRESS_MODE`, which is
+lax by default, so any public host. It is strict with no host from 1.9.1: no migration, no pull mirror and
+no push mirror reaches anywhere, one that already stands included (measured). `0095` ends with
+`ensure_gateway_status_view()`, and the baseline's
 dumped copy of that view became a call to the same function, because `CREATE OR REPLACE VIEW`
 cannot narrow a view the function has just widened and every boot after the first was failing in
 `0001`.
@@ -11379,7 +11382,7 @@ knows that holds an admitted role is seated, every gateway repository gets its p
 branch protection back, and a repository somebody made by hand in the organisation has `main`
 protected the same way, without the incident template, because a playbook a gateway later adopts
 should have been reviewed from the start. A member who is not a dashboard identity was seated by
-hand and is left alone. Nothing is created that enrolment would not create, and nothing is deleted.
+hand and is left alone. Nothing is created that enrolment would not create, and no repository is deleted.
 An empty secret leaves the sweep inert, and `0002` says so at boot. `test_forge_sweep.py` drives a
 role changed behind the door, a deleted hook and a hand-made repository. One pass runs at a time
 ([One pass at a time](#one-pass-at-a-time-0156)).
@@ -11421,6 +11424,102 @@ repository; measured), which is what the platform repository will use.
 a clone of `<repo>.wiki.git` with the key and a push to it succeed). The wiki therefore stops
 being a place only people wrote; [Accepted risks](../docs/security-model.md#an-appliances-deploy-key-can-write-its-repositorys-wiki) records the
 decision to keep it there.
+
+**The branch rules do not cover tags, so tags have two rules of their own (1.9.1).** Git takes a short
+name for a tag before a branch, on a remote and in a checkout: with both, `git fetch origin main`
+brings in the tag's commit. Until 1.9.1 the puller named `main` short, and the key and both teams could
+make a tag of that name. Both ends are closed, because an appliance takes its half only when its
+`platform.yml` moves:
+
+- **The appliance names every ref in full** (drift check 551), and takes no tags into its checkout.
+- **The forge refuses the tag.** `ensureTagProtection()` keeps two rules on each gateway repository, at
+  enrolment before anything reads the repository or a key can write it, and on every sweep (drift
+  check 552). A tag named `main` or `appliance`, in any case, is the machine account's alone. Every
+  other tag is both teams'. No deploy key is on either list, so a key makes no tag at all.
+
+The rules' patterns are exact complements, and the reason is how `gitea/gitea:28.3.0` decides, each
+point measured:
+
+| Question | Answer |
+| :--- | :--- |
+| Which rule decides, when several match a name? | Any of them: whoever one matching rule admits is admitted. So a rule for every tag, beside one for `main`, opens `main` |
+| Does a pattern match without case? | No. A pattern between slashes is a Go regular expression, with no negative lookahead, and any other is a glob whose `*` crosses a slash |
+| Does an empty list admit nobody? | Yes: not the organisation's owner and not a site administrator. The API refuses to make a rule with one |
+| Who can delete or move a protected tag? | Those its rule admits, by push or through the API. So the machine account is on the list, and the sweep can delete a tag it finds |
+| Can a team member change a rule? | No: 403 from the API, and 404 from the settings pages |
+| Does a release get round it? | No. Making one, publishing a draft of one and renaming its tag are all refused |
+
+Any other rule could only admit more people, so the sweep removes one. Nothing in Aber offers one.
+
+A tag already under such a name is deleted by the first sweep, with the release made from it, and is
+listed as `untagged` in the summary and named with its commit in the log. The exact spelling alone,
+because Git matches a ref with case. Gitea's API cannot delete a tag on a file or a folder, which no
+appliance can deploy either: the sweep reports one as an error until somebody deletes it on the
+forge's volume.
+
+**A gateway's repository is held by its teams, and by nobody by name (1.9.1).** Both teams may create
+repositories, and enrolment adopts one that carries a gateway's name, which is how a custom gateway is
+seeded from the template. Gitea makes the person who creates a repository a collaborator with `admin`,
+and nothing took that away. So enrolment and every sweep, in this order (drift check 554):
+
+1. **`findRepository()` knows the repository by its own name.** Gitea finds one by a name it had before, and in
+   any case. So does an appliance's clone, over SSH, while the sweep and `forge-events` do not. One that a person
+   renamed has its name back. One that now carries another gateway's name is that gateway's.
+2. **`ensureHeldByTeams()` removes every collaborator**, from an archived gateway's repository too, which one
+   could take out of the archive. One the forge keeps is an error on every pass, and enrolment refuses the
+   repository.
+3. **`refuseMirror()` refuses a mirror**, whose `main` the forge fetches from elsewhere under no rule. Enrolment
+   asks this first, because Gitea takes no mirror out of the archive.
+4. **`ensureProposals()` turns proposals on.** While they are off the forge answers 404 for those that are open,
+   and an approval on one could not be dismissed. Then the tags, as above.
+5. **`ensureBranchProtection()` and `ensureApplianceProtection()` put each of our three rules right in
+   place.** A rule on `main` that is looser than an Administrator's approval has those fields patched, and
+   what only tightens it is kept. One that is missing is made open to the machine account alone, which
+   seeds the repository under it, so `main` never stands without a rule of ours.
+6. **`finishBranchRules()` removes any other rule**, seeds and closes a `main` just made. A rule on one
+   other branch that asks what `main`'s asks can loosen nothing, and stays.
+7. **`ensureDefaultBranch()` makes `main` the default again**, having given the branch it was the rule `main`
+   has. Enrolment used to tell the appliance the default branch, and an appliance told another follows it
+   until it is set up again. A branch no rule can close, `appliance` among them, costs the old key.
+8. The sweep removes a deploy key that is not titled as the gateway's, which every key of Aber's has been
+   since 1.0.0, and a key titled as a gateway's on a repository that is no gateway's.
+
+Each step of a pass is tried by itself, so one that fails leaves the others done. A pass that a person's
+leavings could stop would leave the rest of them in place.
+
+**A rule's name is whatever a person made it, and the API takes it in a path.** The `forge-api` listener
+refuses an escaped slash, so `rulePath()` leaves a slash as it is, which Gitea's route takes. A name with a
+backslash, an empty segment or a dot segment has no path: the listener merges slashes, and `fetch` and the
+listener both resolve dots, so removing a rule named `..` would have been `DELETE` on the repository.
+`forgeApi()` asks no path with a dot segment. A rule with no path stays, so `takeFromAppliance()` removes the
+repository's deploy keys, and the pass and the enrolment are errors. A mirror is answered the same way. A
+rule of that kind is removed from inside the forge's pod, which is past the listener. The same call without
+`/branch_protections/…` removes the repository:
+
+```bash
+TOKEN=$(kubectl -n aber get secret aber-forge-token -o jsonpath='{.data.token}' | base64 -d)
+kubectl -n aber exec deploy/gitea -- curl --path-as-is -X DELETE -H "Authorization: token $TOKEN" \
+  "http://127.0.0.1:3000/api/v1/repos/gateways/<repository>/branch_protections/<the name, percent-encoded, its dots as %2E>"
+```
+
+What each step is for, measured against `gitea/gitea:28.3.0`:
+
+| Question | Answer |
+| :--- | :--- |
+| Does a maker stay an administrator? | Yes, after enrolment and after they leave the team: their own API token still changes the rules |
+| What can an administrator of one do with the rules as they are? | Force-merge: past the approval and the shape check, leaving no trace in the rules |
+| Which branch rule decides? | The first that matches, by ascending priority, a plain name before a glob. A plain name matches without case, so `MAIN` is a rule on `main` |
+| Does `enable_push: false` close a branch? | Not by itself. `unprotected_file_patterns` admits a push of those files from anybody with write, a deploy key included |
+| Does a closed rule keep its approval? | Not by itself. A bypass list merges past it, and with no approvals list anybody with write approves |
+| When does an approval count? | By the rule when it was given. One given under a looser rule goes on counting after the rule is put back, so those are dismissed |
+| Does a fork's **Sync fork** pass the rule on `main`? | No: it is refused, fast-forward or not |
+| Does a mirror's sync? | Yes: no rule is asked. Gitea refuses to take a mirror out of the archive, so enrolment refused one before 1.9.1 too |
+
+**A gateway's repository is read by object id** (`fileAtCommit()`, drift check 553). With a tag named
+`main`, Gitea's contents call reads the tag for `ref=main` and for no ref, and its trees and commits
+calls read the tag for `main`. The contents and raw calls also take a branch or a tag NAMED as a
+commit's id ahead of the commit, and both teams can push a branch of any name. The branches call reads
+the branch, and the trees and blobs calls given an id read that object.
 
 **The webhook records both heads.** Its branch filter, `*`, covers both; the sweep patches a hook
 registered with an older filter. Gitea resolves a push's hooks when it processes the queued push
@@ -11879,15 +11978,16 @@ template, so the forge offers **Use this template**. Untagged, because it is cop
 than converged to: `publishToForge()` takes a `version` of `null` and returns without tagging.
 Somebody making a gateway that needs an adapter generates
 `gateways/gateway-<sparkplug_id>` from it before commissioning, and enrolment adopts what it finds
-— `ensureRepository` reads the repository that is already there, then the protection, the pointer
-and the key follow as they always do. **No column records the choice**; the repository is the
+— `ensureRepository` reads the repository that is already there, its maker is removed from it
+([a gateway's repository is held by its teams](#the-appliance-reports-on-a-branch-of-its-own-archived-migration-0104)),
+then the protection, the pointer and the key follow as they always do. **No column records the choice**; the repository is the
 record.
 
 Four things were measured against `gitea/gitea:1.27.3`: the machine account may set `template` on
 a repository it owns (`PATCH /repos/{owner}/{name}`); `POST /repos/{owner}/{name}/generate` into
 the `gateways` organisation answers 201; a generated repository is **not** itself a template and
 carries **no** branch protection, so enrolment's is the first; and generation copies the whole
-tree, `.aber/manifest.json` included. That last one is why `ensureBranchProtection()` removes that
+tree, `.aber/manifest.json` included. That last one is why `finishBranchRules()` removes that
 file in the same window it commits the incident template — the one moment the machine account may
 still write `main` — since a manifest stating the digest and date of the *example* is a file
 about the wrong repository. It is not fatal if the removal fails: a stray file reads badly and

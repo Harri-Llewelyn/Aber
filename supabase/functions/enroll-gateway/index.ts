@@ -5,6 +5,7 @@ import { brokerPublicHost } from "../_shared/publicAddresses.ts";
 import {
   forgeConfig,
   forgeKnownHosts,
+  MAIN_BRANCH,
   provisionGatewayRepository,
   validPublicKey,
 } from "../_shared/forge.ts";
@@ -281,7 +282,7 @@ export default async function handler(req: Request): Promise<Response> {
       const knownHosts = await forgeKnownHosts(forge, repo.ssh_url);
       repository = {
         ssh_url: repo.ssh_url,
-        branch: repo.default_branch || "main",
+        branch: MAIN_BRANCH,
         known_hosts: knownHosts,
         // The platform repository the same key reads, and the tag current at enrolment, which the
         // gateway's own platform.yml carries from here on. Null on a deployment that names no

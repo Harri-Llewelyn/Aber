@@ -775,8 +775,8 @@ class TestForgeProvisioning(EnrollGatewayBase):
     def test_the_repository_carries_an_incident_template_and_its_label(self):
         """
         ISSUES ARE THE GATEWAY'S INCIDENT LOG, and the template is what makes that true rather than
-        aspirational. Committed to `main` before the branch is protected -- the one moment the
-        machine account may -- so it must be there on the first enrolment or never.
+        aspirational. Committed to `main` while its rule admits the machine account alone -- the one
+        moment that account may -- so it must be there on the first enrolment or never.
         """
         status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
         self.assertEqual(status, 200, payload)

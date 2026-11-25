@@ -745,9 +745,32 @@ which is what the compromised-key case needs (`docs/remote-gateways.md` §8).
 ### An appliance's deploy key can write its repository's wiki
 
 Since `0104` an appliance's deploy key is writable on its own repository, so that it can report
-what it is running on the `appliance` branch. Branch rules confine it there: `main` and every
-other branch refuse it. The wiki is a second git repository beside the first, and Gitea has no
-rule for it: measured against `gitea/gitea:1.27.3`, a clone of `<repo>.wiki.git` with the key and
+what it is running on the `appliance` branch. The forge's rules confine it there. Measured against
+`gitea/gitea:28.3.0`:
+
+| With its key, an appliance can | It cannot |
+| :--- | :--- |
+| Read its own repository, and the platform's | Push to `main`, or to any branch but `appliance` |
+| Add commits to `appliance` | Rewrite or delete `appliance` |
+| Push to its repository's wiki | Make, move or delete a tag of any name (from 1.9.1) |
+| | Open a pull request, or write the platform's repository |
+
+The tags have rules of their own because branch rules do not cover them, and a tag can stand in for a
+branch: Git takes a short name for a tag first. So nobody can make a tag named `main` or `appliance`
+on a gateway's repository, people in either team included, and the appliance names every branch in
+full. Both teams make any other tag. The design is in
+[`supabase/README.md`](../supabase/README.md#the-appliance-reports-on-a-branch-of-its-own-archived-migration-0104).
+
+A person has what their team has there, and no more (from 1.9.1). Gitea makes whoever creates a
+repository its administrator, also after their role has gone, so enrolment and every sweep remove
+anybody who holds a gateway's repository by name. They put back what makes the approval on `main` real,
+remove any other rule that could loosen it, and keep `main` the default branch, the only branch an
+appliance is told. What stays outside is what a repository made by hand already held when its gateway
+enrolled: that is deployed as it is, and nobody approved it
+([*A gateway seeded from the example*](remote-gateways.md#a-playbook-of-the-gateways-own)).
+
+The wiki is a second git repository beside the first, and Gitea has no
+rule for it: a clone of `<repo>.wiki.git` with the key and
 a push to it succeed. A compromised appliance, or its key taken from a cabinet, could therefore
 rewrite the notes people keep about that gateway. The flow is unaffected.
 
