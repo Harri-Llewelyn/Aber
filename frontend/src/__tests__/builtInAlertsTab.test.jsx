@@ -29,7 +29,7 @@ vi.mock('../api', async () => {
       readAutomations: vi.fn(),
       automationsDocument: vi.fn(),
       automationsForEntity: vi.fn(),
-      resolveId: vi.fn(),
+      findEntities: vi.fn(),
       automationRow: vi.fn(),
       readAutomationAlerts: vi.fn(),
       get: vi.fn(),
@@ -69,7 +69,7 @@ beforeEach(() => {
   api.readAutomations.mockResolvedValue({ automations: [], devices: {}, rows: [], active: [], history: [] })
   api.readAutomationAlerts.mockResolvedValue({ active: [], history: [] })
   api.automationsForEntity.mockResolvedValue([])
-  api.resolveId.mockResolvedValue([])
+  api.findEntities.mockResolvedValue([])
   api.automationsDocument.mockResolvedValue({ automations: [], devices: {} })
   api.automationRow.mockResolvedValue(null)
   api.get.mockResolvedValue([])

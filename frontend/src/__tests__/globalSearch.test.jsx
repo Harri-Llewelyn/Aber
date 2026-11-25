@@ -8,14 +8,15 @@ import { TABS, tabIsVisible } from '../navigation'
 /**
  * The global search answers three questions that fail in three different ways: the ranking is pure
  * and tested as arithmetic (its failure is a worse order that still looks like it works); the id
- * lookup is asynchronous and races itself (its failure is showing an asset for an id no longer in
- * the box); and the visibility of what can be found has to match the rail exactly.
+ * lookup is asynchronous and races itself (its failure is showing a record for an id no longer in
+ * the box); and the visibility of what can be found has to match the rail exactly. Which records are
+ * found, and where each opens, is globalSearchRecords.test.jsx's.
  */
 
 vi.mock('../api', () => ({
   // `get` is the settings read the box makes once it is opened; most cases here do not care what
   // comes back, so it answers with nothing and the suite that does care overrides it.
-  api: { resolveId: vi.fn(), searchAssets: vi.fn(), get: vi.fn().mockResolvedValue([]) }
+  api: { findEntities: vi.fn(), listPeople: vi.fn(), listUserAccounts: vi.fn(), get: vi.fn().mockResolvedValue([]) }
 }))
 
 // No help rows here, so a heading in help/ that shares a card's name cannot change these cases.
@@ -24,6 +25,10 @@ vi.mock('../help/searchIndex', async (importOriginal) => ({ ...(await importOrig
 
 import { api } from '../api'
 import { GlobalSearch } from '../components/common/GlobalSearch'
+import { areaUrl, cellUrl, deviceUrl, gatewayUrl, schemaUrl, trailUrl } from '../routes'
+
+/** A row as entity_directory answers it. */
+const rec = (kind, id, name, extra = {}) => ({ kind, id, name, state: 'active', variant: null, second_ids: [], page_id: id, ...extra })
 
 const adminTabs = () => TABS.filter(t => tabIsVisible(t, () => true, 'Administrator'))
 const targets = () => buildTargets(adminTabs())
@@ -197,15 +202,11 @@ describe('the palette', () => {
   const props = () => ({
     tabs: adminTabs(),
     currentTab: 'site-map',
+    userRole: 'Operator',
     onNavigate: vi.fn(),
-    onSelectDevice: vi.fn(),
-    onSelectGateway: vi.fn(),
-    onSelectCell: vi.fn(),
-    onSelectArea: vi.fn(),
-    onSelectSchema: vi.fn(),
     onSelectSetting: vi.fn(),
     onSelectSection: vi.fn(),
-    onSelectTrail: vi.fn()
+    onOpen: vi.fn()
   })
 
   const type = (value) => {
@@ -217,8 +218,7 @@ describe('the palette', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    api.resolveId.mockResolvedValue([])
-    api.searchAssets.mockResolvedValue([])
+    api.findEntities.mockResolvedValue([])
     api.get.mockResolvedValue([])
   })
 
@@ -267,10 +267,9 @@ describe('the palette', () => {
       expect(clearButton()).toBeTruthy()
     })
 
-    it('drops the previous query\'s asset hits with the text', async () => {
-      /* The estate lookup is debounced, so without clearing `entities` the last query's rows would
-         sit under an empty box until the timer fired. */
-      api.searchAssets.mockResolvedValue([{ kind: 'device', id: UUID, name: 'CNC_01' }])
+    it('drops the previous query\'s records with the text', async () => {
+      // The search is debounced, so the last query's rows must not sit under another text until it answers.
+      api.findEntities.mockResolvedValue([rec('devices', UUID, 'CNC_01')])
       render(<GlobalSearch {...props()} />)
       const input = type('CNC')
       expect(await screen.findByText('CNC_01')).toBeInTheDocument()
@@ -364,7 +363,7 @@ describe('the palette', () => {
   describe('an id pasted into the box', () => {
 
     it('is resolved against the database rather than the static index', async () => {
-      api.resolveId.mockResolvedValue([{ kind: 'device', id: UUID, name: 'Haas VF-2' }])
+      api.findEntities.mockResolvedValue([rec('devices', UUID, 'Haas VF-2')])
       const p = props()
       render(<GlobalSearch {...p} />)
       type(UUID)
@@ -374,23 +373,18 @@ describe('the palette', () => {
       expect(screen.getByText('Device')).toBeTruthy()
 
       fireEvent.click(screen.getByText('Haas VF-2'))
-      expect(p.onSelectDevice).toHaveBeenCalledWith(UUID)
+      expect(p.onOpen).toHaveBeenCalledWith(deviceUrl(UUID))
     })
 
     it('sends each kind to the page that owns it', async () => {
-      for (const [kind, prop] of [
-        ['gateway', 'onSelectGateway'],
-        ['cell', 'onSelectCell'],
-        ['area', 'onSelectArea'],
-        ['schema', 'onSelectSchema']
-      ]) {
-        api.resolveId.mockResolvedValue([{ kind, id: UUID, name: `a ${kind}` }])
+      for (const [kind, url] of [['gateways', gatewayUrl], ['cells', cellUrl], ['areas', areaUrl], ['schemas', schemaUrl]]) {
+        api.findEntities.mockResolvedValue([rec(kind, UUID, `one of the ${kind}`)])
         const p = props()
         const { unmount } = render(<GlobalSearch {...p} />)
         type(UUID)
 
-        fireEvent.click(await screen.findByText(`a ${kind}`))
-        expect(p[prop], `a ${kind} must open the ${kind} page`).toHaveBeenCalledWith(UUID)
+        fireEvent.click(await screen.findByText(`one of the ${kind}`))
+        expect(p.onOpen, `one of the ${kind} must open the ${kind} page`).toHaveBeenCalledWith(url(UUID))
         unmount()
       }
     })
@@ -400,98 +394,73 @@ describe('the palette', () => {
      * "no such device" would tell an Operator that an id they are not cleared for does not exist.
      */
     it('says what was searched and does not claim the id is unknown', async () => {
-      api.resolveId.mockResolvedValue([])
       render(<GlobalSearch {...props()} />)
       type(UUID)
 
       const message = await screen.findByText(/visible to you/i)
-      expect(message.textContent).toMatch(/cell, gateway, device or schema/i)
+      expect(message.textContent).toMatch(/no entity with that id/i)
       expect(message.textContent).not.toMatch(/does not exist/i)
     })
 
     /**
-     * THE ID HAD ONE CONSUMER AND IT COVERED FIVE KINDS. `resolveId` probes areas, cells,
-     * gateways, devices and schemas; the Audit Trail records every kind in
-     * AUDIT_TRAIL_ENTITY_TYPES, so the copyable Entity ID in its drawer was a dead end for a
-     * setting, a backup, a proposal or a person. The trail's own search matches `entity_id`
-     * whatever kind carries it, so this row is the answer for the rest -- and it is offered for
-     * the five too, because "what happened to this" is the second question somebody pasting an id
-     * is asking.
+     * The Audit Trail records every kind in AUDIT_TRAIL_ENTITY_TYPES and the directory some of them, and the
+     * trail's search matches `entity_id` whatever kind carries it. So the row is offered for an id nothing
+     * names, and for one that is found too: "what happened to this" is the second question somebody pasting
+     * an id is asking.
      */
-    it('offers the Audit Trail for an id no asset probe could name', async () => {
-      api.resolveId.mockResolvedValue([])
+    it('offers the Audit Trail for an id no record could name', async () => {
       render(<GlobalSearch {...props()} />)
       type(UUID)
 
-      expect(await screen.findByText(/Find this ID in the Audit Trail/)).toBeTruthy()
+      expect(await screen.findByText('Find This ID in the Audit Trail')).toBeTruthy()
     })
 
-    it('offers it for a resolved id as well, beneath the asset itself', async () => {
-      api.resolveId.mockResolvedValue([{ kind: 'device', id: UUID, name: 'Haas VF-2' }])
+    it('offers it for an id that is found as well, beneath the record itself', async () => {
+      api.findEntities.mockResolvedValue([rec('devices', UUID, 'Haas VF-2')])
       render(<GlobalSearch {...props()} />)
       type(UUID)
 
       await screen.findByText('Haas VF-2')
       const rows = [...document.querySelectorAll('.global-search-result-label')]
         .map(el => el.textContent)
-      // The asset first: it is the more specific answer, and a row that moves under the cursor
-      // once the lookup lands is the reason the static index is ordered this way too.
-      expect(rows).toEqual(['Haas VF-2', 'Find this ID in the Audit Trail'])
+      // The record first: it is the more specific answer.
+      expect(rows).toEqual(['Haas VF-2', 'View in Entities', 'Find This ID in the Audit Trail'])
     })
 
     it('hands over the id in the box, not the one before it', async () => {
-      /* The row carries the term, so correcting a digit has to move it. Two unresolved ids in a
-         row leave the asset list empty and `looksLikeId` true throughout, which is the shape that
-         would strand the first id on the row.
-
-         It cannot strand one TODAY: `matches` is a fresh `[]` on every render for an id, so the
-         memo recomputes regardless of its dependency list. This pins the behaviour rather than
-         the mechanism, which is the half that should outlive a change to either. */
-      api.resolveId.mockResolvedValue([])
+      // The row carries the term, so correcting a digit has to move it.
       const p = props()
       render(<GlobalSearch {...p} />)
       type(UUID)
-      await screen.findByText(/Find this ID in the Audit Trail/)
+      await screen.findByText('Find This ID in the Audit Trail')
 
       const second = '11111111-2222-4333-8444-555555555555'
       type(second)
-      await waitFor(() => expect(api.resolveId).toHaveBeenCalledWith(second))
+      // Not while the search is out: a row for the first id must not be there to press.
+      expect(screen.queryByText('Find This ID in the Audit Trail')).toBeNull()
 
-      fireEvent.click(screen.getByText(/Find this ID in the Audit Trail/))
-      expect(p.onSelectTrail).toHaveBeenCalledWith(second)
+      fireEvent.click(await screen.findByText('Find This ID in the Audit Trail'))
+      expect(p.onOpen).toHaveBeenCalledWith(trailUrl(second))
     })
 
-    it('hands the id to the trail rather than to an asset page', async () => {
-      api.resolveId.mockResolvedValue([])
+    it('hands the id to the trail rather than to a record\'s page', async () => {
       const p = props()
       render(<GlobalSearch {...p} />)
       type(UUID)
 
-      fireEvent.click(await screen.findByText(/Find this ID in the Audit Trail/))
-      expect(p.onSelectTrail).toHaveBeenCalledWith(UUID)
-      // Not an entity hit: those open a page for a kind this id may not have.
-      expect(p.onSelectDevice).not.toHaveBeenCalled()
+      fireEvent.click(await screen.findByText('Find This ID in the Audit Trail'))
+      expect(p.onOpen).toHaveBeenCalledTimes(1)
+      expect(p.onOpen).toHaveBeenCalledWith(trailUrl(UUID))
     })
 
     it('does not run the static matcher against it', async () => {
       render(<GlobalSearch {...props()} />)
       type(UUID)
-      await waitFor(() => expect(api.resolveId).toHaveBeenCalled())
+      await waitFor(() => expect(api.findEntities).toHaveBeenCalled())
 
       // No page or card contains a hex string, so a matcher run here can only produce the "nothing
       // matches" message flashing up before the lookup returns.
       expect(screen.queryByText(/Nothing matches/i)).toBeNull()
-    })
-
-    it('does not run the ID lookup on a partial id', async () => {
-      render(<GlobalSearch {...props()} />)
-      type(UUID.slice(0, 20))
-
-      await waitFor(() => expect(screen.queryByRole('listbox')).toBeTruthy())
-      // `isUuid` passes only a complete id, so the primary-key probe does not run; the name search
-      // does, and matches nothing.
-      expect(api.resolveId).not.toHaveBeenCalled()
-      await waitFor(() => expect(api.searchAssets).toHaveBeenCalled())
     })
 
     /**
@@ -501,13 +470,13 @@ describe('the palette', () => {
     it('ignores a reply for an id that is no longer being asked about', async () => {
       const OTHER = '11111111-2222-4333-8444-555555555555'
       let releaseFirst
-      api.resolveId
-        .mockImplementationOnce(() => new Promise(resolve => { releaseFirst = () => resolve([{ kind: 'device', id: UUID, name: 'STALE' }]) }))
-        .mockResolvedValueOnce([{ kind: 'cell', id: OTHER, name: 'FRESH' }])
+      api.findEntities
+        .mockImplementationOnce(() => new Promise(resolve => { releaseFirst = () => resolve([rec('devices', UUID, 'STALE')]) }))
+        .mockResolvedValueOnce([rec('cells', OTHER, 'FRESH')])
 
       render(<GlobalSearch {...props()} />)
       type(UUID)
-      await waitFor(() => expect(api.resolveId).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(api.findEntities).toHaveBeenCalledTimes(1))
 
       type(OTHER)
       expect(await screen.findByText('FRESH')).toBeTruthy()
@@ -519,7 +488,7 @@ describe('the palette', () => {
     })
 
     it('reports a failed lookup as "not found" rather than as an error', async () => {
-      api.resolveId.mockRejectedValue(new Error('PostgREST unreachable'))
+      api.findEntities.mockRejectedValue(new Error('PostgREST unreachable'))
       render(<GlobalSearch {...props()} />)
       type(UUID)
 
@@ -527,21 +496,14 @@ describe('the palette', () => {
     })
   })
 
-  describe('an asset name typed into the box', () => {
-    const hit = (kind, name, id) => ({ kind, id, name })
-
-    beforeEach(() => {
-      api.resolveId.mockResolvedValue([])
-      api.searchAssets.mockResolvedValue([])
-    })
-
-    it('finds all five kinds by name', async () => {
-      api.searchAssets.mockResolvedValue([
-        hit('device', 'Haas VF-2', '11111111-1111-4111-8111-111111111111'),
-        hit('gateway', 'Haas Cell Gateway', '22222222-2222-4222-8222-222222222222'),
-        hit('cell', 'Haas Bay', '33333333-3333-4333-8333-333333333333'),
-        hit('area', 'Haas Hall', '55555555-5555-4555-8555-555555555555'),
-        hit('schema', 'Haas Mill Schema', '44444444-4444-4444-8444-444444444444')
+  describe('a name typed into the box', () => {
+    it('finds each kind by name', async () => {
+      api.findEntities.mockResolvedValue([
+        rec('devices', '11111111-1111-4111-8111-111111111111', 'Haas VF-2'),
+        rec('gateways', '22222222-2222-4222-8222-222222222222', 'Haas Cell Gateway'),
+        rec('cells', '33333333-3333-4333-8333-333333333333', 'Haas Bay'),
+        rec('areas', '55555555-5555-4555-8555-555555555555', 'Haas Hall'),
+        rec('schemas', '44444444-4444-4444-8444-444444444444', 'Haas Mill Schema')
       ])
       render(<GlobalSearch {...props()} />)
       type('Haas')
@@ -592,13 +554,13 @@ describe('the palette', () => {
       render(<GlobalSearch {...props()} />)
       type('H')
       await waitFor(() => expect(screen.queryByRole('listbox')).toBeTruthy())
-      expect(api.searchAssets).not.toHaveBeenCalled()
+      expect(api.findEntities).not.toHaveBeenCalled()
     })
 
-    it('puts pages and cards above assets', async () => {
-      // The static index answers instantly and the estate lookup arrives after a debounce, so
-      // assets on top would move under the cursor.
-      api.searchAssets.mockResolvedValue([hit('device', 'Devices Rig', '55555555-5555-4555-8555-555555555555')])
+    it('puts pages and cards above records', async () => {
+      // The static index answers instantly and the records arrive after a debounce, so
+      // records on top would move under the cursor.
+      api.findEntities.mockResolvedValue([rec('devices', '55555555-5555-4555-8555-555555555555', 'Devices Rig')])
       render(<GlobalSearch {...props()} />)
       type('device')
 
@@ -609,10 +571,10 @@ describe('the palette', () => {
     })
 
     it('reports a name that matches nothing without an error', async () => {
-      api.searchAssets.mockRejectedValue(new Error('PostgREST unreachable'))
+      api.findEntities.mockRejectedValue(new Error('PostgREST unreachable'))
       render(<GlobalSearch {...props()} />)
       type('nothing-called-this')
-      await waitFor(() => expect(api.searchAssets).toHaveBeenCalled())
+      await waitFor(() => expect(api.findEntities).toHaveBeenCalled())
       // Same reasoning as the id lookup: the box somebody is typing in is not where they should
       // learn the backend is down.
       await waitFor(() => expect(screen.queryByText(/Nothing matches/i)).toBeTruthy())

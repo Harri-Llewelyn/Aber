@@ -14,7 +14,7 @@ import { searchHelp } from '../help/searchIndex'
 
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal()),
-  api: { resolveId: vi.fn(), searchAssets: vi.fn(), get: vi.fn() }
+  api: { findEntities: vi.fn(), listPeople: vi.fn(), listUserAccounts: vi.fn(), get: vi.fn() }
 }))
 
 // The real function, watched: the panel in the last case listens for it as it does in the app.
@@ -32,11 +32,11 @@ const CURRENT = 'devices'
 const props = () => ({
   tabs: TABS.filter(t => tabIsVisible(t, () => true, 'Administrator')),
   currentTab: CURRENT,
+  userRole: 'Operator',
   onNavigate: vi.fn(),
-  onSelectDevice: vi.fn(),
   onSelectSection: vi.fn(),
   onSelectSetting: vi.fn(),
-  onSelectTrail: vi.fn()
+  onOpen: vi.fn()
 })
 
 /** What the box should list for `query`: the panel's matcher, ranked for the open page, capped. */
@@ -57,8 +57,7 @@ const selected = () => screen.getAllByRole('option').findIndex(o => o.getAttribu
 
 beforeEach(() => {
   vi.clearAllMocks()
-  api.resolveId.mockResolvedValue([])
-  api.searchAssets.mockResolvedValue([])
+  api.findEntities.mockResolvedValue([])
   api.get.mockResolvedValue([])
   // jsdom has no scrollIntoView; the panel scrolls to the heading with it.
   Element.prototype.scrollIntoView = vi.fn()
@@ -92,7 +91,8 @@ describe('the Help group', () => {
   })
 
   it('sits after the pages and cards and before the records', async () => {
-    api.searchAssets.mockResolvedValue([{ kind: 'device', id: '55555555-5555-4555-8555-555555555555', name: 'Devices Rig' }])
+    const id = '55555555-5555-4555-8555-555555555555'
+    api.findEntities.mockResolvedValue([{ kind: 'devices', id, name: 'Devices Rig', state: 'active', variant: null, second_ids: [], page_id: id }])
     expect(expected('devices').length).toBeGreaterThan(0)
 
     render(<GlobalSearch {...props()} />)
