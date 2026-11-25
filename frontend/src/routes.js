@@ -7,11 +7,14 @@ import { ENTITY_KIND_BY_TABLE, isAutomationAlert } from './constants'
  * query parameters it writes when somebody sets the filter by hand.
  */
 
-/** One device: its id (or Sparkplug id) in the page's search, which opens its drawer. */
-export const deviceUrl = (id) => pageUrl('devices', { search: id })
-export const gatewayUrl = (id) => pageUrl('gateways', { search: id })
-export const cellUrl = (id) => pageUrl('cells', { search: id })
-export const areaUrl = (id) => pageUrl('areas', { search: id })
+/**
+ * One device: its id (or Sparkplug id) in the page's search, which opens its drawer. `archived` sets the
+ * page's lifecycle filter too, which opens on what is in service.
+ */
+export const deviceUrl = (id, archived = false) => pageUrl('devices', { search: id, lifecycle: archived && 'archived' })
+export const gatewayUrl = (id, archived = false) => pageUrl('gateways', { search: id, lifecycle: archived && 'archived' })
+export const cellUrl = (id, archived = false) => pageUrl('cells', { search: id, lifecycle: archived && 'archived' })
+export const areaUrl = (id, archived = false) => pageUrl('areas', { search: id, lifecycle: archived && 'archived' })
 export const schemaUrl = (uuid) => pageUrl('schemas', { search: uuid })
 
 /** One device's readings over time on the History page, at the window it opens on. */
@@ -78,8 +81,12 @@ export const proposalSubjectUrl = (proposal) => {
 /*
  * The kinds whose address takes more than an id. `variant` is what entity_directory (0321) says sets the
  * record apart within its kind: a metric's tab, a capture's kind of subject, an identity withdrawn and a
- * person removed.
+ * person removed. `state` is whether it is archived, which four kinds can be.
  */
+const deviceEntityUrl = (id, variant, state) => deviceUrl(id, state === 'archived')
+const gatewayEntityUrl = (id, variant, state) => gatewayUrl(id, state === 'archived')
+const cellEntityUrl = (id, variant, state) => cellUrl(id, state === 'archived')
+const areaEntityUrl = (id, variant, state) => areaUrl(id, state === 'archived')
 const metricEntityUrl = (id, variant) => metricUrl(id, variant === 'deprecated', variant === 'derived')
 const captureEntityUrl = (id, variant) => captureSubjectUrl(variant, id)
 const identityEntityUrl = (id, variant) => identityUrl(id, variant === 'withdrawn')
@@ -89,10 +96,10 @@ const personEntityUrl = (id, variant) => personUrl(id, variant === 'removed')
  * One record by its kind, or null for a kind with no page or a record with no id to open it by. The id is
  * the one its own page finds it by: a capture's subject, a backup's run and an automation's key.
  */
-export const entityUrl = (type, id, variant = null) => {
-  const url = { device: deviceUrl, gateway: gatewayUrl, cell: cellUrl, area: areaUrl, schema: schemaUrl, metric: metricEntityUrl,
+export const entityUrl = (type, id, variant = null, state = null) => {
+  const url = { device: deviceEntityUrl, gateway: gatewayEntityUrl, cell: cellEntityUrl, area: areaEntityUrl, schema: schemaUrl, metric: metricEntityUrl,
     capture: captureEntityUrl, backup: backupUrl, automation: automationUrl, identity: identityEntityUrl, person: personEntityUrl }[type]
-  return url && id ? url(id, variant) : null
+  return url && id ? url(id, variant, state) : null
 }
 
 /** The Entities page searched by a text. A whole id that names one entity opens that entity, whatever its state. */

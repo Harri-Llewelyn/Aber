@@ -17,7 +17,10 @@ export default function check() {
   const COLUMNS = 'grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));';
   const MUST_READ = ['SuppressionWindows.jsx', 'GatewayRepositoryPanel.jsx', 'AreaPlanPanel.jsx'];
   // A drawer section drawn by a function in a page's file: [file, function name].
-  const SECTIONS_IN_PAGES = [['frontend/src/components/tabs/AuditTrailTab.jsx', 'CausationGroup']];
+  const SECTIONS_IN_PAGES = [
+    ['frontend/src/components/tabs/AuditTrailTab.jsx', 'CausationGroup'],
+    ['frontend/src/components/tabs/EntityDrawer.jsx', 'WhatSurvives'],
+  ];
   const offences = [];
 
   const css = read(CSS);

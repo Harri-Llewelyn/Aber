@@ -69,7 +69,7 @@ const show = async ({ role = 'Operator', entities = FEW, archives = [], tombston
     if (path.startsWith('/api/v1/archives')) return Promise.resolve(archives)
     return Promise.resolve([])
   })
-  render(<EntitiesTab showToast={vi.fn()} userRole={role} hasPermission={holds(role)} onViewTrail={vi.fn()} />)
+  render(<EntitiesTab showToast={vi.fn()} userRole={role} hasPermission={holds(role)} />)
   await waitFor(() => expect(headings().length).toBeGreaterThan(0))
 }
 

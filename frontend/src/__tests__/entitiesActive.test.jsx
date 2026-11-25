@@ -92,7 +92,7 @@ const show = async ({ role = 'Administrator', entities = EVERY, archives = [], r
     return Promise.resolve([])
   })
   const showToast = vi.fn()
-  render(<EntitiesTab showToast={showToast} userRole={role} hasPermission={holds(role)} onViewTrail={vi.fn()} />)
+  render(<EntitiesTab showToast={showToast} userRole={role} hasPermission={holds(role)} />)
   // A search and an address that names a kind or a row open the groups themselves.
   if (url === '/entities') await expandAll()
   return { showToast }
@@ -259,14 +259,16 @@ describe('the search', () => {
     expect(search()).toHaveValue('lathe')
   })
 
-  it('opens the tab that lists an archived or a retired row, for a whole id of one', async () => {
-    api.findEntities.mockResolvedValue([ofArchived(ARCHIVED_CELL)])
-    await show({ archives: [ARCHIVED_CELL, ARCHIVED_DEVICE], url: `/entities?find=${ARCHIVED_CELL.entity_id}` })
-    await waitFor(() => expect(address()).toBe(`/entities/archived?find=${ARCHIVED_CELL.entity_id}`))
-    await waitFor(() => expect(names()).toEqual(['Old bay']))
-    expect(panel()).not.toHaveClass('context-panel-open')
-    // Restore is there as it always was.
-    expect(screen.getByRole('button', { name: /Restore/ })).toBeEnabled()
+  it.each([
+    ['archived', ARCHIVED_CELL, 'Old bay'],
+    ['retired', RETIRED_DEVICE, 'Scrapped lathe'],
+  ])('opens an %s row\'s drawer on the tab that lists it, for its whole id', async (tab, entity, name) => {
+    api.findEntities.mockResolvedValue([ofArchived(entity)])
+    await show({ archives: [ARCHIVED_CELL, ARCHIVED_DEVICE], retired: [RETIRED_DEVICE], url: `/entities?find=${entity.entity_id}` })
+    await waitFor(() => expect(address()).toBe(`/entities/${tab}?find=${entity.entity_id}&entity=${entity.entity_id}`))
+    await waitFor(() => expect(names()).toEqual([name]))
+    await waitFor(() => expect(panel()).toHaveClass('context-panel-open'))
+    expect(panel()).toHaveAttribute('aria-label', expect.stringContaining(name))
   })
 
   it('is asked again after Restore, since the entity is on another tab now', async () => {
@@ -275,7 +277,8 @@ describe('the search', () => {
     await show({ archives: [ARCHIVED_CELL, ARCHIVED_DEVICE], url: '/entities/archived?find=old' })
     await waitFor(() => expect(names()).toEqual(['Old bay', 'Old lathe']))
     api.findEntities.mockResolvedValue([row('cells', ARCHIVED_CELL.entity_id, 'Old bay'), ofArchived(ARCHIVED_DEVICE)])
-    fireEvent.click(screen.getAllByRole('button', { name: /Restore/ })[0])
+    await openRow('Old bay')
+    fireEvent.click(drawer().getByRole('button', { name: /Restore/ }))
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Restore Cell' })).getByRole('button', { name: 'Restore Cell' }))
     await waitFor(() => expect(api.findEntities).toHaveBeenCalledTimes(2))
     expect(await screen.findByText(/Also found:/)).toHaveTextContent('Also found: 1 active.')
@@ -420,10 +423,10 @@ describe('an entity\'s drawer', () => {
 describe('what each role may do', () => {
   it('opens the Archived tab to every role, with Restore and Permanent Delete for archive:manage alone', async () => {
     await show({ role: 'Operator', archives: [ARCHIVED_CELL], url: '/entities/archived' })
-    expect(await screen.findByText('Old bay')).toBeInTheDocument()
+    await openRow('Old bay')
     expect(holds('Operator')(PERMISSION_UUIDS.ARCHIVE_MANAGE)).toBe(false)
-    expect(screen.getByRole('button', { name: /Restore/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /Permanent Delete/ })).toBeDisabled()
+    expect(drawer().getByRole('button', { name: /Restore/ })).toBeDisabled()
+    expect(drawer().getByRole('button', { name: /Permanent Delete/ })).toBeDisabled()
   })
 
   it('tells a role the tombstones are not for who they are for, rather than that there are none', async () => {

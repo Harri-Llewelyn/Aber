@@ -1657,7 +1657,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
-| Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, the groups that start open; `sort`; `entity`, on Active |
+| Entities | `archived`, `retired` | `find`, which the three tabs share; `kind`, the groups that start open; `sort`; `entity` |
 | System | the group, `logs` | `sort`. Logs: `service`, `level`, `search`, the time window (`span` and `at`, `range`, or `from` and `to`; [One time control](#one-time-control-for-every-period)) |
 | Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
@@ -1678,9 +1678,8 @@ apart within its kind, and what each kind's further ids are called.
   else, so a tab and the search cannot disagree. `findRank()` applies the same rule to the rows the
   browser holds, and mirror check `159` holds the two to it.
 - **`?find=` is the search, and the three tabs share it.** It is the address of a "what is this?" link:
-  `/entities?find=<id>`. A whole id that names one row opens that row: an Active row's drawer, or the tab
-  that lists another. It opens once, as an arrival by id does (`useArrivalSelection`), so a drawer that is
-  closed stays closed.
+  `/entities?find=<id>`. A whole id that names one row opens that row's drawer, on the tab that lists it.
+  It opens once, as an arrival by id does (`useArrivalSelection`), so a drawer that is closed stays closed.
 - **Each tab's rows are groups by kind,** in `ENTITY_KINDS`' order and closed to begin with, as the Metric
   Catalog's are. A tab that shows one group starts with it open. A tab is one table, so its columns line
   up from group to group, and a column sorts inside each. Beside its count a heading says the one fact an
@@ -1693,10 +1692,19 @@ apart within its kind, and what each kind's further ids are called.
   the groups stay as they are.
 - **An arrival opens the group its row is in:** `?entity=`, or a whole id. Closing that group leaves the
   drawer open.
-- **`EntityDrawer` is the same for every kind.** It reads the row and nothing more, except how many
-  automations apply to a device. `entityUrl()` in `routes.js` knows each kind's own page (`ENTITY_PAGES` in
-  `utils/entityPages.js` is the rail's name for it), and `tabIsVisible()` decides whether this reader may
-  open it: an Auditor reads an identity here, and Access Control is an Administrator's.
+- **`EntityDrawer` is the same for every kind, and every row opens it.** It reads the row and nothing more,
+  except how many automations apply to a device in service. `entityUrl()` in `routes.js` knows each kind's
+  own page (`ENTITY_PAGES` in `utils/entityPages.js` is the rail's name for it), and `tabIsVisible()` decides
+  whether this reader may open it: an Auditor reads an identity here, and Access Control is an
+  Administrator's.
+  - **An archived row's has the acts,** as every drawer has its own: Restore first, its page with the lifecycle
+    filter on Archived, its Audit Trail, Export Bundle for a device, and Permanent Delete last. Restore and
+    Permanent Delete close it, since the row leaves the tab. Its auto-purge is a row, or a warning where it
+    is due within a week or a playback holds it (`purgeWarning()`). `/api/v1/archives` gives each row its
+    own of `entity_directory` (`directory`), for the description, the further ids and the place.
+  - **A retired row's is read-only.** It has no page, so it has no actions: the links of *What Survives* are a
+    section. Its ids are read from the tombstone the page holds already, as the view's own arm for them
+    reads them (`retiredRow()`, mirror check `168`).
 - **A retired row is for `archive:manage` or `audit_trail:read`.** A reader with neither is told so, rather
   than that nothing has been retired.
 
@@ -1775,7 +1783,7 @@ const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.i
 | `AutomationsTab` | The Automations page (tab id `automations`), ungated: rules that watch a device's readings and raise an alert, written as YAML ([Automations and its editor](#automations-and-its-editor)). The list shows each automation's alias, its triggers in words, whether it is enabled, firing now and last fired. `AutomationDetail` is one automation in the YAML editor, or a new one on an example. The page's second tab, **Built-in**, is `BuiltInAlerts` and its drawer `BuiltInAlertDrawer`: the alerts Aber raises about itself, read-only ([The Built-in tab](#the-built-in-tab-lists-the-alerts-aber-raises-about-itself)) |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `SystemTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach. The Ingestion & Messaging tab opens with `SystemFigures`: what the stack is doing now, from `directory_figures` and two live counts (`utils/systemFigures.js`), each figure "not observed" when it has no fresh value, and each with a Grafana panel linked to it when this browser can reach Grafana. **Logs**, an Administrator's alone, is `SystemLogs`: a service's newest lines from `service-logs`, rendered as text, each with a copy button. The filter is read once typing settles, since each new read writes an Audit Trail row. The window is the shared `TimeWindowControl` with Day and Week only: a rolling window is sent as its range and any other as its `from` and `to`, so a refresh repeats a fixed window exactly and writes no row. The Service list follows the window, read again when it moves, and a chosen service the new list lacks is kept and said so |
-| `EntitiesTab` | The Entities page (tab id `entities`), ungated: one card, a tab for each state of one lifecycle, and one search over the three ([The Entities page](#the-entities-page-lists-every-kind-and-finds-any-id)). Each tab's rows are groups by kind. **Active**: everything in service this reader may see, of every kind, with `EntityDrawer` for the open row. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (behind a [typed gate](#typed-text-guards-removing-access-and-what-cannot-be-undone)) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
+| `EntitiesTab` | The Entities page (tab id `entities`), ungated: one card, a tab for each state of one lifecycle, and one search over the three ([The Entities page](#the-entities-page-lists-every-kind-and-finds-any-id)). Each tab's rows are groups by kind, with `EntityDrawer` for the open row. **Active**: everything in service this reader may see, of every kind. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (behind a [typed gate](#typed-text-guards-removing-access-and-what-cannot-be-undone)) and, on a device, Export Bundle in the drawer, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each drawer linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
 

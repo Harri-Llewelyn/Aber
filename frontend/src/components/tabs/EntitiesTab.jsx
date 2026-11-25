@@ -1,17 +1,16 @@
 import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { RouteLink } from '../common/RouteLink'
-import { entityUrl, trailUrl } from '../../routes'
+import { entityUrl } from '../../routes'
 import { ENTITY_FIND_LIMIT, PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle, rolesHolding } from '../../hooks/usePermissions'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import CopyableId from '../common/CopyableId'
-// Restore and delete run from inside a ConfirmModal, which owns its own pending state; the export
-// is the one action that runs from the row. The drawers' Restore asks with the same dialog.
+// Restore and delete run from inside a ConfirmModal, which owns its own pending state. Every drawer's
+// Restore asks with the same dialog.
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { RestoreEntityModal } from '../modals/RestoreEntityModal'
 import { DeviceExportModal } from '../modals/DeviceExportModal'
-import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlList, useUrlState, useUrlTab } from '../../hooks/useUrlState'
@@ -31,20 +30,17 @@ import { useOpenGroups } from '../../hooks/useOpenGroups'
 import { PersonName } from '../common/PersonName'
 import { SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
-import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle, IconLock } from '../common/Icons'
+import { IconArchive, IconTrash, IconAlertTriangle, IconLock } from '../common/Icons'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { hadEnrolled } from '../../utils/credentialState'
 import {
-  ENTITY_KINDS, byKindThenName, entityKey, findText, groupByKind, isWholeId, kindCount, kindPlural, lastDeleted, mergeFound, nextPurge,
-  purgeIsHeld, purgeIsSoon, variantBadge,
+  ENTITY_KINDS, archivedRow, byKindThenName, entityKey, findText, groupByKind, isWholeId, kindCount, kindPlural, lastDeleted, mergeFound,
+  nextPurge, purgeIsHeld, purgeIsSoon, retiredRow, variantBadge,
 } from '../../utils/entities'
 import { KIND_ICONS } from '../../utils/entityPages'
 import { formatDate, formatDateTime, plural } from '../../utils/format'
-
-/** The page's singular row type -> the Audit Trail page's handover type. */
-const TRAIL_TYPE = { area: 'AREA', cell: 'CELL', gateway: 'GATEWAY', device: 'DEVICE' }
 
 /** The three states, in tab order (navigation.jsx). The description is the tab's tooltip; the help page has the rest. */
 export const STAGES = ENTITIES_TABS
@@ -74,11 +70,6 @@ const ACTIVE_SORT = {
   second_ids: { type: 'text', value: e => e.second_ids.join(' · ') }
 }
 
-/** An archived or a retired row with the kind, the id and the state entity_directory has for it: the rows are named in the singular. */
-const ofState = (state) => (row) => ({ ...row, kind: `${row.entity_type}s`, id: row.entity_id, state })
-const ofArchived = ofState('archived')
-const ofRetired = ofState('retired')
-
 /** The Archived table's sortable columns. An entity with no auto-purge timer goes last. */
 const ARCHIVED_SORT = {
   name: { type: 'text', value: a => a.name },
@@ -101,10 +92,9 @@ const RETIRED_SORT = {
  * in service this reader's own policies admit, of every kind, with people and the pinned identities beside it
  * for the two roles that may read them. Archived is what archiving leaves: the row still in its table,
  * restorable, its retention timer running. Retired is what deleting leaves: the row gone, a tombstone
- * written by the database on the DELETE, with links to what survives it -- the audit trail, a gateway's
- * repository in the forge, any bundle exported while it was alive, and the historian id its readings are
- * still keyed by. Each tab's rows are groups by kind, closed to begin with, in one table whose first two
- * columns the three tabs share.
+ * written by the database on the DELETE. Each tab's rows are groups by kind, closed to begin with, in one
+ * table whose first two columns the three tabs share, and a row opens `EntityDrawer`, which has the acts
+ * and the links of its state.
  *
  * One search covers the three. `?find=` is asked of find_entities(), which reads the view, so a tab lists
  * only what the search found; a whole id that names one row opens that row, on its own tab. `?kind=` names
@@ -113,7 +103,7 @@ const RETIRED_SORT = {
  * `unmappedMetricsTo` is handed to the export dialog, whose warning about metrics with no semantic
  * id then links to the Metrics page. Omit it for a reader who cannot open that page.
  */
-export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, unmappedMetricsTo }) {
+export function EntitiesTab({ showToast, userRole, hasPermission, unmappedMetricsTo }) {
   const [active, setActive]     = useState({ rows: NONE, loaded: false, error: null })
   const [archives, setArchives] = useState([])
   const [retired, setRetired]   = useState([])
@@ -157,12 +147,12 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
     () => [...active.rows, ...local].sort(byKindThenName),
     [active.rows, local]
   )
-  const everyArchived = useMemo(() => archives.map(ofArchived), [archives])
+  const everyArchived = useMemo(() => archives.map(archivedRow), [archives])
   // Who deleted each one: the email stamped at the time, and their display name read live. Only
   // people this viewer can already see here are answered; anyone else is drawn by email alone.
   const retirerNames = useDisplayNames(useMemo(() => retired.map(r => r.retired_by), [retired]))
   const everyRetired = useMemo(
-    () => retired.map(r => ({ ...ofRetired(r), retired_by_name: retirerNames.get(r.retired_by) || null })),
+    () => retired.map(r => ({ ...retiredRow(r), retired_by_name: retirerNames.get(r.retired_by) || null })),
     [retired, retirerNames]
   )
   /** A tab's rows, or those of them the search found, as groups. */
@@ -235,14 +225,15 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
 
   useEffect(() => { load() }, [load])
 
-  // The Active row whose drawer is open, in the address as `?entity=`.
-  const inService = (id) => everyActive.find(row => row.id === id)
-    ?? matches.find(row => row.state === 'active' && row.id === id) ?? null
+  // The row of the open tab whose drawer is open, in the address as `?entity=`.
+  const rowOf = (id) => ({ active: everyActive, archived: everyArchived, retired: everyRetired })[stage].find(row => row.id === id)
+    ?? (stage === 'active' ? matches.find(row => row.state === 'active' && row.id === id) : null) ?? null
+  const read = stage === 'active' ? active.loaded && localLoaded : !loading
   const [selectedId, setSelectedId] = useUrlState('entity', '', {
     // A row only the search found is known once it has answered.
-    allowed: active.loaded && localLoaded && !searching ? id => inService(id) !== null : null
+    allowed: read && !searching ? id => rowOf(id) !== null : null
   })
-  const selected = stage === 'active' && selectedId ? inService(selectedId) : null
+  const selected = selectedId ? rowOf(selectedId) : null
   const toggle = useCallback((row) => setSelectedId(id => (id === row.id ? '' : row.id)), [setSelectedId])
   // An arrival opens the group its row is in: `?entity=`, or a whole id. A press is on a row of an open one.
   const arrived = useRef(null)
@@ -251,20 +242,22 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
   }
   const selectedKey = selected ? entityKey(selected) : null
   useEffect(() => { if (selectedKey) arrived.current() }, [selectedKey])
-  const nameOf = (kind, id) => everyActive.find(row => row.kind === kind && row.id === id)?.name
+  const nameOf = (kind, id) => (everyActive.find(row => row.kind === kind && row.id === id)
+    ?? everyArchived.find(row => row.kind === kind && row.id === id))?.name
 
-  // A whole id that names one row opens it: an Active row's drawer, or the tab that lists another.
+  // A whole id that names one row opens it, on the tab that lists it.
   const exact = searching ? NONE : matches.filter(row => isWholeId(row, found.text))
   useArrivalSelection(found.text, exact.length === 1 ? exact : NONE, () => true, (row) => {
     // Replaced, not pushed: Back from here should leave the page, not land on the arrival again.
     if (row.state !== stage) setStage(row.state, { replace: true })
-    if (row.state === 'active') setSelectedId(row.id)
+    setSelectedId(row.id)
   })
 
-  // Restore and Permanent Delete run from their dialogs, which show a refusal and stay open.
+  // Restore and Permanent Delete run from their dialogs, which show a refusal and stay open. The row
+  // leaves the tab, so its drawer closes with the dialog.
   const restore = async (item) => {
     await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
-    setConfirmRestore(null); load(); setVersion(v => v + 1)
+    setConfirmRestore(null); setSelectedId(''); load(); setVersion(v => v + 1)
     showToast(`Entity '${item.name}' restored to active service`, 'success', { to: entityUrl(item.entity_type, item.entity_id) })
   }
 
@@ -276,34 +269,29 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
   const purge = async (item) => {
     await api.delete(`/api/v1/${item.entity_type}s/${item.entity_id}`)
     // Dismissed after the delete, so the action runs while the confirmation is on screen.
-    setConfirmPurge(null)
+    setConfirmPurge(null); setSelectedId('')
     load(); setVersion(v => v + 1)
     showToast(`Entity '${item.name}' permanently deleted`, 'success')
   }
 
-  const downloadExport = useCallback(async (row) => {
+  const downloadExport = async (row) => {
     try {
       const url = await api.assetExportDownloadUrl(row)
       window.open(url, '_blank', 'noopener')
     } catch (e) { showToast(e.message, 'error') }
-  }, [showToast])
+  }
 
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
-  const deniedTitle = requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
   // aas-export refuses the bundle to a reader without audit_trail:read, since it carries the trail.
   const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   // The tombstones' policy: either permission. Anyone else is told so, rather than that there are none.
   const readsRetired = canArchive || canReadTrail
+  // The newest bundle of each device, by its id.
   const latestExports = useMemo(() => {
     const latest = new Map()
     for (const x of exports) if (!latest.has(x.entity_id)) latest.set(x.entity_id, x)
     return latest
   }, [exports])
-  const archivedActs = useMemo(
-    () => ({ canArchive, deniedTitle, latestExports, onRestore: setConfirmRestore, onExport: setExportFor, onPurge: setConfirmPurge }),
-    [canArchive, deniedTitle, latestExports]
-  )
-  const retiredActs = useMemo(() => ({ onViewTrail, onDownload: downloadExport }), [onViewTrail, downloadExport])
 
   // What else the search found, on the tabs that are not open. Nothing is said while an answer is due.
   const elsewhere = found.text === '' || searching ? [] : STAGES
@@ -317,7 +305,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
   const settled = !waiting && (stage === 'active' ? active.loaded && !active.error : !loading)
 
   /** The open tab's groups, as the table's bodies: a heading each, and the rows of the open ones. */
-  const bodies = ({ columns, sort, Row, detailOf, acts }) => groups.map(group => {
+  const bodies = ({ columns, sort, Row, detailOf }) => groups.map(group => {
     const key = groupKey(group.kind)
     const isOpen = openGroups.isOpen(key)
     const Icon = KIND_ICONS[group.kind]
@@ -352,7 +340,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
               selectedId={selectedId}
               onSelect={toggle}
               notify={showToast}
-              acts={acts}
+              latestExports={latestExports}
             />
           )}
         </tbody>
@@ -470,17 +458,16 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
            />
          ) : (
            <div className="table-wrap">
-             <table>
+             <table className="table-entities table-entities-archived">
                <thead>
                  <tr>
                    <SortHeader sort={archivedSort} column="name">Name</SortHeader>
                    <SortHeader sort={archivedSort} column="entity_id">UUID</SortHeader>
                    <SortHeader sort={archivedSort} column="archived_at">Archived At</SortHeader>
                    <SortHeader sort={archivedSort} column="auto_purge" title="When the auto-purge timer deletes the record for good. Never: no timer runs, so it stays until someone deletes it.">Auto-Purge</SortHeader>
-                   <th className="row-actions">Actions</th>
                  </tr>
                </thead>
-               {bodies({ columns: 5, sort: archivedSort, Row: ArchivedRow, detailOf: nextPurge, acts: archivedActs })}
+               {bodies({ columns: 4, sort: archivedSort, Row: ArchivedRow, detailOf: nextPurge })}
              </table>
            </div>
          )}
@@ -500,7 +487,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
            />
          ) : (
            <div className="table-wrap">
-             <table>
+             <table className="table-entities table-entities-retired">
                <thead>
                  <tr>
                    <SortHeader sort={retiredSort} column="name">Name</SortHeader>
@@ -508,10 +495,9 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
                    <SortHeader sort={retiredSort} column="retired_at" title="When the row was deleted">Retired At</SortHeader>
                    <SortHeader sort={retiredSort} column="by" title="Who deleted it, or the retention job">By</SortHeader>
                    <SortHeader sort={retiredSort} column="historian_id" title="The historian keys this entity's readings by this id">Historian ID</SortHeader>
-                   <th className="row-actions">What Survives</th>
                  </tr>
                </thead>
-               {bodies({ columns: 6, sort: retiredSort, Row: RetiredRow, detailOf: lastDeleted, acts: retiredActs })}
+               {bodies({ columns: 5, sort: retiredSort, Row: RetiredRow, detailOf: lastDeleted })}
              </table>
            </div>
          )}
@@ -522,6 +508,11 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
       <EntityDrawer
         entity={selected}
         nameOf={nameOf}
+        lastExport={selected?.kind === 'devices' ? latestExports.get(selected.id) ?? null : null}
+        onRestore={setConfirmRestore}
+        onExport={setExportFor}
+        onPurge={setConfirmPurge}
+        onDownload={downloadExport}
         onClose={() => setSelectedId('')}
         showToast={showToast}
         userRole={userRole}
@@ -613,24 +604,23 @@ const KindRows = memo(function KindRows({ rows, columns, sort, Row, selectedId, 
   )
 })
 
-/** Enter or Space on a row itself acts as its click; a key on a control inside it is that control's. */
-const rowKeyHandler = (onSelect) => (e) => {
-  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
-  if (e.key === ' ') e.preventDefault()
-  onSelect()
-}
+/** What a row that opens its drawer takes: a press, and Enter or Space on the row itself. A control inside it keeps its own. */
+const opensDrawer = (row, selected, onSelect) => ({
+  className: `row-selectable${selected ? ' row-selected' : ''}`,
+  tabIndex: 0,
+  onClick: rowSelectHandler(() => onSelect(row)),
+  onKeyDown: (e) => {
+    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    if (e.key === ' ') e.preventDefault()
+    onSelect(row)
+  },
+})
 
 const ActiveRow = memo(function ActiveRow({ row, selected, onSelect, notify }) {
   const badge = variantBadge(row)
   const seconds = row.second_ids.join(' · ')
-  const select = () => onSelect(row)
   return (
-    <tr
-      className={`row-selectable${selected ? ' row-selected' : ''}`}
-      tabIndex={0}
-      onClick={rowSelectHandler(select)}
-      onKeyDown={rowKeyHandler(select)}
-    >
+    <tr {...opensDrawer(row, selected, onSelect)}>
       <td>
         <strong>{row.name || '—'}</strong>
         {badge && <Badge size="sm" tone={badge.tone} title={badge.title} className="badge-follow">{badge.label}</Badge>}
@@ -645,123 +635,49 @@ const ActiveRow = memo(function ActiveRow({ row, selected, onSelect, notify }) {
   )
 })
 
-const ArchivedRow = memo(function ArchivedRow({ row: a, notify, acts }) {
-  const { canArchive, deniedTitle, latestExports, onRestore, onExport, onPurge } = acts
-  const latestExport = a.kind === 'devices' ? latestExports.get(a.id) : null
+const ArchivedRow = memo(function ArchivedRow({ row, selected, onSelect, notify, latestExports }) {
+  const latestExport = row.kind === 'devices' ? latestExports.get(row.id) : null
   return (
-    <tr>
+    <tr {...opensDrawer(row, selected, onSelect)}>
       <td>
-        <strong>{a.name}</strong>
+        <strong>{row.name || '—'}</strong>
         {latestExport && (
           <Tooltip text={`A bundle of this device was taken ${formatDateTime(latestExport.taken_at)} and is kept beside the cold tier`}>
             <div className="cell-meta">Exported {formatDate(latestExport.taken_at)}</div>
           </Tooltip>
         )}
       </td>
-      <td><CopyableId value={a.entity_id} label="uuid" onNotify={notify} /></td>
-      <td className="cell-meta">{formatDateTime(a.archived_at)}</td>
+      <td><CopyableId value={row.id} label="uuid" onNotify={notify} /></td>
+      <td className="cell-meta">{formatDateTime(row.archived_at)}</td>
       <td>
-        {purgeIsHeld(a) ? (
-          <PurgeHeld at={a.auto_delete_at} playbacks={a.playbacks} />
-        ) : a.auto_delete_at ? (
-          <PurgeDate at={a.auto_delete_at} />
+        {purgeIsHeld(row) ? (
+          <PurgeHeld at={row.auto_delete_at} playbacks={row.playbacks} />
+        ) : row.auto_delete_at ? (
+          <PurgeDate at={row.auto_delete_at} />
         ) : (
           <Badge size="sm">Never auto-purged</Badge>
         )}
       </td>
-      {/* Restore is the ordinary move and Permanent Delete the irreversible one, so
-          they are not peers: delete only takes its danger colour when pointed at.
-          Export Bundle, for a device, is what to do before the delete. */}
-      <td className="row-actions">
-        <Tooltip text={!canArchive ? deniedTitle : null}>
-          <button
-            className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
-            disabled={!canArchive}
-            onClick={() => canArchive && onRestore(a)}
-          >
-            <IconRefreshCw size={12} /> Restore
-          </button>
-        </Tooltip>
-        {a.entity_type === 'device' && (
-          <Tooltip text={!canArchive ? deniedTitle : 'An AASX bundle of its shell, audit trail and live telemetry, with a copy kept beside the cold tier'}>
-            <button
-              className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
-              disabled={!canArchive}
-              onClick={() => canArchive && onExport(a)}
-            >
-              <IconDownload size={12} /> Export Bundle…
-            </button>
-          </Tooltip>
-        )}
-        <Tooltip text={!canArchive ? deniedTitle : null}>
-          <button
-            className={`btn btn-sm btn-danger btn-danger-reveal ${!canArchive ? 'btn-disabled' : ''}`}
-            disabled={!canArchive}
-            onClick={() => canArchive && onPurge(a)}
-          >
-            <IconTrash size={12} /> Permanent Delete
-          </button>
-        </Tooltip>
-      </td>
     </tr>
   )
 })
 
-const RetiredRow = memo(function RetiredRow({ row: r, notify, acts }) {
+const RetiredRow = memo(function RetiredRow({ row, selected, onSelect, notify }) {
   return (
-    <tr>
-      <td><strong>{r.name || '—'}</strong></td>
-      <td><CopyableId value={r.entity_id} label="uuid" onNotify={notify} /></td>
-      <Tooltip text={r.archived_at ? `Archived ${formatDateTime(r.archived_at)}` : null}>
-        <td className="cell-meta">{formatDateTime(r.retired_at)}</td>
+    <tr {...opensDrawer(row, selected, onSelect)}>
+      <td><strong>{row.name || '—'}</strong></td>
+      <td><CopyableId value={row.id} label="uuid" onNotify={notify} /></td>
+      <Tooltip text={row.archived_at ? `Archived ${formatDateTime(row.archived_at)}` : null}>
+        <td className="cell-meta">{formatDateTime(row.retired_at)}</td>
       </Tooltip>
       {/* The name with the email on hover, where the column is narrow. */}
-      <td className="cell-meta">{r.retired_by_email
-        ? <PersonName name={r.retired_by_name} email={r.retired_by_email} emailOnHover />
-        : (r.retired_by ? <span className="mono">{String(r.retired_by).slice(0, 8)}…</span> : 'retention timer')}</td>
-      <td>{r.sparkplug_id ? <CopyableId value={r.sparkplug_id} label="historian id" onNotify={notify} /> : <span className="cell-meta">—</span>}</td>
-      <td className="row-actions"><Survivors row={r} {...acts} /></td>
+      <td className="cell-meta">{row.retired_by_email
+        ? <PersonName name={row.retired_by_name} email={row.retired_by_email} emailOnHover />
+        : (row.retired_by ? <span className="mono">{String(row.retired_by).slice(0, 8)}…</span> : 'retention timer')}</td>
+      <td>{row.sparkplug_id ? <CopyableId value={row.sparkplug_id} label="historian id" onNotify={notify} /> : <span className="cell-meta">—</span>}</td>
     </tr>
   )
 })
-
-/** What survives a retired entity, as links; derived from the tombstone's row and its exports. */
-function Survivors({ row: r, onViewTrail, onDownload }) {
-  return (
-    <>
-      {onViewTrail && (
-        <RouteLink
-          className="btn btn-sm btn-ghost"
-          to={trailUrl(r.entity_id, TRAIL_TYPE[r.entity_type], true)}
-          onNavigate={() => onViewTrail({ id: r.entity_id, type: TRAIL_TYPE[r.entity_type], purged: true })}
-          title="Open this entity's audit trace on the Audit Trail page, deleted entities shown"
-        >
-          <IconHistory size={12} /> Audit Trail
-        </RouteLink>
-      )}
-      {/* Derived from the id as it is everywhere else. */}
-      {r.entity_type === 'gateway' && r.old_data?.forge_repository_at && r.sparkplug_id && (
-        <Tooltip text="Its repository in the forge: archived, read-only, every branch and wiki page kept">
-          <a
-            className="btn btn-sm btn-ghost"
-            href={gatewayRepositoryUrl({ sparkplug_id: r.sparkplug_id })}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <IconExternalLink size={12} /> Forge repository
-          </a>
-        </Tooltip>
-      )}
-      {(r.exports || []).map(x => (
-        <Tooltip key={x.id} text={`The bundle taken ${formatDateTime(x.taken_at)}${x.taken_by_email ? ` by ${x.taken_by_email}` : ''}: shell, audit trail, live telemetry and the cold-object manifest`}>
-          <button className="btn btn-sm btn-ghost" onClick={() => onDownload(x)}>
-            <IconDownload size={12} /> Bundle {formatDate(x.taken_at)}
-          </button>
-        </Tooltip>
-      ))}
-    </>
-  )
-}
 
 /**
  * An archived row's auto-purge date, as a plain date. Within a week of the purge it takes the

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { cellUrl } from '../routes'
 import { EntitiesTab } from '../components/tabs/EntitiesTab'
 import { purgeIsSoon } from '../utils/entities'
+import { formatDateTime } from '../utils/format'
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
 import { tabLink } from '../test/tabBar'
@@ -40,11 +41,22 @@ const expandAll = async () => {
 /** The rows of the groups that are open. */
 const dataRows = () => [...document.querySelectorAll('tbody tr:not(.table-group-row)')]
 
+const panel = () => document.querySelector('.context-panel')
+const drawer = () => within(panel())
+/** Opens the drawer of the row of that name, whose acts and links are in it. */
+const openRow = async (name) => {
+  const find = () => dataRows().find(tr => tr.querySelector('strong').textContent === name)
+  await waitFor(() => expect(find()).toBeTruthy())
+  fireEvent.click(find())
+  await waitFor(() => expect(panel()).toHaveClass('context-panel-open'))
+}
+
+/** The Archived tab, with the drawer of its first row open. */
 const showArchives = async (hasPermission = () => true, rows = [ARCHIVED_CELL]) => {
   api.get.mockResolvedValue(rows)
   const showToast = vi.fn()
   render(<EntitiesTab showToast={showToast} hasPermission={hasPermission} />)
-  await waitFor(() => expect(screen.getByText(rows[0].name)).toBeInTheDocument())
+  await openRow(rows[0].name)
   return { showToast }
 }
 
@@ -55,7 +67,7 @@ describe('EntitiesTab Component', () => {
     vi.clearAllMocks()
   })
 
-  it('renders archived items table and enables restore button for authorized user', async () => {
+  it('opens an archived row\'s drawer, with Restore for who may', async () => {
     const mockArchives = [
       { entity_id: 'Cell_1', name: 'Assembly Line 1', entity_type: 'cell', archived_at: '2026-07-25T10:00:00Z', auto_delete_at: null }
     ]
@@ -66,9 +78,7 @@ describe('EntitiesTab Component', () => {
 
     render(<EntitiesTab showToast={showToast} hasPermission={hasPermission} />)
 
-    await waitFor(() => {
-      expect(screen.getByText('Assembly Line 1')).toBeInTheDocument()
-    })
+    await openRow('Assembly Line 1')
 
     const restoreBtn = screen.getByRole('button', { name: /Restore/i })
     expect(restoreBtn).not.toBeDisabled()
@@ -85,9 +95,7 @@ describe('EntitiesTab Component', () => {
 
     render(<EntitiesTab showToast={showToast} hasPermission={hasPermission} />)
 
-    await waitFor(() => {
-      expect(screen.getByText('Assembly Line 1')).toBeInTheDocument()
-    })
+    await openRow('Assembly Line 1')
 
     const restoreBtn = screen.getByRole('button', { name: /Restore/i })
     expect(restoreBtn).toBeDisabled()
@@ -161,6 +169,7 @@ describe('EntitiesTab permanent delete', () => {
     await confirmPurge()
 
     await waitFor(() => expect(api.get.mock.calls.length).toBeGreaterThan(before))
+    expect(panel()).not.toHaveClass('context-panel-open')
   })
 
   it('reports a failure rather than pretending the row is gone', async () => {
@@ -182,16 +191,18 @@ describe('EntitiesTab permanent delete', () => {
   })
 
   /**
-   * Restore is a ghost button and Permanent Delete only takes its danger colour when pointed at:
-   * two filled buttons side by side invite the wrong one to be clicked.
+   * Restore is the drawer's one primary, at the top of its actions, and Permanent Delete is last and takes
+   * its danger colour only when pointed at: two filled buttons side by side invite the wrong click.
    */
   it('does not dress the two actions as equals', async () => {
     await showArchives()
 
-    expect(screen.getByRole('button', { name: /Restore/i }).className).toMatch(/btn-ghost/)
-    expect(purgeButton().className).toMatch(/btn-danger-reveal/)
-    // Neither is the page's primary action.
-    expect(screen.getByRole('button', { name: /Restore/i }).className).not.toMatch(/btn-primary/)
+    const acts = [...panel().querySelectorAll('.context-action')]
+    expect(acts[0]).toHaveTextContent('Restore')
+    expect(acts[0]).toHaveClass('btn-primary')
+    expect(acts.at(-1)).toBe(purgeButton())
+    expect(purgeButton()).toHaveClass('context-action-danger', 'btn-ghost')
+    expect(panel().querySelectorAll('.btn-primary')).toHaveLength(1)
   })
 })
 
@@ -272,7 +283,7 @@ const ARCHIVED_GATEWAY = {
   credential_revoked_at: '2026-07-25T10:00:01Z'
 }
 
-const restoreButton = () => screen.getAllByRole('button', { name: /Restore/i })[0]
+const restoreButton = () => drawer().getByRole('button', { name: /Restore/i })
 /** The confirming button inside the dialog, which repeats the action with the entity's type. */
 const confirmRestoreButton = async () =>
   within(await screen.findByRole('dialog', { name: /^Restore / }))
@@ -348,7 +359,8 @@ describe('EntitiesTab restore asks first', () => {
     // In the dialog, which stays open to try again or cancel; the row is still there.
     expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('row level security')
     expect(showToast).not.toHaveBeenCalledWith(expect.anything(), 'error')
-    expect(screen.getByText('Assembly Line 1')).toBeInTheDocument()
+    expect(dataRows()[0]).toHaveTextContent('Assembly Line 1')
+    expect(panel()).toHaveClass('context-panel-open')
   })
 
   it('is gated on the same permission as delete', async () => {
@@ -500,23 +512,20 @@ const routed = ({ archives = [], retired = [], exports = [] } = {}) => (path) =>
 const showLifecycle = async (lists, props = {}) => {
   api.get.mockImplementation(routed(lists))
   const showToast = vi.fn()
-  const onViewTrail = vi.fn()
-  render(<EntitiesTab showToast={showToast} hasPermission={() => true} onViewTrail={onViewTrail} {...props} />)
+  render(<EntitiesTab showToast={showToast} hasPermission={() => true} {...props} />)
   await expandAll()
   const first = lists.archives?.[0] || lists.retired?.[0]
   await waitFor(() => expect(screen.getAllByText(first.name).length).toBeGreaterThan(0))
-  return { showToast, onViewTrail }
+  return { showToast }
 }
 
 /** The page with its Retired tab chosen, once the first tombstone (or the empty line) is drawn. */
 const showRetired = async (lists) => {
   api.get.mockImplementation(routed(lists))
-  const onViewTrail = vi.fn()
-  render(<EntitiesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={onViewTrail} />)
+  render(<EntitiesTab showToast={vi.fn()} hasPermission={() => true} />)
   fireEvent.click(tabLink('Retired'))
   if (lists.retired) await expandAll()
   await screen.findByText(lists.retired?.[0]?.name || /Nothing has been retired/)
-  return { onViewTrail }
 }
 
 describe('EntitiesTab lists archived areas', () => {
@@ -525,6 +534,7 @@ describe('EntitiesTab lists archived areas', () => {
   it('lists an area beside the cells, gateways and devices, with the same two actions', async () => {
     await showLifecycle({ archives: [ARCHIVED_AREA] })
     expect(screen.getByRole('button', { name: 'Areas, 1 area' })).toBeInTheDocument()
+    await openRow('North Hall')
     expect(screen.getByRole('button', { name: /Restore/i })).not.toBeDisabled()
     expect(purgeButton()).not.toBeDisabled()
     // The export is a device's: an area has no shell and no readings of its own.
@@ -536,6 +546,7 @@ describe('EntitiesTab lists archived areas', () => {
        row. An archived area holds no Area-Wide asset (0199), so the delete meets no refusal and
        the prompt promises none. */
     await showLifecycle({ archives: [ARCHIVED_AREA] })
+    await openRow('North Hall')
     fireEvent.click(purgeButton())
 
     const prompt = await screen.findByText(/Permanently delete the area/i)
@@ -547,6 +558,7 @@ describe('EntitiesTab lists archived areas', () => {
 
   it('does not mention a plan the area never carried', async () => {
     await showLifecycle({ archives: [{ ...ARCHIVED_AREA, plan_path: null }] })
+    await openRow('North Hall')
     fireEvent.click(purgeButton())
 
     expect((await screen.findByText(/Permanently delete the area/i)).textContent).not.toMatch(/area plan/i)
@@ -563,6 +575,7 @@ describe('EntitiesTab exports a device before it goes', () => {
     })
     const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] })
 
+    await openRow('CNC_01')
     fireEvent.click(screen.getByRole('button', { name: /Export Bundle/i }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /^Export$/ }))
 
@@ -580,6 +593,7 @@ describe('EntitiesTab exports a device before it goes', () => {
     })
     const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] })
 
+    await openRow('CNC_01')
     fireEvent.click(screen.getByRole('button', { name: /Export Bundle/i }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /^Export$/ }))
 
@@ -593,6 +607,7 @@ describe('EntitiesTab exports a device before it goes', () => {
     })
     const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] }, { unmappedMetricsTo: '/metrics?unmapped=1' })
 
+    await openRow('CNC_01')
     fireEvent.click(screen.getByRole('button', { name: /Export Bundle/i }))
     const dialog = within(await screen.findByRole('dialog'))
     fireEvent.click(dialog.getByRole('radio', { name: /AASX package/ }))
@@ -608,10 +623,13 @@ describe('EntitiesTab exports a device before it goes', () => {
   it('notes the latest export beside the row, so a second one is a choice rather than a habit', async () => {
     await showLifecycle({ archives: [ARCHIVED_DEVICE], exports: [EXPORT_ROW] })
     expect(screen.getByText(/Exported/)).toBeInTheDocument()
+    await openRow('CNC_01')
+    expect(drawer().getByText('Last Bundle').closest('.context-field')).toHaveTextContent(formatDateTime(EXPORT_ROW.taken_at))
   })
 
   it('tells a device\'s delete dialog to export first', async () => {
     await showLifecycle({ archives: [ARCHIVED_DEVICE] })
+    await openRow('CNC_01')
     fireEvent.click(purgeButton())
 
     const prompt = await screen.findByText(/Permanently delete the device/i)
@@ -622,7 +640,7 @@ describe('EntitiesTab exports a device before it goes', () => {
   it('withholds the export from a reader who cannot manage archives', async () => {
     api.get.mockImplementation(routed({ archives: [ARCHIVED_DEVICE] }))
     render(<EntitiesTab showToast={vi.fn()} hasPermission={() => false} />)
-    await waitFor(() => expect(screen.getByText('CNC_01')).toBeInTheDocument())
+    await openRow('CNC_01')
 
     expect(screen.getByRole('button', { name: /Export Bundle/i })).toBeDisabled()
   })
@@ -659,19 +677,21 @@ describe('EntitiesTab shows what has been retired', () => {
   })
 
   it('opens the audit trail with deleted entities shown, since the row is gone', async () => {
-    const { onViewTrail } = await showRetired({ retired: [RETIRED_DEVICE] })
-    const link = screen.getByRole('link', { name: /Audit Trail/i })
+    await showRetired({ retired: [RETIRED_DEVICE] })
+    await openRow('CNC_01')
+    const link = drawer().getByRole('link', { name: 'View in Audit Trail' })
     expect(link).toHaveAttribute('href', '/audit-trail?search=dev-1&deleted=1')
     fireEvent.click(link)
-    expect(onViewTrail).toHaveBeenCalledWith({ id: 'dev-1', type: 'DEVICE', purged: true })
+    expect(window.location.pathname + window.location.search).toBe('/audit-trail?search=dev-1&deleted=1')
   })
 
   it('links a gateway to its repository in the forge, which archiving kept', async () => {
     await showRetired({ retired: [RETIRED_DEVICE, RETIRED_GATEWAY] })
-    const links = screen.getAllByRole('link', { name: /Forge repository/i })
+    await openRow('Line_A_Gateway')
+    expect(drawer().getByRole('link', { name: 'Forge Repository' })).toHaveAttribute('href', expect.stringContaining('gateway-def456'))
     // Only the gateway, and only because the sweep recorded that it had a repository.
-    expect(links).toHaveLength(1)
-    expect(links[0]).toHaveAttribute('href', expect.stringContaining('gateway-def456'))
+    await openRow('CNC_01')
+    await waitFor(() => expect(drawer().queryByRole('link', { name: 'Forge Repository' })).toBeNull())
   })
 
   it('offers a bundle exported while the device was alive, from the cold tier\'s bucket', async () => {
@@ -679,6 +699,7 @@ describe('EntitiesTab shows what has been retired', () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     await showRetired({ retired: [RETIRED_DEVICE] })
 
+    await openRow('CNC_01')
     fireEvent.click(screen.getByRole('button', { name: /^Bundle/i }))
 
     await waitFor(() => expect(api.assetExportDownloadUrl).toHaveBeenCalledWith(EXPORT_ROW))
@@ -688,8 +709,9 @@ describe('EntitiesTab shows what has been retired', () => {
 
   it('offers nothing to download for a device that was never exported', async () => {
     await showRetired({ retired: [{ ...RETIRED_DEVICE, exports: [] }] })
+    await openRow('CNC_01')
     expect(screen.queryByRole('button', { name: /^Bundle/i })).toBeNull()
-    expect(screen.getByRole('link', { name: /Audit Trail/i })).toBeInTheDocument()
+    expect(drawer().getByRole('link', { name: 'View in Audit Trail' })).toBeInTheDocument()
   })
 
   it('still shows the Archived tab when the tombstones cannot be read', async () => {
@@ -747,11 +769,15 @@ describe('EntitiesTab layout', () => {
     expect(heads()).toEqual(['Name', 'UUID'])
   })
 
-  it('right-aligns the What Survives header over its actions and names the timer Auto-Purge', async () => {
+  it('has no column of buttons on either tab, and names the timer Auto-Purge', async () => {
     await showLifecycle({ archives: [ARCHIVED_CELL], retired: [RETIRED_DEVICE] })
-    expect(screen.getByText('Auto-Purge')).toBeInTheDocument()
+    const heads = () => [...document.querySelectorAll('thead th')].map(th => th.textContent)
+    expect(heads()).toEqual(['Name', 'UUID', 'Archived At', 'Auto-Purge'])
     fireEvent.click(tabLink('Retired'))
-    expect(screen.getByText('What Survives')).toHaveClass('row-actions')
+    expect(heads()).toEqual(['Name', 'UUID', 'Retired At', 'By', 'Historian ID'])
+    expect(document.querySelector('.row-actions')).toBeNull()
+    // Every row ends in the chevron of a row that opens a panel.
+    for (const tr of dataRows()) expect(tr).toHaveClass('row-selectable')
   })
 
   it('shows the auto-purge as a plain date, flagged with an icon as well as colour within a week', async () => {

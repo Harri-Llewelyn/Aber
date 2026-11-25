@@ -801,7 +801,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
               <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
             {/* Ungated: every role reads its own rows. `userRole` decides whether people are read too and
                 which of the pages an entity is on this reader may open, so it waits for the role. */}
-            {tab === 'entities'       && !loadingPerms && <EntitiesTab showToast={showToast} userRole={userRole} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} unmappedMetricsTo={unmappedMetricsTo} />}
+            {tab === 'entities'       && !loadingPerms && <EntitiesTab showToast={showToast} userRole={userRole} hasPermission={hasPermission} unmappedMetricsTo={unmappedMetricsTo} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` lets the page tell "nothing archived" from "not yours to see";
                 cold_storage_rows() gates in its body. */}

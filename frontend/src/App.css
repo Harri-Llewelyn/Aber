@@ -1856,7 +1856,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* Group header row: a collapsible category inside a table body, on the header colour. It pins to
    the top of the scroller, below a pinned `thead` (`--table-head-height`, 0 where the header does
-   not pin), for as long as its own `tbody` is in view. Its hairlines are shadows, since a border
+   not pin), until the next group's covers it. Its hairlines are shadows, since a border
    does not travel with a sticky cell. Under the header's z-index 2. */
 .table-group-row > td {
   position: sticky;
@@ -1953,6 +1953,7 @@ tbody tr.table-group-foot:hover { background: none; }
   align-items: center;
   gap: 4px;
 }
+.cell-purge-date > svg { flex-shrink: 0; }
 .cell-purge-date-soon {
   color: var(--danger-text);
   font-weight: 600;
@@ -1963,19 +1964,28 @@ tbody tr.table-group-foot:hover { background: none; }
   color: var(--text-muted);
 }
 
-/* The Active tab of Entities: three columns of one grid, so a long semantic id is cut in its own cell and
-   never widens the table. The widths are the first row's, which fixed layout reads; the second ids take
-   what is left. */
+/* Entities' three tables, whose first two columns are one grid: a long semantic id is cut in its own cell and
+   never widens the table, and the tabs' shared columns line up. The widths are the first row's, which fixed
+   layout reads; the rest share what is left. The scroller keeps the scrollbar's room whether or not a tab
+   needs it, and holds the rows' sr-only words, which would otherwise lengthen the page. */
+.table-wrap:has(> .table-entities) { position: relative; scrollbar-gutter: stable; container: entities / inline-size; }
 .table-entities { table-layout: fixed; }
-/* The scrollbar's room is kept whether or not a tab needs it, so the tabs' columns are the same widths. */
-.table-wrap:has(> .table-entities) { scrollbar-gutter: stable; }
-.table-entities th:nth-child(1) { width: 30%; }
-.table-entities th:nth-child(2) { width: 32%; }
+.table-entities th:nth-child(-n + 2) { width: 28%; }
+.table-entities-retired th:nth-child(5) { width: 17%; }
 .table-entities td { overflow-wrap: anywhere; }
 .entity-second-ids { display: block; min-width: 0; font-size: 12px; color: var(--text-muted); }
-@media (max-width: 760px) {
+/* A narrow window, or a drawer beside the table: closer cells, and each table its own widths. */
+@container entities (max-width: 760px) {
   .table-entities tr:not(.table-group-row) > :is(th, td) { padding-left: 8px; padding-right: 8px; }
   .table-entities th { letter-spacing: 0; }
+  .table-entities td > .badge { padding: 3px 6px; letter-spacing: 0; }
+  .table-entities-archived th:nth-child(1) { width: 25%; }
+  .table-entities-archived th:nth-child(2) { width: 19%; }
+  .table-entities-archived th:nth-child(3) { width: 20%; }
+  .table-entities-retired th:nth-child(1) { width: 24%; }
+  .table-entities-retired th:nth-child(2) { width: 19%; }
+  .table-entities-retired th:nth-child(3) { width: 19%; }
+  .table-entities-retired th:nth-child(5) { width: 23%; }
 }
 
 /* What else a search found, between the toolbar and the table. */
