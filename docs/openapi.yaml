@@ -1406,7 +1406,7 @@ paths:
                 p_until: { type: string, format: date-time }
                 p_before_recorded_at: { type: string, format: date-time, description: 'The cursor, with `p_before_id`.' }
                 p_before_id: { type: integer, format: int64 }
-                p_search: { type: string, description: 'A substring of the entity id or the name the timeline shows; 1 to 18 digits also match the row id and the transaction id.' }
+                p_search: { type: string, description: 'A substring of the entity id, of the name the timeline shows, or of a further id the entity goes by (`Entity.second_ids`); 1 to 18 digits also match the row id and the transaction id. A further semantic id finds every row of its metric.' }
                 p_changed_by: { type: array, nullable: true, items: { type: string, format: uuid }, description: 'Only the rows these people or machine identities wrote: any of these `changed_by` ids. Null or empty is no constraint.' }
                 p_class: { type: array, nullable: true, items: { type: string, enum: [created, operational, configuration, lifecycle, read] }, description: 'Any of these classes. Null or empty is no constraint.' }
                 p_counts: { type: boolean, default: false, description: 'Also answer `counts`.' }
