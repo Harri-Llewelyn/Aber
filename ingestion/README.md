@@ -730,6 +730,11 @@ such as the plan of an area the nightly purge deleted, and deletes them through 
 `capture_worker.py`'s storage client. It is not part of the daemon's sweep: a plan has nothing to
 do with the broker, and a CronJob can be turned off on its own (`areaPlanSweep.enabled`).
 
+**3D models no device names go the same way** (`0329`). [`device_model_sweep.py`](device_model_sweep.py)
+runs hourly as the `device-model-sweep` CronJob (`deviceModelSweep.enabled`), over the same loop and
+clients. It asks `ingest_unclaimed_device_model_objects()` for the `asset-3d-models` objects that no
+device, no retired device's tombstone and no open proposal has named for a day.
+
 **100 MiB**, sized from the traffic rather than picked. At the fleet's measured 0.95 msg/s a full
 working day fits, and it is twice the 50 MiB cap `capture_jobs` puts on a recording, which counts
 the bytes the file holds. That is the constraint that matters, because a capture that terminated

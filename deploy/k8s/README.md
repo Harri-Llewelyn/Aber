@@ -392,7 +392,7 @@ Run `npm run dev:test`. The port-forwards give `DB_HOST`, `SUPABASE_DB_HOST`, `M
 | `node-red`, `frontend` | deployed |
 | `i3x-service` | deployed |
 | `gitea` + `gitea-external` | deployed |
-| `prometheus`, `loki`, `alloy`, the `cold-archive` and `area-plan-sweep` CronJobs | deployed |
+| `prometheus`, `loki`, `alloy`, the `cold-archive`, `area-plan-sweep` and `device-model-sweep` CronJobs | deployed |
 | `grafana`, `Ingress` (9 subdomain routes) | deployed |
 | `helm test` (the FDW link, the API, the broker, ingestion, the dashboard), k3d CI | deployed |
 | In-cluster E2E Jobs, the backup service, historian physical backup, database TLS | **available, off by default** |
@@ -884,8 +884,8 @@ at the end of this section. Each writes only where a volume is mounted:
   files, and `nginx.conf` rendered at start.
 - `ingestion`: `/tmp`, for the liveness heartbeat and the objects `python -m cold_archive query`
   fetches. It has no size limit, because reaching one would evict the daemon.
-- `playback` and the `cold-archive` and `area-plan-sweep` CronJobs: `/tmp`. They write no file of
-  their own; Python and OpenSSL use it when they need a temporary file.
+- `playback` and the `cold-archive`, `area-plan-sweep` and `device-model-sweep` CronJobs: `/tmp`.
+  They write no file of their own; Python and OpenSSL use it when they need a temporary file.
 - `node-red`: `/tmp`, for what a flow's file or exec node writes there. It has no size limit, for
   the same reason as `ingestion`'s.
 - `assemble-config` (mosquitto): `/tmp`. `mosquitto_passwd` hashes each managed account in a
@@ -938,7 +938,7 @@ together.
 
 | Image | uid:gid | Where it runs |
 |---|---|---|
-| ingestion | 10001:10001 | `ingestion`, `playback`, the `cold-archive` and `area-plan-sweep` CronJobs, the `claim-templates` hook |
+| ingestion | 10001:10001 | `ingestion`, `playback`, the `cold-archive`, `area-plan-sweep` and `device-model-sweep` CronJobs, the `claim-templates` hook |
 | test-runner | 10001:10001 | the e2e and load-test Jobs |
 | i3x-service | 10001:10001 | `i3x-service` |
 | edge-runtime | 10001:10001 | `supabase-functions` |

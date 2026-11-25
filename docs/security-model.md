@@ -138,7 +138,10 @@ Two consequences worth stating on the front page; both are detailed in
   for a viewer holding no session and a signed URL would turn every shell already handed out into a
   time bomb. Anything in it must carry nothing beyond machine geometry. The objects are public; the
   listing is not: keys are `<device_uuid>/<file>`, so listing the bucket, like writing to it, is
-  gated on `device:manage`, not merely `authenticated`.
+  gated on `device:manage`, not merely `authenticated`. A file a device no longer names is deleted:
+  at once by the page that replaced or removed it, and otherwise by the hourly `device-model-sweep`
+  (`0329`). The sweep runs as the ingestion principal, which lists and deletes such a file and no
+  other.
 
 **A capture is read only through its audited download** (`0195`). A file in `broker-captures` holds
 the plant's raw traffic. Administrator, Shopfloor_Manager and Auditor read a stored capture's file
