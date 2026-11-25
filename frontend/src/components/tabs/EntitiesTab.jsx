@@ -137,8 +137,10 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
   )
 
   /* What the search found, for the text it was asked with. `found.text` lags `text` while one is typed and
-     while the answer is on its way, and what is listed is always one answer's. */
+     while the answer is on its way, and what is listed is always one answer's. Asked again after an act on
+     the page (`version`), since a restored entity is on another tab. */
   const [found, setFound] = useState({ text: '', rows: NONE, error: null })
+  const [version, setVersion] = useState(0)
   useEffect(() => {
     if (text === '') {
       setFound({ text: '', rows: NONE, error: null })
@@ -152,7 +154,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
         .catch(e => { if (live) setFound({ text, rows: NONE, error: e?.message || 'The search failed.' }) })
     }, FIND_SETTLE_MS)
     return () => { live = false; clearTimeout(timer) }
-  }, [text])
+  }, [text, version])
   const searching = text !== found.text
   const matches = useMemo(
     () => (found.text === '' ? NONE : mergeFound(found.rows, local, found.text)),
@@ -258,7 +260,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
   // Restore and Permanent Delete run from their dialogs, which show a refusal and stay open.
   const restore = async (item) => {
     await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
-    setConfirmRestore(null); load()
+    setConfirmRestore(null); load(); setVersion(v => v + 1)
     showToast(`Entity '${item.name}' restored to active service`, 'success', { to: entityUrl(item.entity_type, item.entity_id) })
   }
 
@@ -271,7 +273,8 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
     await api.delete(`/api/v1/${item.entity_type}s/${item.entity_id}`)
     // Dismissed after the delete, so the action runs while the confirmation is on screen.
     setConfirmPurge(null)
-    load(); showToast(`Entity '${item.name}' permanently deleted`, 'success')
+    load(); setVersion(v => v + 1)
+    showToast(`Entity '${item.name}' permanently deleted`, 'success')
   }
 
   const downloadExport = async (row) => {
@@ -359,7 +362,7 @@ export function EntitiesTab({ showToast, userRole, hasPermission, onViewTrail, u
         <CardHeading
           icon={<IconArchive size={15} />}
           title="Entities"
-          description="Everything this site has, found by any ID or name. An archived one restores intact; a retired one was deleted, and links to what survives it."
+          description="Every entity in service, archived or deleted, found by any ID or name. An archived one restores intact; a retired one links to what survives it."
         />
         <TabStrip
           ariaLabel="Entities"

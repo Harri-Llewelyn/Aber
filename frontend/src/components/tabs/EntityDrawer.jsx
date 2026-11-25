@@ -118,7 +118,7 @@ export function EntityDrawer({ entity, nameOf, onClose, showToast, userRole, has
       subtitle={entity && (
         <>
           <Badge size="sm">{kind}</Badge>
-          {badge && <Badge size="sm" tone={badge.tone} title={badge.title} className="badge-follow">{badge.label}</Badge>}
+          {badge && <Badge size="sm" tone={badge.tone} title={badge.title}>{badge.label}</Badge>}
         </>
       )}
       warnings={entityWarnings(entity)}

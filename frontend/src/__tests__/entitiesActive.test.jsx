@@ -18,6 +18,7 @@ vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal()),
   api: {
     get: vi.fn(),
+    post: vi.fn(),
     findEntities: vi.fn(),
     listPeople: vi.fn(),
     listUserAccounts: vi.fn(),
@@ -278,6 +279,18 @@ describe('the search', () => {
     expect(panel()).not.toHaveClass('context-panel-open')
     // Restore is there as it always was.
     expect(screen.getByRole('button', { name: /Restore/ })).toBeEnabled()
+  })
+
+  it('is asked again after Restore, since the entity is on another tab now', async () => {
+    api.findEntities.mockResolvedValue([ofArchived(ARCHIVED_CELL), ofArchived(ARCHIVED_DEVICE)])
+    api.post.mockResolvedValue(true)
+    await show({ archives: [ARCHIVED_CELL, ARCHIVED_DEVICE], url: '/entities/archived?find=old' })
+    await waitFor(() => expect(names()).toEqual(['Old bay', 'Old lathe']))
+    api.findEntities.mockResolvedValue([row('cells', ARCHIVED_CELL.entity_id, 'Old bay'), ofArchived(ARCHIVED_DEVICE)])
+    fireEvent.click(screen.getAllByRole('button', { name: /Restore/ })[0])
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Restore cell' })).getByRole('button', { name: 'Restore Cell' }))
+    await waitFor(() => expect(api.findEntities).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText(/Also found:/)).toHaveTextContent('Also found: 1 active.')
   })
 
   it('says nothing matches, by what was typed', async () => {
