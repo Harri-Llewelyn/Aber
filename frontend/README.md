@@ -442,9 +442,10 @@ handler. Two pickers build on it.
   version is not in force, over the metric count and the description. The search reads the name, the
   description and the names of the metrics a schema models, all from the definition the page already
   holds. A schema found by a metric names it in place of its description, so the row is no taller. The
-  list has one height whether the site has one schema or sixty. The schemas ticked as it opens come
-  first, and ticking moves no row. Under reduced motion a row's cut text wraps: a tooltip on a row
-  would cover the rows under it.
+  list is as tall as the schemas it offers, up to 200px (three rows and the next one's name), and a
+  search never changes it. The schemas ticked as it opens come first, and ticking moves no row. Under
+  reduced motion a row's cut text wraps, since a tooltip on a row would cover the rows under it, and
+  the list is always 200px.
 
 ### A dialog's width is named by its content
 

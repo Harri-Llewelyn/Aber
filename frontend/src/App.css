@@ -7915,9 +7915,9 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .list-picker-label-disabled > input { cursor: not-allowed; }
 .list-picker-label-disabled { color: var(--text-muted); }
 
-/* The device form's schema list (SchemaPicker): a fixed height, so neither the site's schemas nor a
-   search changes the dialog's, and shorter only while there is none to list. */
-.schema-picker-list { flex: none; height: 200px; }
+/* The device form's schema list (SchemaPicker): as tall as the schemas it offers, up to three and the
+   next one's name, so a short list costs a dialog nothing and a search never changes its height. */
+.schema-picker-list { flex: none; min-height: 0; height: min(var(--schema-rows) * 54px + 2px, 200px); }
 .schema-picker-list-none { flex: none; min-height: 0; }
 .schema-picker-list input { flex-shrink: 0; }
 .schema-picker-list .list-picker-label { padding-block: 6px; }
@@ -7948,6 +7948,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* Cut text slides unless motion is reduced. Here it then wraps: a tooltip on a row would cover the
    rows under it. */
 @media (prefers-reduced-motion: reduce) {
+  .schema-picker-list { height: 200px; }
   .schema-picker-row .overflow-text { white-space: normal; overflow-wrap: anywhere; }
   .schema-picker-detail { align-items: baseline; }
 }

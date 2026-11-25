@@ -148,13 +148,20 @@ describe('the order', () => {
     expect(names()).toEqual(['Schema_42', 'Schema_40', 'Schema_41', 'Schema_43', 'Schema_44', 'Schema_45', 'Schema_46', 'Schema_47', 'Schema_48', 'Schema_49'])
   })
 
-  it('has one height whether it lists one schema or sixty, and is short with none', () => {
+  it('is as tall as the schemas it offers, whatever a search leaves, and short with none', () => {
     const { rerender } = render(<Harness schemas={sixty} />)
     const list = () => document.querySelector('.list-picker-list')
+    const rows = () => list().style.getPropertyValue('--schema-rows')
     expect(list()).toHaveClass('schema-picker-list')
+    expect(rows()).toBe('60')
+    type('schema_42')
+    expect(names()).toEqual(['Schema_42'])
+    expect(rows()).toBe('60')
+    type('')
     rerender(<Harness schemas={sixty.slice(0, 1)} />)
     expect(names()).toEqual(['Schema_01'])
     expect(list()).toHaveClass('schema-picker-list')
+    expect(rows()).toBe('1')
     rerender(<Harness schemas={[]} />)
     expect(list()).not.toHaveClass('schema-picker-list')
     expect(list().textContent).toBe('No schemas yet. Create one on the Schemas page.')

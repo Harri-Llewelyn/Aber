@@ -38,7 +38,7 @@ function SchemaRow({ schema, metrics, needle, id }) {
 /**
  * Schemas to choose from, as a fieldset named by `legend`: a ListPicker whose search finds a schema
  * by its name, its description or the name of a metric it models, and says which metric when that is
- * what found it. The list has one height whatever it holds, so a dialog does not grow with the site.
+ * what found it. The list is as tall as the schemas offered, up to 200px, and a search never changes it.
  *
  * The schemas chosen as it opens are listed first, so they are found without a search. Choosing
  * moves no row.
@@ -79,6 +79,7 @@ export function SchemaPicker({ schemas, value, onToggle, disabled = false, legen
       })}
       renderItem={(row, { needle }) => <SchemaRow {...row} needle={needle} id={idOf(row.schema)} />}
       listClass={rows.length > 0 ? 'schema-picker-list' : 'schema-picker-list-none'}
+      listStyle={rows.length > 0 ? { '--schema-rows': rows.length } : undefined}
       emptyText="No schemas yet. Create one on the Schemas page."
       noMatchText="No matching schemas."
     >
