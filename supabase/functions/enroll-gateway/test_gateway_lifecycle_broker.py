@@ -153,6 +153,7 @@ class BrokerLifecycle(unittest.TestCase):
             raise
         except Exception as err:  # noqa: BLE001
             skip_or_fail(f"could not sign in as the seeded Administrator -- apply supabase/seed.sql first ({err})")
+        cls.addClassCleanup(cls.delete_made)
         cls.reclaim()
 
     @classmethod
@@ -164,8 +165,8 @@ class BrokerLifecycle(unittest.TestCase):
             delete_broker_account(row["sparkplug_id"])
 
     @classmethod
-    def tearDownClass(cls):
-        # Each gateway, then its account, whatever the last one did; the first failure is raised at the end.
+    def delete_made(cls):
+        """Each gateway, then its account, whatever the last one did; the first failure is raised at the end."""
         failure = None
         for gid in cls.made:
             try:

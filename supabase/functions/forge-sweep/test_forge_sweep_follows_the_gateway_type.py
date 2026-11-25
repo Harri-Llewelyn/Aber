@@ -27,7 +27,9 @@ from test_forge_sweep import (  # noqa: E402
     ORGANISATION, PLATFORM_ORGANISATION, PLATFORM_REPOSITORY, ForgeSweepBase, delete_broker_account, enroll,
     forge, rest, sign_in, stack_sign_in, sweep,
 )
-from test_enroll_gateway import delete_gateway_and_wait_for_revoke  # noqa: E402
+from test_enroll_gateway import (  # noqa: E402
+    check_sparkplug_id, delete_gateway_and_wait_for_revoke, sparkplug_id_of,
+)
 
 # Differs from every other suite's fixture id in its first block: sparkplug_id is the first 21 hex
 # characters of the uuid.
@@ -56,24 +58,23 @@ class TestTheKeyFollowsTheType(ForgeSweepBase):
             raise
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"could not sign in as the seeded administrator ({err})")
-        delete_gateway_and_wait_for_revoke(TEST_GW_ID, "gwy" + TEST_GW_ID.replace("-", "")[:21])
+        cls.sparkplug_id = sparkplug_id_of(TEST_GW_ID)
+        cls.repo = f"gateway-{cls.sparkplug_id}"
+        # Class clean-ups, which Python also runs when setUpClass raises. In reverse: the repository,
+        # the row, whose delete waits for the revoke it queues, then the account that outlives it.
+        cls.addClassCleanup(delete_broker_account, cls.sparkplug_id)
+        cls.addClassCleanup(delete_gateway_and_wait_for_revoke, TEST_GW_ID, cls.sparkplug_id)
+        cls.addClassCleanup(forge, f"/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
+        # What a run that was killed left behind.
+        forge(f"/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
+        delete_gateway_and_wait_for_revoke(TEST_GW_ID, cls.sparkplug_id)
         status, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body={"id": TEST_GW_ID, "name": "Test_Forge_Sweep_Type", "status": "OFFLINE", "deployment": "remote"},
         )
         if status >= 300:
             raise unittest.SkipTest(f"could not create the test gateway: {rows}")
-        cls.sparkplug_id = rows[0]["sparkplug_id"]
-        cls.repo = f"gateway-{cls.sparkplug_id}"
-        forge(f"/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
-
-    @classmethod
-    def tearDownClass(cls):
-        forge(f"/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
-        try:
-            delete_gateway_and_wait_for_revoke(TEST_GW_ID, cls.sparkplug_id)
-        finally:
-            delete_broker_account(cls.sparkplug_id)
+        check_sparkplug_id(TEST_GW_ID, rows[0]["sparkplug_id"])
 
     def set_type(self, deployment):
         status, _ = rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"deployment": deployment})

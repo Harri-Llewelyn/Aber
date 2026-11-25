@@ -162,9 +162,14 @@ class ForgeEventsBase(unittest.TestCase):
             rest("/gateways?limit=1")
         except Exception as err:  # noqa: BLE001 -- any failure here means "no stack"
             raise unittest.SkipTest(f"PostgREST is unreachable at {SUPABASE_URL}: {err}")
+        # Class clean-ups, which Python also runs when setUpClass raises. In reverse: the row, whose
+        # delete waits for the revoke it queues, then the broker account, which outlives the row.
+        sparkplug_id = sparkplug_id_of(TEST_GW_ID)
+        cls.addClassCleanup(delete_broker_account, sparkplug_id)
+        cls.addClassCleanup(delete_gateway_and_wait_for_revoke, TEST_GW_ID, sparkplug_id)
         # A row a crashed run left behind is deleted like any other, so its revoke is answered before
         # this class enrols under the same id.
-        delete_gateway_and_wait_for_revoke(TEST_GW_ID, sparkplug_id_of(TEST_GW_ID))
+        delete_gateway_and_wait_for_revoke(TEST_GW_ID, sparkplug_id)
         status, rows = rest(
             "/gateways", method="POST", prefer="return=representation",
             body={"id": TEST_GW_ID, "name": "Test_Forge_Events", "status": "OFFLINE", "deployment": "remote"},
@@ -174,9 +179,24 @@ class ForgeEventsBase(unittest.TestCase):
         cls.sparkplug_id = rows[0]["sparkplug_id"]
         check_sparkplug_id(TEST_GW_ID, cls.sparkplug_id)
 
-    @classmethod
-    def tearDownClass(cls):
-        delete_gateway_and_wait_for_revoke(TEST_GW_ID, cls.sparkplug_id)
+    @staticmethod
+    def require_the_forge():
+        """Asked before the gateway is made, as the sign-in is: a class that skips makes none."""
+        try:
+            status, _ = forge_as_machine("/api/v1/version")
+        except OSError as err:
+            skip_or_fail(f"no forge reachable at {FORGE_URL}: {err}")
+        if status != 200:
+            skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
+
+    @staticmethod
+    def administrator():
+        try:
+            return sign_in()
+        except stack_sign_in.RateLimited:
+            raise
+        except Exception as err:  # noqa: BLE001
+            skip_or_fail(f"could not sign in as the seeded administrator ({err})")
 
     def setUp(self):
         rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={
@@ -301,28 +321,12 @@ class TestTheForgeItself(ForgeEventsBase):
 
     @classmethod
     def setUpClass(cls):
+        cls.require_the_forge()
+        cls.admin_token = cls.administrator()
         super().setUpClass()
-        status, _ = forge_as_machine("/api/v1/version")
-        if status != 200:
-            skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
-        try:
-            cls.admin_token = sign_in()
-        except stack_sign_in.RateLimited:
-            raise
-        except Exception as err:  # noqa: BLE001
-            skip_or_fail(f"could not sign in as the seeded administrator ({err})")
         cls.repo = f"gateway-{cls.sparkplug_id}"
+        cls.addClassCleanup(cls.delete_repo)
         cls.delete_repo()
-
-    @classmethod
-    def tearDownClass(cls):
-        # The broker account outlives the row; it is deleted through the service's admin credential,
-        # after the base class has waited for the revoke the row's delete queued.
-        try:
-            cls.delete_repo()
-            super().tearDownClass()
-        finally:
-            delete_broker_account(cls.sparkplug_id)
 
     @classmethod
     def delete_repo(cls):
@@ -391,22 +395,16 @@ class TestAProposal(ForgeEventsBase):
 
     @classmethod
     def setUpClass(cls):
+        cls.require_the_forge()
         super().setUpClass()
-        status, _ = forge_as_machine("/api/v1/version")
-        if status != 200:
-            skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
         cls.repo = f"gateway-{cls.sparkplug_id}"
+        cls.addClassCleanup(forge_as_machine, f"/api/v1/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
         forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
         status, made = forge_as_machine(f"/api/v1/orgs/{ORGANISATION}/repos", method="POST", body={
             "name": cls.repo, "private": True, "auto_init": True, "default_branch": "main",
         })
         if status != 201:
             skip_or_fail(f"could not create a repository to propose against: {made}")
-
-    @classmethod
-    def tearDownClass(cls):
-        forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
-        super().tearDownClass()
 
     def propose(self, branch, content):
         """A commit on a new branch, as a person uploading a file in the forge would make."""
@@ -503,29 +501,14 @@ class TestTheApplianceItself(ForgeEventsBase):
 
     @classmethod
     def setUpClass(cls):
+        cls.require_the_forge()
+        cls.admin_token = cls.administrator()
         super().setUpClass()
-        status, _ = forge_as_machine("/api/v1/version")
-        if status != 200:
-            skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
-        try:
-            cls.admin_token = sign_in()
-        except stack_sign_in.RateLimited:
-            raise
-        except Exception as err:  # noqa: BLE001
-            skip_or_fail(f"could not sign in as the seeded administrator ({err})")
         cls.repo = f"gateway-{cls.sparkplug_id}"
+        cls.addClassCleanup(cls.delete_repo)
         cls.delete_repo()
         cls.work = tempfile.mkdtemp(prefix="aber-appliance-")
-
-    @classmethod
-    def tearDownClass(cls):
-        # As TestTheForgeItself: the account is deleted after the revoke is answered.
-        try:
-            cls.delete_repo()
-            shutil.rmtree(cls.work, ignore_errors=True)
-            super().tearDownClass()
-        finally:
-            delete_broker_account(cls.sparkplug_id)
+        cls.addClassCleanup(shutil.rmtree, cls.work, ignore_errors=True)
 
     @classmethod
     def delete_repo(cls):
