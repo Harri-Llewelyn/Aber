@@ -391,10 +391,7 @@ class TestAMachineIdentityReadsAsAPersonDoes(unittest.TestCase):
         if issued is None:
             raise unittest.SkipTest(reason)
         cls.token, cls.jti = issued
-
-    @classmethod
-    def tearDownClass(cls):
-        revoke_machine_token(TOKEN, cls.jti)
+        cls.addClassCleanup(revoke_machine_token, TOKEN, cls.jti)
 
     def machine(self, path: str):
         return get(path, self.token, send_apikey=False)

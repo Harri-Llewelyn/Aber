@@ -21,6 +21,10 @@ transaction, as the System page's suite does, and the tests that want an outage 
 table as it is, which raises on connect. One class reads a real historian when
 ABER_TEST_HISTORIAN names one (see the end of this file); every other test rolls back.
 
+pg_cron runs evaluate_automations() on this database every minute, and a run that meets another does
+nothing. Each test holds the run's lock from before its first write to its rollback, so the scheduled
+run is the one that does nothing.
+
 What is held here:
 
   * The read. machine_condition_rows() answers one row for each breaching live threshold pair in the
@@ -84,6 +88,18 @@ def get_connection():
     return conn
 
 
+def hold_the_evaluator(cur):
+    """
+    Take evaluate_automations()'s lock for this transaction: the run this session then makes holds it
+    already, and pg_cron's does nothing. Waits for a run under way, which takes milliseconds here, and
+    fails when the lock is not free in 30 s. Taken before any write, so no session waits for it holding
+    a row another session that holds it wants.
+    """
+    cur.execute("SET LOCAL lock_timeout = '30s';"
+                "SELECT pg_advisory_xact_lock(hashtextextended('evaluate_automations', 0));"
+                "SET LOCAL lock_timeout = 0;")
+
+
 def trigger(device=DEV_A, metric=METRIC, **over):
     t = {"trigger": "threshold", "device": device, "metric": metric, "above": 80, "for": "5m"}
     t.update(over)
@@ -105,6 +121,7 @@ class EvaluatorBase(unittest.TestCase):
         self.cur.execute("SELECT to_regprocedure('public.evaluate_automations(timestamp with time zone)') IS NOT NULL;")
         if not self.cur.fetchone()[0]:
             self.skipTest("0271 is not applied to this database")
+        hold_the_evaluator(self.cur)
         self.cur.execute("SELECT id, name FROM public.roles;")
         roles = {name: rid for rid, name in self.cur.fetchall()}
         for user_id, role in PEOPLE:
@@ -838,15 +855,21 @@ class TheJob(EvaluatorBase):
         self.assertEqual(self.cur.fetchone(), (timedelta(minutes=5), timedelta(minutes=5), timedelta(minutes=5), timedelta(hours=13)))
 
     def test_a_second_run_at_the_same_time_finds_nothing_to_do(self):
-        self.owner()
-        self.cur.execute("SELECT pg_try_advisory_xact_lock(hashtextextended('evaluate_automations', 0));")
-        self.assertTrue(self.cur.fetchone()[0])
-        # Another session holds it: the run returns at once without reading anything.
+        # The lock setUp holds is the first run's. The second, in another session, returns at once
+        # without reading anything: here a read raises, and a run that read would raise the alert.
         other = get_connection()
         try:
             with other.cursor() as cur:
+                cur.execute(
+                    "CREATE OR REPLACE FUNCTION public.machine_condition_readings()"
+                    " RETURNS TABLE (trigger_id uuid, entity_id uuid, metric_name text, comparison text,"
+                    "                threshold double precision, value double precision,"
+                    "                observed_at timestamp with time zone, breached boolean)"
+                    " LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'the second run read'; END $$;")
                 cur.execute("SELECT public.evaluate_automations();")
                 self.assertEqual(cur.fetchone()[0], 0)
+                cur.execute("SELECT count(*) FROM public.platform_alerts WHERE fingerprint = %s;", (NOT_EVALUATED,))
+                self.assertEqual(cur.fetchone()[0], 0, "a second run read while the first was under way")
         finally:
             other.rollback()
             other.close()

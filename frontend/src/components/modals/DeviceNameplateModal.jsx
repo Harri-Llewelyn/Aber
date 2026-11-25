@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
-import { IconAlertTriangle, IconLock, IconTag, IconCheck } from '../common/Icons'
+import { IconLock, IconTag, IconCheck } from '../common/Icons'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { HelpTip } from '../common/HelpTip'
 import { Modal } from '../common/Modal'
 import { LoadingState } from '../common/LoadingState'
@@ -135,6 +136,14 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
   // Matches device_nameplate_uri_shape: an absolute IRI, or nothing. A bare string exports as a
   // broken xs:anyURI that no consumer reports and every consumer mis-renders.
   const uriIsValid = !form.uri_of_the_product || /^[a-z][a-z0-9+.-]*:/i.test(form.uri_of_the_product)
+  // By column, said under its field. Each holds Save.
+  const fieldErrors = {
+    year_of_construction: yearIsValid ? null : 'Year of construction must be four digits. IDTA types it as a '
+      + 'string, so a range or a week code would be legitimate on a plate — but the column accepts only a year.',
+    uri_of_the_product: uriIsValid ? null : (
+      <>Product URI must be an absolute IRI, including its scheme — <span className="mono">https://…</span></>
+    )
+  }
   const canSave = canManage && !saving && yearIsValid && uriIsValid
   // The same two rules gate a proposal, so an approver is never asked about a value the column
   // would refuse.
@@ -248,6 +257,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                 // Explicit htmlFor/id names the input. A value shown as text has no control to name, so
                 // its label is a plain div.
                 const inputId = `nameplate-${field.column}`
+                const fieldError = fieldErrors[field.column]
                 const NameTag = isPublished || reading ? 'div' : 'label'
                 return (
                   <div key={field.column}>
@@ -300,25 +310,14 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
                         placeholder={field.placeholder || ''}
                         value={form[field.column]}
                         onChange={e => set(field.column, e.target.value)}
+                        {...fieldErrorProps(fieldError, `${inputId}-error`)}
                       />
                     )}
+                    <FieldError id={`${inputId}-error`} error={fieldError} />
                   </div>
                 )
               })}
             </div>
-
-            {/* Each holds Save, so each is said as a problem, under the grid. */}
-            {!yearIsValid && (
-              <div className="form-hint hint-danger">
-                <IconAlertTriangle size={12} /> Year of construction must be four digits. IDTA types it as a string, so a range or a
-                week code would be legitimate on a plate — but the column accepts only a year.
-              </div>
-            )}
-            {!uriIsValid && (
-              <div className="form-hint hint-danger">
-                <IconAlertTriangle size={12} /> Product URI must be an absolute IRI, including its scheme — <span className="mono">https://…</span>
-              </div>
-            )}
           </>
         )}
 

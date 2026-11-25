@@ -75,6 +75,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/standards.js` (`VDA5050_GROUP`, `vda5050FieldType()`, `VDA5050_SEMANTIC_NAMESPACE`) | the metric group registered under VDA 5050, the name `metric_catalog_name_format` admits for each seeded field, and the namespace the generator, the table's CHECK and i3X mint and read the ids under (mirror checks 117 and 118) |
 | `utils/standards.js` (`STANDARDS`) | the `standard` each arm of `concept_definitions` carries, and the one a metric group is registered under (mirror check 119) |
 | `utils/qudt.js` (`QUDT_VERSION`, `QUDT_KIND_NAMESPACE`, `QUDT_LABEL`) | the release the generator reads, the namespace the tables' CHECKs, i3X and the exporter name a quantity kind's id under, and the label the view gives QUDT's arm, which `STANDARDS` leaves out because no metric is filed under it (mirror checks 123 and 124) |
+| `utils/idtaTemplates.js` (`CARDINALITY_LABELS`) | the cardinalities `idta_template_elements` admits and the template generator reads (mirror check 153) |
 | `utils/historianBackupSchedule.js` (`nextHistorianBackup()`) | the historian backup sidecar's schedule, `physical_backup_missed_slot()` and `physical_backup_type()` in `timescaledb/physical_backup.sql` |
 | `hooks/usePermissions.js` (`DEFAULT_ROLE_PERMISSIONS_MAP`) | the `role_permissions` grants, as the chain seeds and withdraws them |
 | `utils/alertAcknowledgement.js` | the acknowledgement reasons `platform_alerts_acknowledgement_reason_valid` and `acknowledge_alert()` admit, and the roles `acknowledge_alert()` and `withdraw_alert_acknowledgement()` allow (mirror checks 45 and 46) |
@@ -345,12 +346,12 @@ cut before the name is (`OverflowText`): a Filters panel's section says what is 
 ### Cut text slides on hover or focus
 
 `common/OverflowText.jsx` draws one line that may not fit, cut with an ellipsis at rest. While the
-pointer is on it, or on the button or link it sits in, or that control has keyboard focus, text
-that is really cut slides at about reading pace (`SLIDE_PX_PER_SECOND`) until its end shows. It
-slides back when they leave.
+pointer is on it, or on the button, link or label it sits in, or that control has keyboard focus,
+text that is really cut slides at about reading pace (`SLIDE_PX_PER_SECOND`) until its end shows. It
+slides back when they leave. A label's focus is its checkbox's.
 
 - It never moves by itself, and under `prefers-reduced-motion` it does not move at all, so the
-  control's tooltip must carry the whole text.
+  control's tooltip must carry the whole text, or the text must wrap there (a list picker's rows).
 - It measures as it activates (`scrollWidth` against `clientWidth`), as `CopyableId` does, so a
   drawer opening needs no listener. `onMeasure(cut)` hears each measurement.
 - A section heading's `detail` (`GroupHeading`) is its button's tooltip while it is cut, and only
@@ -424,14 +425,28 @@ stays on the title's first line however long the title is. Controls too wide to 
 characters (the Site Map's legend in the expanded plan) wrap to a line below it, and narrow to the
 row.
 
-**One metric list serves the schema builder and Add Derived Metric** (`common/MetricPicker.jsx`): the
-search, the standard filter and the grouped, tickable list. The list narrows what is shown, never
-what is chosen, because the dialog holds the choice. `single` makes the ticks radio buttons for a
-dialog that takes one metric. A caller that cannot show a long list at the window's height gives it
-one with `listStyle`. A catalog metric is always chosen from this list, never from a dropdown, which
-stops being usable as the catalog grows: Deprecate Metric's Superseded By, and the schema editor for a
-draft, which adds each metric's stored keys with `renderNote`. The vocabulary pickers in Add Metric
-(MTConnect's data item types and the others) are still grouped dropdowns.
+**A long list is chosen from a list picker** (`common/ListPicker.jsx`): a search, then rows with a
+tick that scroll inside themselves. The search narrows what is shown, never what is chosen, because
+the dialog holds the choice. `single` makes the ticks radio buttons for a dialog that takes one. The
+list takes the height the dialog leaves; a caller that cannot show a long list at the window's height
+gives it one with `listStyle`, or a class with `listClass`. With a `legend` it is a fieldset, named by
+the legend and by how many are selected. Its rows are native checkboxes, so Tab and Space need no
+handler. Two pickers build on it.
+
+- **`MetricPicker`** groups the catalog's metrics and adds the standard filter. A catalog metric is
+  always chosen from it, never from a dropdown, which stops being usable as the catalog grows: the
+  schema builder, Add Derived Metric, Deprecate Metric's Superseded By, and the schema editor for a
+  draft, which adds each metric's stored keys with `renderNote`. The vocabulary pickers in Add Metric
+  (MTConnect's data item types and the others) are still grouped dropdowns.
+- **`SchemaPicker`** lists the schemas a device can have, in Register New Device and Edit Device
+  Configuration. A row is two lines: the name and version, with the Schemas page's badge while the
+  version is not in force, over the metric count and the description. The search reads the name, the
+  description and the names of the metrics a schema models, all from the definition the page already
+  holds. A schema found by a metric names it in place of its description, so the row is no taller. The
+  list is as tall as the schemas it offers, up to 200px (three rows and the next one's name), and a
+  search never changes it. The schemas ticked as it opens come first, and ticking moves no row. Under
+  reduced motion a row's cut text wraps, since a tooltip on a row would cover the rows under it, and
+  the list is always 200px.
 
 ### A dialog's width is named by its content
 
@@ -497,8 +512,14 @@ refused while it cannot. `dialogSaysWhy.test.jsx` holds the pattern for the dial
   not scold. A dialog with steps passes `touched` for the step it is on, and so does one that waits
   for a particular field (Change Password waits for the new password).
 - **A form with buttons of its own** inside a dialog (Attach a link) draws `FormProblem` above them.
-- **A problem with one field's value as typed is said under that field,** in its hint: too long,
-  not an email address, a name already taken. It is not repeated above the buttons.
+- **A problem with one field's value as typed is said under that field,** not above the buttons as
+  well: too long, not an email address, a name already taken.
+- **A field's error is a `FieldError`, under the field and its hint.** It has `FormProblem`'s look,
+  and the hint keeps its own text. `fieldErrorProps(error, errorId, hintId)`, spread on the control,
+  sets `aria-invalid`, which takes the danger border from `App.css`, and names the hint and then the
+  error in `aria-describedby`. When an error shows is the form's to decide. It is announced once, as
+  it appears; one that changes with each key is drawn at once, and announced when it has stood still
+  for a second. Drift checks 560 and 561 refuse one drawn by hand and one no control names.
 - **An edit that changes nothing is not a problem.** Its confirm is greyed and its tooltip says so.
   Nothing is said in red, because the form shows it.
 - **A required field says so on its label** with `RequiredMark`, and its control carries
@@ -545,6 +566,8 @@ with Restore Access; it is guarded because a slip blocks a person's sign-in at o
   capture do this, because each destroys that capture.
 - **A dialog that says its act cannot be undone has a gate,** or is in drift check 544's list with
   the reason it has none. The check also names every gated dialog.
+- **A 3D model and an area plan take a plain confirm,** to replace and to remove. Each can be
+  downloaded first, and the confirm says so in one wording for both (`utils/storedFile.js`).
 - **A gateway's credential and setup dialogs ask for its name too,** before they cut off whatever
   uses the credential or command the gateway already has.
 
@@ -619,8 +642,8 @@ The device drawer shows no model. One action after View in History opens it in a
 (`Model3DUploader`, which is that dialog): **View 3D Model** when a model is attached, **Add 3D
 Model…** when none is. Both open the same dialog. With a model it holds the viewer, the file's name
 and size, a **Public** marker, **Download** (every role), and **Replace** and **Remove** (permission
-to manage devices; Remove asks first, and closes the dialog once the model is gone, so its toast is
-in view). With none it holds the drop zone, and a model dropped on it appears in the same dialog
+to manage devices; each asks first, and Remove closes the dialog once the model is gone, so its toast
+is in view). With none it holds the drop zone, and a model dropped on it appears in the same dialog
 when the page reloads the device.
 
 - **Nothing loads until it is asked for.** The dialog is mounted only while it is open
@@ -1429,7 +1452,7 @@ not. `VITE_RELEASE_VERSION` states what **the release** is, `Chart.AppVersion` a
 same ConfigMap as everything else.
 
 `utils/releaseVersion.js` compares them and the account menu shows a line under the version when
-they disagree: *Update available — 1.9.1*.
+they disagree: *Update available — 1.9.2*.
 
 **A pod is self-consistent**, so this is not a rollout progress indicator: `config.js` is mounted
 with `subPath` and never updates in place, and the chart's `checksum/config` annotation rolls the pod
@@ -1447,7 +1470,7 @@ Three things it is not:
   this stack was told to run. Checking GHCR would need an egress allowance the chart does not grant,
   and would fail closed on a plant network with no route out.
 - **It compares `MAJOR.MINOR.PATCH` only.** A development bundle names itself with `git describe`
-  (`v1.9.0-12-g04374f9-dirty`), so anything stricter would warn on every dev cluster permanently.
+  (`v1.9.1-12-g04374f9-dirty`), so anything stricter would warn on every dev cluster permanently.
   The describe takes release tags only (`--match 'v[0-9]*'`), so a GPL source-mirror tag
   (`gpl-sources-…`) never becomes the name.
 - **It is a statement, not a button.** Nothing in a browser can upgrade the stack; the upgrade is
@@ -1521,7 +1544,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Schemas | | `search`, `status`, `sort`; `schema` |
 | Metrics | `derived`, `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Derived: `derived-search`, `sort`. Uncatalogued: `name`, `sort` |
 | Automations | `<id>`, an automation's `id:` (`/automations/lathe-3-spindle-hot`); `new` for the starter; `built-in` for the Built-in tab | `search`, `entity` (a device's id), `sort`; `trigger`, which opens the automation that owns an alert's trigger; `open`, on `/automations/new` and `/automations/built-in`, for an automation whose id is `new` or `built-in`. Built-in: `search`, `sort`, `rule` (a built-in alert's uid, which opens its drawer) |
-| Vocabulary | the standard, as a slug (`opc-ua`), or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
+| Vocabulary | the standard, as a slug (`opc-ua`), or `templates` or `imported` | `search`; on Imported, `sort` and `file`, an imported vocabulary's id, which opens its concepts |
 | Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
 | Capture | `device`, `captures`, `playbacks` | Gateways and Devices: `stored`, `search`, `gateway`, `sort`; `subject`. Captures and Playbacks: `search`; `job` |
 | Archives | `retired` | `sort` |

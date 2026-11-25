@@ -56,9 +56,12 @@ async function propose(forge: Forge) {
     const at = `${call.method} ${call.path}`;
     if (at === "GET /branches/main") return answer(200, { commit: { id: BASE } });
     if (at === `GET /branches/${BRANCH}`) return branch ? answer(200, { commit: { id: branch } }) : answer(404);
-    if (at === "GET /contents/platform.yml") {
-      const text = texts[call.query.get("ref") ?? ""];
-      return text ? answer(200, { type: "file", sha: "blob", encoding: "base64", content: btoa(text) }) : answer(404);
+    if (call.method === "GET" && call.path.startsWith("/git/trees/")) {
+      const commit = call.path.split("/")[3];
+      return texts[commit] ? answer(200, { tree: [{ path: "platform.yml", type: "blob", sha: `blob-${commit}` }] }) : answer(404);
+    }
+    if (call.method === "GET" && call.path.startsWith("/git/blobs/blob-")) {
+      return answer(200, { encoding: "base64", content: btoa(texts[call.path.slice("/git/blobs/blob-".length)]) });
     }
     if (at === "GET /pulls") {
       return answer(200, (forge.pulls ?? []).map((p) => ({ ...p, head: { label: p.label, repo_id: 1 }, base: { repo_id: 1 } })));
@@ -98,13 +101,14 @@ Deno.test("every read is of one commit, and the branch is made at it", async () 
 
   const reads = asked.filter((a) => a.method === "GET" && /^\/(contents|raw|git)\//.test(a.path));
   assert.equal(reads.length > 0, true);
-  assert.equal(reads.map((a) => a.query.get("ref")), [BASE, MADE]);
+  const of = (commit: string) => [`/git/trees/${commit}`, `/git/blobs/blob-${commit}`];
+  assert.equal(reads.map((a) => a.path), [...of(BASE), ...of(MADE)]);
   assert.equal(asked.filter((a) => a.path.startsWith("/compare/")).map((a) => a.path), [`/compare/${BASE}...${MADE}`]);
 
   const made = asked.find((a) => a.method === "POST" && a.path === "/branches");
   assert.equal(made?.body, { new_branch_name: BRANCH, old_ref_name: BASE });
   const committed = asked.find((a) => a.method === "PUT");
-  assert.equal([committed?.body?.branch, committed?.body?.sha, atob(String(committed?.body?.content))], [BRANCH, "blob", NEW]);
+  assert.equal([committed?.body?.branch, committed?.body?.sha, atob(String(committed?.body?.content))], [BRANCH, `blob-${BASE}`, NEW]);
   const pull = asked.find((a) => a.method === "POST" && a.path === "/pulls");
   assert.equal([pull?.body?.head, pull?.body?.base], [BRANCH, "main"]);
 });

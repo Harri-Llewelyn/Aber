@@ -4,7 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId, sparkplugGroupProblem } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
 import { inServiceDevices } from './utils/inService';
-import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES, PLAN_ROTATIONS } from './utils/areaPlans';
+import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanFileName, areaPlanPath, AREA_PLAN_MAX_BYTES, PLAN_ROTATIONS } from './utils/areaPlans';
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { authServerRefusesSession, isSessionRefusal } from './utils/sessionError';
 import { reportSessionRefused, SESSION_REFUSED } from './lib/connectionState';
@@ -30,7 +30,8 @@ import { PICTURE_BUCKET, picturePath } from './utils/picture';
 // public.device_locations and merged onto each row as `effective_cell_id` / `location_source` /
 // `cell_mismatch`; `cell_id` stays the raw column. Read `effective_cell_id` to display, `cell_id`
 // to edit. No embed can express "unless the child has a place of its own".
-// `asset_id` is always the device UUID, including for quarantined devices.
+// `asset_id` on a row mapped here is the device UUID, a quarantined device's too. A `telemetry` or
+// `asset_config` row's `asset_id` is the `sparkplug_id`: toTelemetryKey() takes one to the other.
 /**
  * The IDTA Digital Nameplate template the editor and the AAS exporter both work against.
  * Mirrors NAMEPLATE_TEMPLATE_ID in supabase/functions/_shared/aas/shell.ts; the version is part
@@ -3825,6 +3826,24 @@ const apiMethods = {
       return data || [];
     }
 
+    if (path.startsWith('/api/v1/idta-template-elements')) {
+      // Reference data (migration 0320), generated from IDTA's submodel templates (CC BY 4.0) and read-only to
+      // the app: every element of each template, nested ones included, in the template's own order. Read in
+      // pages of 1000, the most a server may be set to return, since a further template may pass that.
+      const rows = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('idta_template_elements')
+          .select('*')
+          .order('template_id', { ascending: true })
+          .order('ordinal', { ascending: true })
+          .range(from, from + 999);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if ((data || []).length < 1000) return rows;
+      }
+    }
+
     // Checked before /metric-catalog: startsWith on the shorter path would otherwise not match,
     // but keeping the more specific route first makes the ordering intent explicit.
     if (path.startsWith('/api/v1/metric-groups')) {
@@ -4774,6 +4793,18 @@ const apiMethods = {
       await supabase.storage.from(AREA_PLAN_BUCKET).remove([previous]).catch(() => {});
     }
     return { ...data[0], area_id: data[0].id };
+  },
+
+  /**
+   * An area's plan as a download: `?download=` makes storage send it as an attachment, as a 3D
+   * model's URL does, named after the area. The bucket is private, so the URL is signed, for one
+   * object and sixty seconds. Every signed-in role may read the bucket, as the Site Map does.
+   */
+  areaPlanDownloadUrl: async (area) => {
+    const { data, error } = await supabase.storage
+      .from(AREA_PLAN_BUCKET).createSignedUrl(area.plan_path, 60, { download: areaPlanFileName(area) });
+    if (error) throw new Error(error.message || 'Could not create a download link');
+    return withApiKey(data.signedUrl);
   },
 
   /**

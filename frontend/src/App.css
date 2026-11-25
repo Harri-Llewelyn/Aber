@@ -2786,6 +2786,10 @@ main:focus { outline: none; }
   box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
+/* A control whose value is refused, with why in the FieldError beneath it. After :focus, so the
+   border stays while the focus ring is drawn round it. */
+.form-control[aria-invalid="true"] { border-color: var(--danger); }
+
 /* Placeholders bound to the theme explicitly rather than the browser default. --text-muted, not
    --text-dim, which measures 2.45:1 against --bg-base in dark mode. */
 /* A field that cannot be edited: the page background, muted text, no focus ring. */
@@ -7917,33 +7921,104 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .form-hint.hint-warning > svg,
 .form-hint.hint-danger > svg { vertical-align: -2px; }
 
+/* A problem may quote what was typed, which may hold no space to break at. A value in it keeps the
+   line's size and colour; `.mono` sets its own. */
+.form-hint.hint-danger { overflow-wrap: anywhere; }
+.form-hint.hint-danger .mono { font-size: inherit; color: inherit; }
+
+/* A FieldError over its control rather than beneath it: the metric picker, which fills the dialog. */
+.field-error-above { margin: 0 0 4px; }
+
 .form-hint-inline { font-weight: 400; font-size: 11px; color: var(--text-muted); }
 
-/* The device form's line of metric groups, under the schema checklist it follows. */
+/* The device form's line of metric groups, under the schema picker it follows. */
 .schema-groups { margin-top: 6px; }
 
-/* The device form's schema picker: a fieldset of checkboxes, scrolling once the registry is long. */
-.schema-picker {
+/* A long list to choose from (ListPicker): the search row, then rows that scroll inside themselves.
+   The list takes the height the fields above leave, unless its caller gives it one. */
+.list-picker {
   border: none;
   padding: 0;
   margin-inline: 0;
   min-width: 0;
 }
-.schema-checklist {
-  max-height: 220px;
-  overflow-y: auto;
-  padding: 6px 14px;
+.list-picker-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
 }
-.schema-checklist label {
+.list-picker-search > input { flex: 1 1 auto; }
+.list-picker-list {
+  flex: 1 1 auto;
+  min-height: 160px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.list-picker-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.list-picker-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
-  cursor: pointer;
-  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
 }
-.schema-checklist input:disabled,
-.schema-checklist input:disabled + span { cursor: not-allowed; color: var(--text-muted); }
+.list-picker-row-extra { padding-right: 12px; }
+.list-picker-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+/* A row that cannot be chosen now, among rows that can. */
+.list-picker-label-blocked { cursor: not-allowed; opacity: 0.55; }
+/* Every row of a list nothing can be chosen from: still to be read, so muted and not faded. */
+.list-picker-label-disabled,
+.list-picker-label-disabled > input { cursor: not-allowed; }
+.list-picker-label-disabled { color: var(--text-muted); }
+
+/* The device form's schema list (SchemaPicker): as tall as the schemas it offers, up to three and the
+   next one's name, so a short list costs a dialog nothing and a search never changes its height. */
+.schema-picker-list { flex: none; min-height: 0; height: min(var(--schema-rows) * 54px + 2px, 200px); }
+.schema-picker-list-none { flex: none; min-height: 0; }
+.schema-picker-list input { flex-shrink: 0; }
+.schema-picker-list .list-picker-label { padding-block: 6px; }
+/* A row is two lines, each one line high whatever it holds. */
+.schema-picker-row {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.schema-picker-head,
+.schema-picker-detail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.schema-picker-head { min-height: 24px; font-size: 13px; }
+.schema-picker-head .badge { padding-block: 1px; }
+.schema-picker-name { font-weight: 600; }
+.schema-picker-version,
+.schema-picker-detail { font-size: 11px; color: var(--text-muted); }
+.schema-picker-detail { gap: 3px; }
+/* The metric a search found: at the line's own size, so saying which makes no row taller. */
+.schema-picker-detail .mono { font-size: inherit; line-height: 1; }
+.schema-picker-head > :not(.schema-picker-name),
+.schema-picker-count { flex-shrink: 0; white-space: nowrap; }
+/* Cut text slides unless motion is reduced. Here it then wraps: a tooltip on a row would cover the
+   rows under it. */
+@media (prefers-reduced-motion: reduce) {
+  .schema-picker-list { height: 200px; }
+  .schema-picker-row .overflow-text { white-space: normal; overflow-wrap: anywhere; }
+  .schema-picker-detail { align-items: baseline; }
+}
 
 /* The panel's Location row: the area and cell chips on one line, "›" between them. */
 .device-location {
@@ -7985,8 +8060,8 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* GATEWAYS: the setup and credential dialogs. */
 
 /* Exempts the typed-name label's uppercasing, so the operator is not told to type capitals that
-   are not in the name. */
-.gateway-typed-name { text-transform: none; color: var(--text-primary); }
+   are not in the name. A long name wraps, as a typed gate's does. */
+.gateway-typed-name { text-transform: none; color: var(--text-primary); overflow-wrap: anywhere; }
 
 .gateway-block-head {
   display: flex;
@@ -8432,6 +8507,63 @@ ol.gateway-steps {
 .vocab-notice a { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
 .vocab-notice a:hover,
 .vocab-notice a:focus-visible { text-decoration: underline; }
+
+/* VOCABULARY, Templates: a section's elements, a row each. A name is stepped in by how many elements it is
+   inside, the step History's Overview gives a cell's lanes under its area. Text wraps rather than being cut,
+   so a row is as tall as its name needs; under 800px the type goes under the name and the id on a line
+   of its own. */
+.template-about {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.template-elements { margin: 0; padding: 0; list-style: none; }
+
+.template-element {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 190px) 92px minmax(0, 340px);
+  gap: 2px 16px;
+  align-items: baseline;
+  padding: 6px 0;
+  font-size: 12px;
+}
+.template-element + .template-element { border-top: 1px solid var(--border); }
+.template-element .cell-meta { overflow-wrap: anywhere; }
+
+/* Positioned, so the words for assistive technology in it are placed and clipped inside the scroller. */
+.template-element-name {
+  position: relative;
+  min-width: 0;
+  padding-left: calc(var(--template-depth, 0) * 18px);
+  overflow-wrap: anywhere;
+}
+.template-element-name p { margin: 2px 0 0; color: var(--text-muted); }
+.template-element-name p .mono { font-size: inherit; color: inherit; }
+
+.template-element-id {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.template-element-id .copyable-id { margin: 0; }
+.template-element-further { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.template-element-further .cell-meta { flex-shrink: 0; overflow-wrap: normal; }
+.template-element-further .copyable-id { min-width: 0; }
+
+@media (max-width: 800px) {
+  .template-element { grid-template-columns: minmax(0, 1fr) max-content; }
+  .template-element-name { grid-row: 1; }
+  .template-element-name ~ .cell-meta:nth-child(2) { grid-column: 1; grid-row: 2; padding-left: calc(var(--template-depth, 0) * 18px); }
+  .template-element-name ~ .cell-meta:nth-child(3) { grid-column: 2; grid-row: 1; }
+  .template-element-id { grid-column: 1 / -1; padding-left: calc(var(--template-depth, 0) * 18px); }
+}
 
 /* VOCABULARY, Imported: the files a site imported, in a table above the concepts, and the Import
    dialog's preview. The table scrolls with the concepts, in the card's one scroller. */

@@ -80,6 +80,12 @@ class ArrivalsBase(unittest.TestCase):
         self.cur.execute("SELECT to_regclass('public.gateway_arrival_figures') IS NOT NULL;")
         if not self.cur.fetchone()[0]:
             self.skipTest("0303 is not applied to this database")
+        # pg_cron runs the collector on this database every minute, and it reads its probe first. Held
+        # until the rollback, the table keeps that run out: a test writes the probe before the figures,
+        # the run the figures before the probe, and the two would deadlock.
+        self.cur.execute("SET LOCAL lock_timeout = '30s';"
+                         "LOCK TABLE public.gateway_arrival_probe IN ACCESS EXCLUSIVE MODE;"
+                         "SET LOCAL lock_timeout = 0;")
         self.next_id = 9_303_000_000
 
     def tearDown(self):

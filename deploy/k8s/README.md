@@ -605,7 +605,7 @@ inside each image's package, so they are public with it.
 To check, run this from somewhere with no credentials at all:
 
 ```bash
-helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.9.0
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.9.1
 ```
 
 ### What the release does not do

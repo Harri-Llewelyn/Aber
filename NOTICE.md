@@ -5,14 +5,17 @@
 The MIT licence in [`LICENSE`](LICENSE) covers the work in this repository: the Helm chart, the SQL in [`timescaledb/`](timescaledb/) and
 [`supabase/migrations/`](supabase/migrations/), the frontend, the ingestion, playback and i3X
 services, the Node-RED flows, the Grafana dashboard definitions, the scripts and the documentation.
-The six exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20),
+The nine exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20),
 [the dashboard's fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11),
 [the icon glyphs it copies](#the-dashboards-icons--lucide-isc-and-feather-mit),
 [the ASHRAE 223P ontology](#the-ashrae-223p-ontology--apache-license-20),
-[the MTConnect schema](#mtconnect-the-devices-schema-and-the-definitions-read-from-it) and
+[the AAS metamodel schemas](#the-aas-metamodel-schemas--creative-commons-attribution-40),
+[the MTConnect schema](#mtconnect-the-devices-schema-and-the-definitions-read-from-it),
+[the IDTA submodel templates](#idta-the-submodel-templates-and-the-elements-read-from-them),
+[the QUDT vocabularies](#qudt-the-quantity-kind-and-unit-vocabularies-and-the-rows-read-from-them) and
 [the VDA 5050 state schema](#vda-5050-the-state-schema-and-the-fields-read-from-it), which keep their own
 licences. [The OPC UA NodeSets](#opc-ua-the-companion-specification-nodesets-and-the-descriptions-derived-from-them)
-are not a seventh: nothing of them is kept here, only text derived from them, and this licence covers
+are not a tenth: nothing of them is kept here, only text derived from them, and this licence covers
 that text. The licence texts in [`licenses/`](licenses/) are copied verbatim from the projects they
 belong to. The two written offers of source there (`SOURCE`) are Aber's own.
 
@@ -569,6 +572,31 @@ a binary form, so here it is as the file gives it:
 AMT's SysML model (`mtconnect/mtconnect_sysml_model`) is not read. It has no licence file, and its
 own terms allow copying only in the form received, without modifications. Taking its documentation
 into a seed would be a modification, so the definitions come from the schema repository instead.
+
+### IDTA: the submodel templates and the elements read from them
+
+[`scripts/vocabularies/idta-02006-3-0-3-digital-nameplate.json`](scripts/vocabularies/idta-02006-3-0-3-digital-nameplate.json)
+and
+[`idta-02017-1-0-1-asset-interfaces-description.json`](scripts/vocabularies/idta-02017-1-0-1-asset-interfaces-description.json)
+are the submodel templates *Digital Nameplate for industrial equipment* (IDTA 02006-3-0-3) and *Asset
+Interfaces Description* (IDTA 02017-1-0-1), published by the Industrial Digital Twin Association (IDTA) in
+[`github.com/admin-shell-io/submodel-templates`](https://github.com/admin-shell-io/submodel-templates),
+at commit `5285185b1ef9425fe45068bcbda8faaf74f3eb89`. They are licensed under
+[Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/),
+as the repository's `LICENSE.txt` says. That file is beside them, in
+[`LICENSE-idta-CC-BY-4.0.txt`](scripts/vocabularies/LICENSE-idta-CC-BY-4.0.txt). The MIT licence above does
+not cover them.
+
+**Asset Interfaces Description is unmodified,** byte for byte. **Digital Nameplate is changed in one way:**
+27 of its ConceptDescriptions are taken out, because they carry the text of definitions that IEC CDD and
+ECLASS issued. The template cites the two dictionaries by their identifiers, and the identifiers are kept.
+No text of either dictionary is taken.
+
+`scripts/generate-idta-template.mjs` builds the `idta_template_elements` rows from them, in migration
+`0320`: each element's name, place, type, identifiers, cardinality and example, and what the template says
+of it in English, with its whitespace collapsed. IDTA's text is in those rows and on the Vocabulary page,
+which credits IDTA under CC BY 4.0. IDTA provides the material as it is, with no warranty, as the licence's
+disclaimer says. Adopting a template is not a claim of conformance to it.
 
 ### OPC UA: the companion specification NodeSets and the descriptions derived from them
 

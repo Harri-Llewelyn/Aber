@@ -151,6 +151,7 @@ def telemetry(environment):
 class TestPublishingKeepsTheSubmodelId(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.addClassCleanup(teardown)
         teardown()
         cls.device, cls.v1 = provision()
         cls.before = telemetry(exported())
@@ -167,10 +168,6 @@ class TestPublishingKeepsTheSubmodelId(unittest.TestCase):
         assert status == 200, f"publish_schema_version {status}: {published}"
         cls.environment = exported()
         cls.after = telemetry(cls.environment)
-
-    @classmethod
-    def tearDownClass(cls):
-        teardown()
 
     def test_the_id_is_the_lineages_and_survives_the_publish(self):
         self.assertTrue(self.before["id"].endswith(f"/submodel/{SCHEMA_NAME}/OperationalTelemetry"))

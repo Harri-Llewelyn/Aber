@@ -43,6 +43,15 @@ export function enrolmentStands(gateway) {
 }
 
 /**
+ * Whether issuing setup for a Remote gateway revokes a credential at once: the one its enrolled
+ * appliance still holds. The drawer's Re-issue Setup and the setup dialog's warning are this one
+ * answer, and issue_gateway_enrollment_token() reads the same rule in the database.
+ */
+export function setupRevokesCredential(gateway) {
+  return enrolmentStands(gateway);
+}
+
+/**
  * Whether a Remote gateway has ever enrolled, whatever its credential is now: an archive and a
  * re-issued setup both leave `enrolled_at`. The machine it enrolled on may still hold that enrolment.
  */

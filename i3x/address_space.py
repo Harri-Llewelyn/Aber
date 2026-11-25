@@ -63,11 +63,10 @@ LANES = {
     ),
 }
 
-# Namespaces. i3X groups TYPES into namespaces, and every type served here is this deployment's own:
-# a schema is a JSON Schema authored here even when every metric it names comes from a standard.
-# So GET /namespaces lists these two and nothing else, and every Object's typeNamespaceUri is the
-# local one. A vocabulary such as MTConnect is where a metric's semantic id comes from, not a
-# namespace any type belongs to; listing one would promise types a client never meets (#459).
+# Namespaces. i3X groups TYPES into namespaces. These two are this deployment's own: a schema is a
+# JSON Schema authored here even when every metric it names comes from a standard. A catalog metric's
+# type is in the namespace its semantic id is defined in (metric_type_namespace()), and
+# GET /namespaces lists exactly the namespaces the served types use.
 NS_LOCAL = "https://aber.local/i3x"
 NS_RELATIONSHIPS = "https://aber.local/i3x/relationships"
 

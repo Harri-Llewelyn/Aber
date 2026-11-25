@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Aber API
-  version: "1.9.0"
+  version: "1.9.1"
   description: |
     The HTTP surface of Aber, the shopfloor data platform. Every request goes through
     the **Envoy API gateway** on `http://127.0.0.1:54321`, which routes to five upstreams:
@@ -49,8 +49,8 @@ info:
 
     The reference vocabularies (`mtconnect_vocabulary`, `iso22400_vocabulary`,
     `opcua_vocabulary`, `ashrae223_vocabulary`, `qudt_quantity_kinds`, `qudt_units`, `vda5050_vocabulary`,
-    `idta_submodel_templates`) and the `concept_definitions` and `concept_sources` views over them are
-    `SELECT`-only for `authenticated`; `anon` is revoked.
+    `idta_submodel_templates`, `idta_template_elements`) and the `concept_definitions` and
+    `concept_sources` views over them are `SELECT`-only for `authenticated`; `anon` is revoked.
 
     ### PostgREST conventions
 
@@ -834,7 +834,7 @@ paths:
         Buckets still being written are visible immediately — real-time aggregation unions the
         materialised part with the raw tail, so this does not lag behind `/rest/v1/telemetry`.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
         - { name: bucket, in: query, schema: { type: string }, description: 'Bucket start, e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -858,7 +858,7 @@ paths:
         As `/rest/v1/telemetry_1m`, bucketed to five minutes and aggregated from it. Identical
         columns.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string } }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string } }
         - { name: bucket, in: query, schema: { type: string }, description: 'e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -886,7 +886,7 @@ paths:
         kept for five years. For any question about a period older than the raw window, this is the
         only place an answer exists.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string } }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string } }
         - { name: bucket, in: query, schema: { type: string }, description: 'e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -959,7 +959,7 @@ paths:
               required: [p_resolution]
               properties:
                 p_resolution: { type: string, enum: [1m, 5m, 1h] }
-                p_asset_id: { type: string, example: dev220000000000400080000 }
+                p_asset_id: { type: string, example: dev220000000000400080000, description: 'Device Sparkplug ID (devices.sparkplug_id). Omitted: every device.' }
                 p_metric_name: { type: string, example: Systems/TEMPERATURE }
                 p_from: { type: string, format: date-time, description: 'Bucket start at or after.' }
                 p_to: { type: string, format: date-time, description: 'Bucket start at or before, or before when `p_to_inclusive` is false.' }
@@ -4143,8 +4143,10 @@ paths:
       summary: Read the IDTA submodel-template element definitions
       description: |
         Reference data: the elements an IDTA Asset Administration Shell submodel template defines,
-        with the identifiers IDTA publishes for them. Currently IDTA 02006-3-0-1 Digital Nameplate
-        (`template_id` `https://admin-shell.io/idta/nameplate/3/0/Nameplate`).
+        with the identifiers IDTA publishes for them. Currently the 20 top-level elements of the IDTA
+        02006 Digital Nameplate, version 3.0 (`template_id`
+        `https://admin-shell.io/idta/nameplate/3/0/Nameplate`). `/rest/v1/idta_template_elements` holds
+        every element of each seeded template, nested ones included.
 
         **`semantic_id` is issued by IDTA, IEC CDD or ECLASS — never minted here.** Most are IRDIs
         (`0112/2///61987#ABA951#009`); a few are admin-shell.io IRIs. `semantic_id_type` says which.
@@ -4162,6 +4164,39 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/IDTASubmodelTemplateElement' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/idta_template_elements:
+    get:
+      tags: [Registry]
+      summary: Read the elements of the IDTA submodel templates
+      description: |
+        396 elements of two IDTA submodel templates, nested ones included: Digital Nameplate 3.0.3 (IDTA
+        02006) and Asset Interfaces Description 1.0.1 (IDTA 02017). Generated by
+        `scripts/generate-idta-template.mjs` from the templates' own JSON (Creative Commons Attribution
+        4.0, Industrial Digital Twin Association). Reference data: a row is an element a template defines,
+        and listing a template claims no conformance to it.
+
+        **`path` is the AAS API's idShortPath,** with a dot into a collection and `[n]` into a list:
+        `Markings[0].MarkingName`. With `template_id` it is the key. `parent_path` is null at the top, and
+        `order=template_id,ordinal` gives each element under its parent.
+
+        **The ids are issued by IDTA, IEC CDD, ECLASS or W3C,** never minted here. An element the template
+        gives no id has none. `definition` is what the template's file says of the element in that
+        template, in English, so it is not a definition of the concept, and `concept_definitions` does
+        not read it. It holds no IEC CDD or ECLASS text.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - { name: template_id, in: query, schema: { type: string }, description: 'e.g. `eq.https://admin-shell.io/idta/AssetInterfacesDescription/1/0/Submodel`' }
+        - { name: semantic_id, in: query, schema: { type: string }, description: 'e.g. `eq.0112/2///61987#ABA951#009`' }
+        - { name: parent_path, in: query, schema: { type: string }, description: 'e.g. `is.null` for the top of a template' }
+      responses:
+        '200':
+          description: Template elements.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/IDTATemplateElement' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/concept_definitions:
@@ -7618,8 +7653,15 @@ paths:
         `gateways` organisation (a playbook made by hand), without the incident template. It is the
         backstop for what `forge-membership` does at the door: a revoked login that never returns is
         unseated here, and its SSH key with it. A member who is not a dashboard identity was seated by
-        hand and is left alone. Nothing is created that enrolment would not create, and nothing is
-        deleted.
+        hand and is left alone.
+
+        A gateway's repository is held by its teams, under Aber's rules. A pass removes anybody who
+        holds one by name, any rule of somebody else's that could loosen Aber's, a deploy key that is
+        not the gateway's, and a tag named as a branch the appliance reads, with the release made from
+        it. It makes `main` the default branch, turns proposals on, and gives a repository that was
+        renamed its name back. One that is a mirror, or has a rule the API cannot name, loses its deploy
+        keys and is an error. Nothing is created that enrolment would not create, and a repository is
+        never deleted.
 
         Authorised by `FORGE_SWEEP_SECRET` in the `x-sweep-secret` header, **not** by the publishable key.
         The identities acted on come from `user_roles` and the forge's own lists, never from the
@@ -7654,7 +7696,7 @@ paths:
       responses:
         '200':
           description: >-
-            The pass completed. `placed`, `removed`, `hooked`, `protected`, `rekeyed`, `revoked`,
+            The pass completed. `placed`, `removed`, `hooked`, `protected`, `untagged`, `rekeyed`, `revoked`,
             `archived`, `restored`, `published` and `recorded` list what changed; `errors` lists what
             the forge refused, per item; `warnings` lists what the sweep declined and was right to
             decline -- a released tag found at other content than this build ships, which no retry
@@ -9097,6 +9139,27 @@ components:
         description: { type: string, nullable: true }
         is_mandatory: { type: boolean, description: 'What the template requires. Descriptive only — the exporter does not claim the template.' }
         ordinal: { type: integer, description: 'Order in the published template.' }
+
+    IDTATemplateElement:
+      type: object
+      readOnly: true
+      properties:
+        template_id: { type: string, example: 'https://admin-shell.io/idta/nameplate/3/0/Nameplate', description: 'The semantic id a submodel names to claim the template.' }
+        template_name: { type: string, example: Digital Nameplate }
+        template_number: { type: string, example: IDTA 02006, description: 'IDTA''s number for the specification.' }
+        template_version: { type: string, example: '3.0.3', description: 'The bug-fix release of the file the rows were read from.' }
+        path: { type: string, example: 'Markings[0].MarkingName', description: 'The element''s idShortPath. The key, with `template_id`.' }
+        parent_path: { type: string, nullable: true, example: 'Markings[0]', description: 'Null at the top of the template.' }
+        ordinal: { type: integer, example: 21, description: 'The element''s place in the document, an element before what is inside it.' }
+        id_short: { type: string, nullable: true, example: MarkingName, description: 'Null for an item of a list, which has none.' }
+        model_type: { type: string, enum: [AnnotatedRelationshipElement, BasicEventElement, Blob, Capability, Entity, File, MultiLanguageProperty, Operation, Property, Range, ReferenceElement, RelationshipElement, SubmodelElementCollection, SubmodelElementList] }
+        value_type: { type: string, nullable: true, example: 'xs:string', description: 'A Property''s or Range''s XSD type, the type of a list''s items, or a File''s content type.' }
+        semantic_id: { type: string, nullable: true, example: '0112/2///61987#ABA231#009', description: 'Never minted by this deployment. Null where the template gives none.' }
+        semantic_id_type: { type: string, nullable: true, enum: [IRI, IRDI] }
+        supplemental_semantic_ids: { type: array, items: { type: string }, example: ['0173-1#02-ABI190#003'], description: 'The further ids the template gives the element.' }
+        cardinality: { type: string, nullable: true, enum: [One, ZeroToOne, ZeroToMany, OneToMany], description: 'How many its parent holds. Null where the template does not say.' }
+        definition: { type: string, nullable: true, description: 'What the template''s file says of the element, in English.' }
+        example_value: { type: string, nullable: true, example: '0173-1#07-DAA603#004' }
 
     ConceptDefinition:
       type: object

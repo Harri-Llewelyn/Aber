@@ -7,8 +7,8 @@ import { fail, pass, read } from './lib.mjs';
 // has not answered would disable the account the next class makes under the same name. The helper,
 // in test_enroll_gateway.py, waits for the answer in net._http_response (pg_net takes a request off
 // its queue before the answer, so an empty queue proves nothing). No suite holds a bare delete of a
-// gateway row, its base class's setUpClass and tearDownClass call the helper, and any other
-// tearDownClass goes through the base class's.
+// gateway row, its base class's setUpClass calls the helper and its tearDownClass, or a class clean-up
+// the setUpClass registers, does too, and any other tearDownClass goes through the base class's.
 // -------------------------------------------------------------------------------------------------
 const HELPER_FILE = 'supabase/functions/enroll-gateway/test_enroll_gateway.py';
 const SUITES = [
@@ -50,8 +50,9 @@ export default function check() {
     if (!setUps.some((b) => b.includes('delete_gateway_and_wait_for_revoke('))) {
       problems426.push(`${suite}: no setUpClass deletes a leftover gateway through delete_gateway_and_wait_for_revoke()`);
     }
-    if (!tearDowns.some((b) => b.includes('delete_gateway_and_wait_for_revoke('))) {
-      problems426.push(`${suite}: no tearDownClass deletes the gateway through delete_gateway_and_wait_for_revoke()`);
+    if (!tearDowns.some((b) => b.includes('delete_gateway_and_wait_for_revoke('))
+        && !setUps.some((b) => b.includes('cls.addClassCleanup(delete_gateway_and_wait_for_revoke,'))) {
+      problems426.push(`${suite}: no tearDownClass or class clean-up deletes the gateway through delete_gateway_and_wait_for_revoke()`);
     }
     for (const body of tearDowns) {
       if (!body.includes('delete_gateway_and_wait_for_revoke(') && !body.includes('super().tearDownClass()')) {

@@ -108,6 +108,13 @@ in one database and the server opens another, with nothing reporting a fault.
 # portless `private` an earlier release wrote, which would refuse port 9000.
 - name: GITEA__webhook__ALLOWED_HOST_LIST
   value: ""
+# What the forge fetches and pushes by itself, a migration and both kinds of mirror, has a policy of its
+# own, which is lax by default: any public host. No branch rule covers what a mirror brings, and a push
+# mirror copies a repository out for as long as it stands. Strict with no host refuses every one.
+- name: GITEA__migrations__EGRESS_MODE
+  value: strict
+- name: GITEA__migrations__ALLOWED_HOST_LIST
+  value: ""
 {{- /* The audit log: an audit_event table in gitea.db, which the backup takes with the rest of
      the file. Both asserted, never omitted, for the reason START_SSH_SERVER is. How to read it and
      what it leaves out: forge/README.md, "The audit log". */}}

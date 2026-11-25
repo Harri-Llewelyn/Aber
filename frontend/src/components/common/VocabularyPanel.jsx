@@ -18,9 +18,13 @@ import { VocabularySections } from './VocabularySections'
  * tooltip (`noteFor`, a standard's source for the entry), what counts as in use); see
  * common/MTConnectVocabularyPanel.jsx and its siblings. A descriptor's `notice` is a line the
  * standard asks to be shown with it, such as QUDT's credit, at the right-hand end of the row Expand
- * all starts. The search matches the name, the tooltip and the id. Sections start collapsed,
- * and searching opens only the sections that match. An entry is clickable when its tab has an
- * `onUse` and the viewer can add a metric.
+ * all starts. The search matches the name, the tooltip, the id and `searchTextFor`, further text the
+ * tooltip has no room for. Sections start collapsed, and searching opens only the sections that match.
+ * An entry is clickable when its tab has an `onUse` and the viewer can add a metric.
+ *
+ * A tab whose entries are nested gives `parentOf`, the entry one is inside, and a search keeps what a
+ * match is inside. `renderItems` draws a section's entries where chips do not suit them, and `subtitle`
+ * replaces the card's where it is not true of the tab: the Templates tab has all three.
  *
  * A tab whose rows the page does not hold, such as the vocabularies a site imported, carries a
  * `panel` instead: an element that loads its own data and draws everything under the tab bar, with
@@ -49,15 +53,19 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
   const filtered = useMemo(() => {
     const sections = active?.sections || []
     if (!query) return sections
+    const matches = i =>
+      i.name.toLowerCase().includes(query) ||
+      (active.tooltipFor?.(i) || '').toLowerCase().includes(query) ||
+      (active.idFor?.(i)?.value || '').toLowerCase().includes(query) ||
+      (active.searchTextFor?.(i) || '').toLowerCase().includes(query)
     return sections
-      .map(s => ({
-        ...s,
-        items: s.items.filter(i =>
-          i.name.toLowerCase().includes(query) ||
-          (active.tooltipFor?.(i) || '').toLowerCase().includes(query) ||
-          (active.idFor?.(i)?.value || '').toLowerCase().includes(query)
-        )
-      }))
+      .map(s => {
+        const kept = new Set()
+        for (const item of s.items.filter(matches)) {
+          for (let i = item; i && !kept.has(i); i = active.parentOf?.(i)) kept.add(i)
+        }
+        return { ...s, items: s.items.filter(i => kept.has(i)) }
+      })
       .filter(s => s.items.length > 0)
   }, [active, query])
 
@@ -78,7 +86,7 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
   // switch, so one query asks every standard.
   const head = (
     <>
-      <CardHeading icon={<IconFileCode size={15} />} title={title} description={subtitle} />
+      <CardHeading icon={<IconFileCode size={15} />} title={title} description={active.subtitle || subtitle} />
       <TabStrip
         ariaLabel={title}
         value={active.id}

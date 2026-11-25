@@ -378,4 +378,12 @@ class TestTheDeployedFunction(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    # The subject is removed after the report, so a failing run keeps its output. It is the shared
+    # fixture, which the other AAS suites also provision and remove.
+    result = None
+    try:
+        result = unittest.main(exit=False).result
+    finally:
+        if DEVICE:
+            aas_fixture.teardown(SUPABASE_URL, TOKEN, PUBLISHABLE_KEY)
+    sys.exit(0 if result is not None and result.wasSuccessful() else 1)

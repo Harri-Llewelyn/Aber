@@ -97,7 +97,7 @@ SUPABASE_DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
 
 # The machine this suite pretends to have recorded, and the gateway it hangs off.
 #
-# PINNED, so a run killed between setUpClass and tearDownClass leaves rows the next run reclaims
+# PINNED, so a run killed before its clean-up leaves rows the next run reclaims
 # rather than a new pair every time. They differ in the FIRST hex block on purpose: `sparkplug_id`
 # is generated from the first 21 hex characters of the uuid, so two ids differing only in the last
 # block generate the SAME wire identity and collide on the unique index.
@@ -442,16 +442,16 @@ class _ReplayFixture(unittest.TestCase):
     def _begin(cls):
         cls.session = Session(sign_in())
         cls.metric = "PLAYBACK/REPLAY_" + secrets.token_hex(8).upper()
-        # Set before the first step that can fail: unittest skips tearDownClass when setUpClass
-        # raises, and the pinned ids are what the next run reclaims, but a partially-built class
-        # must still be safe to read.
+        # Set before the first step that can fail: the clean-up runs when setUpClass raises, and reads
+        # how far it got.
         cls.capture_id = None
         cls.storage_path = None
         cls.source = None
         cls.lane_map = None
+        cls.addClassCleanup(cls._clean_up)
 
     @classmethod
-    def tearDownClass(cls):
+    def _clean_up(cls):
         """
         Everything this suite made, in the order the foreign keys want.
 

@@ -158,6 +158,8 @@ def provision(token):
     )
     if status != 200 or not rows:
         print("[test_fplus_directory] the fixture schema is not readable")
+        # The suite skips, so what the fixture made goes now.
+        teardown(token)
         return None, []
     schema_id = rows[0]["id"]
 
@@ -383,10 +385,7 @@ class TestAMachineIdentityReadsAsAPersonDoes(unittest.TestCase):
         if issued is None:
             raise unittest.SkipTest(reason)
         cls.token, cls.jti = issued
-
-    @classmethod
-    def tearDownClass(cls):
-        revoke_machine_token(TOKEN, cls.jti)
+        cls.addClassCleanup(revoke_machine_token, TOKEN, cls.jti)
 
     def test_every_route_answers_it_as_it_answers_a_person(self):
         for path in ("/v1/device", f"/v1/device/{EXPECTED_DEVICE_IDS[0]}", f"/v1/schema/{SCHEMA_ID}",

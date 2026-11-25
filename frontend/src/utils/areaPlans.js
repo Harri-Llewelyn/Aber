@@ -215,3 +215,9 @@ function parseLength(value) {
 export function areaPlanPath(area, stamp = Date.now()) {
   return `${area.area_id ?? area.id}/plan-${stamp}.svg`
 }
+
+/** The name a downloaded plan is saved under: the area's, since the stored name is only a stamp. */
+export function areaPlanFileName(area) {
+  const name = (area.area_name ?? area.name ?? '').replace(/[^\p{L}\p{N}._-]+/gu, '-')
+  return `${name || 'area'}-plan.svg`
+}

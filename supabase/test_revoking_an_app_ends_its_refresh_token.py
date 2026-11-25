@@ -175,11 +175,8 @@ class RevokingAnAppEndsItsRefreshToken(unittest.TestCase):
         apps = {a["id"]: a for a in rpc(cls.admin_token, "list_apps")}
         assert GRAFANA in apps, "list_apps() does not list Grafana's client"
         cls.redirect_uri = apps[GRAFANA]["redirect_uris"][0]
-        # Start from no approval, so the first sign-in is asked for one.
-        revoke_own(cls.person_token)
-
-    @classmethod
-    def tearDownClass(cls):
+        # Start from no approval, so the first sign-in is asked for one, and end with none.
+        cls.addClassCleanup(revoke_own, cls.person_token)
         revoke_own(cls.person_token)
 
     def signed_in_app(self):

@@ -21,9 +21,11 @@ import { ActionButton } from '../common/ActionButton'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
+import { FieldError } from '../common/FieldError'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
+import { SchemaPicker } from '../common/SchemaPicker'
 import { SearchInput } from '../common/SearchInput'
 import { ColumnHeader, SortHeader } from '../common/SortHeader'
 import { Tooltip } from '../common/Tooltip'
@@ -68,7 +70,7 @@ import {
   outOfVocabularyMetrics, OUT_OF_VOCABULARY_TAG
 } from '../../utils/deviceTags'
 import { oldDevicesLinkChanges, STATUS_OUT_OF_VOCABULARY, STATUS_UNMODELLED } from '../../utils/devicesAddress'
-import { assignableSchemas, isAssignableSchema, schemaStatus, statusLabel } from '../../utils/schemaVersion'
+import { assignableSchemas, isAssignableSchema } from '../../utils/schemaVersion'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
@@ -414,6 +416,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     }
   })
 
+  /** Archived versions are not offered, except one this device already carries. The database refuses the write as well. */
+  const offeredSchemas = useMemo(
+    () => assignableSchemas(schemas, editing ? schemaIdsForDevice(editing) : []),
+    [schemas, editing]
+  )
+
   /** The schema rows the form has ticked: what the device will be judged against once saved. */
   const formSchemas = schemas.filter(s => (form.schema_ids || []).includes(s.schema_uuid))
   const formGroups = deviceTagList(editing, formSchemas)
@@ -507,6 +515,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
      proposal this form adds to: one open proposal per asset per person, so a second change extends
      the first. */
   const proposeMode = !canManage && canPropose
+
+  // The change to Enforce, not the state: what Enforce discards cannot be fetched back.
+  const startsEnforcing = form.conformance_policy === 'enforce'
+    && editing?.conformance_policy !== 'enforce'
+    && formSchemas.length > 0
 
   /**
    * The note under a field a proposal may not name. Disabled with the reason printed, rather than
@@ -1446,32 +1459,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               )
             })()}
 
-            {/* A fieldset of checkboxes: the legend names the group to a screen reader, and Tab and
-                Space work without a custom widget. */}
-            <fieldset className="form-group schema-picker">
-              <legend className="form-label">Schemas (optional)</legend>
-              <Withheld field="schema_ids" />
-              {/* Archived versions are not offered; assignableSchemas() keeps the ones this device
-                  already carries, labelled with their status. The database refuses the write as well. */}
-              <div className="form-control schema-checklist">
-                {(() => {
-                  const offered = assignableSchemas(schemas, editing ? schemaIdsForDevice(editing) : [])
-                  if (offered.length === 0) {
-                    return <span className="cell-meta">No schemas yet. Create one on the Schemas page.</span>
-                  }
-                  return offered.map(s => (
-                    <label key={s.schema_uuid}>
-                      <input
-                        type="checkbox"
-                        disabled={proposeMode}
-                        checked={(form.schema_ids || []).includes(s.schema_uuid)}
-                        onChange={() => toggleSchema(s.schema_uuid)}
-                      />
-                      <span>{isAssignableSchema(s) ? s.schema_name : `${s.schema_name} · ${statusLabel(schemaStatus(s))}`}</span>
-                    </label>
-                  ))
-                })()}
-              </div>
+            <SchemaPicker
+              legend="Schemas (optional)"
+              note={<Withheld field="schema_ids" />}
+              schemas={offeredSchemas}
+              value={form.schema_ids || []}
+              onToggle={toggleSchema}
+              disabled={proposeMode}
+            >
               {/* What the ticked schemas make of the device, as text: nothing here can be typed
                   into. Absent while no ticked schema models a group. */}
               {formGroups.length > 0 && (
@@ -1495,7 +1490,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   silently detach it — move it forward by publishing from the Schemas page, not from here.
                 </div>
               )}
-            </fieldset>
+            </SchemaPicker>
 
             {/* Only when editing: a device being created has no schema yet, and the column defaults
                 to 'audit' server-side. */}
@@ -1509,6 +1504,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   disabled={proposeMode}
                   value={form.conformance_policy || 'audit'}
                   onChange={e => setForm(f => ({ ...f, conformance_policy: e.target.value }))}
+                  // A choice that can be saved, so not aria-invalid.
+                  aria-describedby={startsEnforcing ? 'device-conformance-error' : undefined}
                 >
                   <option value="audit">Audit — record the violation, keep the reading</option>
                   <option value="enforce">Enforce — record it and DROP the reading</option>
@@ -1528,18 +1525,14 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   </div>
                 )}
 
-                {/* Shown on the change, not on the state: what Enforce discards cannot be fetched
-                    back. */}
-                {form.conformance_policy === 'enforce'
-                  && editing.conformance_policy !== 'enforce'
-                  && formSchemas.length > 0 && (
-                  <div className="form-hint hint-danger">
-                    From the next message, a value contradicting this device's schema will not be
-                    written to the historian and cannot be recovered. The violation is still
-                    recorded in the Audit Trail. Schema changes take up to five minutes to take
-                    effect.
-                  </div>
-                )}
+                <FieldError
+                  id="device-conformance-error"
+                  error={startsEnforcing
+                    ? "From the next message, a value contradicting this device's schema will not be written "
+                      + 'to the historian and cannot be recovered. The violation is still recorded in the '
+                      + 'Audit Trail. Schema changes take up to five minutes to take effect.'
+                    : null}
+                />
               </div>
             )}
 

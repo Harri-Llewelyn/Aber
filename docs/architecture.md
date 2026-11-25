@@ -1,7 +1,7 @@
 # How Aber fits together
 
-What Aber is for and where it stops, what each part does, where its code lives, which standards
-it uses, and how it relates to the AMRC Connectivity Stack. Why the Kubernetes deployment is built the way it is has its own
+What Aber is for and where it stops, what each part does, where its code lives, how it identifies
+things, which standards it uses, and how it relates to the AMRC Connectivity Stack. Why the Kubernetes deployment is built the way it is has its own
 document: [`kubernetes-architecture.md`](kubernetes-architecture.md).
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
@@ -201,6 +201,229 @@ made. The demo user accounts are seeded separately, by `supabase/seed.sql`.
 > live definition, because
 > `check-docs-drift.mjs` can verify a redeclaration was *intended* and cannot verify it was
 > *complete*.
+
+---
+
+## How Aber identifies things
+
+Most things in Aber have two kinds of id. The **key** is the row's own, in the platform database. The
+**public ids** are what other systems see: on MQTT, in an Asset Administration Shell (AAS), in the i3X
+address space, in a file or in a repository's name. This section gives both for each kind of thing. It
+says which code makes each id, and which ids a site holds outside Aber. It is for people who change
+Aber and people who connect another system to it.
+
+- **Nothing in Aber changes a key.** Renaming, moving, archiving and restoring a thing leave its key
+  alone, and every id made from the key. A deleted thing's key is not used again.
+- **A uuid key is its column's default**, `gen_random_uuid()`, unless a table below says otherwise. So
+  each site has uuids of its own. A row a migration seeds with a fixed uuid has the same one on every
+  site.
+- **A name is a label**, unless a table below says a topic, a file or a type is made from it.
+- **Changing an id a site already holds makes the release major**
+  ([What the version number means](releases.md#what-the-version-number-means)). *Held outside Aber*
+  says which those are.
+
+### The plant
+
+| Kind | Key | Public ids | Made by | Held outside Aber | May it change? |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Site | None: one install is one site | The Sparkplug group, the primary host ID, the AAS base IRI and the cold archive's site key. The site's name, a segment of every UNS topic. `i3x:site` in i3X | The chart's values: `ingestion.sparkplugGroup`, `ingestion.primaryHostId`, `supabaseFunctions.aas.baseIri` and `coldArchive.s3.siteKey`. The `site.name` setting | Every gateway, MQTT client, exported shell and archived file | No, except the name, which moves every UNS topic |
+| Area, cell | `areas.id`, `cells.id`: uuid | The uuid, as its i3X element id. Its name, unique, as a segment of a UNS topic | The column's default | i3X clients. UNS subscribers hold the name | No, except the name, which moves the topics below it |
+| Gateway | `gateways.id`: uuid | `sparkplug_id` (`gwy…`): the edge node in its topics, its broker username, its i3X element id and its repository's name. The uuid, as its Factory+ Instance_UUID | [The Sparkplug id](#the-sparkplug-id). The Playback gateway's uuid is pinned in `0002` | The edge node, its credential, MQTT and Factory+ clients | No. Its Sparkplug group can be edited, which moves its Directory address |
+| Device | `devices.id`: uuid | `sparkplug_id` (`dev…`): the key of its readings, its AAS ids and its i3X element id, and the id in its topic. The uuid, as its Factory+ Instance_UUID and in an automation's file. `reported_identity`, where it publishes an id of its own. Its name, as a segment of a UNS topic | [The Sparkplug id](#the-sparkplug-id). Ingestion records `reported_identity` when it first hears the device | The device or its edge node, exported shells, copied readings, automation files | No, except the name, which moves its UNS topics |
+| Replay lane | A `devices` row with `shadow_of` set, so a uuid of its own | A `sparkplug_id` of its own. Its shell lists no `specificAssetIds` | `ensure_shadow_devices()` | No | No. It is deleted with the device it stands for |
+| A device's metric | `asset_id` and `metric_name`, in the historian | The same pair: `<sparkplug_id>/<metric name>` in i3X | `ingestion/ingestion.py` | i3X clients, copied readings | No |
+
+### The model
+
+| Kind | Key | Public ids | Made by | Held outside Aber | May it change? |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Schema version | `schemas.id`: uuid. `schema_name` is unique | The uuid, as its type's i3X element id and its Directory Schema_UUID, which is local. `semantic_id`, where it has one | `fork_schema()` and `apply_device_schemas()` name a new version | i3X and Factory+ clients | No. A draft can be renamed |
+| Schema lineage | `lineage_root_id`: its first version's uuid | `lineage_name`: the key in its AAS Submodel ids, the name in a device schemas file, and its i3X `sourceTypeId` when it has no semantic id | `schemas_take_their_lineage()`, [Lineage names](#lineage-names) | Exported shells, AAS clients, device schemas files | Only while its first version is a draft |
+| Metric, measured or derived | `metric_catalog.id`: uuid. Its name is unique, and is the key in practice | The name: on the wire, in readings, in files, and in its i3X type `i3x:type:metric:<name>`. `semantic_id` and the rows of `metric_semantic_ids`: the concepts it means | A person, or `apply_derived_metrics()` for a derived one | Every device that publishes it, and everything that reads it | The name, no: `enforce_metric_catalog_immutability()` refuses. Its semantic ids can be edited |
+| Metric group | `metric_groups.id`: uuid. Its name is unique, whatever its case | Its name: what is before the first `/` of a metric's name | The generated column `metric_catalog.metric_group` | In metric names | No |
+| A standard's entry | The standard's own name or id for it, in that vocabulary's table | Its semantic id | The generators, `scripts/generate-*-vocabulary.mjs`, into the seed. [Vocabularies](vocabularies.md) | Exported shells, i3X clients | No |
+| Imported vocabulary | `site_vocabularies.id`: uuid. The file's SHA-256 is unique | Each concept's semantic id, as the file gives it | `import_site_vocabulary()` | Wherever the file came from | No |
+| Submodel template's element | `template_id` and `path`, its idShortPath in the template. `template_id` and `id_short` in `idta_submodel_templates` | The template's IRI and the element's semantic id, as IDTA publishes them | The seed | Exported shells | No |
+
+### People, machine identities and access
+
+| Kind | Key | Public ids | Made by | Held outside Aber | May it change? |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Person | `auth.users.id`: uuid | The uuid: the `sub` of every token, what Grafana finds their account by, and their forge username | GoTrue, through `manage-people`. `ensure_first_administrator()` makes the first | Grafana, the forge, registered apps | No. The email address and the display name can |
+| Machine identity | `auth.users.id`: uuid, of an account that cannot sign in (`is_machine_principal()`). `machine_principals.principal_id` is the same id | The uuid: the `sub` of its tokens | `create_machine_principal()`. Four are pinned, in `0002` and `0181` | Its tokens | No. Its name and purpose can |
+| API token | Its `jti`: uuid | The same | `mint-service-token`, `scripts/mint-api-token.mjs` and `scripts/lib/service-jwt.mjs` | Whoever holds the token | No |
+| Role | `roles.id`: an integer, pinned in `0002` | Its name, such as `Shopfloor_Manager`, which is what code compares | The seed | No | No |
+| Permission | `permissions.id`: uuid, pinned in `0002` | Its name, such as `telemetry:read`, which is what code compares | The seed | No | No |
+| App that signs people in | `auth.oauth_clients.id`: uuid | The same, as its client ID | `register_app()`. Aber's own four are pinned in `0002` (`stack_app_ids()`) | The app's configuration | No |
+| Broker account | Its MQTT username | The same: a gateway's is its `sparkplug_id`, and a read-only account's is `sub` and 21 random hex characters | The database, and `generateSubscriberId()` in `scripts/lib/mosquitto-credentials.mjs`. The chart's values name the platform's own | The client that signs in with it | No |
+| Gateway setup token | `gateway_enrollment_tokens.id`: uuid | None. The token is a secret, and only its SHA-256 is stored | The database | Until it is used or expires | No |
+
+### What happens, and what is kept
+
+| Kind | Key | Public ids | Made by | Held outside Aber | May it change? |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Audit Trail row | `audit_trail.id`, a number, with `recorded_at` | `entity_type` and `entity_id`: [what it is about](#entity_type-the-word-for-a-kind). `causation_id` groups the rows one transaction wrote, in this database only | `log_audit_trail_event()`, and each function that records its own act | A device's exported bundle | No |
+| Change proposal | `change_proposals.id`: uuid | None. `entity_type` and `entity_id` name its subject | The column's default | No | No |
+| Deleted asset | `entity_type` and `entity_id`, in `retired_entities` | The ids it had | `record_retired_entity()` | As before it was deleted | No |
+| Recording, capture, playback | `capture_jobs.id`, `captures.id`, `playback_jobs.id`: uuid | A stored capture's object: `<subject's sparkplug_id>/<uuid>.json` | `start_capture_job()` and `begin_capture_upload()` | A downloaded capture holds the ids its devices published under | No |
+| Backup | `backups.id`: uuid | `stamp`, such as `20261124T031500Z`: its folder, and its off-site copy's | `stampNow()` in `scripts/backup-service.mjs` | The off-site copy | No |
+| Alert | `platform_alerts.id`: uuid, one for each time it fires. `fingerprint` and `starts_at` together are unique | The uuid, in a webhook message (`alert_id`). The fingerprint: Grafana's, or `condition:<trigger>:<device>:<metric>` | `automation_alert_fingerprint()` for an automation's, Grafana for the rest | Webhook receivers | No |
+| Built-in alert rule | Its `uid`, in `grafana/provisioning/alerting/alert-rules.yaml` | The same, as `rule_uid` on its alerts | That file | Links to the rule in Grafana | No |
+| Automation | `automations.id`: uuid | `key`: the `id:` in its file. A trigger's uuid, in the fingerprint and labels of its alerts | Whoever writes the file, and `apply_automations()` | Automation files, webhook receivers | No. A trigger keeps its uuid while it names the same device and metric |
+| Suppression window | `alert_suppression_windows.id`: uuid | None | The column's default | No | No |
+| Link | `links.id`: uuid | None. `entity_type` and `entity_id` name what it is on | The column's default | No | No |
+| Notification | `notification_deliveries.id`: uuid | The uuid, as the webhook message's id | The column's default | Webhook receivers | No |
+| Setting | `system_settings.key`, such as `site.name`. Its uuid is its Audit Trail `entity_id` | The key | The seed | No | No |
+| Service in the Directory | `directory_services.id`: uuid, pinned in `0002` | The uuid, as its Directory Service_UUID, which is local | The seed | Factory+ clients | No |
+| Exported bundle | `asset_exports.id`: uuid | Its object: `assets/<sparkplug_id>/<time>.aasx` | `exportObjectKey()` in `_shared/aas/bundle.ts` | The archive bucket | No |
+| Gateway's repository | Its name: `gateways/gateway-<sparkplug_id>` | The same, and its deploy key's title, `gateway <sparkplug_id>` | `repositoryNameFor()` in `_shared/forge.ts` | The gateway's own clone, and every other | No |
+| 3D model, area plan, picture | The object's path, which starts with its device's, area's or person's uuid | A 3D model's address, in exported shells | `modelStoragePath()`, `areaPlanPath()` and `picturePath()` in `frontend/src/utils/` | Exported shells hold a model's | A picture's, no. A model's follows its file's name, and a plan gets a new one at each upload |
+
+### The Sparkplug id
+
+A gateway or a device is addressed by its `sparkplug_id`: `gwy` or `dev`, then the first 21 hex
+characters of its uuid, with no hyphens and in lower case. It is 24 characters in all.
+
+- **The database makes it.** It is a `GENERATED ALWAYS … STORED` column of `gateways` and `devices`
+  (`0001_baseline_schema.sql`), so nothing can write one.
+- **The dashboard derives the same id** from a uuid, in
+  [`sparkplugId.js`](../frontend/src/utils/sparkplugId.js). Mirror check 1 holds the two together. Nothing
+  else in Aber derives it, outside the tests.
+- **It does not give the uuid back.** It leaves out the last 11 characters. Look the row up by the column.
+- **It is unique on the site.** Two uuids whose first 21 hex characters agree cannot both be devices.
+  Fixtures that pin uuids must differ in those.
+- **The length is fixed**, so ingestion can say an id on the wire was cut short, rather than only that
+  it is unknown.
+- **Some devices publish another id.** A device admitted from Quarantine may keep its own, and a
+  Factory+ device may publish its uuid. Its readings are still kept under its `sparkplug_id`
+  ([Asset Identity on the Wire](../ingestion/README.md#asset-identity-on-the-wire)).
+
+### AAS ids and the base IRI
+
+Every id in a shell is the base IRI, the device's `sparkplug_id` and what follows it. `buildEnvironment()`
+in [`_shared/aas/shell.ts`](../supabase/functions/_shared/aas/shell.ts) makes them, for an exported file
+and for `aas-api` alike.
+
+| Id | Form |
+| :--- | :--- |
+| `globalAssetId` | `<base IRI><sparkplug_id>` |
+| The shell | `<globalAssetId>/shell` |
+| A Submodel | `<globalAssetId>/submodel/` and `Nameplate`, `DerivedMetrics`, `VisualRepresentation`, `<key>/OperationalTelemetry` or `<key>/KeyPerformanceIndicators` |
+| A concept | The semantic id itself, with no base IRI |
+
+- **The base IRI is the site's**, `supabaseFunctions.aas.baseIri`. The default, under `aber.local`, belongs
+  to nobody. Changing it changes every id above, so it is fixed once a shell has been exported or read.
+- **`<key>` is the schema lineage's name** as an idShort, unless `device_submodels.submodel_key` gives
+  another. `assignSubmodelKeys()` in [`submodelKeys.ts`](../supabase/functions/_shared/aas/submodelKeys.ts) has the
+  rule for two that clash.
+- **`specificAssetIds`** also names the asset by its serial number, its product URI and its
+  `sparkplug_id` ([Connecting an AAS client](../supabase/README.md#connecting-an-aas-client)).
+
+### i3X element ids
+
+A gateway or a device is its `sparkplug_id`, and a row with no identity on the wire is its uuid. A thing
+with no row of its own has an id that starts `i3x:`. The
+[i3X README](../i3x/README.md#element-ids) says which kind uses which, and why.
+
+### The `aber.local` namespace
+
+An id under `https://aber.local/` was minted by Aber. The name resolves nowhere on purpose: it claims no
+standard's authority.
+
+- **`https://aber.local/semantics/…`** is a concept whose standard publishes no id: MTConnect, ISO 22400 and
+  VDA 5050. An id from OPC UA, ASHRAE 223P, QUDT or IDTA is the standard's own.
+- **A metric no standard names has no semantic id.** None is minted for it.
+- **`https://aber.local/i3x`** and **`https://aber.local/i3x/relationships`** are the namespaces of i3X's
+  local types and relationships.
+- **`https://aber.local/ids/asset/`** is the default base IRI, above.
+
+Every site has the same semantic ids for the same concepts, so a shell from one site means the same at
+another. They are ids a site holds outside Aber.
+
+### Lineage names
+
+Every version of a schema has a uuid and a name of its own: `Robot_Arm_Schema`, `Robot_Arm_Schema_v2`.
+What outlives a version is its **lineage**, the versions made one from another.
+
+- **`lineage_root_id` and `lineage_name`** are the first version's uuid and name, on every version.
+  `schemas_take_their_lineage()` sets them, and no caller can.
+- **A published version cannot be renamed**, so a lineage with one keeps its name. Renaming a first
+  version that is still a draft renames its lineage.
+- **Use the lineage's name for something that must survive a publish**, as a Submodel's id does. Use the
+  version's uuid for something that must not, as an i3X type does: a version is a contract of its own.
+
+### `asset_id` is a Sparkplug ID, except inside the dashboard
+
+`asset_id` means two things. No API, file or table mixes them.
+
+| Where | What `asset_id` holds |
+| :--- | :--- |
+| `telemetry`, its rollups and `telemetry_latest`, in both databases | The device's `sparkplug_id` |
+| The functions that read them: `p_asset_id`, `asset_ids` | The device's `sparkplug_id` |
+| `asset_config`, the parameters a device declared at birth | The device's `sparkplug_id` |
+| A Unified Namespace message, a History export, an exported bundle's manifest, a file in the cold archive | The device's `sparkplug_id` |
+| A device row in the dashboard's code, as `mapDeviceRow()` in `frontend/src/api.js` makes it | **The device's uuid**, the drawer's **Device UUID**. `id` on the same row is the same value |
+| The `assetId` and `assetIds` arguments in `frontend/src/api.js` | Either. `toTelemetryKey()` turns a uuid into a `sparkplug_id` |
+| The `Asset_ID` metric in a Sparkplug payload | The id the device claims. Ingestion checks it against the topic, which decides |
+
+In new code, call a uuid `device_id` and a Sparkplug ID `sparkplug_id`. Use `asset_id` only for the
+historian's column and what is read from it.
+
+### `entity_type`: the word for a kind
+
+Several tables say what a row is about with two columns: `entity_type`, a word for the kind, and
+`entity_id`, which one.
+
+**A new word is the table's name:** lower case with underscores, and plural for a new table. The audit
+trigger stores the table's name, so almost every word is one already, and the Audit Trail turns each
+into the label a person reads. A thing with no table in `public` takes the name its table would have, as
+`service_logs` does. A new column uses these same words. A column that already holds singular words
+keeps its style, so a new word there is singular too.
+
+`audit_trail.entity_type` holds these. Drift check 566 holds the list to the dashboard's
+`AUDIT_TRAIL_ENTITY_TYPES` and to `audit_trail_action_kinds()`.
+
+| Word | What it is about | `entity_id` |
+| :--- | :--- | :--- |
+| `areas`, `cells`, `gateways`, `devices` | The row | Its uuid |
+| `device_nameplate` | A device's nameplate | The device's uuid |
+| `device_submodels` | A schema attached to a device | The device's uuid |
+| `schemas` | A schema version | Its uuid |
+| `metric_catalog` | A metric, measured or derived | Its uuid |
+| `metric_semantic_ids` | A metric's further semantic ids | The metric's uuid |
+| `site_vocabularies` | An imported vocabulary | Its uuid |
+| `change_proposals` | A proposal that expired. One that was applied is filed under its subject | Its uuid |
+| `automations` | An automation, with its triggers and actions | Its uuid |
+| `capture_jobs`, `captures`, `playback_jobs` | A recording, the capture it stored, a playback | Its uuid |
+| `platform_alerts` | **An alert across its occurrences**: each acknowledgement, and each withdrawal of one | Made from its fingerprint |
+| `telemetry` | **Exports of readings**, all in one lane. Not a row of the historian | One fixed uuid |
+| `user_roles` | **A person**: their account, roles, password, sessions, second factor, name, email address and app approvals. Not a row of `user_roles` | The person's uuid |
+| `service_principals` | **A machine identity** and its tokens, with the acknowledgement of an alert about one. No table has this name: the table is `machine_principals` | The identity's uuid |
+| `oauth_clients` | An app that signs people in. The table is GoTrue's, `auth.oauth_clients` | Its client ID |
+| `broker_accounts` | A read-only broker account. The broker holds it, and no table does | Its username's hex characters, padded with zeros |
+| `service_logs` | Reads of one service's log lines. No table | Made from the service's name |
+| `notification_channels` | The webhook's signing key. No table | Made from the channel's name |
+| `system_settings` | A setting | Its uuid |
+| `backup_jobs`, `backups` | A request for a backup, and the backup it took | Its uuid |
+
+A trail from an earlier release can also hold `area_floors`, `cell_links`, `gateway_links` and
+`device_links`.
+
+The other columns that hold a word for a kind:
+
+| Column | Words | Style |
+| :--- | :--- | :--- |
+| `change_proposals.entity_type` | `areas`, `cells`, `device_nameplate`, `devices`, `gateways`, `schemas` | Table names |
+| `retired_entities.entity_type` | `areas`, `cells`, `devices`, `gateways` | Table names |
+| `asset_exports.entity_type` | `devices` | Table names |
+| `platform_alerts.entity_type` | `device`, `gateway`, `platform`, `service_identity` | Singular: a Grafana rule's label says it. `platform` is an alert about Aber itself, and `service_identity` one about a machine identity's token |
+| `links.entity_type` | `area`, `cell`, `device`, `gateway` | Singular |
+| `captures.subject_kind` | `device`, `gateway` | Singular |
+| `capture_jobs.subject_kind` | `device`, `gateway` | Singular |
+| `capture_uploads.subject_kind` | `device`, `gateway` | Singular |
+
+The dashboard spells a kind two more ways. The Audit Trail's filter says `AREA` or `SERVICE IDENTITY`
+(`kind` in `AUDIT_TRAIL_ENTITY_TYPES`), and `entityUrl()` takes the singular. Neither is stored.
 
 ---
 

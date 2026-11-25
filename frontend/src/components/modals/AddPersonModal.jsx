@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
+import { FieldError, fieldErrorProps } from '../common/FieldError'
 import { Modal } from '../common/Modal'
 import { RequiredMark } from '../common/RequiredMark'
 import { IconCheck, IconPlus, IconUser } from '../common/Icons'
@@ -141,12 +142,12 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
           placeholder="Their name, as colleagues know it"
           autoComplete="off"
           disabled={busy}
-          aria-invalid={nameProblem ? 'true' : undefined}
-          aria-describedby="add-person-name-hint"
+          {...fieldErrorProps(nameProblem, 'add-person-name-error', 'add-person-name-hint')}
         />
-        <div id="add-person-name-hint" className={nameProblem ? 'form-hint hint-danger' : 'form-hint'}>
-          {nameProblem || `Shown with their email address beside it. Up to ${DISPLAY_NAME_MAX} characters. They can change it on their Profile page.`}
+        <div id="add-person-name-hint" className="form-hint">
+          {`Shown with their email address beside it. Up to ${DISPLAY_NAME_MAX} characters. They can change it on their Profile page.`}
         </div>
+        <FieldError id="add-person-name-error" error={nameProblem} />
       </div>
 
       <div className="form-group">
