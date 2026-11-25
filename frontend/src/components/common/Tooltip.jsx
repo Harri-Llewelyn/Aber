@@ -2,6 +2,7 @@ import React, { useCallback, useId, useLayoutEffect, useRef, useState } from 're
 import { createPortal } from 'react-dom'
 import { useHoverIntent } from '../../hooks/useHoverIntent'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { isWrong } from './FieldError'
 
 export const TOOLTIP_WIDTH = 320
 /** From the trigger: room for the arrow's point. */
@@ -122,9 +123,11 @@ export function TooltipBubble({ id, text, pos, container = null, keepMounted = f
  * lost focus.
  *
  * Spread `trigger` onto the control, and pass `bubble` to TooltipBubble. While `disabled` it never
- * shows, whatever the pointer and focus do, so a control whose text has gone holds no Escape.
+ * shows, whatever the pointer and focus do, so a control whose text has gone holds no Escape. While
+ * `wrong` it shows to the pointer alone: a press that finds a field wrong moves the focus to it, and
+ * the bubble would cover what is said under it.
  */
-export function useTooltip({ delay = TOOLTIP_DELAY_MS, disabled = false } = {}) {
+export function useTooltip({ delay = TOOLTIP_DELAY_MS, disabled = false, wrong = false } = {}) {
   const id = useId()
   const ref = useRef(null)
   const hover = useHoverIntent(delay)
@@ -138,6 +141,7 @@ export function useTooltip({ delay = TOOLTIP_DELAY_MS, disabled = false } = {}) 
   const hide = useCallback(() => { hideHover(); setFocused(false) }, [hideHover])
   const { pos, container } = useTooltipPosition(ref, visible, hide)
   useEscapeKey(hide, visible)
+  useLayoutEffect(() => { if (wrong) setFocused(false) }, [wrong])
 
   const trigger = {
     ref,
@@ -150,6 +154,7 @@ export function useTooltip({ delay = TOOLTIP_DELAY_MS, disabled = false } = {}) 
       const returning = focusedAsWindowLeft.current
       focusedAsWindowLeft.current = null
       if (pressed.current) { pressed.current = false; return }
+      if (wrong) return
       if (returning !== null && e.relatedTarget === null) setFocused(returning)
       else setFocused(true)
     },
@@ -182,6 +187,8 @@ const setRefs = (...refs) => (el) => {
  * `describe={false}` says the same of a bubble that only rewords the name, such as an icon
  * button's name with its shortcut, which `aria-keyshortcuts` states.
  *
+ * A field whose value is wrong (`fieldErrorProps`) shows it to the pointer alone.
+ *
  *   <Tooltip text="Send the bundle to the gateway again">
  *     <button type="button" className="btn btn-ghost btn-sm" onClick={resend}>Resend</button>
  *   </Tooltip>
@@ -190,9 +197,9 @@ const setRefs = (...refs) => (el) => {
  * something that takes no focus the tooltip shows to a pointer only, so keep it to controls.
  */
 export function Tooltip({ text, delay, describe = true, children }) {
-  const tip = useTooltip({ delay, disabled: !text })
   const child = React.Children.only(children)
   const own = child.props
+  const tip = useTooltip({ delay, disabled: !text, wrong: isWrong(own) })
   const { trigger } = tip
   const both = (ours, theirs) => (e) => { ours(e); theirs?.(e) }
   const describes = Boolean(text) && describe && own['aria-label'] !== text && own.children !== text
