@@ -405,6 +405,9 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
   AUDIT_TRAIL_ENTITY_TYPES.map(e => [e.kind, e.table])
 );
 
+/** How many rows one search on the Entities page answers: find_entities()' own default (0321). */
+export const ENTITY_FIND_LIMIT = 200;
+
 /**
  * Every tab id the router will accept. This list and `TABS` in navigation.jsx must agree:
  * `handleNavClick` returns early on an id that is not here, so a tab declared there and forgotten
@@ -412,7 +415,7 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  */
 export const VALID_TABS = [
   'site-map', 'history', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'automations', 'vocabulary', 'system',
-  'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings',
+  'capture', 'entities', 'cold-storage', 'access-control', 'backups', 'settings',
   'profile'
 ];
 

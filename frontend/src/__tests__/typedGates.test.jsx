@@ -15,7 +15,7 @@ import { tabLink } from '../test/tabBar'
  * Typed text guards removing a person's access, whoever they are, and every act that cannot be
  * undone (frontend/README.md, "Typed text guards removing access and what cannot be undone"). Each
  * gated dialog holds its button until the record's own name is typed, and then acts once. Permanent
- * Delete's is in ArchivesTab.test.jsx and Discard Draft's in schemaVersioningUi.test.jsx.
+ * Delete's is in EntitiesTab.test.jsx and Discard Draft's in schemaVersioningUi.test.jsx.
  */
 
 vi.mock('../api', async () => {

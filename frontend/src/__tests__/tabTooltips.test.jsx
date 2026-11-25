@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import { APPS_SECTION, PEOPLE_SECTION, SECTIONS } from '../components/tabs/AccessControlTab'
 import { QUEUES } from '../components/tabs/ApprovalsTab'
-import { STAGES } from '../components/tabs/ArchivesTab'
+import { STAGES } from '../components/tabs/EntitiesTab'
 import { VIEWS as CAPTURE_VIEWS } from '../components/tabs/CaptureTab'
 import { VIEWS as DEVICE_VIEWS } from '../components/tabs/DevicesTab'
 import { VIEWS as METRIC_VIEWS } from '../components/tabs/MetricsTab'
@@ -19,7 +19,7 @@ import { SERVICE_GROUPS, UNGROUPED_DESCRIPTION } from '../components/tabs/System
 const TOOLTIPS = [
   ...[PEOPLE_SECTION, APPS_SECTION, ...SECTIONS].map(t => [`Access Control: ${t.label}`, t.description]),
   ...QUEUES.map(t => [`Approvals: ${t.label}`, t.description]),
-  ...STAGES.map(t => [`Archived Entities: ${t.label}`, t.description]),
+  ...STAGES.map(t => [`Entities: ${t.label}`, t.description]),
   ...CAPTURE_VIEWS.map(t => [`Capture: ${t.label}`, t.description]),
   ...DEVICE_VIEWS.map(t => [`Devices: ${t.label}`, t.description]),
   ...METRIC_VIEWS.map(t => [`Metrics: ${t.label}`, t.description]),
@@ -39,7 +39,7 @@ describe('every tab tooltip', () => {
   })
 
   it('covers every tab of the pages it lists', () => {
-    expect(TOOLTIPS).toHaveLength(6 + 2 + 2 + 4 + 2 + 4 + 6 + 8 + 4)
+    expect(TOOLTIPS).toHaveLength(6 + 2 + 3 + 4 + 2 + 4 + 6 + 8 + 4)
   })
 
   it('has a sentence for each Settings category the database seeds', () => {

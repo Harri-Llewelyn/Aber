@@ -2,12 +2,13 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { cellUrl } from '../routes'
-import { ArchivesTab, purgeIsSoon } from '../components/tabs/ArchivesTab'
+import { EntitiesTab, purgeIsSoon } from '../components/tabs/EntitiesTab'
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
 import { tabLink } from '../test/tabBar'
 
-vi.mock('../api', () => ({
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal()),
   api: {
     get: vi.fn(),
     post: vi.fn(),
@@ -16,6 +17,9 @@ vi.mock('../api', () => ({
     displayNamesFor: vi.fn()
   }
 }))
+
+// The page opens on Active; these tests are about its other two tabs (entitiesActive.test.jsx has that one).
+beforeEach(() => window.history.replaceState(null, '', '/entities/archived'))
 
 // The bundle is a ZIP handed to an anchor; jsdom has no object URLs, and the file is not the fact
 // under test.
@@ -29,14 +33,14 @@ const ARCHIVED_CELL = {
 const showArchives = async (hasPermission = () => true, rows = [ARCHIVED_CELL]) => {
   api.get.mockResolvedValue(rows)
   const showToast = vi.fn()
-  render(<ArchivesTab showToast={showToast} hasPermission={hasPermission} />)
+  render(<EntitiesTab showToast={showToast} hasPermission={hasPermission} />)
   await waitFor(() => expect(screen.getByText(rows[0].name)).toBeInTheDocument())
   return { showToast }
 }
 
 const purgeButton = () => screen.getByRole('button', { name: /Permanent Delete/i })
 
-describe('ArchivesTab Component', () => {
+describe('EntitiesTab Component', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -50,7 +54,7 @@ describe('ArchivesTab Component', () => {
     const hasPermission = vi.fn().mockReturnValue(true) // Authorized
     const showToast = vi.fn()
 
-    render(<ArchivesTab showToast={showToast} hasPermission={hasPermission} />)
+    render(<EntitiesTab showToast={showToast} hasPermission={hasPermission} />)
 
     await waitFor(() => {
       expect(screen.getByText('Assembly Line 1')).toBeInTheDocument()
@@ -69,7 +73,7 @@ describe('ArchivesTab Component', () => {
     const hasPermission = vi.fn().mockReturnValue(false) // Unauthorized
     const showToast = vi.fn()
 
-    render(<ArchivesTab showToast={showToast} hasPermission={hasPermission} />)
+    render(<EntitiesTab showToast={showToast} hasPermission={hasPermission} />)
 
     await waitFor(() => {
       expect(screen.getByText('Assembly Line 1')).toBeInTheDocument()
@@ -95,7 +99,7 @@ const confirmPurge = async (name = 'Assembly Line 1') => {
   fireEvent.click(await screen.findByRole('button', { name: /^Confirm$/ }))
 }
 
-describe('ArchivesTab permanent delete', () => {
+describe('EntitiesTab permanent delete', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it('never deletes on the first click', async () => {
@@ -264,7 +268,7 @@ const confirmRestoreButton = async () =>
   within(await screen.findByRole('dialog', { name: /^Restore / }))
     .getByRole('button', { name: /^Restore (Area|Cell|Gateway|Device)$/ })
 
-describe('ArchivesTab restore asks first', () => {
+describe('EntitiesTab restore asks first', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it('never restores on the first click', async () => {
@@ -479,6 +483,7 @@ const routed = ({ archives = [], retired = [], exports = [] } = {}) => (path) =>
   if (path.startsWith('/api/v1/archives/retired')) return Promise.resolve(retired)
   if (path.startsWith('/api/v1/archives/exports')) return Promise.resolve(exports)
   if (path.startsWith('/api/v1/archives')) return Promise.resolve(archives)
+  // Nothing in service: the Active tab is entitiesActive.test.jsx's.
   return Promise.resolve([])
 }
 
@@ -486,7 +491,7 @@ const showLifecycle = async (lists, props = {}) => {
   api.get.mockImplementation(routed(lists))
   const showToast = vi.fn()
   const onViewTrail = vi.fn()
-  render(<ArchivesTab showToast={showToast} hasPermission={() => true} onViewTrail={onViewTrail} {...props} />)
+  render(<EntitiesTab showToast={showToast} hasPermission={() => true} onViewTrail={onViewTrail} {...props} />)
   const first = lists.archives?.[0] || lists.retired?.[0]
   await waitFor(() => expect(screen.getAllByText(first.name).length).toBeGreaterThan(0))
   return { showToast, onViewTrail }
@@ -496,13 +501,13 @@ const showLifecycle = async (lists, props = {}) => {
 const showRetired = async (lists) => {
   api.get.mockImplementation(routed(lists))
   const onViewTrail = vi.fn()
-  render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={onViewTrail} />)
+  render(<EntitiesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={onViewTrail} />)
   fireEvent.click(tabLink('Retired'))
   await screen.findByText(lists.retired?.[0]?.name || /Nothing has been retired/)
   return { onViewTrail }
 }
 
-describe('ArchivesTab lists archived areas', () => {
+describe('EntitiesTab lists archived areas', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it('lists an area beside the cells, gateways and devices, with the same two actions', async () => {
@@ -536,7 +541,7 @@ describe('ArchivesTab lists archived areas', () => {
   })
 })
 
-describe('ArchivesTab exports a device before it goes', () => {
+describe('EntitiesTab exports a device before it goes', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it('offers Export Bundle on a device through the export dialog, and posts the device id to the bundle route', async () => {
@@ -604,14 +609,14 @@ describe('ArchivesTab exports a device before it goes', () => {
 
   it('withholds the export from a reader who cannot manage archives', async () => {
     api.get.mockImplementation(routed({ archives: [ARCHIVED_DEVICE] }))
-    render(<ArchivesTab showToast={vi.fn()} hasPermission={() => false} />)
+    render(<EntitiesTab showToast={vi.fn()} hasPermission={() => false} />)
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeInTheDocument())
 
     expect(screen.getByRole('button', { name: /Export Bundle/i })).toBeDisabled()
   })
 })
 
-describe('ArchivesTab shows what has been retired', () => {
+describe('EntitiesTab shows what has been retired', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it('says when nothing has been retired, in a tab that is always there', async () => {
@@ -680,14 +685,14 @@ describe('ArchivesTab shows what has been retired', () => {
     api.get.mockImplementation((path) => path.startsWith('/api/v1/archives/retired') || path.startsWith('/api/v1/archives/exports')
       ? Promise.reject(new Error('permission denied'))
       : Promise.resolve([ARCHIVED_CELL]))
-    render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} />)
+    render(<EntitiesTab showToast={vi.fn()} hasPermission={() => true} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
     fireEvent.click(tabLink('Retired'))
     expect(screen.getByText(/Nothing has been retired/)).toBeInTheDocument()
   })
 })
 
-describe('ArchivesTab layout', () => {
+describe('EntitiesTab layout', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it('is one scrolling card named for the page, with a tab per stage and no counts', async () => {
@@ -697,23 +702,24 @@ describe('ArchivesTab layout', () => {
     const cards = document.querySelectorAll('.card')
     expect(cards).toHaveLength(1)
     expect(cards[0]).toHaveClass('card-fill')
-    expectCardHeading('Archived Entities', /out of commission/)
+    expectCardHeading('Entities', /found by any ID or name/)
 
     const strip = cards[0].querySelector('.tab-strip')
     expect(strip.parentElement).toBe(cards[0])
-    expect(within(strip).getAllByRole('link').map(t => t.textContent)).toEqual(['Archived', 'Retired'])
+    expect(within(strip).getAllByRole('link').map(t => t.textContent)).toEqual(['Active', 'Archived', 'Retired'])
     expect(document.querySelector('.section-count')).toBeNull()
-    // Each stage explains itself in its tab's tooltip; the bar has no "?". Neither stage has
-    // filters or actions, so no toolbar row is drawn and the table follows the bar.
+    // Each stage explains itself in its tab's tooltip; the bar has no "?". The toolbar is one for the
+    // three tabs, the search first, and the table follows it.
+    expect(tabLink('Active')).toHaveAccessibleDescription(/Every entity in service/)
     expect(tabLink('Archived')).toHaveAccessibleDescription(/Restore returns one intact/)
     expect(tabLink('Retired')).toHaveAccessibleDescription(/Only a tombstone remains/)
     expect(strip.querySelector('.help-tip')).toBeNull()
-    expect(document.querySelector('.filter-bar')).toBeNull()
-    expect(strip.nextElementSibling).toHaveClass('table-wrap')
+    expect(strip.nextElementSibling).toHaveClass('filter-bar')
+    expect(strip.nextElementSibling.nextElementSibling).toHaveClass('table-wrap')
     fireEvent.click(tabLink('Retired'))
     expect(strip.querySelector('.help-tip')).toBeNull()
-    expect(document.querySelector('.filter-bar')).toBeNull()
-    expect(strip.nextElementSibling).toHaveClass('table-wrap')
+    expect(strip.nextElementSibling).toHaveClass('filter-bar')
+    expect(strip.nextElementSibling.nextElementSibling).toHaveClass('table-wrap')
   })
 
   it('orders and styles the shared columns alike in both tables', async () => {
@@ -721,12 +727,12 @@ describe('ArchivesTab layout', () => {
     const heads = () => [...document.querySelectorAll('thead th')].slice(0, 3).map(th => th.textContent)
     const typeBadge = () => document.querySelector('tbody tr').children[1].querySelector('.badge')
 
-    expect(heads()).toEqual(['Name', 'Type', 'Entity ID'])
+    expect(heads()).toEqual(['Name', 'Kind', 'UUID'])
     expect(typeBadge()).toHaveTextContent('DEVICE')
     expect(typeBadge()).toHaveClass('badge-neutral')
 
     fireEvent.click(tabLink('Retired'))
-    expect(heads()).toEqual(['Name', 'Type', 'Entity ID'])
+    expect(heads()).toEqual(['Name', 'Kind', 'UUID'])
     expect(typeBadge()).toHaveTextContent('DEVICE')
     expect(typeBadge()).toHaveClass('badge-neutral')
   })
@@ -774,7 +780,7 @@ describe('ArchivesTab layout', () => {
  * Both stages sort by their columns (#801), the sort held in the address. The two tables live in
  * one component, so the one on the hidden tab must leave alone a sort meant for the one shown.
  */
-describe('ArchivesTab: sorting by a column (#801)', () => {
+describe('EntitiesTab: sorting by a column (#801)', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   const at = (url) => window.history.replaceState(null, '', url)
@@ -791,7 +797,7 @@ describe('ArchivesTab: sorting by a column (#801)', () => {
   })
 
   it('sorts the Archived table by its auto-purge date, with "Never auto-purged" last either way', async () => {
-    at('/archives')
+    at('/entities/archived')
     await showLifecycle({ archives: [
       archived('Press 10', '2026-12-01T00:00:00Z'),
       archived('Press 9', null),
@@ -802,16 +808,16 @@ describe('ArchivesTab: sorting by a column (#801)', () => {
     sortBy('Auto-Purge')
     expect(names()).toEqual(['Press 2', 'Press 10', 'Boiler', 'Press 9'])
     expect(screen.getByRole('columnheader', { name: 'Auto-Purge' })).toHaveAttribute('aria-sort', 'ascending')
-    expect(address()).toBe('/archives?sort=auto_purge')
+    expect(address()).toBe('/entities/archived?sort=auto_purge')
 
     sortBy('Auto-Purge')
     expect(names()).toEqual(['Boiler', 'Press 10', 'Press 2', 'Press 9'])
     expect(screen.getByRole('columnheader', { name: 'Auto-Purge' })).toHaveAttribute('aria-sort', 'descending')
-    expect(address()).toBe('/archives?sort=-auto_purge')
+    expect(address()).toBe('/entities/archived?sort=-auto_purge')
   })
 
   it('sorts the Retired table by who retired it: the email, else the account uuid, else the retention timer', async () => {
-    at('/archives/retired')
+    at('/entities/retired')
     await showLifecycle({ retired: [
       tombstone('By Zoe', { retired_by: 'user-9', retired_by_email: 'zoe@example.test' }),
       tombstone('By the timer', { retired_by: null, retired_by_email: null }),
@@ -822,13 +828,13 @@ describe('ArchivesTab: sorting by a column (#801)', () => {
     sortBy('By')
     // The timer is a value, not an empty cell, so it sorts as its words do rather than last.
     expect(names()).toEqual(['By the admin', 'By a machine', 'By the timer', 'By Zoe'])
-    expect(address()).toBe('/archives/retired?sort=by')
+    expect(address()).toBe('/entities/retired?sort=by')
     sortBy('By')
     expect(names()).toEqual(['By Zoe', 'By the timer', 'By a machine', 'By the admin'])
   })
 
   it('keeps a sort meant for the Retired tab on arrival, which the hidden Archived table leaves alone', async () => {
-    at('/archives/retired?sort=-retired_at')
+    at('/entities/retired?sort=-retired_at')
     api.get.mockImplementation(routed({
       archives: [ARCHIVED_CELL],
       retired: [
@@ -837,21 +843,21 @@ describe('ArchivesTab: sorting by a column (#801)', () => {
         tombstone('Retired 2 Oct', {}, '2026-10-02T10:00:00Z')
       ]
     }))
-    render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} />)
+    render(<EntitiesTab showToast={vi.fn()} hasPermission={() => true} />)
     await screen.findByText('Retired 1 Oct')
     expect(names()).toEqual(['Retired 3 Oct', 'Retired 2 Oct', 'Retired 1 Oct'])
     expect(screen.getByRole('columnheader', { name: 'Retired At' })).toHaveAttribute('aria-sort', 'descending')
-    expect(address()).toBe('/archives/retired?sort=-retired_at')
+    expect(address()).toBe('/entities/retired?sort=-retired_at')
   })
 
   it('keeps a sort meant for the Archived tab on arrival, which the hidden Retired table leaves alone', async () => {
-    at('/archives?sort=-auto_purge')
+    at('/entities/archived?sort=-auto_purge')
     await showLifecycle({
       archives: [archived('Press 9', null), archived('Press 2', '2026-11-15T00:00:00Z'), archived('Boiler', '2027-01-10T00:00:00Z')],
       retired: [RETIRED_DEVICE]
     })
     expect(names()).toEqual(['Boiler', 'Press 2', 'Press 9'])
-    expect(address()).toBe('/archives?sort=-auto_purge')
+    expect(address()).toBe('/entities/archived?sort=-auto_purge')
   })
 })
 
@@ -859,7 +865,7 @@ describe('ArchivesTab: sorting by a column (#801)', () => {
  * The nightly purge skips a gateway a playback names (0193), and the record of a playback is kept
  * for good, so that gateway's Auto-purge date would never be kept. Its row says why instead.
  */
-describe('ArchivesTab: a gateway a playback holds', () => {
+describe('EntitiesTab: a gateway a playback holds', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   const held = (playbacks) => ({ ...ARCHIVED_GATEWAY, playbacks })

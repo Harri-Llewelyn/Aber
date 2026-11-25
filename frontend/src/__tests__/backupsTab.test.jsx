@@ -1294,13 +1294,13 @@ describe('releasing', () => {
 describe('the page is an Administrator page', () => {
   /**
    * Filed by retention rather than by permission: a backup is something kept against a timer and
-   * restored from, which is what Cold Storage and Archived Entities are too. Administrator-only is
+   * restored from, which is what Cold Storage and Entities are too. Administrator-only is
    * still true of the page, it just is not what the group means.
    */
   it('sits in the retention group for an Administrator and nowhere for anyone else', () => {
     const grant = () => true
     const forAdmin = groupedNav(TABS.filter(t => tabIsVisible(t, grant, 'Administrator')))
-    expect(forAdmin.find(g => g.id === 'retention').tabs.map(t => t.id)).toEqual(['cold-storage', 'backups', 'archives'])
+    expect(forAdmin.find(g => g.id === 'retention').tabs.map(t => t.id)).toEqual(['cold-storage', 'backups', 'entities'])
 
     for (const role of ['Shopfloor_Manager', 'Auditor', 'Operator']) {
       const visible = TABS.filter(t => tabIsVisible(t, grant, role)).map(t => t.id)

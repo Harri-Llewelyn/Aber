@@ -61,10 +61,10 @@ describe('the nav and the router agree', () => {
   it('still honours a permission-gated tab, which was dead code until Settings was added', () => {
     /* `tabIsVisible` is what makes the role gate work; this pins that the permission branch
        survives. */
-    const archives = TABS.find(t => t.id === 'archives')
-    expect(archives.permission).toBeTruthy()
-    expect(tabIsVisible(archives, uuid => uuid === archives.permission, 'Operator')).toBe(true)
-    expect(tabIsVisible(archives, () => false, 'Operator')).toBe(false)
+    const trail = TABS.find(t => t.id === 'audit-trail')
+    expect(trail.permission).toBeTruthy()
+    expect(tabIsVisible(trail, uuid => uuid === trail.permission, 'Operator')).toBe(true)
+    expect(tabIsVisible(trail, () => false, 'Operator')).toBe(false)
   })
 
   it('shows the Settings tab to every role, since every role may read a setting', () => {
@@ -183,6 +183,39 @@ describe('a page that moved', () => {
       expect(VALID_TABS).toContain(to)
       expect(VALID_TABS).not.toContain(from)
     }
+  })
+})
+
+/**
+ * Entities was Archived Entities, at `/archives`, until 1.10. Its bare address opened on Archived, which
+ * is the second tab now, so each old address still lands on the tab it named.
+ */
+describe('a page that moved and was given a new first tab', () => {
+  afterEach(() => window.history.replaceState({}, '', '/'))
+
+  it.each([
+    ['/archives', '/entities/archived'],
+    ['/archives/archived', '/entities/archived'],
+    ['/archives/retired', '/entities/retired'],
+  ])('sends %s to %s, replacing the entry so Back skips it', (old, now) => {
+    window.history.replaceState({}, '', `${old}?sort=-archived_at`)
+    const push = vi.spyOn(window.history, 'pushState')
+    const { result } = renderHook(() => useAppRouting())
+    expect(result.current.tab).toBe('entities')
+    expect(window.location.pathname + window.location.search).toBe(`${now}?sort=-archived_at`)
+    expect(push).not.toHaveBeenCalled()
+    push.mockRestore()
+  })
+
+  it('leaves the new addresses alone', () => {
+    expect(movedUrl('/entities')).toBeNull()
+    expect(movedUrl('/entities/archived?find=x')).toBeNull()
+    expect(movedUrl('/archives-old')).toBeNull()
+  })
+
+  it('opens Entities while the old address is still in the bar, so no other page mounts first', () => {
+    expect(tabFromUrl('/archives')).toBe('entities')
+    expect(tabFromUrl('/archives/retired?sort=by')).toBe('entities')
   })
 })
 

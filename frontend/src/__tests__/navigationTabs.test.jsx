@@ -8,7 +8,7 @@ import { act, render, screen } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import {
-  TABS, AUTOMATIONS_TABS, DEVICES_TABS, APPROVALS_TABS, METRICS_TABS, VOCABULARY_TABS, CAPTURE_TABS, ARCHIVES_TABS,
+  TABS, AUTOMATIONS_TABS, DEVICES_TABS, APPROVALS_TABS, METRICS_TABS, VOCABULARY_TABS, CAPTURE_TABS, ENTITIES_TABS,
   SYSTEM_TABS, ACCESS_CONTROL_PEOPLE_TAB, ACCESS_CONTROL_APPS_TAB, ACCESS_CONTROL_TABS, SETTINGS_TABS, PROFILE_TABS,
   currentTabOf, pageTabsOf, pageTitleOf, signalTabOf, tabHref,
 } from '../navigation'
@@ -19,7 +19,7 @@ import { VIEWS as DEVICE_VIEWS } from '../components/tabs/DevicesTab'
 import { QUEUES } from '../components/tabs/ApprovalsTab'
 import { VIEWS as METRIC_VIEWS } from '../components/tabs/MetricsTab'
 import { VIEWS as CAPTURE_VIEWS } from '../components/tabs/CaptureTab'
-import { STAGES } from '../components/tabs/ArchivesTab'
+import { STAGES } from '../components/tabs/EntitiesTab'
 import { SERVICE_GROUPS } from '../components/tabs/SystemTab'
 import { APPS_SECTION, PEOPLE_SECTION, SECTIONS } from '../components/tabs/AccessControlTab'
 import { CATEGORY_DESCRIPTIONS, SettingsTab } from '../components/tabs/SettingsTab'
@@ -46,7 +46,7 @@ describe('one list per page', () => {
     expect(QUEUES).toBe(APPROVALS_TABS)
     expect(METRIC_VIEWS).toBe(METRICS_TABS)
     expect(CAPTURE_VIEWS).toBe(CAPTURE_TABS)
-    expect(STAGES).toBe(ARCHIVES_TABS)
+    expect(STAGES).toBe(ENTITIES_TABS)
     expect(PEOPLE_SECTION).toBe(ACCESS_CONTROL_PEOPLE_TAB)
     expect(APPS_SECTION).toBe(ACCESS_CONTROL_APPS_TAB)
     expect(SECTIONS).toBe(ACCESS_CONTROL_TABS)
@@ -58,7 +58,7 @@ describe('one list per page', () => {
 
   it('names the twelve tabbed pages, Profile among them though the rail does not draw it', () => {
     expect(tabbed.map(t => t.id).sort()).toEqual([
-      'access-control', 'approvals', 'archives', 'automations', 'capture', 'devices', 'history', 'metrics',
+      'access-control', 'approvals', 'automations', 'capture', 'devices', 'entities', 'history', 'metrics',
       'profile', 'settings', 'system', 'vocabulary',
     ])
   })

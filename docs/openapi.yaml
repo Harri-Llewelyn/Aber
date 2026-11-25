@@ -1715,7 +1715,7 @@ paths:
       tags: [Auth]
       summary: Look up the display names of people you can already see
       description: |
-        For Approvals and Archived Entities (`0203`), which Operators and Shopfloor Managers read
+        For Approvals and the Entities page (`0203`), which Operators and Shopfloor Managers read
         too, and the Capture page's History (`0213`). Answers for your own id, for the proposer of
         a change proposal you may read, for the retirer of a retired entity you may read, for
         the person who started a capture or playback job you may read (Administrator,
@@ -5307,6 +5307,75 @@ paths:
         '204': { description: Deleted. }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /rest/v1/entity_directory:
+    get:
+      tags: [Registry]
+      summary: Every entity, with each id it goes by
+      description: |
+        Read-only view (`0321`), one row for each area, cell, gateway, device, schema version, metric,
+        capture, backup, automation and machine identity an Administrator made, and for each tombstone in
+        `retired_entities`. It is the Entities page's Active tab, and what `find_entities` searches.
+
+        **Runs as the caller** (`security_invoker`): the policies of the tables beneath decide the rows.
+        Every role reads the plant, the model and the automations. Captures are for Administrators,
+        Shopfloor Managers and Auditors, machine identities for Administrators and Auditors, backups for
+        Administrators, and tombstones for a holder of `archive:manage` or `audit_trail:read`. `anon`
+        reads nothing.
+
+        A live replay lane is not listed. People are not either: `rpc/list_people` and
+        `rpc/list_user_accounts` are the reads of them.
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [active, archived, retired] }
+          description: 'e.g. `eq.active`'
+        - name: kind
+          in: query
+          schema: { type: string }
+          description: 'e.g. `in.(devices,gateways)`'
+        - name: second_ids
+          in: query
+          schema: { type: string }
+          description: 'A whole further id: `cs.{dev220000000000400080000}`. `rpc/find_entities` also takes the start of one.'
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: The rows the caller may read.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Entity' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this view.' }
+
+  /rest/v1/rpc/find_entities:
+    post:
+      tags: [Registry]
+      summary: What does this id name?
+      description: |
+        The rows of `entity_directory` one text names (`0321`): a whole id (the key, or any of
+        `second_ids`), the start of one from 8 characters, or any part of a name. Case and the spaces round
+        the text are ignored, and `%` and `_` are themselves. A whole id comes first, then a whole name,
+        then the rest. Blank text answers no row.
+
+        **Runs as the caller** (`SECURITY INVOKER`): the rows they may read from the view.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_query]
+              properties:
+                p_query: { type: string, example: dev220000000000400080000 }
+                p_limit: { type: integer, default: 200, minimum: 1, maximum: 500, description: 'A number outside the range is taken as the nearest in it.' }
+      responses:
+        '200':
+          description: The rows found, best first.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Entity' } }
+        '401': { description: 'Not authenticated; `anon` may not call it.' }
+
   /rest/v1/retired_entities:
     get:
       tags: [Registry]
@@ -5320,7 +5389,7 @@ paths:
         The row carries what the entity was called, the `sparkplug_id` its readings are still keyed
         by in the historian, when it was archived and retired, who retired it (`retired_by` is null
         when the timer did), the id of the trail's `DELETE` row, and `old_data`, the whole row as
-        it was. It is the Archived Entities page's Retired tab, where each row links to what
+        it was. It is the Entities page's Retired tab, where each row links to what
         survives it: the audit trail, a gateway's repository in the forge, and any bundle in
         `asset_exports`.
 
@@ -5361,7 +5430,7 @@ paths:
         One row per `aas-export?format=bundle` that was stored (`0124`): which device, where the
         copy is (`object_bucket`, `object_key`, in the cold tier's bucket under `assets/`), its
         size and SHA-256, the counts the bundle's manifest reported, and who took it. The row
-        outlives the device, which is the point: the Archived Entities page offers the download
+        outlives the device, which is the point: the Entities page offers the download
         from a tombstone. The object itself is fetched with the ordinary Storage API, through a
         signed URL.
 
@@ -8409,6 +8478,44 @@ components:
             setting is empty; it is a Simulated or Shadow lane; nothing places it; its cell is in no
             area; a name on its path is empty or holds `/`, `+` or `#`. NULL when `uns_path` is set.
             The same labels as `aber_ingestion_uns_skipped_total{reason}`.
+
+    Entity:
+      type: object
+      readOnly: true
+      description: One entity and the ids it goes by, from `public.entity_directory` (0321).
+      properties:
+        kind:
+          type: string
+          enum: [areas, cells, gateways, devices, schemas, metric_catalog, captures, backups, automations, service_principals]
+          description: The word `audit_trail.entity_type` uses.
+        id: { type: string, format: uuid, description: 'Its key.' }
+        name: { type: string, nullable: true, description: "A capture's is its subject's, and a backup's its stamp." }
+        description: { type: string, nullable: true, description: "A capture's or a backup's note, and a machine identity's purpose." }
+        state: { type: string, enum: [active, archived, retired], description: "The archive lifecycle's. Only an area, a cell, a gateway or a device is ever archived or retired." }
+        variant:
+          type: string
+          nullable: true
+          description: >-
+            What sets it apart within its kind. A schema version's status (`draft`, `active`, `archived`), a
+            capture's kind of subject (`gateway`, `device`), a backup's origin (`requested`, `scheduled`), or
+            `playback`, `quarantined`, `replay_lane`, `deprecated`, `derived`, `disabled` or `withdrawn`.
+        second_ids:
+          type: array
+          items: { type: string }
+          description: >-
+            Its further ids: a Sparkplug id, the id a device reports, semantic ids, a capture's stored path, a
+            backup's stamp, an automation's key. Never a subject's.
+          example: [dev220000000000400080000]
+        area_id: { type: string, format: uuid, nullable: true, description: "Where it is: a device's is its effective one." }
+        cell_id: { type: string, format: uuid, nullable: true, description: "Where it is: a device's is its effective one." }
+        gateway_id: { type: string, format: uuid, nullable: true, description: 'The gateway a device publishes through, or a capture recorded.' }
+        device_id: { type: string, format: uuid, nullable: true, description: 'The device a capture recorded.' }
+        page_id:
+          type: string
+          nullable: true
+          description: >-
+            What its own page of the dashboard opens it by: a capture's subject, a backup's job (null once the
+            job is gone), an automation's key, else its id. Null for a retired one.
 
     DeviceSubmodel:
       type: object

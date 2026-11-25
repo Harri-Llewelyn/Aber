@@ -82,7 +82,7 @@ describe('a page with tabs', () => {
       expect(screen.queryByRole('button', { name: `Show the ${page} tabs` })).toBeNull()
     }
     expect(screen.queryByRole('button', { name: 'Show the Profile tabs' })).toBeNull()
-    for (const page of ['Approvals', 'Devices', 'Metrics', 'Vocabulary', 'Capture', 'Archived Entities', 'System', 'Access Control', 'Settings']) {
+    for (const page of ['Approvals', 'Devices', 'Metrics', 'Vocabulary', 'Capture', 'Entities', 'System', 'Access Control', 'Settings']) {
       expect(chevron(page)).toBeInTheDocument()
     }
   })
