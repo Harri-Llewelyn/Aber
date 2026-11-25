@@ -3,7 +3,7 @@ import { fail, pass, read, supabaseReadme } from './lib.mjs';
 // -------------------------------------------------------------------------------------------------
 // 169. Every component the backup service writes has a label on the Backups page and is named in
 // 0001's backups.components comment, and neither names one it does not write. Without a label the
-// page shows the bare name, and its Take a backup dialog leaves the component out.
+// page shows the bare name, and its Take a Backup dialog leaves the component out.
 // -------------------------------------------------------------------------------------------------
 function part1() {
   const service = read('scripts/backup-service.mjs');

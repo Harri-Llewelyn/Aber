@@ -1474,7 +1474,7 @@ An area's plan is an object in the `area-plans` bucket that `areas.plan_path` na
 `purge_expired_archives` job deletes an expired area in SQL, and SQL cannot remove a stored file
 (see `0190`). So the area's row went and its drawing stayed in the bucket for ever, readable by
 every signed-in role. The dashboard's own removals strand one too, when they fail: Permanent
-Delete, Replace plan and Remove plan each change the row first and swallow a failed object delete.
+Delete, Replace Plan and Remove Plan each change the row first and swallow a failed object delete.
 
 - **The database says which plans nothing names.** `is_unclaimed_area_plan_object()` is true when
   no area's `plan_path` names the object, archived areas included.
@@ -2508,7 +2508,7 @@ view. The webhook's own suite holds the parse.
 
 Plans arrive the wrong way round for the people using them: a sheet exported in portrait for an
 area that runs left to right, or north at the top when everyone reads the floor from the entrance.
-Turning the SVG in an editor and using **Replace plan** moved every pin, because a place is two
+Turning the SVG in an editor and using **Replace Plan** moved every pin, because a place is two
 fractions of the drawing and nothing moved them. So the turn is state on the `areas` row, and the
 file in the `area-plans` bucket stays as uploaded, as an image or CAD viewer turns a view in quarter
 turns and leaves the file alone.
@@ -2522,7 +2522,7 @@ turns and leaves the file alone.
 - **`areas_plan_rotation_needs_a_plan`**: `plan_path IS NOT NULL OR plan_rotation = 0`, as
   `areas_plan_has_aspect` ties `plan_aspect` to `plan_path`. Removing a plan resets the turn for any
   client that writes the row, not only the dashboard, and the default outline is never drawn turned.
-  **Replace plan** writes only `plan_path` and `plan_aspect`, so it keeps the turn: the usual
+  **Replace Plan** writes only `plan_path` and `plan_aspect`, so it keeps the turn: the usual
   replacement is a newer revision of the same drawing, in the same orientation.
 
 **A turn moves no place.** `cells.plan_x` and `plan_y` stay fractions of the drawing as uploaded.
@@ -12729,7 +12729,7 @@ so the page shows that backup on a line of its own. The chart tells the page whe
 - **The page's state line** uses the platform line's rule on Historian Backup Stale's clock: a
   failure newer than the last success, or no success for 36 hours counted from the last success
   (before the first, from the first recorded run).
-- **Take a backup asks the historian too.** On claiming a requested job, the service calls
+- **Take a Backup asks the historian too.** On claiming a requested job, the service calls
   `physical_backup_request()` in the historian as its superuser, and carries on with the platform
   backup without waiting. The sidecar's minute loop claims the request
   (`physical_backup_claim_request()`), takes a differential and records it; the first run recorded
@@ -12745,7 +12745,7 @@ The chart tells the page whether to (`VITE_PLATFORM_PHYSICAL_BACKUP`).
   returns, without the request, so the page applies one rule to both lines. Administrator only,
   checked in its body. An Administrator gets a row of NULLs before the sidecar has recorded
   anything, which the page shows as no backup yet, not as a database it cannot read.
-- **Take a backup asks nothing of it.** The service's dump already covers this database, so there is
+- **Take a Backup asks nothing of it.** The service's dump already covers this database, so there is
   no request table here.
 
 **Retention is decided once, here.** A scheduled backup is pruned by the service once it is older

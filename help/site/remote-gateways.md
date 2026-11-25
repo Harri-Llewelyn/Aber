@@ -34,8 +34,8 @@ token.
 
 0. **The deployment must know its own address first.** The page asks `gateway-bundle` whether an
    appliance could enrol. If not, it says so above the table and in the form, and names the variable
-   to set ([*The two addresses that must be right*](#the-two-addresses-that-must-be-right)). Save is
-   held back for a Remote gateway until it can. Host and Simulated gateways are unaffected.
+   to set ([*The two addresses that must be right*](#the-two-addresses-that-must-be-right)). Until it
+   can, **Save Gateway** saves no Remote gateway and says why. Host and Simulated gateways are unaffected.
    `npm run setup` asks for the domain when it writes a values file.
 1. **Gateways → New Gateway.** Name it after the machine or the cell it serves.
 2. **Set Type to “Remote”.** Before you save, the form says what will happen:

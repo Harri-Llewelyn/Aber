@@ -117,7 +117,7 @@ is right for both.
   `historian_backup_state()` returns, without the request, so one rule reads both.
 - **No requests table.** The historian's sidecar also takes a differential when the Backups page asks
   for a backup, because the logical dump skips the historian while pgBackRest backs it up. The dump
-  never skips the platform database, so **Take a backup** already backs it up.
+  never skips the platform database, so **Take a Backup** already backs it up.
 
 ## A restore carries the Vault key
 
