@@ -17,7 +17,7 @@ const ZONES = [
     chart: /^ {2}modelFileSizeLimit: (\d+)$/m, chartName: 'supabaseStorage.modelFileSizeLimit',
   },
   {
-    label: 'a capture', file: 'frontend/src/components/tabs/CaptureTab.jsx', constant: 'CAPTURE_FILE_MAX_BYTES',
+    label: 'a capture', file: 'frontend/src/utils/captureFile.js', constant: 'CAPTURE_FILE_MAX_BYTES',
     init: /process\.env\.CAPTURE_FILE_SIZE_LIMIT \|\| '(\d+)'/, initName: 'the default of CAPTURE_FILE_SIZE_LIMIT',
     chart: /^ {2}captureFileSizeLimit: (\d+)$/m, chartName: 'supabaseStorage.captureFileSizeLimit',
   },

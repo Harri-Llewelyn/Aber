@@ -14,7 +14,7 @@ import { pressHeld } from '../test/dialogs'
 
 /**
  * What each page does with a file given to its drop zone: an area's plan, a device's 3D model, Capture's
- * drawer and Import Vocabulary. The uploads that ask for their file in a dialog are
+ * drawer and Play a File…, and Import Vocabulary. The uploads that ask for their file in a dialog are
  * uploadsAskForTheFileFirst.test.jsx, and the zone itself dropZone.test.jsx.
  */
 
@@ -152,19 +152,29 @@ describe("a device's 3D model", () => {
   })
 })
 
+const CAPTURED = { aber_capture_version: 1, capture_epoch_ms: 1, messages: [{ topic: 'spBv1.0/G/NDATA/gwy12', offset_ms: 0, payload: {} }], identities: { edge_nodes: [], devices: [] } }
+const captured = (name = 'edited.json', over = {}) => new File([JSON.stringify({ ...CAPTURED, ...over })], name, { type: 'application/json' })
+/** A capture whose file names the gateway it recorded. */
+const capturedBy = (gateway, name) => captured(name, { identities: { edge_nodes: [gateway], devices: [] } })
+const STORED = { id: 'cap-1', subject_kind: 'gateway', gateway_id: 'gw-1', device_id: null, subject_sparkplug_id: 'gwy12', storage_path: 'gwy12/c.json', size_bytes: 1, message_count: 1, note: null, manifest: { birth_captured: true, metric_names: [] }, source: 'recorded', recorded_at: '2026-08-27T14:30:00.000Z' }
+
+const openCapture = async (captures = []) => {
+  api.get.mockImplementation(p => Promise.resolve(p.includes('gateways')
+    ? [{ id: 'gw-1', name: 'Line 1 Gateway', sparkplug_id: 'gwy12', is_archived: false }, { id: 'gw-2', name: 'Line 2 Gateway', sparkplug_id: 'gwy13', is_archived: false }]
+    : p.includes('devices') ? [{ id: 'dev-1', name: 'CNC Spindle', sparkplug_id: 'dev27', gateway_id: 'gw-1', is_archived: false }] : []))
+  for (const fn of ['recentCaptureJobs', 'recentPlaybackJobs', 'playbackTargets', 'playbackStaleCredentials']) api[fn].mockResolvedValue([])
+  for (const fn of ['activeCaptureJob', 'activePlaybackJob', 'playbackWorkerStatus']) api[fn].mockResolvedValue(null)
+  api.listCaptures.mockResolvedValue(captures)
+  api.jobHistory.mockResolvedValue({ rows: [], remaining: 0, more: false })
+  api.displayNamesFor.mockResolvedValue(new Map())
+  render(<CaptureTab showToast={vi.fn()} userRole="Administrator" />)
+  await screen.findByText('Line 1 Gateway')
+}
+
 describe("Capture's drawer", () => {
-  const CAPTURED = { aber_capture_version: 1, capture_epoch_ms: 1, messages: [{ topic: 'spBv1.0/G/NDATA/gwy12', offset_ms: 0, payload: {} }], identities: { edge_nodes: [], devices: [] } }
-  const captured = (name = 'edited.json') => new File([JSON.stringify(CAPTURED)], name, { type: 'application/json' })
   const open = async () => {
-    api.get.mockImplementation(p => Promise.resolve(p.includes('gateways')
-      ? [{ id: 'gw-1', name: 'Line 1 Gateway', sparkplug_id: 'gwy12', is_archived: false }, { id: 'gw-2', name: 'Line 2 Gateway', sparkplug_id: 'gwy13', is_archived: false }]
-      : []))
-    for (const fn of ['listCaptures', 'recentCaptureJobs', 'recentPlaybackJobs', 'playbackTargets', 'playbackStaleCredentials']) api[fn].mockResolvedValue([])
-    for (const fn of ['activeCaptureJob', 'activePlaybackJob', 'playbackWorkerStatus']) api[fn].mockResolvedValue(null)
-    api.jobHistory.mockResolvedValue({ rows: [], remaining: 0, more: false })
-    api.displayNamesFor.mockResolvedValue(new Map())
-    render(<CaptureTab showToast={vi.fn()} userRole="Administrator" />)
-    fireEvent.click((await screen.findByText('Line 1 Gateway')).closest('tr'))
+    await openCapture()
+    fireEvent.click(screen.getByText('Line 1 Gateway').closest('tr'))
   }
   const zone = (name = 'Line 1 Gateway') => screen.getByRole('button', { name: `Upload a capture for ${name}` })
 
@@ -211,6 +221,194 @@ describe("Capture's drawer", () => {
     expect(APP_CSS).toMatch(/\.drop-zone\[data-dragging="yes"\],\n\.capture-drop-overlay \{ background: var\(--bg-surface\); \}/)
     expect(APP_CSS).toMatch(/\.drop-zone\[data-dragging="yes"\] \{ border: 1px solid var\(--accent\); \}/)
     expect(APP_CSS).toMatch(/\.capture-card-drop \{ border-color: var\(--accent\); \}/)
+  })
+})
+
+describe("Capture's Play a File…", () => {
+  const dialog = () => screen.getByRole('dialog', { name: 'Play a File' })
+  const zone = () => within(dialog()).getByRole('button', { name: /^File/ })
+  const subject = () => within(dialog()).findByLabelText('File It Against')
+  const choose = (f) => act(async () => { fireEvent.change(screen.getByTestId('capture-upload-file'), { target: { files: [f] } }) })
+  const open = async (captures) => {
+    await openCapture(captures)
+    fireEvent.click(screen.getByRole('button', { name: /Play a File…/ }))
+  }
+
+  it('opens its dialog first, which says what it does and asks for the file', async () => {
+    await open()
+    expect(dialog()).toHaveAccessibleDescription(/^Stores the file as a capture, then goes on to play it back\. Every device the file recorded must exist on this site/)
+    expect(zone()).toHaveAccessibleDescription('Drop a capture file here, or click to choose one Required. A .json file, up to 100 MiB')
+    expect(within(dialog()).queryByLabelText('File It Against')).toBeNull()
+    expect(dialog().querySelector('.modal-problem')).toHaveTextContent('')
+    expect(api.uploadCapture).not.toHaveBeenCalled()
+  })
+
+  it('says in its tooltip what it does in a few words, and leaves the rest to the dialog', async () => {
+    await openCapture()
+    const tip = screen.getByRole('button', { name: /Play a File…/ })
+    expect(tip).toHaveAccessibleDescription('Store a capture file and play it straight back. Dropping it on this card does the same.')
+  })
+
+  it('says on the press that a file is missing, at the zone, which takes the focus', async () => {
+    await open()
+    pressHeld(dialog(), 'Upload Capture', 'Choose a file to play.')
+    expect(zone()).toHaveAccessibleDescription(/Choose a file to play\.$/)
+    expect(zone()).toHaveFocus()
+    expect(api.uploadCapture).not.toHaveBeenCalled()
+  })
+
+  it('goes on once a file is dropped on it, in the same dialog, with the subject the file names', async () => {
+    await open()
+    const before = dialog()
+    await drop(zone(), capturedBy('gwy13', 'line2.json'))
+    expect(await subject()).toHaveValue('gateway:gw-2')
+    expect(dialog()).toBe(before)
+    expect(zone()).toHaveTextContent('line2.json')
+    expect(zone()).toHaveTextContent('Choose Another')
+  })
+
+  it('is stored and then played back, as a file dropped on the card is', async () => {
+    api.uploadCapture.mockResolvedValue({ id: 'cap-new', path: 'gwy13/x.json', messages: 1, manifest: { device_ids: [], birth_captured: true } })
+    await open()
+    const given = capturedBy('gwy13', 'line2.json')
+    await choose(given)
+    await subject()
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Upload Capture' }))
+    await waitFor(() => expect(api.uploadCapture).toHaveBeenCalledWith(expect.objectContaining({ subjectKind: 'gateway', subjectId: 'gw-2', file: given, note: 'line2.json' })))
+    expect(await screen.findByRole('dialog', { name: 'Play Back Capture — line2.json' })).toBeInTheDocument()
+  })
+
+  it('takes another file in the first one\'s place, with the subject that one names', async () => {
+    await open()
+    await choose(capturedBy('gwy13', 'line2.json'))
+    expect(await subject()).toHaveValue('gateway:gw-2')
+    await choose(capturedBy('gwy12', 'line1.json'))
+    await waitFor(async () => expect(await subject()).toHaveValue('gateway:gw-1'))
+    expect(zone()).toHaveTextContent('line1.json')
+    // A file that names none is offered none: the one before's is not its own.
+    await choose(captured('nobody.json'))
+    await waitFor(async () => expect(await subject()).toHaveValue(''))
+  })
+
+  it('keeps a subject chosen by hand, until a file names one of its own', async () => {
+    await open()
+    await choose(captured('nobody.json'))
+    fireEvent.change(await subject(), { target: { value: 'gateway:gw-2' } })
+    await choose(captured('nobody-either.json'))
+    expect(await subject()).toHaveValue('gateway:gw-2')
+    await choose(capturedBy('gwy12', 'line1.json'))
+    await waitFor(async () => expect(await subject()).toHaveValue('gateway:gw-1'))
+  })
+
+  it.each([[{ devices: {}, edge_nodes: 7 }], ['gwy12'], [null]])('offers no subject for identities that are not lists: %j', async (identities) => {
+    await open()
+    await choose(captured('odd.json', { identities }))
+    expect(await subject()).toHaveValue('')
+  })
+
+  it('offers the device a file names before the gateway it names', async () => {
+    await open()
+    await choose(captured('both.json', { identities: { devices: ['dev27'], edge_nodes: ['gwy13'] } }))
+    expect(await subject()).toHaveValue('device:dev-1')
+  })
+
+  it('asks for the name again before it replaces a stored capture with another file', async () => {
+    await open([STORED])
+    await choose(capturedBy('gwy12', 'a.json'))
+    await subject()
+    const name = () => within(dialog()).getByLabelText('Type the gateway name to confirm')
+    expect(within(dialog()).getByRole('button', { name: 'Replace and Upload' })).toBeDisabled()
+    fireEvent.change(name(), { target: { value: 'Line 1 Gateway' } })
+    expect(within(dialog()).getByRole('button', { name: 'Replace and Upload' })).toBeEnabled()
+    await choose(capturedBy('gwy12', 'b.json'))
+    await waitFor(() => expect(name()).toHaveValue(''))
+    expect(within(dialog()).getByRole('button', { name: 'Replace and Upload' })).toBeDisabled()
+  })
+
+  it('loses nothing to a cancelled picker, and keeps what it holds when another is refused', async () => {
+    await open()
+    await choose(capturedBy('gwy13', 'line2.json'))
+    await subject()
+    await act(async () => { fireEvent.change(screen.getByTestId('capture-upload-file'), { target: { files: [] } }) })
+    await drop(zone(), png())
+    expect(errorAt(zone())).toHaveTextContent('"plan.png" is not a .json file.')
+    expect(zone()).toHaveTextContent('line2.json')
+    expect(await subject()).toHaveValue('gateway:gw-2')
+    expect(zone()).not.toHaveAttribute('aria-invalid')
+  })
+
+  it('says at the zone why a file is no capture, names it, and goes on with the next', async () => {
+    await open()
+    await choose(new File(['not json'], 'broken.json', { type: 'application/json' }))
+    await waitFor(() => expect(errorAt(zone())).toHaveTextContent('"broken.json" is not valid JSON. Record one with: python ingestion/capture.py record --out <file>'))
+    expect(zone()).toHaveTextContent('broken.json')
+    expect(within(dialog()).queryByLabelText('File It Against')).toBeNull()
+    pressHeld(dialog(), 'Upload Capture', '"broken.json" is not valid JSON.')
+    expect(api.uploadCapture).not.toHaveBeenCalled()
+    await choose(capturedBy('gwy13', 'line2.json'))
+    expect(await subject()).toHaveValue('gateway:gw-2')
+    expect(errorAt(zone())).toBeNull()
+  })
+
+  it('refuses a file from another site before anything is stored, and takes one from this one after', async () => {
+    await open()
+    await choose(captured('foreign.json', {
+      messages: [{ topic: 'spBv1.0/G/DDATA/gwy12/dev99', offset_ms: 0, payload: {} }], identities: { edge_nodes: ['gwy12'], devices: ['dev99'] },
+    }))
+    expect(await within(dialog()).findByText(/this site does not have/)).toBeInTheDocument()
+    expect(within(dialog()).queryByLabelText('File It Against')).toBeNull()
+    pressHeld(dialog(), 'Upload Capture', 'This file records devices this site does not have.')
+    expect(zone()).toHaveFocus()
+    expect(api.uploadCapture).not.toHaveBeenCalled()
+    await choose(capturedBy('gwy13', 'line2.json'))
+    expect(await subject()).toHaveValue('gateway:gw-2')
+    expect(within(dialog()).queryByText(/this site does not have/)).toBeNull()
+  })
+
+  it('reads the stored captures again as it opens, and again as it takes a file', async () => {
+    await openCapture()
+    const reads = () => api.listCaptures.mock.calls.length
+    let before = reads()
+    fireEvent.click(screen.getByRole('button', { name: /Play a File…/ }))
+    await waitFor(() => expect(reads()).toBeGreaterThan(before))
+    before = reads()
+    await choose(capturedBy('gwy13', 'line2.json'))
+    await waitFor(() => expect(reads()).toBeGreaterThan(before))
+  })
+
+  it('opens with the file in it when one is dropped on the card, and takes another there', async () => {
+    await openCapture()
+    await act(async () => { fireEvent.drop(document.querySelector('.capture-card'), dragged(capturedBy('gwy13', 'line2.json'))) })
+    expect(await subject()).toHaveValue('gateway:gw-2')
+    expect(zone()).toHaveTextContent('line2.json')
+    await choose(capturedBy('gwy12', 'line1.json'))
+    await waitFor(async () => expect(await subject()).toHaveValue('gateway:gw-1'))
+  })
+
+  it('starts again after a Cancel', async () => {
+    await open()
+    await choose(capturedBy('gwy13', 'line2.json'))
+    await subject()
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: /Play a File…/ }))
+    expect(zone()).toHaveTextContent('Drop a capture file here, or click to choose one')
+  })
+})
+
+describe("the dialog Capture's drawer opens", () => {
+  it('stores another file chosen in it, opening no playback, against the subject it opened with', async () => {
+    api.uploadCapture.mockResolvedValue({ id: 'cap-new', path: 'gwy12/x.json', messages: 1, manifest: { device_ids: [], birth_captured: true } })
+    await openCapture()
+    fireEvent.click(screen.getByText('Line 1 Gateway').closest('tr'))
+    await drop(screen.getByRole('button', { name: 'Upload a capture for Line 1 Gateway' }), captured('first.json'))
+    const dialog = () => screen.getByRole('dialog', { name: 'Upload Capture' })
+    // The second file names another gateway: the drawer's subject is the one offered, all the same.
+    const second = capturedBy('gwy13', 'second.json')
+    await act(async () => { fireEvent.change(screen.getByTestId('capture-upload-file'), { target: { files: [second] } }) })
+    expect(await within(dialog()).findByLabelText('File It Against')).toHaveValue('gateway:gw-1')
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Upload Capture' }))
+    await waitFor(() => expect(api.uploadCapture).toHaveBeenCalledWith(expect.objectContaining({ subjectId: 'gw-1', file: second })))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 })
 

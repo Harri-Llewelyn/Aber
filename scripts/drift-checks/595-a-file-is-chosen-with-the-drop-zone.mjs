@@ -18,6 +18,7 @@ const ZONES = [
   'components/common/AreaPlanPanel.jsx',
   'components/common/Model3DUploader.jsx',
   'components/tabs/CaptureTab.jsx',
+  'components/modals/UploadCaptureModal.jsx',
   'components/modals/ApplySchemasModal.jsx',
   'components/modals/ApplyAutomationsModal.jsx',
   'components/modals/DerivedMetricsEditorModal.jsx',
@@ -41,7 +42,7 @@ const RULES = [
     what: "reads the files of a drop",
     found: (src) => /\bdataTransfer\b[^\n]{0,20}\.(?:files|items)\b/.test(src),
     allowed: [
-      ['components/tabs/CaptureTab.jsx', 'a file dropped anywhere on the card is stored and played back, as Play a File… does'],
+      ['components/tabs/CaptureTab.jsx', "a file dropped anywhere on the card opens Play a File…'s dialog with the file in it"],
     ],
   },
   {
@@ -50,7 +51,6 @@ const RULES = [
     allowed: [
       ['components/common/AreaPlanPanel.jsx', 'Replace Plan: the plan is drawn where a zone would be'],
       ['components/common/Model3DUploader.jsx', 'Replace: the model is drawn where a zone would be'],
-      ['components/tabs/CaptureTab.jsx', 'Play a File…: the card it sits on takes the drop'],
       ['components/tabs/ProfileTab.jsx', 'Choose Picture: a zone makes its row taller than the others'],
     ],
   },
@@ -59,7 +59,7 @@ const RULES = [
 const RULE_IN_README = '**One component takes a file.**';
 /** The button a zone that holds a file draws, and the help that names it. */
 const AGAIN = 'Choose Another';
-const HELP = ['help/pages/vocabulary.md', 'help/pages/schemas.md', 'help/pages/metrics.md', 'help/pages/automations.md'];
+const HELP = ['help/pages/vocabulary.md', 'help/pages/schemas.md', 'help/pages/metrics.md', 'help/pages/automations.md', 'help/pages/capture.md'];
 
 /** A source without its comments, each left as blank lines so a line number still holds. */
 const code = (src) => src

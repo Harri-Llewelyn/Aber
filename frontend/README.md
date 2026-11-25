@@ -656,8 +656,8 @@ for an appliance is an `ApplianceCommand`.
 
 **One component takes a file.** `DropZone` (`common/DropZone.jsx`) is where a person gives one, dropped on
 it or chosen in the browser's picker: Import Vocabulary, an area's plan, a device's 3D model, Capture's
-drawer, and the uploads of schemas, derived metrics and automations. Drift check 595 refuses a file input
-anywhere else.
+drawer, Play a File…, and the uploads of schemas, derived metrics and automations. Drift check 595 refuses
+a file input anywhere else.
 
 - **The zone is the button.** Tab reaches it once, and a click, Enter or Space opens the picker. It is
   named by its label and described by what to drop, the kinds and the limit, and then by its error.
@@ -668,12 +668,15 @@ anywhere else.
   at once are refused. The page's own check (`refuse`) runs on a file given either way.
 - **A refusal is a `FieldError` at the zone, which stays.** A file it already held stays too, and is not
   marked wrong. A plan's and a model's refusals are toasted as well.
-- **An upload's dialog opens first, and asks for the file.** The page takes no drop. Another file takes the
-  first one's place in the same dialog, and nothing is lost but that file's own checks
-  (`hooks/useYamlFile.js`).
+- **An upload's dialog opens first, and asks for the file.** Another file takes the first one's place in the
+  same dialog, and nothing is lost but that file's own checks. `hooks/useYamlFile.js` holds a YAML file's,
+  and `UploadCaptureModal` a capture's. The page takes no drop, but for Capture's card, which opens Play a
+  File…'s dialog with the file in it.
+- **What opened Capture's dialog says whether the file is played.** Play a File… and the card store it and
+  play it back. The drawer's zone only stores it, and so does another file chosen in the dialog it opened.
 - **A button where a zone has no place** uses the same picker, `useFilePicker()`: Replace on a plan and a
-  model, Play a File…, and Choose Picture. A zone that says what a zone says made the Picture row 111 to
-  148px tall, where the tallest other row is 85px.
+  model, and Choose Picture. A zone that says what a zone says made the Picture row 111 to 148px tall, where
+  the tallest other row is 85px.
 
 ### A plan opens expanded
 

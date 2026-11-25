@@ -210,10 +210,11 @@ describe('a file from another site', () => {
     expect(screen.queryByRole('button', { name: /Prepare Replay Lanes/ })).toBeNull()
   })
 
-  it('says on the "Play a File…" button that every recorded device must exist here', async () => {
+  it('is told in the "Play a File…" dialog, before it is chosen, that every recorded device must exist here', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    expect(screen.getByRole('button', { name: /Play a File…/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Play a File…/ }))
+    expect(screen.getByRole('dialog', { name: 'Play a File' }))
       .toHaveAccessibleDescription(expect.stringMatching(/Every device the file recorded must exist on this site/))
   })
 })
