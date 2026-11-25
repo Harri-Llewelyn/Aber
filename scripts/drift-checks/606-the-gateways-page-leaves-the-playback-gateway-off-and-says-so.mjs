@@ -2,8 +2,9 @@ import { fail, pass, read } from './lib.mjs';
 
 // -------------------------------------------------------------------------------------------------
 // 606. The Gateways page leaves the Playback gateway off its list by the database's flag, after the
-// filters have counted, so no count changes. The help and the README name that control and Release
-// waiting as the page draws them, and the README's address table lists every key the page reads.
+// filters have counted, so no count changes. Its check is in the Filters panel, under Lifecycle and Type.
+// The help and the README name the check and Release waiting as the page draws them, and the README's
+// address table lists every key the page reads.
 // -------------------------------------------------------------------------------------------------
 const TAB = 'frontend/src/components/tabs/GatewaysTab.jsx';
 const WORDS = 'frontend/src/utils/playbackGateway.js';
@@ -17,7 +18,7 @@ export default function check() {
   const label = constant('PLAYBACK_GATEWAY_LABEL');
   const param = constant('PLAYBACK_GATEWAY_PARAM');
   const release = /<IconGitBranch size=\{13\} \/> ([A-Z][a-z ]+) \(\{releasesWaiting\}\)/.exec(tab)?.[1];
-  for (const [name, value] of [['the Playback control\'s label', label], ['its query key', param], ['the waiting release\'s label', release]]) {
+  for (const [name, value] of [['the Playback check\'s label', label], ['its query key', param], ['the waiting release\'s label', release]]) {
     if (!value) problems606.push(`could not read ${name} out of ${WORDS} or ${TAB}`);
   }
 
@@ -29,10 +30,18 @@ export default function check() {
     problems606.push(`${TAB} no longer leaves the Playback gateway off by isShadowGateway(), after the filters have counted`);
   }
 
+  const from = tab.indexOf('<FiltersPopover ');
+  const panel = from < 0 ? '' : tab.slice(from, tab.indexOf('</FiltersPopover>', from));
+  const drawn = [...panel.matchAll(/<Filter(?:List|Check)\n\s+label=(?:"([^"]+)"|\{(\w+)\})/g)].map((m) => m[1] ?? m[2]);
+  if (drawn.join() !== 'Lifecycle,Type,PLAYBACK_GATEWAY_LABEL') {
+    problems606.push(`${TAB}'s Filters panel holds ${drawn.join(', ') || 'nothing this check can read'}, not Lifecycle and Type over the Playback check`);
+  }
+
   for (const name of [label, release]) {
     for (const file of [HELP, README]) if (name && !read(file).includes(`**${name}**`)) problems606.push(`${file} does not name **${name}**, as the Gateways page does`);
   }
-  if (!read(HELP).includes('**1 showing**')) problems606.push(`${HELP} does not say what the control says while the Playback gateway shows by itself`);
+  if (!read(HELP).includes('**1 showing**')) problems606.push(`${HELP} does not say what the check says while the Playback gateway shows by itself`);
+  if (!read(HELP).includes(`**${label}**, under **Filters**, lists it.`)) problems606.push(`${HELP} does not say that the check is under Filters`);
 
   const keys = [...tab.matchAll(/useUrl(?:State|List)\(('[a-z]+'|PLAYBACK_GATEWAY_PARAM)/g)]
     .map((m) => (m[1].startsWith('\'') ? m[1].slice(1, -1) : param));

@@ -5,7 +5,7 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
 import { PERMISSION_UUIDS } from '../constants'
-import { pick } from '../test/listFilters'
+import { closePanel, pick } from '../test/listFilters'
 import { tooltipOf } from '../test/tooltips'
 
 vi.mock('../api', async () => {
@@ -43,6 +43,7 @@ const show = async (rows, hasPermission = () => true) => {
      lifecycle filter has its own test. */
   if (rows.some(r => r.is_archived)) {
     await waitFor(() => pick('Lifecycle', 'active', 'archived'))
+    closePanel()
   }
   await waitFor(() => expect(rowNamed(rows[0].gateway_name)).toBeTruthy())
 }
@@ -72,10 +73,10 @@ describe('the gateways card header', () => {
     expectToolbarButton(/New Gateway/)
   })
 
-  it('starts the toolbar with the search box, then the lifecycle', async () => {
+  it('starts the toolbar with the search box, then the status', async () => {
     await show([{ gateway_id: 'g1', gateway_name: 'Host_Gateway_NodeRED', type: 'HOST', status: 'ONLINE' }])
-    const lifecycle = expectSearchFirst('Search gateways by name, UUID or Sparkplug ID').nextElementSibling
-    expect(lifecycle).toHaveAccessibleName('Lifecycle: Active')
+    const status = expectSearchFirst('Search gateways by name, UUID or Sparkplug ID').nextElementSibling
+    expect(status).toHaveAccessibleName('Status: Any status')
   })
 })
 

@@ -55,11 +55,10 @@ describe('Release waiting', () => {
     expect(currentUrl()).toBe('/gateways')
   })
 
-  it('stands beside Has quarantined devices', async () => {
+  it('stands beside Has quarantined devices, before the Filters panel', async () => {
     await open([gateway(1, waits)])
-    const buttons = [...document.querySelectorAll('.filter-bar > button, .filter-bar > .tooltip-anchor button, .filter-bar button')]
-      .map(b => b.textContent.trim()).filter(t => /^(Has quarantined|Release waiting)/.test(t))
-    expect(buttons).toEqual(['Has quarantined devices (0)', 'Release waiting (1)'])
+    const buttons = [...document.querySelectorAll('.filter-bar button')].map(b => b.textContent.trim())
+    expect(buttons).toEqual(['Any status', 'Has quarantined devices (0)', 'Release waiting (1)', 'Filters', 'New Gateway'])
   })
 
   it('is not offered while none waits', async () => {

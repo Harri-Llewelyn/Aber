@@ -5,10 +5,10 @@ import { isSuppressed } from './alertSuppression'
 
 /*
  * The Playback gateway on the Gateways page, as replay lanes are on Devices (replayLanes.js): left off
- * the list until a control shows it, or until something is wrong with it.
+ * the list until a check shows it, or until something is wrong with it.
  */
 
-/** The query key of the control, as the Gateways page keeps it: `?playback=1`. */
+/** The query key of the check, as the Gateways page keeps it: `?playback=1`. */
 export const PLAYBACK_GATEWAY_PARAM = 'playback'
 
 export const PLAYBACK_GATEWAY_LABEL = 'Show Playback gateway'

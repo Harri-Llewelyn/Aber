@@ -87,7 +87,8 @@ import {
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlList, useUrlState } from '../../hooks/useUrlState'
-import { FilterDropdown } from '../common/FilterChecklist'
+import { FiltersPopover } from '../common/FiltersPopover'
+import { FilterCheck, FilterDropdown, FilterList } from '../common/FilterChecklist'
 import {
   LIFECYCLE_ALIASES, LIFECYCLE_DEFAULT, LIFECYCLE_OPTIONS, LIFECYCLE_VALUES, applyFacets, lifecycleChanged, lifecycleOf
 } from '../../utils/listFilters'
@@ -256,6 +257,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     setReleaseOnly(false)
     setShowPlayback(false)
     setLifecycle(LIFECYCLE_DEFAULT)
+  }
+
+  // The Filters panel's own Clear: only the filters inside it.
+  const clearPopoverFilters = () => {
+    setLifecycle(LIFECYCLE_DEFAULT)
+    setKindFilter([])
+    setShowPlayback(false)
   }
 
   const load = useCallback(async (signal) => {
@@ -509,13 +517,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   })
   const releasesWaiting = facetCounts.release.get(WAITING) || 0
 
-  // The Playback gateway is left off the list until its control is on. Something wrong with it, or a
-  // Type filter that names it, shows it whatever the control says.
-  const playbackReason = (g) => {
-    const problem = playbackProblem(g, { activeAlerts, quarantined: gatewaysWithQuarantine })
-    if (problem) return { problem: true, words: problem }
-    return kindFilter.includes(GATEWAY_TYPES.PLAYBACK) ? { words: 'the Type filter names it' } : null
-  }
+  // The Playback gateway is left off the list until its check is on. Something wrong with it, or a
+  // Type filter that names it, shows it whatever the check says.
+  const playbackReason = (g) => playbackProblem(g, { activeAlerts, quarantined: gatewaysWithQuarantine })
+    || (kindFilter.includes(GATEWAY_TYPES.PLAYBACK) ? 'the Type filter names it' : null)
   const matchingGateways = facetRows.filter(g => !isShadowGateway(g) || showPlayback || playbackReason(g))
   const onlyPlaybackMatches = matchingGateways.length === 0 && facetRows.length > 0
   const playbackGateways = gateways.filter(g => isShadowGateway(g) && !g.is_archived)
@@ -545,9 +550,12 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   }, [cells])
   const [filteredGateways, sort] = useSortableRows(matchingGateways, sortColumns)
 
+  // The filters inside the Filters panel, which its button counts; the bar's Clear counts all.
+  const popoverFilterCount =
+    (kindFilter.length ? 1 : 0) + (showPlayback ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
   const activeFilterCount =
-    (searchQuery ? 1 : 0) + (liveStatusFilter.length ? 1 : 0) + (kindFilter.length ? 1 : 0) +
-    (quarantineOnly ? 1 : 0) + (releaseOnly ? 1 : 0) + (showPlayback ? 1 : 0) + (lifecycleChanged(lifecycle) ? 1 : 0)
+    popoverFilterCount + (searchQuery ? 1 : 0) + (liveStatusFilter.length ? 1 : 0) +
+    (quarantineOnly ? 1 : 0) + (releaseOnly ? 1 : 0)
 
   // Arriving from a cell's gateway chip or a device's Serving Gateway chip names ONE gateway: open it.
   useArrivalSelection(
@@ -560,8 +568,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       setSelectedId(g.gateway_id)
     }
   )
-  // The Playback gateway's drawer, opened by that link or by `?gateway=`, turns its control on, so the
-  // list shows it too. Once for each opening: the control can be turned off again beside the drawer.
+  // The Playback gateway's drawer, opened by that link or by `?gateway=`, turns its check on, so the
+  // list shows it too. Once for each opening: the check can be turned off again beside the drawer.
   useArrivalSelection(selectedId, gateways, (g, id) => g.gateway_id === id && isShadowGateway(g), () => setShowPlayback(true))
 
   // Resolved fresh every render; a gateway that disappears resolves to null and the drawer closes.
@@ -684,26 +692,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           description="The edge nodes that publish to the broker, each with its own broker credential, and the status each last reported."
         />
 
+      {/* The toolbar: search, status and the toggles in the row, the rest in the panel. */}
       <div className="filter-bar">
         <SearchInput
           value={searchQuery}
           onChange={setSearchQuery}
           placeholder="Search name, UUID or Sparkplug ID…"
           ariaLabel="Search gateways by name, UUID or Sparkplug ID"
-        />
-
-        {/* Lifecycle is a filter like the rest, opening on Active; the counts are beside each value. */}
-        <FilterDropdown
-          label="Lifecycle"
-          noun="lifecycle"
-          plural="lifecycles"
-          options={LIFECYCLE_OPTIONS}
-          value={lifecycle}
-          onChange={setLifecycle}
-          counts={facetCounts.lifecycle}
-          defaultValue={LIFECYCLE_DEFAULT}
-          everyIsAny
-          width="sm"
         />
 
         {/* Derived from heartbeat age as well as the stored status: STALE is never stored. */}
@@ -719,23 +714,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           tip="Stale is a gateway whose last heartbeat is older than 90 seconds."
         />
 
-        {/* The same value the Type column prints, through the same helper. */}
-        <FilterDropdown
-          label="Type"
-          noun="type"
-          plural="types"
-          options={LISTED_TYPES.map(t => ({ value: t, label: gatewayTypeLabel(t) }))}
-          value={kindFilter}
-          onChange={setKindFilter}
-          counts={facetCounts.type}
-          width="sm"
-          tip={kindFilter.length === 1 ? gatewayTypeDescription(kindFilter[0]) : null}
-        />
-
         <Tooltip text="Gateways reporting devices held in quarantine. Several failing at once points at a misconfigured edge node.">
           <button
             className={`btn btn-sm ${quarantineOnly ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setQuarantineOnly(v => !v)}
+            aria-pressed={quarantineOnly}
           >
             <IconShieldAlert size={13} /> Has quarantined devices ({gatewaysWithQuarantine.size})
           </button>
@@ -755,20 +738,41 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           </Tooltip>
         )}
 
-        {/* Off with one showing, it says so, and a triangle says that something is wrong. */}
-        {(playbackGateways.length > 0 || showPlayback) && (
-          <Tooltip text={playbackReasons.length > 0 ? `Shown because ${playbackReasons[0].words}.` : PLAYBACK_GATEWAY_TIP}>
-            <button
-              type="button"
-              className={`btn btn-sm ${showPlayback ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setShowPlayback(v => !v)}
-              aria-pressed={showPlayback}
-            >
-              {playbackReasons.some(r => r.problem) ? <IconAlertTriangle size={13} /> : <IconPlay size={13} />}{' '}
-              {PLAYBACK_GATEWAY_LABEL} ({playbackShowing ? `${playbackReasons.length} showing` : playbackGateways.length})
-            </button>
-          </Tooltip>
-        )}
+        <FiltersPopover activeCount={popoverFilterCount} onClear={clearPopoverFilters}>
+          {/* Lifecycle is a filter like the rest, opening on Active; the counts are beside each value.
+              At Active it is not a choice that opens its section first. */}
+          <FilterList
+            label="Lifecycle"
+            plural="lifecycles"
+            options={LIFECYCLE_OPTIONS}
+            value={lifecycle}
+            defaultValue={LIFECYCLE_DEFAULT}
+            onChange={setLifecycle}
+            counts={facetCounts.lifecycle}
+          />
+
+          {/* The same value the Type column prints, through the same helper. */}
+          <FilterList
+            label="Type"
+            plural="types"
+            options={LISTED_TYPES.map(t => ({ value: t, label: gatewayTypeLabel(t) }))}
+            value={kindFilter}
+            onChange={setKindFilter}
+            counts={facetCounts.type}
+            tip={kindFilter.length === 1 ? gatewayTypeDescription(kindFilter[0]) : null}
+          />
+
+          {/* Off with the row listed all the same, its count says so and its tip says why. */}
+          {(playbackGateways.length > 0 || showPlayback) && (
+            <FilterCheck
+              label={PLAYBACK_GATEWAY_LABEL}
+              checked={showPlayback}
+              onChange={setShowPlayback}
+              count={playbackShowing ? `${playbackReasons.length} showing` : playbackGateways.length}
+              tip={playbackReasons.length > 0 ? `Shown because ${playbackReasons[0]}.` : PLAYBACK_GATEWAY_TIP}
+            />
+          )}
+        </FiltersPopover>
 
         <div className="filter-bar-actions">
           <ClearFilters count={activeFilterCount} onClear={resetFilters} />

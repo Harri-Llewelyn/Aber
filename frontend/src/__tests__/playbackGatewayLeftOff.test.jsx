@@ -5,15 +5,15 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 import { currentUrl } from '../hooks/useUrlState'
 import { gatewayUrl } from '../routes'
-import { pick, valuesShown } from '../test/listFilters'
-import { tooltipOf } from '../test/tooltips'
+import { openFiltersPanel, pick, valuesShown } from '../test/listFilters'
 import { PLAYBACK_GATEWAY_TIP, playbackProblem } from '../utils/playbackGateway'
 
 /**
- * The Playback gateway is left off the Gateways page until its control is on. What is pinned: the
- * control and the address; that its row is found by the flag and never by its name; that a link to it
- * shows it and opens its drawer; that a search which finds it alone says it is hidden; that no count
- * changes; and that something wrong with it shows it, which the control says.
+ * The Playback gateway is left off the Gateways page until its check is on, in the Filters panel as
+ * Devices' Show replay lanes is. What is pinned: the check and the address; that its row is found by the
+ * flag and never by its name; that a link to it shows it and opens its drawer; that a search which finds
+ * it alone says it is hidden; that no count changes; and that something wrong with it shows it, which the
+ * check says.
  */
 
 vi.mock('../api', async () => {
@@ -34,6 +34,7 @@ const playback = (overrides = {}) => gateway({
   gateway_id: PLAYBACK_ID, gateway_name: 'Playback', sparkplug_id: PLAYBACK_NODE,
   is_simulated: true, is_shadow: true, status: 'OFFLINE', last_heartbeat: null, ...overrides,
 })
+const retired = () => gateway({ gateway_id: 'gw-old', gateway_name: 'Retired_Gateway', is_archived: true })
 
 const open = async (rows, { devices = [], activeAlerts = [], address = '/gateways' } = {}) => {
   api.get.mockImplementation((path) => {
@@ -47,32 +48,41 @@ const open = async (rows, { devices = [], activeAlerts = [], address = '/gateway
 }
 
 const bar = () => document.querySelector('.filter-bar')
-const control = () => within(bar()).queryByRole('button', { name: /^Show Playback gateway/ })
+/** The check in the Filters panel, opening the panel, or null where it is not offered. */
+const check = () => within(openFiltersPanel()).queryByRole('checkbox', { name: /^Show Playback gateway/ })
+/** The check as it reads, its count after its words. */
+const reads = () => check().closest('label').textContent
+/** What its tip says. */
+const tip = async () => {
+  fireEvent.focus(within(openFiltersPanel()).getByRole('button', { name: 'About show playback gateway' }))
+  return (await screen.findByRole('tooltip')).textContent
+}
 const listed = () => [...document.querySelectorAll('tbody tr td strong')].map(el => el.textContent)
 const drawerOpen = () => document.querySelector('.context-panel')?.getAttribute('aria-hidden') === 'false'
 const search = (text) => fireEvent.change(screen.getByLabelText(/Search gateways/), { target: { value: text } })
 
 beforeEach(() => vi.clearAllMocks())
 
-describe('the control', () => {
+describe('the check', () => {
   it('leaves it off by default, and is no filter that was changed', async () => {
     await open([gateway(), playback()])
 
     expect(listed()).toEqual(['Host_Gateway_NodeRED'])
-    expect(control()).toHaveTextContent('Show Playback gateway (1)')
-    expect(control()).toHaveAttribute('aria-pressed', 'false')
-    expect(tooltipOf(control())).toBe(PLAYBACK_GATEWAY_TIP)
+    expect(reads()).toBe('Show Playback gateway 1')
+    expect(check()).not.toBeChecked()
+    expect(await tip()).toBe(PLAYBACK_GATEWAY_TIP)
+    expect(within(bar()).getByRole('button', { name: 'Filters' })).toBeInTheDocument()
     expect(screen.queryByText(/Clear filters/)).toBeNull()
     expect(currentUrl()).toBe('/gateways')
   })
 
-  it('shows it, and the address keeps it', async () => {
+  it('shows it, is counted, and the address keeps it', async () => {
     await open([gateway(), playback()])
-    fireEvent.click(control())
+    fireEvent.click(check())
 
     expect(listed()).toEqual(['Host_Gateway_NodeRED', 'Playback'])
-    expect(control()).toHaveAttribute('aria-pressed', 'true')
-    expect(control()).toHaveClass('btn-primary')
+    expect(check()).toBeChecked()
+    expect(within(bar()).getByRole('button', { name: 'Filters (1)' })).toBeInTheDocument()
     expect(currentUrl()).toBe('/gateways?playback=1')
 
     fireEvent.click(screen.getByRole('button', { name: /Clear filters \(1\)/ }))
@@ -84,7 +94,7 @@ describe('the control', () => {
     await open([gateway(), playback()], { address: '/gateways?playback=1' })
 
     expect(listed()).toEqual(['Host_Gateway_NodeRED', 'Playback'])
-    expect(control()).toHaveAttribute('aria-pressed', 'true')
+    expect(check()).toBeChecked()
   })
 
   it('goes by the flag, and never by the name', async () => {
@@ -94,7 +104,7 @@ describe('the control', () => {
 
   it('is not offered where there is none', async () => {
     await open([gateway()])
-    expect(control()).toBeNull()
+    expect(check()).toBeNull()
   })
 
   it('is there on an install with no gateway of its own, which says none yet', async () => {
@@ -102,7 +112,7 @@ describe('the control', () => {
     expect(screen.getByText('No gateways yet.')).toBeInTheDocument()
     expect(screen.queryByText(/it is hidden/)).toBeNull()
 
-    fireEvent.click(control())
+    fireEvent.click(check())
     expect(listed()).toEqual(['Playback'])
     expect(screen.getByText('No gateways yet besides the Playback gateway.')).toBeInTheDocument()
   })
@@ -115,8 +125,7 @@ describe('the control', () => {
 
 describe('the counts', () => {
   it('are of every gateway, as they were', async () => {
-    const retired = gateway({ gateway_id: 'gw-old', gateway_name: 'Retired_Gateway', is_archived: true })
-    await open([gateway(), playback(), retired])
+    await open([gateway(), playback(), retired()])
 
     expect(listed()).toEqual(['Host_Gateway_NodeRED'])
     expect(valuesShown('Lifecycle')).toEqual(['Active 2', 'Archived 1'])
@@ -124,9 +133,8 @@ describe('the counts', () => {
     expect(within(bar()).getByRole('button', { name: 'Has quarantined devices (0)' })).toBeInTheDocument()
   })
 
-  it('show every row once the control is on', async () => {
-    const retired = gateway({ gateway_id: 'gw-old', gateway_name: 'Retired_Gateway', is_archived: true })
-    await open([gateway(), playback(), retired], { address: '/gateways?playback=1' })
+  it('show every row once the check is on', async () => {
+    await open([gateway(), playback(), retired()], { address: '/gateways?playback=1' })
 
     expect(listed()).toHaveLength(2)
     pick('Lifecycle', 'active', 'archived')
@@ -135,13 +143,14 @@ describe('the counts', () => {
 })
 
 describe('the Type and Status filters', () => {
-  it('list it when Type names it, and the control says that it is showing', async () => {
+  it('list it when Type names it, and the check says that it is showing', async () => {
     await open([gateway(), playback()])
     pick('Type', 'playback')
 
     expect(listed()).toEqual(['Playback'])
-    expect(control()).toHaveTextContent('Show Playback gateway (1 showing)')
-    expect(tooltipOf(control())).toBe('Shown because the Type filter names it.')
+    expect(check()).not.toBeChecked()
+    expect(reads()).toBe('Show Playback gateway 1 showing')
+    expect(await tip()).toBe('Shown because the Type filter names it.')
   })
 
   it.each([
@@ -165,29 +174,29 @@ describe('a link to it', () => {
 
     await waitFor(() => expect(drawerOpen()).toBe(true))
     await waitFor(() => expect(listed()).toContain('Playback'))
-    expect(control()).toHaveAttribute('aria-pressed', 'true')
+    expect(check()).toBeChecked()
     expect(currentUrl()).toContain('playback=1')
   })
 
-  it('leaves the control free to leave it off again', async () => {
+  it('leaves the check free to leave it off again', async () => {
     await open([gateway(), playback()], { address: `/gateways?gateway=${PLAYBACK_ID}` })
     await waitFor(() => expect(listed()).toContain('Playback'))
 
-    fireEvent.click(control())
+    fireEvent.click(check())
     expect(listed()).toEqual(['Host_Gateway_NodeRED'])
-    expect(control()).toHaveAttribute('aria-pressed', 'false')
+    expect(check()).not.toBeChecked()
   })
 
   it('to another gateway leaves it off', async () => {
     await open([gateway(), playback()], { address: gatewayUrl('gw-1') })
 
     await waitFor(() => expect(drawerOpen()).toBe(true))
-    expect(control()).toHaveAttribute('aria-pressed', 'false')
+    expect(check()).not.toBeChecked()
   })
 })
 
 describe('a search', () => {
-  it('that finds it alone says it is hidden, with the control to show it', async () => {
+  it('that finds it alone says it is hidden, with a button to show it', async () => {
     await open([gateway(), playback()])
     search('playb')
 
@@ -239,14 +248,15 @@ describe('something wrong with it', () => {
     ['a stuck replay', { activeAlerts: [job('playback', { rule_uid: 'aber-job-stuck', alert_name: 'Capture or Playback Stuck' })] }, 'an alert is firing: Capture or Playback Stuck'],
     ['a worker that does not report', { activeAlerts: [job('playback', { rule_uid: 'aber-playback-worker-stale', alert_name: 'Playback Worker Not Reporting', labels: {} })] }, 'an alert is firing: Playback Worker Not Reporting'],
     ['a device in quarantine', { devices: [held] }, 'it has a device in quarantine'],
-  ])('%s shows it, and the control says that one is showing', async (_what, state, words) => {
+  ])('%s shows it, and the check says that one is showing, and why', async (_what, state, words) => {
     await open([gateway(), playback()], state)
 
     expect(listed()).toEqual(['Host_Gateway_NodeRED', 'Playback'])
-    expect(control()).toHaveTextContent('Show Playback gateway (1 showing)')
-    expect(control()).toHaveAttribute('aria-pressed', 'false')
-    expect(tooltipOf(control())).toBe(`Shown because ${words}.`)
+    expect(check()).not.toBeChecked()
+    expect(reads()).toBe('Show Playback gateway 1 showing')
+    expect(await tip()).toBe(`Shown because ${words}.`)
     // Not what a person chose, so no filter was changed and the address holds nothing.
+    expect(within(bar()).getByRole('button', { name: 'Filters' })).toBeInTheDocument()
     expect(screen.queryByText(/Clear filters/)).toBeNull()
     expect(currentUrl()).toBe('/gateways')
   })
@@ -261,13 +271,13 @@ describe('something wrong with it', () => {
   ])('%s leaves it off', async (_what, state) => {
     await open([gateway(), playback()], state)
     expect(listed()).toEqual(['Host_Gateway_NodeRED'])
-    expect(control()).toHaveTextContent('Show Playback gateway (1)')
+    expect(reads()).toBe('Show Playback gateway 1')
   })
 
-  it('is said in words with a triangle, not by a colour', async () => {
-    await open([gateway(), playback()], { activeAlerts: [onGateway()] })
-    expect(control().querySelector('svg path').getAttribute('d')).toMatch(/^M10\.29/)
-    expect(control()).toHaveClass('btn-ghost')
+  it('says why beside a check that is on, too', async () => {
+    await open([gateway(), playback()], { activeAlerts: [onGateway()], address: '/gateways?playback=1' })
+    expect(reads()).toBe('Show Playback gateway 1')
+    expect(await tip()).toBe('Shown because an alert is firing: Gateway Clock Skew.')
   })
 
   it('is found by Has quarantined devices, which counts it', async () => {
@@ -280,5 +290,37 @@ describe('something wrong with it', () => {
     expect(playbackProblem(playback(), { activeAlerts: [onGateway()] })).not.toBeNull()
     expect(playbackProblem(playback(), {})).toBeNull()
     expect(playbackProblem(null)).toBeNull()
+  })
+})
+
+describe('the Filters panel', () => {
+  it('holds Lifecycle and Type over the check, and the toolbar holds neither', async () => {
+    await open([gateway(), playback()])
+    const panel = openFiltersPanel()
+
+    expect(within(panel).getByRole('button', { name: 'Lifecycle, Active' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(panel).getByRole('button', { name: 'Type' })).toHaveAttribute('aria-expanded', 'false')
+    const controls = panel.querySelector('.filters-popover-controls')
+    expect([...controls.children].map(c => c.className)).toEqual(['filter-sections', 'filter-list-head'])
+    expect(within(bar()).queryByRole('button', { name: /^(Lifecycle|Type):/ })).toBeNull()
+  })
+
+  it('counts its own filters, and clears them alone', async () => {
+    await open([gateway(), playback(), retired()], { address: '/gateways?lifecycle=active,archived&type=host&playback=1&status=ONLINE' })
+
+    expect(within(bar()).getByRole('button', { name: 'Filters (3)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Clear filters \(4\)/ })).toBeInTheDocument()
+
+    fireEvent.click(within(openFiltersPanel()).getByRole('button', { name: 'Clear' }))
+    expect(within(bar()).getByRole('button', { name: 'Filters' })).toBeInTheDocument()
+    expect(currentUrl()).toBe('/gateways?status=ONLINE')
+  })
+
+  it('says whether Has quarantined devices is on, as the toggles beside it do', async () => {
+    await open([gateway()])
+    const toggle = () => within(bar()).getByRole('button', { name: /^Has quarantined devices/ })
+    expect(toggle()).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(toggle())
+    expect(toggle()).toHaveAttribute('aria-pressed', 'true')
   })
 })
