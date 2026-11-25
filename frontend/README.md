@@ -566,6 +566,8 @@ with Restore Access; it is guarded because a slip blocks a person's sign-in at o
   capture do this, because each destroys that capture.
 - **A dialog that says its act cannot be undone has a gate,** or is in drift check 544's list with
   the reason it has none. The check also names every gated dialog.
+- **A 3D model and an area plan take a plain confirm,** to replace and to remove. Each can be
+  downloaded first, and the confirm says so in one wording for both (`utils/storedFile.js`).
 - **A gateway's credential and setup dialogs ask for its name too,** before they cut off whatever
   uses the credential or command the gateway already has.
 
@@ -640,8 +642,8 @@ The device drawer shows no model. One action after View History opens it in a fu
 (`Model3DUploader`, which is that dialog): **View 3D Model** when a model is attached, **Add 3D
 Model…** when none is. Both open the same dialog. With a model it holds the viewer, the file's name
 and size, a **Public** marker, **Download** (every role), and **Replace** and **Remove** (permission
-to manage devices; Remove asks first, and closes the dialog once the model is gone, so its toast is
-in view). With none it holds the drop zone, and a model dropped on it appears in the same dialog
+to manage devices; each asks first, and Remove closes the dialog once the model is gone, so its toast
+is in view). With none it holds the drop zone, and a model dropped on it appears in the same dialog
 when the page reloads the device.
 
 - **Nothing loads until it is asked for.** The dialog is mounted only while it is open

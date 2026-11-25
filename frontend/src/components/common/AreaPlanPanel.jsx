@@ -1,11 +1,12 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
-import { AREA_PLAN_MAX_BYTES, isSvgFile, nextRotation, planRotation } from '../../utils/areaPlans'
+import { AREA_PLAN_MAX_BYTES, areaPlanFileName, decodeSvgBytes, isSvgFile, nextRotation, planRotation, readSvgPlan } from '../../utils/areaPlans'
+import { STORED_FILE_DELETED, STORED_FILE_REPLACED } from '../../utils/storedFile'
 import { HelpTip } from './HelpTip'
 import { plural } from '../../utils/format'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { ExpandablePlanPreview } from './AreaPlanPreview'
-import { IconUpload, IconTrash, IconRotateCcw, IconRotateCw } from './Icons'
+import { IconDownload, IconUpload, IconTrash, IconRotateCcw, IconRotateCw } from './Icons'
 import { areaUrl, siteMapAreaUrl } from '../../routes'
 import { Tooltip } from './Tooltip'
 import { SaveDiscard } from './SaveDiscard'
@@ -16,10 +17,10 @@ const TURN_UNSAVED = 'Save or discard the turn first.'
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, turn it, replace it,
  * or remove it. A plan is drawn as a preview with every cell on it, Turn left and Turn right in a
- * row under its heading, Replace and Remove under its card (each pair in the drawer's grid of
- * buttons), and Expand on the card, which opens it
+ * row under its heading, Download, Replace and Remove under its card (each group in the drawer's grid
+ * of buttons), and Expand on the card, which opens it
  * window-sized (PlanViewer). Replace sits away from the turns because a missed turn would open a
- * file dialog. An area with no plan shows the drop zone rather than a button, the same gesture a
+ * file dialog. Download is for every role that sees the plan. An area with no plan shows the drop zone rather than a button, the same gesture a
  * device's 3D model takes; a reader who may not upload sees the default outline instead.
  *
  * A turn is a draft held here: the preview and the expanded plan draw it, and nothing is written
@@ -31,6 +32,11 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
   const [dragging, setDragging] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const fileInput = useRef(null)
+
+  // The file chosen in place of the stored plan, `{ areaId, file }`, until Replace's dialog is
+  // answered. It belongs to the area it was chosen for, as a turn does.
+  const [replacement, setReplacement] = useState(null)
+  if (replacement && replacement.areaId !== area.area_id) setReplacement(null)
 
   // The unsaved turn, `{ areaId, rotation }`. It belongs to the area it was made on: turning to
   // another area drops it, as closing the panel does by unmounting it.
@@ -50,21 +56,36 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
   const placedLine = `${plural(placed, 'cell')} placed on it`
   const limitMiB = Math.round(AREA_PLAN_MAX_BYTES / 1048576)
 
+  // Uploads a checked file and attaches it. A refusal is thrown, for whoever asked to show.
+  const attach = async (file) => {
+    setBusy(true)
+    try {
+      await api.uploadAreaPlan(area, file)
+      setReplacement(null)
+      // To the Site Map, where the plan is drawn with its cells.
+      showToast?.(`Plan attached to ${area.area_name}`, 'success', { to: siteMapAreaUrl(area.area_id) })
+      onChanged?.()
+    } finally { setBusy(false) }
+  }
+
   const upload = async (file) => {
     if (!file) return
     if (!isSvgFile(file)) { showToast?.(`"${file.name}" is not an SVG. An area plan is an SVG drawing.`, 'error'); return }
     if (file.size > AREA_PLAN_MAX_BYTES) { showToast?.(`"${file.name}" is over the ${limitMiB} MiB limit.`, 'error'); return }
-    setBusy(true)
     try {
-      await api.uploadAreaPlan(area, file)
-      // To the Site Map, where the plan is drawn with its cells.
-      showToast?.(`Plan attached to ${area.area_name}`, 'success', { to: siteMapAreaUrl(area.area_id) })
-      onChanged?.()
+      if (!area.plan_path) { await attach(file); return }
+      // Asked once the file has passed its checks, so a person who cancels the picker is asked nothing.
+      const { problem } = readSvgPlan(decodeSvgBytes(await file.arrayBuffer()))
+      if (problem) throw new Error(problem)
+      setReplacement({ areaId: area.area_id, file })
     } catch (e) { showToast?.(e.message, 'error') }
-    finally {
-      setBusy(false)
-      if (fileInput.current) fileInput.current.value = ''
-    }
+  }
+
+  // A signed URL in a new tab, as a capture's download is: the bucket is private and the link is short-lived.
+  const downloadPlan = async () => {
+    try {
+      window.open(await api.areaPlanDownloadUrl(area), '_blank', 'noopener')
+    } catch (e) { showToast?.(e.message, 'error') }
   }
 
   // Run from Remove area plan's dialog, which shows a refusal and stays open.
@@ -116,7 +137,12 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
       type="file"
       accept=".svg,image/svg+xml"
       style={{ display: 'none' }}
-      onChange={e => upload(e.target.files?.[0])}
+      onChange={e => {
+        const file = e.target.files?.[0]
+        // Cleared so re-picking the SAME file fires a change event again, after a failure or a Cancel.
+        e.target.value = ''
+        upload(file)
+      }}
       /* The picker sits inside the zone so its label stays with it, which means its own click
          would bubble back to the zone and open it a second time. */
       onClick={e => e.stopPropagation()}
@@ -126,11 +152,22 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
 
   return (
     <div className="area-plan-panel">
+      {replacement && (
+        <ConfirmModal
+          title="Replace area plan"
+          icon={<IconUpload size={18} />}
+          message={`Replace the plan of ${area.area_name} with "${replacement.file.name}"? ${STORED_FILE_REPLACED}`}
+          confirmLabel="Replace plan"
+          pendingLabel="Replacing…"
+          onConfirm={() => attach(replacement.file)}
+          onCancel={() => setReplacement(null)}
+        />
+      )}
       {confirm && (
         <ConfirmModal
           title="Remove area plan"
           icon={<IconTrash size={18} />}
-          message={`Remove the plan from ${area.area_name}? Cells keep their places on the default outline.`}
+          message={`Remove the plan from ${area.area_name}? Cells keep their places on the default outline. ${STORED_FILE_DELETED}`}
           confirmLabel="Remove plan"
           pendingLabel="Removing…"
           onConfirm={removePlan}
@@ -172,20 +209,30 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
       {area.plan_path || !canManage ? (
         <>
           <ExpandablePlanPreview area={shownArea} cells={cells} />
-          {turnable && (
+          {area.plan_path && (
             <div className="context-buttons area-plan-panel-buttons">
-              {picker}
-              {/* Held while a turn is unsaved, so a replacement is never taken with a turn nobody saved. */}
-              <Tooltip text={turnUnsaved ? TURN_UNSAVED : null}>
-                <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={openPicker}>
-                  <IconUpload size={13} /> Replace plan
+              {/* For every role, as a 3D model's Download is: reading is not a write. */}
+              <Tooltip text={`Save ${areaPlanFileName(area)} to this computer`}>
+                <button className="btn btn-ghost btn-sm context-action" onClick={downloadPlan}>
+                  <IconDownload size={13} /> Download plan
                 </button>
               </Tooltip>
-              <Tooltip text={turnUnsaved ? TURN_UNSAVED : 'The area keeps the default outline'}>
-                <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={() => setConfirm(true)}>
-                  <IconTrash size={13} /> Remove plan
-                </button>
-              </Tooltip>
+              {turnable && (
+                <>
+                  {picker}
+                  {/* Held while a turn is unsaved, so a replacement is never taken with a turn nobody saved. */}
+                  <Tooltip text={turnUnsaved ? TURN_UNSAVED : null}>
+                    <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={openPicker}>
+                      <IconUpload size={13} /> Replace plan
+                    </button>
+                  </Tooltip>
+                  <Tooltip text={turnUnsaved ? TURN_UNSAVED : 'The area keeps the default outline'}>
+                    <button className={`btn btn-ghost btn-sm context-action${turnUnsaved ? ' btn-disabled' : ''}`} disabled={busy || turnUnsaved} onClick={() => setConfirm(true)}>
+                      <IconTrash size={13} /> Remove plan
+                    </button>
+                  </Tooltip>
+                </>
+              )}
             </div>
           )}
         </>

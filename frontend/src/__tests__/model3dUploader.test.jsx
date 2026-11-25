@@ -145,7 +145,7 @@ describe('Model3DUploader', () => {
 
       expect(api.removeDeviceModel).not.toHaveBeenCalled()
       expect(dialog).toHaveAccessibleDescription(
-        'Remove the 3D model from CNC_01? The device keeps its other details, and the file is deleted.')
+        'Remove the 3D model from CNC_01? The device keeps its other details. The stored file is deleted. Download it first to keep a copy.')
       expect(within(dialog).getByRole('button', { name: 'Remove Model' })).toHaveClass('btn-danger')
     })
 

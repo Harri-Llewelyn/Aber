@@ -27,7 +27,7 @@ export default function check() {
     problems367.push('Model3DUploader.jsx does not draw Download before, and outside, the canManage gate that holds Replace and Remove');
   }
   const bullet = help.slice(help.indexOf('**The 3D model\'s file**'), help.indexOf('**Add 3D Model…**'));
-  for (const phrase of ['**Download** saves it, and every role can use it', '**Replace** and **Remove** need permission to manage devices', '**Remove** asks first']) {
+  for (const phrase of ['**Download** saves it, and every role can use it', '**Replace** and **Remove** need permission to manage devices', 'Both ask first']) {
     if (!bullet.includes(phrase)) problems367.push(`help/pages/devices.md's 3D model file bullet does not say "${phrase}"`);
   }
   const add = help.slice(help.indexOf('**Add 3D Model…**'), help.indexOf('**Who can open a model.**'));

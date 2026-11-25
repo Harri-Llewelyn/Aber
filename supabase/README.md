@@ -13093,7 +13093,7 @@ endpoint. See "Cold telemetry archival" above.
 | Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix | no browser role: the `aas-export` function writes as `service_role` | **the owner alone**, their own `<user id>/avatar`, while they hold a role; Remove Access deletes it as `service_role` |
 | Read | anyone, including `anon` | those two plus **Auditor**, a stored capture only through `issue_capture_download()` | every signed-in role | Administrator, Shopfloor_Manager, Auditor | the owner alone: no Administrator arm |
 | Operator | read | nothing | read | nothing | their own picture |
-| Reached by | a plain public URL | a signed URL, minted after `issue_capture_download()` records the download | an authenticated download, handed to an `<img>` as a blob URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
+| Reached by | a plain public URL | a signed URL, minted after `issue_capture_download()` records the download | an authenticated download, handed to an `<img>` as a blob URL; **Download plan** takes a signed URL, sent as an attachment | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL |
 
 `asset-exports` has no write policy at all, and that is the point: an object in it is evidence of
 an export that an `asset_exports` row records, so a hand-uploaded file would be a bundle with no
