@@ -85,6 +85,9 @@ and a route to Aber. Paste the command. It runs two stages in one line:
   Every step before enrolment is safe to repeat, so the same command can be pasted again. Only
   enrolment spends the token, and the installer refuses to run on an appliance that has enrolled.
 
+  If the token runs out before the appliance enrols, re-issue the command and paste the new one on the
+  same machine. The installer puts the new token in the `.env` and keeps the rest of it.
+
 The command ends by printing the Node-RED editor password **once**. Within about a minute the
 dashboard shows the gateway **ONLINE**. The installer then runs the appliance's first convergence (a
 run of the platform playbook,
@@ -694,7 +697,8 @@ names which. Set it where the deployment is configured (`global.publicBaseDomain
 values), and restart the functions service. The notice clears the next time you open the page.
 
 **`docker compose logs bootstrap` says the token was refused (`401`).**
-The token is unknown, expired or already redeemed. Re-issue from the dashboard.
+The token is unknown, expired or already redeemed. Re-issue from the dashboard. A new install command can
+be pasted on the same machine: the installer replaces the old token.
 
 **`503` with `retryable: true`.**
 The broker credential service was unreachable, and your token was **released**. Start the container
