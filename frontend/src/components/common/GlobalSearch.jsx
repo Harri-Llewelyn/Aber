@@ -250,15 +250,23 @@ export function GlobalSearch({ tabs, currentTab, userRole, onNavigate, onSelectS
     dismiss()
   }
 
+  /** The highlight one row on, in view: an id's two rows are under the records, which can fill the panel. */
+  const step = (by) => {
+    if (results.length === 0) return
+    const at = (cursor + by + results.length) % results.length
+    highlight(at)
+    document.getElementById(`global-search-result-${at}`)?.scrollIntoView?.({ block: 'nearest' })
+  }
+
   const onKeyDown = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); dismiss(); return }
     if (!open) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      if (results.length) highlight((cursor + 1) % results.length)
+      step(1)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      if (results.length) highlight((cursor - 1 + results.length) % results.length)
+      step(-1)
     } else if (e.key === 'Enter') {
       e.preventDefault()
       activate(results[cursor])

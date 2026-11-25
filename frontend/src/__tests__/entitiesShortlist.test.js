@@ -67,11 +67,11 @@ describe('an id', () => {
     expect(idFoundBy(device, 'deva000')).toBeNull()
   })
 
-  it('has the shape of one from eight characters of a UUID, or as a semantic id is written', () => {
-    for (const text of ['3f2504e0', '3F2504E0-4f89', '3f2504e0-4f89-41d3-9a0c-0305e82c3301', ' 3f2504e0- ', 'https://example.org/a', 'urn:a:b', '0112/2///61987#ABA951#009', 'nsu=http://a.org/;i=1']) {
+  it('has the shape of one from eight characters of a UUID, or as a Sparkplug id or a semantic id is written', () => {
+    for (const text of ['3f2504e0', '3F2504E0-4f89', '3f2504e0-4f89-41d3-9a0c-0305e82c3301', ' 3f2504e0- ', 'devf9966a4ee9ce4e519e6d5', 'GWYf9966a4ee9ce4e519e6d5', 'https://example.org/a', 'urn:a:b', '0112/2///61987#ABA951#009', 'nsu=http://a.org/;i=1']) {
       expect(isIdShaped(text), text).toBe(true)
     }
-    for (const text of ['', '3f2504e', '3f2504e0x', '3f2504e04f89', '3f25-04e04f89', '3f2504e0-4f89-41d3-9a0c-0305e82c33011', 'lathe-10', 'plc-10', 'Lathe 10 bay']) {
+    for (const text of ['', '3f2504e', '3f2504e0x', '3f2504e04f89', '3f25-04e04f89', '3f2504e0-4f89-41d3-9a0c-0305e82c33011', 'devf9966a4ee9ce4e519e6d', 'devices and gateways, all', 'lathe-10', 'plc-10', 'Lathe 10 bay']) {
       expect(isIdShaped(text), text).toBe(false)
     }
   })

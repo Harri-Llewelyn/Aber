@@ -1,6 +1,7 @@
 import { DERIVED_TAG_TITLE } from '../components/common/DerivedTag'
 import { KNOWN_PRINCIPALS } from './serviceIdentities'
 import { SCHEMA_STATUS } from './schemaVersion'
+import { isSparkplugId } from './sparkplugId'
 import { inferSemanticIdType } from './standards'
 
 /**
@@ -171,12 +172,12 @@ function isUuidStart(text) {
 }
 
 /**
- * Whether a text is an id by its shape, whether or not anything has it: a UUID, the start of one, or a
- * semantic id. Any other id, such as a Sparkplug id, is known for one by what it names (`idFoundBy`).
+ * Whether a text is an id by its shape, whether or not anything has it: a UUID, the start of one, a
+ * Sparkplug id Aber issues, or a semantic id. Any other is known for one by what it names (`idFoundBy`).
  */
 export function isIdShaped(text) {
   const q = String(text ?? '').trim()
-  return isUuidStart(q) || inferSemanticIdType(q) !== ''
+  return isUuidStart(q) || isSparkplugId(q.toLowerCase()) || inferSemanticIdType(q) !== ''
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })

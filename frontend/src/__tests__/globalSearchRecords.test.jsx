@@ -297,8 +297,8 @@ describe('an id', () => {
     expect(onOpen).toHaveBeenCalledWith(findEntityUrl(ghost))
   })
 
-  it('offers both for the start of an id, and for a semantic id, that nothing has', async () => {
-    for (const text of ['3f2504e0', '3f2504e0-4f89-41', 'urn:example:nothing', '0173-1#02-AAO677#002']) {
+  it('offers both for the start of an id, a Sparkplug id and a semantic id that nothing has', async () => {
+    for (const text of ['devf9966a4ee9ce4e519e6d5', '3f2504e0', '3f2504e0-4f89-41', 'urn:example:nothing', '0173-1#02-AAO677#002']) {
       const { unmount } = show('Shopfloor_Manager')
       type(text)
       await screen.findByText('View in Entities')
@@ -369,6 +369,21 @@ describe('an id', () => {
       expect(onOpen, text).toHaveBeenCalledWith(trailUrl(RETIRED.id, '', true))
       unmount()
     }
+  })
+
+  it('has its two rows brought into view by the arrow keys, below a list longer than the panel', async () => {
+    const seen = []
+    Element.prototype.scrollIntoView = function scrollIntoView(how) { seen.push([labelOf(this), how]) }
+    try {
+      api.findEntities.mockResolvedValue([DEVICE])
+      show('Shopfloor_Manager')
+      type(DEVICE.id)
+      await screen.findByText('Haas 10')
+      fireEvent.keyDown(box(), { key: 'ArrowUp' })
+      fireEvent.keyDown(box(), { key: 'ArrowUp' })
+      expect(seen).toEqual([[ID_ROWS[1], { block: 'nearest' }], [ID_ROWS[0], { block: 'nearest' }]])
+      expect(highlighted()).toBe(ID_ROWS[0])
+    } finally { delete Element.prototype.scrollIntoView }
   })
 
   it('too long for its row is cut, and slides once a person highlights the row', async () => {
