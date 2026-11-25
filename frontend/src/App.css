@@ -1980,8 +1980,7 @@ tbody tr:hover { background: var(--bg-glass); }
   font-size: 13px;
   color: var(--text-primary);
 }
-.form-static-none { color: var(--text-dim); }
-.semantic-id-static { font-size: 12px; overflow-wrap: anywhere; }
+.form-static-none { color: var(--text-muted); }
 
 /* A value to copy (CopyField): `.form-static`'s text, in mono, in the box a block of commands has
    (pre.gateway-code), so it reads as text to take rather than a field to fill. A click selects all of
@@ -2714,7 +2713,6 @@ main:focus { outline: none; }
 .schema-history-change { font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
 .schema-history-here { margin-left: auto; }
 .schema-history-change { margin-top: 3px; }
-.schema-history-change.form-static-none { color: var(--text-dim); }
 
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(16px); }
@@ -2946,6 +2944,16 @@ main:focus { outline: none; }
 }
 
 .form-control option { background: var(--bg-surface); color: var(--text-primary); }
+
+/* The id and its reference type, side by side while there is room. Each label has its tip beside it. */
+.semantic-id-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+.semantic-id-own { flex: 1 1 260px; min-width: 0; }
+.semantic-id-type { flex: 0 0 160px; }
+.semantic-id-label { display: flex; align-items: center; margin-bottom: 7px; }
+.semantic-id-label > .form-label { margin-bottom: 0; }
+.semantic-id-optional { font-weight: 400; color: var(--text-dim); }
+.form-control.semantic-id-input { font-size: 11px; }
+.form-static.semantic-id-static { font-size: 12px; overflow-wrap: anywhere; }
 
 /* SemanticIdField's row under the field: the marker on a suggested id and the compact actions.
    --text-muted, not --text-dim, which falls under AA on the Add Metric form's glass. */

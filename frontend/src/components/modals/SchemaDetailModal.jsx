@@ -70,9 +70,7 @@ function VersionHistory({ lineage, schema }) {
                 <span className="mono schema-history-name">{v.schema_name}</span>
                 {isThis && <span className="schema-history-here">This version</span>}
               </div>
-              <div className={v.change_description ? 'schema-history-change' : 'schema-history-change form-static-none'}>
-                {v.change_description || 'No change description recorded.'}
-              </div>
+              <div className="schema-history-change">{v.change_description || 'No change description recorded.'}</div>
             </li>
           )
         })}
