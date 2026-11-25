@@ -473,9 +473,10 @@ in it, `lg` 640px for content rather than input, `xl` 720px for two columns of f
 900px for a table. `full` is the window, for a viewer. A form is never `sm`. A dialog with steps
 keeps its widest step from first to last, so one that ends by showing a secret is `lg` throughout.
 Sibling dialogs share a step: an asset's create and edit forms are all `md`, both Add Metric dialogs
-are `xl`, and the dialogs that build a schema and show a version are `wide`. Drift check 530 holds the families, and fails when one's members disagree or an
-`sm` dialog holds a field. Every step uses `.modal`'s padding except `full`, and a rule for one
-dialog's layout hangs on its own class (`className`), never on its step.
+are `xl`, and the dialogs that build a schema and show a version are `wide`. Drift check 530 holds the
+families, and fails when one's members disagree or an `sm` dialog holds a field. Every step uses
+`.modal`'s padding except `full`, and a rule for one dialog's layout hangs on its own class
+(`className`), never on its step.
 
 ### A dialog takes focus
 
@@ -637,9 +638,10 @@ table cell, as on Settings, the value is `.setting-static`.
 - **Fixed for this role** is a label too. A Settings row for anyone but an Administrator shows its
   value as text, and Actions says who can change it. The Notifications tab's rows are the same rows.
   So is a draft schema for a role that may not manage schemas, and a Digital Nameplate for one that may
-  neither edit nor propose; a notice at the top says so. The nameplate's problem line says from the open, in every mode, which fields the template still asks for before an
-  export names it. That is no problem with the form, so `.nameplate-standing` gives the line the hint's
-  look. A refused press takes the line's place until the next edit.
+  neither edit nor propose; a notice at the top says so. The nameplate's problem line says from the open,
+  in every mode, which fields the template still asks for before an export names it. That is no problem
+  with the form, so `.nameplate-standing` gives the line the hint's look. A refused press takes the
+  line's place until the next edit.
 - **Conditional stays a control, with its reason in words.** A field that is open to someone else, or
   once something else is set, keeps its control: a proposal's fields that a proposal cannot carry
   (`nonProposableFields()` words each), and Reference Type until an id is given. The reason sits
