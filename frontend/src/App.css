@@ -8092,6 +8092,12 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   .gateway-settings { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* The platform release that waits for approval, in the drawer's Platform row (WaitingBump). */
+.waiting-bump { color: var(--text-primary); }
+.waiting-bump-link { color: var(--accent-text); text-decoration: none; text-underline-offset: 2px; }
+.waiting-bump-link:hover,
+.waiting-bump-link:focus-visible { text-decoration: underline; }
+
 /* A block of commands or values to copy. `pre` keeps it ahead of .mono's colour and size. */
 pre.gateway-code {
   margin: 6px 0 0;

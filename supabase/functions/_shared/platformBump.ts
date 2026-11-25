@@ -141,6 +141,18 @@ export function decideBump(pulls: BumpPull[], tag: string): BumpDecision {
   };
 }
 
+/** A platform bump that waits for approval: the release proposed and its pull request. */
+export interface WaitingBump {
+  tag: string;
+  number: number;
+}
+
+/** The pull request for `tag` that is open, whichever pass opened it, or null. */
+export function waitingBump(pulls: BumpPull[], tag: string): WaitingBump | null {
+  const open = pulls.find((p) => p.open && p.branch === bumpBranch(tag));
+  return open ? { tag, number: open.number } : null;
+}
+
 export function bumpTitle(tag: string): string {
   return `Converge to the platform at ${tag}`;
 }

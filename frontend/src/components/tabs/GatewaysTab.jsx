@@ -63,7 +63,7 @@ import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { ShowGatewayCredentialModal } from '../modals/ShowGatewayCredentialModal'
-import { GatewayRepositoryPanel } from '../common/GatewayRepositoryPanel'
+import { GatewayRepositoryPanel, WaitingBump } from '../common/GatewayRepositoryPanel'
 import {
   IconRadio,
   IconPlus,
@@ -137,6 +137,13 @@ const arrivalGroup = (gatewayId, figures) => {
 
 /** A row's value, with the command for its state under it while there is one. */
 const withCommand = (text, command) => (command ? <>{text}{command}</> : text)
+
+/** What the Platform row says of the last convergence, then the release that waits for approval, if any. */
+const platformValue = (gateway, reported, canOpenForge) => (
+  gateway.forge_bump_tag && gateway.forge_bump_number
+    ? <>{reported && `${reported} · `}<WaitingBump gateway={gateway} canOpenForge={canOpenForge} /></>
+    : reported
+)
 
 /**
  * The drawer's group for an appliance that should have reported to its forge branch and never has: one
@@ -1274,28 +1281,33 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               label: 'Platform',
               health: true,
               // A refused run names no tag, so its outcome stands alone.
-              value: selected.forge_appliance_platform_tag || rowTone(healthProblems, 'Platform') === TONE_DANGER
-                ? withCommand(
-                  [
-                    selected.forge_appliance_platform_tag,
-                    selected.forge_appliance_platform_outcome === 'converged'
-                      ? `converged ${formatHeartbeat(selected.forge_appliance_converged_at)}`
-                      : selected.forge_appliance_platform_outcome,
-                  ].filter(Boolean).join(' · '),
-                  rowTone(healthProblems, 'Platform') === TONE_DANGER && (
-                    <ApplianceCommand drawer command={CONVERGE_JOURNAL} showToast={showToast}>
-                      The last run&rsquo;s journal says why. See <ApplianceCommandsHelp />.
-                    </ApplianceCommand>
-                  )
+              value: withCommand(
+                platformValue(
+                  selected,
+                  selected.forge_appliance_platform_tag || rowTone(healthProblems, 'Platform') === TONE_DANGER
+                    ? [
+                      selected.forge_appliance_platform_tag,
+                      selected.forge_appliance_platform_outcome === 'converged'
+                        ? `converged ${formatHeartbeat(selected.forge_appliance_converged_at)}`
+                        : selected.forge_appliance_platform_outcome,
+                    ].filter(Boolean).join(' · ')
+                    : null,
+                  canOpenForge
+                ),
+                rowTone(healthProblems, 'Platform') === TONE_DANGER && (
+                  <ApplianceCommand drawer command={CONVERGE_JOURNAL} showToast={showToast}>
+                    The last run&rsquo;s journal says why. See <ApplianceCommandsHelp />.
+                  </ApplianceCommand>
                 )
-                : null,
+              ),
               danger: rowTone(healthProblems, 'Platform') === TONE_DANGER,
               help: 'The platform playbook tag this appliance last converged to, and how that run '
                 + 'ended. It converges hourly and after boot. "failed" means ansible-pull did not '
                 + 'complete and the timer will try again; the command under it, run on the '
                 + 'appliance, says why. The tag is changed by a pull '
                 + 'request on platform.yml in this gateway\'s repository, so a fleet mid-rollout '
-                + 'shows different tags here. Empty on an appliance that runs the bundle alone.'
+                + 'shows different tags here. A release that "waits for approval" is one Aber has '
+                + 'proposed there. Empty on an appliance that runs the bundle alone.'
             },
             // A bespoke adapter has no heartbeat of its own: a gateway whose adapter is crash-looping
             // still publishes and reads ONLINE, so this row is the only place it shows.

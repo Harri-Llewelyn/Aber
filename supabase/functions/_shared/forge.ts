@@ -42,6 +42,8 @@ import {
   findPlatformTag,
   isOlderRelease,
   supersededComment,
+  type WaitingBump,
+  waitingBump,
   withPlatformTag,
 } from "./platformBump.ts";
 
@@ -1784,6 +1786,8 @@ async function makeBumpBranch(
 export interface PlatformBump {
   /** The pull request it opened, by number. */
   opened: number | null;
+  /** What waits for approval after this call. */
+  waiting: WaitingBump | null;
   /** The machine account's older pull requests it closed. */
   closed: number[];
   /** Why it could not propose one, when no retry clears it. */
@@ -1801,19 +1805,26 @@ export interface PlatformBump {
  */
 export async function proposePlatformBump(cfg: ForgeConfig, name: string, tag: string): Promise<PlatformBump> {
   const path = `/repos/${FORGE_ORGANISATION}/${name}`;
-  const bump: PlatformBump = { opened: null, closed: [], declined: null };
+  const bump: PlatformBump = { opened: null, waiting: null, closed: [], declined: null };
   const decline = (reason: string) => ({ ...bump, declined: `no bump to ${tag} is proposed: ${reason}` });
+  // One opened while the file could be read may be open still.
+  const declineFile = async (reason: string) => ({
+    ...decline(`${PLATFORM_POINTER_PATH} on main cannot be used, ${reason}`),
+    waiting: waitingBump(await bumpPulls(cfg, name), tag),
+  });
 
   // Every read below is pinned to this one commit, so that they describe one state.
   const base = await branchHead(cfg, { name }, MAIN_BRANCH);
   if (base === null) return decline("there is no branch main");
   const pointer = await pointerAt(cfg, name, base);
-  if ("reason" in pointer) return decline(`${PLATFORM_POINTER_PATH} on main cannot be used, ${pointer.reason}`);
+  if ("reason" in pointer) return await declineFile(pointer.reason);
   const found = findPlatformTag(pointer.text);
-  if ("reason" in found) return decline(`${PLATFORM_POINTER_PATH} on main cannot be used, ${found.reason}`);
+  if ("reason" in found) return await declineFile(found.reason);
   if (!isOlderRelease(found.tag, tag)) return bump;
 
-  const { existing, supersedes } = decideBump(await bumpPulls(cfg, name), tag);
+  const pulls = await bumpPulls(cfg, name);
+  bump.waiting = waitingBump(pulls, tag);
+  const { existing, supersedes } = decideBump(pulls, tag);
   if (existing === null) {
     const branch = bumpBranch(tag);
     const unusable = await makeBumpBranch(
@@ -1840,6 +1851,7 @@ export async function proposePlatformBump(cfg: ForgeConfig, name: string, tag: s
     });
     if (!opened.ok) throw await refused(`could not open the bump's pull request on '${name}'`, opened);
     bump.opened = ((await opened.json()) as { number: number }).number;
+    bump.waiting = { tag, number: bump.opened };
     console.log(`forge: opened #${bump.opened} on '${name}', from ${found.tag} to ${tag}`);
   }
 

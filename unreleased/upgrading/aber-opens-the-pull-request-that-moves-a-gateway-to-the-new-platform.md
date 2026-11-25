@@ -9,8 +9,9 @@ afterwards, the repository of each Remote gateway in service that is on an older
 pull request, *Converge to the platform at* `v1.10.0`, from Aber's own account. It changes that one
 line. A site with more than ten such gateways gets ten every fifteen minutes.
 
-1. Start with one gateway. Open its repository from its drawer (**Open in the forge**), then **Pull
-   Requests**.
+1. Start with one gateway. Open its drawer, and its **Health** block. The **Platform** row says
+   *v1.10.0 waits for approval*, which is a link to the pull request. A gateway that has reported no
+   health has no such row: choose **Open in the forge** in its drawer, then **Pull Requests**.
 2. As an Administrator, read the change and approve it. Nobody on your site wrote it, so you may.
 3. Merge it. The appliance converges within the hour, and the drawer's **Platform** row shows the new
    release. Then do the others.

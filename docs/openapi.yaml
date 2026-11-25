@@ -8164,6 +8164,22 @@ components:
             NULL until one arrives. When it differs from `sparkplug_group` the node publishes outside
             the group it is addressed by: ingestion still accepts it by `sparkplug_id`, and the
             Gateways page warns.
+        forge_bump_tag:
+          type: string
+          nullable: true
+          readOnly: true
+          example: v1.10.0
+          description: >-
+            The platform release whose pull request from Aber waits for an Administrator's approval in
+            this gateway's repository (migration `0327`). Written and cleared by the forge sweep, and
+            cleared when the merge arrives. NULL means none waits, as far as the last pass saw. A change
+            to it is not in the audit trail: the forge holds the proposal.
+        forge_bump_number:
+          type: integer
+          nullable: true
+          readOnly: true
+          example: 3
+          description: The number of the pull request `forge_bump_tag` names, set and cleared with it.
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         area_id: { type: string, format: uuid, nullable: true, description: 'Populated exactly when `location_scope` is `area_wide`.' }
         access_url: { type: string, nullable: true, description: 'The gateway''s own UI. Omitted rather than disabled in the dashboard when absent.' }
